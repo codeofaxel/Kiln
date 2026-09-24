@@ -19,6 +19,7 @@ Covers:
 
 from __future__ import annotations
 
+import contextlib
 import sys
 import types
 from pathlib import Path
@@ -263,8 +264,10 @@ def test_a_printer_with_no_sequence_reads_as_nothing(signal_overlay):
 
 
 def test_load_sequence_is_absent_without_the_overlay():
-    # Public floor: no curated load sequence ships in this repo.
-    assert get_printer_intel("bambu_a1").load_sequence == []
+    # Public floor: no curated load sequence ships in this repo.  Measured as
+    # a free install, so an installed kiln-pro cannot answer in its place.
+    with _free_install():
+        assert get_printer_intel("bambu_a1").load_sequence == []
 
 
 def test_failure_mode_signals_default_to_empty():
@@ -474,10 +477,10 @@ def test_the_discriminator_comes_before_the_physical_work():
 # ---------------------------------------------------------------------------
 
 
-def _free_troubleshoot(**kwargs):
-    """Call the tool the way a free install would — kiln_pro unimportable."""
+@contextlib.contextmanager
+def _free_install():
+    """Run the body the way a free install would — kiln_pro unimportable."""
     import kiln.printer_intelligence as pi
-    from kiln.server import troubleshoot_printer as tool
 
     class _Block:
         def find_spec(self, name, path=None, target=None):
@@ -501,11 +504,19 @@ def _free_troubleshoot(**kwargs):
     sys.meta_path.insert(0, blocker)
     pi._merged_cache = None
     try:
-        return getattr(tool, "fn", tool)(**kwargs)
+        yield
     finally:
         sys.meta_path.remove(blocker)
         sys.modules.update(evicted)
         pi._merged_cache = None
+
+
+def _free_troubleshoot(**kwargs):
+    """Call the tool the way a free install would — kiln_pro unimportable."""
+    from kiln.server import troubleshoot_printer as tool
+
+    with _free_install():
+        return getattr(tool, "fn", tool)(**kwargs)
 
 
 def test_the_nudge_is_specific_when_the_user_named_an_exact_signal():
