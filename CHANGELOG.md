@@ -7,6 +7,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **See what your colour changes cost, and how to cut them (Pro+).** Business+ also prices in the chance of a reprint. See kiln3d.com/pricing.
+
 - **Show any file you already have on the 3D stage.** A model or the sliced file about to print — turn it over before you approve it, without remaking or re-slicing anything.
 
 - **A look at the camera now settles what's on the plate.** Kiln already showed you the feed; now what you see goes on the record, so it stops asking and prints can start again.
