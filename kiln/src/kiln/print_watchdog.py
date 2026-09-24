@@ -53,6 +53,14 @@ is empty unless configured.
 
 Yellow flags (logged and passed to ``on_anomaly``, no e-stop):
 
+* A fault the printer has stopped for -- paused or ended the job on a code
+  -- reported once per code as ``fault_needs_person``.  The red rule above
+  stands down when the firmware has acted, and that used to mean the
+  watchdog said nothing at all: on 2026-09-24 an A1 paused at its first
+  colour change on 1200-8015 (failed to pull the filament out of the
+  toolhead) and the watchdog reported zero flags while the person found
+  out at the machine.  The flag stops nothing; it is the machine's own
+  stop, said out loud.
 * WiFi signal weaker than -80 dBm
 * Chamber fan stalled (speed reported as 0 while printing)
 * The print has stopped moving -- judged by
@@ -533,6 +541,10 @@ class PrintWatchdog:
         # Yellow rules already reported for the current print, so a condition
         # that holds for hours is reported once rather than every poll.
         self._yellow_seen: set[str] = set()
+        # The fault codes last reported as needing a person, joined; a fault
+        # that stands for an hour is reported once, a new code again.  Kept
+        # apart from ``_yellow_seen``, which every non-printing poll clears.
+        self._fault_reported: str | None = None
         # The print_error rule's evidence: the code a printing reading carried
         # and when it was first seen.  Dropped whenever the conditions lapse.
         self._error_streak: tuple[int, float] | None = None
@@ -639,6 +651,20 @@ class PrintWatchdog:
                 "red_flags": [f.to_dict() for f in self._flags if f.kind == "red"],
                 "yellow_flags": [f.to_dict() for f in self._flags if f.kind == "yellow"],
             }
+
+    def current_fault(self, printer_name: str | None = None) -> dict[str, Any] | None:
+        """The fault on the latest reading, as :func:`fault_banner` spells it.
+
+        ``None`` while the latest reading carries no fault, and before any
+        reading.  This is the fact the result banner reads on every tool
+        call: the watchdog already polls the machine every few seconds, so
+        the banner costs no printer read of its own.
+        """
+        from kiln.printers.base import fault_banner
+
+        with self._lock:
+            state = self._last_state
+        return fault_banner(state, printer_name=printer_name)
 
     # ------------------------------------------------------------------
     # Single-step entry point — the core of the watchdog.
@@ -991,6 +1017,36 @@ class PrintWatchdog:
         """Return all yellow flags firing this tick."""
         now = self._time()
         flags: list[Flag] = []
+
+        # --- A fault the machine has stopped for ----------------------
+        # The red rule stands down the moment the firmware acts on a fault
+        # (see the module docstring), which is right: a paused print must
+        # not be emergency-stopped.  But "stops nothing" was read as "says
+        # nothing" -- a print paused for a failed filament change counted
+        # as zero flags of either colour -- so the fault is at least the
+        # yellow "needs the person", once per code, stopping nothing.
+        from kiln.printers.base import fault_banner
+
+        banner = fault_banner(state)
+        if banner is not None and banner["needs_person"]:
+            key = ",".join(banner["codes"])
+            if key != self._fault_reported:
+                self._fault_reported = key
+                flags.append(
+                    Flag(
+                        kind="yellow",
+                        rule="fault_needs_person",
+                        message=banner["note"],
+                        timestamp=now,
+                        context={
+                            "code": banner["code"],
+                            "codes": list(banner["codes"]),
+                            "state": banner["state"],
+                        },
+                    )
+                )
+        elif banner is None:
+            self._fault_reported = None
 
         # --- Stopped moving ------------------------------------------
         # The shared detector's verdict; this watchdog keeps no progress

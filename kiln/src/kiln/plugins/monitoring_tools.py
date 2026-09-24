@@ -1552,6 +1552,19 @@ class _MonitoringToolsPlugin:
                         f"(id={response['monitor_id']}). Check first_layer_status after "
                         f"~{first_layer_delay + first_layer_checks * first_layer_interval}s."
                     )
+                    # How the agent will LEARN of a fault, stated where the
+                    # print begins: the watchdog polls the machine, and a
+                    # fault it stops for rides every tool result, whatever
+                    # the agent happens to poll.
+                    response["fault_reporting"] = (
+                        "Kiln's watchdog is polling this printer. If the printer "
+                        "stops for a fault (a jam, a failed filament change), "
+                        "the fault rides EVERY tool result as `printer_fault` "
+                        "while it stands, and printer_status(detail=\"lite\") "
+                        "lists it under `faults` -- so poll printer_status to "
+                        "follow the print, and act on `printer_fault` wherever "
+                        "you see it."
+                    )
                 except Exception as exc:  # noqa: BLE001 — the printer has the job; this is a warning
                     _logger.exception(
                         "First-layer monitor could not start after the print did"
@@ -1586,7 +1599,10 @@ class _MonitoringToolsPlugin:
             """Check the status of a first-layer monitor.
 
             Returns the current monitoring state, including any captured snapshots
-            once monitoring is complete.
+            once monitoring is complete.  A fault the printer has stopped for
+            rides this result as ``printer_fault`` (as it rides every tool
+            result while Kiln's watchdog sees it standing); the monitor's own
+            fields describe the first layer, not the machine's fault state.
 
             Args:
                 monitor_id: The monitor ID returned by ``start_monitored_print``.

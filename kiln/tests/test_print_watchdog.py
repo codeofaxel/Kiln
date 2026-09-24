@@ -351,6 +351,51 @@ class TestAFaultTheMachineHasActedOn:
         assert adapter.emergency_stops == 0
         assert [f for f in anomalies if f.kind == "red"] == []
 
+    def test_a_paused_print_reporting_a_code_is_said_once_as_needing_a_person(self):
+        """2026-09-24, 15:15: an A1 paused at its first colour change on
+        1200-8015 and the watchdog reported zero flags of either colour.
+        Stopping nothing is right; saying nothing is not."""
+        wd, adapter, clock, anomalies = _make_watchdog()
+        adapter.state = _reading(PrinterStatus.PRINTING)
+        assert wd.step() is None
+        assert wd.current_fault("default") is None
+
+        adapter.state = _reading(PrinterStatus.PAUSED, A_FAULT)
+        for _ in range(int(600 / DEFAULT_POLL_INTERVAL)):
+            clock.advance(DEFAULT_POLL_INTERVAL)
+            assert wd.step() is None
+
+        assert adapter.emergency_stops == 0
+        said = [f for f in anomalies if f.rule == "fault_needs_person"]
+        assert len(said) == 1, "once per code, not once per poll"
+        assert said[0].kind == "yellow"
+        assert "1200-8007" in said[0].message and "person at the machine" in said[0].message
+        assert said[0].context["state"] == "paused"
+        assert len(wd.status()["yellow_flags"]) >= 1
+
+        fault = wd.current_fault("default")
+        assert fault["code"] == "1200-8007" and fault["needs_person"] is True
+        assert fault["printer_name"] == "default"
+
+        # The fault cleared and the print resumed: the banner is gone, and a
+        # second pause on the same code is news again.
+        adapter.state = _reading(PrinterStatus.PRINTING)
+        clock.advance(DEFAULT_POLL_INTERVAL)
+        wd.step()
+        assert wd.current_fault() is None
+        adapter.state = _reading(PrinterStatus.PAUSED, A_FAULT)
+        clock.advance(DEFAULT_POLL_INTERVAL)
+        wd.step()
+        assert len([f for f in anomalies if f.rule == "fault_needs_person"]) == 2
+
+    def test_a_code_the_printer_prints_through_is_the_red_rules_not_the_yellows(self):
+        wd, adapter, clock, anomalies = _make_watchdog()
+        adapter.state = _reading(PrinterStatus.PRINTING, A_FAULT)
+        assert wd.step() is None  # within the persist window
+        assert [f for f in anomalies if f.rule == "fault_needs_person"] == []
+        fault = wd.current_fault()
+        assert fault is not None and fault["needs_person"] is False
+
 
 class TestAFaultThePrinterIsPrintingThrough:
     """A code that stands while the machine keeps printing is the one to stop for."""

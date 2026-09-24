@@ -877,7 +877,15 @@ class _UtilityToolsPlugin:
                         "coordinate; it reports what it left free instead of "
                         "defaulting it. Served by kiln-pro, free."
                     ),
-                    "monitor": "printer_status, printer_snapshot, await_print_completion",
+                    "monitor": (
+                        "printer_status(detail=\"lite\") to poll a print (run "
+                        "state + every fault code under `faults`), "
+                        "printer_snapshot, await_print_completion. A fault the "
+                        "printer stops for rides EVERY tool result as "
+                        "`printer_fault` while Kiln's watchdog sees it -- tell "
+                        "the user the moment you see one; ams_status carries no "
+                        "fault line."
+                    ),
                     "queue_jobs": "submit_job → job_status → queue_summary",
                 },
                 "session_maintenance": {

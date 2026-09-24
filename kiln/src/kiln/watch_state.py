@@ -94,6 +94,12 @@ def _watcher_words() -> dict[str, dict[str, Any]]:
                 "bed_warmup_timeout": "the bed never reaching its target",
             },
             "yellow": {
+                "fault_needs_person": (
+                    "a fault the printer has stopped for (paused or ended the "
+                    "job on a code) -- said once per code, on the kiln_watch "
+                    "block and on every tool result while it stands, and "
+                    "never acted on: the machine's own stop is the act"
+                ),
                 "stalled": (
                     f"no progress for {stall_threshold_seconds() / 60:.0f} minutes while "
                     f"printing, judged against the printer's own countdown -- reported "
@@ -201,7 +207,7 @@ def _watchdog_state(printer_name: str) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 — a watchdog that cannot report is not running
         logger.debug("watchdog status unreadable for %r: %s", printer_name, exc)
         return {"attached": True, "running": False}
-    return {
+    block = {
         "attached": True,
         "running": bool(status.get("running")),
         "poll_seconds": getattr(watchdog, "_poll_interval", None),
@@ -210,6 +216,118 @@ def _watchdog_state(printer_name: str) -> dict[str, Any]:
         "red_flags": len(status.get("red_flags") or []),
         "yellow_flags": len(status.get("yellow_flags") or []),
     }
+    # The fault on the watchdog's latest reading, in the shared banner's
+    # words, so a poller reading only this block sees the code and what
+    # to do -- a count of one yellow flag says neither.
+    fault = _current_fault(watchdog, printer_name)
+    if fault is not None:
+        block["fault"] = fault
+    return block
+
+
+def _current_fault(watchdog: Any, printer_name: str) -> dict[str, Any] | None:
+    """A watchdog's fault banner, or ``None``; a double without one has none."""
+    read = getattr(watchdog, "current_fault", None)
+    if not callable(read):
+        return None
+    try:
+        return read(printer_name)
+    except Exception as exc:  # noqa: BLE001 — an unreadable fault is no banner, never a broken block
+        logger.debug("watchdog fault unreadable for %r: %s", printer_name, exc)
+        return None
+
+
+#: The key the fault banner rides under on every tool result, and inside
+#: the ``kiln_watch`` watchdog block.
+RESULT_FAULT_KEY = "printer_fault"
+
+
+def watched_printer_faults() -> list[dict[str, Any]]:
+    """Every fault standing on a printer a RUNNING watchdog is watching.
+
+    One banner per faulted printer, each naming its machine.  A watchdog
+    that has stopped or retired holds a reading from before it left, so
+    its fault is not a fact about the machine now and is not reported.
+    Never raises; a registry it cannot read is an empty list.
+    """
+    from kiln import server as _srv
+
+    try:
+        with _srv._print_watchdogs_lock:
+            watchdogs = list(_srv._print_watchdogs.items())
+    except Exception:  # noqa: BLE001 — no registry, no faults to report
+        return []
+    faults: list[dict[str, Any]] = []
+    for name, watchdog in watchdogs:
+        try:
+            if not watchdog.status().get("running"):
+                continue
+        except Exception:  # noqa: BLE001 — a watchdog that cannot report is not running
+            continue
+        fault = _current_fault(watchdog, name)
+        if fault is not None:
+            faults.append(fault)
+    return faults
+
+
+def _attach_fault_banner(inner: Any, ctx: Any, name: str | None) -> None:
+    """Put the standing fault on this tool result, whatever the tool was.
+
+    MCP gives a server no way to push a message into the model's context;
+    the only channel is the results of the calls the agent makes.  So the
+    banner rides EVERY result while a watched printer is faulted -- the
+    agent polling ``ams_status`` for a colour change sees it there, on the
+    call it is actually making, instead of on the one it did not think to
+    make.  It rides twice: as ``printer_fault`` in the structured content
+    for a host that renders that, and as a text block for a host that
+    shows the text.  One shared builder (:func:`fault_banner`), no per-tool
+    branch; a result that already carries the key is left alone.  Never
+    raises -- a banner must never break the result it rides on.
+    """
+    try:
+        if getattr(inner, "isError", False):
+            return
+        faults = watched_printer_faults()
+        if not faults:
+            return
+        from kiln.local_stage import _result_as_dict
+
+        sc = getattr(inner, "structuredContent", None)
+        if not isinstance(sc, dict):
+            # Seed from the tool's own output: a host that prefers
+            # structuredContent shows THIS and nothing else, so seeding
+            # with only the banner would hide the result it rides on.
+            sc = _result_as_dict(inner) or {}
+        else:
+            sc = dict(sc)
+        if RESULT_FAULT_KEY in sc:
+            return
+        payload: Any = faults[0] if len(faults) == 1 else faults
+        if sc:
+            sc[RESULT_FAULT_KEY] = payload
+            inner.structuredContent = sc
+        note = "\n".join(str(f.get("note") or "") for f in faults).strip()
+        content = getattr(inner, "content", None)
+        if note and isinstance(content, list):
+            try:
+                from mcp.types import TextContent
+
+                content.append(TextContent(type="text", text=note))
+            except Exception:  # noqa: BLE001 — the structured key still carries it
+                logger.debug("fault banner text block not appended", exc_info=True)
+    except Exception:  # noqa: BLE001 — a banner must never break a tool result
+        logger.debug("printer fault banner not attached", exc_info=True)
+
+
+def install_fault_banner(mcp: Any) -> bool:
+    """Wrap the lowlevel handler so every result can carry the banner."""
+    try:
+        from kiln.mcp_compat import wrap_call_tool_result
+
+        return bool(wrap_call_tool_result(mcp, _attach_fault_banner))
+    except Exception:  # noqa: BLE001 — optional surface, never fatal
+        logger.debug("printer fault banner hook not installed", exc_info=True)
+        return False
 
 
 def _health_state(printer_name: str) -> dict[str, Any]:
