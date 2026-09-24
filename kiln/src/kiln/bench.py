@@ -52,7 +52,7 @@ OBSERVATION_FORMAT = "printer_motion_observation/1"
 BLOCKS = ("pause", "cancel", "end", "filament_change", "head")
 #: The blocks a record can have a blank for.
 RECORD_BLOCKS = ("pause", "cancel", "end", "filament_change")
-#: The blanks a five-minute session can fill.  A colour change is never
+#: The blanks a short session can fill.  A colour change is never
 #: triggered (no printer offers a way to without unloading by hand), and the
 #: Z travel and the quiet start are not things a test print can show.
 TEACHABLE = ("pause", "cancel", "end", "head")
@@ -419,7 +419,7 @@ def _joined(words: list[str], last: str = "or") -> str:
 
 
 def offer_sentence(model_name: str, blanks: list[str]) -> str:
-    """The offer: what Kiln does not know about this printer that five
+    """The offer: what Kiln does not know about this printer that a few
     minutes can teach it -- only the blanks a session can fill."""
     moves = [_BLOCK_VERBS[b] for b in ("pause", "cancel", "end") if b in blanks]
     head = "head" in blanks
@@ -431,7 +431,7 @@ def offer_sentence(model_name: str, blanks: list[str]) -> str:
         what = f"how big the {model_name}'s head is"
     else:
         what = f"how the {model_name} moves its head on its own"
-    return (f"Kiln doesn't know {what}, so it assumes the worst. A five-minute session with a coin-sized test "
+    return (f"Kiln doesn't know {what}, so it assumes the worst. A few minutes with a coin-sized test "
             "print teaches it; the printer_bench tool runs it.")
 
 
@@ -518,7 +518,7 @@ def offer_after_registration(adapter: Any, printer_name: str) -> dict[str, Any] 
         name = _display_name(printer_id)
         if first:
             sentence = (f"Kiln has no record for the {name} yet, so it can't check a second part beside the first. "
-                        "A five-minute session with a coin-sized test print teaches it; the printer_bench tool runs it.")
+                        "A few minutes with a coin-sized test print teaches it; the printer_bench tool runs it.")
         else:
             sentence = offer_sentence(name, teachable)
         return {"tool": "printer_bench", "printer_name": printer_name, "blanks": teachable, "first": first,

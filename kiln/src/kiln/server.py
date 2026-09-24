@@ -11121,7 +11121,7 @@ def register_printer(
             result["config_path"] = persisted_path
 
         # Once, for a model whose motion record has blanks: the offer of the
-        # five-minute session that fills them (kiln.bench).  Never twice.
+        # short session that fills them (kiln.bench).  Never twice.
         try:
             from kiln.bench import offer_after_registration
 

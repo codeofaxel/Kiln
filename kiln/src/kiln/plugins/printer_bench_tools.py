@@ -151,7 +151,7 @@ def _intro(session: dict[str, Any]) -> str:
         what = "it " + ", then ".join(parts) + ", watching where the head goes each time"
         if head:
             what += ", and you measure the head with calipers"
-        text = f"{lead}Help Kiln get to know your {model} in about five minutes: {what}."
+        text = f"{lead}Help Kiln get to know your {model} in a few minutes: {what}."
         text += (" Kiln reads where the head goes from the printer itself." if session["loggable"]
                  else " Kiln will ask you where the head stopped, with a picture.")
     else:
@@ -544,7 +544,7 @@ def printer_bench(
     answer: str | None = None,
     restart: bool = False,
 ) -> dict[str, Any]:
-    """Help Kiln get to know your printer: a five-minute guided session, one ask at a time.
+    """Help Kiln get to know your printer in a few minutes: a guided session, one ask at a time.
 
     Kiln judges where a second part can go on an occupied plate from a
     record of how each printer moves its head on its own.  Where that
@@ -651,7 +651,7 @@ def _advance(session: dict[str, Any], adapter: Any, answer: Any) -> dict[str, An
             bench.note_offer(session["unit"], answer="later")
             _end_session(session)
             return {"success": True, "step": "later", "printer_name": name, "ask": "",
-                    "message": "No problem. Call printer_bench whenever you have five minutes; Kiln won't bring it up again on its own."}
+                    "message": "No problem. Call printer_bench whenever you have a few minutes; Kiln won't bring it up again on its own."}
         if _is_no(answer):
             bench.note_offer(session["unit"], answer="declined")
             _end_session(session)
@@ -1008,7 +1008,7 @@ class _PrinterBenchPlugin:
 
     @property
     def description(self) -> str:
-        return "A five-minute guided session that teaches Kiln how this printer moves its head on its own"
+        return "A short guided session that teaches Kiln how this printer moves its head on its own"
 
     def register(self, mcp: Any) -> None:
         import kiln.server as _srv

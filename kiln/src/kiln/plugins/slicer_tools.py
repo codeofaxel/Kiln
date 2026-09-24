@@ -604,7 +604,7 @@ def _placement_refusal(
 
 def _bench_offer(state: Any, verdict: dict[str, Any] | None) -> dict[str, Any] | None:
     """The point-of-need door: a refusal that rests on a block nobody has
-    described offers the five-minute session that fills it, instead of a
+    described offers the short session that fills it, instead of a
     dead end -- unless the person declined or already ran it."""
     try:
         from kiln import bench

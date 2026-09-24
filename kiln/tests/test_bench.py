@@ -257,7 +257,7 @@ class TestWhatTheRecordLacks:
     def test_the_offer_names_only_what_a_session_can_teach_in_plain_words(self):
         assert bench.offer_sentence("Bambu Lab A1", ["pause", "cancel"]) == (
             "Kiln doesn't know where the Bambu Lab A1 sends its head when it pauses or cancels a print, so it "
-            "assumes the worst. A five-minute session with a coin-sized test print teaches it; the printer_bench "
+            "assumes the worst. A few minutes with a coin-sized test print teaches it; the printer_bench "
             "tool runs it.")
         every = bench.offer_sentence("Creality K1", ["pause", "cancel", "end", "head", "quiet_start"])
         assert every.startswith("Kiln doesn't know where the Creality K1 sends its head when it pauses, cancels a "
@@ -296,6 +296,7 @@ class TestNeverNaggedTwice:
         first = bench.offer_after_registration(fresh, "new")
         assert first["first"] is True and first["blanks"] == ["pause", "cancel", "end", "head"]
         assert first["sentence"].startswith("Kiln has no record for the") and "can't check a second part beside the first" in first["sentence"]
+        assert "A few minutes with a coin-sized test print teaches it" in first["sentence"]
         # Blanks no session can fill are no reason to offer one, and the one
         # offer is not spent on them.
         other = _Adapter(); other.serial = "01P00A000000003"
@@ -468,7 +469,7 @@ class TestTheConversation:
         out = _step(server)
         assert out["step"] == "intro" and out["options"] == ["yes", "later", "no"]
         assert out["ask"] == (
-            "Help Kiln get to know your Bambu Lab A1 in about five minutes: it prints a coin-sized square, pauses and "
+            "Help Kiln get to know your Bambu Lab A1 in a few minutes: it prints a coin-sized square, pauses and "
             "resumes it, and lets it finish, then prints a second one and cancels it partway, watching where the head "
             "goes each time, and you measure the head with calipers. Kiln will ask you where the head stopped, with a "
             "picture. Ready?")
@@ -556,6 +557,7 @@ class TestTheConversation:
         _step(server)
         out = _step(server, "later")
         assert out["step"] == "later" and "won't bring it up again" in out["message"]
+        assert "whenever you have a few minutes" in out["message"]
         assert bench.may_offer(bench.unit_of(server.machine), "registration") is False
         assert bench.may_offer(bench.unit_of(server.machine), "refusal") is True
         _step(server, restart=True)
@@ -598,7 +600,7 @@ class TestTheConversation:
         monkeypatch.setattr(bench, "PositionLog", _InstantLog)
         out = _step(server)
         assert out["ask"] == (
-            "Help Kiln get to know your Bambu Lab A1 in about five minutes: it prints a coin-sized square, pauses and "
+            "Help Kiln get to know your Bambu Lab A1 in a few minutes: it prints a coin-sized square, pauses and "
             "resumes it, and stops it, watching where the head goes each time. Kiln reads where the head goes from "
             "the printer itself. Ready?")
         _step(server, "yes"); _step(server, "yes")
@@ -629,7 +631,7 @@ class TestTheConversation:
     def test_an_end_only_session_lets_the_square_finish_and_says_so(self, server, monkeypatch):
         monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: (["end"], _verdict(ok=True, blanks=["end"])))
         out = _step(server)
-        assert out["ask"].startswith("Help Kiln get to know your Bambu Lab A1 in about five minutes: it prints a "
+        assert out["ask"].startswith("Help Kiln get to know your Bambu Lab A1 in a few minutes: it prints a "
                                      "coin-sized square and lets it finish, watching where the head goes each time.")
         _step(server, "yes")
         out = _step(server, "yes")
