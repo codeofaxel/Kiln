@@ -359,6 +359,30 @@ class TestCapabilitiesRideOnlyOnThePollThatAsks:
         assert "capabilities" not in plain["status"]
         assert with_caps["status"]["capabilities"] == {"can_pause": True}
 
+    def test_the_poll_verb_carries_the_ask_through_the_sdk(self, monkeypatch):
+        """The door the panel actually polls.  The SDK drops an argument a
+        tool does not declare, silently -- which is how the ask went
+        unanswered -- so the flag goes in through the registered verb, the
+        way a host's ``tools/call`` arrives, not straight to the composer."""
+        from kiln import server
+
+        asked: list[str | None] = []
+
+        def fake_status(printer_name=None, detail=None):
+            asked.append(detail)
+            return {"success": True, "printer": {"state": "printing"}, "job": {}}
+
+        monkeypatch.setattr(local_monitor, "_direct_status", self._real_direct_status)
+        monkeypatch.setattr(server, "printer_status", fake_status)
+        mcp = _fastmcp()
+        assert local_monitor._register_snapshot_verb(mcp)
+        tools = mcp._tool_manager
+
+        anyio.run(tools.call_tool, "kiln_monitor_snapshot", {"include_capabilities": True})
+        anyio.run(tools.call_tool, "kiln_monitor_snapshot", {})
+
+        assert asked == ["full", "lite"]
+
 
 class TestTheStatusRefusalIsUnwrappedFromTheRealShape:
     """The failure axis, driven through the REAL ``_direct_status`` against
