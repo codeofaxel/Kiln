@@ -17,6 +17,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Print a second part beside one that's still on the plate (Pro).** On the Bambu A1 for now: the head goes over the part, where the printer's own start routine would drive straight through it. Other printers say why they can't yet. See https://kiln3d.com/pricing.
 
+- **A small test print teaches Kiln how your printer moves.** Then Free tells you whether a second part fits beside the one on your plate, and Kiln Pro tells you where. See https://kiln3d.com/pricing.
+
 - **The 3D stage shows what's already on your plate.** The print still standing there shows as itself, by name, beside where your new part would go, with a plain "fits here" or "doesn't fit here".
 
 ### Changed
