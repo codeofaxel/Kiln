@@ -5461,6 +5461,7 @@ def monitor_print(
     printer_name: str | None = None,
     include_snapshot: bool = True,
     brief_id: str = "",
+    show_panel: bool = False,
 ) -> str | dict:
     """One-shot print status report (human-readable text: progress, temps, speed, cost, ETA).
 
@@ -5478,6 +5479,11 @@ def monitor_print(
         a print can answer "is this the right design for the goal?"
         without a separate lookup.  Best-effort: a missing kiln-pro
         install or an unresolvable brief silently skips the line.
+    :param show_panel: Open the inline live monitor panel again even
+        though one opened by an earlier call is still live above.  Pass
+        only when the person asks to see the panel again; the report
+        itself is unchanged.  Read by the inline monitor's result hook
+        (``kiln.local_monitor``), not here.
     """
     try:
         if printer_name:

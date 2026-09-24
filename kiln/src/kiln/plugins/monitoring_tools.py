@@ -858,6 +858,7 @@ class _MonitoringToolsPlugin:
             failure_type: str | None = None,
             failure_confidence: float | None = None,
             auto_pause: bool | None = None,
+            show_panel: bool = False,
         ) -> dict:
             """Snapshot + structured data for AI visual inspection of an in-progress print.
 
@@ -878,6 +879,10 @@ class _MonitoringToolsPlugin:
                 auto_pause: If True, automatically pause the print when a failure is
                     detected with confidence >= 0.8.  Defaults to the value of the
                     ``KILN_VISION_AUTO_PAUSE`` environment variable (default False).
+                show_panel: Open the inline live monitor panel again even though
+                    one opened by an earlier call is still live above.  Pass only
+                    when the person asks to see the panel again.  Read by the
+                    inline monitor's result hook (``kiln.local_monitor``), not here.
             """
             from kiln.printers import PrinterError, PrinterStatus
             from kiln.registry import PrinterNotFoundError

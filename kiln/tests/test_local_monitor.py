@@ -710,3 +710,87 @@ class TestMonitorDocumentCache:
         _cache_the_monitor()
         assert stage_cache.document() == "stage-doc"
         assert stage_cache.monitor_document() == _DOC
+
+
+class TestARepeatWhileThePanelIsLive:
+    """The host opens a panel for every call to a stamped tool, and the
+    server cannot keep a second one from appearing -- so it says so in the
+    result (the stage's own ``shown`` slot) and that panel draws itself as
+    a one-line card.  Measured 2026-09-24: three status checks in one
+    chat, three identical live panels.  The panel's own poll is its proof
+    of life; the person's ask (``show_panel=True``) opens it again."""
+
+    def _poll(self, printer_name=None):
+        mcp = _fastmcp()
+        assert local_monitor._register_snapshot_verb(mcp)
+        args = {"printer_name": printer_name} if printer_name else {}
+        anyio.run(mcp._tool_manager.call_tool, "kiln_monitor_snapshot", args)
+
+    def test_the_first_call_opens_a_panel_and_nothing_says_repeat(self):
+        sc = _run_hook(_apps_host(), "monitor_print")
+        assert sc.get(monitor_payload.MONITOR_STRUCTURED_CONTENT_KEY)
+        assert "shown" not in sc
+
+    def test_a_call_while_the_panel_polls_is_said_to_be_a_repeat(self):
+        self._poll()
+        sc = _run_hook(_apps_host(), "monitor_print")
+        assert sc["shown"] == {"repeat": "live_panel", "repeat_note": local_monitor.LIVE_PANEL_NOTE}
+        # Said, never suppressed: the readings still ride for the agent.
+        payload = sc[monitor_payload.MONITOR_STRUCTURED_CONTENT_KEY]
+        assert payload["kind"] == monitor_payload.MONITOR_PAYLOAD_KIND
+
+    def test_the_persons_ask_opens_the_panel_again(self):
+        self._poll()
+        sc = _run_hook(_apps_host(), "monitor_print", {"show_panel": True})
+        assert "shown" not in sc
+
+    def test_a_panel_that_stopped_polling_is_forgotten(self, monkeypatch):
+        self._poll()
+        later = local_monitor.time.monotonic() + local_monitor.PANEL_LIVE_WINDOW_SECONDS + 1
+        monkeypatch.setattr(local_monitor.time, "monotonic", lambda: later)
+        sc = _run_hook(_apps_host(), "monitor_print")
+        assert "shown" not in sc
+
+    def test_another_printers_panel_does_not_count(self):
+        self._poll("workshop-a1")
+        assert "shown" not in _run_hook(_apps_host(), "monitor_print")
+        sc = _run_hook(_apps_host(), "monitor_print", {"printer_name": "workshop-a1"})
+        assert sc["shown"]["repeat"] == "live_panel"
+
+    def test_the_vision_door_follows_the_same_rule(self):
+        self._poll()
+        assert _run_hook(_apps_host(), "monitor_print_vision")["shown"]["repeat"] == "live_panel"
+
+    def test_the_note_names_the_doors_that_replace_a_repeat(self):
+        note = local_monitor.LIVE_PANEL_NOTE
+        assert "printer_status" in note and "first_layer_status" in note
+        assert "show_panel=True" in note
+
+    def test_the_clause_says_the_panel_polls_itself(self):
+        """The old clause told agents the panel refreshes with each call, so
+        keep watching through this tool -- the exact guidance that littered a
+        chat with panels."""
+        clause = local_monitor.MONITOR_DESCRIPTION_CLAUSE
+        assert "polls the printer itself" in clause
+        assert "printer_status" in clause and "first_layer_status" in clause
+        assert "show_panel=True" in clause
+        assert "refreshes with each monitoring call" not in clause
+        assert "keep watching through" not in clause
+
+    def test_every_monitor_door_declares_show_panel_so_the_sdk_passes_it(self):
+        """The SDK drops an argument a tool does not declare, silently (the
+        include_capabilities lesson), so the person's ask must be a declared
+        parameter on every door the hook reads."""
+        import inspect
+
+        from kiln import server
+        from kiln.plugins.monitoring_tools import _MonitoringToolsPlugin
+
+        assert inspect.signature(server.monitor_print).parameters["show_panel"].default is False
+
+        from kiln.mcp_compat import FastMCP
+
+        mcp = FastMCP("plugin")
+        _MonitoringToolsPlugin().register(mcp)
+        vision = mcp._tool_manager._tools["monitor_print_vision"]
+        assert inspect.signature(vision.fn).parameters["show_panel"].default is False

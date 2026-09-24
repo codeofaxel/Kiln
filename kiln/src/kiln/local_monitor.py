@@ -89,6 +89,7 @@ from __future__ import annotations
 import base64
 import logging
 import os
+import time
 from typing import Any
 
 from kiln.mcp_compat import wrap_call_tool_result
@@ -137,9 +138,13 @@ MONITOR_DESCRIPTION_CLAUSE = (
     "INLINE LIVE MONITOR: on success this tool also opens Kiln's inline "
     "print monitor — a live panel with progress, temperatures, and the "
     "camera while a print runs — in hosts that render MCP Apps panels. The "
-    "panel refreshes with each monitoring call, so keep watching through "
-    "this tool rather than narrating stale numbers. Free with a Kiln "
-    "sign-in; the text report below is always complete on its own."
+    "panel polls the printer itself once open, so do not call this tool "
+    "again to refresh it: later checks go through printer_status or "
+    "first_layer_status, and a repeat while the panel is live returns the "
+    "text report with a one-line card, not a second panel. Pass "
+    "show_panel=True only when the person asks to see the panel again. "
+    "Free with a Kiln sign-in; the text report below is always complete "
+    "on its own."
 )
 
 #: Tools whose success result is a monitoring answer about a printer, so
@@ -530,6 +535,9 @@ def _register_snapshot_verb(mcp: Any) -> bool:
             Returns the composed printer snapshot the rendered panel polls.
             Called by the panel itself; not useful to call directly.
             """
+            # The poll is the panel's proof of life: the next monitor call
+            # reads it to say whether a live panel is already above.
+            _note_panel_poll(printer_name)
             return {
                 MONITOR_STRUCTURED_CONTENT_KEY: compose_local_payload(
                     printer_name=printer_name,
@@ -575,6 +583,46 @@ def _stamp_tools(mcp: Any) -> int:
     return stamped
 
 
+#: When the panel for a printer last polled ``kiln_monitor_snapshot``, keyed
+#: by the ``printer_name`` argument the entry call named ("" for the default
+#: printer — the argument the panel echoes back on every poll).  The panel
+#: polls on its own once open, 5 s while a print is on screen and 30 s
+#: otherwise, so a recent poll is proof a live panel is above, and its
+#: absence is proof enough that none is: closed, torn down, or in a tab the
+#: host has hidden.  Bounded by the number of printers a session names.
+_panel_polls: dict[str, float] = {}
+
+#: How recently a poll must have landed for the panel above to count as
+#: live: three of the panel's slowest beats, so one dropped poll never
+#: reopens a panel and a closed one is forgotten within a minute and a half.
+PANEL_LIVE_WINDOW_SECONDS = 90.0
+
+#: The sentence a repeat result carries — read by the agent in the result
+#: and by the panel, which becomes a one-line card on it.
+LIVE_PANEL_NOTE = (
+    "The live monitor an earlier call opened is still polling above, so this "
+    "result's panel is a one-line card rather than a second monitor. The "
+    "panel keeps itself current: check on the print with printer_status or "
+    "first_layer_status, and pass show_panel=True only when the person asks "
+    "to see the panel again."
+)
+
+
+def _poll_key(printer_name: str | None) -> str:
+    return printer_name if isinstance(printer_name, str) and printer_name else ""
+
+
+def _note_panel_poll(printer_name: str | None) -> None:
+    """The panel for *printer_name* just polled: it is live above."""
+    _panel_polls[_poll_key(printer_name)] = time.monotonic()
+
+
+def _panel_is_live(printer_name: str | None) -> bool:
+    """Whether a panel for *printer_name* polled within the live window."""
+    at = _panel_polls.get(_poll_key(printer_name))
+    return at is not None and time.monotonic() - at <= PANEL_LIVE_WINDOW_SECONDS
+
+
 def _install_result_hook(mcp: Any) -> bool:
     """Attach the monitor payload to monitor-tool results.
 
@@ -604,10 +652,12 @@ def _install_result_hook(mcp: Any) -> bool:
                 return
             _log_signal_once(attaching=True)
             printer_name = None
+            show_panel = False
             if isinstance(args, dict):
                 pn = args.get("printer_name")
                 if isinstance(pn, str) and pn:
                     printer_name = pn
+                show_panel = bool(args.get("show_panel"))
             payload = compose_local_payload(
                 printer_name=printer_name,
                 include_camera=inline_camera_enabled(),
@@ -620,6 +670,16 @@ def _install_result_hook(mcp: Any) -> bool:
             sc = getattr(inner, "structuredContent", None)
             sc = dict(sc) if isinstance(sc, dict) else {}
             sc[MONITOR_STRUCTURED_CONTENT_KEY] = payload
+            # The panel an earlier call opened is still polling above.  The
+            # host opens a panel for every call to a stamped tool and the
+            # server cannot keep it from appearing, so the one decision the
+            # server owns is to say so in the result — the stage's own slot
+            # — and that panel draws itself as a one-line card.  Said, never
+            # suppressed: the payload still rides for the agent.  Measured
+            # 2026-09-24: three status checks, three identical live panels.
+            # ``show_panel`` is the person's ask to see it again.
+            if not show_panel and _panel_is_live(printer_name):
+                sc["shown"] = {"repeat": "live_panel", "repeat_note": LIVE_PANEL_NOTE}
             inner.structuredContent = sc
         except Exception:  # noqa: BLE001 — a panel must never break a tool
             logger.debug("local monitor payload not attached", exc_info=True)
@@ -692,3 +752,4 @@ def _reset_for_tests() -> None:
     global _host_read_the_monitor, _signal_logged
     _host_read_the_monitor = False
     _signal_logged = False
+    _panel_polls.clear()
