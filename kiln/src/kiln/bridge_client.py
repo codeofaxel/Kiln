@@ -54,6 +54,11 @@ SUSTAINED_REFUSALS = 2
 #: file the next attempt picks up on its own.
 SIGNED_OUT_RETRY_S = 300.0
 
+#: The session states a server-side probe can END on: the server answered.
+#: ``degraded`` is the server NOT answering (a proxy 502, a 429, a network
+#: blip, a refresh backoff) and is never a verdict about the session.
+PROBE_VERDICTS = frozenset({"refreshed", "live", "needs_signin", "signed_out"})
+
 # Injected dependency shapes.
 ToolCaller = Callable[[str, dict], Any]          # (tool_name, args) -> result
 ArtifactFetcher = Callable[[str], str]           # cloud token -> local file path
@@ -523,7 +528,14 @@ class BridgeClient:
 
         backoff = 1.0
         refusals = 0  # consecutive handshake refusals in this outage
-        probed = False  # one server-side session check per outage
+        # One server-side session check per outage -- once it has ANSWERED.
+        # A probe the server did not answer (``degraded``) is asked again
+        # after the signed-out interval of sleeps, or a dead session behind
+        # a proxy blip retries every minute for ever with no "run kiln
+        # signin" (2026-09-24).
+        probed = False
+        probe_verdict = False
+        slept_since_probe = 0.0
         said_signin = False  # the hint, once per signed-out stretch
         write_bridge_state(connected=False)  # advertise "running"; flips true on connect
         while not self._stop:
@@ -536,6 +548,8 @@ class BridgeClient:
                     backoff = 1.0
                     refusals = 0
                     probed = False
+                    probe_verdict = False
+                    slept_since_probe = 0.0
                     said_signin = False
                     async for raw in ws:
                         try:
@@ -569,14 +583,26 @@ class BridgeClient:
                     refusals += 1
                     session = self._session_verdict(verify=False)
                     state = getattr(session, "state", None)
+                    may_ask = not probed or (
+                        not probe_verdict and slept_since_probe >= SIGNED_OUT_RETRY_S
+                    )
                     if (
                         state not in ("needs_signin", "signed_out")
                         and refusals >= SUSTAINED_REFUSALS
-                        and not probed
+                        and may_ask
                     ):
                         probed = True
+                        slept_since_probe = 0.0
                         session = self._session_verdict(verify=True)
                         state = getattr(session, "state", None)
+                        probe_verdict = state in PROBE_VERDICTS
+                        if not probe_verdict:
+                            logger.info(
+                                "bridge: the server could not be asked about the session "
+                                "(%s); asking again in %.0f minutes.",
+                                state or "no answer",
+                                SIGNED_OUT_RETRY_S / 60,
+                            )
                         if state == "refreshed":
                             logger.info(
                                 "bridge: the relay kept refusing a token the clock "
@@ -601,6 +627,7 @@ class BridgeClient:
                     backoff = SIGNED_OUT_RETRY_S
                 logger.info("bridge link down (%s); retrying in %.0fs", exc, backoff)
                 await asyncio.sleep(backoff)
+                slept_since_probe += backoff
                 backoff = SIGNED_OUT_RETRY_S if signed_out else min(backoff * 2, 60.0)
 
     def stop(self) -> None:

@@ -244,6 +244,47 @@ class TestHandshake403NamesTheFix:
         assert "renewed the session" in text
         assert max(sleeps) <= 60.0
 
+    def test_a_probe_that_got_no_verdict_is_asked_again_after_the_retry_interval(
+        self, monkeypatch, caplog
+    ):
+        """The server, asked, did not answer (a proxy 502, a 429, a network
+        blip): that is not a verdict, and treating it as "probed" left a
+        dead session retrying every 60 s for ever with no "run kiln signin".
+        The question is put again once the signed-out retry interval has
+        been slept away, and the second answer is a verdict."""
+        import kiln.bridge_client as bc
+        from kiln.auth_session import SessionBearer
+
+        self._refusing_relay(monkeypatch)
+        verified = iter(["degraded", "needs_signin"])
+        asked: list[bool] = []
+
+        def _resolve(*a, verify=False, **k):
+            if verify:
+                asked.append(True)
+                state = next(verified, "needs_signin")
+            else:
+                state = "needs_signin" if len(asked) >= 2 else "live"
+            token = "tok" if state in ("live", "refreshed", "degraded") else ""
+            return SessionBearer(token=token, state=state, detail="Your Kiln session has expired.")
+
+        monkeypatch.setattr("kiln.auth_session.resolve_session_bearer", _resolve)
+        monkeypatch.setattr(bc, "_read_license", lambda **k: "tok")
+        client = bc.BridgeClient.__new__(bc.BridgeClient)
+        client._pinned_license = None
+        client._url = "wss://unit.invalid/api/bridge/connect"
+        client._stop = False
+        text, sleeps = self._drive(monkeypatch, caplog, client, 12)
+
+        assert len(asked) == 2, f"asked {len(asked)} times; sleeps {sleeps}"
+        assert "kiln signin" in text
+        assert text.count("kiln signin") == 1
+        # The re-ask waited the signed-out interval out, not a single backoff.
+        first_answer = sleeps.index(bc.SIGNED_OUT_RETRY_S)
+        assert sum(sleeps[1:first_answer]) >= bc.SIGNED_OUT_RETRY_S
+        # And from the verdict on, the storm stops.
+        assert sleeps[first_answer:] == [bc.SIGNED_OUT_RETRY_S] * len(sleeps[first_answer:])
+
     def test_a_pinned_license_is_never_asked_about(self, monkeypatch, caplog):
         import kiln.bridge_client as bc
 
