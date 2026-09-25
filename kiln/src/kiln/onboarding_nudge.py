@@ -68,7 +68,9 @@ def _disabled() -> bool:
 
 
 def _result_seems_failed(inner: Any, payload: dict | None) -> bool:
-    if getattr(inner, "isError", False):
+    from kiln.mcp_compat import result_is_error
+
+    if result_is_error(inner):
         return True
     return bool(payload) and payload.get("success") is False
 
@@ -84,8 +86,9 @@ def _attach(inner: Any, ctx: Any, name: str | None) -> None:
             return
 
         from kiln.local_stage import _result_as_dict
+        from kiln.mcp_compat import result_structured_content, set_result_structured_content
 
-        sc = getattr(inner, "structuredContent", None)
+        sc = result_structured_content(inner)
         if not isinstance(sc, dict):
             sc = _result_as_dict(inner) or {}
         else:
@@ -101,7 +104,7 @@ def _attach(inner: Any, ctx: Any, name: str | None) -> None:
             return
 
         sc[RESULT_KEY] = {"note": _NOTE}
-        inner.structuredContent = sc
+        set_result_structured_content(inner, sc)
         _attached = True
 
         from kiln.daily_stats import record_event

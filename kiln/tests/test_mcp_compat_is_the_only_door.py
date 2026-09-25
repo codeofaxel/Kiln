@@ -107,6 +107,51 @@ def test_no_module_reaches_for_the_v1_lowlevel_attribute():
     )
 
 
+#: ``CallToolResult`` fields SDK 2 renamed; the wire names survive only as
+#: serialisation aliases, which attribute access does not see.
+_RESULT_FIELDS = ("structuredContent", "structured_content", "isError", "is_error")
+
+
+def test_no_module_reads_or_writes_a_result_field_by_one_majors_name():
+    """``mcp_compat.result_structured_content()`` and its pair exist for this.
+
+    Every mutator on the ``tools/call`` chain -- the stage, the monitor, both
+    nudges, the standing-window note -- read and wrote ``structuredContent``
+    by attribute.  On SDK 2 the read found nothing and the write raised,
+    inside handlers that swallow their own errors, so none of them reached a
+    host on SDK 2 while CI, pinned to 2.2, stayed green: every test handed
+    the mutators an SDK 1-shaped stand-in.  Same defect as the lowlevel
+    attribute above, on the result instead of the server.
+    """
+    offenders = []
+    for path in sorted(_SRC.rglob("*.py")):
+        if path.name == _THE_DOOR:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute) and node.attr in _RESULT_FIELDS:
+                offenders.append(f"{path.relative_to(_SRC)}:{node.lineno} .{node.attr}")
+            elif (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in ("getattr", "setattr", "hasattr")
+                and len(node.args) >= 2
+                and isinstance(node.args[1], ast.Constant)
+                and node.args[1].value in _RESULT_FIELDS
+            ):
+                offenders.append(
+                    f"{path.relative_to(_SRC)}:{node.lineno} "
+                    f"{node.func.id}(..., {node.args[1].value!r})"
+                )
+
+    assert not offenders, (
+        "these read or write a CallToolResult field by one SDK's attribute "
+        "name; use kiln.mcp_compat.result_structured_content / "
+        "set_result_structured_content / result_is_error, which use "
+        "whichever name the installed SDK has:\n  " + "\n  ".join(offenders)
+    )
+
+
 def test_the_shim_itself_still_names_both_majors():
     """Guard the guard.
 

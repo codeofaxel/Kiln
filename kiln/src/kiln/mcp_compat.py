@@ -85,6 +85,9 @@ __all__ = [
     "install_uninitialized_request_guard",
     "lowlevel_server",
     "restart_keeps_connection",
+    "result_is_error",
+    "result_structured_content",
+    "set_result_structured_content",
     "set_instructions",
     "stamp_restart",
     "set_tool_input_schema",
@@ -132,6 +135,48 @@ def set_tool_input_schema(tool: Any, schema: Any) -> None:
             setattr(tool, attr, schema)
             return
     raise AttributeError(f"{type(tool).__name__} carries no input schema")
+
+
+_STRUCTURED_ATTRS = ("structured_content", "structuredContent")
+_IS_ERROR_ATTRS = ("is_error", "isError")
+
+
+def result_structured_content(result: Any) -> Any:
+    """The ``structuredContent`` of a ``CallToolResult``, whichever SDK built it.
+
+    Same rename as the schema pair above: SDK 2 calls the fields
+    ``structured_content`` and ``is_error`` and keeps the wire names only as
+    aliases, which attribute access does not see.  ``None`` when the object
+    has neither.
+    """
+    for attr in _STRUCTURED_ATTRS:
+        if hasattr(result, attr):
+            return getattr(result, attr)
+    return None
+
+
+def set_result_structured_content(result: Any, value: Any) -> None:
+    """Replace a result's structured content under the attribute its SDK uses.
+
+    A write by the SDK 1 name is not merely lost on SDK 2: the result is a
+    pydantic model with no field of that name, so the assignment raises --
+    and every mutator on the ``tools/call`` chain swallows its own errors by
+    design, so the stage, the monitor and the notes all went missing on
+    SDK 2 with nothing said.
+    """
+    for attr in _STRUCTURED_ATTRS:
+        if hasattr(result, attr):
+            setattr(result, attr, value)
+            return
+    raise AttributeError(f"{type(result).__name__} carries no structured content")
+
+
+def result_is_error(result: Any) -> bool:
+    """Whether a ``CallToolResult`` reports a tool error, whichever SDK built it."""
+    for attr in _IS_ERROR_ATTRS:
+        if hasattr(result, attr):
+            return bool(getattr(result, attr))
+    return False
 
 
 def lowlevel_server(mcp: Any) -> Any:
