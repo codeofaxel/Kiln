@@ -329,6 +329,11 @@ The safety system actively prevents the following:
   like `M104 S350` on a 300 C-max printer are blocked before reaching firmware.
 - **Start a print without pre-flight validation.**  There is no code path that
   bypasses `preflight_check()`.
+- **Start a print nobody said yes to.**  A print starts only after a person
+  says go -- in their AI app's approval dialog, by typing a code Kiln shows on
+  their screen, or at the terminal, or under an auto-print setting they
+  switched on themselves -- and an agent cannot supply that yes itself.  Stopping, pausing and watching a print never need that yes.  See
+  "Saying Go" in [PROJECT_DOCS.md](PROJECT_DOCS.md#saying-go).
 - **Allow agents to modify firmware settings.**  EEPROM writes (M500/M501/M502),
   network configuration (M552-M554), and firmware updates (M997) are all
   blocked at the G-code validation layer.

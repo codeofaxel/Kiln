@@ -243,13 +243,16 @@ List G-code files available on the printer.
 Upload a local G-code file to the printer.
 
 #### `kiln print <files>... [--queue]`
-Start printing. Accepts multiple files via glob expansion. With `--queue`, files are submitted to the job queue for sequential printing.
+Start printing. Accepts multiple files via glob expansion. With `--queue`, files are submitted to the job queue for sequential printing. Before anything starts, it shows you the preview and asks you to confirm at the keyboard (see [Saying Go](#saying-go)).
 
 #### `kiln cancel`
 Cancel the active print job.
 
 #### `kiln pause` / `kiln resume`
 Pause or resume the active print.
+
+#### `kiln consent window|status|extend|revoke`
+Open, list, extend or close a standing window — a yes for a while on one printer (see [Standing windows](#standing-windows)). `window` and `extend` only work with a person at the keyboard; `revoke` works from anywhere.
 
 #### `kiln temp [--tool N] [--bed N] [--printer NAME]`
 Get current temperatures, or set targets. Without flags, returns current
@@ -363,7 +366,7 @@ Check Kiln's own setup: MCP client config drift, stale paths, environment proble
 Close leftover background Kiln servers that closed agent sessions leave behind. Checks that nothing is printing first and never touches the session you're in.
 
 #### `kiln doctor` / `kiln doctor-creality`
-Diagnose connection problems. The Creality variant verifies local Moonraker reachability and gives same-LAN/IP/port guidance.
+Diagnose connection problems. The Creality variant verifies local Moonraker reachability and gives same-LAN/IP/port guidance. `kiln doctor` also says which ways of saying go to a print work on this computer (your app's dialog, a code on this screen, the terminal) and lists any standing window that is open.
 
 #### `kiln self-update`
 Update Kiln to the latest version. Holds off while a print is running.
@@ -810,7 +813,80 @@ New print starts require a preview-confirmation step:
 
 Confirmations are single-use, short-lived, and bound to the file and printer, so an agent can never quietly start a print you haven't seen. `KILN_SKIP_PREVIEW_GATE=1` is the explicit advanced-user bypass and is logged whenever used.
 
-In MCP apps that support confirmation prompts, the approval is a dialog the app shows you directly — your assistant cannot answer it for you. It names the file and covers that one print. Every way of starting a print asks: slicing-and-printing, retries, and monitored prints all pass through the same approval step, and a retry only re-asks when the shape changed.
+In MCP apps that support confirmation prompts, the approval is a dialog the app shows you directly — your assistant cannot answer it for you. It names the file and covers that one print, unless you choose a standing window. Every way of starting a print asks: slicing-and-printing, retries, and monitored prints all pass through the same approval step, and a retry only re-asks when the shape changed. If your app cannot show a dialog, Kiln shows a code on your screen instead — see [Saying Go](#saying-go).
+
+### Saying Go
+
+A print starts only when a person says go — for that one print, or for a while — in a place your assistant cannot answer for you. No flag or command lets an assistant supply that yes itself; the only exceptions are switches you set yourself, all off by default — the advanced-user bypass above and the [auto-print settings](DEPLOYMENT.md#auto-print-use-with-caution). Stopping, pausing, resuming and watching a print never need that yes.
+
+Kiln tries the ways below in order and uses the first one that works on your setup. When a print is refused, your assistant is told which of them exist on your computer, and only those, so it can tell you what to do.
+
+#### 1. Your app's approval dialog
+
+If your AI app can show approval dialogs, Kiln asks there before every print. The dialog names the file and the printer, starts on **No** (so a stray click starts nothing), and offers:
+
+- **Yes, this print only**
+- **Yes, and for the next 2 hours without asking again**
+- **Yes, and for the rest of today without asking again**
+- **No**
+
+You can also type a length instead, like `45m` or `3h` (24 hours at most). The "for a while" answers open a [standing window](#standing-windows) on that printer. Saying No, or closing the dialog, ends it there: nothing is sent to the printer.
+
+Two checks keep the dialog honest. A yes that comes back faster than anyone could read the question is asked once more, and a second instant yes counts as no answer. And where Kiln can see that your app is set up to answer dialogs automatically (some apps let you add hooks that do this), it skips the dialog, because a yes from it would prove nothing. Either way, Kiln moves on to a code on your screen.
+
+#### 2. A code on your screen
+
+When your app cannot show the dialog, Kiln puts a four-digit code in an ordinary system notification on the computer it runs on. It looks like this:
+
+> **Kiln**\
+> benchy.3mf on garage\
+> Type 4821 in your chat to print it. Add 2h or today to keep printing without asking.
+
+Type the code into your chat with your assistant:
+
+| You type | What it means |
+|---|---|
+| `4821` | Yes, this print only |
+| `4821 2h` | Yes, and keep printing on this printer for the next 2 hours without asking |
+| `4821 today` | Yes, and for the rest of today (until midnight on that computer's clock) |
+
+A length works too, like `4821 45m` (24 hours at most). Your assistant passes your words to Kiln and tries the print again; if the code matches, the print starts.
+
+- **Your assistant cannot see the code.** Nothing it can ask Kiln for reveals it: the code is held only in Kiln's memory while it waits and never appears in anything Kiln hands back. That is what makes typing it a real yes.
+- **One code, one print.** A code covers the one file on the one printer it was shown for, works once, and runs out after 10 minutes. It never covers more than that one printer.
+- **Wrong guesses count.** After three wrong codes, every waiting code is cancelled and no new one is shown for a minute; then ask your assistant to try the print again for a fresh code. A reply that arrives within two seconds of the banner — faster than anyone could read it — is not counted, and the banner is shown again the next time the print is tried. A printer is shown at most five new codes an hour.
+- **Notifications have to be on.** The code is a normal notification, so if notifications are off on that computer, or Do Not Disturb or a Focus mode is hiding them, you will not see it. On Linux it needs a desktop session and the `notify-send` command. If no banner appears, give your yes at the terminal instead.
+- **What it proves, and what it does not.** A typed code proves that someone who could see that screen chose to type it — the same as a yes at the keyboard. If you have let an assistant take screenshots of that computer, it could read a banner while it is showing; on a setup like that, use the dialog or the terminal.
+
+A computer with no screen (a headless box) shows no code, and neither does one where the banner has been turned off (see [Environment Variables](#environment-variables)). There, the yes comes from the terminal.
+
+#### 3. The terminal
+
+At a terminal on the computer running Kiln:
+
+```bash
+kiln print benchy.3mf                              # shows the preview, then asks: Start printing …? [y/N]
+kiln consent window --for 2h --printer garage      # opens a standing window (below)
+```
+
+`kiln print` opens the preview (or, for a file it cannot draw, says so) and asks you directly. It only asks when a person is at the keyboard: if an assistant runs the command for you, it gets a refusal, not a question. This way of saying go is there on every computer that runs Kiln.
+
+#### Standing windows
+
+A standing window is a yes for a while: until it closes, prints on that printer start without asking you each time. Every print inside one still has to be previewed first.
+
+- **Opening one:** pick a "for a while" answer in the dialog, add `2h` or `today` to a code, or at the terminal run `kiln consent window --for 2h --printer garage` (`--for` takes lengths like `30m`, `2h` or `1d`). Nothing your assistant can call opens or extends one.
+- **24 hours at most**, whichever way it was opened. Open another when it runs out.
+- **Seeing them:** `kiln consent status` (or `kiln doctor`) lists what is open, until when, and how it was opened.
+- **Closing one:** `kiln consent revoke <id>` (or `--all`), or tell your assistant to close it — closing works from anywhere. Jobs queued under a window that has closed do not start on it.
+- **Extending one:** `kiln consent extend <id> --for 1h`, at the terminal.
+- **Several printers:** a window over a list of printers (`--printers a,b`) or all of them (`--fleet`) is a Business feature, like running several printers at once ([kiln3d.com/pricing](https://kiln3d.com/pricing)).
+
+A window that runs out or is closed while a print is running lets that print finish. It only stops new prints from starting without asking.
+
+#### When Nothing at Home Is Running Kiln
+
+Kiln reaches your printer over your home network (or a USB cable) from the computer it is installed on, and every way of saying go above ends at that computer. So a computer on the printer's network has to be switched on, awake and running Kiln — a Mac or PC that is not asleep, or a small always-on computer. When nothing at home is running Kiln, none of these can start a print. If you want to start prints while you are away from the desk, leave one computer on and set it not to sleep. `kiln doctor` on that computer says which ways of saying go work there.
 
 ### Occupied Plate
 
@@ -919,6 +995,8 @@ The common ones:
 | `KILN_BAMBU_IDLE_DISCONNECT_S` / `KILN_ELEGOO_IDLE_DISCONNECT_S` | Seconds idle before the printer's connection slot is released (default `120`, `0` disables). These printers allow only a few clients at once |
 | `KILN_NO_UPDATE_CHECK` | Disable the version-update check |
 | `KILN_SKIP_PREVIEW_GATE` | Advanced-user bypass for preview confirmation; logged when used |
+| `KILN_SCREEN_CODE` | Set `0` to stop Kiln showing an approval code in a system notification when your app cannot draw the approval dialog; a yes then comes from the terminal or a standing window |
+| `KILN_DIALOG_MIN_READ_S` | Seconds (default `1`). An approval-dialog yes that comes back faster than this is asked again, and a second one that fast counts as no answer; `0` turns the check off |
 | `KILN_MMF_API_KEY` | MyMiniFactory API key |
 | `KILN_CULTS3D_USERNAME` / `KILN_CULTS3D_API_KEY` | Cults3D credentials |
 | `KILN_AUTH_ENABLED` / `KILN_AUTH_KEY` | Local server API-key auth |
