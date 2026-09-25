@@ -167,6 +167,9 @@ class TestTheNotesLandOnEitherShape:
         result = make(is_error=True)
         update_nudge_on._attach(result, None, "list_materials")
         assert result_structured_content(result) is None
+        # Nor under the other shape's name: an SDK 1 read of the flag misses
+        # an SDK 2 error, and the note is written beside the real field.
+        assert set(vars(result)) == set(vars(make(is_error=True)))
 
 
 # ---------------------------------------------------------------------------
