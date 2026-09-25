@@ -1142,13 +1142,14 @@ def visualize_model(
         if successful:
             # A render happened: the floor of the preview ladder, on record
             # for the print gate.  The door writes it, not the caller — which
-            # look it drew, and a hash of the pixels shown, so a token can
-            # say which pictures the person was looking at.
+            # look it drew, a hash of the pixels shown, so a token can say
+            # which pictures the person was looking at, and where the first
+            # of them is, so an ask to the account can carry that picture.
             from kiln.preview_evidence import record as _record_evidence
 
             _record_evidence(
                 "png", file_path, renderer=result["renderer"], views=len(successful),
-                shown_sha=_sha_of_views(successful),
+                shown_sha=_sha_of_views(successful), picture=str(successful[0]["path"]),
             )
 
         if not share_link:

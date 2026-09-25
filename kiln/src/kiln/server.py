@@ -47,6 +47,7 @@ Environment variables
 
 from __future__ import annotations
 
+import asyncio
 import atexit
 
 # Import kiln-pro early so compatibility shims are installed before
@@ -83,10 +84,13 @@ from kiln.print_consent import (
     NOT_ASKED_CODE_COOLDOWN,
     NOT_ASKED_CODE_SHOWN,
     NOT_ASKED_HOST_CANNOT,
+    NOT_ASKED_PENDING_TAG,
     SOURCE_CI_BYPASS,
     SOURCE_CODE,
     SOURCE_DERIVED,
     SOURCE_ELICITED,
+    SOURCE_HOSTED_APPROVAL,
+    SOURCE_HOSTED_DELEGATION,
     PrintConsent,
     consent_for,
     describe_file_for_approval,
@@ -2293,6 +2297,14 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
     the gate cannot disagree about whether a yes exists: the whole point
     of a window is that prints inside it do not ask.
 
+    On a signed-in machine the account is asked next, before any dialog:
+    a person's approval of these bytes on this printer, or a window they
+    opened for this machine, is a yes already given (and a decline of the
+    ask this machine posted is a no).  Where the dialog cannot be drawn,
+    the account is also asked beside the screen's code, so the person can
+    answer at whichever door they are near.  The server decides every
+    answer; see :mod:`kiln.bridge_client` for the fields read and sent.
+
     Returns ``None`` when nobody could be asked, which leaves the existing
     preview-token gate exactly as it was.  That is the honest fallback:
     hosts without elicitation, and the REST proxy where no person is
@@ -2340,6 +2352,10 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
     answered = screen_code.take_answer(file_value, aimed)
     if answered is not None:
         return _consent_from_code_answer(tool_name, file_value, printer_name, answered, aimed=aimed)
+    # A yes the signed-in account already holds for this print.
+    from_account = await _consent_from_account(tool_name, file_value, printer_name, aimed)
+    if from_account is not None:
+        return from_account
     try:
         can_ask = bool(host_can_ask_the_user(mcp, ctx))
     except Exception as exc:  # noqa: BLE001 — cannot ask is not approved
@@ -2354,7 +2370,9 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
             _audit(tool_name, "consent_dialog_skipped", details={"reason": "host_hook", "settings": hook_path})
             can_ask = False
     if not can_ask:
-        return _offer_screen_code(tool_name, file_value, aimed, ctx, hook_path=hook_path, fallback=NOT_ASKED_HOST_CANNOT)
+        return await _offer_screen_code(
+            tool_name, file_value, aimed, ctx, hook_path=hook_path, fallback=NOT_ASKED_HOST_CANNOT,
+        )
 
     offer_window, offer_fleet = dialog_offers()
     message = describe_print_request(
@@ -2391,7 +2409,9 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
         )
     logger.debug("Consent could not be obtained from the dialog (%s); offering the screen's code", answer.detail)
     _audit(tool_name, "consent_dialog_unavailable", details={"file": file_value, "detail": answer.detail})
-    return _offer_screen_code(tool_name, file_value, aimed, ctx, hook_path=None, fallback=f"unavailable:{answer.detail}")
+    return await _offer_screen_code(
+        tool_name, file_value, aimed, ctx, hook_path=None, fallback=f"unavailable:{answer.detail}",
+    )
 
 
 def _host_client_name(ctx: Any) -> str:
@@ -2422,28 +2442,200 @@ def _sha256_if_local(file_value: str) -> str:
     return ""
 
 
-def _offer_screen_code(
+async def _offer_screen_code(
     tool_name: str, file_value: str, aimed: str, ctx: Any, *, hook_path: str | None, fallback: str,
 ):
     """The screen door: show a code for this print on this machine's
     screen and record that nobody has answered yet, so the refusal can
     say what to do.  Where no banner can be shown — the hosted server, a
     box with no screen, a notifier that failed — *fallback* is recorded
-    instead, the reason the refusal gave before this door existed."""
+    instead, the reason the refusal gave before this door existed.
+
+    Beside the code, on a signed-in machine, the print is also put to the
+    account (:func:`_ask_the_account`) — shown, cooling down or
+    unavailable alike — and the reason carries the ask's id, so the
+    refusal can name the page where a person answers it."""
     if _hosted_now():
         return note_not_asked(fallback)
+    file_sha256 = _sha256_if_local(file_value)
     shown = screen_code.issue(
-        tool=tool_name, file_name=file_value, file_sha256=_sha256_if_local(file_value),
+        tool=tool_name, file_name=file_value, file_sha256=file_sha256,
         printer_name=aimed, host=_host_label(ctx),
     )
     outcome = shown.get("outcome")
     if outcome == screen_code.SHOWN:
         _audit(tool_name, "consent_code_shown", details={"file": file_value, "printer": aimed, "again": bool(shown.get("again"))})
-        return note_not_asked(NOT_ASKED_CODE_SHOWN + (f":hook={hook_path}" if hook_path else ""))
-    if outcome == screen_code.COOLDOWN:
-        return note_not_asked(f"{NOT_ASKED_CODE_COOLDOWN}:{int(shown.get('seconds_left') or 60)}")
-    _audit(tool_name, "consent_code_unavailable", details={"file": file_value, "reason": shown.get("reason")})
-    return note_not_asked(fallback)
+        reason = NOT_ASKED_CODE_SHOWN + (f":hook={hook_path}" if hook_path else "")
+    elif outcome == screen_code.COOLDOWN:
+        reason = f"{NOT_ASKED_CODE_COOLDOWN}:{int(shown.get('seconds_left') or 60)}"
+    else:
+        _audit(tool_name, "consent_code_unavailable", details={"file": file_value, "reason": shown.get("reason")})
+        reason = fallback
+    return note_not_asked(reason + await _ask_the_account(tool_name, file_value, aimed, file_sha256))
+
+
+#: What the account's answer is called here: an approval of one print, or
+#: a window a person opened for this machine.  Any other kind is no answer.
+_ACCOUNT_SOURCES = {"approval": SOURCE_HOSTED_APPROVAL, "machine_window": SOURCE_HOSTED_DELEGATION}
+
+
+def _what_was_shown(file_value: str) -> tuple[str | None, str]:
+    """``(picture, door)`` for an ask to the account: the still this
+    machine showed of the file, and the door the preview came through.
+    Only a still in the stage's own look is sent — a raw render is for
+    inspection, and a person approves what they are shown.  Never raises."""
+    with contextlib.suppress(Exception):
+        from kiln.preview_evidence import DOOR_PNG, DOORS, STAGE_RENDERERS, evidence_for
+
+        local = _local_copy_of(file_value)
+        if not local:
+            return None, ""
+        ev = evidence_for(local)
+        door = next((d for d in DOORS if ev.get(d)), "")
+        still = ev.get(DOOR_PNG) or {}
+        picture = str(still.get("picture") or "")
+        if still.get("renderer") in STAGE_RENDERERS and picture and os.path.isfile(picture):
+            return picture, door
+        return None, door
+    return None, ""
+
+
+def _post_the_ask(file_value: str, aimed: str, file_sha256: str):
+    """The blocking half of :func:`_ask_the_account`, run off the loop."""
+    from kiln import bridge_client
+
+    picture, door = _what_was_shown(file_value)
+    return bridge_client.ask_the_account(
+        file_sha256=file_sha256, file_name=file_value, printer_name=aimed,
+        picture_path=picture, shown_door=door,
+    )
+
+
+async def _ask_the_account(tool_name: str, file_value: str, aimed: str, file_sha256: str) -> str:
+    """Put this print to the signed-in account, where any signed-in
+    browser at kiln3d.com/monitor can answer it.  Returns the tag the
+    not-asked reason carries (``:pending=<id>``), or ``""`` when nothing
+    is held: not signed in, no local copy to hash, the server did not
+    answer, or it refused the ask (audited).  Never raises."""
+    if not file_sha256:
+        return ""
+    try:
+        ask = await asyncio.to_thread(_post_the_ask, file_value, aimed, file_sha256)
+    except Exception:  # noqa: BLE001 — an ask that could not be put is no ask
+        logger.debug("consent: account ask failed", exc_info=True)
+        return ""
+    if ask is None:
+        return ""
+    if ask.refused:
+        _audit(
+            tool_name, "consent_pending_refused",
+            details={"file": file_value, "printer": aimed, "reason": ask.refused, "picture_sent": ask.picture_sent},
+        )
+        return ""
+    if ask.posted:
+        _audit(
+            tool_name, "consent_pending_posted",
+            details={
+                "file": file_value, "printer": aimed, "pending": ask.id,
+                "picture_sent": ask.picture_sent, "repeat": ask.repeat,
+            },
+        )
+    return NOT_ASKED_PENDING_TAG + ask.id
+
+
+def _read_the_account(file_value: str, aimed: str):
+    """The blocking half of :func:`_consent_from_account`, run off the
+    loop: ``(file_sha256, answer)``, or ``None`` when there is nothing to
+    read — not signed in, no local copy to hash, no answer."""
+    from kiln import bridge_client
+
+    if not bridge_client.account_bearer():
+        return None
+    file_sha256 = _sha256_if_local(file_value)
+    if not file_sha256:
+        return None
+    answer = bridge_client.read_the_account(file_sha256=file_sha256, printer_name=aimed)
+    return None if answer is None else (file_sha256, answer)
+
+
+async def _consent_from_account(
+    tool_name: str, file_value: str, printer_name: str | None, aimed: str,
+):
+    """A yes the signed-in account already holds for these bytes on this
+    printer — a person's approval of this print, or a window they opened
+    for this machine — recorded as the yes for the call now being served.
+    Returns the reset token, or ``None`` when the account holds none.
+
+    The start is reported to the account first, and only a report the
+    server accepted records a yes: an approval is one print, and one it
+    could not be told about could be spent twice.  ``door`` stays empty —
+    the account's yes shows nothing on this machine, so the preview token
+    still proves the print was seen.
+
+    Raises :class:`RuntimeError` when the person declined the ask THIS
+    machine posted for this print, as a dialog's No does; a decline this
+    process did not post (or already honoured) refuses nothing, so the
+    next start can ask again.  Nothing here runs on the hosted server."""
+    if _hosted_now():
+        return None
+    from kiln import bridge_client
+
+    try:
+        read = await asyncio.to_thread(_read_the_account, file_value, aimed)
+    except Exception:  # noqa: BLE001 — an account that could not be read has not said yes
+        logger.debug("consent: account read failed", exc_info=True)
+        return None
+    if read is None:
+        return None
+    file_sha256, answer = read
+    ask = bridge_client.live_ask(file_sha256, aimed)
+    if ask is not None and answer.pending_id and (answer.pending_id != ask.id or answer.pending_state != "waiting"):
+        # The ask this machine posted is no longer waiting — answered,
+        # declined, run out or replaced — so the next ask is a new one.
+        # An answer naming no ask at all leaves the memo to its own end.
+        bridge_client.forget_ask(file_sha256, aimed)
+        if answer.pending_id == ask.id and answer.pending_state == "declined":
+            _audit(
+                tool_name, "consent_refused",
+                details={"file": file_value, "action": "decline", "door": "account", "pending": ask.id, "printer": aimed},
+            )
+            raise RuntimeError(
+                f"{tool_name} was not started: the print was declined in Kiln (kiln3d.com/monitor). "
+                "Nothing was sent to the printer."
+            )
+    source = _ACCOUNT_SOURCES.get(answer.kind)
+    if not answer.allowed or source is None or not answer.id:
+        return None
+    try:
+        started = await asyncio.to_thread(
+            bridge_client.record_start,
+            authority_id=answer.id, kind=answer.kind, file_sha256=file_sha256, printer_name=aimed,
+        )
+    except Exception:  # noqa: BLE001
+        started = False
+    if not started:
+        logger.debug("consent: the account's %s %s was not accepted for this start", answer.kind, answer.id)
+        return None
+    bridge_client.forget_ask(file_sha256, aimed)
+    grantor = answer.grantor
+    identity = grantor if grantor.startswith("account:") or not grantor else f"account:{grantor}"
+    window = source == SOURCE_HOSTED_DELEGATION
+    _audit(
+        tool_name, "consent_granted",
+        details={
+            "file": file_value, "by": "account", "source": source, "identity": identity,
+            "authority": answer.id, "kind": answer.kind, "via": answer.via,
+            "printer": aimed, "file_sha256": file_sha256,
+            **({"window_until": answer.expires_at} if window else {}),
+        },
+    )
+    return set_consent(
+        PrintConsent(
+            tool=tool_name, file_name=file_value, printer_name=printer_name, source=source,
+            identity=identity, window_id=answer.id if window else "",
+            expires_at=answer.expires_at if window else None,
+        )
+    )
 
 
 def _consent_from_code_answer(
@@ -2650,6 +2842,12 @@ def _no_yes_message(tool_name: str, file_name: str, aimed: str) -> str:
     approval dialog is coming here, and that the yes — one print, or a
     standing window — has to be given at a terminal.  An agent left to
     guess tends to promise a dialog it cannot show.
+
+    When the signed-in account is holding an ask about this print, one
+    sentence names the fixed page a person answers it on (never a link
+    for this print); on a machine nobody has signed in, one clause says
+    ``kiln signin`` would have given them that door.  The terminal stays
+    last either way.
     """
     from kiln.runtime_env import is_hosted_multitenant
 
@@ -2665,6 +2863,19 @@ def _no_yes_message(tool_name: str, file_name: str, aimed: str) -> str:
             "itself. Tell the person that plainly."
         )
     why = why_not_asked()
+    pending = ""
+    if NOT_ASKED_PENDING_TAG in why:
+        why, pending = why.rsplit(NOT_ASKED_PENDING_TAG, 1)
+    monitor = (
+        "approve it in Kiln on their phone or any signed-in browser at kiln3d.com/monitor, "
+        "then start again."
+    ) if pending else ""
+    signin = ""
+    if why and not pending:
+        from kiln.bridge_client import account_signed_out
+
+        if account_signed_out():
+            signin = "`kiln signin` on this machine lets them approve from their phone next time."
     if why.startswith(NOT_ASKED_CODE_SHOWN):
         hook = ""
         if ":hook=" in why:
@@ -2672,35 +2883,43 @@ def _no_yes_message(tool_name: str, file_name: str, aimed: str) -> str:
                 " This host's own hooks answer its dialogs (" + why.split(":hook=", 1)[1]
                 + "), so the dialog was not used."
             )
+        account = f" Or they can {monitor}" if monitor else (f" {signin}" if signin else "")
         return (
             f"{tool_name} refuses to proceed: {name} was shown, but nobody said go. A code was just "
             "shown in a notification on the screen of the machine Kiln runs on." + hook + " Tell the "
             f"person: type the code here to print {name} on {aimed} — the code alone approves this "
             f"print; the code followed by 2h or today also keeps printing on {aimed} without asking. "
             "Then pass their exact words to give_print_code and start again. Nothing you can call "
-            "reveals the code, and a wrong guess counts. If no notification appeared, their yes can "
-            f"be given at a terminal: `kiln print {name}` or `kiln consent window --for 2h --printer "
-            f"{aimed}`."
+            "reveals the code, and a wrong guess counts." + account + " If no notification appeared, "
+            f"their yes can be given at a terminal: `kiln print {name}` or `kiln consent window --for "
+            f"2h --printer {aimed}`."
         )
     if why.startswith(NOT_ASKED_CODE_COOLDOWN):
         secs = why.split(":", 1)[1] if ":" in why else "60"
-        return (
+        lead = (
             f"{tool_name} refuses to proceed: too many wrong codes, or too many codes, just now — no "
-            f"new code is shown for {secs} seconds. Tell the person plainly, wait, then start again; "
-            f"or their yes can be given at a terminal (`kiln print {name}`)."
+            f"new code is shown for {secs} seconds. Tell the person plainly, wait, then start again"
         )
+        if monitor or signin:
+            account = f"Or they can {monitor}" if monitor else signin
+            return f"{lead}. {account} Or their yes can be given at a terminal (`kiln print {name}`)."
+        return f"{lead}; or their yes can be given at a terminal (`kiln print {name}`)."
     if why == NOT_ASKED_HOST_CANNOT:
-        return (
+        lead = (
             f"{tool_name} refuses to proceed: {name} was shown, but nobody said go, and "
             "this host cannot show an approval dialog, so no dialog is coming — tell the "
-            "person that plainly. Their yes has to be given at a terminal: `kiln print "
-            f"{name}` (or `kiln queue submit {name}`) asks them about this one print, and "
+            "person that plainly."
+        )
+        terminal = (
+            f"`kiln print {name}` (or `kiln queue submit {name}`) asks them about this one print, and "
             f"`kiln consent window --for 2h --printer {aimed}` opens a standing window for a "
             "while. Kiln cannot open a window from here, and an agent cannot supply "
-            "either yes."
         )
-    return (
-        f"{tool_name} refuses to proceed: {name} was shown, but nobody said go — a yes "
+        if monitor:
+            return f"{lead} They can {monitor} Or their yes can be given at a terminal: {terminal}any of these yeses."
+        return f"{lead}{(' ' + signin) if signin else ''} Their yes has to be given at a terminal: {terminal}either yes."
+    lead = f"{tool_name} refuses to proceed: {name} was shown, but nobody said go"
+    doors = (
         "comes from the host's approval dialog (a host that asks shows one; the person "
         "approves it, and can choose there to open a standing window for this printer), "
         f"from a person at a terminal (`kiln print {name}` or `kiln queue submit {name}` "
@@ -2708,6 +2927,11 @@ def _no_yes_message(tool_name: str, file_name: str, aimed: str) -> str:
         f"consent window --for 2h --printer {aimed}`); an agent cannot supply any of the "
         "three."
     )
+    if monitor:
+        return f"{lead}. They can {monitor} Otherwise a yes {doors}"
+    if signin:
+        return f"{lead}. {signin} For this print, a yes {doors}"
+    return f"{lead} — a yes {doors}"
 
 
 def _preview_gate_error(

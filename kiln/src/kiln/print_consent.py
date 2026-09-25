@@ -667,6 +667,10 @@ NOT_ASKED_CODE_SHOWN = "code_shown"
 #: A code could not be shown just now (too many guesses, too many codes);
 #: carries ``:<seconds>`` to wait.
 NOT_ASKED_CODE_COOLDOWN = "code_cooldown"
+#: Appended, last, to any reason above when the signed-in account is
+#: holding an ask about this print (``:pending=<id>``), so the refusal can
+#: name the page where a person answers it.
+NOT_ASKED_PENDING_TAG = ":pending="
 
 _not_asked: ContextVar[str] = ContextVar("kiln_print_consent_not_asked", default="")
 
