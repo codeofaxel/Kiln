@@ -304,7 +304,7 @@ class TestTheBannerRidesEveryResult:
         assert names == {"a1", "x1c"}
 
     def test_the_hook_installs_on_a_real_server(self) -> None:
-        from mcp.server.fastmcp import FastMCP
+        from kiln.mcp_compat import FastMCP
 
         mcp = FastMCP("fault-banner-test")
         assert watch_state.install_fault_banner(mcp) is True
