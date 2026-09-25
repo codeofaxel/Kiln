@@ -692,7 +692,7 @@ def test_the_package_carries_the_helper_and_the_windows_icon():
         info = plistlib.load(fh)
     assert info["CFBundleName"] == "Kiln" and info["CFBundleIdentifier"] == "com.kiln3d.notifier"
     assert info["LSUIElement"] is True and info["CFBundleExecutable"] == "kiln-notifier"
-    pyproject = (pathlib.Path(screen_code.__file__).parents[2] / "pyproject.toml").read_text()
+    pyproject = (pathlib.Path(__file__).resolve().parents[1] / "pyproject.toml").read_text()
     for rel in ("data/notifier/Kiln.png", "data/notifier/Kiln.app/Contents/MacOS/kiln-notifier",
                 "data/notifier/Kiln.app/Contents/_CodeSignature/CodeResources"):
         assert f'"{rel}"' in pyproject, rel

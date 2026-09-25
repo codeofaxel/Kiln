@@ -20,6 +20,7 @@ import base64
 import hashlib
 import json
 import pathlib
+import threading
 import time
 import types
 from unittest.mock import MagicMock, patch
@@ -539,6 +540,10 @@ class TestTheStillOnDemand:
     @responses.activate
     def test_none_on_record_the_stage_painter_paints_one_and_it_is_sent(self, signed_in, mesh, monkeypatch, audits, tmp_path):
         monkeypatch.setattr(stage_paint, "try_paint_stage_views", _REAL_PAINTER)
+        # This is about the bytes a working painter produces, not how long the
+        # ask waits for them: a loaded build machine paints slower than the
+        # ask's own limit, and the ask then rightly goes without a picture.
+        monkeypatch.setattr(server, "_ASK_STILL_WAIT_S", 300.0)
         _may_i()
         _held()
         _ask(mesh)
@@ -594,9 +599,12 @@ class TestTheStillOnDemand:
     @responses.activate
     def test_a_slow_painting_is_not_waited_for(self, signed_in, mesh, monkeypatch, tmp_path, audits):
         still = _png(tmp_path, "late.png")
+        release = threading.Event()
 
         def slow(*a, **k):
-            time.sleep(1.0)
+            # A painting that does not finish until the test lets it: the ask
+            # returning at all is the proof it did not wait.
+            release.wait(60)
             return [{"path": str(still)}]
 
         monkeypatch.setattr(stage_paint, "try_paint_stage_views", slow)
@@ -604,8 +612,12 @@ class TestTheStillOnDemand:
         _may_i()
         _held()
         started = time.monotonic()
-        _ask(mesh)
-        assert time.monotonic() - started < 0.9
+        try:
+            _ask(mesh)
+            elapsed = time.monotonic() - started
+        finally:
+            release.set()
+        assert elapsed < 30  # the painting would have taken 60 s
         assert json.loads(_calls(PENDING)[0].request.body)["picture_png_b64"] == ""
         assert [d["picture_source"] for _, a, d in audits if a == "consent_pending_posted"] == ["timed_out"]
 
