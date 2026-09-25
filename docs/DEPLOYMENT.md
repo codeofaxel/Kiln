@@ -94,6 +94,8 @@ Reference for running Kiln yourself. Covers all environment variables, Docker de
 |---|---|---|---|
 | `KILN_CONFIRM_UPLOAD` | No | `false` | Require confirmation before file uploads (`1`, `true`, `yes`) |
 | `KILN_CONFIRM_MODE` | No | `false` | Require confirmation before destructive operations (`1`, `true`, `yes`) |
+| `KILN_SCREEN_CODE` | No | on | Set `0` to stop Kiln showing an approval code in a system notification when the AI app cannot draw the approval dialog. A yes to a print then comes from the terminal (`kiln print`) or a standing window |
+| `KILN_DIALOG_MIN_READ_S` | No | `1` | Seconds. An approval-dialog yes that comes back faster than this is asked again, and a second one that fast counts as no answer. `0` turns the check off |
 | `KILN_STRICT_MATERIAL_CHECK` | No | `true` | Enforce strict material compatibility checks |
 | `KILN_HEATER_TIMEOUT` | No | `30` | Minutes before heater auto-cooldown watchdog triggers (0 to disable) |
 | `KILN_VISION_AUTO_PAUSE` | No | `false` | Auto-pause print on vision-detected failures |

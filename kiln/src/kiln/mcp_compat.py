@@ -38,8 +38,12 @@ actually on the wire.
 
 from __future__ import annotations
 
+import contextlib
 import contextvars
+import inspect
 import logging
+import os
+import time
 from typing import Any
 
 _logger = logging.getLogger(__name__)
@@ -92,6 +96,7 @@ __all__ = [
     "stamp_restart",
     "set_tool_input_schema",
     "tool_input_schema",
+    "call_registered_tool",
     "tool_result_blocks",
     "uninitialized_request_message",
     "wrap_call_tool_result",
@@ -110,6 +115,30 @@ def tool_result_blocks(result: Any) -> Any:
     if isinstance(result, tuple):
         result = result[0]
     return getattr(result, "content", result)
+
+
+async def call_registered_tool(mcp: Any, name: str, arguments: Any = None, *, context: Any = None):
+    """Run a registered tool the way a host's ``tools/call`` does, on either SDK.
+
+    The tool manager's ``call_tool`` grew a required ``context`` parameter in
+    SDK 2: on SDK 1 it defaults to ``None`` and a two-argument call works, so a
+    caller written against SDK 1 passes locally and raises ``TypeError:
+    call_tool() missing 1 required positional argument`` on a tree that
+    installs SDK 2 — which is CI.  The parameter is read off the signature
+    rather than assumed, so a third spelling fails here, once, instead of at
+    every call site.
+
+    ``None`` is a legitimate context: the manager only hands it to the tool
+    body when the tool declares a context parameter, and a tool that does is
+    not one a test drives this way.
+    """
+    manager = getattr(mcp, "_tool_manager", mcp)
+    call = manager.call_tool
+    kwargs: dict[str, Any] = {}
+    with contextlib.suppress(Exception):
+        if "context" in inspect.signature(call).parameters:
+            kwargs["context"] = context
+    return await call(name, dict(arguments or {}), **kwargs)
 
 
 _SCHEMA_ATTRS = ("input_schema", "inputSchema")
@@ -331,6 +360,23 @@ def host_can_ask_the_user(mcp: Any, ctx: Any = None) -> bool:
     return getattr(caps, "elicitation", None) is not None
 
 
+#: A yes sooner than this after the question was put was not read by a
+#: person.  Reading the shortest question the dialog asks takes longer.
+#: ``KILN_DIALOG_MIN_READ_S`` overrides it (``0`` turns the rule off: a
+#: test host answers in no time at all).
+MIN_HUMAN_ANSWER_S = 1.0
+
+
+def _min_human_answer_s() -> float:
+    raw = os.environ.get("KILN_DIALOG_MIN_READ_S", "").strip()
+    if raw:
+        try:
+            return max(0.0, float(raw))
+        except ValueError:
+            pass
+    return float(MIN_HUMAN_ANSWER_S)
+
+
 async def ask_user_to_confirm(
     ctx: Any, message: str, *, offer_window: bool = True, offer_fleet: bool = False,
 ):
@@ -368,18 +414,35 @@ async def ask_user_to_confirm(
         _logger.debug("Could not build the confirmation form: %s", exc)
         return DialogAnswer("unavailable", f"form_unavailable:{type(exc).__name__}")
 
-    try:
-        result = await ctx.elicit(message=message, schema=schema)
-    except Exception as exc:  # noqa: BLE001 — a host that cannot answer is not an error
-        _logger.debug("Could not ask the user for confirmation: %s", exc)
-        return DialogAnswer("unavailable", f"{type(exc).__name__}")
-
-    data = getattr(result, "data", None)
-    if data is None:
-        data = getattr(result, "content", None)
-    return answer_from_content(
-        getattr(result, "action", ""), data, offer_window=offer_window, offer_fleet=offer_fleet,
-    )
+    asked = message
+    for last_try in (False, True):
+        started = time.monotonic()
+        try:
+            result = await ctx.elicit(message=asked, schema=schema)
+        except Exception as exc:  # noqa: BLE001 — a host that cannot answer is not an error
+            _logger.debug("Could not ask the user for confirmation: %s", exc)
+            return DialogAnswer("unavailable", f"{type(exc).__name__}")
+        elapsed = time.monotonic() - started
+        data = getattr(result, "data", None)
+        if data is None:
+            data = getattr(result, "content", None)
+        answer = answer_from_content(
+            getattr(result, "action", ""), data, offer_window=offer_window, offer_fleet=offer_fleet,
+        )
+        if not (answer.accepted and elapsed < _min_human_answer_s()):
+            return answer
+        # A yes that lands before a person could have read the question was
+        # not read by a person: a host's own hook, or a click that was not
+        # looking.  Ask once more, saying so; a second instant yes is no
+        # answer at all, and the caller moves to the next door.
+        if last_try:
+            break
+        _logger.warning("approval dialog answered in %d ms — faster than a person reads; asking again", int(elapsed * 1000))
+        asked = (
+            "(Asked again: the first answer came back faster than a person could have read this.)\n\n"
+            + message
+        )
+    return DialogAnswer("unavailable", "answered_too_fast")
 
 
 def set_instructions(mcp: Any, text: str) -> None:

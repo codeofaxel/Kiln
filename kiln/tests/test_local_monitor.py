@@ -24,6 +24,7 @@ import anyio
 import pytest
 
 from kiln import local_monitor, monitor_payload, stage_cache
+from kiln.mcp_compat import call_registered_tool
 
 _DOC = "<!DOCTYPE html><html><body>monitor</body></html>"
 
@@ -376,9 +377,8 @@ class TestCapabilitiesRideOnlyOnThePollThatAsks:
         monkeypatch.setattr(server, "printer_status", fake_status)
         mcp = _fastmcp()
         assert local_monitor._register_snapshot_verb(mcp)
-
-        _call_tool(mcp, "kiln_monitor_snapshot", {"include_capabilities": True})
-        _call_tool(mcp, "kiln_monitor_snapshot", {})
+        anyio.run(call_registered_tool, mcp, "kiln_monitor_snapshot", {"include_capabilities": True})
+        anyio.run(call_registered_tool, mcp, "kiln_monitor_snapshot", {})
 
         assert asked == ["full", "lite"]
 
@@ -475,30 +475,6 @@ class TestTheRoomCameraRule:
         assert monitor_payload.is_active_print_state("idle") is False
         assert monitor_payload.is_active_print_state(None) is False
 
-
-def _call_tool(mcp, name: str, arguments: dict):
-    """Call a registered tool the way a host's ``tools/call`` arrives, on
-    either SDK major.  The tool manager called bare needs a request context
-    that SDK 2 made a required argument; an in-process client supplies it.
-    SDK 2 connects ``Client`` to a server object directly; 1.x has the
-    memory-stream helper that 2.x removed."""
-    try:
-        from mcp import Client
-    except ImportError:
-        from mcp.shared.memory import create_connected_server_and_client_session
-
-        def _client():
-            return create_connected_server_and_client_session(mcp)
-    else:
-
-        def _client():
-            return Client(mcp)
-
-    async def _once():
-        async with _client() as client:
-            return await client.call_tool(name, arguments)
-
-    return anyio.run(_once)
 
 
 def _run_hook(host, tool_name, arguments=None):
@@ -725,7 +701,7 @@ class TestTheControlVerbStandsFromInstall:
     control, with their own posture, in the shape the panel parses."""
 
     def _call(self, mcp, args):
-        return _call_tool(mcp, "kiln_monitor_control", args)
+        return anyio.run(call_registered_tool, mcp, "kiln_monitor_control", args)
 
     def test_the_verb_stands_from_install_and_is_app_only(self):
         _cache_the_monitor()
@@ -856,7 +832,7 @@ class TestARepeatWhileThePanelIsLive:
         mcp = _fastmcp()
         assert local_monitor._register_snapshot_verb(mcp)
         args = {"printer_name": printer_name} if printer_name else {}
-        _call_tool(mcp, "kiln_monitor_snapshot", args)
+        anyio.run(call_registered_tool, mcp, "kiln_monitor_snapshot", args)
 
     def test_the_first_call_opens_a_panel_and_nothing_says_repeat(self):
         sc = _run_hook(_apps_host(), "monitor_print")

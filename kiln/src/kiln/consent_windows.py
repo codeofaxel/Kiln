@@ -71,6 +71,7 @@ from pathlib import Path
 from typing import Any
 
 from kiln.print_consent import (
+    SOURCE_CODE,
     SOURCE_ELICITED,
     SOURCE_TERMINAL,
     DialogAnswer,
@@ -120,7 +121,7 @@ SOURCE_WEB = "user_web"
 
 #: How a window was opened — which door.  The same words the print gate
 #: uses for who held the pen: a terminal, the host's dialog, the web page.
-SOURCE_DOORS = (SOURCE_TERMINAL, SOURCE_ELICITED, SOURCE_WEB)
+SOURCE_DOORS = (SOURCE_TERMINAL, SOURCE_ELICITED, SOURCE_WEB, SOURCE_CODE)
 
 Scope = tuple[str, ...] | str
 
@@ -435,7 +436,9 @@ def open_window(*, seconds: float, scope: Any) -> Window:
     return _open_window(seconds=seconds, scope=scope, source=SOURCE_TERMINAL)
 
 
-def open_window_from_dialog(answer: DialogAnswer, *, printer_name: str) -> Window:
+def open_window_from_dialog(
+    answer: DialogAnswer, *, printer_name: str, source: str = SOURCE_ELICITED,
+) -> Window:
     """The dialog door: open the window the person asked for when they
     answered the approval dialog with "yes, and for a while".
 
@@ -449,8 +452,12 @@ def open_window_from_dialog(answer: DialogAnswer, *, printer_name: str) -> Windo
     that cannot be read, or is past the cap, is ``ValueError`` in the
     person's words; the caller reports it and the yes to THIS print
     stands.  On the hosted server the account's store opens it, or
-    :class:`NotAPerson` when there is none.
+    :class:`NotAPerson` when there is none.  *source* names the door the
+    answer came through: the host's dialog, or the code typed after a
+    banner (:data:`SOURCE_CODE`) — the same answer, the same window.
     """
+    if source not in SOURCE_DOORS:
+        raise ValueError(f"a window from an answer names a known door, not {source!r}")
     if not isinstance(answer, DialogAnswer) or not answer.opens_window:
         raise ValueError("only a person's yes with a 'for a while' answer opens a window")
     name = str(printer_name or "").strip()
@@ -463,12 +470,12 @@ def open_window_from_dialog(answer: DialogAnswer, *, printer_name: str) -> Windo
         if store is None:
             raise NotAPerson("the hosted server has no window store; the account approves each print")
         w = store.open(
-            seconds=check_window_length(seconds), scope=_checked_scope(scope), source=SOURCE_ELICITED,
+            seconds=check_window_length(seconds), scope=_checked_scope(scope), source=source,
         )
         logger.info("standing consent window %s opened by %s (%s) for %s, until %s",
                     w.id, w.set_by, w.source, describe_scope(w.scope), time.ctime(w.until))
         return w
-    return _open_window(seconds=seconds, scope=scope, source=SOURCE_ELICITED)
+    return _open_window(seconds=seconds, scope=scope, source=source)
 
 
 def extend_window(window_id: str, *, seconds: float) -> Window:

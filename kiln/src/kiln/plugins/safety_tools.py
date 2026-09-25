@@ -500,6 +500,103 @@ class _SafetyToolsPlugin:
                 )
 
         # ------------------------------------------------------------------
+        # give_print_code
+        #
+        # The screen door.  When this host cannot draw the approval dialog,
+        # Kiln shows a short code in a notification on the machine it runs
+        # on and the person types it in the chat.  This is where the agent
+        # relays those words.  It is not a tool that says yes: without the
+        # code — which nothing an agent can call reveals — it says no, and
+        # a wrong guess counts (see kiln.screen_code).
+        # ------------------------------------------------------------------
+
+        @mcp.tool()
+        def give_print_code(words: str) -> dict:
+            """Relay the code the person typed after Kiln showed one on their screen.
+
+            When a print is refused with "a code was just shown in a notification",
+            ask the person to type it here, then pass their exact words: the code
+            alone approves that one print; the code followed by ``2h`` or ``today``
+            also keeps printing on that printer without asking for a while. Then
+            call the start tool again. Nothing you can call reveals the code; a
+            wrong guess counts, and three wrong guesses void every code for a minute.
+
+            Args:
+                words: Exactly what the person typed, e.g. ``4821`` or ``4821 2h``.
+            """
+            from kiln import screen_code
+            from kiln.runtime_env import is_hosted_multitenant
+
+            if err := _srv._check_auth("write"):
+                return err
+            if is_hosted_multitenant():
+                return _srv._error_dict(
+                    "The hosted server has no screen to show a code on; the signed-in person "
+                    "approves each print on the print page.", code="NOT_HERE",
+                )
+            out = screen_code.answer(words, host=_srv._host_label(None))
+            outcome = out.get("outcome")
+            if outcome == screen_code.ANSWERED:
+                rec = out["record"]
+                issued = rec.issued
+                reply: dict = {
+                    "success": True,
+                    "approved": {
+                        "file": issued.file_name, "printer": issued.printer_name or "default",
+                        "choice": rec.choice, "typed_duration": rec.typed_duration,
+                    },
+                    "next": f"Call the tool that starts the print again ({issued.tool}); this yes covers it.",
+                }
+                if rec.answer.opens_window:
+                    # The window opens where the dialog's does: when the print
+                    # starts, in the wrapper — never from a tool.
+                    reply["standing_window"] = {
+                        "opens": "when the print is started",
+                        "for": rec.answer.describe_window_ask(),
+                    }
+                _srv._audit(
+                    "give_print_code", "consent_code_answered",
+                    details={
+                        "file": issued.file_name, "printer": issued.printer_name, "words": rec.words,
+                        "choice": rec.choice, "host": issued.host, "file_sha256": issued.file_sha256,
+                        "code_shown_at": issued.issued_at, "answered_at": rec.answered_at,
+                    },
+                )
+                return reply
+            _srv._audit("give_print_code", "consent_code_refused", details={"outcome": outcome})
+            if outcome == screen_code.WRONG:
+                if out.get("nothing_live"):
+                    return _srv._error_dict(
+                        "No code is waiting to be answered. Start the print again so one is shown.",
+                        code="NO_CODE",
+                    )
+                return _srv._error_dict(
+                    f"That is not the code that was shown. {out.get('tries_left', 0)} tries left.",
+                    code="WRONG_CODE",
+                )
+            if outcome == screen_code.VOIDED:
+                return _srv._error_dict(
+                    f"Too many wrong codes: every code is void for {out.get('seconds_left', 60)} seconds. "
+                    "Tell the person, wait, then start the print again.", code="CODES_VOIDED",
+                )
+            if outcome == screen_code.TOO_FAST:
+                return _srv._error_dict(
+                    "That answer came back before a person could have read the notification; it was "
+                    "not counted. The notification is shown again when the print is started again.",
+                    code="TOO_FAST",
+                )
+            if outcome == screen_code.EVERY_PRINTER_NOT_HERE:
+                return _srv._error_dict(
+                    "A code covers the one printer the print was aimed at. Every printer at once is "
+                    "opened at a terminal (`kiln consent window --for 2h --fleet`) or on the account page.",
+                    code="NOT_HERE",
+                )
+            return _srv._error_dict(
+                "Pass exactly what the person typed: the four-digit code, optionally followed by 2h, "
+                "today, or a length like 45m.", code="VALIDATION_ERROR",
+            )
+
+        # ------------------------------------------------------------------
         # consent_window_status / revoke_consent_window
         #
         # A standing window is a person's "yes, for a while": prints may
