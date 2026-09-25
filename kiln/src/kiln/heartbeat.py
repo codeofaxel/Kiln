@@ -624,6 +624,15 @@ def _send_heartbeat() -> None:
                 # surface.
                 "surface_sessions": stats.get("surface_sessions", {}),
                 "surface_events": stats.get("surface_events", {}),
+                # Which agent host drove the server — the app that
+                # spawned it, as it named itself at the MCP handshake —
+                # and what it declared it can do, plus a model hint when
+                # the host volunteered one ("unknown" otherwise, because
+                # the protocol does not carry the model).  Keys come from
+                # kiln/agent_host.py; the dashboard reads them by the
+                # same label rule as the texture and profile maps.
+                "agent_hosts": _top_n(stats.get("agent_hosts", {}), 50),
+                "agent_host_facts": _top_n(stats.get("agent_host_facts", {}), 200),
                 # Model names of EVERY registered printer (deduped,
                 # capped) — the top-level printer_model field only ever
                 # names the default machine, which made second printers

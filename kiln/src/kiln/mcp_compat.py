@@ -79,11 +79,15 @@ __all__ = [
     "ask_user_to_confirm",
     "capture_request_context",
     "client_capabilities",
+    "client_info",
     "current_session",
     "host_can_ask_the_user",
     "install_uninitialized_request_guard",
     "lowlevel_server",
     "restart_keeps_connection",
+    "result_is_error",
+    "result_structured_content",
+    "set_result_structured_content",
     "set_instructions",
     "stamp_restart",
     "set_tool_input_schema",
@@ -131,6 +135,48 @@ def set_tool_input_schema(tool: Any, schema: Any) -> None:
             setattr(tool, attr, schema)
             return
     raise AttributeError(f"{type(tool).__name__} carries no input schema")
+
+
+_STRUCTURED_ATTRS = ("structured_content", "structuredContent")
+_IS_ERROR_ATTRS = ("is_error", "isError")
+
+
+def result_structured_content(result: Any) -> Any:
+    """The ``structuredContent`` of a ``CallToolResult``, whichever SDK built it.
+
+    Same rename as the schema pair above: SDK 2 calls the fields
+    ``structured_content`` and ``is_error`` and keeps the wire names only as
+    aliases, which attribute access does not see.  ``None`` when the object
+    has neither.
+    """
+    for attr in _STRUCTURED_ATTRS:
+        if hasattr(result, attr):
+            return getattr(result, attr)
+    return None
+
+
+def set_result_structured_content(result: Any, value: Any) -> None:
+    """Replace a result's structured content under the attribute its SDK uses.
+
+    A write by the SDK 1 name is not merely lost on SDK 2: the result is a
+    pydantic model with no field of that name, so the assignment raises --
+    and every mutator on the ``tools/call`` chain swallows its own errors by
+    design, so the stage, the monitor and the notes all went missing on
+    SDK 2 with nothing said.
+    """
+    for attr in _STRUCTURED_ATTRS:
+        if hasattr(result, attr):
+            setattr(result, attr, value)
+            return
+    raise AttributeError(f"{type(result).__name__} carries no structured content")
+
+
+def result_is_error(result: Any) -> bool:
+    """Whether a ``CallToolResult`` reports a tool error, whichever SDK built it."""
+    for attr in _IS_ERROR_ATTRS:
+        if hasattr(result, attr):
+            return bool(getattr(result, attr))
+    return False
 
 
 def lowlevel_server(mcp: Any) -> Any:
@@ -202,6 +248,24 @@ def current_session(mcp: Any, ctx: Any = None) -> Any | None:
         return lowlevel_server(mcp).request_context.session
     except Exception:  # noqa: BLE001 — no session is a legitimate answer
         return None
+
+
+def client_info(mcp: Any, ctx: Any = None) -> Any | None:
+    """The connected host's ``clientInfo`` — its name and version — or None.
+
+    The two majors spell the field differently on the parsed initialize
+    params: SDK 1 keeps the wire's ``clientInfo``, SDK 2 renames it
+    ``client_info``.  A reader that asked for only the first got None for
+    every host on SDK 2, and nothing said so, so both spellings are
+    resolved here, once, over the session :func:`current_session` finds.
+    Never raises: "no session" and "no clientInfo" are legitimate answers.
+    """
+    params = getattr(current_session(mcp, ctx), "client_params", None)
+    for attr in ("client_info", "clientInfo"):
+        info = getattr(params, attr, None)
+        if info is not None:
+            return info
+    return None
 
 
 def capture_request_context(mcp: Any, method: str) -> bool:

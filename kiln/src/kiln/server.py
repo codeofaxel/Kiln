@@ -1358,6 +1358,14 @@ def _install_mcp_request_context_capture() -> None:
         token = _current_mcp_request_context.set(context)
         tool_token = _tool_context.enter_tool(name)
         consent_token = None
+        # Which app is on the other end of this connection, counted once
+        # per process on the first tool call to land — the handshake is
+        # the only place a host names itself, and the dispatch chokepoint
+        # is the one door every tool passes.  Never affects the call.
+        with contextlib.suppress(Exception):
+            from kiln.agent_host import record_once as _record_agent_host
+
+            _record_agent_host(mcp, context)
         try:
             if _terms_gate_blocks(name):
                 # One-time consent gate — raised so the lowlevel handler returns

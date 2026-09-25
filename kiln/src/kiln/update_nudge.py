@@ -83,7 +83,9 @@ def _hosted_multitenant() -> bool:
 
 
 def _result_seems_failed(inner: Any, payload: dict | None) -> bool:
-    if getattr(inner, "isError", False):
+    from kiln.mcp_compat import result_is_error
+
+    if result_is_error(inner):
         return True
     return bool(payload) and payload.get("success") is False
 
@@ -101,8 +103,9 @@ def _attach(inner: Any, ctx: Any, name: str | None) -> None:
             return
 
         from kiln.local_stage import _result_as_dict
+        from kiln.mcp_compat import result_structured_content, set_result_structured_content
 
-        sc = getattr(inner, "structuredContent", None)
+        sc = result_structured_content(inner)
         if not isinstance(sc, dict):
             # Seed from the tool's own output — a host that prefers
             # structuredContent shows THIS and nothing else, so seeding
@@ -126,7 +129,7 @@ def _attach(inner: Any, ctx: Any, name: str | None) -> None:
         if info.get("highlights"):
             note = f"{_AGENT_NOTE} {_HIGHLIGHTS_NOTE}"
         sc[RESULT_KEY] = {**info, "note": note}
-        inner.structuredContent = sc
+        set_result_structured_content(inner, sc)
         _attached = True
 
         from kiln.daily_stats import record_update_nudge

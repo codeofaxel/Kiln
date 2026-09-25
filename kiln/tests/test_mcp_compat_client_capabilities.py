@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from kiln.mcp_compat import client_capabilities
+from kiln.mcp_compat import client_capabilities, client_info
 
 
 def _ctx_with(caps: object) -> SimpleNamespace:
@@ -56,3 +56,46 @@ def test_no_session_anywhere_is_none_not_a_crash():
     assert client_capabilities(bare) is None
     assert client_capabilities(bare, SimpleNamespace(session=None)) is None
     assert client_capabilities(SimpleNamespace()) is None
+
+
+# ---------------------------------------------------------------------------
+# client_info — the same session, the other half of the handshake
+# ---------------------------------------------------------------------------
+
+
+def _ctx_with_params(params: object) -> SimpleNamespace:
+    return SimpleNamespace(session=SimpleNamespace(client_params=params))
+
+
+def test_client_info_reads_the_sdk2_spelling():
+    """SDK 2 parses the handshake into snake_case: ``client_info``.  Reading
+    only the wire's ``clientInfo`` answered None for every host there."""
+    info = object()
+    assert client_info(SimpleNamespace(), _ctx_with_params(SimpleNamespace(client_info=info))) is info
+
+
+def test_client_info_reads_the_sdk1_spelling():
+    info = object()
+    assert client_info(SimpleNamespace(), _ctx_with_params(SimpleNamespace(clientInfo=info))) is info
+
+
+def test_client_info_reads_the_installed_sdks_own_params():
+    """The real model of whichever SDK major is installed, not a fake: the
+    accessor must find the name on the object the SDK itself builds."""
+    from mcp.types import InitializeRequestParams
+
+    params = InitializeRequestParams.model_validate({
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {"name": "claude-code", "version": "2.1.280"},
+    })
+    info = client_info(SimpleNamespace(), _ctx_with_params(params))
+    assert info is not None
+    assert info.name == "claude-code"
+    assert info.version == "2.1.280"
+
+
+def test_client_info_with_no_session_is_none_not_a_crash():
+    assert client_info(SimpleNamespace()) is None
+    assert client_info(SimpleNamespace(), SimpleNamespace(session=None)) is None
+    assert client_info(SimpleNamespace(), _ctx_with_params(None)) is None

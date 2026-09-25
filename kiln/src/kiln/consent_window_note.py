@@ -116,8 +116,9 @@ def _attach(inner: Any, ctx: Any, name: str | None, arguments: dict | None) -> N
             return
 
         from kiln.local_stage import _result_as_dict
+        from kiln.mcp_compat import result_structured_content, set_result_structured_content
 
-        sc = getattr(inner, "structuredContent", None)
+        sc = result_structured_content(inner)
         if not isinstance(sc, dict):
             # Seed from the tool's own output — a host that prefers
             # structuredContent shows THIS and nothing else, so seeding
@@ -128,7 +129,7 @@ def _attach(inner: Any, ctx: Any, name: str | None, arguments: dict | None) -> N
         if not sc:
             return
         sc[RESULT_KEY] = block
-        inner.structuredContent = sc
+        set_result_structured_content(inner, sc)
     except Exception:  # noqa: BLE001 -- a note must never break a result
         logger.debug("standing window note not attached", exc_info=True)
 
