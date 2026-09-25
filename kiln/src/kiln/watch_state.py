@@ -282,7 +282,13 @@ def _attach_fault_banner(inner: Any, ctx: Any, name: str | None) -> None:
     raises -- a banner must never break the result it rides on.
     """
     try:
-        if getattr(inner, "isError", False):
+        from kiln.mcp_compat import (
+            result_is_error,
+            result_structured_content,
+            set_result_structured_content,
+        )
+
+        if result_is_error(inner):
             return
         # The hosted server runs one process for every tenant, and its
         # watchdog registry is nobody's printer: said here, the way the
@@ -296,7 +302,7 @@ def _attach_fault_banner(inner: Any, ctx: Any, name: str | None) -> None:
             return
         from kiln.local_stage import _result_as_dict
 
-        sc = getattr(inner, "structuredContent", None)
+        sc = result_structured_content(inner)
         if not isinstance(sc, dict):
             # Seed from the tool's own output: a host that prefers
             # structuredContent shows THIS and nothing else, so seeding
@@ -309,7 +315,7 @@ def _attach_fault_banner(inner: Any, ctx: Any, name: str | None) -> None:
         payload: Any = faults[0] if len(faults) == 1 else faults
         if sc:
             sc[RESULT_FAULT_KEY] = payload
-            inner.structuredContent = sc
+            set_result_structured_content(inner, sc)
         note = "\n".join(str(f.get("note") or "") for f in faults).strip()
         content = getattr(inner, "content", None)
         if note and isinstance(content, list):

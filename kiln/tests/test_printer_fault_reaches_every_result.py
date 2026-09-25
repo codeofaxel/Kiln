@@ -311,6 +311,57 @@ class TestTheBannerRidesEveryResult:
         assert watch_state.install_fault_banner(mcp) is False  # once per process
 
 
+class TestTheBannerLandsOnEitherSdksResult:
+    """SDK 2 names a result's fields ``structured_content`` and ``is_error``;
+    a write by the SDK 1 name raised there, inside a hook that swallows its
+    own errors, so the banner never reached a host.  The stand-in above has
+    the SDK 1 shape, so these run the installed SDK's real type and an
+    SDK 2-shaped stand-in too."""
+
+    @staticmethod
+    def _text(payload: str) -> list:
+        return [SimpleNamespace(type="text", text=payload)]
+
+    def test_on_the_installed_sdks_real_result(self, registry) -> None:
+        from mcp.types import CallToolResult, TextContent
+
+        registry["default"] = _Dog(running=True, reading=_paused_with_todays_fault())
+        result = CallToolResult(
+            content=[TextContent(type="text", text='{"success": true, "tray_now": "255"}')]
+        )
+
+        watch_state._attach_fault_banner(result, None, "ams_status")
+
+        wire = result.model_dump(by_alias=True)
+        assert wire["structuredContent"][watch_state.RESULT_FAULT_KEY]["code"] == PULL_OUT_FAILED_CODE
+        assert wire["structuredContent"]["tray_now"] == "255"
+        assert any(
+            str(b.get("text", "")).startswith("PRINTER FAULT on default") for b in wire["content"]
+        )
+
+    def test_on_an_sdk2_shaped_result(self, registry) -> None:
+        registry["default"] = _Dog(running=True, reading=_paused_with_todays_fault())
+        result = SimpleNamespace(
+            structured_content=None, is_error=False, content=self._text('{"success": true}')
+        )
+
+        watch_state._attach_fault_banner(result, None, "ams_status")
+
+        assert result.structured_content[watch_state.RESULT_FAULT_KEY]["code"] == PULL_OUT_FAILED_CODE
+        assert not hasattr(result, "structuredContent")
+
+    def test_an_sdk2_error_result_carries_no_banner(self, registry) -> None:
+        registry["default"] = _Dog(running=True, reading=_paused_with_todays_fault())
+        result = SimpleNamespace(
+            structured_content=None, is_error=True, content=self._text('{"success": false}')
+        )
+
+        watch_state._attach_fault_banner(result, None, "ams_status")
+
+        assert result.structured_content is None
+        assert not hasattr(result, "structuredContent")
+
+
 # ---------------------------------------------------------------------------
 # Every door that starts or follows a print says how a fault will arrive
 # ---------------------------------------------------------------------------
