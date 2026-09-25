@@ -10890,16 +10890,17 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
     try:
         from kiln import screen_code as _sc
 
-        _screen = _sc.screen_available()
+        _switched_off = os.environ.get("KILN_SCREEN_CODE", "").strip().lower() in ("0", "false", "off", "no")
+        if _switched_off:
+            _code_line = "the code banner is switched off here (KILN_SCREEN_CODE=0); "
+        elif _sc.screen_available():
+            _code_line = "a code shown on this screen when it cannot; "
+        else:
+            _code_line = "no screen here, so no code can be shown; "
         checks.append({
             "name": "approval_doors",
             "ok": True,
-            "detail": (
-                "the app's dialog when it draws one; "
-                + ("a code shown on this screen when it cannot; " if _screen
-                   else "no screen here, so no code can be shown (no DISPLAY); ")
-                + "`kiln print <file>` at this terminal"
-            ),
+            "detail": "the app's dialog when it draws one; " + _code_line + "`kiln print <file>` at this terminal",
         })
     except Exception as exc:
         checks.append({"name": "approval_doors", "ok": True, "detail": f"check skipped: {exc}"})
