@@ -2610,6 +2610,24 @@ def _host_label(ctx: Any) -> str:
     return ""
 
 
+def _printer_label_for_a_person(printer_name: str | None) -> str:
+    """How a person calls this printer on a banner: the name they gave it,
+    or — for Kiln's own ``default`` alias — its model ("Bambu Lab A1"), or
+    "your printer" when the model is not known.  Never the alias itself."""
+    name = str(printer_name or "").strip()
+    if name and name.lower() != "default":
+        return name
+    with contextlib.suppress(Exception):
+        model = _resolve_printer_model_live(name or None)
+        if model:
+            from kiln.printers.bed_fit import get_printer_display_name
+
+            shown = str(get_printer_display_name(model) or "").strip()
+            if shown:
+                return shown
+    return "your printer"
+
+
 def _sha256_if_local(file_value: str) -> str:
     """The sha256 of the file's bytes when a local copy can be read, else ``""``."""
     with contextlib.suppress(Exception):
@@ -2639,7 +2657,7 @@ async def _offer_screen_code(
     file_sha256 = _sha256_if_local(file_value)
     shown = screen_code.issue(
         tool=tool_name, file_name=file_value, file_sha256=file_sha256,
-        printer_name=aimed, host=_host_label(ctx),
+        printer_name=aimed, host=_host_label(ctx), printer_label=_printer_label_for_a_person(aimed),
     )
     outcome = shown.get("outcome")
     if outcome == screen_code.SHOWN:

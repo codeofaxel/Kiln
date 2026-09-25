@@ -151,8 +151,9 @@ class TestTheCodeIsOffered:
     def test_the_banner_words_carry_the_code_once_and_the_three_answers(self, banners):
         _ask()
         title, subtitle, message = screen_code.banner_text(banners[0])
-        assert title == "Kiln" and "benchy.3mf" in subtitle and "bench" in subtitle
-        assert message.count(banners[0].code) == 1 and "2h" in message and "today" in message
+        words = " ".join((title, subtitle, message))
+        assert title.startswith("Kiln") and "benchy" in subtitle and "bench" in subtitle
+        assert words.count(banners[0].code) == 1 and "2h" in message and "today" in message
 
     def test_no_tool_result_or_status_line_carries_a_live_code(self, banners):
         _ask()
@@ -329,3 +330,98 @@ def test_the_preview_gate_takes_a_code_yes_like_a_terminals(banners):
     # A yes with no preview is refused for the preview, never for the yes.
     assert r.consent is not None and r.block is not None
     assert "nobody said go" not in json.dumps(r.block) and "preview" in json.dumps(r.block).lower()
+
+
+# ---------------------------------------------------------------------------
+# The banner, read by a person (live test 2026-09-25: the code sat mid-sentence
+# and was cut off, the printer read "default", and the file kept its extension)
+# ---------------------------------------------------------------------------
+
+
+class TestTheBannerReadsForAPerson:
+    def test_the_code_is_in_the_title_so_a_cut_off_banner_still_shows_it(self, banners, monkeypatch):
+        monkeypatch.setattr(server, "_resolve_printer_model_live", lambda name=None: "bambu_a1")
+        _ask(printer_name="default")
+        title, _subtitle, _message = screen_code.banner_text(banners[0])
+        assert banners[0].code in title
+
+    def test_the_default_printer_is_named_by_its_model_not_by_kilns_alias(self, banners, monkeypatch):
+        monkeypatch.setattr(server, "_resolve_printer_model_live", lambda name=None: "bambu_a1")
+        _ask(printer_name="default")
+        _title, subtitle, _message = screen_code.banner_text(banners[0])
+        assert "default" not in subtitle and "Bambu Lab A1" in subtitle
+
+    def test_a_printer_the_person_named_keeps_that_name(self, banners, monkeypatch):
+        monkeypatch.setattr(server, "_resolve_printer_model_live", lambda name=None: "bambu_a1")
+        _ask(printer_name="garage")
+        _title, subtitle, _message = screen_code.banner_text(banners[0])
+        assert "garage" in subtitle
+
+    def test_an_unknown_model_is_your_printer(self, banners, monkeypatch):
+        monkeypatch.setattr(server, "_resolve_printer_model_live", lambda name=None: "")
+        _ask(printer_name="default")
+        _title, subtitle, _message = screen_code.banner_text(banners[0])
+        assert "your printer" in subtitle and "default" not in subtitle
+
+    def test_the_file_is_named_without_its_extension(self, banners):
+        _ask()
+        _title, subtitle, _message = screen_code.banner_text(banners[0])
+        assert "benchy" in subtitle and ".3mf" not in subtitle
+
+
+def test_every_door_a_window_opens_through_has_its_own_label():
+    """A window opened by a typed code once read "opened via terminal" —
+    every door that was not the dialog or the web fell into that name."""
+    from kiln.consent_windows import SOURCE_DOORS, Window, describe
+
+    now = time.time()
+    labels = {
+        source: describe(Window(id="w_t", set_by="os_user:t", set_at=now, until=now + 60, scope=("bench",), source=source))["opened_via"]
+        for source in SOURCE_DOORS
+    }
+    assert len(set(labels.values())) == len(SOURCE_DOORS), labels
+    assert labels[SOURCE_CODE] == "screen_code"
+
+
+def test_the_desktop_apps_code_tab_reads_the_same_hooks(tmp_path):
+    """The desktop app's Code tab runs Claude Code under its own client name
+    (``local-agent-mode-kiln``, read off a live audit line) and honours the
+    same settings files, so its hooks are checked too."""
+    settings = tmp_path / ".claude" / "settings.json"
+    settings.parent.mkdir()
+    settings.write_text(json.dumps({"hooks": {"Elicitation": [{"matcher": "", "hooks": []}]}}))
+    assert screen_code.host_dialog_hook("local-agent-mode-kiln", cwd=str(tmp_path)) == str(settings)
+
+
+# ---------------------------------------------------------------------------
+# The code never rides a command line
+# ---------------------------------------------------------------------------
+
+
+def _issued(code="4821"):
+    now = time.time()
+    return screen_code.Issued(
+        code=code, tool="start_print", file_name="benchy.3mf", file_sha256="", printer_name="bench",
+        host="", issued_at=now, issued_mono=time.monotonic(), expires_at=now + 600, shown_at=now,
+    )
+
+
+@pytest.mark.parametrize("platform", ["darwin", "win32"])
+def test_the_code_never_rides_a_command_line(monkeypatch, platform):
+    """Any program on the machine can list every process's arguments, so a
+    code handed to the notifier as an argument is readable by the agent it
+    exists to keep out.  It travels on the notifier's standard input."""
+    seen = []
+
+    def fake_run(argv, **kw):
+        seen.append((list(argv), kw.get("input")))
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(screen_code, "_show_hook", None)
+    monkeypatch.setattr(screen_code.sys, "platform", platform)
+    monkeypatch.setattr(screen_code.subprocess, "run", fake_run)
+    monkeypatch.setattr(screen_code, "_branded_notifier", lambda: None, raising=False)
+    assert screen_code._show(_issued("4821"))
+    argv, stdin = seen[-1]
+    assert not any("4821" in str(a) for a in argv), argv
+    assert "4821" in (stdin or "")

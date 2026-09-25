@@ -122,6 +122,15 @@ SOURCE_WEB = "user_web"
 #: How a window was opened — which door.  The same words the print gate
 #: uses for who held the pen: a terminal, the host's dialog, the web page.
 SOURCE_DOORS = (SOURCE_TERMINAL, SOURCE_ELICITED, SOURCE_WEB, SOURCE_CODE)
+#: The word for each door on a status line.  One entry per door: a door
+#: left out would be read back as the terminal, which is how a window a
+#: typed code opened once said "opened via terminal".
+_OPENED_VIA = {
+    SOURCE_TERMINAL: "terminal",
+    SOURCE_ELICITED: "host_dialog",
+    SOURCE_WEB: "web",
+    SOURCE_CODE: "screen_code",
+}
 
 Scope = tuple[str, ...] | str
 
@@ -606,7 +615,7 @@ def describe(w: Window, now: float | None = None) -> dict[str, Any]:
         "id": w.id,
         "scope": describe_scope(w.scope),
         "set_by": w.set_by,
-        "opened_via": {SOURCE_ELICITED: "host_dialog", SOURCE_WEB: "web"}.get(w.source, "terminal"),
+        "opened_via": _OPENED_VIA.get(w.source, "terminal"),
         "set_at": time.strftime("%Y-%m-%d %H:%M", time.localtime(w.set_at)),
         "until": time.strftime("%Y-%m-%d %H:%M", time.localtime(w.until)),
         "until_clock": time.strftime("%H:%M", time.localtime(w.until)),

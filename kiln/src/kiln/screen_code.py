@@ -100,6 +100,9 @@ class Issued:
     expires_at: float
     shown_at: float
     wrong_tries: int = 0
+    #: How a person calls the printer on the banner; matching uses
+    #: ``printer_name``, never this.
+    printer_label: str = ""
 
     def live(self, now: float | None = None) -> bool:
         return (now if now is not None else time.time()) < self.expires_at
@@ -164,14 +167,32 @@ def screen_available() -> bool:
     return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
 
 
+#: What a file is called on the banner: its name, without the print-file
+#: suffix a person never typed.  Longest first, so ``x.gcode.3mf`` loses both.
+_SHOWN_WITHOUT = (".gcode.3mf", ".3mf", ".gcode", ".stl", ".obj", ".step", ".stp")
+
+
+def _shown_name(file_name: str) -> str:
+    name = os.path.basename(str(file_name or ""))
+    for suffix in _SHOWN_WITHOUT:
+        if name.lower().endswith(suffix) and len(name) > len(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
 def banner_text(issued: Issued) -> tuple[str, str, str]:
     """``(title, subtitle, message)`` — the words on the banner.  The one
-    place the code is put into words."""
-    where = f" on {issued.printer_name}" if issued.printer_name else ""
+    place the code is put into words.
+
+    The code goes in the TITLE: a banner cuts its body off after a line
+    or two, and the code is the one thing the person came to read.  The
+    printer is named the way the person names it, never by Kiln's
+    ``default`` alias."""
+    printer = issued.printer_label or issued.printer_name or "your printer"
     return (
-        "Kiln",
-        f"{issued.file_name}{where}",
-        f"Type {issued.code} in your chat to print it. "
+        f"Kiln print code {issued.code}",
+        f"{_shown_name(issued.file_name)} on {printer}",
+        "Type the code in your chat to print it. "
         "Add 2h or today to keep printing without asking.",
     )
 
@@ -180,14 +201,23 @@ def _applescript_string(text: str) -> str:
     return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def _show_command(issued: Issued) -> list[str] | None:
+def _show_command(issued: Issued) -> tuple[list[str], str | None] | None:
+    """``(argv, stdin)`` that puts the banner up on this platform, or ``None``.
+
+    The words — the code among them — travel on the notifier's STANDARD
+    INPUT wherever the notifier can read one.  Any program on the machine
+    can list every process's arguments, so a code passed as an argument is
+    readable by exactly the agent it exists to keep out.  Linux's
+    ``notify-send`` takes its text only as arguments; there the code sits
+    on its command line for the moment it runs, and that is said here
+    rather than hidden."""
     title, subtitle, message = banner_text(issued)
     if sys.platform == "darwin":
         script = (
             f"display notification {_applescript_string(message)} "
             f"with title {_applescript_string(title)} subtitle {_applescript_string(subtitle)}"
         )
-        return ["osascript", "-e", script]
+        return ["osascript", "-"], script
     if sys.platform.startswith("win"):
         ps = (
             "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null;"
@@ -200,9 +230,9 @@ def _show_command(issued: Issued) -> list[str] | None:
             "$n = [Windows.UI.Notifications.ToastNotification]::new($x);"
             "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('Kiln').Show($n);"
         )
-        return ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps]
+        return ["powershell", "-NoProfile", "-NonInteractive", "-Command", "-"], ps
     if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
-        return ["notify-send", "-a", "Kiln", f"{title}: {subtitle}", message]
+        return ["notify-send", "-a", "Kiln", title, f"{subtitle}\n{message}"], None
     return None
 
 
@@ -215,11 +245,12 @@ def _show(issued: Issued) -> bool:
             return bool(_show_hook(issued))
         except Exception:  # noqa: BLE001 — a notifier that fails has not shown
             return False
-    argv = _show_command(issued)
-    if argv is None:
+    command = _show_command(issued)
+    if command is None:
         return False
+    argv, stdin = command
     try:
-        done = subprocess.run(argv, capture_output=True, timeout=8, check=False)
+        done = subprocess.run(argv, input=stdin, capture_output=True, text=True, timeout=8, check=False)
     except Exception as exc:  # noqa: BLE001 — no binary, a timeout, a dead session
         logger.debug("screen code banner not shown: %s", type(exc).__name__)
         return False
@@ -252,6 +283,7 @@ def _prune(now: float) -> None:
 
 def issue(
     *, tool: str, file_name: str, file_sha256: str, printer_name: str | None, host: str = "",
+    printer_label: str = "",
 ) -> dict[str, Any]:
     """Show a code for this print, or say why not.  The result NEVER
     carries the code.  Outcomes: ``shown`` (``again`` when it was already
@@ -284,6 +316,7 @@ def issue(
             code=_new_code(), tool=tool, file_name=os.path.basename(file_name) or file_name,
             file_sha256=file_sha256 or "", printer_name=str(printer_name or ""), host=host,
             issued_at=now, issued_mono=time.monotonic(), expires_at=now + CODE_TTL_S, shown_at=now,
+            printer_label=str(printer_label or ""),
         )
         if not _show(issued):
             return {"outcome": UNAVAILABLE, "reason": "banner_failed"}
@@ -419,9 +452,13 @@ def _hook_matches(entry: Any, server_name: str) -> bool:
 def host_dialog_hook(client_name: str | None, *, server_name: str = "kiln", cwd: str | None = None) -> str | None:
     """The settings file whose ``Elicitation`` hook would answer this
     server's dialogs on the host that is connected, or ``None``.  Only
-    Claude Code is known to run such hooks; other hosts are not read."""
+    Claude Code is known to run such hooks (as ``claude-code``, or as the
+    desktop app's Code tab, ``local-agent-mode-*``); other hosts are not
+    read."""
     name = str(client_name or "").lower()
-    if "claude" not in name:
+    # Claude Code, in a terminal or in the desktop app's Code tab — which
+    # runs it under its own client name and reads the same settings files.
+    if "claude" not in name and "local-agent-mode" not in name:
         return None
     base = Path(cwd or os.getcwd())
     for raw in _HOOK_SETTINGS:
