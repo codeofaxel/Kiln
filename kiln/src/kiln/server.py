@@ -1747,9 +1747,171 @@ def _coverage_for(
 
 
 def _coverage_line_for(printer_name: str | None) -> str | None:
-    """The report's one short coverage line for *printer_name*, or ``None``."""
+    """The report's one short coverage line for *printer_name*, or ``None``:
+    the watching sentence, with the agent's own door named where the
+    panel would show "turn on"."""
     block, watch = _coverage_for(printer_name)
-    return _coverage_short_line(block, watch) if block else None
+    if not block:
+        return None
+    said = coverage_watching_sentence(block, watch)
+    if said is None:
+        return None
+    if said["ask"]:
+        return f"{said['text']} {said['ask']} — start a background watch (watch_print)."
+    return said["text"]
+
+
+def _join_or(items: list[str]) -> str:
+    if len(items) <= 1:
+        return "".join(items)
+    return ", ".join(items[:-1]) + " or " + items[-1]
+
+
+def _join_and(items: list[str]) -> str:
+    if len(items) <= 1:
+        return "".join(items)
+    return ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def coverage_watching_sentence(
+    block: dict[str, Any], watch: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """What is not watched and who could, with the actor named every time.
+
+    ONE rule for the three surfaces that say it -- this report, the inline
+    monitor panel (kiln-pro ``print_monitor.html``) and the web Monitor
+    (``lib/api/coverage.ts``) port it clause for clause and are pinned to the
+    same cases -- because "not watched" on its own never says whether the
+    PRINTER's detectors or KILN's watchers are the ones falling short, and
+    a person deciding whether to walk away needs to know who is looking.
+
+    Every fact is a kiln-pro bucket, the block's own ``printer_label`` and
+    ``conditions``, or Kiln's watch state; nothing is inferred.  The
+    printer is named by its catalogue name ("your Bambu Lab A1"), and
+    "your printer" only when the wire carries none -- never "the printer".
+    Exactly one sentence shape per bucket combination:
+
+    * gaps (the printer can't, or has it switched off, and Kiln is not
+      covering it) -- "Your A1 can't watch for spaghetti or a bad first
+      layer." with ``ask`` "Kiln can watch the camera for spaghetti" when
+      the wire says a background watch would add it now; ", and neither
+      can Kiln on this print." when Kiln could by another door; ", and
+      neither can Kiln." when it never could; "Kiln can watch the camera
+      for them once a print is running." before a print;
+    * no gaps, Kiln could add a camera watch on top -- "Your X1 watches
+      for spaghetti itself." with ``ask`` "Kiln can add a camera watch too";
+    * no gaps, nothing to add -- "Watched by your A1 and Kiln.", or why
+      Kiln is not watching; a conditional detector's clause follows;
+    * an unknown machine -- kiln-pro's own first sentence.
+
+    Returns the sentence, the ask (the surface adds its own action after
+    it: the panel's "turn on", the web's "ask your agent"), the gaps and
+    the offer, and the two groups the details list under -- what the
+    printer watches for and what Kiln does -- or ``None`` with nothing to
+    say.
+    """
+    by_status = block.get("by_status") or {}
+
+    def _labels(key: str) -> list[str]:
+        raw = by_status.get(key)
+        return [str(label) for label in raw] if isinstance(raw, list) else []
+
+    watched = _labels("watched")
+    conditional = _labels("conditional")
+    off = _labels("off_for_this_print")
+    not_watched = _labels("not_watched")
+    unknown = _labels("unknown")
+    kiln_watching = _labels("kiln_watching")
+    kiln_can = _labels("kiln_can_watch")
+    kiln_now = _labels("kiln_can_watch_now")
+    raw_conditions = block.get("conditions")
+    conditions = {
+        str(k): str(v) for k, v in raw_conditions.items() if isinstance(v, str) and v
+    } if isinstance(raw_conditions, dict) else {}
+    raw_label = block.get("printer_label")
+    label = raw_label.strip() if isinstance(raw_label, str) and raw_label.strip() else None
+    who = f"your {label}" if label else "your printer"
+    who_cap = who[0].upper() + who[1:]
+    printing = watch.get("printing") if isinstance(watch, dict) else None
+
+    groups = {
+        "printer": {
+            "label": label,
+            "watches": watched,
+            "with_conditions": {c: conditions.get(c, "") for c in conditional},
+            "cant": not_watched,
+            "off": off,
+            "unknown": unknown,
+        },
+        "kiln": {
+            "watching": kiln_watching,
+            "can_now": kiln_now,
+            "can_later": [c for c in kiln_can if c not in kiln_now],
+        },
+    }
+
+    def _said(text: str, ask: str | None, gaps: list[str], offer: list[str]) -> dict[str, Any]:
+        return {"text": text, "ask": ask, "gaps": gaps, "offer": offer, **groups}
+
+    if not (watched or conditional or off or not_watched):
+        # Unknown machine, or a maker that publishes nothing: kiln-pro's
+        # first sentence is the whole finding.
+        first = str(block.get("headline") or "").strip().split(". ", 1)[0].rstrip(".")
+        if not first:
+            return None
+        return _said(f"{first}.", None, [], [])
+
+    covered = set(kiln_watching)
+    cant = [c for c in not_watched if c not in covered]
+    off_gaps = [c for c in off if c not in covered]
+    gaps = cant + off_gaps
+
+    def _them(some: list[str], of: list[str]) -> str:
+        if len(of) == 1:
+            return "it"
+        return "them" if len(some) == len(of) else _join_or(some)
+
+    if gaps:
+        parts: list[str] = []
+        if cant:
+            parts.append(f"can't watch for {_join_or(cant)}")
+        if off_gaps:
+            parts.append(f"has {_join_or(off_gaps)} switched off")
+        head = f"{who_cap} " + ", and ".join(parts)
+        offer = [c for c in gaps if c in kiln_now]
+        if offer:
+            return _said(f"{head}.", f"Kiln can watch the camera for {_them(offer, gaps)}", gaps, offer)
+        later = [c for c in gaps if c in kiln_can]
+        if later and printing is False:
+            text = f"{head}. Kiln can watch the camera for {_them(later, gaps)} once a print is running."
+        elif later:
+            text = f"{head}, and neither can Kiln on this print."
+        else:
+            text = f"{head}, and neither can Kiln."
+        return _said(text, None, gaps, [])
+
+    addable = [c for c in kiln_now if c in watched or c in conditional]
+    if addable:
+        return _said(
+            f"{who_cap} watches for {_join_and(addable)} itself.",
+            "Kiln can add a camera watch too", [], addable,
+        )
+
+    if kiln_watching:
+        text = f"Watched by {who} and Kiln."
+    elif isinstance(watch, dict) and printing is False:
+        text = f"Watched by {who}. Kiln attaches its watchdog to the prints it starts."
+    elif isinstance(watch, dict):
+        attached = bool((watch.get("watchdog") or {}).get("attached"))
+        why = "its watchdog stopped" if attached else "it did not start it"
+        text = f"Watched by {who}. Kiln is not watching this print ({why})."
+    else:
+        text = f"Watched by {who}."
+    if conditional:
+        # The clauses themselves wait in the details group: a firmware
+        # floor and two switch-off modes do not fit a line.
+        text += f" {who_cap} watches for {_join_and(conditional)} with conditions."
+    return _said(text, None, [], [])
 
 
 def _coverage_short_line(

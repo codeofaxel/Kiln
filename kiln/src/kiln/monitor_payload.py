@@ -131,6 +131,18 @@ def compose_monitor_payload(
             "by_status": coverage.get("by_status") or {},
             "known": bool(coverage.get("known")),
         }
+        # The machine's own name and each conditional detector's clause,
+        # when kiln-pro says them: the watching sentence names WHO watches
+        # ("Your Bambu Lab A1 can't watch for spaghetti"), never "the
+        # printer".  Optional, like the block's other courtesy fields.
+        label = coverage.get("printer_label")
+        if isinstance(label, str) and label.strip():
+            payload["coverage"]["printer_label"] = label.strip()
+        conditions = coverage.get("conditions")
+        if isinstance(conditions, dict) and conditions:
+            payload["coverage"]["conditions"] = {
+                str(k): str(v) for k, v in conditions.items() if isinstance(v, str) and v
+            }
     if video:
         # The relay's answer, projected to what the panel needs and nothing
         # more: where to play, what is feeding it, and how old the newest
