@@ -84,10 +84,15 @@ _PROTOCOL_COMMAND_KEY = rf"{_PROTOCOL_CLASS_KEY}\shell\open\command"
 
 
 def _ago(seconds: float) -> str:
-    """Human-friendly elapsed time: ``2h 14m`` / ``5m`` / ``just now``."""
+    """Human-friendly elapsed time, as a DURATION in every case: ``2h 14m`` /
+    ``5m`` / ``under a minute``.  A duration reads the same after ``for``
+    and before ``ago``, so no caller needs to know the value -- ``just now``
+    for the first minute made the connected line say "for just now"
+    (seen live, 2026-09-24) while the crash line special-cased it.
+    """
     seconds = max(0, int(seconds))
     if seconds < 60:
-        return "just now"
+        return "under a minute"
     m = seconds // 60
     if m < 60:
         return f"{m}m"
@@ -316,7 +321,7 @@ def _describe_status(
         # back, but "it crashed and recovered" and "it never crashed" are not
         # the same fact and should not read the same.
         elapsed = _ago(now - last_exit_at)
-        when = elapsed if elapsed == "just now" else f"{elapsed} ago"
+        when = f"{elapsed} ago"
         lines.append(
             f"Recovered from a crash {when} "
             f"({restarts} restart{'s' if restarts != 1 else ''} this run)."

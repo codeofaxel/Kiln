@@ -100,7 +100,7 @@ def test_describe_status_matrix():
 
 
 def test_ago():
-    assert _ago(5) == "just now"
+    assert _ago(5) == "under a minute"
     assert _ago(300) == "5m"
     assert _ago(8040) == "2h 14m"
 
@@ -499,8 +499,8 @@ def test_a_very_recent_crash_reads_like_english():
         since=now, now=now, supervised=True, restarts=1, last_exit_at=now - 5,
     )
     line = next(ln for ln in lines if "Recovered" in ln)
-    assert "just now ago" not in line
-    assert line == "Recovered from a crash just now (1 restart this run)."
+    assert "just now" not in line
+    assert line == "Recovered from a crash under a minute ago (1 restart this run)."
 
 
 # --- version currency: the daemon can be older than the machine it runs on --
@@ -1126,3 +1126,15 @@ def test_status_asks_the_server_only_when_the_bridge_is_up_and_refused(monkeypat
     out = CliRunner().invoke(bridge, ["status"])
     assert "on, connected" in out.output
     assert asked == [False]
+
+
+def test_the_connected_line_reads_as_a_duration_at_every_age():
+    """"Connected to the relay for just now." was what a fresh sign-in
+    printed (seen live, 2026-09-24): the helper answered a point in time for
+    the first minute and a duration after it.  A duration at every age."""
+    for since, said in ((995.0, "under a minute"), (700.0, "5m"), (-7040.0, "2h 14m")):
+        _head, lines = _describe_status(
+            signed_in=True, enabled=True, running=True, connected=True, since=since, now=1000.0,
+        )
+        assert lines[0] == f"Connected to the relay for {said}.", lines[0]
+        assert "just now" not in " ".join(lines)
