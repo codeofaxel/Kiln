@@ -92,7 +92,12 @@ import os
 import time
 from typing import Any
 
-from kiln.mcp_compat import wrap_call_tool_result
+from kiln.mcp_compat import (
+    result_is_error,
+    result_structured_content,
+    set_result_structured_content,
+    wrap_call_tool_result,
+)
 from kiln.monitor_payload import (
     MONITOR_STRUCTURED_CONTENT_KEY,
     compose_monitor_payload,
@@ -754,7 +759,7 @@ def _install_result_hook(mcp: Any) -> bool:
         try:
             if name not in MONITOR_TOOLS:
                 return
-            if getattr(inner, "isError", False):
+            if result_is_error(inner):
                 return
             if not _host_renders_apps(mcp, ctx):
                 _log_signal_once(attaching=False)
@@ -776,7 +781,7 @@ def _install_result_hook(mcp: Any) -> bool:
                 # its own note ("no camera available"); the lean default
                 # says where the picture went instead.
                 payload.setdefault("camera_note", CAMERA_FETCHED_BY_PANEL_NOTE)
-            sc = getattr(inner, "structuredContent", None)
+            sc = result_structured_content(inner)
             sc = dict(sc) if isinstance(sc, dict) else {}
             sc[MONITOR_STRUCTURED_CONTENT_KEY] = payload
             # The panel an earlier call opened is still polling above.  The
@@ -789,7 +794,7 @@ def _install_result_hook(mcp: Any) -> bool:
             # ``show_panel`` is the person's ask to see it again.
             if not show_panel and _panel_is_live(printer_name):
                 sc["shown"] = {"repeat": "live_panel", "repeat_note": LIVE_PANEL_NOTE}
-            inner.structuredContent = sc
+            set_result_structured_content(inner, sc)
         except Exception:  # noqa: BLE001 — a panel must never break a tool
             logger.debug("local monitor payload not attached", exc_info=True)
 
