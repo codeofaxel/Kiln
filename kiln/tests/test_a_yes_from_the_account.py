@@ -37,9 +37,11 @@ from kiln import (
     print_signoff,
     screen_code,
     server,
+    stage_paint,
 )
 from kiln.preview_gate import PreviewGate
 from kiln.print_consent import (
+    CHOICE_THIS_PRINT,
     NOT_ASKED_CODE_SHOWN,
     NOT_ASKED_HOST_CANNOT,
     NOT_ASKED_PENDING_TAG,
@@ -56,6 +58,7 @@ PENDING = f"{API}/api/print-authority/pending"
 MAY_I = f"{API}/api/print-authority/may-i-print"
 RECORD = f"{API}/api/print-authority/record-start"
 MACHINE = "ab" * 16
+_REAL_PAINTER = stage_paint.try_paint_stage_views
 
 
 def _jwt(exp: float) -> str:
@@ -94,6 +97,9 @@ def _clean(monkeypatch, tmp_path):
     import kiln.device
 
     monkeypatch.setattr(kiln.device, "get_device_fingerprint", lambda: MACHINE)
+    # The stage painter declines unless a test hands it a real mesh and
+    # puts it back: most of these files are a few bytes of junk.
+    monkeypatch.setattr(stage_paint, "try_paint_stage_views", lambda *a, **k: None)
     yield
     screen_code._reset_for_tests()
     preview_evidence._reset_for_tests()
@@ -301,12 +307,13 @@ class TestTheAsk:
         assert body["observe_nonce"]
 
     @responses.activate
-    def test_the_picture_the_preview_recorded_rides_the_ask_hashed_as_sent(self, signed_in, model, tmp_path):
+    def test_the_picture_the_preview_recorded_rides_the_ask_hashed_as_sent(self, signed_in, model, tmp_path, audits):
         still = _png(tmp_path, "iso.png")
         preview_evidence.record("png", str(model), renderer="stage_paint", shown_sha="abc", picture=str(still))
         _may_i()
         _held()
         _ask(model)
+        assert [d["picture_source"] for _, a, d in audits if a == "consent_pending_posted"] == ["on_record"]
         body = json.loads(_calls(PENDING)[0].request.body)
         png = base64.b64decode(body["picture_png_b64"])
         assert png == still.read_bytes()
@@ -343,6 +350,7 @@ class TestTheAsk:
         assert NOT_ASKED_PENDING_TAG not in r.why and "kiln3d.com/monitor" not in r.text
         refused = [d for _, a, d in audits if a == "consent_pending_refused"]
         assert refused and refused[0]["reason"] == "picture_invalid"
+        assert refused[0]["picture_sent"] is False and refused[0]["picture_source"] == "render_failed"
         assert observed == []
 
     @responses.activate
@@ -490,3 +498,212 @@ def test_picture_for_ask_reads_only_what_it_can(tmp_path):
     assert bridge_client.picture_for_ask(str(tmp_path / "junk.png")) is None
     small = _png(tmp_path, "small.png")
     assert bridge_client.picture_for_ask(str(small)) == small.read_bytes()
+
+
+# ---------------------------------------------------------------------------
+# A still painted for the ask when none is on record
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def mesh(tmp_path):
+    import trimesh
+
+    path = tmp_path / "cube.stl"
+    trimesh.creation.box(extents=(20, 20, 20)).export(str(path))
+    return path
+
+
+class TestTheStillOnDemand:
+    @responses.activate
+    def test_none_on_record_the_stage_painter_paints_one_and_it_is_sent(self, signed_in, mesh, monkeypatch, audits):
+        monkeypatch.setattr(stage_paint, "try_paint_stage_views", _REAL_PAINTER)
+        _may_i()
+        _held()
+        _ask(mesh)
+        body = json.loads(_calls(PENDING)[0].request.body)
+        png = base64.b64decode(body["picture_png_b64"])
+        assert png[:8] == b"\x89PNG\r\n\x1a\n" and len(png) <= bridge_client.PICTURE_MAX_BYTES
+        assert body["shown_pixels_sha"] == hashlib.sha256(png).hexdigest()
+        assert [d["picture_source"] for _, a, d in audits if a == "consent_pending_posted"] == ["rendered"]
+        # Painted for the phone, not shown here: it signs nothing off on this machine.
+        assert preview_evidence.evidence_for(str(mesh))["png"] is None
+
+    @responses.activate
+    def test_the_painter_is_asked_for_the_stage_look_in_one_view(self, signed_in, mesh, monkeypatch, tmp_path):
+        seen = []
+
+        def painter(file_path, selected, rotations, **kw):
+            seen.append((file_path, [a[0] for a in selected], kw))
+            return [{"path": str(_png(tmp_path, "painted.png"))}]
+
+        monkeypatch.setattr(stage_paint, "try_paint_stage_views", painter)
+        _may_i()
+        _held()
+        _ask(mesh)
+        assert len(seen) == 1 and seen[0][1] == ["isometric"] and seen[0][2]["require_colors"] is False
+        assert json.loads(_calls(PENDING)[0].request.body)["picture_png_b64"]
+
+    @responses.activate
+    def test_a_painter_that_fails_posts_the_ask_without_a_picture(self, signed_in, mesh, audits):
+        _may_i()
+        _held("pa_2")
+        r = _ask(mesh)
+        body = json.loads(_calls(PENDING)[0].request.body)
+        assert body["picture_png_b64"] == "" and body["shown_pixels_sha"] == ""
+        assert r.why.endswith(NOT_ASKED_PENDING_TAG + "pa_2") and "kiln3d.com/monitor" in r.text
+        assert [d["picture_source"] for _, a, d in audits if a == "consent_pending_posted"] == ["render_failed"]
+
+    @responses.activate
+    def test_a_painter_switched_off_is_said_as_such(self, signed_in, mesh, monkeypatch, audits):
+        monkeypatch.setattr(stage_paint, "try_paint_stage_views", _REAL_PAINTER)
+        monkeypatch.setenv("KILN_NO_STAGE_STILLS", "1")
+        _may_i()
+        _held()
+        _ask(mesh)
+        assert json.loads(_calls(PENDING)[0].request.body)["picture_png_b64"] == ""
+        assert [d["picture_source"] for _, a, d in audits if a == "consent_pending_posted"] == ["renderer_unavailable"]
+
+    @responses.activate
+    def test_a_slow_painting_is_not_waited_for(self, signed_in, mesh, monkeypatch, tmp_path, audits):
+        still = _png(tmp_path, "late.png")
+
+        def slow(*a, **k):
+            time.sleep(1.0)
+            return [{"path": str(still)}]
+
+        monkeypatch.setattr(stage_paint, "try_paint_stage_views", slow)
+        monkeypatch.setattr(server, "_ASK_STILL_WAIT_S", 0.1)
+        _may_i()
+        _held()
+        started = time.monotonic()
+        _ask(mesh)
+        assert time.monotonic() - started < 0.9
+        assert json.loads(_calls(PENDING)[0].request.body)["picture_png_b64"] == ""
+        assert [d["picture_source"] for _, a, d in audits if a == "consent_pending_posted"] == ["timed_out"]
+
+    @responses.activate
+    def test_an_older_server_that_wants_a_picture_leaves_no_ask_and_no_page(self, signed_in, mesh, audits):
+        _may_i()
+        responses.add(responses.POST, PENDING, status=400, json={"error": "picture_invalid", "message": "a picture"})
+        r = _ask(mesh)
+        assert NOT_ASKED_PENDING_TAG not in r.why and "kiln3d.com/monitor" not in r.text
+        assert bridge_client.live_ask(_sha(mesh), "bench") is None
+        assert [d["reason"] for _, a, d in audits if a == "consent_pending_refused"] == ["picture_invalid"]
+
+    @responses.activate
+    def test_nothing_is_painted_for_an_ask_already_held(self, signed_in, mesh, monkeypatch):
+        painted = []
+        monkeypatch.setattr(stage_paint, "try_paint_stage_views", lambda *a, **k: painted.append(1))
+        _may_i()
+        _held()
+        _ask(mesh)
+        _ask(mesh)
+        assert len(painted) == 1
+
+
+# ---------------------------------------------------------------------------
+# Another door answered: the ask is withdrawn
+# ---------------------------------------------------------------------------
+
+
+def _withdraw_url(pending_id: str) -> str:
+    return f"{PENDING}/{pending_id}/withdraw"
+
+
+@pytest.fixture
+def banners(monkeypatch):
+    shown: list[screen_code.Issued] = []
+
+    def show(issued):
+        shown.append(issued)
+        return True
+
+    monkeypatch.setattr(screen_code, "_show_hook", show)
+    return shown
+
+
+def _give(words):
+    return server.mcp._tool_manager._tools["give_print_code"].fn(words=words)
+
+
+class TestTheAskIsWithdrawn:
+    @responses.activate
+    def test_a_typed_code_withdraws_the_ask_once(self, signed_in, model, banners, audits):
+        _may_i()
+        _held("pa_5")
+        _ask(model)
+        responses.add(responses.POST, _withdraw_url("pa_5"), json={"success": True})
+        assert _give(banners[0].code)["success"]
+        r = _ask(model)
+        assert r.consent is not None and r.consent.source == print_consent.SOURCE_CODE
+        assert len(_calls(_withdraw_url("pa_5"))) == 1
+        assert _calls(_withdraw_url("pa_5"))[0].request.headers["Authorization"] == signed_in
+        withdrawn = [d for _, a, d in audits if a == "consent_pending_withdrawn"]
+        assert withdrawn == [{
+            "file": str(model), "printer": "bench", "pending": "pa_5", "withdrawn": True, "answered_by": "screen_code",
+        }]
+        assert bridge_client.live_ask(_sha(model), "bench") is None
+
+    @responses.activate
+    def test_a_withdrawal_that_fails_never_stops_the_start(self, signed_in, model, banners, audits):
+        _may_i()
+        _held("pa_6")
+        _ask(model)
+        responses.add(responses.POST, _withdraw_url("pa_6"), body=requests.ConnectionError("down"))
+        _give(banners[0].code)
+        r = _ask(model)
+        assert r.consent is not None and r.consent.source == print_consent.SOURCE_CODE
+        assert [d["withdrawn"] for _, a, d in audits if a == "consent_pending_withdrawn"] == [False]
+
+    @responses.activate
+    def test_the_dialogs_yes_and_its_no_both_withdraw(self, signed_in, model, monkeypatch, audits):
+        _may_i()
+        _held("pa_d")
+        _ask(model)
+        responses.add(responses.POST, _withdraw_url("pa_d"), json={"success": True})
+        monkeypatch.setattr(server, "host_can_ask_the_user", lambda mcp, ctx: True)
+
+        async def yes(ctx, message, **kw):
+            return print_consent.DialogAnswer("accept", choice=CHOICE_THIS_PRINT)
+
+        monkeypatch.setattr(server, "ask_user_to_confirm", yes)
+        assert _ask(model).consent is not None
+        assert len(_calls(_withdraw_url("pa_d"))) == 1
+        # And a No, for an ask held again.
+        monkeypatch.setattr(server, "host_can_ask_the_user", lambda mcp, ctx: False)
+        responses.replace(responses.POST, PENDING, json={"success": True, "pending": {"id": "pa_e", "expires_at": time.time() + 600, "page": "/monitor", "state": "waiting", "repeat": False}})
+        _ask(model)
+        responses.add(responses.POST, _withdraw_url("pa_e"), json={"success": True})
+        monkeypatch.setattr(server, "host_can_ask_the_user", lambda mcp, ctx: True)
+
+        async def no(ctx, message, **kw):
+            return print_consent.DialogAnswer("decline")
+
+        monkeypatch.setattr(server, "ask_user_to_confirm", no)
+        with pytest.raises(RuntimeError, match="declined"):
+            _ask(model)
+        assert len(_calls(_withdraw_url("pa_e"))) == 1
+        assert [d["answered_by"] for _, a, d in audits if a == "consent_pending_withdrawn"] == ["dialog", "dialog_decline"]
+
+    @responses.activate
+    def test_a_window_that_covers_the_print_withdraws_the_ask(self, signed_in, model, audits, monkeypatch):
+        _may_i()
+        _held("pa_w")
+        _ask(model)
+        responses.add(responses.POST, _withdraw_url("pa_w"), json={"success": True})
+        monkeypatch.setattr(consent_windows, "person_at_terminal", lambda: True)  # a person opened it
+        consent_windows.open_window(seconds=3600, scope=("bench",))
+        _ask(model)
+        assert len(_calls(_withdraw_url("pa_w"))) == 1
+        assert [d["answered_by"] for _, a, d in audits if a == "consent_pending_withdrawn"] == ["standing_window"]
+
+    @responses.activate
+    def test_no_ask_held_means_no_withdrawal(self, signed_in, model, banners, audits):
+        _may_i()
+        responses.add(responses.POST, PENDING, status=400, json={"error": "picture_invalid"})
+        _ask(model)
+        _give(banners[0].code)
+        assert _ask(model).consent is not None
+        assert [c for c in responses.calls if c.request.url.endswith("/withdraw")] == []
+        assert not [a for _, a, _ in audits if a == "consent_pending_withdrawn"]

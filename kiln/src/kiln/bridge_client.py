@@ -683,6 +683,18 @@ def forget_ask(file_sha256: str, printer_name: str) -> None:
         _asks.pop(_ask_key(file_sha256, printer_name), None)
 
 
+def holds_an_ask(printer_name: str) -> bool:
+    """Whether this process holds a live ask for any file on this printer —
+    the cheap check before hashing a file to find which."""
+    printer = _ask_key("", printer_name)[1]
+    now = time.time()
+    with _ask_lock:
+        return any(
+            key[1] == printer and (ask.expires_at is None or ask.expires_at > now)
+            for key, ask in _asks.items()
+        )
+
+
 def _reset_asks_for_tests() -> None:
     with _ask_lock:
         _asks.clear()
@@ -881,6 +893,31 @@ def ask_the_account(
     with contextlib.suppress(Exception):
         _observe_in_background(_api_base(), bearer, nonce)
     return ask
+
+
+def withdraw_ask(file_sha256: str, printer_name: str) -> tuple[str, bool] | None:
+    """``POST /api/print-authority/pending/{id}/withdraw`` for the ask this
+    process posted about these bytes on this printer: another door
+    answered the print.  ``(id, withdrawn)``, or ``None`` when this process
+    holds no such ask.  The memo is dropped either way — an ask the server
+    would not withdraw runs out on its own.  Never raises."""
+    ask = live_ask(file_sha256, printer_name)
+    if ask is None:
+        return None
+    forget_ask(file_sha256, printer_name)
+    bearer = account_bearer()
+    if not bearer:
+        return ask.id, False
+    from urllib.parse import quote
+
+    answered = _account_call("POST", f"/pending/{quote(ask.id, safe='')}/withdraw", bearer, json={})
+    if answered is None:
+        return ask.id, False
+    status, data = answered
+    if not (200 <= status < 300):
+        logger.debug("account: withdraw answered %s (%s)", status, data.get("error"))
+        return ask.id, False
+    return ask.id, True
 
 
 def read_the_account(*, file_sha256: str, printer_name: str) -> AccountAnswer | None:

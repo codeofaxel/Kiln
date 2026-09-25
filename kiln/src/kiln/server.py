@@ -2345,13 +2345,16 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
         # A person already said yes for this — inside a window they
         # opened, on purpose.  Asking again would be the dialog the
         # window exists to stop.  The gate reads the same record.
+        await _withdraw_the_ask(tool_name, file_value, aimed, answered_by="standing_window")
         return None
     # The code the person already typed for this print, after a banner on
     # this machine's screen: spent by this start, the way a dialog's yes
     # lives for its call.
     answered = screen_code.take_answer(file_value, aimed)
     if answered is not None:
-        return _consent_from_code_answer(tool_name, file_value, printer_name, answered, aimed=aimed)
+        token = _consent_from_code_answer(tool_name, file_value, printer_name, answered, aimed=aimed)
+        await _withdraw_the_ask(tool_name, file_value, aimed, answered_by="screen_code")
+        return token
     # A yes the signed-in account already holds for this print.
     from_account = await _consent_from_account(tool_name, file_value, printer_name, aimed)
     if from_account is not None:
@@ -2395,13 +2398,16 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
     )
     answer = await ask_user_to_confirm(ctx, message, offer_window=offer_window, offer_fleet=offer_fleet)
     if answer.accepted:
-        return consent_from_dialog_answer(tool_name, file_value, printer_name, answer, aimed=aimed)
+        token = consent_from_dialog_answer(tool_name, file_value, printer_name, answer, aimed=aimed)
+        await _withdraw_the_ask(tool_name, file_value, aimed, answered_by="dialog")
+        return token
     if answer.action in ("decline", "cancel"):
         _audit(
             tool_name,
             "consent_refused",
             details={"file": file_value, "action": answer.action},
         )
+        await _withdraw_the_ask(tool_name, file_value, aimed, answered_by=f"dialog_{answer.action}")
         raise RuntimeError(
             f"{tool_name} was not started: the print was "
             + ("declined" if answer.action == "decline" else "dismissed without an answer")
@@ -2500,15 +2506,107 @@ def _what_was_shown(file_value: str) -> tuple[str | None, str]:
     return None, ""
 
 
+#: The longest an ask waits for a still painted for it; past this it is
+#: posted without one, and the painting finishes (and is thrown away) on
+#: its own thread.
+_ASK_STILL_WAIT_S = 8.0
+
+
+def _paint_still_for_ask(file_value: str, output_dir: str) -> tuple[str | None, str]:
+    """``(png, case)``: one stage-look still of the file, painted now for
+    an ask when none is on record — the stage painter only, whose look
+    (``stage_paint``) is one ``issue_preview_token(door="png")`` accepts,
+    never the grey inspection render.  Records no preview evidence: nobody
+    has looked at it on this machine.  *case* says what happened —
+    ``rendered``, ``no_local_copy``, ``no_mesh``, ``renderer_unavailable``
+    or ``render_failed``."""
+    try:
+        from kiln import stage_paint
+        from kiln.model_visualizer import _ANGLE_ROTATIONS, _CAMERA_ANGLES
+        from kiln.preview_evidence import stage_file_for
+    except Exception:  # noqa: BLE001 — a painter that cannot load cannot paint
+        return None, "renderer_unavailable"
+    local = _local_copy_of(file_value)
+    if not local:
+        return None, "no_local_copy"
+    staged, _why = stage_file_for(local)
+    if not staged:
+        return None, "no_mesh"
+    if os.environ.get(stage_paint._OPT_OUT_ENV, "").strip() or stage_paint._deps() is None:
+        return None, "renderer_unavailable"
+    # A part that carries its own colours is painted in them or not at
+    # all: the part in one colour is the wrong picture to approve.
+    require_colors = False
+    if staged.lower().endswith(".3mf"):
+        with contextlib.suppress(Exception):
+            from kiln.threemf_parser import parse_colored_3mf
+
+            require_colors = bool(parse_colored_3mf(staged).colors_found)
+    iso = next(a for a in _CAMERA_ANGLES if a[0] == "isometric")
+    views = stage_paint.try_paint_stage_views(
+        staged, [iso], {"isometric": _ANGLE_ROTATIONS["isometric"]},
+        output_dir=output_dir, width=800, height=600, require_colors=require_colors,
+    )
+    path = next((str(v["path"]) for v in views or [] if v.get("path")), None)
+    return (path, "rendered") if path else (None, "render_failed")
+
+
+def _still_for_ask(file_value: str) -> tuple[str | None, str, str, str | None]:
+    """``(picture, door, case, scratch_dir)`` for an ask: the still on
+    record when there is one (``on_record``), else one painted now within
+    :data:`_ASK_STILL_WAIT_S` (``timed_out`` past it).  The caller removes
+    *scratch_dir* once the picture is read; a painting that outlived the
+    wait removes its own."""
+    picture, door = _what_was_shown(file_value)
+    if picture:
+        return picture, door, "on_record", None
+    scratch = tempfile.mkdtemp(prefix="kiln-ask-still-")
+    box: dict[str, Any] = {}
+    lock = threading.Lock()
+
+    def paint() -> None:
+        try:
+            result = _paint_still_for_ask(file_value, scratch)
+        except Exception:  # noqa: BLE001 — a painting that failed is no picture
+            logger.debug("consent: still for the ask not painted", exc_info=True)
+            result = (None, "render_failed")
+        with lock:
+            box["result"] = result
+            if box.get("abandoned"):
+                shutil.rmtree(scratch, ignore_errors=True)
+
+    worker = threading.Thread(target=paint, name="kiln-ask-still", daemon=True)
+    worker.start()
+    worker.join(_ASK_STILL_WAIT_S)
+    with lock:
+        if "result" not in box:
+            box["abandoned"] = True
+            return None, door, "timed_out", None
+    path, case = box["result"]
+    return path, door, case, scratch
+
+
 def _post_the_ask(file_value: str, aimed: str, file_sha256: str):
-    """The blocking half of :func:`_ask_the_account`, run off the loop."""
+    """The blocking half of :func:`_ask_the_account`, run off the loop:
+    ``(ask, picture_case)``.  Nothing is painted for an ask already held
+    or for a machine nobody signed in."""
     from kiln import bridge_client
 
-    picture, door = _what_was_shown(file_value)
-    return bridge_client.ask_the_account(
-        file_sha256=file_sha256, file_name=file_value, printer_name=aimed,
-        picture_path=picture, shown_door=door,
-    )
+    if bridge_client.live_ask(file_sha256, aimed) is not None or not bridge_client.account_bearer():
+        return bridge_client.ask_the_account(
+            file_sha256=file_sha256, file_name=file_value, printer_name=aimed,
+            picture_path=None, shown_door="",
+        ), ""
+    picture, door, case, scratch = _still_for_ask(file_value)
+    try:
+        ask = bridge_client.ask_the_account(
+            file_sha256=file_sha256, file_name=file_value, printer_name=aimed,
+            picture_path=picture, shown_door=door,
+        )
+    finally:
+        if scratch:
+            shutil.rmtree(scratch, ignore_errors=True)
+    return ask, case
 
 
 async def _ask_the_account(tool_name: str, file_value: str, aimed: str, file_sha256: str) -> str:
@@ -2520,7 +2618,7 @@ async def _ask_the_account(tool_name: str, file_value: str, aimed: str, file_sha
     if not file_sha256:
         return ""
     try:
-        ask = await asyncio.to_thread(_post_the_ask, file_value, aimed, file_sha256)
+        ask, picture_case = await asyncio.to_thread(_post_the_ask, file_value, aimed, file_sha256)
     except Exception:  # noqa: BLE001 — an ask that could not be put is no ask
         logger.debug("consent: account ask failed", exc_info=True)
         return ""
@@ -2529,7 +2627,10 @@ async def _ask_the_account(tool_name: str, file_value: str, aimed: str, file_sha
     if ask.refused:
         _audit(
             tool_name, "consent_pending_refused",
-            details={"file": file_value, "printer": aimed, "reason": ask.refused, "picture_sent": ask.picture_sent},
+            details={
+                "file": file_value, "printer": aimed, "reason": ask.refused,
+                "picture_sent": ask.picture_sent, "picture_source": picture_case,
+            },
         )
         return ""
     if ask.posted:
@@ -2537,10 +2638,43 @@ async def _ask_the_account(tool_name: str, file_value: str, aimed: str, file_sha
             tool_name, "consent_pending_posted",
             details={
                 "file": file_value, "printer": aimed, "pending": ask.id,
-                "picture_sent": ask.picture_sent, "repeat": ask.repeat,
+                "picture_sent": ask.picture_sent, "picture_source": picture_case, "repeat": ask.repeat,
             },
         )
     return NOT_ASKED_PENDING_TAG + ask.id
+
+
+def _withdraw_blocking(file_value: str, aimed: str):
+    """The blocking half of :func:`_withdraw_the_ask`, run off the loop."""
+    from kiln import bridge_client
+
+    file_sha256 = _sha256_if_local(file_value)
+    return bridge_client.withdraw_ask(file_sha256, aimed) if file_sha256 else None
+
+
+async def _withdraw_the_ask(tool_name: str, file_value: str, aimed: str, *, answered_by: str) -> None:
+    """Another door answered this print, so withdraw the ask this machine
+    put to the account for it — a card left waiting is a yes someone could
+    still tap for a print already answered.  Quiet on failure; audited as
+    ``consent_pending_withdrawn``.  Never raises, never holds up a start
+    beyond the account call's own short timeouts, and does nothing when
+    this process holds no ask for the printer."""
+    from kiln import bridge_client
+
+    if _hosted_now() or not bridge_client.holds_an_ask(aimed):
+        return
+    try:
+        done = await asyncio.to_thread(_withdraw_blocking, file_value, aimed)
+    except Exception:  # noqa: BLE001 — a withdrawal that failed leaves the ask to run out
+        logger.debug("consent: ask not withdrawn", exc_info=True)
+        return
+    if done is None:
+        return
+    pending_id, withdrawn = done
+    _audit(
+        tool_name, "consent_pending_withdrawn",
+        details={"file": file_value, "printer": aimed, "pending": pending_id, "withdrawn": withdrawn, "answered_by": answered_by},
+    )
 
 
 def _read_the_account(file_value: str, aimed: str):
