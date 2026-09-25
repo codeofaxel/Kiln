@@ -10884,6 +10884,27 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
     except Exception as exc:
         checks.append({"name": "standing_consent_windows", "ok": True, "detail": f"check skipped: {exc}"})
 
+    # 4a-ter. The doors a yes can come through on this install.  Informational:
+    # a person should know, before a print is refused, whether a code will
+    # appear on this screen when their app cannot draw the dialog.
+    try:
+        from kiln import screen_code as _sc
+
+        _switched_off = os.environ.get("KILN_SCREEN_CODE", "").strip().lower() in ("0", "false", "off", "no")
+        if _switched_off:
+            _code_line = "the code banner is switched off here (KILN_SCREEN_CODE=0); "
+        elif _sc.screen_available():
+            _code_line = "a code shown on this screen when it cannot; "
+        else:
+            _code_line = "no screen here, so no code can be shown; "
+        checks.append({
+            "name": "approval_doors",
+            "ok": True,
+            "detail": "the app's dialog when it draws one; " + _code_line + "`kiln print <file>` at this terminal",
+        })
+    except Exception as exc:
+        checks.append({"name": "approval_doors", "ok": True, "detail": f"check skipped: {exc}"})
+
     # 4b. Printer connection slots — who on this machine is actually holding
     # one.  Separate from the process count above because they answer
     # different questions: a server that never touched the printer holds no

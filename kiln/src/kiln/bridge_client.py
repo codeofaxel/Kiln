@@ -27,9 +27,11 @@ import json
 import logging
 import os
 import tempfile
+import threading
 import time
 import urllib.request
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -591,6 +593,393 @@ def clear_bridge_state() -> None:
     """Remove the liveness file on shutdown (best-effort)."""
     with contextlib.suppress(OSError):
         os.unlink(_state_path())
+
+
+# ---------------------------------------------------------------------------
+# The account's answer, read by the home box
+# ---------------------------------------------------------------------------
+#
+# Interface contracts only.  When this machine is signed in (``kiln signin``),
+# the Kiln API may hold a person's answer about a print this machine asked
+# about: the routes under ``/api/print-authority/`` are served by kiln-pro
+# (https://kiln3d.com/pricing).  This section sends the fields named below
+# and reads the fields named below — nothing else.  Whether an answer is
+# given, and what it covers, is the server's to say.  Every call is short and
+# never raises; "not signed in" and "the server did not answer" are both no
+# answer, logged at debug, and the caller goes on down its own ladder.
+
+_ACCOUNT_ROUTE = "/api/print-authority"
+#: ``(connect, read)`` seconds.  A print start waits on these, so they are
+#: short: a slow answer is no answer, and the ladder goes on without it.
+_ACCOUNT_TIMEOUT_S = (3.0, 5.0)
+#: The largest picture an ask may carry (the route's own limit, 200 KB).
+PICTURE_MAX_BYTES = 200 * 1024
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+#: How long this process trusts its own memo of a live ask when the
+#: server's answer carried no readable end.
+_ASK_MEMO_FALLBACK_S = 60.0
+
+
+@dataclass(frozen=True)
+class AccountAsk:
+    """What ``POST /api/print-authority/pending`` said about one ask."""
+
+    id: str = ""
+    expires_at: float | None = None
+    #: The server already held a live ask for these bytes on this printer.
+    repeat: bool = False
+    #: Whether a picture rode the post.
+    picture_sent: bool = False
+    #: ``False`` when this process answered from its own memo of a live
+    #: ask and posted nothing.
+    posted: bool = True
+    #: The server's refusal code when it would not hold the ask
+    #: (``""`` when it did).
+    refused: str = ""
+
+
+@dataclass(frozen=True)
+class AccountAnswer:
+    """``GET /api/print-authority/may-i-print``, in the fields read here."""
+
+    allowed: bool
+    #: ``authority.kind`` — ``"approval"`` or ``"machine_window"`` when allowed.
+    kind: str = ""
+    id: str = ""
+    grantor: str = ""
+    expires_at: float | None = None
+    via: str = ""
+    #: ``pending.id`` / ``pending.state`` — the newest ask for these bytes
+    #: on this printer, when the server has one.
+    pending_id: str = ""
+    pending_state: str = ""
+
+
+_ask_lock = threading.Lock()
+#: ``{(file_sha256, printer): AccountAsk}`` — the live asks this process
+#: posted, so a start retried every few seconds does not post again.
+_asks: dict[tuple[str, str], AccountAsk] = {}
+
+
+def _ask_key(file_sha256: str, printer_name: str) -> tuple[str, str]:
+    return str(file_sha256 or "").strip().lower(), str(printer_name or "").strip().lower()
+
+
+def live_ask(file_sha256: str, printer_name: str) -> AccountAsk | None:
+    """The ask this process posted for these bytes on this printer, while
+    it is live."""
+    key = _ask_key(file_sha256, printer_name)
+    with _ask_lock:
+        ask = _asks.get(key)
+        if ask is not None and ask.expires_at is not None and ask.expires_at <= time.time():
+            _asks.pop(key, None)
+            return None
+        return ask
+
+
+def forget_ask(file_sha256: str, printer_name: str) -> None:
+    """Drop this process's memo of an ask — it was answered, or it ran out."""
+    with _ask_lock:
+        _asks.pop(_ask_key(file_sha256, printer_name), None)
+
+
+def holds_an_ask(printer_name: str) -> bool:
+    """Whether this process holds a live ask for any file on this printer —
+    the cheap check before hashing a file to find which."""
+    printer = _ask_key("", printer_name)[1]
+    now = time.time()
+    with _ask_lock:
+        return any(
+            key[1] == printer and (ask.expires_at is None or ask.expires_at > now)
+            for key, ask in _asks.items()
+        )
+
+
+def _reset_asks_for_tests() -> None:
+    with _ask_lock:
+        _asks.clear()
+
+
+def _api_base() -> str:
+    return (os.environ.get("KILN_API_URL") or _DEFAULT_API_URL).rstrip("/")
+
+
+def account_bearer() -> str:
+    """The signed-in person's session bearer (``kiln signin`` / ``kiln
+    pair``), or ``""``.  The session, not a license key: the ask and the
+    answer are a person's.  Never raises."""
+    try:
+        from kiln.auth_session import resolve_session_bearer
+
+        return resolve_session_bearer().token.strip()
+    except Exception:  # noqa: BLE001 — auth trouble is no bearer
+        logger.debug("account: session bearer unresolved", exc_info=True)
+        return ""
+
+
+def account_signed_out() -> bool:
+    """Whether this machine has no sign-in the account door could use — so
+    ``kiln signin`` is the thing to suggest.  No network: a session that can
+    renew itself counts as signed in (whether it renews is the next call's
+    to find out), and any other session is judged by
+    :func:`kiln.auth_session.resolve_session_bearer`, which touches the
+    network only to renew."""
+    try:
+        from kiln.auth_session import _read_tokens, resolve_session_bearer
+
+        stored = _read_tokens()
+        if str(stored.get("access_token") or "").strip() and str(stored.get("refresh_token") or "").strip():
+            return False
+        return not resolve_session_bearer().token.strip()
+    except Exception:  # noqa: BLE001 — unreadable auth is no sign-in
+        return True
+
+
+def _epoch(value: Any) -> float | None:
+    """A time the server sent — epoch seconds or ISO 8601 — as epoch."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value or "").strip()
+    if not text:
+        return None
+    with contextlib.suppress(ValueError):
+        return float(text)
+    try:
+        from datetime import datetime, timezone
+
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
+def _account_call(method: str, path: str, bearer: str, **kwargs: Any) -> tuple[int, dict[str, Any]] | None:
+    """One request to the account routes: ``(status, body)``, or ``None``
+    when the server could not be reached.  Never raises."""
+    import requests
+
+    try:
+        resp = requests.request(
+            method, f"{_api_base()}{_ACCOUNT_ROUTE}{path}",
+            headers={"Authorization": f"Bearer {bearer}"}, timeout=_ACCOUNT_TIMEOUT_S, **kwargs,
+        )
+    except Exception as exc:  # noqa: BLE001 — offline, DNS, TLS, a timeout
+        logger.debug("account: %s %s unreachable: %s", method, path, type(exc).__name__)
+        return None
+    try:
+        body = resp.json()
+    except ValueError:
+        body = {}
+    return resp.status_code, body if isinstance(body, dict) else {}
+
+
+def picture_for_ask(path: str | None) -> bytes | None:
+    """The still at *path* as PNG bytes no larger than
+    :data:`PICTURE_MAX_BYTES` — as it is when it fits, else shrunk with
+    Pillow — or ``None``.  The ask binds the person's yes to these exact
+    bytes, so whatever is returned here is what is hashed and sent."""
+    if not path:
+        return None
+    try:
+        with open(path, "rb") as fh:
+            raw = fh.read()
+    except OSError:
+        return None
+    if raw[:8] == _PNG_MAGIC and len(raw) <= PICTURE_MAX_BYTES:
+        return raw
+    try:
+        import io
+
+        from PIL import Image
+
+        with Image.open(io.BytesIO(raw)) as src:
+            image = src.convert("RGBA") if src.mode not in ("RGB", "RGBA") else src.copy()
+        for side in (800, 640, 480, 360, 240):
+            smaller = image.copy()
+            smaller.thumbnail((side, side))
+            buf = io.BytesIO()
+            smaller.save(buf, format="PNG", optimize=True)
+            data = buf.getvalue()
+            if len(data) <= PICTURE_MAX_BYTES:
+                return data
+    except Exception:  # noqa: BLE001 — a picture that cannot be read is no picture
+        logger.debug("account: picture %s not usable", path, exc_info=True)
+    return None
+
+
+def _observe_in_background(api: str, bearer: str, nonce: str) -> None:
+    """:func:`observe_addresses` off to the side: the print start that
+    posted the ask never waits on it."""
+    threading.Thread(
+        target=observe_addresses, args=(api, bearer, nonce), name="kiln-ask-observe", daemon=True,
+    ).start()
+
+
+def ask_the_account(
+    *, file_sha256: str, file_name: str, printer_name: str, picture_path: str | None, shown_door: str,
+) -> AccountAsk | None:
+    """``POST /api/print-authority/pending``: ask the signed-in account
+    about this print, once while an ask is live.
+
+    Sends ``file_sha256``, ``file_name``, ``printer_name``,
+    ``shown_pixels_sha`` (the sha256 of the picture bytes sent, or ``""``),
+    ``shown_door``, ``picture_png_b64`` (``""`` when there is none),
+    ``machine_fingerprint`` (this install's heartbeat device) and
+    ``observe_nonce``; reads ``pending.id``, ``pending.expires_at`` and
+    ``pending.repeat``.  After a held ask the machine is shown to the relay
+    with the nonce (:func:`observe_addresses`).
+
+    ``None`` when there is nobody to ask for or the server did not answer;
+    an :class:`AccountAsk` with ``refused`` set when it answered with a
+    refusal.  Never raises.
+    """
+    if not file_sha256 or not printer_name:
+        return None
+    memo = live_ask(file_sha256, printer_name)
+    if memo is not None:
+        return AccountAsk(
+            id=memo.id, expires_at=memo.expires_at, repeat=True, picture_sent=memo.picture_sent, posted=False,
+        )
+    bearer = account_bearer()
+    if not bearer:
+        return None
+    try:
+        from kiln.device import get_device_fingerprint
+
+        machine = str(get_device_fingerprint() or "").strip()
+    except Exception:  # noqa: BLE001
+        machine = ""
+    if not machine:
+        logger.debug("account: no machine fingerprint on this install; nothing asked")
+        return None
+    import base64
+    import hashlib
+    import secrets
+
+    picture = picture_for_ask(picture_path)
+    nonce = secrets.token_urlsafe(18)
+    body = {
+        "file_sha256": str(file_sha256).lower(),
+        "file_name": os.path.basename(str(file_name or "")),
+        "printer_name": printer_name,
+        "shown_pixels_sha": hashlib.sha256(picture).hexdigest() if picture else "",
+        "shown_door": shown_door or "",
+        "picture_png_b64": base64.b64encode(picture).decode("ascii") if picture else "",
+        "machine_fingerprint": machine,
+        "observe_nonce": nonce,
+    }
+    answered = _account_call("POST", "/pending", bearer, json=body)
+    if answered is None:
+        return None
+    status, data = answered
+    held = data.get("pending") if isinstance(data.get("pending"), dict) else {}
+    if not (200 <= status < 300) or not str(held.get("id") or ""):
+        code = str(data.get("error") or f"http_{status}")
+        logger.debug("account: ask not held (%s)", code)
+        return AccountAsk(picture_sent=picture is not None, refused=code)
+    expires_at = _epoch(held.get("expires_at"))
+    ask = AccountAsk(
+        id=str(held["id"]),
+        expires_at=expires_at if expires_at is not None else time.time() + _ASK_MEMO_FALLBACK_S,
+        repeat=bool(held.get("repeat")),
+        picture_sent=picture is not None,
+    )
+    with _ask_lock:
+        _asks[_ask_key(file_sha256, printer_name)] = ask
+    with contextlib.suppress(Exception):
+        _observe_in_background(_api_base(), bearer, nonce)
+    return ask
+
+
+def withdraw_ask(file_sha256: str, printer_name: str) -> tuple[str, bool] | None:
+    """``POST /api/print-authority/pending/{id}/withdraw`` for the ask this
+    process posted about these bytes on this printer: another door
+    answered the print.  ``(id, withdrawn)``, or ``None`` when this process
+    holds no such ask.  The memo is dropped either way — an ask the server
+    would not withdraw runs out on its own.  Never raises."""
+    ask = live_ask(file_sha256, printer_name)
+    if ask is None:
+        return None
+    forget_ask(file_sha256, printer_name)
+    bearer = account_bearer()
+    if not bearer:
+        return ask.id, False
+    from urllib.parse import quote
+
+    answered = _account_call("POST", f"/pending/{quote(ask.id, safe='')}/withdraw", bearer, json={})
+    if answered is None:
+        return ask.id, False
+    status, data = answered
+    if not (200 <= status < 300):
+        logger.debug("account: withdraw answered %s (%s)", status, data.get("error"))
+        return ask.id, False
+    return ask.id, True
+
+
+def read_the_account(*, file_sha256: str, printer_name: str) -> AccountAnswer | None:
+    """``GET /api/print-authority/may-i-print?printer_name=&file_hash=``.
+
+    Reads ``allowed``; ``authority.kind``, ``.id``, ``.grantor``,
+    ``.expires_at`` and ``.via``; and ``pending.id`` / ``pending.state``.
+    ``None`` when not signed in or the server did not answer.  Never
+    raises."""
+    if not file_sha256 or not printer_name:
+        return None
+    bearer = account_bearer()
+    if not bearer:
+        return None
+    answered = _account_call(
+        "GET", "/may-i-print", bearer,
+        params={"printer_name": printer_name, "file_hash": str(file_sha256).lower()},
+    )
+    if answered is None:
+        return None
+    status, data = answered
+    if not (200 <= status < 300):
+        logger.debug("account: may-i-print answered %s (%s)", status, data.get("error"))
+        return None
+    authority = data.get("authority") if isinstance(data.get("authority"), dict) else {}
+    pending = data.get("pending") if isinstance(data.get("pending"), dict) else {}
+    return AccountAnswer(
+        allowed=data.get("allowed") is True,
+        kind=str(authority.get("kind") or ""),
+        id=str(authority.get("id") or ""),
+        grantor=str(authority.get("grantor") or ""),
+        expires_at=_epoch(authority.get("expires_at")),
+        via=str(authority.get("via") or ""),
+        pending_id=str(pending.get("id") or ""),
+        pending_state=str(pending.get("state") or ""),
+    )
+
+
+def record_start(*, authority_id: str, kind: str, file_sha256: str, printer_name: str) -> bool:
+    """``POST /api/print-authority/record-start`` with ``authority_id``,
+    ``kind``, ``file_sha256`` and ``printer_name``: this machine is starting
+    the print that answer covers.  True only when the server said so (a 2xx
+    carrying ``event``).  Never raises."""
+    if not authority_id:
+        return False
+    bearer = account_bearer()
+    if not bearer:
+        return False
+    answered = _account_call(
+        "POST", "/record-start", bearer,
+        json={
+            "authority_id": authority_id, "kind": kind,
+            "file_sha256": str(file_sha256).lower(), "printer_name": printer_name,
+        },
+    )
+    if answered is None:
+        return False
+    status, data = answered
+    if not (200 <= status < 300) or not isinstance(data.get("event"), dict):
+        logger.debug("account: record-start answered %s (%s)", status, data.get("error"))
+        return False
+    return True
 
 
 def run_bridge() -> None:

@@ -101,6 +101,10 @@ SOURCE_TERMINAL = "user_terminal"
 SOURCE_DERIVED = "derived"
 #: A person at a terminal opened a standing window covering this printer.
 SOURCE_WINDOW = "standing_window"
+#: A person typed the code Kiln showed on this machine's screen
+#: (:mod:`kiln.screen_code`): the agent relayed the words, the code proved
+#: someone at the screen chose to type them.  The terminal's rung.
+SOURCE_CODE = "user_code"
 #: The hosted server's account approved this file (the hook below).
 SOURCE_HOSTED_APPROVAL = "hosted_account_approval"
 #: An agent started this under a delegation the hosted server's account
@@ -125,7 +129,7 @@ def grade_of(source: str) -> str | None:
     own (a derived plate rides its input's; a bypass is not a yes)."""
     if source in (SOURCE_ELICITED, *HOSTED_SOURCES):
         return GRADE_A
-    if source in (SOURCE_TERMINAL, SOURCE_WINDOW):
+    if source in (SOURCE_TERMINAL, SOURCE_WINDOW, SOURCE_CODE):
         return GRADE_B
     return None
 
@@ -655,6 +659,18 @@ def set_consent(consent: PrintConsent | None):
 #: gate's refusal so it can say, plainly, that no dialog is coming and
 #: the person's yes has to come from a terminal.  Never a yes.
 NOT_ASKED_HOST_CANNOT = "host_cannot_ask"
+#: A code was shown on this machine's screen instead; the refusal says so
+#: and names the tool the agent relays the person's words through.  May
+#: carry ``:hook=<path>`` when the host's dialog was skipped because its
+#: own hooks answer dialogs.
+NOT_ASKED_CODE_SHOWN = "code_shown"
+#: A code could not be shown just now (too many guesses, too many codes);
+#: carries ``:<seconds>`` to wait.
+NOT_ASKED_CODE_COOLDOWN = "code_cooldown"
+#: Appended, last, to any reason above when the signed-in account is
+#: holding an ask about this print (``:pending=<id>``), so the refusal can
+#: name the page where a person answers it.
+NOT_ASKED_PENDING_TAG = ":pending="
 
 _not_asked: ContextVar[str] = ContextVar("kiln_print_consent_not_asked", default="")
 
