@@ -218,13 +218,15 @@ def test_the_model_is_unknown_unless_the_host_volunteers_it():
     )
     assert stray is not None and stray.model == "unknown"
 
-    # A host that puts a model on clientInfo (an open record) is read.
+    # Nothing on clientInfo is read as a model: the handshake has no such
+    # field, and the SDK Kiln ships drops fields it does not model, so a
+    # "model" there is never a hint -- on either SDK major.
     volunteered = agent_host.describe(
         SimpleNamespace(),
         _ctx({**CLAUDE_CODE, "clientInfo": {**CLAUDE_CODE["clientInfo"], "model": "GPT-5"}}),
         env=NO_ENV,
     )
-    assert volunteered is not None and volunteered.model == "gpt-5"
+    assert volunteered is not None and volunteered.model == "unknown"
 
 
 def test_facts_carry_version_model_and_declared_capabilities():
@@ -345,6 +347,58 @@ def test_the_heartbeat_ships_both_maps_same_day_and_complete(pipeline):
     # it recorded nothing — that is how the dashboard tells "too old to
     # report" from "quiet day".
     assert sent[1]["p_details"]["agent_hosts"] == {}
+
+
+def test_a_real_connection_records_the_host_it_names(pipeline, monkeypatch):
+    """Through a live session, on whichever SDK major is installed: a client
+    that names itself connects, calls one tool, and the host lands in the
+    day file.  The tests above hand describe() a session built by hand;
+    this is the proof the real dispatch hands it one it can read -- the
+    check that catches an SDK renaming the handshake field (SDK 2 spells it
+    ``client_info``), which every hand-built session would sail past."""
+    import asyncio
+
+    from mcp.types import Implementation
+
+    from kiln import server
+
+    # This suite may itself run under Claude Code; its marker must not
+    # colour a host that is not asking as Claude Code.
+    for var in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "ANTHROPIC_MODEL"):
+        monkeypatch.delenv(var, raising=False)
+    tools = server.mcp._tool_manager._tools
+    monkeypatch.setattr(tools["donate_info"], "fn", lambda: {"success": True})
+    info = Implementation(name="claude-code", version="9.9.9")
+
+    async def _never_asked(*_args, **_kwargs):
+        raise AssertionError("no question is put to the person in this test")
+
+    def _in_process_client():
+        """SDK 2 connects ``Client`` to a server object directly; 1.x has
+        the memory-stream helper that 2.x removed.  A callback declares
+        elicitation on both."""
+        try:
+            from mcp import Client
+        except ImportError:
+            from mcp.shared.memory import create_connected_server_and_client_session
+
+            return create_connected_server_and_client_session(
+                server.mcp, client_info=info, elicitation_callback=_never_asked,
+            )
+        return Client(server.mcp, client_info=info, elicitation_callback=_never_asked)
+
+    async def _one_call() -> None:
+        async with _in_process_client() as client:
+            await client.call_tool("donate_info", {})
+
+    asyncio.run(_one_call())
+    data = daily_stats._read()
+    assert data["agent_hosts"] == {"claude-code": 1}
+    assert data["agent_host_facts"] == {
+        "claude-code v:9.9.9": 1,
+        "claude-code model:unknown": 1,
+        "claude-code elicitation": 1,
+    }
 
 
 def test_the_dispatch_chokepoint_records_the_host():

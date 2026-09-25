@@ -83,6 +83,7 @@ from typing import Any
 from kiln.mcp_compat import (
     capture_request_context,
     client_capabilities,
+    client_info,
     lowlevel_server,
     wrap_call_tool_result,
 )
@@ -754,12 +755,14 @@ def _log_signal_once(mcp: Any, renders: bool, ctx: Any = None) -> None:
     if _signal_logged:
         return
     _signal_logged = True
+    # Through the one accessor that knows both SDK spellings of the field:
+    # reading ``clientInfo`` directly named every host "unknown" on SDK 2.
     try:
-        session = getattr(ctx, "session", None)
-        if session is None:
-            session = lowlevel_server(mcp).request_context.session
-        info = session.client_params.clientInfo
-        who = f"{getattr(info, 'name', '?')}/{getattr(info, 'version', '?')}"
+        info = client_info(mcp, ctx)
+        who = (
+            f"{getattr(info, 'name', '?')}/{getattr(info, 'version', '?')}"
+            if info is not None else "unknown host"
+        )
     except Exception:  # noqa: BLE001
         who = "unknown host"
     if not renders:

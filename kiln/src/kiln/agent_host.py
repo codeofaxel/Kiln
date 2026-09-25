@@ -31,12 +31,13 @@ around:
   too; the marker is Claude Code's statement about itself, never about
   whichever host happens to hold it.
 
-The MODEL is not part of the protocol.  No host examined sends it in
-``clientInfo`` and none exports it to the server process by default;
-it is recorded only when a host volunteers one — a non-standard
-``model`` field on ``clientInfo``, or Claude Code's own
-``ANTHROPIC_MODEL`` override, which names the model it will use — and
-reads ``unknown`` otherwise.  An honest unknown beats a guess: the
+The MODEL is not part of the protocol.  The handshake has no field for
+it, and the MCP SDK Kiln ships drops any field it does not model, so a
+host could not hand one over in ``clientInfo`` even if it tried.  The
+one model signal a stdio server can see is Claude Code's own
+``ANTHROPIC_MODEL`` override, which names the model a session was
+configured to start with; it is read only for Claude Code, and every
+other host reads ``unknown``.  An honest unknown beats a guess: the
 dashboard counts the unknowns as unknowns rather than filing them
 under whichever model was fashionable.
 
@@ -125,7 +126,7 @@ class AgentHost(NamedTuple):
     apps: bool
     #: Declared elicitation (it can put a question in front of a person).
     elicitation: bool
-    #: A model the host volunteered, as a token, or ``unknown``.
+    #: Claude Code's configured model override, as a token, or ``unknown``.
     model: str
 
     @property
@@ -169,14 +170,6 @@ def _host_name(info: Any) -> str:
     return name
 
 
-def _client_info(mcp: Any, ctx: Any) -> Any | None:
-    from kiln.mcp_compat import current_session
-
-    session = current_session(mcp, ctx)
-    params = getattr(session, "client_params", None)
-    return getattr(params, "clientInfo", None)
-
-
 def _is_claude_code(name: str, env: Any) -> bool:
     """Claude Code's markers apply: the host names itself Claude Code AND
     the marker is present.  Either alone is not enough — the name without
@@ -193,22 +186,16 @@ def _entrypoint(name: str, env: Any) -> str:
     return token(env.get(_CLAUDE_CODE_ENTRYPOINT) or _CLAUDE_CODE_DEFAULT_ENTRYPOINT)
 
 
-def _model_hint(info: Any, name: str, env: Any) -> str:
-    """A model the host volunteered, or ``unknown``.
+def _model_hint(name: str, env: Any) -> str:
+    """Claude Code's configured model, or ``unknown``.
 
-    ``clientInfo`` is an open record (the SDK keeps unknown fields as
-    extras), so a host that adds ``model`` there is read; no host examined
-    does today.  Claude Code's ``ANTHROPIC_MODEL`` override counts only
-    for Claude Code itself, for the same reason as the entry point, and
-    it is the model the session was configured to START with: a switch
-    made inside the session never reaches the server's environment.
+    Claude Code's ``ANTHROPIC_MODEL`` override counts only for Claude Code
+    itself, for the same reason as the entry point, and it is the model
+    the session was configured to START with: a switch made inside the
+    session never reaches the server's environment.  Nothing on
+    ``clientInfo`` is read as a model — the handshake has no such field,
+    and the SDK drops fields it does not model.
     """
-    extra = getattr(info, "model_extra", None) or {}
-    volunteered = extra.get("model") if isinstance(extra, dict) else None
-    if not volunteered:
-        volunteered = getattr(info, "model", None)
-    if volunteered:
-        return token(volunteered)
     if _is_claude_code(name, env):
         override = env.get(_CLAUDE_CODE_MODEL_OVERRIDE)
         if override:
@@ -227,11 +214,12 @@ def describe(mcp: Any, ctx: Any = None, env: Any = None) -> AgentHost | None:
     """
     env = os.environ if env is None else env
     try:
-        info = _client_info(mcp, ctx)
+        from kiln import local_stage
+        from kiln.mcp_compat import client_info, host_can_ask_the_user
+
+        info = client_info(mcp, ctx)
         if info is None:
             return None
-        from kiln import local_stage
-        from kiln.mcp_compat import host_can_ask_the_user
 
         name = _host_name(info)
         return AgentHost(
@@ -240,7 +228,7 @@ def describe(mcp: Any, ctx: Any = None, env: Any = None) -> AgentHost | None:
             entrypoint=_entrypoint(name, env),
             apps=bool(local_stage.host_declares_apps(mcp, ctx)),
             elicitation=bool(host_can_ask_the_user(mcp, ctx)),
-            model=_model_hint(info, name, env),
+            model=_model_hint(name, env),
         )
     except Exception as exc:  # noqa: BLE001 — telemetry never breaks a call
         _logger.debug("agent_host.describe failed: %s", exc)

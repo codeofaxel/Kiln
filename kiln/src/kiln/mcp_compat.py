@@ -79,6 +79,7 @@ __all__ = [
     "ask_user_to_confirm",
     "capture_request_context",
     "client_capabilities",
+    "client_info",
     "current_session",
     "host_can_ask_the_user",
     "install_uninitialized_request_guard",
@@ -202,6 +203,24 @@ def current_session(mcp: Any, ctx: Any = None) -> Any | None:
         return lowlevel_server(mcp).request_context.session
     except Exception:  # noqa: BLE001 — no session is a legitimate answer
         return None
+
+
+def client_info(mcp: Any, ctx: Any = None) -> Any | None:
+    """The connected host's ``clientInfo`` — its name and version — or None.
+
+    The two majors spell the field differently on the parsed initialize
+    params: SDK 1 keeps the wire's ``clientInfo``, SDK 2 renames it
+    ``client_info``.  A reader that asked for only the first got None for
+    every host on SDK 2, and nothing said so, so both spellings are
+    resolved here, once, over the session :func:`current_session` finds.
+    Never raises: "no session" and "no clientInfo" are legitimate answers.
+    """
+    params = getattr(current_session(mcp, ctx), "client_params", None)
+    for attr in ("client_info", "clientInfo"):
+        info = getattr(params, attr, None)
+        if info is not None:
+            return info
+    return None
 
 
 def capture_request_context(mcp: Any, method: str) -> bool:
