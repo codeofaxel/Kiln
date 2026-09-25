@@ -56,11 +56,11 @@ def test_the_wire_shape_is_headline_statuses_known_name_and_conditions_only() ->
     payload = compose_monitor_payload(
         None, None, None, None, None, None,
         coverage={"headline": "h", "by_status": {"watched": ["x"]}, "known": True, "classes": {"x": {}}, "statement": "long",
-                  "printer_label": " Bambu Lab A1 ", "conditions": {"x": "needs an AMS", "y": 3, "z": ""}},
+                  "printer_label": " Acme Meridian 3 ", "conditions": {"x": "only with the lid closed", "y": 3, "z": ""}},
     )
     assert set(payload["coverage"]) == {"headline", "by_status", "known", "printer_label", "conditions"}
-    assert payload["coverage"]["printer_label"] == "Bambu Lab A1"
-    assert payload["coverage"]["conditions"] == {"x": "needs an AMS"}
+    assert payload["coverage"]["printer_label"] == "Acme Meridian 3"
+    assert payload["coverage"]["conditions"] == {"x": "only with the lid closed"}
     bare = compose_monitor_payload(
         None, None, None, None, None, None,
         coverage={"headline": "h", "by_status": {}, "known": True, "printer_label": "", "conditions": {}},
@@ -119,9 +119,8 @@ def test_the_report_line_is_one_short_line_and_only_with_kiln_pro() -> None:
         server, "_resolve_printer_model_live", return_value="bambu_x1c"
     ), mock.patch.object(server, "_resolve_adapter", side_effect=RuntimeError("no printer")):
         line = server._coverage_line_for(None)
-    assert line == (
-        "Your printer can't watch for the first layer, and neither can Kiln."
-    )
+    # No Kiln bucket on this wire: the gaps alone, and no word about Kiln.
+    assert line == "Your printer can't watch for the first layer."
     assert "\n" not in line
 
     with mock.patch.object(server, "_pro_bridge", return_value=_fake_pro(available=False)):
@@ -265,7 +264,7 @@ def test_the_report_line_reaches_monitor_print_output() -> None:
     ), mock.patch.object(server, "_resolve_printer_model_live", return_value="bambu_x1c"):
         report = server.monitor_print(include_snapshot=False)
     assert isinstance(report, str), report
-    assert "- Your printer can't watch for the first layer, and neither can Kiln." in report
+    assert "- Your printer can't watch for the first layer." in report
     assert "What is watching this print" not in report, "the essay is the panel's, not the report's"
     assert report.index("can't watch for") < report.index("Camera:")
 
@@ -374,66 +373,95 @@ def test_starting_a_health_session_answers_with_what_is_watching_now() -> None:
 
 # --- the watching sentence: one rule, the actor named --------------------------
 
-#: The cases the inline monitor panel (kiln-pro tests/test_monitor_panel_polish.py)
-#: and the web Monitor (lib/api/coverage.test.ts) run through their ports of
-#: this rule; each expects the same text and ask.
-def _a1(**over) -> dict:
-    by = {**_A1_BY_STATUS, "not_watched": ["spaghetti", "a bad first layer"],
-          "kiln_watching": ["a heater fault", "a stalled print", "a fault the printer reports"],
-          "kiln_can_watch": ["spaghetti", "a bad first layer", "a filament tangle", "a dead camera feed",
-                             "a lost connection"],
-          "kiln_can_watch_now": ["spaghetti", "a filament tangle"], **over}
-    return {"headline": _A1_HEADLINE, "by_status": by, "known": True, "printer_label": "Bambu Lab A1",
-            "conditions": {"nozzle clumping": "off when spiral vase", "air printing (extruding nothing)": "needs an AMS Lite"}}
+#: A made-up machine, so the fixture is the RULE's and not a copy of any
+#: model's detector research -- that belongs to kiln-pro, whose own tests
+#: (tests/test_monitor_panel_polish.py) run the real blocks through this
+#: same function and its two ports (the panel, the web's lib/api/coverage.ts).
+#: The class labels are the wire's vocabulary; the name, the buckets and the
+#: clauses are invented.
+_GAPPY_BY_STATUS = {
+    "watched": ["running out of filament", "a filament tangle"],
+    "conditional": ["nozzle clumping"],
+    "not_watched": ["spaghetti", "a bad first layer"],
+    "unknown": ["fire"],
+    "kiln_watching": ["a heater fault", "a stalled print"],
+    "kiln_can_watch": ["spaghetti", "a bad first layer", "a dead camera feed"],
+    "kiln_can_watch_now": ["spaghetti"],
+}
+_GAPPY_HEADLINE = (
+    "What is watching this print — watched: running out of filament, a filament tangle. "
+    "watched, with conditions: nozzle clumping. not watched: spaghetti, a bad first layer. "
+    "Kiln is watching: a heater fault, a stalled print."
+)
+_GAPPY_CONDITIONS = {"nozzle clumping": "only with the lid closed"}
 
 
-def _x1(**over) -> dict:
+def _gappy(**over) -> dict:
+    """A machine with gaps Kiln could fill: the offer shapes."""
+    return {"headline": _GAPPY_HEADLINE, "by_status": {**_GAPPY_BY_STATUS, **over}, "known": True,
+            "printer_label": "Acme Meridian 3", "conditions": _GAPPY_CONDITIONS}
+
+
+def _covered(**over) -> dict:
+    """A machine that watches the camera classes itself: the add-on shapes."""
     by = {"watched": ["a filament tangle", "running out of filament"], "conditional": ["spaghetti"],
           "unknown": ["fire"], "kiln_watching": ["a heater fault"], "kiln_can_watch": ["a dead camera feed"],
           "kiln_can_watch_now": ["spaghetti", "a filament tangle"], **over}
     return {"headline": "What is watching this print — watched: a filament tangle.", "by_status": by,
-            "known": True, "printer_label": "Bambu Lab X1 Carbon", "conditions": {"spaghetti": "needs the chamber light on"}}
+            "known": True, "printer_label": "Acme Meridian 3 Pro",
+            "conditions": {"spaghetti": "after the first layers"}}
+
+
+def _without(block: dict, *buckets: str) -> dict:
+    """*block* with the named by_status buckets absent, as an older wire is."""
+    return {**block, "by_status": {k: v for k, v in block["by_status"].items() if k not in buckets}}
 
 
 WATCHING_SENTENCE_CASES: dict[str, tuple[dict | None, dict | None, dict | None]] = {
-    "a1_gaps": (_a1(), _watch(printing=True, attached=True, running=True),
-                {"text": "Your Bambu Lab A1 can't watch for spaghetti or a bad first layer.",
-                 "ask": "Kiln can watch the camera for spaghetti"}),
-    "a1_both_now": (_a1(kiln_can_watch_now=["spaghetti", "a bad first layer"]), _watch(),
-                    {"text": "Your Bambu Lab A1 can't watch for spaghetti or a bad first layer.",
-                     "ask": "Kiln can watch the camera for them"}),
-    "one_gap": (_a1(not_watched=["spaghetti"], kiln_can_watch_now=["spaghetti"]), _watch(),
-                {"text": "Your Bambu Lab A1 can't watch for spaghetti.", "ask": "Kiln can watch the camera for it"}),
-    "no_camera_mid_print": (_a1(kiln_can_watch_now=[]), _watch(),
-                            {"text": "Your Bambu Lab A1 can't watch for spaghetti or a bad first layer, "
+    "gaps": (_gappy(), _watch(printing=True, attached=True, running=True),
+             {"text": "Your Acme Meridian 3 can't watch for spaghetti or a bad first layer.",
+              "ask": "Kiln can watch the camera for spaghetti"}),
+    "both_now": (_gappy(kiln_can_watch_now=["spaghetti", "a bad first layer"]), _watch(),
+                 {"text": "Your Acme Meridian 3 can't watch for spaghetti or a bad first layer.",
+                  "ask": "Kiln can watch the camera for them"}),
+    "one_gap": (_gappy(not_watched=["spaghetti"], kiln_can_watch_now=["spaghetti"]), _watch(),
+                {"text": "Your Acme Meridian 3 can't watch for spaghetti.", "ask": "Kiln can watch the camera for it"}),
+    "no_camera_mid_print": (_gappy(kiln_can_watch_now=[]), _watch(),
+                            {"text": "Your Acme Meridian 3 can't watch for spaghetti or a bad first layer, "
                                      "and neither can Kiln on this print.", "ask": None}),
-    "never": (_a1(not_watched=["fire"], kiln_can_watch=[], kiln_can_watch_now=[]), _watch(),
-              {"text": "Your Bambu Lab A1 can't watch for fire, and neither can Kiln.", "ask": None}),
-    "idle": (_a1(kiln_watching=[], kiln_can_watch_now=[]), _watch(printing=False),
-             {"text": "Your Bambu Lab A1 can't watch for spaghetti or a bad first layer. "
+    "never": (_gappy(not_watched=["fire"], kiln_can_watch=[], kiln_can_watch_now=[]), _watch(),
+              {"text": "Your Acme Meridian 3 can't watch for fire, and neither can Kiln.", "ask": None}),
+    "idle": (_gappy(kiln_watching=[], kiln_can_watch_now=[]), _watch(printing=False),
+             {"text": "Your Acme Meridian 3 can't watch for spaghetti or a bad first layer. "
                       "Kiln can watch the camera for them once a print is running.", "ask": None}),
-    "switched_off": (_a1(not_watched=["spaghetti"], off_for_this_print=["nozzle clumping"],
-                         kiln_can_watch_now=["spaghetti"]), _watch(),
-                     {"text": "Your Bambu Lab A1 can't watch for spaghetti, and has nozzle clumping switched off.",
+    "switched_off": (_gappy(not_watched=["spaghetti"], off_for_this_print=["nozzle clumping"],
+                            kiln_can_watch_now=["spaghetti"]), _watch(),
+                     {"text": "Your Acme Meridian 3 can't watch for spaghetti, and has nozzle clumping switched off.",
                       "ask": "Kiln can watch the camera for spaghetti"}),
-    "kiln_covers_a_gap": (_a1(kiln_watching=["spaghetti", "a heater fault"], kiln_can_watch_now=[]), _watch(),
-                          {"text": "Your Bambu Lab A1 can't watch for a bad first layer, and neither can Kiln on this print.",
+    "kiln_covers_a_gap": (_gappy(kiln_watching=["spaghetti", "a heater fault"], kiln_can_watch_now=[]), _watch(),
+                          {"text": "Your Acme Meridian 3 can't watch for a bad first layer, and neither can Kiln on this print.",
                            "ask": None}),
-    "x1_adds": (_x1(), _watch(printing=True, attached=True, running=True),
-                {"text": "Your Bambu Lab X1 Carbon watches for spaghetti and a filament tangle itself.",
-                 "ask": "Kiln can add a camera watch too"}),
-    "everything": (_x1(kiln_can_watch_now=[]), _watch(printing=True, attached=True, running=True),
-                   {"text": "Watched by your Bambu Lab X1 Carbon and Kiln. "
-                            "Your Bambu Lab X1 Carbon watches for spaghetti with conditions.", "ask": None}),
-    "kiln_not_started": (_x1(kiln_watching=[], kiln_can_watch_now=[]), _watch(printing=True, attached=False),
-                         {"text": "Watched by your Bambu Lab X1 Carbon. Kiln is not watching this print (it did not start it). "
-                                  "Your Bambu Lab X1 Carbon watches for spaghetti with conditions.", "ask": None}),
-    "no_label": ({k: v for k, v in _a1().items() if k != "printer_label"}, _watch(),
+    "adds": (_covered(), _watch(printing=True, attached=True, running=True),
+             {"text": "Your Acme Meridian 3 Pro watches for spaghetti and a filament tangle itself.",
+              "ask": "Kiln can add a camera watch too"}),
+    "everything": (_covered(kiln_can_watch_now=[]), _watch(printing=True, attached=True, running=True),
+                   {"text": "Watched by your Acme Meridian 3 Pro and Kiln. "
+                            "Your Acme Meridian 3 Pro watches for spaghetti with conditions.", "ask": None}),
+    "kiln_not_started": (_covered(kiln_watching=[], kiln_can_watch_now=[]), _watch(printing=True, attached=False),
+                         {"text": "Watched by your Acme Meridian 3 Pro. Kiln is not watching this print (it did not start it). "
+                                  "Your Acme Meridian 3 Pro watches for spaghetti with conditions.", "ask": None}),
+    "no_label": ({k: v for k, v in _gappy().items() if k != "printer_label"}, _watch(),
                  {"text": "Your printer can't watch for spaghetti or a bad first layer.",
                   "ask": "Kiln can watch the camera for spaghetti"}),
-    "older_wire": ({"headline": _A1_HEADLINE, "by_status": _A1_BY_STATUS, "known": True}, _watch(),
-                   {"text": "Your printer can't watch for spaghetti or the first layer, and neither can Kiln on this print.",
-                    "ask": None}),
+    # A wire without the "now" bucket (an older kiln-pro) cannot say what a
+    # watch would add on this print: the gaps alone, no word about Kiln --
+    # "neither can Kiln on this print" read false beside a watch_print that
+    # could have.  The details still list what Kiln could add by another door.
+    "older_wire": (_without({**_gappy(), "printer_label": None}, "kiln_can_watch_now"), _watch(),
+                   {"text": "Your printer can't watch for spaghetti or a bad first layer.", "ask": None}),
+    # A block composed with no print in hand carries no Kiln layer at all.
+    "no_kiln_layer": (_without(_gappy(), "kiln_watching", "kiln_can_watch", "kiln_can_watch_now"), None,
+                      {"text": "Your Acme Meridian 3 can't watch for spaghetti or a bad first layer.", "ask": None}),
     "unknown_machine": ({"headline": "Kiln has no detector research for this model yet. Beyond its spec sheet, "
                                      "assume nothing is watching.", "by_status": {"unknown": ["spaghetti"]}, "known": False},
                         _watch(), {"text": "Kiln has no detector research for this model yet.", "ask": None}),
@@ -457,25 +485,26 @@ def test_the_watching_sentence_names_who_watches_and_who_could() -> None:
 def test_the_watching_sentence_groups_what_each_actor_watches() -> None:
     from kiln import server
 
-    said = server.coverage_watching_sentence(*WATCHING_SENTENCE_CASES["a1_gaps"][:2])
+    said = server.coverage_watching_sentence(*WATCHING_SENTENCE_CASES["gaps"][:2])
     assert said["gaps"] == ["spaghetti", "a bad first layer"] and said["offer"] == ["spaghetti"]
-    assert said["printer"]["label"] == "Bambu Lab A1"
-    assert said["printer"]["watches"] == _A1_BY_STATUS["watched"]
-    assert said["printer"]["with_conditions"] == {
-        "nozzle clumping": "off when spiral vase", "air printing (extruding nothing)": "needs an AMS Lite",
-    }
+    assert said["printer"]["label"] == "Acme Meridian 3"
+    assert said["printer"]["watches"] == _GAPPY_BY_STATUS["watched"]
+    assert said["printer"]["with_conditions"] == _GAPPY_CONDITIONS
     assert said["printer"]["cant"] == ["spaghetti", "a bad first layer"] and said["printer"]["off"] == []
-    assert said["kiln"]["watching"] == ["a heater fault", "a stalled print", "a fault the printer reports"]
-    assert said["kiln"]["can_now"] == ["spaghetti", "a filament tangle"]
-    assert said["kiln"]["can_later"] == ["a bad first layer", "a dead camera feed", "a lost connection"]
+    assert said["kiln"]["watching"] == ["a heater fault", "a stalled print"]
+    assert said["kiln"]["can_now"] == ["spaghetti"]
+    assert said["kiln"]["can_later"] == ["a bad first layer", "a dead camera feed"]
+    # The older wire keeps every "could add" in the details, where it is true.
+    older = server.coverage_watching_sentence(*WATCHING_SENTENCE_CASES["older_wire"][:2])
+    assert older["kiln"]["can_later"] == ["spaghetti", "a bad first layer", "a dead camera feed"]
 
 
 def test_the_report_names_the_agents_own_door_where_the_panel_says_turn_on() -> None:
     from kiln import server
 
-    with mock.patch.object(server, "_pro_bridge", return_value=_fake_pro(result=_a1())), mock.patch.object(
+    with mock.patch.object(server, "_pro_bridge", return_value=_fake_pro(result=_gappy())), mock.patch.object(
         server, "_resolve_printer_model_live", return_value="bambu_a1"
     ), mock.patch.object(server, "_resolve_adapter", side_effect=RuntimeError("no printer")):
         line = server._coverage_line_for(None)
-    assert line == ("Your Bambu Lab A1 can't watch for spaghetti or a bad first layer. "
+    assert line == ("Your Acme Meridian 3 can't watch for spaghetti or a bad first layer. "
                     "Kiln can watch the camera for spaghetti — start a background watch (watch_print).")

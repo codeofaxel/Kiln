@@ -1797,7 +1797,11 @@ def coverage_watching_sentence(
       the wire says a background watch would add it now; ", and neither
       can Kiln on this print." when Kiln could by another door; ", and
       neither can Kiln." when it never could; "Kiln can watch the camera
-      for them once a print is running." before a print;
+      for them once a print is running." before a print; and the gaps
+      alone, with no word about Kiln, on a wire that carries no
+      ``kiln_can_watch_now`` bucket (an older kiln-pro, or a block
+      composed with no print in hand) -- it cannot say what a watch would
+      add on this print, so it vouches for nothing;
     * no gaps, Kiln could add a camera watch on top -- "Your X1 watches
       for spaghetti itself." with ``ask`` "Kiln can add a camera watch too";
     * no gaps, nothing to add -- "Watched by your A1 and Kiln.", or why
@@ -1881,6 +1885,13 @@ def coverage_watching_sentence(
         offer = [c for c in gaps if c in kiln_now]
         if offer:
             return _said(f"{head}.", f"Kiln can watch the camera for {_them(offer, gaps)}", gaps, offer)
+        if "kiln_can_watch_now" not in by_status:
+            # No "now" bucket on the wire: whether a watch would add these
+            # on this print is a fact this block does not carry, and
+            # "neither can Kiln" read false beside a watch_print that
+            # could.  The gaps are true on their own; the details still
+            # list what Kiln could add by another door.
+            return _said(f"{head}.", None, gaps, [])
         later = [c for c in gaps if c in kiln_can]
         if later and printing is False:
             text = f"{head}. Kiln can watch the camera for {_them(later, gaps)} once a print is running."
