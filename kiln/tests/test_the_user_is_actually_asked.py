@@ -292,10 +292,33 @@ def test_the_question_is_answerable_on_its_own():
         printer_name="workshop",
         extra={"material": "PLA"},
     )
-    assert "dragon.stl" in msg
+    # Named the way a person names it: the suffix they never typed is gone.
+    assert "“dragon”" in msg and "dragon.stl" not in msg
     assert "workshop" in msg
     assert "PLA" in msg
     assert "slice_and_print" in msg
+
+
+@pytest.mark.parametrize(
+    ("file_name", "person_reads"),
+    [
+        ("consent_test_cube.gcode.3mf", "consent test cube"),
+        ("/Users/someone/prints/Benchy (1).3mf", "Benchy (1)"),
+        ("plate_1.gcode", "plate 1"),
+        ("bracket.STEP", "bracket"),
+        ("my  part__v2.obj", "my part v2"),
+        ("tab\there\x07.stl", "tab here"),
+        # A name chosen to read backwards on the line a person approves.
+        ("invoice\u202egnp.stl", "invoicegnp"),
+        # Only a print file's own suffixes go.
+        ("notes.txt", "notes.txt"),
+        # Never empty: a name with nothing left is shown as it is.
+        ("___.stl", "___.stl"),
+        (".3mf", ".3mf"),
+    ],
+)
+def test_a_print_file_is_named_the_way_a_person_names_it(file_name, person_reads):
+    assert print_consent.display_name(file_name) == person_reads
 
 
 def test_the_question_does_not_claim_to_show_the_model():
@@ -628,7 +651,7 @@ def test_a_file_the_served_side_cannot_describe_gets_no_built_row(monkeypatch):
     finally:
         print_consent.register_print_description_hook(None)
     assert "Built:" not in _ask.last_message
-    assert "benchy.3mf" in _ask.last_message
+    assert "“benchy”" in _ask.last_message
 
 
 def test_a_describing_hook_that_fails_does_not_stop_the_question(monkeypatch):

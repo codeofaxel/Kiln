@@ -89,19 +89,26 @@ def _api_base() -> str:
         return "https://api.kiln3d.com"
 
 
-def _cache_get(sha: str) -> tuple[str, float] | None:
+def _cache_get(sha: str, min_life_s: float = _REUSE_FLOOR_S) -> tuple[str, float] | None:
     """The live entry for these bytes, or ``None``.
 
     Returns the whole entry rather than just the URL so a caller never has to
     read ``_cache`` a second time: tools run in a thread pool, and a second
     lookup can find the key already evicted by another thread.
+
+    *min_life_s* is how long the link must still have for THIS caller.  An
+    entry below :data:`_REUSE_FLOOR_S` is no use to anyone and is dropped;
+    one merely short of a longer ask is left for the callers it still suits.
     """
     hit = _cache.get(sha)
     if not hit:
         return None
     url, expires_at = hit
-    if expires_at - time.time() <= _REUSE_FLOOR_S:
+    left = expires_at - time.time()
+    if left <= _REUSE_FLOOR_S:
         _cache.pop(sha, None)
+        return None
+    if left < min_life_s:
         return None
     return url, expires_at
 
@@ -202,7 +209,7 @@ def _issued(path: Path, url: str, expires_at: float) -> None:
         logger.debug("stage link evidence not recorded", exc_info=True)
 
 
-def _refused(path: Path, reason: str) -> None:
+def _refused(path: Path, reason: str, evidence: bool = True) -> None:
     """No link, and this door says why — the record a PNG-only sign-off
     needs, written by the door and never by the caller.
 
@@ -210,9 +217,12 @@ def _refused(path: Path, reason: str) -> None:
     :func:`stage_link_for` comes through here, so the log names every
     reason exactly once and :func:`last_refusal` reads the same record.
     A ``None`` with no trace anywhere is how a whole day of missing links
-    went unexplained (2026-09-19).
+    went unexplained (2026-09-19).  *evidence* False logs the reason and
+    records nothing (see :func:`stage_link_for`).
     """
     logger.debug("stage link refused (%s): %s", reason, path.name)
+    if not evidence:
+        return
     try:
         from kiln.preview_evidence import record_url_refusal
 
@@ -305,19 +315,45 @@ def last_refusal(mesh_path: str | os.PathLike[str]) -> str | None:
 
 
 
-def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
+def stage_link_for(
+    mesh_path: str | os.PathLike[str],
+    *,
+    evidence: bool = True,
+    bearer: str | None = None,
+    min_life_s: float | None = None,
+) -> dict[str, Any] | None:
     """Return ``{"viewer_url", "expires_at"}`` for a local mesh, or ``None``.
 
     ``None`` covers every ordinary reason there is no link — opted out, not
     signed in, file missing or not a mesh, too large, network down, API
     unhappy.  None of those are worth interrupting a caller over: the
     preview image the caller already has is the floor.
+
+    *evidence* False asks for the same link without writing the preview
+    record (:mod:`kiln.preview_evidence`) — neither the link nor why there
+    is none.  For a link handed somewhere other than the agent's own
+    result, such as the card a print's ask puts on the account: nobody on
+    this machine has been shown it, and the print gate reads that record
+    as proof the file WAS shown, or as the reason a picture may stand in.
+
+    *bearer* uploads as that credential rather than the one
+    :func:`kiln.auth_session.resolve_api_bearer` picks, for a caller whose
+    link must belong to one account: the stage on an ask's card is kept
+    only when its link was minted for the account asking, and a license
+    key in the environment would mint it for another.  A link cached under
+    any other credential is never handed back for it.
+
+    *min_life_s* is how long a cached link must still have to be reused
+    (:data:`_REUSE_FLOOR_S` unless given): a caller that hands the link to
+    something that lives longer asks for more, and gets a fresh upload —
+    cheap, since the upload is content-addressed — when the cached one
+    would die first.
     """
     global _REFUSED_BEARER
 
     path = Path(mesh_path)
     if (os.environ.get(_OPT_OUT_ENV) or "").strip().lower() in {"1", "true", "yes"}:
-        _refused(path, "opted_out")
+        _refused(path, "opted_out", evidence)
         return None
 
     try:
@@ -327,7 +363,7 @@ def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
     except OSError:
         return None
     if size <= 0 or size > _MAX_UPLOAD_BYTES:
-        _refused(path, "too_large" if size > 0 else "empty")
+        _refused(path, "too_large" if size > 0 else "empty", evidence)
         return None
 
     sha = _sha256_of(path)
@@ -350,24 +386,34 @@ def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
     # The slice is too: a re-slice between calls must not serve a link
     # still wearing the previous slice's tower.
     cache_key = _stage_key(sha, printer_id, slice_tag)
-    cached = _cache_get(cache_key)
+    if bearer is not None:
+        # Filed under who minted it as well, so a link made for another
+        # credential is never handed back to a caller that named its own.
+        cache_key += ":as:" + hashlib.sha256(bearer.encode("utf-8")).hexdigest()[:16]
+    if min_life_s is None:
+        cached = _cache_get(cache_key)
+    else:
+        cached = _cache_get(cache_key, max(_REUSE_FLOOR_S, float(min_life_s)))
     if cached:
         # Same bytes already staged — the sixteen-pose case, and the
         # re-render-an-unchanged-design case, both land here.
-        _issued(path, cached[0], cached[1])
+        if evidence:
+            _issued(path, cached[0], cached[1])
         return {"viewer_url": cached[0], "expires_at": cached[1], "cached": True}
 
-    try:
-        from kiln.auth_session import resolve_api_bearer
+    if bearer is not None:
+        token = bearer.strip()
+    else:
+        try:
+            from kiln.auth_session import resolve_api_bearer
 
-        bearer = resolve_api_bearer()
-    except Exception:
-        _refused(path, "signed_out")
-        return None
-    token = getattr(bearer, "token", "") or ""
+            token = getattr(resolve_api_bearer(), "token", "") or ""
+        except Exception:
+            _refused(path, "signed_out", evidence)
+            return None
     if not token:
         # Signed out.  Nothing to scope a link to; not a failure.
-        _refused(path, "signed_out")
+        _refused(path, "signed_out", evidence)
         return None
     if token == _REFUSED_BEARER:
         # The server already refused THIS bearer this process (expired or
@@ -376,13 +422,13 @@ def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
         # four multi-megabyte uploads refused inside one decorate call,
         # each spending upload time inside a live tool request.  A fresh
         # sign-in mints a different token and clears the skip by value.
-        _refused(path, "session_refused")
+        _refused(path, "session_refused", evidence)
         return None
 
     try:
         import httpx
     except ImportError:
-        _refused(path, "no_httpx")
+        _refused(path, "no_httpx", evidence)
         return None
 
     # A real upload, so the sidecar is worth building now: one parse of the
@@ -413,7 +459,7 @@ def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
         # here -- a preview never opens a second socket to find out.
         from kiln.served_answer import classify_transport_error
 
-        _refused(path, classify_transport_error(exc, probe=False).cause)
+        _refused(path, classify_transport_error(exc, probe=False).cause, evidence)
         return None
 
     if resp.status_code in (401, 403):
@@ -422,20 +468,20 @@ def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
         # paying for the same refusal again.
         _REFUSED_BEARER = token
         logger.debug("stage link refused: HTTP %s (bearer remembered)", resp.status_code)
-        _refused(path, f"http_{resp.status_code}")
+        _refused(path, f"http_{resp.status_code}", evidence)
         return None
     if resp.status_code != 200:
         logger.debug("stage link refused: HTTP %s", resp.status_code)
-        _refused(path, f"http_{resp.status_code}")
+        _refused(path, f"http_{resp.status_code}", evidence)
         return None
     try:
         body = resp.json()
     except Exception:  # noqa: BLE001
-        _refused(path, "bad_response")
+        _refused(path, "bad_response", evidence)
         return None
     url = (body or {}).get("viewer_url")
     if not isinstance(url, str) or not url:
-        _refused(path, "bad_response")
+        _refused(path, "bad_response", evidence)
         return None
 
     expires_at = body.get("viewer_expires_at")
@@ -445,7 +491,8 @@ def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
             expires_in if isinstance(expires_in, (int, float)) else 1800
         )
     _cache_put(cache_key, url, float(expires_at))
-    _issued(path, url, float(expires_at))
+    if evidence:
+        _issued(path, url, float(expires_at))
     return {"viewer_url": url, "expires_at": float(expires_at), "cached": False}
 
 

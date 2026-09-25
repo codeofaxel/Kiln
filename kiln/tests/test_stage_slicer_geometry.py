@@ -318,6 +318,7 @@ class TestEveryDoor:
         mesh = _box(tmp_path / "part.stl")
         gcode = _gcode_for_box(tmp_path / "part.gcode")
         monitor_twin.note_sliced(mesh, gcode)
+        monkeypatch.delenv(stage_link._OPT_OUT_ENV, raising=False)  # the transport below is fake
         monkeypatch.setattr(stage_link, "_stage_printer_id", lambda: None)
         monkeypatch.setattr(
             "kiln.auth_session.resolve_api_bearer",
@@ -355,6 +356,7 @@ class TestEveryDoor:
         mesh = _box(tmp_path / "part.stl")
         first = _gcode_for_box(tmp_path / "first.gcode")
         monitor_twin.note_sliced(mesh, first)
+        monkeypatch.delenv(stage_link._OPT_OUT_ENV, raising=False)  # the transport below is fake
         monkeypatch.setattr(stage_link, "_stage_printer_id", lambda: None)
         monkeypatch.setattr(
             "kiln.auth_session.resolve_api_bearer",

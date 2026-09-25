@@ -34,13 +34,21 @@ from datetime import datetime, timezone
 from typing import Any
 
 from kiln.gcode import (
+    _MAX_SCAN_BYTES,
     slicer_filament_totals,
     slicer_filament_types,
     slicer_layer_count,
     slicer_material_label,
     slicer_print_time,
 )
-from kiln.gcode_metadata import read_head, read_head_and_tail, unpacks_in_chunks
+from kiln.gcode_metadata import (
+    head_and_tail,
+    read_head,
+    read_head_and_tail,
+    read_member_text,
+    sliced_gcode_member,
+    unpacks_in_chunks,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -617,6 +625,33 @@ def extract_metadata(file_path: str) -> FileMetadata:
             file_type="unknown",
             file_size_bytes=_safe_file_size(file_path),
         )
+
+
+def sliced_gcode_lines(file_path: str) -> list[str] | None:
+    """The lines a slicer writes its own figures in, of the G-code
+    *file_path* prints: a G-code file's own top and end
+    (:func:`kiln.gcode_metadata.read_head_and_tail`), or those of the plate
+    a sliced 3MF carries (:func:`kiln.gcode_metadata.sliced_gcode_member`,
+    unpacked by :func:`kiln.gcode_metadata.read_member_text`) — the same
+    window every reader of a file's own figures sees.
+
+    ``None`` for a file that prints no G-code of its own — a mesh, a 3MF
+    holding only a model — and for one that cannot be read, so a caller
+    can never take a figure from anything but a slice.  Never raises.
+    """
+    try:
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext in _GCODE_EXTENSIONS:
+            return read_head_and_tail(file_path)
+        if ext in _3MF_EXTENSIONS:
+            with zipfile.ZipFile(file_path) as zf:
+                member = sliced_gcode_member(zf)
+                if member is None:
+                    return None
+                return head_and_tail(read_member_text(zf, member, _MAX_SCAN_BYTES).splitlines())
+    except Exception as exc:  # noqa: BLE001 — an unreadable file carries no figures
+        logger.debug("No sliced G-code read from %s: %s", os.path.basename(str(file_path)), exc)
+    return None
 
 
 # ---------------------------------------------------------------------------

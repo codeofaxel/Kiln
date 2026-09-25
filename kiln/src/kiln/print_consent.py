@@ -80,7 +80,9 @@ account:<id>#<record>``); and nothing where nothing is known.
 from __future__ import annotations
 
 import logging
+import os
 import time
+import unicodedata
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
@@ -773,6 +775,48 @@ def consent_for(
     )
 
 
+#: The print-file suffixes a person never typed, dropped from the name they
+#: read.  Longest first, so ``x.gcode.3mf`` loses both.
+_PRINT_FILE_SUFFIXES = (".gcode.3mf", ".3mf", ".gcode", ".stl", ".obj", ".step", ".stp")
+
+#: Characters that change how the text AROUND them is drawn without being
+#: seen themselves — the bidirectional marks, embeddings, overrides and
+#: isolates.  A file's name is chosen by whoever wrote the file, and one of
+#: these can make a name read backwards on the very line a person approves.
+_DIRECTION_CONTROLS = frozenset(
+    "\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
+)
+
+
+def display_name(file_name: str) -> str:
+    """How a person names a print file: ``consent_test_cube.gcode.3mf`` is
+    ``consent test cube``.
+
+    The file's own name, without the print-file suffix they never typed,
+    underscores read as spaces, and whitespace — or anything that cannot be
+    seen, which a notification or a toast would choke on — folded to single
+    spaces and trimmed.  Never empty for a real name: one with nothing left
+    is shown as its base name.
+
+    The one rule for every consent door a PERSON reads: the approval
+    dialog, the code's banner, and the ask the account shows as a card.  A
+    result written for the agent keeps the exact file name, because the
+    agent has to hand that name back.
+    """
+    base = os.path.basename(str(file_name or "").strip())
+    stem = base
+    for suffix in _PRINT_FILE_SUFFIXES:
+        if stem.lower().endswith(suffix) and len(stem) > len(suffix):
+            stem = stem[: -len(suffix)]
+            break
+    kept = "".join(
+        " " if ch == "_" or unicodedata.category(ch) == "Cc" else ch
+        for ch in stem
+        if ch not in _DIRECTION_CONTROLS
+    )
+    return " ".join(kept.split()) or base
+
+
 def describe_print_request(
     tool: str,
     *,
@@ -791,6 +835,11 @@ def describe_print_request(
     is explicit that Kiln is describing the job rather than showing it —
     the alternative is a dialog that implies a preview it cannot render.
 
+    The file is named the way a person names it (:func:`display_name`).
+    *printer_name* and *window_printer* are shown as given, so a caller
+    that knows the person's name for the machine passes that, never Kiln's
+    ``default`` alias.
+
     *window_printer* is the one machine a "for a while" answer would
     cover.  When given, the question says so and says how the window is
     closed, because a window a person cannot see the edge of is not one
@@ -799,7 +848,8 @@ def describe_print_request(
     say so.
     """
     where = f" on {printer_name}" if printer_name else " on the default printer"
-    lines = [f"Start printing {file_name or 'this file'}{where}?"]
+    named = display_name(file_name)
+    lines = [f"Start printing “{named}”{where}?" if named else f"Start printing this file{where}?"]
     for key, value in (extra or {}).items():
         if value in (None, "", []):
             continue

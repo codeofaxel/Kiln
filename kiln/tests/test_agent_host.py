@@ -251,6 +251,37 @@ def test_no_session_is_no_host_not_unknown():
     assert agent_host.describe(SimpleNamespace(), SimpleNamespace(session=None)) is None
 
 
+@pytest.mark.parametrize(
+    ("client", "person"),
+    [
+        (CLAUDE_DESKTOP_CHAT["clientInfo"], "Claude"),
+        (CLAUDE_CODE["clientInfo"], "Claude"),
+        (COWORK["clientInfo"], "Claude"),
+        # The Cowork label is the person's name for Kiln, not the app asking.
+        ({"name": "local-agent-mode-my cursor printer", "version": "1.0.0"}, "Claude"),
+        # Cursor's own name carries the editor it is built on; it is Cursor.
+        (CURSOR["clientInfo"], "Cursor"),
+        ({"name": "Visual Studio Code", "version": "1.105.0"}, "VS Code"),
+        ({"name": "codex-mcp-client", "version": "0.40.0"}, "Codex"),
+        ({"name": "openclaw", "version": "1.0.0"}, "OpenClaw"),
+        ({"name": "Windsurf", "version": "1.0.0"}, "Windsurf"),
+        ({"name": "probe-host", "version": "9.9"}, ""),
+    ],
+)
+def test_the_host_is_named_the_way_a_person_names_it(client, person):
+    """For the words a person reads ("Claude asked from your Mac"): an app
+    they would recognise, or nothing — never a guess."""
+    from kiln.mcp_compat import client_info
+
+    params = {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": client}
+    info = client_info(SimpleNamespace(), _ctx(params))
+    assert agent_host.host_name_for_a_person(info) == person
+
+
+def test_no_handshake_names_no_host():
+    assert agent_host.host_name_for_a_person(None) == ""
+
+
 def test_tokens_are_map_keys_not_free_text():
     assert agent_host.token("Claude Desktop!!") == "claude-desktop"
     assert agent_host.token("  ") == "unknown"

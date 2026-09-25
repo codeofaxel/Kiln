@@ -63,6 +63,12 @@ os.environ.setdefault("KILN_SCREEN_CODE", "0")
 # A test host answers the approval dialog in no time; the too-fast rule is
 # tested where it is meant, by setting this back.
 os.environ.setdefault("KILN_DIALOG_MIN_READ_S", "0")
+# No test uploads a mesh to the real API for a stage link.  The moved HOME
+# holds no sign-in, but a KILN_LICENSE_KEY in the environment is a bearer
+# all the same, and the ask to the account asks for a link on every print
+# a signed-in test puts to it.  A test of the link door clears this and
+# fakes the transport itself.
+os.environ.setdefault("KILN_NO_STAGE_LINKS", "1")
 
 # ---------------------------------------------------------------------------
 # Monkey-patch FastMCP to accept unknown kwargs (like ``description``)

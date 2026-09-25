@@ -64,6 +64,7 @@ import tempfile
 import threading
 import time
 import uuid as _uuid_mod
+from collections.abc import Callable
 from contextvars import ContextVar
 from pathlib import Path
 from types import MethodType
@@ -2551,10 +2552,13 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
         )
 
     offer_window, offer_fleet = dialog_offers()
+    # The machine named the way the person names it, in the question and
+    # in the window's edge alike — never Kiln's ``default`` alias.
+    person_printer = _printer_label_for_a_person(aimed)
     message = describe_print_request(
         tool_name,
         file_name=os.path.basename(file_value) or file_value,
-        printer_name=printer_name,
+        printer_name=person_printer,
         extra={
             "material": arguments.get("material"),
             "printer model": arguments.get("printer_id"),
@@ -2565,7 +2569,7 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
                 file_name=file_value, local_path=_local_copy_of(file_value),
             ),
         },
-        window_printer=aimed if offer_window else None,
+        window_printer=person_printer if offer_window else None,
         fleet_offered=offer_fleet,
         terminal_available=not _hosted_now(),
     )
@@ -2610,13 +2614,29 @@ def _host_label(ctx: Any) -> str:
     return ""
 
 
+def _asked_by(ctx: Any) -> str:
+    """The connected host as a person calls it ("Claude"), from its
+    ``clientInfo`` (:func:`kiln.agent_host.host_name_for_a_person`), or
+    ``""``."""
+    with contextlib.suppress(Exception):
+        from kiln.agent_host import host_name_for_a_person
+
+        return host_name_for_a_person(client_info(mcp, ctx))
+    return ""
+
+
 def _printer_label_for_a_person(printer_name: str | None) -> str:
-    """How a person calls this printer on a banner: the name they gave it,
-    or — for Kiln's own ``default`` alias — its model ("Bambu Lab A1"), or
-    "your printer" when the model is not known.  Never the alias itself."""
+    """How a person calls this printer — on the banner, in the dialog, on
+    the account's card: the name they gave it, or — for Kiln's own
+    ``default`` alias — its model ("Bambu Lab A1"), or "your printer" when
+    the model is not known.  Never the alias itself.  The hosted server's
+    own configuration says nothing about a person's machine, so there the
+    alias is always "your printer"."""
     name = str(printer_name or "").strip()
     if name and name.lower() != "default":
         return name
+    if _hosted_now():
+        return "your printer"
     with contextlib.suppress(Exception):
         model = _resolve_printer_model_live(name or None)
         if model:
@@ -2655,9 +2675,10 @@ async def _offer_screen_code(
     if _hosted_now():
         return note_not_asked(fallback)
     file_sha256 = _sha256_if_local(file_value)
+    printer_label = _printer_label_for_a_person(aimed)
     shown = screen_code.issue(
         tool=tool_name, file_name=file_value, file_sha256=file_sha256,
-        printer_name=aimed, host=_host_label(ctx), printer_label=_printer_label_for_a_person(aimed),
+        printer_name=aimed, host=_host_label(ctx), printer_label=printer_label,
     )
     outcome = shown.get("outcome")
     if outcome == screen_code.SHOWN:
@@ -2668,7 +2689,9 @@ async def _offer_screen_code(
     else:
         _audit(tool_name, "consent_code_unavailable", details={"file": file_value, "reason": shown.get("reason")})
         reason = fallback
-    return note_not_asked(reason + await _ask_the_account(tool_name, file_value, aimed, file_sha256))
+    return note_not_asked(reason + await _ask_the_account(
+        tool_name, file_value, aimed, file_sha256, printer_label=printer_label, asked_by=_asked_by(ctx),
+    ))
 
 
 #: What the account's answer is called here: an approval of one print, or
@@ -2777,22 +2800,204 @@ def _still_for_ask(file_value: str) -> tuple[str | None, str, str, str | None]:
     return path, door, case, scratch
 
 
-def _post_the_ask(file_value: str, aimed: str, file_sha256: str):
+#: The longest the printer is asked where it stands, for an ask's card.
+#: Inside the still's own wait, so no ask is posted later for it.
+_ASK_PRINTER_WAIT_S = 3.0
+
+
+class _Aside:
+    """A read for the ask's card, run on its own thread beside the picture.
+
+    :meth:`answer` waits no later than a deadline and gives what came back,
+    or ``None`` — the read then finishes on its own and its answer is
+    dropped.  These reads write nothing and leave nothing to clean up, so
+    all that can outlive the wait is the thread, which ends with its read.
+    """
+
+    def __init__(self, name: str, read: Callable[[], Any]) -> None:
+        self._done = threading.Event()
+        self._value: Any = None
+
+        def run() -> None:
+            try:
+                self._value = read()
+            except Exception:  # noqa: BLE001 — a read that failed says nothing
+                logger.debug("consent: the ask's %s was not read", name, exc_info=True)
+            finally:
+                self._done.set()
+
+        threading.Thread(target=run, name=f"kiln-ask-{name}", daemon=True).start()
+
+    def answer(self, deadline: float) -> Any:
+        """The read's answer when it is back by *deadline* (a
+        :func:`time.monotonic` reading), else ``None``."""
+        return self._value if self._done.wait(max(0.0, deadline - time.monotonic())) else None
+
+
+def _figures_for_ask(local: str | None) -> dict[str, Any]:
+    """What yes costs, from the print file itself: ``print_time_s`` as its
+    slicer wrote it, and ``filament_g`` with ``material`` as Kiln's one
+    material answer weighs the filaments the print uses
+    (:meth:`kiln.cost_estimator.CostEstimator.filament_pricing`) — or ``{}``.
+
+    Only a file that carries its slicer's own figures has any: G-code, or
+    a 3MF holding sliced G-code (:func:`kiln.file_metadata.sliced_gcode_lines`).
+    A mesh has none — nothing is estimated for it, and nothing is borrowed
+    from another slice of the same mesh, so the person never reads a number
+    that is not this print's.  The weight counts only when the slicer's own
+    totals are its source and every filament is weighed as the material the
+    file itself names; a guess at either leaves both out.  Never raises."""
+    out: dict[str, Any] = {}
+    if not local:
+        return out
+    try:
+        from kiln.file_metadata import sliced_gcode_lines
+        from kiln.gcode import slicer_print_time
+
+        lines = sliced_gcode_lines(local)
+        if lines is None:
+            return out
+        printed = slicer_print_time("\n".join(lines))
+        if printed is not None:
+            out["print_time_s"] = printed.seconds
+    except Exception:  # noqa: BLE001 — an unreadable file has no figures
+        logger.debug("consent: the print's time was not read", exc_info=True)
+        return out
+    with contextlib.suppress(Exception):
+        pricing = _get_cost_estimator().filament_pricing(local)
+        if (
+            pricing is not None
+            and pricing.weight_g > 0
+            and pricing.filament_source in ("slicer_header", "3mf")
+            and pricing.material_source == "file"
+        ):
+            out["filament_g"] = pricing.weight_g
+            out["material"] = pricing.material
+    return out
+
+
+def _printer_state_for_ask(aimed: str) -> str:
+    """Where the printer an ask is about stands — ``ready``, ``busy`` or
+    ``offline`` — read the way ``printer_status`` reads it (the adapter the
+    name resolves to, and its ``get_state``), or ``""`` when the read
+    cannot say.  Shown to the person on the card and nothing else: nothing
+    reads it to decide whether the ask is posted or the print may start.
+
+    ``ready`` only from a fresh idle reading; ``busy`` from a machine with
+    work in flight, seen through a fault but never through a reading that
+    has aged out; ``offline`` when Kiln cannot reach it.  A fault, a stale
+    reading, or a printer that refused Kiln's credentials is ``""``.
+    Never raises."""
+    try:
+        from kiln.printers.base import (
+            BUSY_STATES,
+            READY_STATES,
+            UNREACHABLE_STATES,
+            as_status,
+            confirmed_state_of,
+        )
+
+        reading = _resolve_adapter(aimed).get_state()
+    except PrinterError as exc:
+        # The status tool's reading of a printer that did not answer:
+        # unreachable, unless the refusal reads as bad credentials.
+        return "" if _reads_as_auth_failure(str(exc)) else "offline"
+    except Exception:  # noqa: BLE001 — no printer, or no reading: nothing to say
+        return ""
+    headline = as_status(getattr(reading, "state", None))
+    if headline in READY_STATES:
+        return "ready"
+    if as_status(confirmed_state_of(reading)) in BUSY_STATES:
+        return "busy"
+    if headline in UNREACHABLE_STATES:
+        return "offline"
+    return ""
+
+
+#: The print files whose own bytes the account's stage opens: the hosted
+#: viewer serves STL and 3MF.  G-code carries no mesh to draw.
+_ASK_STAGE_SUFFIXES = (".stl", ".3mf")
+#: How much longer than the ask itself its stage link must live: the card
+#: loses its stage when the link runs out, so a link about to die first is
+#: replaced by a fresh one rather than reused.
+_ASK_STAGE_MARGIN_S = 60.0
+
+
+def _stage_url_for_ask(local: str | None, account: str) -> str:
+    """The hosted stage's link for the print file itself, or ``""``.
+
+    Only for an STL or 3MF the stage draws AS ITSELF
+    (:func:`kiln.preview_evidence.stage_file_for`) — a mesh, or a sliced
+    3MF carrying its own model — so the stage a person opens from the ask
+    shows exactly the bytes the ask's ``file_sha256`` names: never the
+    design mesh a print file was sliced from, nor the 1 mm placeholder some
+    print archives carry.
+
+    Uploaded as *account*, the signed-in session the ask itself is posted
+    with, because the account keeps a stage only when its link was minted
+    for that account; and only reused while it will outlive the ask.
+    Asked with ``evidence=False``, because a link on the account's card is
+    not a preview anyone on this machine has been shown, and the print gate
+    reads that record.  Never raises."""
+    if not local or not account or not local.lower().endswith(_ASK_STAGE_SUFFIXES):
+        return ""
+    with contextlib.suppress(Exception):
+        from kiln.bridge_client import ASK_LIFETIME_S
+        from kiln.preview_evidence import stage_file_for
+        from kiln.stage_link import stage_link_for
+
+        staged, _why = stage_file_for(local)
+        if staged and os.path.abspath(staged) == os.path.abspath(local):
+            link = stage_link_for(
+                local, evidence=False, bearer=account, min_life_s=ASK_LIFETIME_S + _ASK_STAGE_MARGIN_S,
+            )
+            url = (link or {}).get("viewer_url")
+            return url if isinstance(url, str) else ""
+    return ""
+
+
+def _post_the_ask(
+    file_value: str, aimed: str, file_sha256: str, *, printer_label: str = "", asked_by: str = "",
+):
     """The blocking half of :func:`_ask_the_account`, run off the loop:
-    ``(ask, picture_case)``.  Nothing is painted for an ask already held
-    or for a machine nobody signed in."""
+    ``(ask, picture_case)``.  Nothing is painted, read or linked for an
+    ask already held or for a machine nobody signed in.
+
+    The card's own reads — the print file's figures, where the printer
+    stands, the stage link — run beside the picture and inside the
+    picture's own wait (:data:`_ASK_STILL_WAIT_S`; the printer no longer
+    than :data:`_ASK_PRINTER_WAIT_S`), so no ask waits longer than an ask
+    always could.  Whatever is not back by then is left off the card."""
     from kiln import bridge_client
 
-    if bridge_client.live_ask(file_sha256, aimed) is not None or not bridge_client.account_bearer():
+    held = bridge_client.live_ask(file_sha256, aimed) is not None
+    account = "" if held else bridge_client.account_bearer()
+    if not account:
         return bridge_client.ask_the_account(
             file_sha256=file_sha256, file_name=file_value, printer_name=aimed,
             picture_path=None, shown_door="",
         ), ""
+    started = time.monotonic()
+    local = _local_copy_of(file_value)
+    figures = _Aside("figures", lambda: _figures_for_ask(local))
+    standing = _Aside("printer", lambda: _printer_state_for_ask(aimed))
+    stage = _Aside("stage", lambda: _stage_url_for_ask(local, account))
     picture, door, case, scratch = _still_for_ask(file_value)
     try:
+        deadline = started + _ASK_STILL_WAIT_S
+        found = figures.answer(deadline) or {}
+        card = bridge_client.AskCard(
+            printer_label=printer_label,
+            asked_by=asked_by,
+            print_time_s=found.get("print_time_s"),
+            filament_g=found.get("filament_g"),
+            material=found.get("material") or "",
+            printer_state=standing.answer(min(deadline, started + _ASK_PRINTER_WAIT_S)) or "",
+            stage_url=stage.answer(deadline) or "",
+        )
         ask = bridge_client.ask_the_account(
             file_sha256=file_sha256, file_name=file_value, printer_name=aimed,
-            picture_path=picture, shown_door=door,
+            picture_path=picture, shown_door=door, card=card,
         )
     finally:
         if scratch:
@@ -2800,16 +3005,23 @@ def _post_the_ask(file_value: str, aimed: str, file_sha256: str):
     return ask, case
 
 
-async def _ask_the_account(tool_name: str, file_value: str, aimed: str, file_sha256: str) -> str:
+async def _ask_the_account(
+    tool_name: str, file_value: str, aimed: str, file_sha256: str,
+    *, printer_label: str = "", asked_by: str = "",
+) -> str:
     """Put this print to the signed-in account, where any signed-in
     browser at kiln3d.com/monitor can answer it.  Returns the tag the
     not-asked reason carries (``:pending=<id>``), or ``""`` when nothing
     is held: not signed in, no local copy to hash, the server did not
-    answer, or it refused the ask (audited).  Never raises."""
+    answer, or it refused the ask (audited).  *printer_label* and
+    *asked_by* are how the person's card names the printer and the app
+    that asked.  Never raises."""
     if not file_sha256:
         return ""
     try:
-        ask, picture_case = await asyncio.to_thread(_post_the_ask, file_value, aimed, file_sha256)
+        ask, picture_case = await asyncio.to_thread(
+            _post_the_ask, file_value, aimed, file_sha256, printer_label=printer_label, asked_by=asked_by,
+        )
     except Exception:  # noqa: BLE001 — an ask that could not be put is no ask
         logger.debug("consent: account ask failed", exc_info=True)
         return ""
@@ -2821,6 +3033,7 @@ async def _ask_the_account(tool_name: str, file_value: str, aimed: str, file_sha
             details={
                 "file": file_value, "printer": aimed, "reason": ask.refused,
                 "picture_sent": ask.picture_sent, "picture_source": picture_case,
+                "card": list(ask.card_sent),
             },
         )
         return ""
@@ -2830,6 +3043,7 @@ async def _ask_the_account(tool_name: str, file_value: str, aimed: str, file_sha
             details={
                 "file": file_value, "printer": aimed, "pending": ask.id,
                 "picture_sent": ask.picture_sent, "picture_source": picture_case, "repeat": ask.repeat,
+                "card": list(ask.card_sent),
             },
         )
     return NOT_ASKED_PENDING_TAG + ask.id

@@ -170,6 +170,40 @@ def _host_name(info: Any) -> str:
     return name
 
 
+#: How a person calls the app that is asking, read off the host's own name
+#: token (:func:`_host_name`, so the Cowork label is already gone).  A pair
+#: matches when its word appears anywhere in the token, and the first match
+#: wins, so ``cursor-vscode`` is Cursor before it is VS Code.  Claude's are
+#: the names measured above; the rest are the apps' own names, which is the
+#: word their hosts carry.  Anything else is ``""``, never a guess.
+_PERSON_NAMES: tuple[tuple[str, str], ...] = (
+    ("local-agent-mode", "Claude"),
+    ("claude", "Claude"),
+    ("codex", "Codex"),
+    ("cursor", "Cursor"),
+    ("windsurf", "Windsurf"),
+    ("openclaw", "OpenClaw"),
+    ("gemini", "Gemini"),
+    ("visual-studio-code", "VS Code"),
+    ("vscode", "VS Code"),
+)
+
+
+def host_name_for_a_person(info: Any) -> str:
+    """The connected host as a person calls it — ``Claude``, ``Cursor``,
+    ``VS Code`` — from its ``clientInfo``, or ``""`` for a host this does
+    not know or no ``clientInfo`` at all.
+
+    For the words a person reads ("Claude asked from your Mac"); the
+    telemetry keeps the raw token (:class:`AgentHost`).  Never raises.
+    """
+    try:
+        name = _host_name(info)
+    except Exception:  # noqa: BLE001 — a host that cannot be named is unnamed
+        return ""
+    return next((label for word, label in _PERSON_NAMES if word in name), "")
+
+
 def _is_claude_code(name: str, env: Any) -> bool:
     """Claude Code's markers apply: the host names itself Claude Code AND
     the marker is present.  Either alone is not enough — the name without

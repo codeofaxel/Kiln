@@ -717,6 +717,9 @@ _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 #: How long this process trusts its own memo of a live ask when the
 #: server's answer carried no readable end.
 _ASK_MEMO_FALLBACK_S = 60.0
+#: How long the account holds an ask before it runs out (the route's own
+#: ten minutes).  Anything the ask puts on the person's card must outlive it.
+ASK_LIFETIME_S = 600.0
 
 
 @dataclass(frozen=True)
@@ -735,6 +738,115 @@ class AccountAsk:
     #: The server's refusal code when it would not hold the ask
     #: (``""`` when it did).
     refused: str = ""
+    #: The names of the card's fields the post carried (:class:`AskCard`,
+    #: plus ``display_name`` and ``asked_from``), for the audit row.
+    card_sent: tuple[str, ...] = ()
+
+
+#: The bounds of the card's fields, the route's own.
+_CARD_TEXT_MAX = 120
+_CARD_ASKED_BY_MAX = 40
+_CARD_MATERIAL_MAX = 24
+_CARD_PRINT_TIME_MAX_S = 30 * 24 * 3600
+_CARD_FILAMENT_MAX_G = 10_000.0
+_CARD_PRINTER_STATES = frozenset({"ready", "busy", "offline"})
+_CARD_ASKED_FROM = frozenset({"mac", "windows", "linux"})
+
+
+def _card_text(value: Any) -> str:
+    """*value* as one line of text for the card: whitespace and anything
+    unprintable folded to single spaces, trimmed, or ``""``."""
+    if not isinstance(value, str):
+        return ""
+    import unicodedata
+
+    return " ".join("".join(" " if unicodedata.category(c) == "Cc" else c for c in value).split())
+
+
+def _fits(text: str, limit: int) -> str:
+    """*text* no longer than *limit* characters: as it is when it fits,
+    else cut on the last word that fits and marked with an ellipsis."""
+    if len(text) <= limit:
+        return text
+    cut = text[: limit - 1].rstrip()
+    head, _, _tail = cut.rpartition(" ")
+    return (head if len(head) >= limit // 2 else cut) + "…"
+
+
+@dataclass(frozen=True)
+class AskCard:
+    """What the person's card says about a print, beside the fields that
+    bind their yes to it: the printer in their words, which app asked, what
+    yes costs, where the printer stands, and a stage to turn the part over
+    on.  Shown, never decided by: nothing here changes whether the ask is
+    held or what a yes covers.
+
+    Every field is optional and sent only when it carries a value inside
+    the route's bounds (:meth:`fields`); an unknown is left out rather than
+    sent as a guess.
+    """
+
+    #: How the person calls the printer ("Bambu Lab A1"), never Kiln's alias.
+    printer_label: str = ""
+    #: The app that asked, as a person calls it ("Claude").
+    asked_by: str = ""
+    #: The whole print's time, as the print file's slicer wrote it.
+    print_time_s: int | None = None
+    #: The filament the print file uses, in grams.
+    filament_g: float | None = None
+    #: What that filament is ("PLA", "PLA + PETG").
+    material: str = ""
+    #: ``ready``, ``busy`` or ``offline``, read from the printer just now.
+    printer_state: str = ""
+    #: The hosted stage's link for the print file's own bytes.
+    stage_url: str = ""
+
+    def fields(self) -> dict[str, Any]:
+        """The fields to send: each one present only when it holds a value
+        the route accepts.  Text is trimmed to one line; a name too long is
+        cut with an ellipsis, while a figure or a word out of bounds is left
+        out, because cutting it would make it say something else."""
+        out: dict[str, Any] = {}
+        label = _fits(_card_text(self.printer_label), _CARD_TEXT_MAX)
+        if label:
+            out["printer_label"] = label
+        asked_by = _card_text(self.asked_by)
+        if asked_by and len(asked_by) <= _CARD_ASKED_BY_MAX:
+            out["asked_by"] = asked_by
+        seconds = self.print_time_s
+        if isinstance(seconds, int) and not isinstance(seconds, bool) and 1 <= seconds <= _CARD_PRINT_TIME_MAX_S:
+            out["print_time_s"] = seconds
+        grams = self.filament_g
+        if (
+            isinstance(grams, (int, float)) and not isinstance(grams, bool)
+            and 0 < grams <= _CARD_FILAMENT_MAX_G
+        ):
+            out["filament_g"] = round(float(grams), 2)
+        material = _card_text(self.material)
+        if material and len(material) <= _CARD_MATERIAL_MAX:
+            out["material"] = material
+        if self.printer_state in _CARD_PRINTER_STATES:
+            out["printer_state"] = self.printer_state
+        url = self.stage_url if isinstance(self.stage_url, str) else ""
+        if url.startswith(("https://", "http://")) and not any(c.isspace() for c in url):
+            out["stage_url"] = url
+        return out
+
+
+def asked_from(platform: str | None = None) -> str:
+    """The kind of computer an ask comes from, as the card names it —
+    ``mac``, ``windows`` or ``linux`` — or ``""`` for anything else.
+    *platform* is ``sys.platform`` unless given."""
+    import sys
+
+    word = str(sys.platform if platform is None else platform).lower()
+    if word == "darwin":
+        return "mac"
+    if word.startswith(("win32", "cygwin", "msys")):
+        return "windows"
+    if word.startswith("linux"):
+        return "linux"
+    return ""
 
 
 @dataclass(frozen=True)
@@ -920,6 +1032,7 @@ def _observe_in_background(api: str, bearer: str, nonce: str) -> None:
 
 def ask_the_account(
     *, file_sha256: str, file_name: str, printer_name: str, picture_path: str | None, shown_door: str,
+    card: AskCard | None = None,
 ) -> AccountAsk | None:
     """``POST /api/print-authority/pending``: ask the signed-in account
     about this print, once while an ask is live.
@@ -928,7 +1041,11 @@ def ask_the_account(
     ``shown_pixels_sha`` (the sha256 of the picture bytes sent, or ``""``),
     ``shown_door``, ``picture_png_b64`` (``""`` when there is none),
     ``machine_fingerprint`` (this install's heartbeat device) and
-    ``observe_nonce``; reads ``pending.id``, ``pending.expires_at`` and
+    ``observe_nonce``; and, for the person's card, ``display_name`` (the
+    file as a person names it, :func:`kiln.print_consent.display_name`),
+    ``asked_from`` (:func:`asked_from`) and whichever of *card*'s fields
+    hold a value (:meth:`AskCard.fields`) — a field with nothing honest to
+    say is left out.  Reads ``pending.id``, ``pending.expires_at`` and
     ``pending.repeat``.  After a held ask the machine is shown to the relay
     with the nonce (:func:`observe_addresses`).
 
@@ -959,6 +1076,8 @@ def ask_the_account(
     import hashlib
     import secrets
 
+    from kiln.print_consent import display_name
+
     picture = picture_for_ask(picture_path)
     nonce = secrets.token_urlsafe(18)
     body = {
@@ -971,6 +1090,16 @@ def ask_the_account(
         "machine_fingerprint": machine,
         "observe_nonce": nonce,
     }
+    extra: dict[str, Any] = {}
+    shown = _fits(_card_text(display_name(str(file_name or ""))), _CARD_TEXT_MAX)
+    if shown:
+        extra["display_name"] = shown
+    where = asked_from()
+    if where in _CARD_ASKED_FROM:
+        extra["asked_from"] = where
+    with contextlib.suppress(Exception):  # a card that cannot be read is a plainer card
+        extra.update((card or AskCard()).fields())
+    body.update(extra)
     answered = _account_call("POST", "/pending", bearer, json=body)
     if answered is None:
         return None
@@ -979,13 +1108,14 @@ def ask_the_account(
     if not (200 <= status < 300) or not str(held.get("id") or ""):
         code = str(data.get("error") or f"http_{status}")
         logger.debug("account: ask not held (%s)", code)
-        return AccountAsk(picture_sent=picture is not None, refused=code)
+        return AccountAsk(picture_sent=picture is not None, refused=code, card_sent=tuple(sorted(extra)))
     expires_at = _epoch(held.get("expires_at"))
     ask = AccountAsk(
         id=str(held["id"]),
         expires_at=expires_at if expires_at is not None else time.time() + _ASK_MEMO_FALLBACK_S,
         repeat=bool(held.get("repeat")),
         picture_sent=picture is not None,
+        card_sent=tuple(sorted(extra)),
     )
     with _ask_lock:
         _asks[_ask_key(file_sha256, printer_name)] = ask

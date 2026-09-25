@@ -371,6 +371,15 @@ class TestTheBannerReadsForAPerson:
         _title, subtitle, _message = screen_code.banner_text(banners[0])
         assert "benchy" in subtitle and ".3mf" not in subtitle
 
+    def test_a_print_files_name_reads_as_words(self, banners, monkeypatch):
+        """The same rule the dialog and the account's card use
+        (:func:`kiln.print_consent.display_name`): underscores are spaces,
+        and a print archive loses both of its suffixes."""
+        monkeypatch.setattr(server, "_resolve_printer_model_live", lambda name=None: "bambu_a1")
+        _ask(file_name="consent_test_cube.gcode.3mf", printer_name="default")
+        _title, subtitle, _message = screen_code.banner_text(banners[0])
+        assert subtitle == "consent test cube on Bambu Lab A1"
+
 
 def test_every_door_a_window_opens_through_has_its_own_label():
     """A window opened by a typed code once read "opened via terminal" —

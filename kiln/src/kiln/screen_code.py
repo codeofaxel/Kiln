@@ -171,31 +171,22 @@ def screen_available() -> bool:
     return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
 
 
-#: What a file is called on the banner: its name, without the print-file
-#: suffix a person never typed.  Longest first, so ``x.gcode.3mf`` loses both.
-_SHOWN_WITHOUT = (".gcode.3mf", ".3mf", ".gcode", ".stl", ".obj", ".step", ".stp")
-
-
-def _shown_name(file_name: str) -> str:
-    name = os.path.basename(str(file_name or ""))
-    for suffix in _SHOWN_WITHOUT:
-        if name.lower().endswith(suffix) and len(name) > len(suffix):
-            return name[: -len(suffix)]
-    return name
-
-
 def banner_text(issued: Issued) -> tuple[str, str, str]:
     """``(title, subtitle, message)`` — the words on the banner.  The one
     place the code is put into words.
 
     The code goes in the TITLE: a banner cuts its body off after a line
     or two, and the code is the one thing the person came to read.  The
-    printer is named the way the person names it, never by Kiln's
+    file is named the way a person names it
+    (:func:`kiln.print_consent.display_name`, the rule every door a person
+    reads uses), and the printer the way they name it, never by Kiln's
     ``default`` alias."""
+    from kiln.print_consent import display_name
+
     printer = issued.printer_label or issued.printer_name or "your printer"
     return (
         f"Kiln print code {issued.code}",
-        f"{_shown_name(issued.file_name)} on {printer}",
+        f"{display_name(issued.file_name)} on {printer}",
         "Type the code in your chat to print it. "
         "Add 2h or today to keep printing without asking.",
     )

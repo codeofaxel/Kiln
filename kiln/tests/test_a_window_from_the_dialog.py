@@ -1191,9 +1191,13 @@ class TestTheWindowIsNeverInvisible:
     def test_the_question_names_the_default_printer_and_the_right_way_to_close(self, monkeypatch):
         host = _Host(CHOICE_THIS_PRINT)
         monkeypatch.setattr(server, "_resolve_effective_printer_name", lambda name=None: name or "default")
+        monkeypatch.setattr(server, "_resolve_printer_model_live", lambda name=None: "bambu_a1")
         _obtain("start_print", {"file_name": "jar.stl"}, host)
         [(message, _)] = host.asked
-        assert "start on the default printer" in message and "kiln consent revoke" in message
+        # The machine the window covers, named as the person names it —
+        # its model, never Kiln's "default" alias.
+        assert "start on Bambu Lab A1" in message and "kiln consent revoke" in message
+        assert "default printer" not in message
         # On the hosted server the person has no terminal: the only close is to say so.
         monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
         consent_windows.register_window_store(_FakeStore())

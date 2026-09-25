@@ -38,6 +38,7 @@ from kiln import (
     print_signoff,
     screen_code,
     server,
+    stage_link,
     stage_paint,
 )
 from kiln.preview_gate import PreviewGate
@@ -53,6 +54,7 @@ from kiln.print_consent import (
     reset_consent,
     why_not_asked,
 )
+from kiln.printers.base import PrinterError, PrinterState, PrinterStatus
 
 API = "https://api.account.test"
 PENDING = f"{API}/api/print-authority/pending"
@@ -60,11 +62,16 @@ MAY_I = f"{API}/api/print-authority/may-i-print"
 RECORD = f"{API}/api/print-authority/record-start"
 MACHINE = "ab" * 16
 _REAL_PAINTER = stage_paint.try_paint_stage_views
+_REAL_STAGE_LINK = stage_link.stage_link_for
 
 
 def _jwt(exp: float) -> str:
     seg = lambda d: base64.urlsafe_b64encode(json.dumps(d).encode()).rstrip(b"=").decode()  # noqa: E731
     return f"{seg({'alg': 'none'})}.{seg({'exp': exp})}.sig"
+
+
+def _no_printer(printer_name=None):
+    raise RuntimeError("no printer is configured in this test")
 
 
 @pytest.fixture(autouse=True)
@@ -101,6 +108,11 @@ def _clean(monkeypatch, tmp_path):
     # The stage painter declines unless a test hands it a real mesh and
     # puts it back: most of these files are a few bytes of junk.
     monkeypatch.setattr(stage_paint, "try_paint_stage_views", lambda *a, **k: None)
+    # The card's own reads reach no printer and no link service: the printer
+    # is not there, and the link door is closed.  A test of either puts its
+    # own fake in place.
+    monkeypatch.setattr(server, "_resolve_adapter", _no_printer)
+    monkeypatch.setattr(stage_link, "stage_link_for", lambda *a, **k: None)
     yield
     screen_code._reset_for_tests()
     preview_evidence._reset_for_tests()
@@ -146,12 +158,12 @@ def _sha(path: pathlib.Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _ask(file_name, printer_name="bench", tool="start_print"):
+def _ask(file_name, printer_name="bench", tool="start_print", ctx=None):
     """One start attempt, judged inside its own call the way the gate reads it."""
 
     async def run():
         token = await server._obtain_print_consent(
-            tool, {"file_name": str(file_name), "printer_name": printer_name}, types.SimpleNamespace(),
+            tool, {"file_name": str(file_name), "printer_name": printer_name}, ctx or types.SimpleNamespace(),
         )
         try:
             return types.SimpleNamespace(
@@ -299,13 +311,18 @@ class TestTheAsk:
         _held()
         _ask(model)
         body = json.loads(_calls(PENDING)[0].request.body)
+        # The card's fields ride only with a value: this junk 3MF carries no
+        # slicer figures, no host named itself, the printer is not there to
+        # read and no link was issued, so those are left out, not guessed.
         assert set(body) == {
             "file_sha256", "file_name", "printer_name", "shown_pixels_sha", "shown_door",
             "picture_png_b64", "machine_fingerprint", "observe_nonce",
+            "display_name", "printer_label", *(["asked_from"] if bridge_client.asked_from() else []),
         }
         assert body["file_sha256"] == _sha(model) and body["file_name"] == "benchy.3mf"
         assert body["printer_name"] == "bench" and body["machine_fingerprint"] == MACHINE
         assert body["observe_nonce"]
+        assert body["display_name"] == "benchy" and body["printer_label"] == "bench"
 
     @responses.activate
     def test_the_picture_the_preview_recorded_rides_the_ask_hashed_as_sent(self, signed_in, model, tmp_path, audits):
@@ -746,3 +763,487 @@ class TestTheAskIsWithdrawn:
         assert _ask(model).consent is not None
         assert [c for c in responses.calls if c.request.url.endswith("/withdraw")] == []
         assert not [a for _, a, _ in audits if a == "consent_pending_withdrawn"]
+
+
+# ---------------------------------------------------------------------------
+# The card: what the ask tells the person, beside the fields that bind the yes
+# ---------------------------------------------------------------------------
+#
+# Every card field is display only.  These pin what each one is read from,
+# that each is left out when it cannot be said honestly, that none of them
+# changes what the ladder decides, and that none of them posts the ask later
+# than the picture's own wait allowed.
+
+#: The moves between a slice's settings and its totals: the two filaments
+#: its totals list.
+_MOVES = "T0\nG1 X10 Y10 E1\nT1\nG1 X20 Y10 E1\n"
+
+#: A painted jar's own totals, in the lines a real Kiln slice of it writes
+#: at its end: two PLA filaments, 34.67 g, 1 h 50 min 26 s.
+_JAR_TOTALS = (
+    "; filament used [mm] = 11040.43, 584.68\n"
+    "; filament used [cm3] = 26.56, 1.41\n"
+    "; filament used [g] = 32.93, 1.74\n"
+    "; total filament used [g] = 34.67\n"
+    "; estimated printing time (normal mode) = 1h 50m 26s\n"
+    "; filament_type = PLA;PLA\n"
+)
+
+#: A two-colour plate as a real Bambu print archive carries it: its totals
+#: at the top of the plate's G-code, a project whose fifth filament is TPU,
+#: and a plate that prints only the first two — both PLA.
+_PLATE_GCODE = (
+    "; HEADER_BLOCK_START\n"
+    "; model printing time: 2h 6m 50s; total estimated time: 2h 14m 0s\n"
+    "; total layer number: 75\n"
+    "; total filament length [mm] : 5127.93,2704.70\n"
+    "; total filament volume [cm^3] : 12334.13,6505.56\n"
+    "; total filament weight [g] : 16.28,8.13\n"
+    "; filament_density: 1.32,1.25,1.25,1.24,1.24\n"
+    "; filament_diameter: 1.75,1.75,1.75,1.75,1.75\n"
+    "; max_z_height: 15.00\n"
+    "; filament: 1,2\n"
+    "; HEADER_BLOCK_END\n\n"
+    "; CONFIG_BLOCK_START\n"
+    "; filament_type = PLA;PLA;PLA;PLA;TPU\n"
+    "; CONFIG_BLOCK_END\n"
+    "M620 S0A\nT0\nG1 X10 Y10 E1\nM620 S1A\nT1\nG1 X20 Y10 E1\n"
+)
+_PLATE_SLICE_INFO = (
+    '<?xml version="1.0" encoding="UTF-8"?>\n<config>\n  <plate>\n'
+    '    <metadata key="index" value="1"/>\n'
+    '    <metadata key="prediction" value="8040"/>\n'
+    '    <metadata key="weight" value="24.41"/>\n'
+    '    <filament id="1" type="PLA" color="#DE4343" used_m="5.13" used_g="16.28"/>\n'
+    '    <filament id="2" type="PLA" color="#161616" used_m="2.70" used_g="8.13"/>\n'
+    "  </plate>\n</config>\n"
+)
+_FIGURES = {"print_time_s", "filament_g", "material"}
+_LINK = "https://app.kiln3d.com/view#v=tok"
+
+
+def _jar_gcode(path: pathlib.Path) -> pathlib.Path:
+    path.write_text("; filament_density: 1.24,1.24\n; filament_diameter: 1.75,1.75\n" + _MOVES + _JAR_TOTALS)
+    return path
+
+
+def _bambu_plate(path: pathlib.Path) -> pathlib.Path:
+    import zipfile
+
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("Metadata/plate_1.gcode", _PLATE_GCODE)
+        zf.writestr("Metadata/slice_info.config", _PLATE_SLICE_INFO)
+    return path
+
+
+def _box(path: pathlib.Path) -> pathlib.Path:
+    import trimesh
+
+    trimesh.creation.box(extents=(20, 20, 20)).export(str(path))
+    return path
+
+
+def _host(name: str):
+    """A handler ctx whose session carries the host's own handshake."""
+    from mcp.types import InitializeRequestParams
+
+    return types.SimpleNamespace(session=types.SimpleNamespace(
+        client_params=InitializeRequestParams.model_validate({
+            "protocolVersion": "2025-06-18", "capabilities": {},
+            "clientInfo": {"name": name, "version": "1.0.0"},
+        }),
+    ))
+
+
+def _posted(i: int = 0) -> dict:
+    return json.loads(_calls(PENDING)[i].request.body)
+
+
+class _Printer:
+    """A printer that answers ``get_state`` with one reading, or raises."""
+
+    def __init__(self, reading):
+        self.reading = reading
+
+    def get_state(self):
+        if isinstance(self.reading, Exception):
+            raise self.reading
+        return self.reading
+
+
+def _fake_view_api(monkeypatch, *, lives=(1800.0,), status=200) -> list[dict]:
+    """The real link door against a fake view API: every upload is kept
+    (its URL and Authorization), and answers with the next link, living the
+    next of *lives* seconds (the last one repeats)."""
+    import httpx
+
+    monkeypatch.setattr(stage_link, "stage_link_for", _REAL_STAGE_LINK)
+    monkeypatch.delenv(stage_link._OPT_OUT_ENV, raising=False)
+    monkeypatch.setattr(stage_link, "_cache", {})
+    monkeypatch.setattr(stage_link, "_REFUSED_BEARER", None)
+    monkeypatch.setattr(stage_link, "_stage_printer_id", lambda: None)
+    uploads: list[dict] = []
+
+    class _Resp:
+        def __init__(self, n):
+            self.status_code, self.n = status, n
+
+        def json(self):
+            life = lives[min(self.n, len(lives) - 1)]
+            return {"viewer_url": f"{_LINK}{self.n}", "viewer_expires_at": time.time() + life}
+
+    def post(url, **kw):
+        uploads.append({"url": f"{_LINK}{len(uploads)}", "auth": kw["headers"]["Authorization"]})
+        return _Resp(len(uploads) - 1)
+
+    monkeypatch.setattr(httpx, "post", post)
+    return uploads
+
+
+@pytest.fixture
+def twin(tmp_path, monkeypatch):
+    """The slice ledger, under tmp."""
+    from kiln import monitor_twin
+
+    monkeypatch.setattr(monitor_twin, "_TWIN_DIR", tmp_path / "twin")
+    monkeypatch.setattr(monitor_twin, "_SLICES_FILE", tmp_path / "twin" / "slices.json")
+    monkeypatch.setattr(monitor_twin, "_ACTIVE_FILE", tmp_path / "twin" / "active.json")
+    return monitor_twin
+
+
+class TestTheCard:
+    @responses.activate
+    def test_it_names_the_print_the_printer_and_who_asked_the_way_a_person_does(
+        self, signed_in, tmp_path, monkeypatch, observed,
+    ):
+        model = tmp_path / "consent_test_cube.gcode.3mf"
+        model.write_bytes(b"not a print archive " + str(tmp_path).encode())
+        monkeypatch.setattr(server, "_resolve_effective_printer_name", lambda name=None: name or "default")
+        monkeypatch.setattr(server, "_resolve_printer_model_live", lambda name=None: "bambu_a1")
+        _may_i()
+        _held()
+        _ask(model, printer_name=None, ctx=_host("claude-code"))
+        body = _posted()
+        assert body["display_name"] == "consent test cube"
+        assert body["printer_label"] == "Bambu Lab A1"
+        assert body["asked_by"] == "Claude"
+        assert body.get("asked_from", "") == bridge_client.asked_from()
+        # What binds the yes is unchanged: the exact file and Kiln's own name.
+        assert body["file_name"] == "consent_test_cube.gcode.3mf" and body["printer_name"] == "default"
+
+    @responses.activate
+    def test_a_host_it_does_not_know_is_not_named_at_all(self, signed_in, model, observed):
+        _may_i()
+        _held()
+        _ask(model, ctx=_host("some-agent-nobody-ships"))
+        assert "asked_by" not in _posted()
+
+    @responses.activate
+    def test_a_slices_own_totals_say_what_yes_costs(self, signed_in, tmp_path, observed, audits):
+        _may_i()
+        _held()
+        _ask(_jar_gcode(tmp_path / "jar.gcode"))
+        body = _posted()
+        assert body["print_time_s"] == 6626 and body["filament_g"] == 34.67 and body["material"] == "PLA"
+        # The audit row names what the card carried.
+        [row] = [d for _, a, d in audits if a == "consent_pending_posted"]
+        assert {"print_time_s", "filament_g", "material", "display_name", "printer_label"} <= set(row["card"])
+
+    @responses.activate
+    def test_a_bambu_plate_is_weighed_as_the_filaments_it_prints(self, signed_in, tmp_path, observed):
+        _may_i()
+        _held()
+        _ask(_bambu_plate(tmp_path / "chopstick_holder.gcode.3mf"))
+        body = _posted()
+        assert body["print_time_s"] == 8040 and body["filament_g"] == 24.41
+        # The project's fifth filament is TPU; this plate never touches it.
+        assert body["material"] == "PLA"
+
+    @responses.activate
+    def test_a_mesh_has_no_figures_even_where_this_machine_sliced_it(self, signed_in, tmp_path, twin, observed):
+        mesh = _box(tmp_path / "jar.stl")
+        gcode = _jar_gcode(tmp_path / "jar.gcode")
+        twin.note_sliced(str(mesh), str(gcode))
+        _may_i()
+        _held()
+        _ask(mesh)
+        _ask(gcode)
+        # Never another slice's numbers for the mesh, never a guess from its geometry...
+        assert not _FIGURES & set(_posted(0))
+        # ...while the slice itself, put to the account, carries its own.
+        assert set(_posted(1)) >= _FIGURES
+
+    @responses.activate
+    def test_a_slice_that_names_no_material_is_not_weighed_as_a_guess(self, signed_in, tmp_path, observed):
+        gcode = tmp_path / "untyped.gcode"
+        gcode.write_text(_MOVES + "; filament used [mm] = 1200.00\n; estimated printing time (normal mode) = 12m 5s\n")
+        _may_i()
+        _held()
+        _ask(gcode)
+        body = _posted()
+        assert body["print_time_s"] == 725
+        assert "filament_g" not in body and "material" not in body
+
+    @pytest.mark.parametrize(
+        ("reading", "said"),
+        [
+            (PrinterState(connected=True, state=PrinterStatus.IDLE), "ready"),
+            (PrinterState(connected=True, state=PrinterStatus.PRINTING), "busy"),
+            (PrinterState(connected=True, state=PrinterStatus.PAUSED), "busy"),
+            (PrinterState(connected=False, state=PrinterStatus.OFFLINE), "offline"),
+            (PrinterState(connected=True, state=PrinterStatus.ERROR, last_known_state=PrinterStatus.PRINTING), "busy"),
+            (PrinterState(connected=True, state=PrinterStatus.ERROR, last_known_state=PrinterStatus.IDLE), None),
+            (PrinterState(connected=True, state=PrinterStatus.STALE, last_known_state=PrinterStatus.PRINTING), None),
+            (PrinterError("Connection refused"), "offline"),
+            (PrinterError("401 Unauthorized"), None),
+        ],
+        ids=["idle", "printing", "paused", "offline", "fault-mid-print", "fault-idle", "stale", "unreachable", "credentials"],
+    )
+    @responses.activate
+    def test_where_the_printer_stands_is_read_and_only_shown(
+        self, signed_in, model, monkeypatch, observed, reading, said,
+    ):
+        monkeypatch.setattr(server, "_resolve_adapter", lambda name=None: _Printer(reading))
+        _may_i()
+        _held()
+        r = _ask(model)
+        assert _posted().get("printer_state") == said
+        # Shown, never decided by: the ask is held and nothing is granted,
+        # whatever the printer said.
+        assert r.consent is None and r.why.endswith(NOT_ASKED_PENDING_TAG + "pa_1")
+
+    @responses.activate
+    def test_the_stage_is_the_print_files_own_bytes(self, signed_in, tmp_path, monkeypatch, twin, observed):
+        asked_for: list[tuple[str, dict]] = []
+
+        def link(path, **kw):
+            asked_for.append((str(path), kw))
+            return {"viewer_url": _LINK, "expires_at": time.time() + 1800}
+
+        monkeypatch.setattr(stage_link, "stage_link_for", link)
+        mesh = _box(tmp_path / "cube.stl")
+        gcode = _jar_gcode(tmp_path / "cube.gcode")
+        twin.note_sliced(str(mesh), str(gcode))
+        from kiln.printers.bambu_3mf import repackage_gcode_as_bambu_3mf
+
+        cube = str(tmp_path / "cube.gcode.3mf")
+        repackage_gcode_as_bambu_3mf(str(gcode), cube)
+        _may_i()
+        _held()
+        _ask(mesh)
+        _ask(gcode)
+        _ask(cube)
+        # The mesh is drawn as itself: its link rides the ask.
+        assert _posted(0)["stage_url"] == _LINK
+        # Raw G-code would be drawn as the mesh it came from, and this archive
+        # carries only the 1 mm placeholder: neither is the bytes the ask names.
+        assert "stage_url" not in _posted(1) and "stage_url" not in _posted(2)
+        # Asked once, for the mesh, as the account asking, for a link that
+        # outlives the ask, and with nothing put on this machine's record.
+        assert asked_for == [(str(mesh), {
+            "evidence": False, "bearer": signed_in.split(" ", 1)[1],
+            "min_life_s": bridge_client.ASK_LIFETIME_S + 60.0,
+        })]
+
+    @responses.activate
+    def test_an_obj_print_file_gets_no_stage(self, signed_in, tmp_path, monkeypatch, observed):
+        """The account's stage opens STL and 3MF; an OBJ link would be one
+        the card cannot draw."""
+        import trimesh
+
+        asked_for: list[str] = []
+        monkeypatch.setattr(
+            stage_link, "stage_link_for",
+            lambda path, **kw: asked_for.append(str(path)) or {"viewer_url": _LINK, "expires_at": time.time() + 1800},
+        )
+        obj = tmp_path / "cube.obj"
+        trimesh.creation.box(extents=(20, 20, 20)).export(str(obj))
+        _may_i()
+        _held()
+        _ask(obj)
+        assert "stage_url" not in _posted() and asked_for == []
+
+    @responses.activate
+    def test_the_stage_is_minted_for_the_account_asking(self, signed_in, tmp_path, monkeypatch, observed):
+        """The account keeps a stage only when its link was minted for that
+        account.  A license key in the environment is the bearer every other
+        link is made with; the ask's is uploaded as the signed-in session the
+        ask is posted with, and a link an earlier preview made under the
+        license is never handed to it."""
+        mesh = _box(tmp_path / "cube.stl")
+        uploads = _fake_view_api(monkeypatch)
+        monkeypatch.setenv("KILN_LICENSE_KEY", "lic-agent-key")
+        agents_own = stage_link.stage_link_for(mesh)  # the agent's preview link, as the license
+        _may_i()
+        _held()
+        _ask(mesh)
+        assert [u["auth"] for u in uploads] == ["Bearer lic-agent-key", signed_in]
+        assert _posted()["stage_url"] == uploads[1]["url"] != agents_own["viewer_url"]
+
+    @responses.activate
+    def test_a_link_that_would_die_before_the_ask_is_replaced_not_reused(
+        self, signed_in, tmp_path, monkeypatch, observed,
+    ):
+        """The card loses its stage when the link runs out, and an ask lives
+        ten minutes: a cached link with five minutes left is replaced, while
+        one that will outlive the ask is reused as it is."""
+        mesh = _box(tmp_path / "cube.stl")
+        uploads = _fake_view_api(monkeypatch, lives=(300.0, 1800.0))
+        _may_i()
+        _held()
+        _ask(mesh, printer_name="bench")
+        _ask(mesh, printer_name="bench-2")  # the same bytes, asked again for another printer
+        assert len(uploads) == 2
+        assert _posted(1)["stage_url"] == uploads[1]["url"] != uploads[0]["url"]
+        _ask(mesh, printer_name="bench-3")
+        assert len(uploads) == 2 and _posted(2)["stage_url"] == uploads[1]["url"]
+
+    @responses.activate
+    def test_the_asks_link_is_not_a_preview_anyone_here_was_shown(self, signed_in, tmp_path, monkeypatch, observed):
+        mesh = _box(tmp_path / "cube.stl")
+        uploads = _fake_view_api(monkeypatch)
+        _may_i()
+        _held()
+        _ask(mesh)
+        assert _posted()["stage_url"] == uploads[0]["url"] and len(uploads) == 1
+        # The link went to the card, not to anyone at this machine: it is no
+        # preview on record, so the print gate's link door still refuses.
+        evidence = preview_evidence.evidence_for(str(mesh))
+        assert evidence["url"] is None and evidence["url_refusal"] is None
+        refusal, _verdict = preview_evidence.judge(str(mesh), "url", host_renders=False)
+        assert refusal is not None
+
+    @responses.activate
+    def test_a_link_that_cannot_be_had_leaves_no_reason_on_record_either(self, signed_in, tmp_path, monkeypatch, observed):
+        mesh = _box(tmp_path / "cube.stl")
+        uploads = _fake_view_api(monkeypatch, status=503)
+        _may_i()
+        _held()
+        _ask(mesh)
+        assert len(uploads) == 1 and "stage_url" not in _posted()
+        # A PNG sign-off needs the link door's own refusal; the ask is not it.
+        assert preview_evidence.evidence_for(str(mesh))["url_refusal"] is None
+
+    @responses.activate
+    def test_slow_reads_are_left_off_the_card_not_waited_for(self, signed_in, tmp_path, monkeypatch, observed):
+        release = threading.Event()
+
+        class _Silent:
+            def get_state(self):
+                release.wait(30)
+                return PrinterState(connected=True, state=PrinterStatus.IDLE)
+
+        def slow_link(path, **kw):
+            release.wait(30)
+            return {"viewer_url": _LINK, "expires_at": time.time() + 1800}
+
+        monkeypatch.setattr(server, "_resolve_adapter", lambda name=None: _Silent())
+        monkeypatch.setattr(stage_link, "stage_link_for", slow_link)
+        monkeypatch.setattr(server, "_ASK_STILL_WAIT_S", 1.0)
+        _may_i()
+        _held()
+        started = time.monotonic()
+        try:
+            r = _ask(_box(tmp_path / "cube.stl"))
+            elapsed = time.monotonic() - started
+        finally:
+            release.set()
+        # The picture's own wait is the ceiling: the reads would have taken 30 s.
+        assert elapsed < 10
+        body = _posted()
+        assert "printer_state" not in body and "stage_url" not in body
+        assert r.why.endswith(NOT_ASKED_PENDING_TAG + "pa_1")
+
+    @responses.activate
+    def test_a_printer_that_does_not_answer_is_given_three_seconds_not_the_whole_wait(
+        self, signed_in, model, monkeypatch, observed,
+    ):
+        release = threading.Event()
+
+        class _Silent:
+            def get_state(self):
+                release.wait(30)
+                return PrinterState(connected=True, state=PrinterStatus.IDLE)
+
+        monkeypatch.setattr(server, "_resolve_adapter", lambda name=None: _Silent())
+        monkeypatch.setattr(server, "_ASK_PRINTER_WAIT_S", 0.2)
+        monkeypatch.setattr(server, "_ASK_STILL_WAIT_S", 6.0)
+        _may_i()
+        _held()
+        started = time.monotonic()
+        try:
+            _ask(model)
+            elapsed = time.monotonic() - started
+        finally:
+            release.set()
+        assert elapsed < 4.0  # the printer's own time box, not the picture's
+        assert "printer_state" not in _posted()
+
+
+def test_every_door_a_person_reads_names_the_print_one_way(signed_in, tmp_path, monkeypatch, observed):
+    """The banner, the approval dialog and the account's card name the same
+    print and the same printer the same way — never the raw file name,
+    never Kiln's ``default`` alias."""
+    model = tmp_path / "consent_test_cube.gcode.3mf"
+    model.write_bytes(b"not a print archive " + str(tmp_path).encode())
+    monkeypatch.setattr(server, "_resolve_effective_printer_name", lambda name=None: name or "default")
+    monkeypatch.setattr(server, "_resolve_printer_model_live", lambda name=None: "bambu_a1")
+    shown: list[screen_code.Issued] = []
+    monkeypatch.setattr(screen_code, "_show_hook", lambda issued: shown.append(issued) or True)
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as mock:
+        mock.add(responses.GET, MAY_I, json={"success": True, "allowed": False, "authority": None, "pending": None})
+        mock.add(responses.POST, PENDING, json={"success": True, "pending": {
+            "id": "pa_1", "expires_at": time.time() + 600, "page": "/monitor", "state": "waiting", "repeat": False,
+        }})
+        mock.add(responses.POST, f"{PENDING}/pa_1/withdraw", json={"success": True})
+        _ask(model, printer_name=None)
+        card = json.loads(next(c for c in mock.calls if c.request.url == PENDING).request.body)
+        asked: list[str] = []
+
+        async def no(ctx, message, **kw):
+            asked.append(message)
+            return print_consent.DialogAnswer("decline")
+
+        monkeypatch.setattr(server, "host_can_ask_the_user", lambda mcp, ctx: True)
+        monkeypatch.setattr(server, "ask_user_to_confirm", no)
+        with pytest.raises(RuntimeError, match="declined"):
+            _ask(model, printer_name=None)
+    _title, subtitle, _message = screen_code.banner_text(shown[0])
+    question = asked[0].splitlines()[0]
+    assert subtitle == "consent test cube on Bambu Lab A1"
+    assert question == "Start printing “consent test cube” on Bambu Lab A1?"
+    assert (card["display_name"], card["printer_label"]) == ("consent test cube", "Bambu Lab A1")
+    for words in (subtitle, question, card["display_name"], card["printer_label"]):
+        assert "default" not in words and ".3mf" not in words and "_" not in words
+
+
+def test_the_card_sends_only_what_fits_the_route():
+    fits = bridge_client.AskCard(
+        printer_label="Bambu Lab A1", asked_by="Claude", print_time_s=2_592_000, filament_g=10_000,
+        material="PLA + PETG", printer_state="busy", stage_url=_LINK,
+    ).fields()
+    assert fits == {
+        "printer_label": "Bambu Lab A1", "asked_by": "Claude", "print_time_s": 2_592_000, "filament_g": 10_000.0,
+        "material": "PLA + PETG", "printer_state": "busy", "stage_url": _LINK,
+    }
+    # A figure or a word out of bounds is left out rather than cut into another claim.
+    for bad in (
+        {"print_time_s": 0}, {"print_time_s": 2_592_001}, {"print_time_s": True}, {"print_time_s": 12.5},
+        {"filament_g": 0}, {"filament_g": -3.0}, {"filament_g": 10_000.5}, {"filament_g": float("nan")},
+        {"material": "PLA + PETG + TPU + ASA + PC"}, {"asked_by": "x" * 41},
+        {"printer_state": "warming"}, {"stage_url": "javascript:alert(1)"}, {"stage_url": "https://a b"},
+    ):
+        assert set(bridge_client.AskCard(**bad).fields()) == set(), bad
+    # A long name is cut on a word and marked, never past the route's 120.
+    long = bridge_client.AskCard(printer_label="garage " * 30).fields()["printer_label"]
+    assert len(long) <= 120 and long.endswith("…") and not long.endswith(" …")
+    # One line: a name cannot carry a line break or a control character to the card.
+    assert bridge_client.AskCard(printer_label="shop\nprinter\x07").fields()["printer_label"] == "shop printer"
+
+
+@pytest.mark.parametrize(
+    ("platform", "word"),
+    [("darwin", "mac"), ("win32", "windows"), ("cygwin", "windows"), ("linux", "linux"), ("freebsd14", ""), ("emscripten", "")],
+)
+def test_the_computer_an_ask_comes_from(platform, word):
+    assert bridge_client.asked_from(platform) == word
