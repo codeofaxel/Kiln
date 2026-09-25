@@ -509,18 +509,13 @@ def _run_hook(host, tool_name, arguments=None):
     _cache_the_monitor()
     mcp = _fastmcp()
 
-    class _Block:
-        def __init__(self, text):
-            self.text = text
-            self.type = "text"
+    from mcp.types import CallToolResult, TextContent
 
-    class _Result:
-        def __init__(self):
-            self.content = [_Block("PRINTING 41%")]
-            self.isError = False
-            self.structuredContent = None
+    from kiln.mcp_compat import result_structured_content
 
-    result = _Result()
+    # The installed SDK's own result type.  An SDK 1-shaped stand-in let a
+    # write by the SDK 1 field name pass here while it raised on SDK 2.
+    result = CallToolResult(content=[TextContent(type="text", text="PRINTING 41%")])
     server = lowlevel_server(mcp)
 
     params = None
@@ -539,7 +534,7 @@ def _run_hook(host, tool_name, arguments=None):
         local_monitor.install(mcp)
         handler = server.get_request_handler("tools/call").handler
         anyio.run(handler, host._mcp_server.request_context, params)
-        return result.structuredContent
+        return result_structured_content(result)
 
     from mcp.server.lowlevel.server import request_ctx
     from mcp.types import CallToolRequest
@@ -559,7 +554,7 @@ def _run_hook(host, tool_name, arguments=None):
         anyio.run(handlers[CallToolRequest], req)
     finally:
         request_ctx.reset(token)
-    return result.structuredContent
+    return result_structured_content(result)
 
 
 class TestThePayloadRidesTheResult:
