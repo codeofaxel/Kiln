@@ -390,3 +390,225 @@ class TestServerFallback:
 
         data = _write_session(auth_home)
         assert server._raw_paired_access_token() == data["access_token"]
+
+
+class TestVerifyWithTheServer:
+    """``verify=True``: one exchange on a session the clock still vouches for.
+
+    2026-09-24: the bridge's session was ended server-side (GET
+    /auth/v1/user → 403 session_not_found) while its access token had forty
+    minutes left on the clock.  The fast path answered ``live`` 591 times,
+    so nothing on the machine ever said "run kiln signin".
+    """
+
+    def test_a_clock_live_token_is_still_asked_about_when_told_to(
+        self, auth_home, monkeypatch
+    ):
+        _write_session(auth_home)  # expires in an hour
+        calls: list[str] = []
+
+        def _refused(rt):
+            calls.append(rt)
+            return 401, {"error": "invalid_refresh_token"}
+
+        monkeypatch.setattr(auth_session, "_post_refresh", _refused)
+
+        result = resolve_session_bearer(verify=True)
+
+        assert result.state == "needs_signin"
+        assert result.token == ""
+        assert calls == ["rt-original"]
+        stored = json.loads((auth_home / ".kiln" / "auth_tokens.json").read_text())
+        assert "refresh_token" not in stored
+        assert stored["refresh_rejected_at"]
+
+    def test_the_verdict_outranks_the_clock_for_every_later_resolve(
+        self, auth_home, monkeypatch
+    ):
+        """After a rejected exchange, a still-clock-valid access token is not
+        handed out as ``live`` — the server refuses it on every use."""
+        _write_session(auth_home)
+        monkeypatch.setattr(auth_session, "_post_refresh", lambda _rt: (401, {}))
+        assert resolve_session_bearer(verify=True).state == "needs_signin"
+
+        _no_network(monkeypatch)
+        again = resolve_session_bearer()
+        assert again.state == "needs_signin"
+        assert "expired" in again.detail
+        assert get_paired_access_token() == ""
+
+    def test_a_session_the_server_renews_comes_back_refreshed(
+        self, auth_home, monkeypatch
+    ):
+        _write_session(auth_home)
+        fresh = _jwt(time.time() + 3600)
+        monkeypatch.setattr(
+            auth_session,
+            "_post_refresh",
+            lambda _rt: (200, {"access_token": fresh, "refresh_token": "rt-2"}),
+        )
+
+        result = resolve_session_bearer(verify=True)
+
+        assert result == SessionBearer(token=fresh, state="refreshed")
+        stored = json.loads((auth_home / ".kiln" / "auth_tokens.json").read_text())
+        assert stored["refresh_token"] == "rt-2"
+        # And the ordinary path is live again with no exchange.
+        _no_network(monkeypatch)
+        assert resolve_session_bearer().state == "live"
+
+    def test_an_unreachable_server_leaves_the_token_in_play(self, auth_home, monkeypatch):
+        data = _write_session(auth_home)
+        monkeypatch.setattr(auth_session, "_post_refresh", lambda _rt: (0, {}))
+        result = resolve_session_bearer(verify=True)
+        assert result == SessionBearer(token=data["access_token"], state="degraded")
+
+    def test_a_rival_that_verified_first_is_honoured_not_repeated(
+        self, auth_home, monkeypatch
+    ):
+        """Two bridges (or a bridge and ``kiln bridge status``) asked at
+        once: the second finds the first's answer on file under the lock
+        and makes no exchange of its own."""
+        _write_session(auth_home)
+        fresh = _jwt(time.time() + 3600)
+        import contextlib as _ctx
+
+        @_ctx.contextmanager
+        def lock_then_rival_wrote():
+            _write_session(auth_home, access_token=fresh, refresh_token="rt-rival")
+            yield
+
+        monkeypatch.setattr(auth_session, "_refresh_lock", lock_then_rival_wrote)
+        _no_network(monkeypatch)
+
+        assert resolve_session_bearer(verify=True) == SessionBearer(token=fresh, state="refreshed")
+
+    def test_a_rival_whose_exchange_was_refused_is_not_re_posted(
+        self, auth_home, monkeypatch
+    ):
+        """The waiter finds the rejection stamp under the lock: the dead
+        token is not sent again, with or without ``verify``."""
+        _write_session(auth_home, access_token=_jwt(time.time() - 10))
+        import contextlib as _ctx
+
+        @_ctx.contextmanager
+        def lock_then_rival_was_refused():
+            stored = json.loads((auth_home / ".kiln" / "auth_tokens.json").read_text())
+            stored.pop("refresh_token")
+            stored["refresh_rejected_at"] = "2026-09-24T22:00:00Z"
+            (auth_home / ".kiln" / "auth_tokens.json").write_text(json.dumps(stored))
+            yield
+
+        monkeypatch.setattr(auth_session, "_refresh_lock", lock_then_rival_was_refused)
+        _no_network(monkeypatch)
+
+        assert resolve_session_bearer().state == "needs_signin"
+        _write_session(auth_home)
+        assert resolve_session_bearer(verify=True).state == "needs_signin"
+
+
+class TestManyProcessesRefreshingAtOnce:
+    """Every Kiln process on a machine reads one token file, and each may
+    refresh the session on its own; Supabase rotates the refresh token on
+    use.  Its rules (docs, "Sessions", refresh token rotation and reuse
+    detection; the auth service's token grant): a refresh token is used
+    once; within a 10 s reuse interval, or when it is the PARENT of the
+    currently active token, presenting it again returns the active pair;
+    any older reuse ends the whole session.  So the invariant this machine
+    must keep is that no two processes ever exchange at the same time, and
+    that a process which waited takes the winner's pair from the file
+    rather than exchanging the token it read before waiting.
+
+    The endpoint below is those rules in miniature; the threads are the
+    processes.  The lock is a real ``flock`` on separate descriptors, which
+    is what separate processes would hold.
+    """
+
+    class _Endpoint:
+        def __init__(self, first: str):
+            self.active = first
+            self.parent: str | None = None
+            self.exchanges = 0
+            self.revoked = False
+            self._n = 0
+            self._lock = __import__("threading").Lock()
+
+        def post(self, refresh_token: str) -> tuple[int, dict]:
+            time.sleep(0.02)  # the network round trip, so racers overlap
+            with self._lock:
+                self.exchanges += 1
+                if self.revoked:
+                    return 401, {"error": "invalid_refresh_token"}
+                if refresh_token == self.active:
+                    self.parent, self._n = self.active, self._n + 1
+                    self.active = f"rt-{self._n}"
+                elif refresh_token != self.parent:
+                    self.revoked = True  # Already Used, outside every exception
+                    return 401, {"error": "invalid_refresh_token"}
+                return 200, {
+                    "access_token": _jwt(time.time() + 3600),
+                    "refresh_token": self.active,
+                }
+
+    def _race(self, auth_home, monkeypatch, *, processes: int):
+        import threading
+
+        _write_session(auth_home, access_token=_jwt(time.time() + 30))
+        endpoint = self._Endpoint("rt-original")
+        monkeypatch.setattr(auth_session, "_post_refresh", endpoint.post)
+        results: list[SessionBearer] = []
+        gate = threading.Barrier(processes)
+
+        def _one():
+            gate.wait()
+            results.append(resolve_session_bearer())
+
+        threads = [threading.Thread(target=_one) for _ in range(processes)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+        return endpoint, results
+
+    def test_six_processes_at_the_margin_make_one_exchange(self, auth_home, monkeypatch):
+        endpoint, results = self._race(auth_home, monkeypatch, processes=6)
+
+        assert len(results) == 6
+        assert endpoint.exchanges == 1, "one refresher at a time per machine"
+        assert not endpoint.revoked
+        tokens = {r.token for r in results}
+        assert len(tokens) == 1, "every process leaves with the winner's token"
+        assert {r.state for r in results} == {"refreshed", "live"}
+        stored = json.loads((auth_home / ".kiln" / "auth_tokens.json").read_text())
+        assert stored["refresh_token"] == endpoint.active
+
+    def test_without_the_lock_every_process_exchanges(self, auth_home, monkeypatch):
+        """The mutation pin: with the lock a no-op, the same race makes one
+        exchange per process.  Supabase's parent exception happens to
+        forgive that many (each presents the same generation), which is
+        why the invariant is pinned on the exchange count and not on the
+        endpoint's mercy."""
+        import contextlib as _ctx
+
+        @_ctx.contextmanager
+        def no_lock():
+            yield
+
+        monkeypatch.setattr(auth_session, "_refresh_lock", no_lock)
+        endpoint, results = self._race(auth_home, monkeypatch, processes=6)
+
+        assert endpoint.exchanges > 1
+        assert not endpoint.revoked, "same-generation reuse is forgiven by the parent rule"
+
+    def test_a_holder_two_generations_behind_ends_the_session(self, auth_home, monkeypatch):
+        """What actually kills a session under these rules: not two racers,
+        but a holder presenting a token older than the active one's parent.
+        Nothing in Kiln keeps such a copy — every resolve re-reads the file
+        — and this pins the rule that must stay true of any new reader."""
+        endpoint = self._Endpoint("rt-original")
+        assert endpoint.post("rt-original")[0] == 200  # -> rt-1 active
+        assert endpoint.post("rt-1")[0] == 200  # -> rt-2 active, parent rt-1
+        assert endpoint.post("rt-1")[0] == 200  # the parent: forgiven
+        assert endpoint.post("rt-original")[0] == 401  # two behind: the family ends
+        assert endpoint.revoked
+        assert endpoint.post("rt-2")[0] == 401  # and the active one with it

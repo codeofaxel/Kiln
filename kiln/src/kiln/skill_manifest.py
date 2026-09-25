@@ -139,6 +139,7 @@ class SkillManifest:
             "For print failures: analyze_print_failure_smart() → get_recovery_plan() → retry_print_with_fix().",
             "Use build_generation_prompt() to enhance generation prompts with design intelligence before calling generate_model().",
             "Use ams_status() to check loaded AMS filaments before multi-color prints.",
+            "During a print, poll printer_status(detail=\"lite\") to follow it (monitor_print for the full report); ams_status carries no fault line. A fault the printer stops for rides EVERY tool result as `printer_fault` while Kiln's watchdog sees it standing — the moment you see one, stop and tell the user; polling will not clear it.",
             "After Kiln's code, plugins, or config change, call restart_server() to apply it — never tell the user to quit and reopen their client app.",
         ]
     )
@@ -182,6 +183,8 @@ class SkillManifest:
             ],
             "monitor_active_print": [
                 "monitor_print() — full report with progress, temps, cost, snapshot",
+                "printer_status(detail=\"lite\") — the poll between reports: run state and every fault code under `faults`",
+                "A fault the printer stops for rides every tool result as `printer_fault` while Kiln's watchdog sees it — tell the user the moment it appears",
                 "Read the snapshot image file and display it inline to user",
                 "Show ALL report fields — never omit cost estimate or temps",
             ],

@@ -723,6 +723,107 @@ def describe_screen_faults(faults: Any) -> list[str]:
     return lines
 
 
+#: The run states in which the firmware has ACTED on a fault -- stopped the
+#: job for it -- so the fault is for a person at the machine, not for a
+#: poller to wait out.
+_FAULT_STOPPED_STATES: frozenset[str] = frozenset({"paused", "error"})
+
+
+def _reading_field(reading: Any, name: str) -> Any:
+    """Attribute-or-key read off a state object or its serialised dict."""
+    if reading is None:
+        return None
+    if isinstance(reading, dict):
+        return reading.get(name)
+    return getattr(reading, name, None)
+
+
+def fault_banner(
+    reading: Any, *, printer_name: str | None = None
+) -> dict[str, Any] | None:
+    """The one short block every door shows for a fault the printer reports.
+
+    ``None`` when *reading* carries no fault.  Otherwise the fault as the
+    printer's own screen spells it, what it means, and what to do -- built
+    ONCE here so the watchdog's flag, the ``kiln_watch`` block and the
+    banner that rides every tool result cannot describe the same fault
+    three ways.  Reads :attr:`PrinterState.faults` (the composed list) and
+    falls back to the bare ``print_error`` for an adapter that composes
+    none, so a duck-typed reading with only a code still gets a banner.
+
+    ``needs_person`` is True when the machine has acted on the fault --
+    paused or ended the job -- which is the case the 2026-09-24 print
+    showed nothing for: an A1 raised 1200-8015 at its first colour change
+    and paused, the watchdog counted it as no flag (a paused reading is
+    the firmware having acted, so the red rule rightly stood down), and
+    the agent, polling ``ams_status`` for the colour switch, learned of the
+    pause from the person at the printer.  ``note`` is the sentence for an
+    agent's context: what stopped, and that polling will not clear it.
+    """
+    faults = _reading_field(reading, "faults")
+    if not isinstance(faults, list):
+        faults = []
+    faults = [f for f in faults if isinstance(f, dict) and f.get("code")]
+    print_error = _reading_field(reading, "print_error")
+    fault_note = _reading_field(reading, "fault_note")
+    if not faults:
+        pretty = format_error_code(print_error)
+        if pretty is None and not fault_note:
+            return None
+        faults = [{"code": pretty or "unknown", "kind": "print_error"}]
+
+    if isinstance(reading, dict):
+        run = row_run_state(reading) or reading.get("state")
+    else:
+        run = effective_state_of(reading)
+    run_word = str(getattr(run, "value", run) or "").lower() or None
+    stopped = run_word in _FAULT_STOPPED_STATES
+
+    lead = faults[0]
+    code = str(lead.get("code"))
+    codes = [str(f.get("code")) for f in faults]
+    text = lead.get("screen_text") or lead.get("reading")
+    screen_text = text.strip() if isinstance(text, str) and text.strip() else None
+    if isinstance(fault_note, str) and fault_note.strip():
+        what_happened = fault_note.strip()
+    elif screen_text:
+        what_happened = f"{code}: {screen_text}"
+    else:
+        what_happened = f"The printer is reporting {code}."
+    remedy = _reading_field(reading, "fault_remedy")
+    if not (isinstance(remedy, str) and remedy.strip()):
+        own = lead.get("remedy")
+        remedy = describe_fault_remedy(own if isinstance(own, str) else None)
+    what_to_do = str(remedy).strip()
+
+    where = f" on {printer_name}" if printer_name else ""
+    headline = f"{code}: {screen_text}" if screen_text else code
+    if stopped:
+        acted = "paused" if run_word == "paused" else "stopped"
+        note = (
+            f"PRINTER FAULT{where}: {headline}. The printer has {acted} for it "
+            f"and is waiting for a person at the machine; polling will not "
+            f"clear it. Tell the person now. {what_to_do}"
+        )
+    else:
+        note = (
+            f"PRINTER FAULT{where}: {headline}. The printer reports it while "
+            f"still {run_word or 'running'}. {what_to_do}"
+        )
+    return {
+        "printer_name": printer_name,
+        "code": code,
+        "codes": codes,
+        "state": run_word,
+        "needs_person": stopped,
+        "screen_text": screen_text,
+        "what_happened": what_happened,
+        "what_to_do": what_to_do,
+        "lines": describe_screen_faults(faults),
+        "note": note,
+    }
+
+
 #: The fields a person might act on with their hands.  Blanked together, by
 #: one rule, in :meth:`PrinterState.__post_init__`.
 TEMPERATURE_FIELDS: tuple[str, ...] = (

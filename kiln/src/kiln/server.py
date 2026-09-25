@@ -9142,6 +9142,12 @@ def ams_status() -> dict:
     Use this to check filament levels before printing, verify the correct
     material is loaded, or select the right ``ams_mapping`` for
     ``start_print()``.
+
+    This dump carries no fault line of its own.  To follow a print, poll
+    ``printer_status(detail="lite")``: it reports the run state and every
+    fault code under ``faults``.  A fault the printer stops for on a
+    watched print also rides this and every other tool result as
+    ``printer_fault`` while it stands.
     """
     if err := _check_auth("read"):
         return err
@@ -17675,6 +17681,19 @@ def _start() -> None:
         local_monitor.install(mcp)
     except Exception:
         logger.debug("inline monitor not installed", exc_info=True)
+
+    # A fault the printer has stopped for, on EVERY tool result while it
+    # stands on a printer the watchdog is watching.  MCP cannot push a
+    # message into the agent's context; the result of whatever the agent
+    # polls is the one channel there is, so the banner rides all of them
+    # (2026-09-24: an agent polling ams_status for a colour change never
+    # saw the pause the printer was sitting in).
+    try:
+        from kiln import watch_state
+
+        watch_state.install_fault_banner(mcp)
+    except Exception:
+        logger.debug("printer fault banner not installed", exc_info=True)
 
     # The update offer, on the FIRST tool result of the session.  The
     # server instructions already carry it, but that is one sentence in
