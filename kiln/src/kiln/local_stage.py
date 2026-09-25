@@ -84,7 +84,6 @@ from kiln.mcp_compat import (
     capture_request_context,
     client_capabilities,
     client_info,
-    lowlevel_server,
     wrap_call_tool_result,
 )
 from kiln.mesh_payload import VIEWER_STRUCTURED_CONTENT_KEY, mesh_to_viewer_payload
