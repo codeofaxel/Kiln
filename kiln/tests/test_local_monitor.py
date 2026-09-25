@@ -141,7 +141,7 @@ class TestOnByDefault:
         monkeypatch.setenv(local_monitor._OPT_OUT_ENV, "1")
         assert local_monitor.enabled() is False
         assert local_monitor.install(object()) == {  # would explode if it did anything
-            "enabled": False, "resource": False, "snapshot_tool": False, "stamped": 0
+            "enabled": False, "resource": False, "snapshot_tool": False, "control_tool": False, "stamped": 0
         }
 
 
@@ -696,6 +696,81 @@ class TestThePollVerbStandsFromInstall:
         first = mcp._tool_manager._tools["kiln_monitor_snapshot"]
         local_monitor.install(mcp)
         assert mcp._tool_manager._tools["kiln_monitor_snapshot"] is first
+
+
+class TestTheControlVerbStandsFromInstall:
+    """The panel's Pause, Resume and Stop call ``kiln_monitor_control`` by
+    name wherever the panel is served.  Only the hosted door had it, so a
+    locally served panel's buttons failed with "Couldn't reach your
+    printer".  The local verb rides the public tools that already own each
+    control, with their own posture, in the shape the panel parses."""
+
+    def _call(self, mcp, args):
+        return anyio.run(mcp._tool_manager.call_tool, "kiln_monitor_control", args)
+
+    def test_the_verb_stands_from_install_and_is_app_only(self):
+        _cache_the_monitor()
+        mcp = _fastmcp()
+        out = local_monitor.install(mcp)
+        assert out["control_tool"] is True
+        tool = mcp._tool_manager._tools["kiln_monitor_control"]
+        ui = (getattr(tool, "meta", None) or {}).get("ui") or {}
+        assert ui.get("visibility") == ["app"]
+        assert ui.get("resourceUri") == local_monitor.PRINT_MONITOR_RESOURCE_URI
+        local_monitor.install(mcp)
+        assert mcp._tool_manager._tools["kiln_monitor_control"] is tool
+
+    def test_each_action_rides_its_own_public_tool(self, monkeypatch):
+        from kiln import server
+
+        calls = []
+        for name in ("pause_print", "resume_print", "cancel_print"):
+            monkeypatch.setattr(server, name, lambda _n=name, **kw: calls.append((_n, kw)) or {"success": True})
+        mcp = _fastmcp()
+        assert local_monitor._register_control_verb(mcp)
+        for action, tool in local_monitor.MONITOR_CONTROL_ACTIONS.items():
+            out = _unwrap(self._call(mcp, {"action": action, "printer_name": "workshop-a1"}))
+            assert out == {"kiln_monitor_control": {"status": "accepted", "action": action}}, action
+            assert calls[-1] == (tool, {"printer_name": "workshop-a1"})
+        # An unnamed call names no printer, the way the tools themselves default.
+        _unwrap(self._call(mcp, {"action": "pause"}))
+        assert calls[-1] == ("pause_print", {})
+
+    def test_a_refusal_keeps_the_tools_own_words(self, monkeypatch):
+        from kiln import server
+
+        monkeypatch.setattr(server, "pause_print", lambda **kw: {
+            "success": False, "error": {"code": "NO_ACTIVE_JOB", "message": "No print is running."}})
+        monkeypatch.setattr(server, "cancel_print", lambda **kw: (_ for _ in ()).throw(RuntimeError("adapter gone")))
+        mcp = _fastmcp()
+        assert local_monitor._register_control_verb(mcp)
+        out = _unwrap(self._call(mcp, {"action": "pause"}))["kiln_monitor_control"]
+        assert out["status"] == "refused" and out["failure"] == {"code": "NO_ACTIVE_JOB", "message": "No print is running."}
+        out = _unwrap(self._call(mcp, {"action": "cancel"}))["kiln_monitor_control"]
+        assert out["status"] == "refused" and out["failure"]["code"] == "CONTROL_ERROR"
+        assert "adapter gone" in out["failure"]["message"]
+        out = _unwrap(self._call(mcp, {"action": "reboot"}))["kiln_monitor_control"]
+        assert out["status"] == "refused" and out["failure"]["code"] == "INVALID_ACTION"
+
+
+def _unwrap(result):
+    """The tool's own dict from whatever the SDK's call_tool hands back."""
+    if isinstance(result, dict):
+        return result
+    if isinstance(result, tuple) and len(result) == 2 and isinstance(result[1], dict):
+        return result[1]
+    if isinstance(result, list):
+        for block in result:
+            text = getattr(block, "text", None)
+            if isinstance(text, str):
+                try:
+                    return json.loads(text)
+                except ValueError:
+                    continue
+    sc = getattr(result, "structuredContent", None)
+    if isinstance(sc, dict):
+        return sc
+    raise AssertionError(f"unreadable tool result: {result!r}")
 
 
 class TestMonitorDocumentCache:

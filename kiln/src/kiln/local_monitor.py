@@ -477,10 +477,12 @@ def _register_resource(mcp: Any) -> bool:
             )
         # Only a host about to render the panel asks for this.
         _host_read_the_monitor = True
-        # Belt and braces: install() already registered the poll verb; a
-        # server whose install was partial still gets it before the View's
-        # first tools/call.  Idempotent, so this costs nothing when it holds.
+        # Belt and braces: install() already registered the panel's verbs;
+        # a server whose install was partial still gets them before the
+        # View's first tools/call.  Idempotent, so this costs nothing when
+        # it holds.
         _register_snapshot_verb(mcp)
+        _register_control_verb(mcp)
         return doc
 
     mcp.add_resource(
@@ -550,6 +552,89 @@ def _register_snapshot_verb(mcp: Any) -> bool:
         return True
     except Exception:
         logger.warning("local monitor: snapshot verb failed", exc_info=True)
+        return False
+
+
+#: Panel action word -> the public control tool it rides.  The hosted door
+#: keeps the same three (kiln-pro ``MONITOR_CONTROL_ACTIONS``); the local
+#: door spells them here because the panel's buttons call one verb by name
+#: wherever the panel is served, and until this stood the locally served
+#: panel's Pause and Stop failed with "Couldn't reach your printer".
+MONITOR_CONTROL_ACTIONS: dict[str, str] = {
+    "pause": "pause_print",
+    "resume": "resume_print",
+    "cancel": "cancel_print",
+}
+
+
+def _control(action: str | None, printer_name: str | None) -> dict[str, Any]:
+    """One panel control, through the public tool that already owns it.
+
+    ``accepted`` means the door took the ask -- never that the machine
+    did it; the panel's polls carry the machine's own word.  The tools
+    keep their own posture (a pause, resume or cancel is not a print
+    start, so no consent token; whatever ``_check_auth`` or the adapter
+    refuses comes back as ``refused`` with its own words), and the shape
+    is the hosted verb's, which the panel already parses.
+    """
+    tool = MONITOR_CONTROL_ACTIONS.get(str(action or "").strip())
+    if tool is None:
+        return {
+            "status": "refused",
+            "failure": {
+                "code": "INVALID_ACTION",
+                "message": "action must be pause, resume, or cancel",
+            },
+        }
+    from kiln import server as _srv
+
+    kwargs: dict[str, Any] = {"printer_name": printer_name} if printer_name else {}
+    try:
+        out = getattr(_srv, tool)(**kwargs)
+    except Exception as exc:  # noqa: BLE001 — the refusal's own words, never a raise into the host
+        return {"status": "refused", "action": action,
+                "failure": {"code": "CONTROL_ERROR", "message": str(exc)}}
+    if isinstance(out, dict) and out.get("success") is False:
+        err = out.get("error")
+        if isinstance(err, dict):
+            failure = {"code": str(err.get("code") or "REFUSED"),
+                       "message": str(err.get("message") or "The printer refused that.")}
+        else:
+            failure = {"code": "REFUSED",
+                       "message": str(err or out.get("message") or "The printer refused that.")}
+        return {"status": "refused", "action": action, "failure": failure}
+    return {"status": "accepted", "action": action}
+
+
+def _register_control_verb(mcp: Any) -> bool:
+    """Register ``kiln_monitor_control`` -- the panel's Pause / Resume / Stop.
+
+    Idempotent and never raises; app-only, standing from install, for the
+    same host-caches-its-tool-list reason as the snapshot verb.
+    """
+    try:
+        registry = getattr(getattr(mcp, "_tool_manager", None), "_tools", None)
+        if isinstance(registry, dict) and "kiln_monitor_control" in registry:
+            return True
+
+        @mcp.tool(
+            name="kiln_monitor_control",
+            meta={"ui": {"resourceUri": PRINT_MONITOR_RESOURCE_URI,
+                         "visibility": ["app"]}},
+        )
+        def kiln_monitor_control(action: str, printer_name: str | None = None) -> dict:
+            """Internal support for Kiln's inline print monitor.
+
+            Relays a pause, resume, or cancel from the panel's own buttons
+            through the same doors the pause_print, resume_print and
+            cancel_print tools open.  Called by the panel itself; not
+            useful to call directly.
+            """
+            return {"kiln_monitor_control": _control(action, printer_name)}
+
+        return True
+    except Exception:
+        logger.warning("local monitor: control verb failed", exc_info=True)
         return False
 
 
@@ -726,6 +811,7 @@ def install(mcp: Any) -> dict[str, Any]:
         "enabled": enabled(),
         "resource": False,
         "snapshot_tool": False,
+        "control_tool": False,
         "stamped": 0,
     }
     if not enabled():
@@ -741,6 +827,7 @@ def install(mcp: Any) -> dict[str, Any]:
     # camera frame now that the result is lean, and a host caches its tool
     # list at initialize (see _register_snapshot_verb).
     out["snapshot_tool"] = _register_snapshot_verb(mcp)
+    out["control_tool"] = _register_control_verb(mcp)
 
     try:
         out["stamped"] = _stamp_tools(mcp)
