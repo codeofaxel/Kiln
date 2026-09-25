@@ -72,6 +72,7 @@ from kiln import tool_context as _tool_context
 from kiln.mcp_compat import (
     FastMCP,
     ask_user_to_confirm,
+    client_info,
     host_can_ask_the_user,
     install_uninitialized_request_guard,
     restart_keeps_connection,
@@ -79,8 +80,11 @@ from kiln.mcp_compat import (
     stamp_restart,
 )
 from kiln.print_consent import (
+    NOT_ASKED_CODE_COOLDOWN,
+    NOT_ASKED_CODE_SHOWN,
     NOT_ASKED_HOST_CANNOT,
     SOURCE_CI_BYPASS,
+    SOURCE_CODE,
     SOURCE_DERIVED,
     SOURCE_ELICITED,
     PrintConsent,
@@ -99,7 +103,7 @@ with contextlib.suppress(ImportError):
     import kiln_pro  # noqa: F401 — triggers compat shim installation
 
 
-from kiln import parse_float_env, parse_int_env, startup_failure
+from kiln import parse_float_env, parse_int_env, screen_code, startup_failure
 from kiln.auth import AuthManager
 from kiln.bed_leveling import BedLevelManager, LevelingPolicy
 
@@ -905,8 +909,10 @@ def _build_instructions() -> str:
         "`standing_window` block naming it. When the person says to close it, call "
         "`revoke_consent_window`; `consent_window_status` shows what is open. "
         "Nothing you can call opens or extends one. If this app cannot show the "
-        "dialog, say so plainly: the yes then comes from the person at a terminal "
-        "(`kiln print`, or `kiln consent window --for 2h --printer NAME`)."
+        "dialog, Kiln shows a short code in a notification on the person's screen: ask them "
+        "to type it here, pass their exact words to `give_print_code`, then start again. "
+        "Nothing you can call reveals the code. With no screen either, the yes comes from "
+        "the person at a terminal (`kiln print`, or `kiln consent window --for 2h --printer NAME`)."
     )
 
     # --- Monitoring & reporting ---
@@ -2328,12 +2334,27 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
         # opened, on purpose.  Asking again would be the dialog the
         # window exists to stop.  The gate reads the same record.
         return None
+    # The code the person already typed for this print, after a banner on
+    # this machine's screen: spent by this start, the way a dialog's yes
+    # lives for its call.
+    answered = screen_code.take_answer(file_value, aimed)
+    if answered is not None:
+        return _consent_from_code_answer(tool_name, file_value, printer_name, answered, aimed=aimed)
     try:
-        if not host_can_ask_the_user(mcp, ctx):
-            return note_not_asked(NOT_ASKED_HOST_CANNOT)
+        can_ask = bool(host_can_ask_the_user(mcp, ctx))
     except Exception as exc:  # noqa: BLE001 — cannot ask is not approved
         logger.debug("Could not read host consent capability: %s", exc)
-        return note_not_asked(NOT_ASKED_HOST_CANNOT)
+        can_ask = False
+    hook_path = None
+    if can_ask:
+        # A host whose own hooks answer its dialogs before the person sees
+        # them has asked nobody; the screen's code is the door instead.
+        hook_path = screen_code.host_dialog_hook(_host_client_name(ctx))
+        if hook_path:
+            _audit(tool_name, "consent_dialog_skipped", details={"reason": "host_hook", "settings": hook_path})
+            can_ask = False
+    if not can_ask:
+        return _offer_screen_code(tool_name, file_value, aimed, ctx, hook_path=hook_path, fallback=NOT_ASKED_HOST_CANNOT)
 
     offer_window, offer_fleet = dialog_offers()
     message = describe_print_request(
@@ -2368,8 +2389,93 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
             + ("declined" if answer.action == "decline" else "dismissed without an answer")
             + ". Nothing was sent to the printer."
         )
-    logger.debug("Consent could not be obtained (%s); falling back to token gate", answer.detail)
-    return note_not_asked(f"unavailable:{answer.detail}")
+    logger.debug("Consent could not be obtained from the dialog (%s); offering the screen's code", answer.detail)
+    _audit(tool_name, "consent_dialog_unavailable", details={"file": file_value, "detail": answer.detail})
+    return _offer_screen_code(tool_name, file_value, aimed, ctx, hook_path=None, fallback=f"unavailable:{answer.detail}")
+
+
+def _host_client_name(ctx: Any) -> str:
+    """The connected host's name from its ``clientInfo``, or ``""``."""
+    with contextlib.suppress(Exception):
+        return str(getattr(client_info(mcp, ctx), "name", "") or "")
+    return ""
+
+
+def _host_label(ctx: Any) -> str:
+    """``name version`` of the connected host, for the audit line."""
+    with contextlib.suppress(Exception):
+        info = client_info(mcp, ctx)
+        name = str(getattr(info, "name", "") or "")
+        version = str(getattr(info, "version", "") or "")
+        return (name + " " + version).strip()
+    return ""
+
+
+def _sha256_if_local(file_value: str) -> str:
+    """The sha256 of the file's bytes when a local copy can be read, else ``""``."""
+    with contextlib.suppress(Exception):
+        local = _local_copy_of(file_value)
+        if local:
+            from kiln.bridge_client import _sha256_of
+
+            return _sha256_of(local)
+    return ""
+
+
+def _offer_screen_code(
+    tool_name: str, file_value: str, aimed: str, ctx: Any, *, hook_path: str | None, fallback: str,
+):
+    """The screen door: show a code for this print on this machine's
+    screen and record that nobody has answered yet, so the refusal can
+    say what to do.  Where no banner can be shown — the hosted server, a
+    box with no screen, a notifier that failed — *fallback* is recorded
+    instead, the reason the refusal gave before this door existed."""
+    if _hosted_now():
+        return note_not_asked(fallback)
+    shown = screen_code.issue(
+        tool=tool_name, file_name=file_value, file_sha256=_sha256_if_local(file_value),
+        printer_name=aimed, host=_host_label(ctx),
+    )
+    outcome = shown.get("outcome")
+    if outcome == screen_code.SHOWN:
+        _audit(tool_name, "consent_code_shown", details={"file": file_value, "printer": aimed, "again": bool(shown.get("again"))})
+        return note_not_asked(NOT_ASKED_CODE_SHOWN + (f":hook={hook_path}" if hook_path else ""))
+    if outcome == screen_code.COOLDOWN:
+        return note_not_asked(f"{NOT_ASKED_CODE_COOLDOWN}:{int(shown.get('seconds_left') or 60)}")
+    _audit(tool_name, "consent_code_unavailable", details={"file": file_value, "reason": shown.get("reason")})
+    return note_not_asked(fallback)
+
+
+def _consent_from_code_answer(
+    tool_name: str, file_value: str, printer_name: str | None, answered: Any, *, aimed: str,
+):
+    """Record the person's typed code as the yes for the call now being
+    served, and open the window their words asked for — here, where the
+    dialog's window opens too, so no tool ever opens one.  The words,
+    both times, the file's bytes, the printer and the host go on the
+    audit line: the record a typed yes needs."""
+    identity = ""
+    with contextlib.suppress(Exception):
+        from kiln.consent_windows import local_identity
+
+        identity = local_identity()
+    issued = answered.issued
+    _audit(
+        tool_name, "consent_granted",
+        details={
+            "file": file_value, "by": "user", "identity": identity, "door": "screen_code",
+            "words": answered.words, "choice": answered.choice, "typed_duration": answered.typed_duration,
+            "host": issued.host, "printer": issued.printer_name, "file_sha256": issued.file_sha256,
+            "code_shown_at": issued.issued_at, "answered_at": answered.answered_at,
+        },
+    )
+    if answered.answer.opens_window:
+        _open_window_from_answer(tool_name, answered.answer, aimed, source=SOURCE_CODE)
+    # ``door`` stays empty: a code says yes, it shows nothing, so the
+    # preview gate still asks for the token that proves the print was seen.
+    return set_consent(
+        PrintConsent(tool=tool_name, file_name=file_value, printer_name=printer_name, source=SOURCE_CODE, identity=identity)
+    )
 
 
 def _hosted_now() -> bool:
@@ -2457,7 +2563,7 @@ def consent_from_dialog_answer(
     )
 
 
-def _open_window_from_answer(tool_name: str, answer: Any, aimed: str) -> None:
+def _open_window_from_answer(tool_name: str, answer: Any, aimed: str, *, source: str = SOURCE_ELICITED) -> None:
     """Open the window a dialog answer asked for, and audit it either way.
     Never raises: the yes to this print stands whether or not the window
     could be written.  A window that did not open is noted for the line
@@ -2467,7 +2573,7 @@ def _open_window_from_answer(tool_name: str, answer: Any, aimed: str) -> None:
 
     asked_for = answer.describe_window_ask()
     try:
-        w = consent_windows.open_window_from_dialog(answer, printer_name=aimed)
+        w = consent_windows.open_window_from_dialog(answer, printer_name=aimed, source=source)
     except Exception as exc:  # noqa: BLE001 — unreadable length, past the cap, hosted, a write failed
         logger.warning("standing window from the dialog not opened (%s): %s", asked_for, exc)
         _audit(
@@ -2558,7 +2664,32 @@ def _no_yes_message(tool_name: str, file_name: str, aimed: str) -> str:
             "yes or a standing window is nobody's here, and an agent cannot supply either door "
             "itself. Tell the person that plainly."
         )
-    if why_not_asked() == NOT_ASKED_HOST_CANNOT:
+    why = why_not_asked()
+    if why.startswith(NOT_ASKED_CODE_SHOWN):
+        hook = ""
+        if ":hook=" in why:
+            hook = (
+                " This host's own hooks answer its dialogs (" + why.split(":hook=", 1)[1]
+                + "), so the dialog was not used."
+            )
+        return (
+            f"{tool_name} refuses to proceed: {name} was shown, but nobody said go. A code was just "
+            "shown in a notification on the screen of the machine Kiln runs on." + hook + " Tell the "
+            f"person: type the code here to print {name} on {aimed} — the code alone approves this "
+            f"print; the code followed by 2h or today also keeps printing on {aimed} without asking. "
+            "Then pass their exact words to give_print_code and start again. Nothing you can call "
+            "reveals the code, and a wrong guess counts. If no notification appeared, their yes can "
+            f"be given at a terminal: `kiln print {name}` or `kiln consent window --for 2h --printer "
+            f"{aimed}`."
+        )
+    if why.startswith(NOT_ASKED_CODE_COOLDOWN):
+        secs = why.split(":", 1)[1] if ":" in why else "60"
+        return (
+            f"{tool_name} refuses to proceed: too many wrong codes, or too many codes, just now — no "
+            f"new code is shown for {secs} seconds. Tell the person plainly, wait, then start again; "
+            f"or their yes can be given at a terminal (`kiln print {name}`)."
+        )
+    if why == NOT_ASKED_HOST_CANNOT:
         return (
             f"{tool_name} refuses to proceed: {name} was shown, but nobody said go, and "
             "this host cannot show an approval dialog, so no dialog is coming — tell the "

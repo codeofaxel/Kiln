@@ -57,6 +57,12 @@ os.environ.pop("KILN_PRINTER_TYPE", None)
 # leaves _stage_document() returning None all suite long unless a test
 # opts back in via KILN_STAGE_DOC, same as it already does when offline.
 os.environ["KILN_NO_STAGE_FETCH"] = "1"
+# No test puts a banner on the developer's screen; a test of the screen
+# door installs its own notifier and turns this back on.
+os.environ.setdefault("KILN_SCREEN_CODE", "0")
+# A test host answers the approval dialog in no time; the too-fast rule is
+# tested where it is meant, by setting this back.
+os.environ.setdefault("KILN_DIALOG_MIN_READ_S", "0")
 
 # ---------------------------------------------------------------------------
 # Monkey-patch FastMCP to accept unknown kwargs (like ``description``)
