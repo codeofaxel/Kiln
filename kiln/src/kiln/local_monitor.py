@@ -572,6 +572,15 @@ MONITOR_CONTROL_ACTIONS: dict[str, str] = {
 }
 
 
+#: How the panel's own buttons are said when a confirmation stands in the
+#: way: "stopping a print" / "stop it", in the words the buttons use.
+_CONFIRM_WORDS = {
+    "pause": ("pausing", "pause"),
+    "resume": ("resuming", "resume"),
+    "cancel": ("stopping", "stop"),
+}
+
+
 def _control(action: str | None, printer_name: str | None) -> dict[str, Any]:
     """One panel control, through the public tool that already owns it.
 
@@ -607,11 +616,11 @@ def _control(action: str | None, printer_name: str | None) -> dict[str, Any]:
         # (the pill read "Stopping…" over a print that kept going).  The
         # gate is kept, not skipped -- the confirmation is the person's to
         # give, through their agent.
+        gerund, verb = _CONFIRM_WORDS.get(action, ("changing", "change"))
         return {"status": "refused", "action": action,
                 "failure": {"code": "CONFIRMATION_REQUIRED",
-                            "message": ("This install asks for confirmation before this "
-                                        "control runs, which the panel cannot give. Ask "
-                                        "your agent instead.")}}
+                            "message": (f"Kiln is set to confirm before {gerund} a print, and "
+                                        f"this panel can't confirm. Ask your agent to {verb} it.")}}
     if isinstance(out, dict) and out.get("success") is False:
         err = out.get("error")
         if isinstance(err, dict):

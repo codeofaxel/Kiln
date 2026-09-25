@@ -793,7 +793,10 @@ class TestTheControlVerbStandsFromInstall:
         out = _unwrap(self._call(mcp, {"action": "cancel"}))["kiln_monitor_control"]
         assert out["status"] == "refused", out
         assert out["failure"]["code"] == "CONFIRMATION_REQUIRED"
-        assert "agent" in out["failure"]["message"]
+        assert out["failure"]["message"] == (
+            "Kiln is set to confirm before stopping a print, and this panel can't confirm. "
+            "Ask your agent to stop it."
+        )
         assert reached == []
         # A control with no confirmation level keeps its door.
         monkeypatch.setattr(server, "pause_print", lambda **kw: {"success": True})
