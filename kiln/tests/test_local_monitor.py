@@ -752,6 +752,34 @@ class TestTheControlVerbStandsFromInstall:
         out = _unwrap(self._call(mcp, {"action": "reboot"}))["kiln_monitor_control"]
         assert out["status"] == "refused" and out["failure"]["code"] == "INVALID_ACTION"
 
+    def test_a_confirmation_the_panel_cannot_give_is_a_refusal_not_an_accept(self, monkeypatch):
+        """Under KILN_CONFIRM_MODE, cancel_print answers with a token for
+        confirm_action instead of cancelling.  The verb read that as
+        "accepted": the pill said "Stopping…" over a print that kept going.
+        The real gate on the real tool: nothing reaches the adapter, and the
+        panel is told to ask the agent."""
+        from kiln import server
+
+        reached: list = []
+
+        def _adapter_reached(*a, **k):
+            reached.append(a)
+            raise AssertionError("the adapter was reached")
+
+        monkeypatch.setattr(server, "_CONFIRM_MODE", True)
+        monkeypatch.setattr(server, "_check_rate_limit", lambda name: None)
+        monkeypatch.setattr(server, "_resolve_control_target", _adapter_reached)
+        mcp = _fastmcp()
+        assert local_monitor._register_control_verb(mcp)
+        out = _unwrap(self._call(mcp, {"action": "cancel"}))["kiln_monitor_control"]
+        assert out["status"] == "refused", out
+        assert out["failure"]["code"] == "CONFIRMATION_REQUIRED"
+        assert "agent" in out["failure"]["message"]
+        assert reached == []
+        # A control with no confirmation level keeps its door.
+        monkeypatch.setattr(server, "pause_print", lambda **kw: {"success": True})
+        assert _unwrap(self._call(mcp, {"action": "pause"}))["kiln_monitor_control"]["status"] == "accepted"
+
 
 def _unwrap(result):
     """The tool's own dict from whatever the SDK's call_tool hands back."""

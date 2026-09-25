@@ -573,9 +573,10 @@ def _control(action: str | None, printer_name: str | None) -> dict[str, Any]:
     ``accepted`` means the door took the ask -- never that the machine
     did it; the panel's polls carry the machine's own word.  The tools
     keep their own posture (a pause, resume or cancel is not a print
-    start, so no consent token; whatever ``_check_auth`` or the adapter
-    refuses comes back as ``refused`` with its own words), and the shape
-    is the hosted verb's, which the panel already parses.
+    start, so no consent token; whatever ``_check_auth``, the
+    confirmation gate or the adapter refuses comes back as ``refused``
+    with its own words), and the shape is the hosted verb's, which the
+    panel already parses.
     """
     tool = MONITOR_CONTROL_ACTIONS.get(str(action or "").strip())
     if tool is None:
@@ -594,6 +595,18 @@ def _control(action: str | None, printer_name: str | None) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 — the refusal's own words, never a raise into the host
         return {"status": "refused", "action": action,
                 "failure": {"code": "CONTROL_ERROR", "message": str(exc)}}
+    if isinstance(out, dict) and out.get("confirmation_required"):
+        # cancel_print under KILN_CONFIRM_MODE answers with a token for
+        # confirm_action, and nothing in the panel can call that: the
+        # machine was not asked, and "accepted" would have said it was
+        # (the pill read "Stopping…" over a print that kept going).  The
+        # gate is kept, not skipped -- the confirmation is the person's to
+        # give, through their agent.
+        return {"status": "refused", "action": action,
+                "failure": {"code": "CONFIRMATION_REQUIRED",
+                            "message": ("This install asks for confirmation before this "
+                                        "control runs, which the panel cannot give. Ask "
+                                        "your agent instead.")}}
     if isinstance(out, dict) and out.get("success") is False:
         err = out.get("error")
         if isinstance(err, dict):
