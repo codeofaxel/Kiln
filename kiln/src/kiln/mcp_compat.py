@@ -38,7 +38,9 @@ actually on the wire.
 
 from __future__ import annotations
 
+import contextlib
 import contextvars
+import inspect
 import logging
 import os
 import time
@@ -91,6 +93,7 @@ __all__ = [
     "stamp_restart",
     "set_tool_input_schema",
     "tool_input_schema",
+    "call_registered_tool",
     "tool_result_blocks",
     "uninitialized_request_message",
     "wrap_call_tool_result",
@@ -109,6 +112,30 @@ def tool_result_blocks(result: Any) -> Any:
     if isinstance(result, tuple):
         result = result[0]
     return getattr(result, "content", result)
+
+
+async def call_registered_tool(mcp: Any, name: str, arguments: Any = None, *, context: Any = None):
+    """Run a registered tool the way a host's ``tools/call`` does, on either SDK.
+
+    The tool manager's ``call_tool`` grew a required ``context`` parameter in
+    SDK 2: on SDK 1 it defaults to ``None`` and a two-argument call works, so a
+    caller written against SDK 1 passes locally and raises ``TypeError:
+    call_tool() missing 1 required positional argument`` on a tree that
+    installs SDK 2 — which is CI.  The parameter is read off the signature
+    rather than assumed, so a third spelling fails here, once, instead of at
+    every call site.
+
+    ``None`` is a legitimate context: the manager only hands it to the tool
+    body when the tool declares a context parameter, and a tool that does is
+    not one a test drives this way.
+    """
+    manager = getattr(mcp, "_tool_manager", mcp)
+    call = manager.call_tool
+    kwargs: dict[str, Any] = {}
+    with contextlib.suppress(Exception):
+        if "context" in inspect.signature(call).parameters:
+            kwargs["context"] = context
+    return await call(name, dict(arguments or {}), **kwargs)
 
 
 _SCHEMA_ATTRS = ("input_schema", "inputSchema")

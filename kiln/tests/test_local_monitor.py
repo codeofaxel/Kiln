@@ -24,6 +24,7 @@ import anyio
 import pytest
 
 from kiln import local_monitor, monitor_payload, stage_cache
+from kiln.mcp_compat import call_registered_tool
 
 _DOC = "<!DOCTYPE html><html><body>monitor</body></html>"
 
@@ -376,10 +377,8 @@ class TestCapabilitiesRideOnlyOnThePollThatAsks:
         monkeypatch.setattr(server, "printer_status", fake_status)
         mcp = _fastmcp()
         assert local_monitor._register_snapshot_verb(mcp)
-        tools = mcp._tool_manager
-
-        anyio.run(tools.call_tool, "kiln_monitor_snapshot", {"include_capabilities": True})
-        anyio.run(tools.call_tool, "kiln_monitor_snapshot", {})
+        anyio.run(call_registered_tool, mcp, "kiln_monitor_snapshot", {"include_capabilities": True})
+        anyio.run(call_registered_tool, mcp, "kiln_monitor_snapshot", {})
 
         assert asked == ["full", "lite"]
 
