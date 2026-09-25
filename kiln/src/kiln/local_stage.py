@@ -84,7 +84,6 @@ from kiln.mcp_compat import (
     capture_request_context,
     client_capabilities,
     client_info,
-    lowlevel_server,
     result_is_error,
     result_structured_content,
     set_result_structured_content,

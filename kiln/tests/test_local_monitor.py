@@ -376,10 +376,24 @@ class TestCapabilitiesRideOnlyOnThePollThatAsks:
         monkeypatch.setattr(server, "printer_status", fake_status)
         mcp = _fastmcp()
         assert local_monitor._register_snapshot_verb(mcp)
-        tools = mcp._tool_manager
 
-        anyio.run(tools.call_tool, "kiln_monitor_snapshot", {"include_capabilities": True})
-        anyio.run(tools.call_tool, "kiln_monitor_snapshot", {})
+        def _in_process_client():
+            """SDK 2 connects ``Client`` to a server object directly; 1.x has
+            the memory-stream helper that 2.x removed."""
+            try:
+                from mcp import Client
+            except ImportError:
+                from mcp.shared.memory import create_connected_server_and_client_session
+
+                return create_connected_server_and_client_session(mcp)
+            return Client(mcp)
+
+        async def _two_polls() -> None:
+            async with _in_process_client() as client:
+                await client.call_tool("kiln_monitor_snapshot", {"include_capabilities": True})
+                await client.call_tool("kiln_monitor_snapshot", {})
+
+        anyio.run(_two_polls)
 
         assert asked == ["full", "lite"]
 
