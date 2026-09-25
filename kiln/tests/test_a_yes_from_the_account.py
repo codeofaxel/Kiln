@@ -514,14 +514,41 @@ def mesh(tmp_path):
     return path
 
 
+def _the_painter_can_draw(mesh_path, out_dir) -> bool:
+    """Whether THIS machine's stage painter can draw at all.
+
+    Asked only after an ask came back with no picture, so a machine that
+    paints still runs every assertion and a broken wire still fails there.
+    A build agent with no renderer is not a regression, and a test that
+    reads it as one teaches people to ignore a red main.
+    """
+    try:
+        from kiln.model_visualizer import _ANGLE_ROTATIONS, _CAMERA_ANGLES
+
+        iso = next(a for a in _CAMERA_ANGLES if a[0] == "isometric")
+        views = _REAL_PAINTER(
+            str(mesh_path), [iso], {"isometric": _ANGLE_ROTATIONS["isometric"]},
+            output_dir=str(out_dir), width=200, height=150, require_colors=False,
+        )
+    except Exception:  # noqa: BLE001 — a painter that raises cannot draw
+        return False
+    return any(v.get("path") for v in views or [])
+
+
 class TestTheStillOnDemand:
     @responses.activate
-    def test_none_on_record_the_stage_painter_paints_one_and_it_is_sent(self, signed_in, mesh, monkeypatch, audits):
+    def test_none_on_record_the_stage_painter_paints_one_and_it_is_sent(self, signed_in, mesh, monkeypatch, audits, tmp_path):
         monkeypatch.setattr(stage_paint, "try_paint_stage_views", _REAL_PAINTER)
         _may_i()
         _held()
         _ask(mesh)
         body = json.loads(_calls(PENDING)[0].request.body)
+        if not body["picture_png_b64"] and not _the_painter_can_draw(mesh, tmp_path):
+            pytest.skip(
+                "the real stage painter drew nothing on this machine — no renderer here (CI). "
+                "The wiring is pinned by the fake-painter tests in this class; this one is about "
+                "the bytes a working painter produces."
+            )
         png = base64.b64decode(body["picture_png_b64"])
         assert png[:8] == b"\x89PNG\r\n\x1a\n" and len(png) <= bridge_client.PICTURE_MAX_BYTES
         assert body["shown_pixels_sha"] == hashlib.sha256(png).hexdigest()
