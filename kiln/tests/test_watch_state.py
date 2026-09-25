@@ -231,3 +231,18 @@ def test_printing_is_read_off_the_state_word_the_caller_already_has(monkeypatch)
     # A stale reading cannot vouch for an empty bed: it counts as a print on the machine.
     assert watch_state.kiln_watch_state("default", adapter=_Adapter(), state_word="stale")["printing"] is True
     assert watch_state.kiln_watch_state("default", adapter=_Adapter())["printing"] is None
+
+
+def test_every_watchdog_rule_word_is_a_phrase_a_status_line_can_say() -> None:
+    """The inline monitor and the web Monitor put the latest flag's words
+    after "Watchdog:" as the one status sentence, so every rule's words are
+    a short noun phrase; how a rule works (once per code, judged against the
+    printer's own countdown, never acted on) is the watchdog's docstring's
+    to say, not the line's."""
+    dog = watch_state._watcher_words()["watchdog"]
+    for colour in ("red", "yellow"):
+        assert dog[colour], colour
+        for rule, words in dog[colour].items():
+            assert len(words) <= 60, (rule, words)
+            assert " -- " not in words and ":" not in words and "(" not in words, (rule, words)
+            assert words[0].islower(), (rule, words)

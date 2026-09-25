@@ -94,17 +94,14 @@ def _watcher_words() -> dict[str, dict[str, Any]]:
                 "bed_warmup_timeout": "the bed never reaching its target",
             },
             "yellow": {
-                "fault_needs_person": (
-                    "a fault the printer has stopped for (paused or ended the "
-                    "job on a code) -- said once per code, on the kiln_watch "
-                    "block and on every tool result while it stands, and "
-                    "never acted on: the machine's own stop is the act"
-                ),
-                "stalled": (
-                    f"no progress for {stall_threshold_seconds() / 60:.0f} minutes while "
-                    f"printing, judged against the printer's own countdown -- reported "
-                    f"to you, never acted on"
-                ),
+                # Each entry is a short noun phrase: the inline monitor and the
+                # web Monitor say the latest flag's words as the one status
+                # sentence ("Watchdog: a weak Wi-Fi signal."), so a rule's
+                # mechanics -- once per code, judged against the printer's own
+                # countdown, reported and never acted on -- belong in the
+                # watchdog's docstring, not on that line.
+                "fault_needs_person": "a fault the printer has stopped for",
+                "stalled": f"no progress for {stall_threshold_seconds() / 60:.0f} minutes while printing",
                 "wifi_weak": "a weak Wi-Fi signal",
                 "chamber_fan_stalled": "a stalled chamber fan",
                 "tool_warmup_slow": "the hotend warming slowly",

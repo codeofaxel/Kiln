@@ -208,8 +208,7 @@ class TestTheWatchBlock:
 
     def test_the_yellow_rule_has_words(self) -> None:
         words = watch_state._watcher_words()["watchdog"]["yellow"]
-        assert "fault_needs_person" in words
-        assert "never acted on" in words["fault_needs_person"]
+        assert words["fault_needs_person"] == "a fault the printer has stopped for"
 
 
 class TestTheBannerRidesEveryResult:
