@@ -3209,9 +3209,15 @@ def _no_yes_message(tool_name: str, file_name: str, aimed: str) -> str:
                 + "), so the dialog was not used."
             )
         account = f" Or they can {monitor}" if monitor else (f" {signin}" if signin else "")
+        switch = ""
+        if screen_code.last_kiln_status() == screen_code.KILN_OFF:
+            switch = (
+                " Notifications from Kiln are turned off on this Mac, so the code went out another "
+                "way and may not show: they can turn them on in System Settings, Notifications, Kiln."
+            )
         return (
             f"{tool_name} refuses to proceed: {name} was shown, but nobody said go. A code was just "
-            "shown in a notification on the screen of the machine Kiln runs on." + hook + " Tell the "
+            "shown in a notification on the screen of the machine Kiln runs on." + hook + switch + " Tell the "
             f"person: type the code here to print {name} on {aimed} — the code alone approves this "
             f"print; the code followed by 2h or today also keeps printing on {aimed} without asking. "
             "Then pass their exact words to give_print_code and start again. Nothing you can call "

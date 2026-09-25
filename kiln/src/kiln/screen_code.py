@@ -40,8 +40,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import plistlib
 import re
 import secrets
+import shutil
 import subprocess
 import sys
 import threading
@@ -134,11 +136,13 @@ def _reset_for_tests() -> None:
     """Forget every code.  The notifier hook is left as the test set it:
     a test that forgets to install one would otherwise put a real banner
     on the developer's screen."""
+    global _last_kiln_status  # noqa: PLW0603
     with _lock:
         _live.clear()
         _answered.clear()
         _cooldown_until.clear()
         _issued_times.clear()
+    _last_kiln_status = None
 
 
 def _key(file_name: str, printer_name: str | None) -> tuple[str, str]:
@@ -201,6 +205,77 @@ def _applescript_string(text: str) -> str:
     return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+#: The name Windows files Kiln's pop-ups under.  Registered for the current
+#: user (no administrator, no prompt) with Kiln's name and icon, so a toast
+#: reads "Kiln" — not "Windows PowerShell", and not silently dropped, which
+#: is what an unregistered name gets on current Windows.
+_WINDOWS_APP_ID = "Kiln3D.Kiln"
+_PACKAGED_PNG = Path(__file__).parent / "data" / "notifier" / "Kiln.png"
+#: Every character PowerShell reads as a single quote.  Inside a
+#: single-quoted string each is escaped by doubling it; missing one is a
+#: way out of the string.
+_PS_QUOTES = "'\u2018\u2019\u201a\u201b"
+
+
+def _ps_literal(text: str) -> str:
+    """A PowerShell single-quoted string: nothing inside it is evaluated —
+    no ``$(...)``, no variables — whatever a file's name holds."""
+    out = str(text)
+    for quote in _PS_QUOTES:
+        out = out.replace(quote, quote + quote)
+    return "'" + out + "'"
+
+
+def _windows_icon() -> str:
+    """Kiln's icon at a stable path Windows can read, or ``""``."""
+    try:
+        if not _PACKAGED_PNG.is_file():
+            return ""
+        home = _kiln_home() / "notifier"
+        home.mkdir(parents=True, exist_ok=True)
+        dest = home / "Kiln.png"
+        if not dest.is_file() or dest.stat().st_size != _PACKAGED_PNG.stat().st_size:
+            shutil.copyfile(_PACKAGED_PNG, dest)
+        return str(dest)
+    except Exception:  # noqa: BLE001 — no icon is a plainer toast, not an error
+        return ""
+
+
+def _windows_toast_script(issued: Issued) -> str:
+    """One line of Windows PowerShell 5.1: register Kiln's name and icon
+    for this user, then show the toast.  Read from standard input, so the
+    code never sits on a command line; every word from outside travels
+    inside a single-quoted literal and XML-escaped, so a file's name cannot
+    become a command."""
+    from xml.sax.saxutils import escape
+
+    title, subtitle, message = banner_text(issued)
+    toast = (
+        '<toast><visual><binding template="ToastGeneric">'
+        f"<text>{escape(title)}</text><text>{escape(subtitle)}</text><text>{escape(message)}</text>"
+        "</binding></visual></toast>"
+    )
+    icon = _windows_icon()
+    steps = [
+        f"$id={_ps_literal(_WINDOWS_APP_ID)}",
+        "$k='HKCU:\\Software\\Classes\\AppUserModelId\\'+$id",
+        "if(-not(Test-Path $k)){New-Item -Path $k -Force|Out-Null}",
+        "New-ItemProperty -Path $k -Name DisplayName -Value 'Kiln' -PropertyType String -Force|Out-Null",
+    ]
+    if icon:
+        steps.append(f"New-ItemProperty -Path $k -Name IconUri -Value {_ps_literal(icon)} -PropertyType String -Force|Out-Null")
+    steps += [
+        "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]|Out-Null",
+        "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime]|Out-Null",
+        "$x=New-Object Windows.Data.Xml.Dom.XmlDocument",
+        f"$x.LoadXml({_ps_literal(toast)})",
+        "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($id).Show([Windows.UI.Notifications.ToastNotification]::new($x))",
+    ]
+    # One line, ended: PowerShell reading a script from standard input runs
+    # each line as it completes.
+    return ";".join(steps) + "\n"
+
+
 def _show_command(issued: Issued) -> tuple[list[str], str | None] | None:
     """``(argv, stdin)`` that puts the banner up on this platform, or ``None``.
 
@@ -219,38 +294,150 @@ def _show_command(issued: Issued) -> tuple[list[str], str | None] | None:
         )
         return ["osascript", "-"], script
     if sys.platform.startswith("win"):
-        ps = (
-            "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null;"
-            "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null;"
-            "$x = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent("
-            "[Windows.UI.Notifications.ToastTemplateType]::ToastText02);"
-            "$t = $x.GetElementsByTagName('text');"
-            f"$t.Item(0).AppendChild($x.CreateTextNode({json.dumps(title + ': ' + subtitle)})) | Out-Null;"
-            f"$t.Item(1).AppendChild($x.CreateTextNode({json.dumps(message)})) | Out-Null;"
-            "$n = [Windows.UI.Notifications.ToastNotification]::new($x);"
-            "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('Kiln').Show($n);"
-        )
-        return ["powershell", "-NoProfile", "-NonInteractive", "-Command", "-"], ps
+        return ["powershell", "-NoProfile", "-NonInteractive", "-Command", "-"], _windows_toast_script(issued)
     if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
         return ["notify-send", "-a", "Kiln", title, f"{subtitle}\n{message}"], None
     return None
 
 
+# ---------------------------------------------------------------------------
+# The Mac's own notifier: Kiln.app
+# ---------------------------------------------------------------------------
+#
+# macOS lets an app post a notification only after the person allows it, and
+# only a native app can ask.  A banner sent through the system script runner
+# arrives labelled "Script Editor" with its icon.  So on a Mac, Kiln ships a
+# small helper app (built by kiln/scripts/build_notifier.py) that posts as Kiln,
+# with Kiln's icon, and can say honestly whether it is allowed to.  It is
+# copied out of the package into Kiln's home once, so it runs from a place
+# that is Kiln's own and survives a reinstall of the package.
+
+_PACKAGED_APP = Path(__file__).parent / "data" / "notifier" / "Kiln.app"
+_NOTIFIER_EXE = Path("Contents") / "MacOS" / "kiln-notifier"
+#: The helper's answers to ``status``.
+KILN_ALLOWED = "authorized"
+KILN_OFF = "denied"
+KILN_NOT_ASKED = "not_determined"
+#: How long the first-time ask may hold a banner before the old route shows
+#: the code; the ask itself keeps running and is answered whenever the
+#: person gets to it.
+_ASK_WAIT_S = 8.0
+
+
+def _kiln_home() -> Path:
+    return Path(os.environ.get("KILN_HOME") or Path.home() / ".kiln")
+
+
+def _bundle_version(app: Path) -> str:
+    try:
+        with open(app / "Contents" / "Info.plist", "rb") as fh:
+            return str(plistlib.load(fh).get("CFBundleVersion") or "")
+    except Exception:  # noqa: BLE001 — unreadable is "no version"
+        return ""
+
+
+def _notifier_path() -> Path | None:
+    """The installed helper's executable, installing or updating it from
+    the package first; ``None`` when this is not a Mac or the package
+    carries no helper.  Never raises."""
+    if sys.platform != "darwin" or not (_PACKAGED_APP / _NOTIFIER_EXE).is_file():
+        return None
+    installed = _kiln_home() / "notifier" / "Kiln.app"
+    try:
+        if _bundle_version(installed) != _bundle_version(_PACKAGED_APP) or not (installed / _NOTIFIER_EXE).is_file():
+            if installed.exists():
+                shutil.rmtree(installed)
+            installed.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(_PACKAGED_APP, installed, symlinks=True)
+        exe = installed / _NOTIFIER_EXE
+        exe.chmod(0o755)
+        return exe
+    except Exception as exc:  # noqa: BLE001 — no helper is the old route, not an error
+        logger.debug("Kiln notifier not installed: %s", exc)
+        return None
+
+
+def kiln_notifications() -> str | None:
+    """Whether macOS lets Kiln post as itself: ``authorized``, ``denied``,
+    ``not_determined`` — or ``None`` off a Mac or with no helper.  Asks
+    nobody; for ``kiln doctor`` and the banner's own choice of route."""
+    exe = _notifier_path()
+    if exe is None:
+        return None
+    try:
+        done = subprocess.run([str(exe), "status"], capture_output=True, text=True, timeout=5, check=False)
+    except Exception:  # noqa: BLE001
+        return None
+    answer = str(getattr(done, "stdout", "") or "").strip()
+    return answer if answer in (KILN_ALLOWED, KILN_OFF, KILN_NOT_ASKED) else None
+
+
+#: What the last banner learned about Kiln's own notifications on this Mac,
+#: so the refusal can name the switch when they are off.  ``None`` until a
+#: banner has been tried, and off a Mac.
+_last_kiln_status: str | None = None
+
+
+def last_kiln_status() -> str | None:
+    return _last_kiln_status
+
+
+def _post_as_kiln(exe: Path, issued: Issued) -> bool:
+    title, subtitle, message = banner_text(issued)
+    words = json.dumps({"title": title, "subtitle": subtitle, "body": message})
+    try:
+        done = subprocess.run([str(exe), "post"], input=words, capture_output=True, text=True, timeout=10, check=False)
+    except Exception:  # noqa: BLE001
+        return False
+    return done.returncode == 0
+
+
+def _show_as_kiln(issued: Issued) -> bool:
+    """Post the banner as Kiln when macOS allows it.  The first time, ask
+    — the system's own "Kiln Notifications" prompt — and wait a moment for
+    the answer; a person who has not answered yet still gets this code by
+    the old route, and the ask carries on without us.  False sends the
+    caller to the old route."""
+    global _last_kiln_status  # noqa: PLW0603
+    exe = _notifier_path()
+    if exe is None:
+        return False
+    status = kiln_notifications()
+    if status == KILN_NOT_ASKED:
+        try:
+            ask = subprocess.Popen([str(exe), "request"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+            out, _ = ask.communicate(timeout=_ASK_WAIT_S)
+            status = str(out or "").strip()
+        except subprocess.TimeoutExpired:
+            _last_kiln_status = KILN_NOT_ASKED
+            return False  # still waiting on the person; the ask stays up
+        except Exception:  # noqa: BLE001
+            return False
+    _last_kiln_status = status
+    return status == KILN_ALLOWED and _post_as_kiln(exe, issued)
+
+
 def _show(issued: Issued) -> bool:
     """Put the banner up.  True only when the platform reported success;
-    never raises.  The command line carries the code, which is why the
-    argument list is never logged."""
+    never raises.  On a Mac, as Kiln when macOS allows it (the helper
+    above), else by the system script runner; elsewhere, the platform's own
+    notifier."""
     if _show_hook is not None:
         try:
             return bool(_show_hook(issued))
         except Exception:  # noqa: BLE001 — a notifier that fails has not shown
             return False
+    if sys.platform == "darwin" and _show_as_kiln(issued):
+        return True
     command = _show_command(issued)
     if command is None:
         return False
     argv, stdin = command
+    # On Windows a console program started from a windowless one opens a
+    # console window of its own; the person would see a black box flash up.
+    quiet = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)} if sys.platform.startswith("win") else {}
     try:
-        done = subprocess.run(argv, input=stdin, capture_output=True, text=True, timeout=8, check=False)
+        done = subprocess.run(argv, input=stdin, capture_output=True, text=True, timeout=8, check=False, **quiet)
     except Exception as exc:  # noqa: BLE001 — no binary, a timeout, a dead session
         logger.debug("screen code banner not shown: %s", type(exc).__name__)
         return False

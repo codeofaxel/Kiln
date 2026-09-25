@@ -220,4 +220,11 @@ kiln = [
     "data/scad_libraries/MCAD/*.scad",
     "py.typed",
     "generation/scad_library/*.scad",
+    # The print-code banner's own notifier: Kiln.app on a Mac, the icon on
+    # Windows (kiln/scripts/build_notifier.py writes both).
+    "data/notifier/Kiln.png",
+    "data/notifier/Kiln.app/Contents/Info.plist",
+    "data/notifier/Kiln.app/Contents/MacOS/kiln-notifier",
+    "data/notifier/Kiln.app/Contents/Resources/Kiln.icns",
+    "data/notifier/Kiln.app/Contents/_CodeSignature/CodeResources",
 ]

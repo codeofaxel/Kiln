@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import pathlib
 import re
+import subprocess
+import sys
 import time
 import types
 
@@ -420,8 +423,299 @@ def test_the_code_never_rides_a_command_line(monkeypatch, platform):
     monkeypatch.setattr(screen_code, "_show_hook", None)
     monkeypatch.setattr(screen_code.sys, "platform", platform)
     monkeypatch.setattr(screen_code.subprocess, "run", fake_run)
-    monkeypatch.setattr(screen_code, "_branded_notifier", lambda: None, raising=False)
+    monkeypatch.setattr(screen_code, "_show_as_kiln", lambda issued: False)  # the fallback route
     assert screen_code._show(_issued("4821"))
     argv, stdin = seen[-1]
     assert not any("4821" in str(a) for a in argv), argv
     assert "4821" in (stdin or "")
+
+
+
+# ---------------------------------------------------------------------------
+# On a Mac, the banner comes from Kiln (the helper app), asked for once
+# ---------------------------------------------------------------------------
+
+
+class _FakeHelper:
+    """The helper's three verbs, answered from a script, with every call kept."""
+
+    def __init__(self, status="authorized", request_answer="authorized", request_hangs=False, post_code=0):
+        self.status, self.request_answer = status, request_answer
+        self.request_hangs, self.post_code = request_hangs, post_code
+        self.calls: list[tuple[list[str], str | None]] = []
+
+    def run(self, argv, **kw):
+        self.calls.append((list(argv), kw.get("input")))
+        verb = argv[1] if len(argv) > 1 else ""
+        if verb == "status":
+            return types.SimpleNamespace(returncode=0, stdout=self.status + "\n")
+        if verb == "post":
+            return types.SimpleNamespace(returncode=self.post_code, stdout="")
+        # anything else is the fallback notifier
+        return types.SimpleNamespace(returncode=0, stdout="")
+
+    def popen(self, argv, **kw):
+        helper = self
+        self.calls.append((list(argv), None))
+
+        class _Ask:
+            killed = False
+
+            def communicate(self, timeout=None):
+                if helper.request_hangs:
+                    raise screen_code.subprocess.TimeoutExpired(argv, timeout)
+                helper.status = helper.request_answer
+                return helper.request_answer + "\n", ""
+
+            def kill(self):
+                self.killed = True
+
+        return _Ask()
+
+    def verbs(self):
+        return [argv[1] if argv[0].endswith("kiln-notifier") else argv[0] for argv, _ in self.calls]
+
+
+@pytest.fixture
+def mac_helper(monkeypatch, tmp_path):
+    def make(**kw):
+        helper = _FakeHelper(**kw)
+        exe = tmp_path / "Kiln.app" / "Contents" / "MacOS" / "kiln-notifier"
+        monkeypatch.setattr(screen_code, "_show_hook", None)
+        monkeypatch.setattr(screen_code.sys, "platform", "darwin")
+        monkeypatch.setattr(screen_code, "_notifier_path", lambda: exe)
+        monkeypatch.setattr(screen_code.subprocess, "run", helper.run)
+        monkeypatch.setattr(screen_code.subprocess, "Popen", helper.popen)
+        return helper
+
+    return make
+
+
+class TestTheBannerComesFromKiln:
+    def test_allowed_posts_as_kiln_with_the_words_on_standard_input(self, mac_helper):
+        helper = mac_helper(status="authorized")
+        assert screen_code._show(_issued("4821"))
+        assert helper.verbs() == ["status", "post"]
+        argv, stdin = helper.calls[-1]
+        assert not any("4821" in a for a in argv)
+        words = json.loads(stdin)
+        assert "4821" in words["title"] and set(words) == {"title", "subtitle", "body"}
+
+    def test_the_first_time_kiln_asks_and_then_posts(self, mac_helper):
+        helper = mac_helper(status="not_determined", request_answer="authorized")
+        assert screen_code._show(_issued())
+        assert helper.verbs() == ["status", "request", "post"]
+        assert screen_code.last_kiln_status() == screen_code.KILN_ALLOWED
+
+    def test_an_unanswered_ask_leaves_the_code_to_the_old_route_and_keeps_asking(self, mac_helper):
+        helper = mac_helper(status="not_determined", request_hangs=True)
+        assert screen_code._show(_issued())
+        assert helper.verbs() == ["status", "request", "osascript"]
+        assert screen_code.last_kiln_status() == screen_code.KILN_NOT_ASKED
+
+    def test_kiln_turned_off_falls_back_and_is_remembered(self, mac_helper):
+        helper = mac_helper(status="denied")
+        assert screen_code._show(_issued())
+        assert helper.verbs() == ["status", "osascript"]
+        assert screen_code.last_kiln_status() == screen_code.KILN_OFF
+
+    def test_a_post_the_helper_refuses_falls_back(self, mac_helper):
+        helper = mac_helper(status="authorized", post_code=3)
+        assert screen_code._show(_issued())
+        assert helper.verbs() == ["status", "post", "osascript"]
+
+    def test_no_helper_is_the_old_route(self, monkeypatch):
+        seen = []
+        monkeypatch.setattr(screen_code, "_show_hook", None)
+        monkeypatch.setattr(screen_code.sys, "platform", "darwin")
+        monkeypatch.setattr(screen_code, "_notifier_path", lambda: None)
+        monkeypatch.setattr(screen_code.subprocess, "run", lambda argv, **kw: seen.append(argv) or types.SimpleNamespace(returncode=0))
+        assert screen_code._show(_issued())
+        assert [a[0] for a in seen] == ["osascript"]
+
+    def test_the_refusal_names_the_switch_when_kiln_is_turned_off(self, mac_helper, monkeypatch):
+        mac_helper(status="denied")
+        monkeypatch.setattr(screen_code, "_show_hook", None)
+        r = _ask()
+        assert r.why.startswith(NOT_ASKED_CODE_SHOWN)
+        assert "Notifications from Kiln are turned off" in r.text and "System Settings" in r.text
+
+
+def _packaged_app(root, version):
+    app = root / "Kiln.app"
+    (app / "Contents" / "MacOS").mkdir(parents=True)
+    (app / "Contents" / "MacOS" / "kiln-notifier").write_text("#!/bin/sh\n")
+    import plistlib
+
+    with open(app / "Contents" / "Info.plist", "wb") as fh:
+        plistlib.dump({"CFBundleVersion": version}, fh)
+    return app
+
+
+class TestTheHelperIsInstalledOnce:
+    def test_installed_from_the_package_into_kilns_home(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(screen_code.sys, "platform", "darwin")
+        monkeypatch.setattr(screen_code, "_PACKAGED_APP", _packaged_app(tmp_path / "pkg", "1"))
+        monkeypatch.setenv("KILN_HOME", str(tmp_path / "home"))
+        exe = screen_code._notifier_path()
+        assert exe == tmp_path / "home" / "notifier" / "Kiln.app" / "Contents" / "MacOS" / "kiln-notifier"
+        assert exe.is_file() and exe.stat().st_mode & 0o111
+
+    def test_a_newer_helper_replaces_the_installed_one_and_the_same_one_is_left_alone(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(screen_code.sys, "platform", "darwin")
+        monkeypatch.setenv("KILN_HOME", str(tmp_path / "home"))
+        monkeypatch.setattr(screen_code, "_PACKAGED_APP", _packaged_app(tmp_path / "v1", "1"))
+        exe = screen_code._notifier_path()
+        marker = exe.parent.parent / "marker"
+        marker.write_text("x")
+        assert screen_code._notifier_path() == exe and marker.exists()  # same version: untouched
+        monkeypatch.setattr(screen_code, "_PACKAGED_APP", _packaged_app(tmp_path / "v2", "2"))
+        screen_code._notifier_path()
+        assert not marker.exists()  # a newer helper was copied over it
+
+    def test_not_a_mac_has_no_helper(self, monkeypatch):
+        monkeypatch.setattr(screen_code.sys, "platform", "win32")
+        assert screen_code._notifier_path() is None
+
+
+# ---------------------------------------------------------------------------
+# On Windows, the toast comes from Kiln too — no prompt, nothing to install
+# ---------------------------------------------------------------------------
+
+_PS_QUOTES = "'\u2018\u2019\u201a\u201b"
+
+
+def _powershell_code_outside_strings(script: str) -> str:
+    """The script with every single-quoted literal removed, doubled quotes
+    honoured: what PowerShell would actually run as code."""
+    code, i, n = [], 0, len(script)
+    while i < n:
+        ch = script[i]
+        if ch in _PS_QUOTES:
+            i += 1
+            while i < n:
+                if script[i] in _PS_QUOTES and i + 1 < n and script[i + 1] in _PS_QUOTES:
+                    i += 2
+                    continue
+                if script[i] in _PS_QUOTES:
+                    i += 1
+                    break
+                i += 1
+            code.append("''")
+            continue
+        code.append(ch)
+        i += 1
+    return "".join(code)
+
+
+def _windows_script(monkeypatch, file_name="benchy.3mf", printer="bench"):
+    monkeypatch.setattr(screen_code.sys, "platform", "win32")
+    monkeypatch.setattr(screen_code, "_windows_icon", lambda: "C:\\Users\\a\\.kiln\\notifier\\Kiln.png")
+    issued = _issued("4821")
+    issued.file_name, issued.printer_name = file_name, printer
+    argv, script = screen_code._show_command(issued)
+    return argv, script
+
+
+class TestTheWindowsToast:
+    def test_it_is_filed_under_kilns_own_name_and_icon(self, monkeypatch):
+        argv, script = _windows_script(monkeypatch)
+        assert argv[0] == "powershell" and argv[-1] == "-"
+        assert "HKCU:\\Software\\Classes\\AppUserModelId\\" in script
+        assert "-Name DisplayName -Value 'Kiln'" in script and "-Name IconUri -Value 'C:\\Users" in script
+        assert "CreateToastNotifier($id)" in script and "'Kiln3D.Kiln'" in script
+
+    def test_the_code_is_in_the_toast_and_not_on_the_command_line(self, monkeypatch):
+        argv, script = _windows_script(monkeypatch)
+        assert not any("4821" in a for a in argv) and "Kiln print code 4821" in script
+
+    @pytest.mark.parametrize("hostile", [
+        "x'); Start-Process calc; ('y.stl",
+        "x\u2019); Start-Process calc; (\u2019y.stl",
+        "x\u2018); Start-Process calc; (\u201by.stl",
+        "$(Start-Process calc).stl",
+        "`$(Start-Process calc)`.stl",
+    ])
+    def test_a_file_name_can_never_become_a_command(self, monkeypatch, hostile):
+        _argv, script = _windows_script(monkeypatch, file_name=hostile)
+        code = _powershell_code_outside_strings(script)
+        assert "Start-Process" not in code and "calc" not in code
+        assert "$(" not in code.replace("$(-not", "")  # the one subexpression is Kiln's own Test-Path
+
+    def test_a_printer_name_can_never_become_a_command_either(self, monkeypatch):
+        _argv, script = _windows_script(monkeypatch, printer="p'); Start-Process calc; ('")
+        assert "Start-Process" not in _powershell_code_outside_strings(script)
+
+    def test_markup_in_a_name_is_text_not_toast_structure(self, monkeypatch):
+        _argv, script = _windows_script(monkeypatch, file_name="a & b <text>c<text>.stl")
+        assert "a &amp; b &lt;text&gt;c&lt;text&gt;" in script
+
+
+def _applescript_code_outside_strings(script: str) -> str:
+    code, i, n = [], 0, len(script)
+    while i < n:
+        if script[i] == '"':
+            i += 1
+            while i < n and script[i] != '"':
+                i += 2 if script[i] == "\\" else 1
+            i += 1
+            code.append('""')
+            continue
+        code.append(script[i])
+        i += 1
+    return "".join(code)
+
+
+def test_on_a_mac_a_file_name_can_never_become_a_command(monkeypatch):
+    monkeypatch.setattr(screen_code.sys, "platform", "darwin")
+    issued = _issued("4821")
+    issued.file_name = 'x" & (do shell script "open -a Calculator") & "y.stl'
+    _argv, script = screen_code._show_command(issued)
+    code = _applescript_code_outside_strings(script)
+    assert "do shell script" not in code and code.startswith("display notification")
+
+
+# ---------------------------------------------------------------------------
+# What the package carries
+# ---------------------------------------------------------------------------
+
+
+def test_the_package_carries_the_helper_and_the_windows_icon():
+    import plistlib
+
+    data = pathlib.Path(screen_code.__file__).parent / "data" / "notifier"
+    app = data / "Kiln.app"
+    assert (data / "Kiln.png").is_file()
+    for rel in ("Contents/Info.plist", "Contents/MacOS/kiln-notifier", "Contents/Resources/Kiln.icns", "Contents/_CodeSignature/CodeResources"):
+        assert (app / rel).is_file(), rel
+    with open(app / "Contents" / "Info.plist", "rb") as fh:
+        info = plistlib.load(fh)
+    assert info["CFBundleName"] == "Kiln" and info["CFBundleIdentifier"] == "com.kiln3d.notifier"
+    assert info["LSUIElement"] is True and info["CFBundleExecutable"] == "kiln-notifier"
+    pyproject = (pathlib.Path(screen_code.__file__).parents[2] / "pyproject.toml").read_text()
+    for rel in ("data/notifier/Kiln.png", "data/notifier/Kiln.app/Contents/MacOS/kiln-notifier",
+                "data/notifier/Kiln.app/Contents/_CodeSignature/CodeResources"):
+        assert f'"{rel}"' in pyproject, rel
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="reads a Mac binary with the Mac's own tools")
+def test_the_helper_runs_on_both_mac_chip_families():
+    exe = pathlib.Path(screen_code.__file__).parent / "data" / "notifier" / "Kiln.app" / "Contents" / "MacOS" / "kiln-notifier"
+    archs = subprocess.run(["lipo", "-archs", str(exe)], capture_output=True, text=True, check=True).stdout.split()
+    assert {"arm64", "x86_64"} <= set(archs)
+
+
+def test_on_windows_no_console_window_flashes_up(monkeypatch):
+    seen = {}
+
+    def fake_run(argv, **kw):
+        seen.update(kw)
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(screen_code, "_show_hook", None)
+    monkeypatch.setattr(screen_code.sys, "platform", "win32")
+    monkeypatch.setattr(screen_code, "_windows_icon", lambda: "")
+    monkeypatch.setattr(screen_code.subprocess, "run", fake_run)
+    assert screen_code._show(_issued())
+    assert seen.get("creationflags") == 0x08000000
+    assert seen["input"].endswith("\n") and seen["input"].count("\n") == 1

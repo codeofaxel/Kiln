@@ -136,6 +136,27 @@ EXPECTED_GROUPS: list[GroupExpectation] = [
         mode="exact_file",
         why="BSD-2-Clause attribution requires shipping LICENSE alongside the code",
     ),
+    # The print-code banner's own notifier (kiln/scripts/build_notifier.py).
+    # Missing, a Mac's banner arrives as "Script Editor" and a Windows toast
+    # loses Kiln's icon -- nothing crashes, which is why only this gate sees it.
+    GroupExpectation(
+        name="mac_notifier_helper",
+        glob="kiln/data/notifier/Kiln.app/Contents/MacOS/kiln-notifier",
+        mode="exact_file",
+        why="print codes on a Mac post as Kiln only through this helper",
+    ),
+    GroupExpectation(
+        name="mac_notifier_signature",
+        glob="kiln/data/notifier/Kiln.app/Contents/_CodeSignature/CodeResources",
+        mode="exact_file",
+        why="a Mac refuses to run the helper with its signature missing",
+    ),
+    GroupExpectation(
+        name="windows_notifier_icon",
+        glob="kiln/data/notifier/Kiln.png",
+        mode="exact_file",
+        why="Windows toasts show Kiln's icon from this file",
+    ),
 ]
 
 

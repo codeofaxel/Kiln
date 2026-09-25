@@ -10894,7 +10894,15 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
         if _switched_off:
             _code_line = "the code banner is switched off here (KILN_SCREEN_CODE=0); "
         elif _sc.screen_available():
-            _code_line = "a code shown on this screen when it cannot; "
+            _code_line = "a code shown on this screen when it cannot"
+            _kiln = _sc.kiln_notifications()
+            if _kiln == _sc.KILN_ALLOWED:
+                _code_line += ", as Kiln"
+            elif _kiln == _sc.KILN_OFF:
+                _code_line += " (notifications from Kiln are off: System Settings, Notifications, Kiln)"
+            elif _kiln == _sc.KILN_NOT_ASKED:
+                _code_line += " (Kiln asks to send notifications the first time)"
+            _code_line += "; "
         else:
             _code_line = "no screen here, so no code can be shown; "
         checks.append({
