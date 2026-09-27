@@ -7,6 +7,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Approve a print without leaving your chat, or from your phone.** When your AI app can't ask you, Kiln shows a code on your screen to type back; or answer on your phone, where the print waits with a picture you can turn in 3D. Say yes once, or for the next few hours.
+
 - **See what your colour changes cost, and how to cut them (Pro+).** Business+ also prices in the chance of a reprint. See kiln3d.com/pricing.
 
 - **Show any file you already have on the 3D stage.** A model or the sliced file about to print — turn it over before you approve it, without remaking or re-slicing anything.
