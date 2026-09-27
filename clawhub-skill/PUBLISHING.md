@@ -5,4 +5,4 @@ demand via `.github/workflows/publish-registries.yml`), from a minimal
 folder assembled at publish time: `SKILL.md`, `server.json`, `README.md`,
 and `LICENSE`. Never run `clawhub publish` by hand.
 
-If the top-level `SKILL.md` changes, keep this folder's copy in sync.
+CI publishes the top-level `SKILL.md`; the copy in this folder is not used.
