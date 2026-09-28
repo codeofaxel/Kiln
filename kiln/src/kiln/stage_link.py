@@ -463,6 +463,18 @@ def stage_link_for(
         return None
 
     if resp.status_code in (401, 403):
+        # The API says WHY it refused (2026-09-27).  When its own auth
+        # upstream did not answer, the bearer is not the problem: this is
+        # the servers not answering, so nothing is remembered against the
+        # token and the next render tries again.
+        try:
+            reason = str((resp.json() or {}).get("reason") or "")
+        except Exception:  # noqa: BLE001 — a body that is not JSON says nothing
+            reason = ""
+        if reason == "auth_upstream_unavailable":
+            logger.debug("stage link unanswered: HTTP %s, auth upstream unavailable", resp.status_code)
+            _refused(path, "unanswered", evidence)
+            return None
         # An auth refusal is a property of the BEARER, not of this mesh —
         # remember it so the next render skips the upload instead of
         # paying for the same refusal again.

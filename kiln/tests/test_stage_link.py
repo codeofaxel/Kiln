@@ -444,6 +444,18 @@ class TestRefusedBearerMemory:
         assert stage_link.stage_link_for(_stl_at(tmp_path, "b.stl")) is not None
         assert len(calls2) == 1
 
+    def test_a_401_for_an_auth_outage_is_not_held_against_the_bearer(self, tmp_path, monkeypatch):
+        # The API answers 401 with reason=auth_upstream_unavailable when
+        # its own auth upstream did not answer: the servers, not the token.
+        outage = _Resp(status=401, body={"error": "invalid_bearer", "reason": "auth_upstream_unavailable"})
+        calls = _wire(monkeypatch, resp=outage, token="good-tok")
+        assert stage_link.stage_link_for(_stl_at(tmp_path, "a.stl")) is None
+        assert stage_link._REFUSED_BEARER is None
+        assert "didn't answer" in stage_link.refusal_sentence(stage_link.last_refusal(_stl_at(tmp_path, "a.stl")))
+        # Same bearer, next render: the upload is tried again.
+        assert stage_link.stage_link_for(_stl_at(tmp_path, "b.stl")) is None
+        assert len(calls) == 2
+
     def test_a_transport_error_is_not_remembered(self, tmp_path, monkeypatch):
         """Only an AUTH verdict condemns a bearer — a 500 or a network blip
         must not silently disable links for the rest of the process."""
