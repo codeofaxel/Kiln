@@ -29,6 +29,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Agreeing to the Terms before you sign in now counts for your account too.**
+
 - **Cost estimates price each filament as the material your file was sliced for.**
 
 - **After slicing, the 3D stage shows the file going to your printer.** Asking to see it again gives a one-line "already on the stage above" instead of a second identical stage.
