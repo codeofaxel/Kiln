@@ -17482,6 +17482,31 @@ def _heartbeat_device_header() -> dict[str, str]:
     return {"X-Kiln-Heartbeat-Device": value} if value else {}
 
 
+def _terms_agreement_handed_over(status: int, body: object, bearer: str) -> bool:
+    """Answer a "the account has not agreed to the Terms" refusal, if this
+    install can.
+
+    The hosted API refuses work until the ACCOUNT has agreed to the current
+    Terms.  An install that agreed before it was signed in holds a real
+    agreement the account never received, so it is handed over — the version
+    the refusal names, with how the person agreed — and ``True`` means the
+    account now has it and the call is worth one more try.  An install with no
+    agreement of its own answers ``False``: the refusal, with its accept link,
+    goes to the person, who is the only one who can agree.
+    """
+    if status != 403 or not isinstance(body, dict) or body.get("error") != "terms_required":
+        return False
+    version = body.get("version")
+    try:
+        from kiln import terms
+
+        return terms.sync_to_account(
+            bearer=bearer, version=version if isinstance(version, str) else ""
+        )
+    except Exception:
+        return False
+
+
 def _pro_api_call(tool_name: str, _timeout: float = 30.0, **kwargs) -> dict:
     """Call a hosted kiln-pro tool through the public REST API.
 
@@ -17640,23 +17665,28 @@ def _pro_api_call(tool_name: str, _timeout: float = 30.0, **kwargs) -> dict:
             headers=headers,
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=_timeout) as resp:
-            return json.loads(resp.read())
-    except urllib.error.HTTPError as exc:
-        # Preserve the server's own error body when present — it usually
-        # carries a structured ``code`` + ``error`` the agent can act on
-        # (e.g. tier-gate denials, quota-exhaustion messages).  A body with
-        # no such fields (FastAPI's bare ``detail``, a gateway page) is
-        # worded here, with WHY beside it: signed out, unanswered, refused.
-        try:
-            body = json.loads(exc.read().decode("utf-8"))
-        except Exception:
-            body = None
-        from kiln.served_answer import envelope_for_http
+        for attempt in (1, 2):
+            try:
+                with urllib.request.urlopen(req, timeout=_timeout) as resp:
+                    return json.loads(resp.read())
+            except urllib.error.HTTPError as exc:
+                # Preserve the server's own error body when present — it
+                # usually carries a structured ``code`` + ``error`` the agent
+                # can act on (e.g. tier-gate denials, quota-exhaustion
+                # messages).  A body with no such fields (FastAPI's bare
+                # ``detail``, a gateway page) is worded here, with WHY beside
+                # it: signed out, unanswered, refused.
+                try:
+                    body = json.loads(exc.read().decode("utf-8"))
+                except Exception:
+                    body = None
+                if attempt == 1 and _terms_agreement_handed_over(exc.code, body, bearer):
+                    continue  # the account holds this install's agreement now
+                from kiln.served_answer import envelope_for_http
 
-        return envelope_for_http(
-            tool_name, exc.code, body, kind=_PRO_TOOL_OFFLINE_KIND.get(tool_name),
-        )
+                return envelope_for_http(
+                    tool_name, exc.code, body, kind=_PRO_TOOL_OFFLINE_KIND.get(tool_name),
+                )
     except Exception as exc:
         # No HTTP answer at all.  Which of two things that was -- this
         # computer is offline, or Kiln's servers didn't answer -- decides

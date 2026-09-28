@@ -292,6 +292,8 @@ class TestAccountScopedAcceptance:
         assert captured["payload"] == {
             "method": "mcp_in_chat",
             "verbatim_text": "I accept the Kiln Terms",
+            # The server holds the record to the version the person agreed to.
+            "version": _CURRENT_TERMS_VERSION,
         }
 
     def test_record_local_only_without_bearer(self, db, monkeypatch):

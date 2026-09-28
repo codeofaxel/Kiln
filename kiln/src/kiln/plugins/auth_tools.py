@@ -152,7 +152,7 @@ class _AuthToolsPlugin:
                 )
 
             try:
-                from kiln.cli.auth_commands import _http_post, _write_tokens
+                from kiln.cli.auth_commands import _complete_signin, _http_post
             except Exception as exc:  # pragma: no cover — helpers are in-package
                 return _srv._error_dict(
                     f"kiln_signin_poll: sign-in helpers unavailable: {exc}",
@@ -184,7 +184,7 @@ class _AuthToolsPlugin:
                 email = str(resp.get("email") or "")
                 tier = str(resp.get("tier") or "free").lower()
                 try:
-                    _write_tokens({
+                    _complete_signin({
                         "access_token": access_token,
                         "refresh_token": resp.get("refresh_token") or "",
                         "email": email,

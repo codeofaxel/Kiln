@@ -18,6 +18,11 @@ _CURRENT_TERMS_VERSION = "3.0"
 
 _SETTINGS_KEY_VERSION = "terms_accepted_version"
 _SETTINGS_KEY_TIMESTAMP = "terms_accepted_at"
+# How the person agreed on this install, kept beside the agreement so that an
+# install that agreed BEFORE it was signed in can hand the account the real
+# record later (see :func:`sync_to_account`), not a guess.
+_SETTINGS_KEY_METHOD = "terms_accepted_method"
+_SETTINGS_KEY_VERBATIM = "terms_accepted_verbatim"
 
 _TERMS_SUMMARY = """\
   By using Kiln, you're agreeing to a few things:
@@ -257,11 +262,27 @@ def is_current(*, db=None, force_server: bool = False) -> bool:
         and resp.get("version") == _CURRENT_TERMS_VERSION
     ):
         # Accepted on another device — backfill local so future checks are fast
-        # and offline-safe (the server already has it, so don't re-POST).
+        # and offline-safe (the server already has it, so don't re-POST).  This
+        # install did not see HOW they agreed, so it keeps no method: a stale
+        # one from an earlier version must never be replayed as this one's.
         db.set_setting(_SETTINGS_KEY_VERSION, _CURRENT_TERMS_VERSION)
         db.set_setting(_SETTINGS_KEY_TIMESTAMP, str(now))
+        db.set_setting(_SETTINGS_KEY_METHOD, "")
+        db.set_setting(_SETTINGS_KEY_VERBATIM, "")
         return True
     return False
+
+
+def _agreement_payload(db) -> dict:
+    """The account-side record of this install's agreement: how the person
+    agreed (``unknown`` for an agreement recorded before the method was kept),
+    their exact words where they typed some, and the version they agreed to —
+    which the server holds the record to."""
+    return {
+        "method": db.get_setting(_SETTINGS_KEY_METHOD) or "unknown",
+        "verbatim_text": db.get_setting(_SETTINGS_KEY_VERBATIM) or None,
+        "version": _CURRENT_TERMS_VERSION,
+    }
 
 
 def record_acceptance(*, db=None, method: str = "setup", verbatim_text: str | None = None) -> None:
@@ -280,15 +301,49 @@ def record_acceptance(*, db=None, method: str = "setup", verbatim_text: str | No
         db = get_db()
     db.set_setting(_SETTINGS_KEY_VERSION, _CURRENT_TERMS_VERSION)
     db.set_setting(_SETTINGS_KEY_TIMESTAMP, str(time.time()))
+    db.set_setting(_SETTINGS_KEY_METHOD, method)
+    db.set_setting(_SETTINGS_KEY_VERBATIM, verbatim_text or "")
 
     bearer = _account_bearer()
     if bearer:
-        _server_request(
-            "/api/terms/accept",
-            "POST",
-            bearer,
-            {"method": method, "verbatim_text": verbatim_text},
-        )
+        _server_request("/api/terms/accept", "POST", bearer, _agreement_payload(db))
+
+
+def sync_to_account(
+    *, db=None, bearer: str | None = None, version: str | None = None
+) -> bool:
+    """Hand the account this install's agreement to the current terms.
+
+    :func:`record_acceptance` mirrors an agreement to the account only when the
+    install has a bearer at that moment, so agreeing first and signing in second
+    left the account without it — and the hosted API refuses work until the
+    ACCOUNT has agreed.  This sends the agreement this install already holds,
+    with how the person made it.  Called when a sign-in completes and when the
+    hosted API refuses a call for want of an agreement.
+
+    Never agrees for anyone: without a local agreement to the current version it
+    sends nothing.  ``version`` is the version the server asked for, from its
+    refusal; any other version sends nothing, because agreeing to one version is
+    not agreeing to another.  ``bearer`` defaults to this install's.  Returns
+    ``True`` only when the server confirmed it holds the agreement.
+    """
+    if db is None:
+        from kiln.persistence import get_db
+
+        db = get_db()
+    if get_accepted_version(db=db) != _CURRENT_TERMS_VERSION:
+        return False
+    if version is not None and version != _CURRENT_TERMS_VERSION:
+        return False
+    token = _account_bearer() if bearer is None else bearer
+    if not token:
+        return False
+    resp = _server_request("/api/terms/accept", "POST", token, _agreement_payload(db))
+    return (
+        isinstance(resp, dict)
+        and resp.get("accepted") is True
+        and resp.get("version") == _CURRENT_TERMS_VERSION
+    )
 
 
 _ACCEPT_PHRASE = "I accept"

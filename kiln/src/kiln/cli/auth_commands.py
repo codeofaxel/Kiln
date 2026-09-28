@@ -80,6 +80,26 @@ def _write_tokens(data: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
+def _complete_signin(data: dict[str, Any]) -> None:
+    """Store a new sign-in, then hand the account this install's agreement to
+    the Terms.
+
+    Every door that signs a person in on this machine ends here — ``kiln
+    signin``, ``kiln pair`` and the in-chat ``kiln_signin_poll`` — so an
+    agreement made on the machine before it was signed in reaches the account
+    the moment one exists, not on the first hosted call that gets refused
+    without it.  The hand-off is best-effort: a sign-in never fails over it,
+    and a refused hosted call still makes it (``server._pro_api_call``).
+    """
+    _write_tokens(data)
+    try:
+        from kiln import terms
+
+        terms.sync_to_account(bearer=str(data.get("access_token") or ""))
+    except Exception:  # noqa: BLE001 -- a sign-in never fails over the hand-off
+        pass
+
+
 def _read_tokens() -> dict[str, Any]:
     path = _tokens_path()
     if not path.exists():
@@ -354,7 +374,7 @@ def auth_login(no_browser: bool, timeout: int, provider: str | None) -> None:
     if status == "success":
         email = str(result.get("email") or "")
         tier = str(result.get("tier") or "free").lower()
-        _write_tokens({
+        _complete_signin({
             "access_token": result.get("access_token") or "",
             "refresh_token": result.get("refresh_token") or "",
             "email": email,
@@ -833,7 +853,7 @@ def auth_pair(code: str, client: str | None) -> None:
 
     email = str(resp.get("email") or "")
     tier = str(resp.get("tier") or "free").lower()
-    _write_tokens({
+    _complete_signin({
         "access_token": access_token,
         "refresh_token": refresh_token,
         "email": email,
