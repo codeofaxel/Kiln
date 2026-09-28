@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import pathlib
 import re
 import subprocess
@@ -568,7 +569,9 @@ class TestTheHelperIsInstalledOnce:
         monkeypatch.setenv("KILN_HOME", str(tmp_path / "home"))
         exe = screen_code._notifier_path()
         assert exe == tmp_path / "home" / "notifier" / "Kiln.app" / "Contents" / "MacOS" / "kiln-notifier"
-        assert exe.is_file() and exe.stat().st_mode & 0o111
+        assert exe.is_file()
+        if os.name != "nt":  # the platform is patched above; NTFS has no execute bit to set
+            assert exe.stat().st_mode & 0o111
 
     def test_a_newer_helper_replaces_the_installed_one_and_the_same_one_is_left_alone(self, monkeypatch, tmp_path):
         monkeypatch.setattr(screen_code.sys, "platform", "darwin")
@@ -638,6 +641,37 @@ class TestTheWindowsToast:
         argv, script = _windows_script(monkeypatch)
         assert not any("4821" in a for a in argv) and "Kiln print code 4821" in script
 
+    def test_the_icon_is_the_ico_and_the_png_is_only_a_fallback(self, monkeypatch, tmp_path):
+        # The Action Center draws the small icon beside "Kiln" only from a
+        # real .ico; a PNG registered there shows the generic app glyph.
+        monkeypatch.setattr(screen_code, "_kiln_home", lambda: tmp_path / "home")
+        packaged = tmp_path / "pkg"
+        packaged.mkdir()
+        (packaged / "Kiln.png").write_bytes(b"png")
+        monkeypatch.setattr(screen_code, "_PACKAGED_PNG", packaged / "Kiln.png")
+        monkeypatch.setattr(screen_code, "_PACKAGED_ICO", packaged / "Kiln.ico")
+        assert screen_code._windows_icon() == str(tmp_path / "home" / "notifier" / "Kiln.png")
+        (packaged / "Kiln.ico").write_bytes(b"ico")
+        assert screen_code._windows_icon() == str(tmp_path / "home" / "notifier" / "Kiln.ico")
+        assert (tmp_path / "home" / "notifier" / "Kiln.ico").read_bytes() == b"ico"
+
+    def test_a_changed_icon_drops_windows_cache_of_the_old_one(self, monkeypatch):
+        # Windows keeps the first icon it resolved for the name; only clearing
+        # the name's notification history makes it read the new file, and the
+        # script does that exactly when the registered IconUri changes.
+        _argv, script = _windows_script(monkeypatch)
+        steps = script.split(";")
+        old = next(i for i, s in enumerate(steps) if s.startswith("$old=(Get-ItemProperty"))
+        set_icon = next(i for i, s in enumerate(steps) if "-Name IconUri -Value" in s)
+        clear = next(i for i, s in enumerate(steps) if "History.Clear($id)" in s)
+        show = next(i for i, s in enumerate(steps) if "CreateToastNotifier($id).Show" in s)
+        assert old < set_icon < clear < show
+        assert "if($old -ne 'C:\\Users\\a\\.kiln\\notifier\\Kiln.png')" in steps[clear]
+        # Without an icon there is nothing to migrate and nothing is cleared.
+        monkeypatch.setattr(screen_code, "_windows_icon", lambda: "")
+        _argv, script = screen_code._show_command(_issued("4821"))
+        assert "History.Clear" not in script and "IconUri" not in script
+
     @pytest.mark.parametrize("hostile", [
         "x'); Start-Process calc; ('y.stl",
         "x\u2019); Start-Process calc; (\u2019y.stl",
@@ -694,7 +728,8 @@ def test_the_package_carries_the_helper_and_the_windows_icon():
 
     data = pathlib.Path(screen_code.__file__).parent / "data" / "notifier"
     app = data / "Kiln.app"
-    assert (data / "Kiln.png").is_file()
+    assert (data / "Kiln.png").is_file() and (data / "Kiln.ico").is_file()
+    assert (data / "Kiln.ico").read_bytes()[:4] == bytes([0, 0, 1, 0])  # an icon file, not a renamed PNG
     for rel in ("Contents/Info.plist", "Contents/MacOS/kiln-notifier", "Contents/Resources/Kiln.icns", "Contents/_CodeSignature/CodeResources"):
         assert (app / rel).is_file(), rel
     with open(app / "Contents" / "Info.plist", "rb") as fh:
@@ -702,7 +737,7 @@ def test_the_package_carries_the_helper_and_the_windows_icon():
     assert info["CFBundleName"] == "Kiln" and info["CFBundleIdentifier"] == "com.kiln3d.notifier"
     assert info["LSUIElement"] is True and info["CFBundleExecutable"] == "kiln-notifier"
     pyproject = (pathlib.Path(__file__).resolve().parents[1] / "pyproject.toml").read_text()
-    for rel in ("data/notifier/Kiln.png", "data/notifier/Kiln.app/Contents/MacOS/kiln-notifier",
+    for rel in ("data/notifier/Kiln.png", "data/notifier/Kiln.ico", "data/notifier/Kiln.app/Contents/MacOS/kiln-notifier",
                 "data/notifier/Kiln.app/Contents/_CodeSignature/CodeResources"):
         assert f'"{rel}"' in pyproject, rel
 

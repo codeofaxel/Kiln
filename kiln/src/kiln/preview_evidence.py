@@ -504,9 +504,15 @@ def judge(
         "the panel fetches its geometry, then call issue_preview_token again with "
         "door='stage'"
     )
+    # The link door is the stage's own result: show_on_stage carries a
+    # viewer_url on a host that draws no panel, while this machine is
+    # signed in.  The MCP visualize_model takes no share_link argument, so
+    # naming that spelling sent an agent into an "unknown argument" refusal
+    # on 2026-09-27.
     url_line = (
-        f"call visualize_model(file_path, share_link=True) on {name}, hand the user its "
-        "viewer_url, then call issue_preview_token again with door='url'"
+        f"call show_on_stage(file_path) on {name} — on a host that draws no panel its "
+        "result carries a viewer_url while this machine is signed in — hand the user "
+        "that link, then call issue_preview_token again with door='url'"
     )
 
     if door == DOOR_STAGE:

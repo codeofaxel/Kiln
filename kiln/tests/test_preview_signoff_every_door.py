@@ -177,7 +177,11 @@ class TestWhichDoor:
         preview_evidence.record("png", path, renderer="openscad")
         refusal, _ = preview_evidence.judge(path, "png", host_renders=False)
         assert refusal is not None
-        assert "share_link=True" in refusal["message"]
+        # The link door is named by the tool that actually issues it; the
+        # MCP visualize_model has no share_link argument.
+        assert "show_on_stage(file_path)" in refusal["message"]
+        assert "viewer_url" in refusal["message"]
+        assert "share_link" not in refusal["message"]
 
     def test_png_is_refused_while_a_link_is_live(self, tmp_path):
         path = _stl(tmp_path / "jar.stl")
@@ -222,7 +226,8 @@ class TestWhichDoor:
     def test_url_needs_a_live_link(self, tmp_path):
         path = _stl(tmp_path / "jar.stl")
         refusal, _ = preview_evidence.judge(path, "url", host_renders=False)
-        assert refusal is not None and "share_link=True" in refusal["message"]
+        assert refusal is not None and "show_on_stage(file_path)" in refusal["message"]
+        assert "share_link" not in refusal["message"]
         preview_evidence.record(
             "url", path, viewer_url="https://kiln3d.com/view/x", expires_at=time.time() - 1,
         )
@@ -889,7 +894,8 @@ def test_the_json_ledger_is_private(tmp_path):
     preview_evidence.record("stage", path, via="panel_fetch")
     ledger = preview_evidence._ledger_path()
     assert ledger.is_file()
-    assert oct(ledger.stat().st_mode & 0o777) == "0o600"
+    if os.name != "nt":  # NTFS has no owner-only mode bits; Windows reports 0o666 for every file
+        assert oct(ledger.stat().st_mode & 0o777) == "0o600"
     json.loads(ledger.read_text())
 
 

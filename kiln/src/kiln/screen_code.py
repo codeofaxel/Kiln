@@ -202,6 +202,11 @@ def _applescript_string(text: str) -> str:
 #: is what an unregistered name gets on current Windows.
 _WINDOWS_APP_ID = "Kiln3D.Kiln"
 _PACKAGED_PNG = Path(__file__).parent / "data" / "notifier" / "Kiln.png"
+#: Windows draws the small icon beside the app name only from a real .ico
+#: with small entries (16/24/32/48 px).  A PNG at any size, a PNG-in-ICO,
+#: and a single 64 px .ico all fall back to the generic app glyph (measured
+#: 2026-09-27 on Windows 10 22H2), so the icon Kiln registers is this file.
+_PACKAGED_ICO = Path(__file__).parent / "data" / "notifier" / "Kiln.ico"
 #: Every character PowerShell reads as a single quote.  Inside a
 #: single-quoted string each is escaped by doubling it; missing one is a
 #: way out of the string.
@@ -218,15 +223,20 @@ def _ps_literal(text: str) -> str:
 
 
 def _windows_icon() -> str:
-    """Kiln's icon at a stable path Windows can read, or ``""``."""
+    """Kiln's icon at a stable path Windows can read, or ``""``.
+
+    The multi-size ``.ico`` first: it is the only form the Action Center
+    header honours.  The PNG is kept as a fallback for a package that
+    shipped without the ``.ico``."""
     try:
-        if not _PACKAGED_PNG.is_file():
+        packaged = _PACKAGED_ICO if _PACKAGED_ICO.is_file() else _PACKAGED_PNG
+        if not packaged.is_file():
             return ""
         home = _kiln_home() / "notifier"
         home.mkdir(parents=True, exist_ok=True)
-        dest = home / "Kiln.png"
-        if not dest.is_file() or dest.stat().st_size != _PACKAGED_PNG.stat().st_size:
-            shutil.copyfile(_PACKAGED_PNG, dest)
+        dest = home / packaged.name
+        if not dest.is_file() or dest.stat().st_size != packaged.stat().st_size:
+            shutil.copyfile(packaged, dest)
         return str(dest)
     except Exception:  # noqa: BLE001 — no icon is a plainer toast, not an error
         return ""
@@ -253,10 +263,23 @@ def _windows_toast_script(issued: Issued) -> str:
         "if(-not(Test-Path $k)){New-Item -Path $k -Force|Out-Null}",
         "New-ItemProperty -Path $k -Name DisplayName -Value 'Kiln' -PropertyType String -Force|Out-Null",
     ]
-    if icon:
-        steps.append(f"New-ItemProperty -Path $k -Name IconUri -Value {_ps_literal(icon)} -PropertyType String -Force|Out-Null")
     steps += [
         "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]|Out-Null",
+    ]
+    if icon:
+        # Windows caches the icon it first resolved for this name.  When the
+        # registered icon changes (the PNG every install before 2026-09-27
+        # registered, or a newer .ico), the cache is dropped only by clearing
+        # this name's notification history — removing and re-creating the
+        # registry key is not enough (measured on Windows 10 22H2).  Kiln's
+        # own toasts are print codes that expire in minutes, so clearing them
+        # once, on the icon's change, loses nothing worth keeping.
+        steps += [
+            "$old=(Get-ItemProperty -Path $k -Name IconUri -ErrorAction SilentlyContinue).IconUri",
+            f"New-ItemProperty -Path $k -Name IconUri -Value {_ps_literal(icon)} -PropertyType String -Force|Out-Null",
+            f"if($old -ne {_ps_literal(icon)}){{try{{[Windows.UI.Notifications.ToastNotificationManager]::History.Clear($id)}}catch{{}}}}",
+        ]
+    steps += [
         "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime]|Out-Null",
         "$x=New-Object Windows.Data.Xml.Dom.XmlDocument",
         f"$x.LoadXml({_ps_literal(toast)})",

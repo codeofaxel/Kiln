@@ -145,6 +145,8 @@ class TestRefreshExchange:
         )
         resolve_session_bearer()
         mode = (auth_home / ".kiln" / "auth_tokens.json").stat().st_mode
+        if os.name == "nt":
+            pytest.skip("NTFS has no owner-only mode bits; Windows reports 0o666 for every file")
         assert stat.S_IMODE(mode) == 0o600
 
     def test_near_expiry_token_refreshes_inside_margin(
@@ -283,6 +285,35 @@ class TestNetworkDegradation:
         assert resolve_session_bearer().state == "degraded"
 
 
+class TestStoredSessionState:
+    """The file-only reading a banner uses: the resolver's own two
+    no-network verdicts, and ``stored`` for everything it would hand out
+    or renew — never an exchange."""
+
+    def test_agrees_with_the_resolver_without_touching_the_network(
+        self, auth_home, monkeypatch
+    ):
+        _no_network(monkeypatch)
+
+        assert auth_session.stored_session_state() == "signed_out"
+        assert resolve_session_bearer().state == "signed_out"
+
+        _write_session(auth_home, refresh_token="", refresh_rejected_at="2026-09-27T20:40:00Z")
+        assert auth_session.stored_session_state() == "needs_signin"
+        assert resolve_session_bearer().state == "needs_signin"
+
+        _write_session(auth_home)
+        assert auth_session.stored_session_state() == "stored"
+        assert resolve_session_bearer().state == "live"
+
+    def test_an_expired_token_is_still_a_stored_session(self, auth_home, monkeypatch):
+        """Expiry on the clock is the resolver's business, and costs an
+        exchange — this reading must not pay it."""
+        _no_network(monkeypatch)
+        _write_session(auth_home, access_token=_jwt(time.time() - 10))
+        assert auth_session.stored_session_state() == "stored"
+
+
 class TestRefreshLockIsExclusive:
     """The lock itself — that two holders cannot overlap.
 
@@ -292,7 +323,7 @@ class TestRefreshLockIsExclusive:
     """
 
     def test_second_acquirer_blocks_while_lock_is_held(self, auth_home):
-        import fcntl
+        fcntl = pytest.importorskip("fcntl")
 
         lock_path = auth_session._tokens_path().with_suffix(".lock")
         with auth_session._refresh_lock():
@@ -307,7 +338,7 @@ class TestRefreshLockIsExclusive:
                 os.close(fd)
 
     def test_lock_released_after_exit(self, auth_home):
-        import fcntl
+        fcntl = pytest.importorskip("fcntl")
 
         lock_path = auth_session._tokens_path().with_suffix(".lock")
         with auth_session._refresh_lock():
@@ -316,6 +347,35 @@ class TestRefreshLockIsExclusive:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)  # must not raise
             fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+
+    def test_windows_second_acquirer_blocks_while_lock_is_held(self, auth_home):
+        """Windows has no ``fcntl``; until 2026-09-27 the lock there was a
+        silent no-op, and six processes at the margin made six exchanges of
+        one refresh token (the race test below, run on Windows) — the reuse
+        Supabase answers by ending the whole session."""
+        msvcrt = pytest.importorskip("msvcrt")
+
+        lock_path = auth_session._tokens_path().with_suffix(".lock")
+        with auth_session._refresh_lock():
+            fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+            try:
+                with pytest.raises(OSError):
+                    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            finally:
+                os.close(fd)
+
+    def test_windows_lock_released_after_exit(self, auth_home):
+        msvcrt = pytest.importorskip("msvcrt")
+
+        lock_path = auth_session._tokens_path().with_suffix(".lock")
+        with auth_session._refresh_lock():
+            pass
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)  # must not raise
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
         finally:
             os.close(fd)
 
@@ -470,7 +530,10 @@ class TestVerifyWithTheServer:
         once: the second finds the first's answer on file under the lock
         and makes no exchange of its own."""
         _write_session(auth_home)
-        fresh = _jwt(time.time() + 3600)
+        # A different ``exp`` on purpose: ``time.time()`` ticks at ~15 ms on
+        # Windows, and two tokens minted in the same tick are the SAME
+        # token, which reads as "nobody wrote" and pays the exchange.
+        fresh = _jwt(time.time() + 7200)
         import contextlib as _ctx
 
         @_ctx.contextmanager

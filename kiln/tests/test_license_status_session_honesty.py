@@ -147,3 +147,120 @@ def test_a_state_with_no_detail_still_says_what_to_do(monkeypatch):
     )
     assert "kiln signin" in payload["agent_hint"]
     assert payload["setup_hint"] == "kiln signin"
+
+
+# ---------------------------------------------------------------------------
+# The `kiln serve` start-up banner: the same lie, one line earlier.
+#
+# 2026-09-27: a session the server had refused to renew (``needs_signin``
+# on disk, every hosted call in the process answering "signed out") still
+# launched as "✓ Signed in as adam@kiln3d.com (Free)" — the banner read the
+# email straight off the token file and the tier off the free-tier stub,
+# consulting neither the resolver's verdict nor the file's own ``tier``.
+#
+# These run against real token files and the real ``kiln.auth_session``
+# (its file-only reading never touches the network), so they fail if the
+# banner and the resolver ever disagree about what a file means.
+# ---------------------------------------------------------------------------
+
+
+def _write_token_file(tmp_path, monkeypatch, **fields):
+    import json
+
+    monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
+    data = {"access_token": "x" * 40, "refresh_token": "r", "email": "adam@kiln3d.com",
+            "tier": "enterprise", "has_entitlement": True}
+    data.update(fields)
+    (tmp_path / ".kiln").mkdir()
+    (tmp_path / ".kiln" / "auth_tokens.json").write_text(json.dumps(data), encoding="utf-8")
+
+
+def _banner(monkeypatch, capsys) -> str:
+    import kiln.server as srv
+
+    # Without kiln-pro the tier stub answers "free" regardless; pin that so
+    # the test means the same thing on an install that has kiln-pro.
+    monkeypatch.setattr(srv, "get_tier", lambda *a, **k: "free")
+    srv._print_startup_banner()
+    return capsys.readouterr().err.strip()
+
+
+def test_banner_says_expired_not_signed_in_when_the_session_needs_signin(
+    tmp_path, monkeypatch, capsys
+):
+    """The incident, pinned: the verdict on disk wins over the email beside
+    it.  The file is exactly what the resolver leaves after a rejected
+    refresh — email and tier kept, refresh token gone, the stamp set."""
+    _write_token_file(
+        tmp_path, monkeypatch, refresh_token="", refresh_rejected_at="2026-09-27T20:40:00Z",
+    )
+
+    line = _banner(monkeypatch, capsys)
+
+    assert "Signed in as" not in line
+    assert "adam@kiln3d.com" in line
+    assert "(Enterprise)" in line
+    assert "expired" in line
+    assert "kiln signin" in line
+
+
+def test_banner_prints_the_tier_the_token_file_records(tmp_path, monkeypatch, capsys):
+    """"(Free)" beside an enterprise sign-in was the stub's answer, not the
+    account's — the file carries the tier the server named at sign-in."""
+    _write_token_file(tmp_path, monkeypatch)
+
+    line = _banner(monkeypatch, capsys)
+
+    assert line == "✓ Kiln MCP. Signed in as adam@kiln3d.com (Enterprise)."
+
+
+def test_banner_never_pays_a_refresh_to_say_where_things_stand(
+    tmp_path, monkeypatch, capsys
+):
+    """Start-up is not the moment: an expired-on-the-clock token is still a
+    stored session, and the first tool call renews it as it always did."""
+    import kiln.auth_session as auth_session
+
+    def _explode(_rt):  # pragma: no cover — reaching here IS the failure
+        raise AssertionError("the banner touched the network")
+
+    monkeypatch.setattr(auth_session, "_post_refresh", _explode)
+    _write_token_file(tmp_path, monkeypatch, access_token="not-a-jwt")
+
+    line = _banner(monkeypatch, capsys)
+
+    assert line == "✓ Kiln MCP. Signed in as adam@kiln3d.com (Enterprise)."
+
+
+def test_banner_treats_an_email_with_no_access_token_as_signed_out(
+    tmp_path, monkeypatch, capsys
+):
+    _write_token_file(tmp_path, monkeypatch, access_token="")
+
+    line = _banner(monkeypatch, capsys)
+
+    assert "Not signed in" in line
+    assert "Signed in as" not in line
+
+
+def test_banner_without_a_token_file_says_not_signed_in(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
+
+    line = _banner(monkeypatch, capsys)
+
+    assert "Not signed in" in line
+
+
+def test_banner_survives_a_broken_resolver(tmp_path, monkeypatch, capsys):
+    """A broken banner beats a broken server: the file is all there is."""
+    import kiln.auth_session as auth_session
+
+    def _explode():
+        raise RuntimeError("resolver exploded")
+
+    monkeypatch.setattr(auth_session, "stored_session_state", _explode)
+    _write_token_file(tmp_path, monkeypatch)
+
+    line = _banner(monkeypatch, capsys)
+
+    assert line == "✓ Kiln MCP. Signed in as adam@kiln3d.com (Enterprise)."

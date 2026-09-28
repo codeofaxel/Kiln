@@ -333,9 +333,9 @@ def not_confirmed_message(tool: str) -> str:
     return (
         f"{tool} refuses to proceed without a preview confirmation. Show the user the "
         "print first — the inline 3D stage if this host draws one (show_on_stage(file_path) "
-        "opens it on the file), else a viewer link "
-        "(visualize_model(file_path, share_link=True) gives a viewer_url), else the PNG "
-        "renders — then call issue_preview_token(file_path, door=<stage|url|png>) and "
+        "opens it on the file), else a viewer link (on a host that draws no panel, "
+        "show_on_stage's result carries a viewer_url while this machine is signed in), "
+        "else the PNG renders — then call issue_preview_token(file_path, door=<stage|url|png>) and "
         "pass the token as preview_token=<token>. To bypass (advanced / CI only), set "
         "KILN_SKIP_PREVIEW_GATE=1."
     )

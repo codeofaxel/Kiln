@@ -1448,6 +1448,20 @@ class _DidYouMeanGroup(click.Group):
     asks for help.
     """
 
+    def main(self, *args: Any, **kwargs: Any) -> Any:
+        """Normalise stdout/stderr to UTF-8 before Click parses anything.
+
+        ``kiln.cli.main:main`` already does this for the console script,
+        but the group is also entered directly — ``cli()`` from a wrapper
+        or a ``python -c`` one-liner — and ``--help`` is answered during
+        argument parsing, before any callback runs.  On a cp1252 Windows
+        stream that door raised ``UnicodeEncodeError`` on the banner's
+        ``🤖`` (seen 2026-09-27), so the fix lives at the group's own door
+        and covers every way in.
+        """
+        _ensure_utf8_streams()
+        return super().main(*args, **kwargs)
+
     def format_help_text(
         self, ctx: click.Context, formatter: click.HelpFormatter
     ) -> None:
@@ -1717,6 +1731,12 @@ def _ensure_utf8_streams() -> None:
     Streams that already report UTF-8 — every normal macOS and Linux
     terminal — are left untouched, so this is a no-op outside the
     legacy-code-page case it exists to fix.
+
+    Streams without ``reconfigure`` (a wrapper, a bare ``StringIO``, a
+    replaced ``sys.stdout``) are left alone rather than re-wrapped: this
+    helper must never be the thing that breaks output.  ``errors`` is set
+    to ``replace`` at the same time, so a glyph that still cannot be
+    encoded degrades to ``?`` instead of a traceback.  Never raises.
     """
     for stream in (sys.stdout, sys.stderr):
         encoding = getattr(stream, "encoding", None)
@@ -1725,8 +1745,8 @@ def _ensure_utf8_streams() -> None:
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is None:
             continue
-        with contextlib.suppress(OSError, ValueError):
-            reconfigure(encoding="utf-8")
+        with contextlib.suppress(Exception):
+            reconfigure(encoding="utf-8", errors="replace")
 
 
 # ---------------------------------------------------------------------------
@@ -11425,7 +11445,13 @@ cli.add_command(verify, name="doctor")
 @click.pass_context
 def upgrade(ctx: click.Context, key: str | None, session: str | None, json_mode: bool) -> None:
     """Activate a Kiln Pro or Business license, or view current tier."""
-    from kiln.licensing import LicenseTier, get_license_manager
+    try:
+        from kiln.licensing import LicenseTier, get_license_manager
+    except ImportError:
+        # kiln-pro supplies ``kiln.licensing``; on a public install the
+        # account is the license (2026-09-27: this was a traceback).
+        _no_license_manager("upgrade", json_mode)
+        return
 
     mgr = get_license_manager()
 
@@ -11563,7 +11589,11 @@ def register(email: str | None, json_mode: bool) -> None:
     Required for outsourced manufacturing via the fulfillment proxy.
     If you already have a license key, shows your current tier.
     """
-    from kiln.licensing import get_license_manager
+    try:
+        from kiln.licensing import get_license_manager
+    except ImportError:
+        _no_license_manager("register", json_mode)
+        return
 
     mgr = get_license_manager()
     info = mgr.get_info()
@@ -11638,11 +11668,100 @@ def register(email: str | None, json_mode: bool) -> None:
         sys.exit(1)
 
 
+def _account_license_snapshot() -> dict[str, Any]:
+    """What a public install can say about its tier and sign-in state.
+
+    ``kiln.licensing`` is a shim kiln-pro registers when it is imported,
+    so on a plain ``pip install kiln3d`` there is no LicenseManager to
+    ask (see :func:`kiln.store_scope.current_tier`).  What this machine
+    DOES have is the account session ``kiln signin`` / ``kiln pair`` /
+    ``kiln whoami`` write to ``~/.kiln/auth_tokens.json``, which caches
+    the tier the server resolved for the account.  That cache plus the
+    session's liveness (:func:`kiln.auth_session.resolve_session_bearer`,
+    which never raises) is the source of truth here; nothing is fetched.
+    """
+    from kiln.auth_session import resolve_session_bearer
+    from kiln.cli.auth_commands import _read_tokens, _tokens_path
+
+    tokens = _read_tokens()
+    bearer = resolve_session_bearer()
+    signed_in = bearer.state in {"live", "refreshed", "degraded"}
+    email = str(tokens.get("email") or "")
+    cached_tier = str(tokens.get("tier") or "").strip().lower()
+
+    if signed_in:
+        tier = cached_tier or "free"
+        source = f"account session ({_tokens_path()})"
+    else:
+        tier = "free"
+        source = "none (no account session on this machine)"
+    if (os.environ.get("KILN_LICENSE_KEY") or "").strip():
+        # A key in the environment is used as a bearer for hosted tools,
+        # but only kiln-pro validates it locally — say so, do not guess.
+        source += "; KILN_LICENSE_KEY is set (validated by kiln-pro only)"
+
+    return {
+        "tier": tier,
+        "is_valid": signed_in,
+        "signed_in": signed_in,
+        "session_state": bearer.state,
+        "email": email,
+        "source": source,
+        "kiln_pro_installed": False,
+        "detail": bearer.detail,
+    }
+
+
+def _no_license_manager(command: str, json_mode: bool) -> None:
+    """What ``upgrade`` and ``register`` say on an install without kiln-pro:
+    the signed-in account is the license, so point at that door instead of
+    a traceback."""
+    data = _account_license_snapshot()
+    if json_mode:
+        import json as _json
+
+        click.echo(_json.dumps({"success": False, "code": "NO_LICENSE_MANAGER", "command": command, **data}, indent=2))
+        return
+    click.echo(f"\n  `kiln {command}` needs kiln-pro, which this install does not have.")
+    signed = f"yes, {data['email']}" if data["signed_in"] else "no"
+    click.echo(f"  Tier: {data['tier'].title()} — signed in: {signed}")
+    click.echo("  On this install your account is the license: `kiln signin` links it,")
+    click.echo("  and a Pro or Business plan bought at https://kiln3d.com/pricing applies")
+    click.echo("  to every machine you sign in on. Check with `kiln license-info`.")
+
+
 @cli.command()
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def license_info(json_mode: bool) -> None:
     """Show current license tier and details."""
-    from kiln.licensing import get_license_manager
+    # kiln-pro supplies ``kiln.licensing``; a public install has none, and
+    # a bare import here was a traceback for every free user (2026-09-27).
+    try:
+        from kiln.licensing import get_license_manager
+    except ImportError:
+        get_license_manager = None  # type: ignore[assignment]
+
+    if get_license_manager is None:
+        data = _account_license_snapshot()
+        if json_mode:
+            import json as _json
+
+            click.echo(_json.dumps({"success": True, **data}, indent=2))
+            return
+        click.echo("\n  Kiln License")
+        click.echo("  ────────────")
+        click.echo(f"  Tier:       {data['tier'].title()}")
+        if data["signed_in"]:
+            who = data["email"] or "this machine"
+            click.echo(f"  Signed in:  Yes — {who} (session {data['session_state']})")
+        else:
+            click.echo("  Signed in:  No")
+        click.echo(f"  Source:     {data['source']}")
+        click.echo("  Local:      kiln-pro is not installed; paid tools run through api.kiln3d.com.")
+        if not data["signed_in"]:
+            click.echo("\n  Run `kiln signin` (free) to sync this machine's tier, or")
+            click.echo("  `kiln whoami` after signing in to refresh it.")
+        return
 
     mgr = get_license_manager()
     info = mgr.get_info()

@@ -165,9 +165,13 @@ def _seconds_to_expiry(token: str, now: float | None = None) -> float:
 def _refresh_lock():
     """Serialize the refresh exchange across processes on this machine.
 
-    Advisory ``flock`` on a sibling lockfile.  On platforms/filesystems
-    without flock the lock degrades to a no-op — Supabase's refresh
-    reuse-grace window still absorbs the rare race.
+    Advisory ``flock`` on a sibling lockfile; a byte-range lock through
+    ``msvcrt`` on Windows, where there is no ``fcntl`` and the first draft
+    silently held nothing — every Kiln process at the margin (MCP server,
+    bridge daemon, CLI) exchanged the same refresh token at once, which is
+    the reuse Supabase answers by ending the whole session.  On
+    filesystems where neither can be taken the lock degrades to a no-op —
+    Supabase's refresh reuse-grace window still absorbs the rare race.
     """
     lock_path = _tokens_path().with_suffix(".lock")
     try:
@@ -176,16 +180,55 @@ def _refresh_lock():
     except OSError:
         yield
         return
+    locked_windows = False
     try:
         try:
             import fcntl
 
             fcntl.flock(fd, fcntl.LOCK_EX)
-        except (ImportError, OSError):
+        except ImportError:
+            locked_windows = _lock_windows(fd)
+        except OSError:
             pass
         yield
     finally:
+        if locked_windows:
+            with contextlib.suppress(Exception):
+                import msvcrt
+
+                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
         os.close(fd)
+
+
+# How long a Windows waiter polls for the lock before going ahead without
+# it: comfortably past one refresh exchange (``_HTTP_TIMEOUT_S``) so a
+# waiter normally finds the winner's pair on its re-read, and bounded so
+# a dead holder can never wedge every process on the machine.
+_WINDOWS_LOCK_WAIT_S = 15.0
+
+
+def _lock_windows(fd: int) -> bool:
+    """Take an exclusive byte-range lock on *fd*; ``False`` if it can't be.
+
+    ``msvcrt.locking`` retries a blocking take only once a second and gives
+    up after ten, so this polls the non-blocking form instead: fine-grained
+    enough that a waiter is through within milliseconds of the winner's
+    release.  Locks are per handle on Windows, so separate descriptors —
+    separate processes, or threads holding their own — exclude each other.
+    """
+    try:
+        import msvcrt
+    except ImportError:
+        return False
+    deadline = time.monotonic() + _WINDOWS_LOCK_WAIT_S
+    while True:
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            return True
+        except OSError:
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.02)
 
 
 def _post_refresh(refresh_token: str) -> tuple[int, dict]:
@@ -254,6 +297,26 @@ def _rejected_verdict(stored: dict) -> SessionBearer | None:
     ).strip():
         return SessionBearer(token="", state="needs_signin", detail=_signin_hint(stored))
     return None
+
+
+def stored_session_state() -> str:
+    """What the token file alone says about the session — never the network.
+
+    ``signed_out`` and ``needs_signin`` exactly as :func:`resolve_session_bearer`
+    answers them (it decides both from the file before any exchange), and
+    ``stored`` for a session it would hand out or renew on its next call.
+    For a start-up banner or a status line that must say where things stand
+    without paying a refresh to find out: a ``kiln serve`` launched on a
+    day-old token used to read the email off the file and call itself
+    signed in even when the verdict beside that email said the opposite
+    (2026-09-27).  Never raises.
+    """
+    stored = _read_tokens()
+    if not str(stored.get("access_token") or "").strip():
+        return "signed_out"
+    if _rejected_verdict(stored) is not None:
+        return "needs_signin"
+    return "stored"
 
 
 def resolve_session_bearer(

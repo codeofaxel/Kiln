@@ -11533,8 +11533,10 @@ def issue_preview_token(
        best option.  Accepted only when the panel actually fetched the
        geometry for this file (or for the design mesh it was sliced from).
     2. ``door="url"`` — a hosted viewer link.  Use it when this host draws
-       no panel.  Accepted only when ``visualize_model(share_link=True)``
-       issued a ``viewer_url`` for this file that is still live.
+       no panel.  Accepted only when ``show_on_stage(file_path)`` issued
+       a ``viewer_url`` for this file that is still live (its result
+       carries one on a host that draws no panel, while the machine is
+       signed in).
     3. ``door="png"`` — the stage's own still (``visualize_model`` with
        ``renderer`` ``stage`` or ``stage_paint``).  The total fallback.
        Accepted only when such a render is on record AND the stage is
@@ -18559,7 +18561,18 @@ def _print_startup_banner() -> None:
     Output shapes:
 
         ✓ Kiln MCP. Signed in as adam@example.com (Pro).
+        ⚠ Kiln MCP. Session for adam@example.com (Pro) has expired — run `kiln signin` to sign in again.
         ⚠ Kiln MCP. Not signed in — run `kiln signin` to connect your Kiln tier.
+
+    Signed-in-ness is judged by :func:`kiln.auth_session.stored_session_state`
+    — the resolver's own ``signed_out`` / ``needs_signin`` rules, the ones
+    every tool acts on — not by whether the token file has an email in it.
+    A session the server has refused to renew keeps its email (and its
+    tier) on disk for the sign-in hint, and the first draft read exactly
+    that as "Signed in as … (Free)" at every launch while every hosted
+    call in the same process said signed out (2026-09-27).  No network:
+    start-up never pays a refresh to say where things stand; the first
+    tool call renews the session as it always did.
 
     Never raises: if tier resolution throws for any reason, we fall
     through to the "not signed in" shape rather than crashing the
@@ -18585,17 +18598,40 @@ def _print_startup_banner() -> None:
                     import json as _json
                     data = _json.loads(tokens_path.read_text(encoding="utf-8"))
                     email = str(data.get("email") or "")
+                    # Without kiln-pro, ``get_tier`` is the stub above and
+                    # answers "free" for everyone; the file carries the tier
+                    # the server named at sign-in, which is what the hosted
+                    # tools will actually run as.
+                    stored_tier = str(data.get("tier") or "").strip()
+                    if stored_tier and tier_label.lower() == "free":
+                        tier_label = stored_tier.title()
             except Exception:
                 pass
         except Exception:
             # Resolution failed — treat as FREE for the banner.
             pass
 
-        if email and tier_label.lower() != "free":
+        session_state = ""
+        if email:
+            try:
+                from kiln.auth_session import stored_session_state
+
+                session_state = stored_session_state()
+            except Exception:
+                # Resolver unreachable (broken install): the file is all
+                # there is, so the banner reads it as before.
+                session_state = ""
+
+        if email and session_state == "needs_signin":
+            msg = (
+                f"\u26a0 Kiln MCP. Session for {email} ({tier_label}) has "
+                "expired \u2014 run `kiln signin` to sign in again."
+            )
+        elif email and session_state != "signed_out":
             msg = f"\u2713 Kiln MCP. Signed in as {email} ({tier_label})."
-        elif email:
-            msg = f"\u2713 Kiln MCP. Signed in as {email} (Free)."
         else:
+            # No email, or an email beside no access token (a half-written
+            # or emptied file): nothing here can authenticate.
             msg = (
                 "\u26a0 Kiln MCP. Not signed in \u2014 run `kiln signin` "
                 "or `kiln pair <code>` to connect your Kiln tier."
