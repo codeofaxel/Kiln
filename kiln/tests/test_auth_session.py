@@ -906,3 +906,54 @@ class TestSignInRequest:
             "credential": "machine", "machine_id": "KLN-A",
         }
         assert auth_session.credential_fields({"access_token": "eyJ..."}) == {}
+
+
+class TestARenewalThatCannotBeSaved:
+    def test_a_machine_credential_is_not_used_until_it_is_on_disk(self, auth_home, monkeypatch):
+        """Used while the old secret is still on disk, the next renewal would
+        present that old secret after the new pair was in use: a copy, to the
+        server, which ends the credential.  Unused, the server hands the same
+        renewed pair back at the next attempt."""
+        old = _kmt(time.time() + 120)
+        _write_session(auth_home, access_token=old, refresh_token="kms_KLN-TEST-0001.s1", credential="machine")
+        monkeypatch.setattr(auth_session, "_post_refresh", lambda rt: (200, {
+            "access_token": _kmt(time.time() + 900), "refresh_token": "kms_KLN-TEST-0001.s2",
+            "credential": "machine", "machine_id": "KLN-TEST-0001",
+        }))
+
+        def disk_full(data):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(auth_session, "_write_tokens", disk_full)
+        result = resolve_session_bearer(refresh_margin_s=300)
+        assert result == SessionBearer(token=old, state="degraded")
+        assert _stored(auth_home)["refresh_token"] == "kms_KLN-TEST-0001.s1"
+
+    def test_the_current_one_is_the_one_on_disk_after_the_lock(self, auth_home, monkeypatch):
+        """A rival process may renew while this one waits on the lock.  When
+        this renewal then cannot be saved, "the current one" is the rival's
+        pair on disk, not the older token this call started from."""
+        import contextlib as _ctx
+
+        old = _kmt(time.time() + 120)
+        rivals = _kmt(time.time() + 200)
+        _write_session(auth_home, access_token=old, refresh_token="kms_KLN-TEST-0001.s1", credential="machine")
+
+        @_ctx.contextmanager
+        def lock_then_rival_renews():
+            _write_session(auth_home, access_token=rivals, refresh_token="kms_KLN-TEST-0001.s2",
+                           credential="machine")
+            yield
+
+        monkeypatch.setattr(auth_session, "_refresh_lock", lock_then_rival_renews)
+        monkeypatch.setattr(auth_session, "_post_refresh", lambda rt: (200, {
+            "access_token": _kmt(time.time() + 900), "refresh_token": "kms_KLN-TEST-0001.s3",
+            "credential": "machine", "machine_id": "KLN-TEST-0001",
+        }))
+
+        def disk_full(data):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(auth_session, "_write_tokens", disk_full)
+        result = resolve_session_bearer(refresh_margin_s=300)
+        assert result == SessionBearer(token=rivals, state="degraded")
