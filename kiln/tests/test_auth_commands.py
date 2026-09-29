@@ -928,3 +928,171 @@ class TestLinkForwardsClientName:
         # Refresh_token must still be there — the --client flag
         # augments, not replaces, the body shape.
         assert captured["body"].get("refresh_token") == "ref"
+
+
+# =====================================================================
+# Machine credentials: the sign-in doors ask for one, and the commands
+# around a signed-in computer treat it as the computer's own
+# =====================================================================
+
+
+def _cli():
+    import click
+    from kiln.cli.auth_commands import register_auth_cli
+
+    g = click.Group("kiln")
+    register_auth_cli(g)
+    return g
+
+
+def _machine_file(auth_home, **extra) -> None:
+    (auth_home / ".kiln").mkdir(mode=0o700, exist_ok=True)
+    record = {
+        "access_token": "kmt_h.c.m", "refresh_token": "kms_KLN-TEST-0001.secret",
+        "email": "maker@example.com", "credential": "machine", "machine_id": "KLN-TEST-0001",
+    }
+    record.update(extra)
+    (auth_home / ".kiln" / "auth_tokens.json").write_text(json.dumps(record))
+
+
+class TestMachineCredentialDoors:
+    def test_signin_asks_for_this_computers_own_credential_and_records_it(
+        self, auth_home, monkeypatch, clear_client_env,
+    ):
+        from click.testing import CliRunner
+        from kiln.cli import auth_commands
+
+        sent: dict = {}
+
+        def fake_post(path, payload, *, bearer=None, timeout=15.0):
+            if path.endswith("/device/start"):
+                sent["start"] = payload
+                return {"success": True, "device_code": "dev-1", "user_code": "WXYZ-1234",
+                        "verification_uri": "https://app.kiln3d.com/auth/device", "interval": 1, "expires_in": 900}
+            return {"status": "success", "credential": "machine", "machine_id": "KLN-WXYZ-1234",
+                    "access_token": "kmt_a.b.c", "refresh_token": "kms_KLN-WXYZ-1234.s", "expires_in": 900,
+                    "email": "maker@example.com", "tier": "pro", "auth_uid": "uid-1", "has_entitlement": True}
+
+        monkeypatch.setattr(auth_commands, "_http_post", fake_post)
+        monkeypatch.setattr(auth_commands.webbrowser, "open", lambda *a, **k: False)
+        monkeypatch.setattr(auth_commands, "_hostname_label", lambda: "shop-pc")
+        monkeypatch.setattr(auth_commands, "_sniff_client_from_parent_process", lambda: "")
+        monkeypatch.setattr(auth_commands, "_is_stdin_tty", lambda: True)
+        monkeypatch.setattr(auth_commands.time, "sleep", lambda s: None)
+
+        r = CliRunner().invoke(_cli(), ["signin", "--no-browser"])
+        assert r.exit_code == 0, r.output
+        assert sent["start"] == {"credential": "machine", "machine_label": "shop-pc", "client_name": "Kiln CLI"}
+        stored = json.loads((auth_home / ".kiln" / "auth_tokens.json").read_text())
+        assert (stored["credential"], stored["machine_id"]) == ("machine", "KLN-WXYZ-1234")
+        assert stored["refresh_token"] == "kms_KLN-WXYZ-1234.s"
+
+    def test_pair_asks_for_a_machine_credential_too(self, auth_home, monkeypatch, clear_client_env):
+        from click.testing import CliRunner
+        from kiln.cli import auth_commands
+
+        captured: dict = {}
+
+        def fake_post(path, body, *, bearer=None, timeout=15.0):
+            captured["body"] = body
+            return {"success": True, "credential": "machine", "machine_id": "KLN-ABCD-EFGH",
+                    "access_token": "kmt_a.b.c", "refresh_token": "kms_KLN-ABCD-EFGH.s",
+                    "email": "maker@example.com", "auth_uid": "uid-1", "tier": "business", "has_entitlement": True}
+
+        monkeypatch.setattr(auth_commands, "_http_post", fake_post)
+        monkeypatch.setattr(auth_commands, "_http_get", lambda path, *, bearer=None, timeout=10.0: (200, {}))
+        monkeypatch.setattr(auth_commands, "_hostname_label", lambda: "print-farm-1")
+        r = CliRunner().invoke(_cli(), ["pair", "KLN-ABCD-EFGH", "--client", "Claude Code"])
+        assert r.exit_code == 0, r.output
+        body = captured["body"]
+        assert (body["credential"], body["machine_label"], body["client_name"]) == ("machine", "print-farm-1", "Claude Code")
+        stored = json.loads((auth_home / ".kiln" / "auth_tokens.json").read_text())
+        assert stored["credential"] == "machine" and stored["machine_id"] == "KLN-ABCD-EFGH"
+
+    def test_an_older_server_answering_with_a_session_is_stored_as_before(self, auth_home, monkeypatch, clear_client_env):
+        from click.testing import CliRunner
+        from kiln.cli import auth_commands
+
+        monkeypatch.setattr(auth_commands, "_http_post", lambda path, body, *, bearer=None, timeout=15.0: {
+            "success": True, "access_token": "eyJ.a.b", "refresh_token": "rt", "email": "m@example.com",
+            "auth_uid": "uid-1", "tier": "free",
+        })
+        monkeypatch.setattr(auth_commands, "_http_get", lambda path, *, bearer=None, timeout=10.0: (200, {}))
+        r = CliRunner().invoke(_cli(), ["pair", "KLN-ABCD-EFGH", "--client", "Cursor"])
+        assert r.exit_code == 0, r.output
+        stored = json.loads((auth_home / ".kiln" / "auth_tokens.json").read_text())
+        assert "credential" not in stored and "machine_id" not in stored
+
+    def test_signout_removes_the_computer_from_the_account(self, auth_home, monkeypatch):
+        from click.testing import CliRunner
+        from kiln import auth_session
+
+        _machine_file(auth_home)
+        asked: list = []
+
+        def fake_json(path, body, *, bearer=""):
+            asked.append((path, body))
+            return 200, {"success": True, "revoked": True}
+
+        monkeypatch.setattr(auth_session, "_post_json", fake_json)
+        r = CliRunner().invoke(_cli(), ["signout"])
+        assert r.exit_code == 0, r.output
+        assert asked == [("/api/auth/machine/revoke", {"refresh_token": "kms_KLN-TEST-0001.secret"})]
+        assert "removed from your Kiln account" in r.output
+        assert not (auth_home / ".kiln" / "auth_tokens.json").exists()
+
+    def test_signout_offline_still_signs_out_and_says_where_to_finish(self, auth_home):
+        from click.testing import CliRunner
+
+        _machine_file(auth_home)
+        r = CliRunner().invoke(_cli(), ["signout"])  # the suite's stub: unreachable
+        assert r.exit_code == 0, r.output
+        assert "settings/agent" in r.output
+        assert not (auth_home / ".kiln" / "auth_tokens.json").exists()
+
+    def test_whoami_renews_first_and_names_the_machine(self, auth_home, monkeypatch):
+        from click.testing import CliRunner
+        from kiln import auth_session
+        from kiln.cli import auth_commands
+
+        _machine_file(auth_home)
+        monkeypatch.setattr(auth_session, "resolve_session_bearer",
+                            lambda *a, **k: auth_session.SessionBearer(token="kmt_fresh.x.y", state="refreshed"))
+        seen: dict = {}
+
+        def fake_get(path, *, bearer=None, timeout=10.0):
+            seen["bearer"] = bearer
+            return 200, {"success": True, "email": "maker@example.com", "tier": "pro", "credential": "machine",
+                         "machine_id": "KLN-TEST-0001", "machine_label": "shop-pc"}
+
+        monkeypatch.setattr(auth_commands, "_http_get", fake_get)
+        r = CliRunner().invoke(_cli(), ["whoami"])
+        assert r.exit_code == 0, r.output
+        assert seen["bearer"] == "kmt_fresh.x.y", "whoami sends the renewed token, not the stale one"
+        assert "Machine: shop-pc (KLN-TEST-0001)" in r.output
+
+    def test_whoami_for_an_ended_sign_in_says_why(self, auth_home, monkeypatch):
+        from click.testing import CliRunner
+        from kiln import auth_session
+
+        _machine_file(auth_home)
+        monkeypatch.setattr(auth_session, "resolve_session_bearer", lambda *a, **k: auth_session.SessionBearer(
+            token="", state="needs_signin", detail="This computer was removed from your Kiln account.",
+        ))
+        r = CliRunner().invoke(_cli(), ["whoami"])
+        assert r.exit_code != 0
+        assert "removed from your Kiln account" in r.output and "kiln signin" in r.output
+
+    def test_link_never_hands_a_machine_credential_to_a_browser(self, auth_home, monkeypatch):
+        from click.testing import CliRunner
+        from kiln.cli import auth_commands
+
+        _machine_file(auth_home)
+
+        def never(*a, **k):
+            raise AssertionError("a machine credential was offered to the reverse-pair door")
+
+        monkeypatch.setattr(auth_commands, "_http_post", never)
+        r = CliRunner().invoke(_cli(), ["link", "--client", "Cursor"])
+        assert r.exit_code != 0
+        assert "can't sign a browser in" in r.output

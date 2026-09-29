@@ -80,7 +80,8 @@ class _AuthToolsPlugin:
             import kiln.server as _srv
 
             try:
-                from kiln.cli.auth_commands import _http_post
+                from kiln.auth_session import machine_signin_request
+                from kiln.cli.auth_commands import _detect_client_name, _hostname_label, _http_post
             except Exception as exc:  # pragma: no cover — helpers are in-package
                 return _srv._error_dict(
                     f"kiln_signin: sign-in helpers unavailable: {exc}",
@@ -88,7 +89,12 @@ class _AuthToolsPlugin:
                 )
 
             try:
-                resp = _http_post("/api/auth/device/start", {})
+                # This computer's own machine credential, the same ask the
+                # ``kiln signin`` command makes.
+                resp = _http_post(
+                    "/api/auth/device/start",
+                    machine_signin_request(_detect_client_name(), label=_hostname_label()),
+                )
             except Exception as exc:
                 # _http_post raises click.ClickException on any HTTP / network
                 # failure; surface its message rather than let it bubble.
@@ -152,6 +158,7 @@ class _AuthToolsPlugin:
                 )
 
             try:
+                from kiln.auth_session import credential_fields
                 from kiln.cli.auth_commands import _complete_signin, _http_post
             except Exception as exc:  # pragma: no cover — helpers are in-package
                 return _srv._error_dict(
@@ -192,6 +199,7 @@ class _AuthToolsPlugin:
                         "tier": tier,
                         "has_entitlement": bool(resp.get("has_entitlement")),
                         "signed_in_at": int(time.time()),
+                        **credential_fields(resp),
                     })
                 except Exception as exc:
                     return _srv._error_dict(

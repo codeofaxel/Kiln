@@ -1038,6 +1038,27 @@ def _isolate_printer_engagement(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_machine_credential_calls(monkeypatch):
+    """Keep the two machine-credential calls off the network, suite-wide.
+
+    A session from an older Kiln that renews is moved onto a machine
+    credential with one more request, and ``kiln signout`` asks the server to
+    remove the computer (both through ``auth_session._post_json``).  Every
+    test that fakes a renewal would otherwise send the first to the real API.
+    Stubbed as "unreachable", which both callers take as "try again later";
+    a test of either door fakes ``_post_json`` itself.
+    """
+    try:
+        from kiln import auth_session
+    except ImportError:  # pragma: no cover — module absent
+        yield
+        return
+
+    monkeypatch.setattr(auth_session, "_post_json", lambda path, body, *, bearer="": (0, {}))
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _no_real_pypi_check(monkeypatch):
     """Keep the update check off the network, for the whole suite.
 

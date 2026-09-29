@@ -234,3 +234,18 @@ class TestGeometryFailuresAreLogged:
             job = provider.generate("cube(5);")
         assert job.status == gen.GenerationStatus.FAILED
         assert any("OpenSCAD compile failed" in r.message for r in caplog.records)
+
+
+def test_a_machine_credential_is_redacted_but_named():
+    """A computer's Kiln sign-in in a log line or a report: the secret goes,
+    the kind stays, so the reader still knows what was there."""
+    from kiln.redaction import redact_secrets
+
+    line = (
+        "refresh failed for kms_KLN-AAAA-BBBB.abcdefghijklmnopqrstuvwxyz0123456789 "
+        "with kmt_eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1In0.c2lnbmF0dXJl"
+    )
+    out = redact_secrets(line)
+    assert "abcdefghijklmnop" not in out and "eyJzdWIi" not in out
+    assert "kms_[REDACTED]" in out and "kmt_[REDACTED]" in out
+    assert redact_secrets("kms_short and skms_notatoken") == "kms_short and skms_notatoken"

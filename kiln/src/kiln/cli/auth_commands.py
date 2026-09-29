@@ -20,10 +20,17 @@ How the login flow works end-to-end:
   5. CLI writes the tokens to ``~/.kiln/auth_tokens.json`` (mode 0600)
      and prints ``Signed in as {email} ({tier})``.
 
-``kiln signout`` deletes the token file.
+``kiln signout`` removes this computer from the account (for a machine
+credential) and deletes the token file.
 
-``kiln whoami`` reads the file, hits ``GET /api/auth/whoami`` with the
-access_token, and prints the resolved email + tier.
+``kiln whoami`` renews the sign-in if it needs it, hits ``GET
+/api/auth/whoami``, and prints the resolved email + tier (and, for a
+machine credential, which computer this is on the account).
+
+What a sign-in door asks for is a machine credential of this computer's
+own (``kiln.auth_session.machine_signin_request``): a sign-in Kiln issues
+to the computer, which nothing done in a browser can end.  A server that
+predates them answers with a session, stored exactly as before.
 
 ``kiln pair <code>`` is the web-initiated mirror of ``kiln signin`` —
 the user has already signed in on app.kiln3d.com; this command claims
@@ -281,8 +288,14 @@ def auth_login(no_browser: bool, timeout: int, provider: str | None) -> None:
         click.echo(f"    kiln identity link --provider {target}", err=True)
         sys.exit(2)
 
-    # 1) Start the device flow.
-    start = _http_post("/api/auth/device/start", {})
+    # 1) Start the device flow, asking for this computer's own machine
+    #    credential under the name /settings/agent will list it by.
+    from kiln.auth_session import machine_signin_request
+
+    start = _http_post(
+        "/api/auth/device/start",
+        machine_signin_request(_detect_client_name() or "Kiln CLI", label=_hostname_label()),
+    )
     if not start.get("success"):
         raise click.ClickException(
             start.get("error") or "Could not start the sign-in flow."
@@ -372,6 +385,8 @@ def auth_login(no_browser: bool, timeout: int, provider: str | None) -> None:
 
     status = str(result.get("status") or "").lower()
     if status == "success":
+        from kiln.auth_session import credential_fields
+
         email = str(result.get("email") or "")
         tier = str(result.get("tier") or "free").lower()
         _complete_signin({
@@ -382,6 +397,7 @@ def auth_login(no_browser: bool, timeout: int, provider: str | None) -> None:
             "tier": tier,
             "has_entitlement": bool(result.get("has_entitlement")),
             "signed_in_at": int(time.time()),
+            **credential_fields(result),
         })
         # Final confirmation on stdout (not stderr) so ``kiln login
         # | tail -1`` captures it.  Ember-coloured checkmark +
@@ -409,15 +425,29 @@ def auth_login(no_browser: bool, timeout: int, provider: str | None) -> None:
 
 @click.command("signout")
 def auth_logout() -> None:
-    """Delete the locally-stored Kiln session token.
+    """Sign this computer out of Kiln.
 
-    This does not revoke the session everywhere — to sign out of every
-    device, use the web app (``Settings → Account → Sign out of all
-    sessions``).  For most users this command is what they want: it
-    forgets the session on this laptop without touching the others.
+    A computer on its own machine sign-in is also removed from your account
+    (app.kiln3d.com/settings/agent), so nothing is left behind that nobody
+    holds.  Your other computers and your browser stay signed in.
     """
+    from kiln.auth_session import holds_machine_credential, revoke_machine_credential
+
+    tokens = _read_tokens()
+    removed = False
+    if holds_machine_credential(tokens):
+        removed = revoke_machine_credential()
     if _delete_tokens():
-        click.echo("Signed out. Token file removed.")
+        if removed:
+            click.echo("Signed out. This computer was removed from your Kiln account.")
+        elif holds_machine_credential(tokens):
+            click.echo(
+                "Signed out on this computer. Kiln couldn't be reached to remove it from "
+                "your account, so it may still be listed at app.kiln3d.com/settings/agent; "
+                "removing it there finishes the job."
+            )
+        else:
+            click.echo("Signed out. Token file removed.")
     else:
         click.echo("You weren't signed in.")
 
@@ -440,17 +470,24 @@ def auth_whoami(as_json: bool) -> None:
     local cache might be out of date (e.g. right after an upgrade in
     the Stripe portal).
     """
-    tokens = _read_tokens()
-    access_token = str(tokens.get("access_token") or "")
-    if not access_token:
-        raise click.ClickException(
-            "Not signed in. Run `kiln signin` to sign in."
-        )
+    from kiln.auth_session import resolve_session_bearer
 
-    code, body = _http_get("/api/auth/whoami", bearer=access_token)
+    # Renewed first when it needs it: a machine credential's access token
+    # lives about fifteen minutes, and "session expired" for a sign-in that
+    # renews itself would be untrue.
+    session = resolve_session_bearer()
+    if not session.token:
+        if session.state == "needs_signin" and session.detail:
+            # Ended, and the detail says how (removed, found in use in two
+            # places, an org seat that ended) — not merely "not signed in".
+            raise click.ClickException(f"{session.detail} Run `kiln signin` to sign in again.")
+        raise click.ClickException("Not signed in. Run `kiln signin` to sign in.")
+    tokens = _read_tokens()
+
+    code, body = _http_get("/api/auth/whoami", bearer=session.token)
     if code == 401:
         raise click.ClickException(
-            "Session expired. Run `kiln signin` to sign in again."
+            str(body.get("message") or "Session expired.") + " Run `kiln signin` to sign in again."
         )
     if code >= 400 or not body.get("success"):
         raise click.ClickException(
@@ -484,6 +521,9 @@ def auth_whoami(as_json: bool) -> None:
         click.echo(f"Status:  {status}")
     if expires:
         click.echo(f"Expires: {expires}")
+    if body.get("credential") == "machine":
+        label = str(body.get("machine_label") or "") or "this computer"
+        click.echo(f"Machine: {label} ({body.get('machine_id') or '?'}) — app.kiln3d.com/settings/agent")
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -805,11 +845,15 @@ def auth_pair(code: str, client: str | None) -> None:
     click.echo("")
     click.echo(f"  Pairing {_hostname_label()} with your Kiln workshop\u2026", err=True)
 
+    from kiln.auth_session import credential_fields, machine_signin_request
+
     resp = _http_post(
         "/api/auth/pairing/claim",
         {
             "code": raw,
-            "machine_label": _hostname_label(),
+            # This computer's own machine credential, named the way
+            # /settings/agent will list it.
+            **machine_signin_request(client_name, label=_hostname_label()),
             "client_name": client_name,
         },
     )
@@ -861,6 +905,7 @@ def auth_pair(code: str, client: str | None) -> None:
         "tier": tier,
         "has_entitlement": bool(resp.get("has_entitlement")),
         "signed_in_at": int(time.time()),
+        **credential_fields(resp),
     })
 
     # Post-write smoke test — confirm the token the server just gave us
@@ -955,12 +1000,22 @@ def auth_link(as_json: bool, client: str | None) -> None:
 
     The code is single-use and expires in 10 minutes.
     """
+    from kiln.auth_session import holds_machine_credential
+
     tokens = _read_tokens()
     access_token = str(tokens.get("access_token") or "")
     if not access_token:
         raise click.ClickException(
             "Not signed in on this terminal.  Run `kiln signin` first, "
             "then `kiln link` to pair a browser tab."
+        )
+    if holds_machine_credential(tokens):
+        # A computer's own sign-in is never handed to a browser: it would turn
+        # a credential only this computer holds into a person's session.
+        raise click.ClickException(
+            "This computer has its own Kiln sign-in, which only it can use, so it "
+            "can't sign a browser in.  Open app.kiln3d.com and sign in there; this "
+            "computer is already listed at app.kiln3d.com/settings/agent."
         )
     refresh_token = str(tokens.get("refresh_token") or "")
 

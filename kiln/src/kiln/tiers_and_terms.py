@@ -411,6 +411,39 @@ def session_expired_message(email: str = "") -> str:
     )
 
 
+def machine_signin_ended_message(reason: str, email: str = "") -> str:
+    """Person-facing copy for a computer's machine sign-in the server ended,
+    by the reason it gave.  ``""`` for a reason with nothing more specific to
+    say than :func:`session_expired_message`.
+
+    Each one names what actually happened, because the person may need to act
+    on it: a computer removed from the account was removed on purpose (maybe
+    by them), a sign-in found in use in two places means a copy of this
+    computer's sign-in exists somewhere, and an ended organisation seat is a
+    conversation with whoever runs that organisation.
+    """
+    who = f" ({email.strip()})" if email and email.strip() else ""
+    messages = {
+        "machine_revoked": (
+            f"This computer was removed from your Kiln account{who}. "
+            "Sign it in again to keep using Kiln's hosted tools here."
+        ),
+        "machine_credential_reused": (
+            f"This computer's Kiln sign-in{who} was used from two places at once "
+            "(a copied settings folder, a cloned disk or a restored backup), so "
+            "Kiln ended it to be safe. Sign in again on this computer."
+        ),
+        "org_access_ended": (
+            "This computer was signed in under your organization's Kiln plan, "
+            "and your seat there has ended. Sign in again to use your own plan."
+        ),
+        "account_disabled": (
+            f"The Kiln account this computer signed in with{who} isn't active."
+        ),
+    }
+    return messages.get(str(reason or "").strip(), "")
+
+
 def signed_out_message() -> str:
     """Person-facing copy for "no session on this machine at all"."""
     return (
@@ -429,6 +462,7 @@ __all__ = [
     "UPGRADE_NUDGE_SCHEMA_VERSION",
     "account_required_message",
     "free_allowance_phrase",
+    "machine_signin_ended_message",
     "session_expired_message",
     "signed_out_message",
     "signin_hint_fields",
