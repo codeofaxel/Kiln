@@ -6,9 +6,7 @@
 
 ## About Kiln
 
-### Overview
-
-Kiln gives AI agents a safe, unified way to design, validate, and manufacture 3D-printed parts. Connect it to Claude (or any MCP-compatible agent) and your assistant can take a part from description to done: design it, check that it will actually print, slice it, print it on your printer, watch the print, and help recover when something goes wrong — through <!-- KILN_MCP_CAPABILITY_COUNT --> 938 MCP capabilities and a <!-- KILN_CLI_COUNT --> 252-command CLI.
+Kiln is the open-source MCP server that lets Claude, Codex or any AI agent design, slice and print on Bambu Lab, Creality, Prusa, Elegoo, Klipper and OctoPrint printers. This page is the full reference: every MCP tool and CLI command, each printer adapter, and the safety guardrails that decide what an agent may do on its own. Connect it to your agent and it takes a part from description to done — design it, check that it will actually print, slice it, print it, watch the print, and help recover when something goes wrong — through <!-- KILN_MCP_CAPABILITY_COUNT --> 938 MCP capabilities and a <!-- KILN_CLI_COUNT --> 252-command CLI.
 
 **Clarification:** Kiln does **not** operate its own marketplace or manufacturing network. It integrates with third-party marketplaces for model discovery and third-party fulfillment providers for outsourced manufacturing. Kiln is orchestration and agent infrastructure, not a supply-side platform.
 
