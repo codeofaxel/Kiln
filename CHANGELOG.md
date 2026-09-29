@@ -29,6 +29,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Whole-object wrapped textures look better.**
+
 - **Agreeing to the Terms before you sign in now counts for your account too.**
 
 - **Cost estimates price each filament as the material your file was sliced for.**
@@ -297,6 +299,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   https://kiln3d.com/pricing.
 
 ### Fixed
+
+- **Texturing a large model no longer times out.** The preview now finishes within your assistant's wait.
 
 - **File details name the right material, print time and layer count for every slicer's files.**
 
