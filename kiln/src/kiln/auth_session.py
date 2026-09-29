@@ -543,6 +543,18 @@ def resolve_session_bearer(
             try:
                 _write_tokens(merged)
             except OSError:
+                if holds_machine_credential(merged):
+                    # Not used until it is on disk.  Unused, the renewed pair
+                    # is simply handed back at the next renewal; used while
+                    # the old secret is still on disk, it would make that
+                    # renewal look like a copy of this computer's sign-in,
+                    # which Kiln ends.
+                    logger.warning(
+                        "auth_session: this computer's renewed sign-in could not be "
+                        "written to %s; still using the current one.", _tokens_path(),
+                    )
+                    _note_network_failure()
+                    return SessionBearer(token=token, state="degraded")
                 # Unpersistable rotation is worth a loud line: the NEXT
                 # refresh will fail (old token rotated away) and force a
                 # re-signin.  The returned token is still good now.

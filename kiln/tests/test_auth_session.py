@@ -881,3 +881,25 @@ class TestSignInRequest:
             "credential": "machine", "machine_id": "KLN-A",
         }
         assert auth_session.credential_fields({"access_token": "eyJ..."}) == {}
+
+
+class TestARenewalThatCannotBeSaved:
+    def test_a_machine_credential_is_not_used_until_it_is_on_disk(self, auth_home, monkeypatch):
+        """Used while the old secret is still on disk, the next renewal would
+        present that old secret after the new pair was in use: a copy, to the
+        server, which ends the credential.  Unused, the server hands the same
+        renewed pair back at the next attempt."""
+        old = _kmt(time.time() + 120)
+        _write_session(auth_home, access_token=old, refresh_token="kms_KLN-TEST-0001.s1", credential="machine")
+        monkeypatch.setattr(auth_session, "_post_refresh", lambda rt: (200, {
+            "access_token": _kmt(time.time() + 900), "refresh_token": "kms_KLN-TEST-0001.s2",
+            "credential": "machine", "machine_id": "KLN-TEST-0001",
+        }))
+
+        def disk_full(data):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(auth_session, "_write_tokens", disk_full)
+        result = resolve_session_bearer(refresh_margin_s=300)
+        assert result == SessionBearer(token=old, state="degraded")
+        assert _stored(auth_home)["refresh_token"] == "kms_KLN-TEST-0001.s1"
