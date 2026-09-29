@@ -39,7 +39,7 @@ The short version of the capability map. Everything below is reachable through t
 - **See it in 3D.** Models render from every angle before printing, and on the hosted connection you can turn a design over interactively — inline in AI apps that support embedded panels, or through a shareable link.
 - **Validate before you print.** Every model can be checked for printability before it reaches a printer: overhangs, thin walls, bridging, bed adhesion, support needs, warping risk, and more — scored, graded, and paired with concrete fixes. Parts that physically can't succeed (too big for the plate, a material your hotend can't melt) are caught up front, free.
 - **Print and monitor.** Slice with your installed slicer, print on any supported printer, and monitor with camera snapshots, progress, temperatures, and health checks. Failed prints get diagnosis, guided recovery, and — on supported setups — resume from the layer where the print stopped.
-- **Decorate.** Photos, logos, QR codes, text, and procedural textures can be applied to models for single- or multi-color printing (paid tiers; see [pricing](https://kiln3d.com/pricing)). A decoration saved earlier can be re-applied by name at its recorded depth and placement.
+- **Decorate.** Photos, logos, QR codes, text, and procedural textures can be applied to models for single- or multi-color printing (paid tiers; see [pricing](https://www.kiln3d.com/pricing)). A decoration saved earlier can be re-applied by name at its recorded depth and placement.
 - **Learn.** Print outcomes feed material recommendations, per-printer settings, and calibration so the next print is smarter than the last. Community learning is anonymized and opt-in.
 - **Version.** Designs, decorations, and mechanical features can be branched, merged, reviewed, released, and signed — version control that understands manufacturing artifacts (Kiln Pro).
 
@@ -47,7 +47,7 @@ Parts of Kiln's intelligence stack are patent-pending.
 
 ### The Web App
 
-[kiln3d.com](https://kiln3d.com) is Kiln in the browser. Sign in for free and make a real, printable object on the spot — pick a starter (coaster, keychain, nameplate, and more), watch it build in 3D, apply a color or texture, and download it to print. No install, no printer, no API key required. The cloud workshop — version history, branches, reviews, and sharing for your designs — is a Kiln Pro feature. Nothing about local printer control requires an account.
+[kiln3d.com](https://www.kiln3d.com) is Kiln in the browser. Sign in for free and make a real, printable object on the spot — pick a starter (coaster, keychain, nameplate, and more), watch it build in 3D, apply a color or texture, and download it to print. No install, no printer, no API key required. The cloud workshop — version history, branches, reviews, and sharing for your designs — is a Kiln Pro feature. Nothing about local printer control requires an account.
 
 ### Supported Printers
 
@@ -61,11 +61,11 @@ Parts of Kiln's intelligence stack are patent-pending.
 | Elegoo | WebSocket/SDCP | Centauri Carbon, Saturn, Mars series; Neptune 4 / OrangeStorm Giga use Moonraker | Stable |
 | Direct USB | Serial | Any Marlin/RepRapFirmware printer over USB | Stable |
 
-The full, always-current list of printer models Kiln ships a tuned profile for lives at [kiln3d.com/printers](https://kiln3d.com/printers).
+The full, always-current list of printer models Kiln ships a tuned profile for lives at [kiln3d.com/printers](https://www.kiln3d.com/printers).
 
 ### Tiers
 
-The core loop — design, validate, slice, print, monitor — is free and open source. Kiln Pro, Business, and Enterprise add depth on top: decoration and versioning, per-printer calibration and learning, production drawings, team workflows, and compliance features. See [kiln3d.com/pricing](https://kiln3d.com/pricing) for what each tier includes.
+The core loop — design, validate, slice, print, monitor — is free and open source. Kiln Pro, Business, and Enterprise add depth on top: decoration and versioning, per-printer calibration and learning, production drawings, team workflows, and compliance features. See [kiln3d.com/pricing](https://www.kiln3d.com/pricing) for what each tier includes.
 
 Kiln works with one printer at a time below the Business tier: registering and listing any number of machines is free, and `hand_back_printer` moves Kiln between them without touching a running print. Driving several printers in parallel — including fleet-wide commands — is a Business feature.
 
@@ -84,7 +84,7 @@ pip install kiln3d
 pipx install kiln3d
 ```
 
-Requirements: Python 3.10+. The pip package is `kiln3d`; the CLI command is `kiln`. OS-specific walkthroughs (Windows, WSL 2, Linux) live at [kiln3d.com/install](https://kiln3d.com/install).
+Requirements: Python 3.10+. The pip package is `kiln3d`; the CLI command is `kiln`. OS-specific walkthroughs (Windows, WSL 2, Linux) live at [kiln3d.com/install](https://www.kiln3d.com/install).
 
 To update later: `kiln self-update` (or ask your AI assistant — it will offer when a new version is out).
 
@@ -193,7 +193,7 @@ Cloud text-to-3D providers (Meshy, Tripo3D, Stability AI, Gemini) are available 
 
 ### No Printer?
 
-You can still go from idea to object: design through the agent or the [web app](https://kiln3d.com), then route the job to a third-party fulfillment provider (`fulfillment_quote` → `fulfillment_order`), or just download your file and print it anywhere.
+You can still go from idea to object: design through the agent or the [web app](https://www.kiln3d.com), then route the job to a third-party fulfillment provider (`fulfillment_quote` → `fulfillment_order`), or just download your file and print it anywhere.
 
 ---
 
@@ -417,7 +417,7 @@ The MCP server starts via `kiln serve` or `python -m kiln serve`. The fastest se
 
 Kiln exposes **<!-- KILN_MCP_TOOL_COUNT --> 931 MCP tools** and **<!-- KILN_MCP_CAPABILITY_COUNT --> 938 total MCP capabilities**. The everyday core is documented below by category; agents see the full, current catalog at connect time (`get_started` and `get_skill_manifest` return the complete map).
 
-Paid-tier tools are discoverable too: agents without a license receive a structured response naming the required tier, so they can tell you what's possible and where it lives ([pricing](https://kiln3d.com/pricing)).
+Paid-tier tools are discoverable too: agents without a license receive a structured response naming the required tier, so they can tell you what's possible and where it lives ([pricing](https://www.kiln3d.com/pricing)).
 
 #### Printer Control
 
@@ -627,7 +627,7 @@ Routes manufacturing to third-party fulfillment providers (Craftcloud). Kiln act
 
 #### Paid-Tier Tool Families (kiln-pro)
 
-The families below ship through [kiln-pro](https://kiln3d.com/pricing), Kiln's paid companion. Agents discover these tools even without a license and receive a structured pointer to the required tier.
+The families below ship through [kiln-pro](https://www.kiln3d.com/pricing), Kiln's paid companion. Agents discover these tools even without a license and receive a structured pointer to the required tier.
 
 - **Decoration & textures (Pro+).** Emboss or deboss photos, logos, SVG, QR codes, and text onto any face of a model; procedural and image-based textures with custom palettes for multicolor printing. Flagships: `decorate_surface`, `apply_procedural_texture`, `smart_decorate`.
 - **Product generators (free with monthly quota; unlimited on Pro+).** One-call generators for coasters, keychains, nameplates, pet tags, trays, ornaments, magnets, and more — engraving-ready and printer-aware, each stating its assumptions (material, sizing) in plain English so you can redirect it in one line. Flagships: `generate_coaster`, `generate_keychain`, `generate_nameplate`.
@@ -641,7 +641,7 @@ The families below ship through [kiln-pro](https://kiln3d.com/pricing), Kiln's p
 - **Sourcing risk for bought parts (Enterprise).** Flags the purchased components a design depends on that are going end-of-life, single-source, or long-lead — and proposes swaps — before you commit to a bill of materials you can't buy in a year. Flagships: `assess_bom_sourcing_risk`, `propose_sourcing_remediation`.
 - **Assembly manuals (Pro+).** Printable step-by-step PDF manuals for multi-part designs, with BOM and per-step renders. Enterprise adds controlled, multi-language factory work instructions with torque specs, inspection gates, and sign-off. Flagships: `generate_assembly_manual`, `embed_manual_in_3mf`.
 - **Mid-print modification & deep recovery (Pro+).** Add features or decorations to a paused print, resume across power loss, and (Business+) triage a whole fleet after an outage. Flagships: `decorate_during_print`, `recover_power_loss_print`, `assess_fleet_power_loss`.
-- **Business & Enterprise operations.** Billing and spend caps, team and org management, SSO, audit-trail export, multi-site fleet views, and project cost tracking. See [pricing](https://kiln3d.com/pricing) for the full breakdown.
+- **Business & Enterprise operations.** Billing and spend caps, team and org management, SSO, audit-trail export, multi-site fleet views, and project cost tracking. See [pricing](https://www.kiln3d.com/pricing) for the full breakdown.
 
 ### MCP Resources
 
@@ -878,7 +878,7 @@ A standing window is a yes for a while: until it closes, prints on that printer 
 - **Seeing them:** `kiln consent status` (or `kiln doctor`) lists what is open, until when, and how it was opened.
 - **Closing one:** `kiln consent revoke <id>` (or `--all`), or tell your assistant to close it — closing works from anywhere. Jobs queued under a window that has closed do not start on it.
 - **Extending one:** `kiln consent extend <id> --for 1h`, at the terminal.
-- **Several printers:** a window over a list of printers (`--printers a,b`) or all of them (`--fleet`) is a Business feature, like running several printers at once ([kiln3d.com/pricing](https://kiln3d.com/pricing)).
+- **Several printers:** a window over a list of printers (`--printers a,b`) or all of them (`--fleet`) is a Business feature, like running several printers at once ([kiln3d.com/pricing](https://www.kiln3d.com/pricing)).
 
 A window that runs out or is closed while a print is running lets that print finish. It only stops new prints from starting without asking.
 
@@ -894,7 +894,7 @@ To print a second part beside the one on the plate, pass a `placement` (a named 
 
 Across a fleet, the same record decides where a job may go. `route_print_job`, `fleet_submit_job` and `suggest_printer_for_job` read every candidate's plate as it stands and say, per printer, whether it has room for this part and how a print there would start. A printer whose plate still holds a part with no spot beside it, or whose plate Kiln has no record of, is never routed onto; a job no plate can take is refused when it is submitted, with each printer's own sentence, rather than queued to be refused at the printer. A print that would start beside a part already on the plate is ranked below a clear plate unless the job's priority is high. Reading the whole fleet's plates is a Kiln Business feature; the verdict on any one printer stays free.
 
-The sliced file then starts **the quiet way**: instead of the printer's own start routine (a Z home on the plate, a bed probe, a purge line drawn across it), the file opens with Kiln's own prologue — an absolute lift to a height clear of everything on the plate, the X/Y home at that height, a travel over the new part's own footprint, and the descent there — and every colour change and the end block lift to the same floor before the head moves sideways. The file carries a contract naming the machine and the plate it was planned for; at the moment of the start Kiln reads it back and asks the printer whether it is homed and idle, refuses if the plate record has changed since the plan, and sends bed levelling, flow and vibration calibration, timelapse, first-layer inspection and the nozzle-clog probe switched off. The clearance verdict is free on every tier; the quiet start is served by kiln-pro (https://kiln3d.com/pricing), and below its tier the file is sliced beside the part but starts only once the plate is clear.
+The sliced file then starts **the quiet way**: instead of the printer's own start routine (a Z home on the plate, a bed probe, a purge line drawn across it), the file opens with Kiln's own prologue — an absolute lift to a height clear of everything on the plate, the X/Y home at that height, a travel over the new part's own footprint, and the descent there — and every colour change and the end block lift to the same floor before the head moves sideways. The file carries a contract naming the machine and the plate it was planned for; at the moment of the start Kiln reads it back and asks the printer whether it is homed and idle, refuses if the plate record has changed since the plan, and sends bed levelling, flow and vibration calibration, timelapse, first-layer inspection and the nozzle-clog probe switched off. The clearance verdict is free on every tier; the quiet start is served by kiln-pro (https://www.kiln3d.com/pricing), and below its tier the file is sliced beside the part but starts only once the plate is clear.
 
 ### G-code Validation
 
@@ -1038,7 +1038,7 @@ See `CONTRIBUTING.md` in the repository for the full contributor guide.
 
 ### About kiln-pro
 
-Kiln's paid tiers ship through the private `kiln-pro` companion package ([kiln3d.com/pricing](https://kiln3d.com/pricing)). Public Kiln defines the interface contracts — the tool manifest, response shapes, and the assembly JSON contract — and works fully without it; kiln-pro provides the licensed features behind those contracts.
+Kiln's paid tiers ship through the private `kiln-pro` companion package ([kiln3d.com/pricing](https://www.kiln3d.com/pricing)). Public Kiln defines the interface contracts — the tool manifest, response shapes, and the assembly JSON contract — and works fully without it; kiln-pro provides the licensed features behind those contracts.
 
 *Kiln is a project of Hadron Labs Inc.*
 
