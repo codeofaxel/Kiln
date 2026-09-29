@@ -44,7 +44,6 @@ import click
 from kiln.cli.auth_commands import (
     _http_get,
     _http_post,
-    _read_tokens,
 )
 
 # Where the user toggles the opt-in flag — printed in every "opt-in
@@ -58,20 +57,23 @@ _ENABLE_URL = "https://app.kiln3d.com/settings/billing/spend-caps"
 
 
 def _require_signin_bearer() -> str:
-    """Pull the user's access_token from ~/.kiln/auth_tokens.json.
+    """This computer's account sign-in (``kiln signin`` / ``kiln pair``),
+    renewed first when it needs it.
 
-    Raises a ClickException pointing at ``kiln signin`` when no token
-    is present.  Fail-fast: every cap-change command requires a real
-    Supabase JWT — license-key bearers cannot run TOTP verify.
+    Raises a ClickException pointing at ``kiln signin`` when there is none.
+    Fail-fast: every cap-change command needs the account's sign-in — a
+    license key has no person behind it to type the authenticator code the
+    server checks.
     """
-    tokens = _read_tokens()
-    bearer = str(tokens.get("access_token") or "")
-    if not bearer:
+    from kiln.auth_session import resolve_session_bearer
+
+    session = resolve_session_bearer()
+    if not session.token:
+        detail = session.detail or "Not signed in."
         raise click.ClickException(
-            "Not signed in.  Run `kiln signin` first, then re-run "
-            "this command."
+            f"{detail}  Run `kiln signin` first, then re-run this command."
         )
-    return bearer
+    return session.token
 
 
 def _http_post_authed(path: str, body: dict[str, Any]) -> dict[str, Any]:

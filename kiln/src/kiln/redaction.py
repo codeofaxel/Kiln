@@ -53,6 +53,11 @@ _AUTH_HEADER_RE = re.compile(r"(Authorization\s*:\s*)(\S+)", re.IGNORECASE)
 # KILN_*_KEY= / KILN_*_SECRET= environment variable values.
 _KILN_SECRET_RE = re.compile(r"(KILN_\w*(?:KEY|SECRET)\s*=\s*)\S+", re.IGNORECASE)
 
+# A computer's Kiln machine credential wherever it appears unlabelled: the
+# access token (``kmt_``) and the refresh secret (``kms_``).  The prefix is
+# kept so a report still says which kind was there.
+_KILN_MACHINE_CREDENTIAL_RE = re.compile(r"\b(km[st]_)[A-Za-z0-9_\-.]{16,}")
+
 # Long hex / base64 tokens behind key-like labels (incl. the bare ``key``
 # label the k/v pattern deliberately omits — ``key: value`` is too common
 # in prose to redact unconditionally, but ``key: <32 hex chars>`` is not).
@@ -92,6 +97,7 @@ def redact_secrets(text: str, marker: str = DEFAULT_MARKER) -> str:
     text = _BASIC_AUTH_RE.sub(r"\1" + marker, text)
     text = _AUTH_HEADER_RE.sub(r"\1" + marker, text)
     text = _KILN_SECRET_RE.sub(r"\1" + marker, text)
+    text = _KILN_MACHINE_CREDENTIAL_RE.sub(r"\1" + marker, text)
     text = _HEX_TOKEN_RE.sub(r"\1" + marker + r"\3", text)
     text = _BASE64_TOKEN_RE.sub(r"\1" + marker + r"\3", text)
     return text
