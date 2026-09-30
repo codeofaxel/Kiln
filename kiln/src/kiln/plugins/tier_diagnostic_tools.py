@@ -100,13 +100,27 @@ def _walk_resolution_chain() -> dict[str, Any]:
                 "detail": f"No license file at {license_path}",
             })
 
-        # Step 4: OAuth session (kiln signin)
-        auth_path = Path("~/.kiln/auth_tokens.json").expanduser()
+        # Step 4: OAuth session (kiln signin).  The file the session resolver
+        # and the licence reader both read, and the resolver's verdict on it:
+        # a session this machine can no longer renew changes what the tier
+        # below is good for, and the answer has to say so.
+        from kiln.auth_session import _tokens_path, resolve_session_bearer
+
+        auth_path = _tokens_path()
+        session = None
         if auth_path.is_file():
+            try:
+                session = resolve_session_bearer()
+            except Exception:  # noqa: BLE001 — a diagnostic must not break
+                session = None
+            lapsed = session is not None and not session.token
             chain.append({
                 "source": "oauth_session",
                 "matched": True,
-                "detail": f"OAuth session present at {auth_path} — bound to your kiln3d.com account",
+                "detail": (
+                    f"OAuth session present at {auth_path} — bound to your kiln3d.com account"
+                    + ("; it has expired and could not be renewed" if lapsed else "")
+                ),
             })
         else:
             chain.append({
@@ -143,7 +157,16 @@ def _walk_resolution_chain() -> dict[str, Any]:
             matched_source = "license_manager_resolve"
             matched_detail = f"resolved by LicenseManager to {tier_str}"
 
-        return _build_response(effective_tier, chain, matched_source, matched_detail)
+        # The session only speaks for a tier it supplied: an operator's key
+        # needs no sign-in and reports exactly what it did before.
+        try:
+            from_session = mgr.get_info().source == "oauth"
+        except Exception:  # noqa: BLE001
+            from_session = False
+        return _build_response(
+            effective_tier, chain, matched_source, matched_detail,
+            session=session if from_session else None,
+        )
 
     except ImportError:
         # kiln-pro not installed — user is necessarily on free tier
@@ -165,8 +188,15 @@ def _build_response(
     chain: list[dict[str, Any]],
     matched_source: str,
     matched_detail: str,
+    *,
+    session: Any = None,
 ) -> dict[str, Any]:
-    """Produce the structured response + agent-friendly one-liner."""
+    """Produce the structured response + agent-friendly one-liner.
+
+    *session* is the sign-in session's :class:`~kiln.auth_session.SessionBearer`
+    when the tier came from it.  One that can no longer be renewed leads the
+    summary, in the words ``license_status`` and ``get_started`` use for it.
+    """
     tier_label = effective_tier.title() if effective_tier else "Free"
     rank = _TIER_RANK.get(effective_tier.lower(), 0)
     # Only the free branch is actionable by signing in — a resolved Pro or
@@ -213,6 +243,22 @@ def _build_response(
             f"Effective tier: {tier_label}. Source: {matched_detail}."
         )
 
+    extra: dict[str, Any] = {}
+    if session is not None:
+        extra["session_state"] = session.state
+    if session is not None and not session.token:
+        from kiln.tiers_and_terms import session_expired_message, signin_hint_fields
+
+        extra["action_required"] = session.detail or session_expired_message()
+        hint_fields = signin_hint_fields()
+        if effective_tier.lower() != "free":
+            agent_summary = (
+                f"{extra['action_required']} Your {tier_label} plan is still on "
+                "file: features that run on this machine keep working, but "
+                "anything that goes through Kiln's servers (browser 3D links, "
+                "the cloud library, hosted tools) needs you to sign back in first."
+            )
+
     return {
         "success": True,
         "effective_tier": effective_tier.lower(),
@@ -222,6 +268,7 @@ def _build_response(
         "matched_source": matched_source,
         "agent_summary": agent_summary,
         "pricing_url": "https://kiln3d.com/pricing",
+        **extra,
         **hint_fields,
     }
 

@@ -254,6 +254,7 @@ _SERVED_CAUSE_OF: dict[str, str] = {
     "transport": "unanswered",
     "bad_response": "unanswered",
     "signed_out": "signed_out",
+    "session_expired": "signed_out",
     "session_refused": "signed_out",
 }
 
@@ -265,7 +266,7 @@ def refusal_sentence(reason: str | None) -> str:
     (it follows a colon or "because" in the result that carries it).
     ``None`` — no refusal on record — reads as no link having been asked
     for."""
-    from kiln.served_answer import Miss, clause
+    from kiln.served_answer import SESSION_EXPIRED_CODE, Miss, clause
 
     if not reason:
         return "no browser link was asked for"
@@ -274,7 +275,8 @@ def refusal_sentence(reason: str | None) -> str:
         return local
     cause = _SERVED_CAUSE_OF.get(reason)
     if cause:
-        return clause(Miss(cause), feature="servers", cannot=_CANNOT)
+        miss = Miss(cause, SESSION_EXPIRED_CODE if reason == "session_expired" else "")
+        return clause(miss, feature="servers", cannot=_CANNOT)
     if reason.startswith("http_"):
         try:
             status = int(reason[len("http_"):])
@@ -401,19 +403,26 @@ def stage_link_for(
             _issued(path, cached[0], cached[1])
         return {"viewer_url": cached[0], "expires_at": cached[1], "cached": True}
 
+    state = ""
     if bearer is not None:
         token = bearer.strip()
     else:
         try:
             from kiln.auth_session import resolve_api_bearer
 
-            token = getattr(resolve_api_bearer(), "token", "") or ""
+            resolved = resolve_api_bearer()
+            token = getattr(resolved, "token", "") or ""
+            state = getattr(resolved, "state", "") or ""
         except Exception:
             _refused(path, "signed_out", evidence)
             return None
     if not token:
-        # Signed out.  Nothing to scope a link to; not a failure.
-        _refused(path, "signed_out", evidence)
+        # Nothing to scope a link to; not a failure.  A sign-in this machine
+        # can no longer renew is told to sign in AGAIN, which is what every
+        # other surface tells the same person.
+        _refused(
+            path, "session_expired" if state == "needs_signin" else "signed_out", evidence
+        )
         return None
     if token == _REFUSED_BEARER:
         # The server already refused THIS bearer this process (expired or

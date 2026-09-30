@@ -675,6 +675,24 @@ class _UtilityToolsPlugin:
                 _tokens = {}
             if _tokens.get("access_token"):
                 _account = {"signed_in": True, "email": _tokens.get("email") or ""}
+                # The account is here; whether its SESSION still works is a
+                # second question, asked of the resolver every hosted call
+                # uses, so this block and the next refusal say the same
+                # thing.  A lapsed owner is not a stranger: no account nudge,
+                # just the one line that says to sign back in.
+                try:
+                    from kiln.auth_session import resolve_session_bearer
+
+                    _session = resolve_session_bearer()
+                except Exception:  # noqa: BLE001 — onboarding must not break
+                    _session = None
+                if _session is not None:
+                    _account["session_state"] = _session.state
+                    if not _session.token:
+                        from kiln.tiers_and_terms import signin_hint_fields
+
+                        _account["action_required"] = _session.detail
+                        _account.update(signin_hint_fields())
             else:
                 from kiln.tiers_and_terms import AGENT_ACCOUNT_NUDGE
 

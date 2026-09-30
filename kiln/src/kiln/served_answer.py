@@ -77,11 +77,19 @@ _FIX = {
     "refused": "",  # the server's own words carry the fix
 }
 
+#: The one ``signed_out`` that is not a stranger: this install HAD a
+#: sign-in and can no longer renew it.  Same cause, and the same fix in
+#: substance, but the person is told the truth of it -- the session ran
+#: out, and they sign back in.  Worded that way at every door, from the
+#: code alone.
+SESSION_EXPIRED_CODE = "KILN_SESSION_EXPIRED"
+_SESSION_EXPIRED = ("your Kiln session has expired", "sign back in")
+
 #: Wire codes that mean "no sign-in the servers accept" -- this install's
 #: own wall, an expired session, and the servers' own answer to a bearer
 #: they could not turn into an account.
 SIGNED_OUT_CODES = frozenset({
-    "KILN_ACCOUNT_NOT_PAIRED", "KILN_SESSION_EXPIRED", "ACCOUNT_REQUIRED", "KILN_AUTH_REJECTED",
+    "KILN_ACCOUNT_NOT_PAIRED", SESSION_EXPIRED_CODE, "ACCOUNT_REQUIRED", "KILN_AUTH_REJECTED",
 })
 #: Wire codes that are not a ruling on anything: the transport failed, the
 #: route was wrong, or the server said in so many words to try again
@@ -349,8 +357,7 @@ def sentence(
     own words whole and offers no fix of its own, because the server named
     it.
     """
-    cause = _CAUSE_CLAUSE[miss.cause].format(feature=feature)
-    fix = _FIX[miss.cause]
+    cause, fix = _cause_and_fix(miss, feature)
     if miss.cause == "refused" and not miss.detail:
         cause += " and gave no reason"
         fix = "wait a minute"
@@ -363,12 +370,18 @@ def sentence(
     return out
 
 
+def _cause_and_fix(miss: Miss, feature: str) -> tuple[str, str]:
+    """What *miss* reads as, and what fixes it."""
+    if miss.cause == "signed_out" and miss.code == SESSION_EXPIRED_CODE:
+        return _SESSION_EXPIRED
+    return _CAUSE_CLAUSE[miss.cause].format(feature=feature), _FIX[miss.cause]
+
+
 def clause(miss: Miss, *, feature: str, cannot: str, then: str = "try again") -> str:
     """The same content as a clause that follows "because": no capital, no
     full stop, the cause in brackets and the fix after a semicolon.  For a
     door whose answer already has a sentence and only needs the why."""
-    cause = _CAUSE_CLAUSE[miss.cause].format(feature=feature)
-    fix = _FIX[miss.cause]
+    cause, fix = _cause_and_fix(miss, feature)
     if miss.cause == "refused":
         cause = f"{cause}: {miss.detail.rstrip('. ')}" if miss.detail else f"{cause} and gave no reason"
         fix = "" if miss.detail else "wait a minute"
@@ -517,6 +530,7 @@ __all__ = [
     "HOSTED_DOORS",
     "KINDS",
     "Miss",
+    "SESSION_EXPIRED_CODE",
     "SIGNED_OUT_CODES",
     "UNANSWERED_CODES",
     "classify_answer",
