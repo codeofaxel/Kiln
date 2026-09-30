@@ -650,7 +650,7 @@ class TestMeshAnalysis:
         assert result.surface_area_mm2 > 4.0  # ~6.0
         assert result.connected_components == 1
         assert result.degenerate_triangles == 0
-        assert result.printability_score > 0
+        assert result.mesh_check_score > 0
 
     def test_cube_center_of_mass(self, tmp_path):
         """Center of mass of a unit cube should be near (0.5, 0.5, 0.5)."""
@@ -678,7 +678,7 @@ class TestMeshAnalysis:
         assert abs(result.dimensions_mm["depth_mm"] - 10.0) < 0.1
         assert abs(result.dimensions_mm["height_mm"] - 10.0) < 0.1
 
-    def test_printability_score_range(self, tmp_path):
+    def test_mesh_check_score_range(self, tmp_path):
         """Score should be between 0 and 100."""
         from kiln.generation.validation import analyze_mesh
 
@@ -686,7 +686,7 @@ class TestMeshAnalysis:
         _write_cube_stl(cube_path, 20.0)
         result = analyze_mesh(cube_path)
 
-        assert 0 <= result.printability_score <= 100
+        assert 0 <= result.mesh_check_score <= 100
 
     def test_nonexistent_file(self):
         """Analyzing a missing file returns issues."""
@@ -1564,7 +1564,7 @@ class TestFailurePrediction:
         result = predict_print_failures(f)
 
         for key in ("verdict", "risk_score", "failure_count", "failures",
-                     "dimensions_mm", "triangle_count", "printability_score"):
+                     "dimensions_mm", "triangle_count", "mesh_check_score"):
             assert key in result
 
     def test_unsupported_format_raises(self, tmp_path):

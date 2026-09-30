@@ -42,7 +42,7 @@ class _PrintabilityToolsPlugin:
             file_path: str,
             nozzle_diameter: float = 0.4,
             layer_height: float = 0.2,
-            max_overhang_angle: float = 45.0,
+            max_overhang_angle: float | None = None,
             build_volume_x: float | None = None,
             build_volume_y: float | None = None,
             build_volume_z: float | None = None,
@@ -77,7 +77,9 @@ class _PrintabilityToolsPlugin:
                 nozzle_diameter: Printer nozzle diameter in mm (default 0.4).
                 layer_height: Print layer height in mm (default 0.2).
                 max_overhang_angle: Maximum overhang angle in degrees before
-                    supports are needed (default 45).
+                    supports are needed.  Leave unset for the material's own
+                    limit (45 when none is known) — the value every other
+                    tool that reports this score uses, so the numbers agree.
                 build_volume_x: Optional build volume X dimension in mm.
                 build_volume_y: Optional build volume Y dimension in mm.
                 build_volume_z: Optional build volume Z dimension in mm.
@@ -332,10 +334,6 @@ class _PrintabilityToolsPlugin:
             from kiln.printability import (
                 analyze_printability as _analyze,
             )
-            from kiln.printability import (
-                is_bedslinger,
-                recommend_adhesion,
-            )
 
             try:
                 report = _analyze(
@@ -343,33 +341,15 @@ class _PrintabilityToolsPlugin:
                     material=material,
                     printer_id=printer_id or None,
                 )
-                if report.bed_adhesion is None:
+                # The report's own decision: the same brim every other
+                # door, and the report's recommendations, speak of.
+                rec = report.adhesion
+                if rec is None:
                     return {
                         "success": True,
                         "recommendation": None,
                         "message": "Could not analyze bed adhesion for this model.",
                     }
-
-                has_enclosure = False
-                is_bs = False
-                if printer_id:
-                    is_bs = is_bedslinger(printer_id)
-                    try:
-                        from kiln.printer_intelligence import get_printer_intel
-
-                        intel = get_printer_intel(printer_id)
-                        if intel:
-                            has_enclosure = intel.get("has_enclosure", False)
-                    except Exception:
-                        pass
-
-                rec = recommend_adhesion(
-                    report.bed_adhesion,
-                    material=material,
-                    has_enclosure=has_enclosure,
-                    is_bedslinger_printer=is_bs,
-                    model_height_mm=report.model_height_mm,
-                )
                 return {
                     "success": True,
                     "recommendation": rec.to_dict(),

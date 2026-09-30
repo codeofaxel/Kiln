@@ -2470,46 +2470,24 @@ class _SlicerToolsPlugin:
                         from kiln.printability import (
                             analyze_printability as _analyze_printability,
                         )
-                        from kiln.printability import (
-                            is_bedslinger,
-                            recommend_adhesion,
-                        )
 
                         report = _analyze_printability(
                             input_path,
                             material=material or "pla",
                             printer_id=effective_printer_id or None,
                         )
-                        if report.bed_adhesion:
-                            has_enclosure = False
-                            is_bs = False
-                            if effective_printer_id:
-                                is_bs = is_bedslinger(effective_printer_id)
-                                try:
-                                    from kiln.printer_intelligence import get_printer_intel
-
-                                    intel = get_printer_intel(effective_printer_id)
-                                    if intel:
-                                        has_enclosure = intel.get("has_enclosure", False)
-                                except Exception:
-                                    pass
-
-                            rec = recommend_adhesion(
-                                report.bed_adhesion,
-                                material=material or "PLA",
-                                has_enclosure=has_enclosure,
-                                is_bedslinger_printer=is_bs,
-                                model_height_mm=report.model_height_mm,
+                        # The report's own brim decision — the one its
+                        # recommendations and every estimate door speak of.
+                        rec = report.adhesion
+                        if rec is not None and (rec.brim_width_mm > 0 or rec.use_raft):
+                            adhesion_rec = rec.to_dict()
+                            adhesion_overrides = dict(rec.slicer_overrides)
+                            _logger.info(
+                                "Auto-adhesion: brim=%dmm raft=%s (%s)",
+                                rec.brim_width_mm,
+                                rec.use_raft,
+                                rec.rationale,
                             )
-                            if rec.brim_width_mm > 0 or rec.use_raft:
-                                adhesion_rec = rec.to_dict()
-                                adhesion_overrides = dict(rec.slicer_overrides)
-                                _logger.info(
-                                    "Auto-adhesion: brim=%dmm raft=%s (%s)",
-                                    rec.brim_width_mm,
-                                    rec.use_raft,
-                                    rec.rationale,
-                                )
                     except Exception:
                         _logger.debug("Auto-adhesion analysis failed, proceeding without", exc_info=True)
 

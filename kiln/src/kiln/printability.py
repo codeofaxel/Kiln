@@ -63,12 +63,27 @@ class OverhangAnalysis:
 
 @dataclass
 class ThinWallAnalysis:
-    """Results of thin wall detection."""
+    """Results of thin wall detection.
+
+    Every count and region in the block is relative to ONE threshold,
+    ``threshold_mm``: the nozzle width, or — when kiln-pro supplies one
+    (https://kiln3d.com) — the material's minimum wall, so this block and
+    a material wall rule never disagree about whether a wall is thin.
+    ``threshold_basis`` says which (``"nozzle"`` or ``"material"``).
+
+    ``problematic_regions`` names every distinct thin feature — one
+    thickness at one place — thinnest first, each with a position
+    (``x``/``y``/``z``), its ``thickness_mm`` and how many measurement
+    ``samples`` landed on it.  ``min_wall_thickness_mm`` is the thinnest
+    wall measured anywhere, thin or not.
+    """
 
     min_wall_thickness_mm: float
-    thin_wall_count: int  # walls below nozzle diameter
+    thin_wall_count: int  # measured points thinner than threshold_mm
     thin_wall_percentage: float
     problematic_regions: list[dict[str, float]]
+    threshold_mm: float = 0.0
+    threshold_basis: str = "nozzle"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -286,6 +301,13 @@ class CostAnalysis:
     cost_breakdown: dict[str, float]
     cost_summary: dict[str, float]
     cost_saving_recommendations: list[str]
+    #: Where ``weight_grams`` and ``filament_length_meters`` came from, in
+    #: the cost estimator's vocabulary: ``"mesh"`` — the mesh volume at
+    #: the ``assumptions`` below, not a slice.  A slicer's figure for the
+    #: same part (``slice_and_estimate``'s ``estimate.filament_used_grams``)
+    #: is the better number whenever both are shown.
+    filament_source: str = "mesh"
+    assumptions: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -438,6 +460,10 @@ class PrintabilityReport:
     # The prose for each fault stays in ``recommendations`` exactly as
     # before; this block only adds the machine-readable name beside it.
     placement: PlacementAnalysis | None = None
+    # The one brim / raft decision for this part (see
+    # :func:`recommend_adhesion`).  Every brim sentence in the report comes
+    # from here; ``None`` only on reports built directly by a client.
+    adhesion: AdhesionRecommendation | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -647,15 +673,18 @@ _WARPING_PUBLIC_DEFAULTS: dict[str, Any] = {
     # tendency mapping above.  Free tier = geometric risk + textbook
     # tendency labels.  The Pro overlay supplies the curated
     # per-material baselines + multiplier overrides.
+    # Rules describe the risk; the brim itself is decided once, by
+    # recommend_adhesion, which reads this block's risk_level.  A rule that
+    # named its own brim here sat beside "no brim needed" in one report.
     "recommendation_rules": [
         {"metric": "flat_area_total_mm2",  "operator": ">", "threshold": 2000.0,
-         "template": "Large flat surface detected ({flat_area_total_mm2:.0f}mm²). Add a 5-8mm brim to resist corner lifting."},
+         "template": "Large flat surface detected ({flat_area_total_mm2:.0f}mm²): its corners can lift as it cools."},
         {"metric": "height_to_base_ratio", "operator": ">", "threshold": 3.0,
          "template": "Tall/narrow geometry (ratio {height_to_base_ratio:.1f}). Consider splitting into shorter sections or adding a wider base."},
         {"metric": "material_tendency",    "operator": "in", "threshold": ["high", "very_high"],
          "template": "Material ({material}) has {material_tendency} warping tendency. Print in an enclosed chamber and increase bed temperature to reduce thermal gradients."},
         {"metric": "sharp_corners_at_base","operator": ">", "threshold": 5,
-         "template": "Sharp corners at the base are prone to curling. Add mouse-ear supports or a brim."},
+         "template": "Sharp corners at the base are prone to curling."},
     ],
 }
 
@@ -740,11 +769,13 @@ _ADHESION_FORCE_PUBLIC_DEFAULTS: dict[str, Any] = {
     # warp-prone PLA; higher values (e.g. 200) miss ABS tall thin.
     # Awaiting empirical recalibration from outcome_tracker data.
     "peel_thermal_z_scale": 100.0,
+    # As with warping: the verdict is stated here, the brim decided once
+    # in recommend_adhesion from this block's risk_level.
     "recommendation_rules": [
         {"metric": "risk_level", "operator": "==", "threshold": "likely_detach",
-         "template": "Part will likely detach during printing. Use a brim (8mm+), glue stick, or raft."},
+         "template": "Part will likely detach during printing: its footprint holds too little for its height."},
         {"metric": "risk_level", "operator": "==", "threshold": "marginal",
-         "template": "Adhesion is borderline. Adding a 5mm brim is recommended."},
+         "template": "Adhesion is borderline for this part's height and footprint."},
         {"metric": "is_poor_adhesion_material", "operator": "==", "threshold": True,
          "template": "Material ({material}) has very poor adhesion on standard build surfaces. Use a specialized build sheet (e.g., Garolite for nylon, PP sheet for PP)."},
     ],
@@ -1640,12 +1671,105 @@ def _supported_chord_mask(
     return keep
 
 
+# Thin samples within this many millimetres of a band's thinnest sample
+# are the same wall: CAD walls come in discrete thicknesses, and a band
+# kept this narrow still separates a 1.4 mm standoff from a 1.5 mm boss.
+_THIN_FEATURE_BAND_MM: float = 0.05
+
+# Samples of one band closer than this share a place.  A fifth of the
+# part's diagonal, clamped: at least a nozzle-scale 5 mm, and never so
+# far that two separate features on a large part merge into one.
+_THIN_FEATURE_LINK_FRACTION: float = 0.2
+_THIN_FEATURE_LINK_MIN_MM: float = 5.0
+_THIN_FEATURE_LINK_MAX_MM: float = 25.0
+
+# Bound on the regions one block reports.  Far above any part a person
+# fixes by hand; its job is only to keep a pathological mesh's payload
+# finite.
+_THIN_FEATURE_CAP: int = 50
+
+
+def _thin_wall_features(
+    points: np.ndarray,
+    thickness: np.ndarray,
+    *,
+    link_mm: float,
+) -> list[dict[str, float]]:
+    """Group thin measurement points into distinct features.
+
+    A feature is one wall thickness at one place.  Points are banded by
+    thickness first (a band spans :data:`_THIN_FEATURE_BAND_MM` from its
+    thinnest point), then joined within a band when closer than
+    ``link_mm``; each group is reported once, at its thinnest point.
+    Banding first is what keeps a slightly thicker feature from hiding
+    behind a thinner one nearby — the report used to be the five
+    thinnest POINTS, which on one enclosure all sat on one lid ledge and
+    left its standoffs and bosses for later rounds to find.
+    """
+    features: list[dict[str, float]] = []
+    order = np.argsort(thickness, kind="stable")
+    i = 0
+    while i < order.size:
+        start = thickness[order[i]]
+        j = i
+        while j < order.size and thickness[order[j]] <= start + _THIN_FEATURE_BAND_MM:
+            j += 1
+        band = order[i:j]
+        # Single-linkage clustering within the band (union-find over the
+        # pairs closer than ``link_mm``).
+        parent = np.arange(band.size)
+
+        def root(k: int) -> int:
+            while parent[k] != k:
+                parent[k] = parent[parent[k]]
+                k = parent[k]
+            return k
+
+        pts = points[band]
+        near = np.linalg.norm(pts[:, None, :] - pts[None, :, :], axis=2) < link_mm
+        for a, b in zip(*np.nonzero(np.triu(near, k=1)), strict=True):
+            ra, rb = root(int(a)), root(int(b))
+            if ra != rb:
+                parent[rb] = ra
+        groups: dict[int, list[int]] = {}
+        for k in range(band.size):
+            groups.setdefault(root(k), []).append(int(band[k]))
+        for members in groups.values():
+            idx = np.asarray(members)
+            best = idx[np.argmin(thickness[idx])]
+            features.append({
+                "x": round(float(points[best, 0]), 2),
+                "y": round(float(points[best, 1]), 2),
+                "z": round(float(points[best, 2]), 2),
+                "thickness_mm": round(float(thickness[best]), 3),
+                "samples": len(members),
+            })
+        i = j
+    features.sort(key=lambda f: (f["thickness_mm"], f["x"], f["y"], f["z"]))
+    return features[:_THIN_FEATURE_CAP]
+
+
 def _analyze_thin_walls(
     triangles: list[tuple[tuple[float, ...], ...]],
     vertices: list[tuple[float, ...]],
     *,
     nozzle_diameter: float = 0.4,
+    thin_below_mm: float | None = None,
 ) -> ThinWallAnalysis:
+    """Measure thin walls; see :func:`_measure_thin_walls`."""
+    return _measure_thin_walls(
+        triangles, vertices,
+        nozzle_diameter=nozzle_diameter, thin_below_mm=thin_below_mm,
+    )[0]
+
+
+def _measure_thin_walls(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    vertices: list[tuple[float, ...]],
+    *,
+    nozzle_diameter: float = 0.4,
+    thin_below_mm: float | None = None,
+) -> tuple[ThinWallAnalysis, float]:
     """Measure thin walls via per-component vectorized inward ray-casting.
 
     For each sampled surface triangle, cast a ray from its centroid
@@ -1661,10 +1785,18 @@ def _analyze_thin_walls(
     opposing wall, never an intruding face from a neighbouring strut
     that happens to share volume at the joint.
 
-    Walls with measured thickness below ``nozzle_diameter`` are flagged
-    as thin.  ``min_wall_thickness_mm`` is the absolute smallest
-    measurement on the mesh; the 0.0 sentinel is reserved for
-    measurement failure on degenerate meshes.
+    Walls with measured thickness below the threshold are flagged as
+    thin: ``nozzle_diameter``, or ``thin_below_mm`` when that is larger
+    (the material's minimum wall, when one is known).  Every point
+    below the threshold is verified the same way, and every distinct thin
+    feature is reported with a position (:func:`_thin_wall_features`).
+    ``min_wall_thickness_mm`` is the absolute smallest measurement on the
+    mesh; the 0.0 sentinel is reserved for measurement failure on
+    degenerate meshes.
+
+    Returns the block and, separately, the percentage of points thinner
+    than the nozzle itself — what the score deducts for on every tier,
+    whatever threshold the block reports against.
 
     Known limitation: helical features (threaded rods, springs) form a
     single component, so per-component scoping does not help — rays
@@ -1678,19 +1810,20 @@ def _analyze_thin_walls(
     :func:`_supported_chord_mask` — so a sliver that tapers to nothing
     within one face is dropped rather than reported at its centroid.
     """
+    threshold = max(nozzle_diameter, thin_below_mm or 0.0)
+    basis = "material" if threshold > nozzle_diameter else "nozzle"
+
+    def unmeasured() -> tuple[ThinWallAnalysis, float]:
+        return ThinWallAnalysis(0.0, 0, 0.0, [], threshold, basis), 0.0
+
     total = len(triangles)
     if total < 4:
         # Degenerate input — no closed surface to measure walls on.
-        return ThinWallAnalysis(
-            min_wall_thickness_mm=0.0,
-            thin_wall_count=0,
-            thin_wall_percentage=0.0,
-            problematic_regions=[],
-        )
+        return unmeasured()
 
     tris = np.asarray(triangles, dtype=np.float64)  # (T, 3, 3)
     if tris.ndim != 3 or tris.shape[1] != 3 or tris.shape[2] != 3:
-        return ThinWallAnalysis(0.0, 0, 0.0, [])
+        return unmeasured()
 
     v0 = tris[:, 0, :]
     v1 = tris[:, 1, :]
@@ -1703,7 +1836,7 @@ def _analyze_thin_walls(
     norm_len = np.linalg.norm(normals, axis=1)
     valid_face = norm_len > 1e-10
     if not valid_face.any():
-        return ThinWallAnalysis(0.0, 0, 0.0, [])
+        return unmeasured()
 
     # Sample origins from valid faces only — degenerate ones can't host
     # a probe (no normal to invert).
@@ -1751,12 +1884,7 @@ def _analyze_thin_walls(
 
     finite_mask = np.isfinite(exit_dist)
     if not finite_mask.any():
-        return ThinWallAnalysis(
-            min_wall_thickness_mm=0.0,
-            thin_wall_count=0,
-            thin_wall_percentage=0.0,
-            problematic_regions=[],
-        )
+        return unmeasured()
 
     # A chord counts only when it holds across the face it was measured
     # from and clears the sliver floor (50 µm; well under any nozzle).
@@ -1774,14 +1902,15 @@ def _analyze_thin_walls(
         cast,
         floor=_SLIVER_CHORD_FLOOR_MM,
         ceiling=np.inf,
-        verify_below=nozzle_diameter,
+        verify_below=threshold,
     )
     counted = supported if supported.any() else finite_mask
     measured_min = float(exit_dist[counted].min())
 
-    thin_mask = counted & (exit_dist < nozzle_diameter)
+    thin_mask = counted & (exit_dist < threshold)
     thin_count = int(thin_mask.sum())
     thin_pct = thin_count / n_sample * 100.0
+    sub_nozzle_pct = int((counted & (exit_dist < nozzle_diameter)).sum()) / n_sample * 100.0
 
     # ``min_wall_thickness_mm`` carries the absolute smallest measured
     # wall thickness on the mesh, regardless of the nozzle threshold —
@@ -1792,25 +1921,25 @@ def _analyze_thin_walls(
     # measurement failure on degenerate meshes.
     problematic: list[dict[str, float]] = []
     if thin_count > 0:
-        thin_dists = exit_dist[thin_mask]
-        thin_origins = origins[thin_mask]
-        order = np.argsort(thin_dists)[:5]
-        for i in order:
-            problematic.append(
-                {
-                    "x": round(float(thin_origins[i, 0]), 2),
-                    "y": round(float(thin_origins[i, 1]), 2),
-                    "z": round(float(thin_origins[i, 2]), 2),
-                    "thickness_mm": round(float(thin_dists[i]), 3),
-                }
-            )
+        diagonal = float(np.linalg.norm(
+            tris.reshape(-1, 3).max(axis=0) - tris.reshape(-1, 3).min(axis=0)
+        ))
+        link_mm = min(
+            _THIN_FEATURE_LINK_MAX_MM,
+            max(_THIN_FEATURE_LINK_MIN_MM, _THIN_FEATURE_LINK_FRACTION * diagonal),
+        )
+        problematic = _thin_wall_features(
+            origins[thin_mask], exit_dist[thin_mask], link_mm=link_mm,
+        )
 
     return ThinWallAnalysis(
         min_wall_thickness_mm=round(measured_min, 3),
         thin_wall_count=thin_count,
         thin_wall_percentage=round(thin_pct, 1),
         problematic_regions=problematic,
-    )
+        threshold_mm=round(threshold, 3),
+        threshold_basis=basis,
+    ), sub_nozzle_pct
 
 
 def _analyze_cavity_widths(
@@ -3424,8 +3553,8 @@ def _estimate_adhesion_force(
         recommendations = list(recommendations) + [
             f"Tall, narrow geometry (aspect ratio {aspect_ratio:.0f}) "
             "concentrates peel stress at the base regardless of "
-            "material. Use a brim or raft and verify your bed "
-            "surface is clean and level. The force-balance verdict "
+            "material: verify your bed surface is clean and level. "
+            "The force-balance verdict "
             "alone can understate this risk; Kiln Pro adds per-"
             "material physics on top.",
         ]
@@ -3466,6 +3595,7 @@ def _compute_score(
     thermal_stress: ThermalStressAnalysis | None = None,
     adhesion_force: AdhesionForceEstimate | None = None,
     overhang_scoring_pct: float | None = None,
+    thin_wall_scoring_pct: float | None = None,
 ) -> int:
     """Compute a printability score from 0-100.
 
@@ -3475,6 +3605,11 @@ def _compute_score(
     for the deduction — the caller passes the percentage of overhangs
     that genuinely need supports when part of the reported set is
     self-supporting (small bridgeable / lateral-reach regions).
+
+    ``thin_wall_scoring_pct`` is the share of measured points thinner
+    than the nozzle.  The thin-wall block may report against a material's
+    higher floor; the score deducts only for walls a nozzle cannot lay
+    at all, so naming more thin walls never lowers anyone's score.
     """
     score = 100
 
@@ -3488,8 +3623,14 @@ def _compute_score(
         score -= min(30, int(pct * 0.5))
 
     # Thin wall deductions (max -25)
-    if thin_walls.thin_wall_count > 0:
-        score -= min(25, int(thin_walls.thin_wall_percentage * 0.5))
+    thin_pct = (
+        thin_wall_scoring_pct
+        if thin_wall_scoring_pct is not None
+        else thin_walls.thin_wall_percentage if thin_walls.thin_wall_count > 0
+        else 0.0
+    )
+    if thin_pct > 0:
+        score -= min(25, int(thin_pct * 0.5))
 
     # Bridging deductions (max -15) — only when the bridges actually need
     # support.  ``bridge_count`` alone counts every short, self-supporting
@@ -3779,8 +3920,17 @@ def _build_recommendations(
     warping: WarpingAnalysis | None = None,
     thermal_stress: ThermalStressAnalysis | None = None,
     adhesion_force: AdhesionForceEstimate | None = None,
+    adhesion: AdhesionRecommendation | None = None,
+    thin_walls_below_nozzle: bool | None = None,
 ) -> list[str]:
-    """Generate actionable recommendations based on analysis results."""
+    """Generate actionable recommendations based on analysis results.
+
+    Brim and raft advice comes only from ``adhesion`` — the one decision
+    (:func:`recommend_adhesion`) — so the report never both prescribes
+    and declines one.  The nozzle advice fires only for walls thinner
+    than the nozzle (``thin_walls_below_nozzle``); a wall above the
+    nozzle but under a material's floor is the material rule's to name.
+    """
     recs: list[str] = []
 
     if overhangs.needs_supports:
@@ -3789,7 +3939,12 @@ def _build_recommendations(
             f"are overhangs.  Consider re-orienting the model to reduce supports."
         )
 
-    if thin_walls.thin_wall_count > 0:
+    below_nozzle = (
+        thin_walls_below_nozzle
+        if thin_walls_below_nozzle is not None
+        else thin_walls.thin_wall_count > 0
+    )
+    if below_nozzle:
         recs.append(
             f"Thin walls detected ({thin_walls.min_wall_thickness_mm:.2f} mm min).  "
             f"Use a smaller nozzle or increase wall thickness."
@@ -3802,10 +3957,10 @@ def _build_recommendations(
 
     if bed_adhesion.adhesion_risk == "high":
         recs.append(
-            "Low bed contact area.  Use a brim or raft, or re-orient the model to increase the contact surface."
+            "Low bed contact area.  Re-orienting the model can increase the contact surface."
         )
-    elif bed_adhesion.adhesion_risk == "medium":
-        recs.append("Moderate bed contact area.  Consider adding a brim for better adhesion.")
+    if adhesion is not None and (adhesion.brim_width_mm > 0 or adhesion.use_raft):
+        recs.append(adhesion.rationale)
 
     if supports.support_percentage > 20:
         recs.append(
@@ -3833,30 +3988,40 @@ def _build_recommendations(
 # ---------------------------------------------------------------------------
 
 
+# Perimeters the mesh-volume estimate assumes; recorded on the estimate.
+_COST_WALL_LAYERS: int = 3
+
+
 def _analyze_cost(
     mesh: Any,
     file_path: str,
     material: str = "PLA",
     infill_percent: float = 20.0,
     needs_supports: bool = False,
-    adhesion_risk: str = "low",
+    adhesion_type: str = "none",
+    layer_height_mm: float = 0.2,
+    nozzle_mm: float = 0.4,
 ) -> CostAnalysis:
     """Compute cost breakdown integrated with printability analysis.
 
     Uses :class:`~kiln.cost_estimator.CostEstimator` to produce a full
-    cost estimate and generates cost-saving recommendations.
+    cost estimate and generates cost-saving recommendations.  The weight
+    is estimated from the mesh volume, never sliced; ``filament_source``
+    and ``assumptions`` on the result say so, so it cannot be mistaken
+    for a slicer's figure printed beside it.  ``adhesion_type`` is the
+    brim or raft the adhesion decision chose.
     """
     from kiln.cost_estimator import CostEstimator
 
     estimator = CostEstimator()
 
-    # Map adhesion risk to adhesion type
-    adhesion_type = "brim" if adhesion_risk == "high" else "none"
-
     estimate = estimator.estimate_from_mesh(
         file_path,
         material=material,
         infill_percent=infill_percent,
+        wall_layers=_COST_WALL_LAYERS,
+        layer_height_mm=layer_height_mm,
+        nozzle_mm=nozzle_mm,
         include_supports=needs_supports,
         adhesion_type=adhesion_type,
     )
@@ -3937,12 +4102,64 @@ def _analyze_cost(
         cost_breakdown=estimate.cost_breakdown,
         cost_summary=cost_summary,
         cost_saving_recommendations=recommendations,
+        filament_source=estimate.filament_source,
+        assumptions={
+            "infill_percent": infill_percent,
+            "wall_layers": _COST_WALL_LAYERS,
+            "layer_height_mm": layer_height_mm,
+            "nozzle_mm": nozzle_mm,
+            "adhesion": adhesion_type,
+        },
     )
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+
+def _material_wall_floor(
+    material: str,
+    *,
+    printer_id: str | None,
+    nozzle_diameter: float,
+    connected_components: int,
+    component_size_uniformity: float,
+    genus: int,
+) -> float | None:
+    """The material's minimum wall, when kiln-pro has one to give.
+
+    Asked BEFORE the walls are measured, so the thin-wall block reports
+    against the same floor kiln-pro's material wall rule judges by
+    (https://kiln3d.com) — one measurement that both read, never a
+    second pass re-measured to agree.  ``None`` — no kiln-pro, a kiln-pro
+    that predates the question, no floor for this material or this
+    caller — leaves the nozzle as the threshold, the safety floor every
+    tier gets.
+    """
+    try:
+        from kiln_pro.bridge import pro_features
+    except ImportError:
+        return None
+    try:
+        if not pro_features.is_available("printability_overlay"):
+            return None
+        resolve = getattr(pro_features.printability_overlay, "resolve_wall_floor", None)
+        if resolve is None:
+            return None
+        floor = resolve(
+            material,
+            printer_id=printer_id,
+            nozzle_diameter_mm=nozzle_diameter,
+            connected_components=connected_components,
+            component_size_uniformity=component_size_uniformity,
+            genus=genus,
+        )
+        floor = float(floor) if floor is not None else 0.0
+    except Exception:  # noqa: BLE001 — the overlay must never break the public path
+        logger.debug("material wall floor unavailable", exc_info=True)
+        return None
+    return floor if floor > 0.0 else None
 
 
 def analyze_printability(
@@ -4055,9 +4272,6 @@ def analyze_printability(
         material=material,
         overlay=judgment_overlay,
     )
-    thin_walls = _analyze_thin_walls(triangles, vertices, nozzle_diameter=nozzle_diameter)
-    cavities = _analyze_cavity_widths(triangles, vertices, nozzle_diameter=nozzle_diameter)
-
     # Connected-component count: one closed body = 1; a multi-body mesh
     # = N components.  Exposed for the kiln-pro overlay.
     #
@@ -4112,6 +4326,23 @@ def analyze_printability(
             component_size_uniformity = 0.0
             mesh_genus = 0
             tris_arr_for_pro = None
+    # Walls are measured once, against the floor they will be judged by:
+    # the material's minimum wall when kiln-pro supplies one, the nozzle
+    # otherwise.  The topology is part of the question; the answer can
+    # depend on it.
+    wall_floor = _material_wall_floor(
+        material,
+        printer_id=printer_id,
+        nozzle_diameter=nozzle_diameter,
+        connected_components=component_count,
+        component_size_uniformity=round(component_size_uniformity, 3),
+        genus=mesh_genus,
+    )
+    thin_walls, sub_nozzle_wall_pct = _measure_thin_walls(
+        triangles, vertices,
+        nozzle_diameter=nozzle_diameter, thin_below_mm=wall_floor,
+    )
+    cavities = _analyze_cavity_widths(triangles, vertices, nozzle_diameter=nozzle_diameter)
     downward_regions = _analyze_downward_regions(
         triangles, z_min, layer_height=layer_height,
     )
@@ -4289,11 +4520,28 @@ def analyze_printability(
         overhangs, thin_walls, bridging, bed_adhesion, supports,
         warping=warping, thermal_stress=thermal_stress, adhesion_force=adhesion_force,
         overhang_scoring_pct=_overhang_scoring_pct,
+        thin_wall_scoring_pct=sub_nozzle_wall_pct,
     )
     grade = _score_to_grade(score)
+    # The one brim / raft decision for this part.  Contact, the adhesion
+    # force balance and the warping verdict are its inputs; none of them
+    # prescribes a brim on its own any more, so a report cannot say "no
+    # brim needed" and "add a brim" at once.
+    has_enclosure, on_bedslinger = _printer_adhesion_context(printer_id)
+    adhesion = recommend_adhesion(
+        bed_adhesion,
+        material=material,
+        has_enclosure=has_enclosure,
+        is_bedslinger_printer=on_bedslinger,
+        model_height_mm=bbox["z_max"] - bbox["z_min"],
+        warping=warping,
+        adhesion_force=adhesion_force,
+    )
     recommendations = _build_recommendations(
         overhangs, thin_walls, bridging, bed_adhesion, supports,
         warping=warping, thermal_stress=thermal_stress, adhesion_force=adhesion_force,
+        adhesion=adhesion,
+        thin_walls_below_nozzle=sub_nozzle_wall_pct > 0,
     )
 
     # Surface the bridge-substitution downgrade.  When the
@@ -4424,7 +4672,13 @@ def analyze_printability(
             material=material,
             infill_percent=infill_percent,
             needs_supports=overhangs.needs_supports,
-            adhesion_risk=bed_adhesion.adhesion_risk,
+            adhesion_type=(
+                "raft" if adhesion.use_raft
+                else "brim" if adhesion.brim_width_mm > 0
+                else "none"
+            ),
+            layer_height_mm=layer_height,
+            nozzle_mm=nozzle_diameter,
         )
 
     report = PrintabilityReport(
@@ -4455,6 +4709,7 @@ def analyze_printability(
         component_size_uniformity=round(component_size_uniformity, 3),
         genus=mesh_genus,
         placement=placement,
+        adhesion=adhesion,
     )
 
     # Optional kiln-pro enrichment: when the kiln-pro package is
@@ -4567,6 +4822,33 @@ def is_bedslinger(printer_id: str | None) -> bool:
     return printer_id.lower().replace("-", "_").strip() in _BEDSLINGER_PRINTERS
 
 
+def _printer_adhesion_context(printer_id: str | None) -> tuple[bool, bool]:
+    """``(has_enclosure, is_bedslinger)`` for the adhesion decision.
+
+    An unknown printer reads as open-frame and not a bed-slinger — the
+    same defaults the decision takes when no printer is named.  The
+    catalogue's ``"default"`` profile, which stands in for any printer it
+    does not know, is unknown, not a statement about that printer.
+
+    (The three doors that each resolved this used to read the profile as
+    a dict; it is a :class:`~kiln.printer_intelligence.PrinterIntel`, so
+    the read always failed into the ``except`` and every printer — an
+    enclosed one included — was judged open-frame.)
+    """
+    if not printer_id:
+        return False, False
+    has_enclosure = False
+    try:
+        from kiln.printer_intelligence import get_printer_intel
+
+        intel = get_printer_intel(printer_id)
+        if getattr(intel, "id", "default") != "default":
+            has_enclosure = bool(getattr(intel, "has_enclosure", False))
+    except Exception:  # noqa: BLE001 — a missing catalogue row is not an error
+        logger.debug("printer intel unavailable for %s", printer_id, exc_info=True)
+    return has_enclosure, is_bedslinger(printer_id)
+
+
 def recommend_adhesion(
     bed_adhesion: BedAdhesionAnalysis,
     *,
@@ -4574,18 +4856,27 @@ def recommend_adhesion(
     has_enclosure: bool = False,
     is_bedslinger_printer: bool = False,
     model_height_mm: float = 0.0,
+    warping: WarpingAnalysis | None = None,
+    adhesion_force: AdhesionForceEstimate | None = None,
 ) -> AdhesionRecommendation:
     """Recommend brim/raft settings based on model geometry + material + printer.
 
-    Uses the contact percentage and adhesion risk from
-    :class:`BedAdhesionAnalysis` combined with material warping tendency
-    and printer type to produce actionable slicer overrides.
+    The one brim / raft decision for a part.  Uses the contact percentage
+    and adhesion risk from :class:`BedAdhesionAnalysis` combined with
+    material warping tendency and printer type, then raises the brim when
+    the part's own warping or adhesion-force verdict calls for one.  Those
+    two analyses describe their risk and leave the brim to this function,
+    so a report can never say "no brim needed" and "add a brim" at once.
 
     :param bed_adhesion: Output from ``_analyze_bed_adhesion()``.
     :param material: Filament type (PLA, ABS, PETG, etc.).
     :param has_enclosure: Whether the printer has an enclosure.
     :param is_bedslinger_printer: Whether the printer is a bed-slinger.
     :param model_height_mm: Model height for tall-part brim logic.
+    :param warping: The part's warping verdict; ``high`` asks for a 5 mm
+        brim, ``critical`` for 8 mm.
+    :param adhesion_force: The part's force-balance verdict;
+        ``marginal`` asks for a 5 mm brim, ``likely_detach`` for 8 mm.
     :returns: :class:`AdhesionRecommendation` with slicer overrides.
     """
     mat_upper = material.upper()
@@ -4629,6 +4920,39 @@ def recommend_adhesion(
         rationale = f"Tall model ({model_height_mm:.0f}mm) with {mat_upper} — precautionary 5mm brim."
     else:
         rationale = f"Good bed contact ({pct:.1f}%), no brim needed."
+
+    # The part's own verdicts can raise the brim, never lower it, and a
+    # raft already covers what a brim would.  The widths are the ones
+    # each verdict's own advice used to name before it stopped naming one.
+    if not raft:
+        raises: list[tuple[int, str]] = []
+        if adhesion_force is not None:
+            if adhesion_force.risk_level == "likely_detach":
+                raises.append((8, (
+                    "8mm brim: the adhesion-force check expects this part to "
+                    "come off the bed at its height and footprint (a raft or "
+                    "glue stick also works)."
+                )))
+            elif adhesion_force.risk_level == "marginal":
+                raises.append((5, (
+                    "5mm brim: adhesion is borderline for this part's height "
+                    "and footprint."
+                )))
+        if warping is not None and warping.risk_level in ("high", "critical"):
+            width = 8 if warping.risk_level == "critical" else 5
+            raises.append((width, (
+                f"{width}mm brim: {warping.risk_level} warping risk for "
+                f"{mat_upper} — a brim holds the corners down."
+            )))
+        for width, reason in raises:
+            if width > brim:
+                brim, rationale = width, reason
+        if brim == 0 and warping is not None and warping.risk_level == "moderate":
+            rationale = (
+                f"Good bed contact ({pct:.1f}%), no brim needed: the warping "
+                f"risk for {mat_upper} is moderate, below the level that "
+                f"calls for one."
+            )
 
     # Build slicer overrides
     overrides: dict[str, str] = {}

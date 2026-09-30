@@ -979,7 +979,7 @@ class _DesignReasoningToolsPlugin:
                     dl = gen.download_result(job.id)
                     analysis = analyze_mesh(dl.local_path)
                     iteration["analysis"] = {
-                        "printability_score": analysis.printability_score,
+                        "mesh_check_score": analysis.mesh_check_score,
                         "issues": analysis.printability_issues,
                         "triangles": analysis.triangle_count,
                         "volume_mm3": analysis.volume_mm3,
@@ -988,8 +988,8 @@ class _DesignReasoningToolsPlugin:
                     iteration["status"] = "succeeded"
                     iteration["file_path"] = dl.local_path
 
-                    if analysis.printability_score > best_score:
-                        best_score = analysis.printability_score
+                    if analysis.mesh_check_score > best_score:
+                        best_score = analysis.mesh_check_score
                         best_result = {
                             "job": job.to_dict(),
                             "result": dl.to_dict(),
@@ -997,7 +997,7 @@ class _DesignReasoningToolsPlugin:
                         }
 
                     # If score is good enough, stop iterating
-                    if analysis.printability_score >= 80:
+                    if analysis.mesh_check_score >= 80:
                         iteration["outcome"] = "passed"
                         iterations.append(iteration)
                         break
@@ -1067,23 +1067,41 @@ class _DesignReasoningToolsPlugin:
         # ------------------------------------------------------------------
 
         @mcp.tool()
-        def optimize_print_orientation(file_path: str, output_path: str = "") -> dict:
+        def optimize_print_orientation(
+            file_path: str,
+            output_path: str = "",
+            material: str = "pla",
+            printer_id: str = "",
+        ) -> dict:
             """Auto-rotate a mesh to minimize overhangs and maximize bed contact.
 
             Tests multiple candidate orientations and picks the one with the
-            best printability score.  Re-orients the mesh and places it flat
-            on the build plate (z_min = 0).
+            fewest overhangs and the most bed contact.  Re-orients the mesh
+            and places it flat on the build plate (z_min = 0).
+
+            ``printability_score`` / ``printability_grade`` are the chosen
+            orientation's score from ``analyze_printability`` itself, judged
+            for ``material`` and ``printer_id`` — pass the same ones you
+            gave ``analyze_printability`` and the two numbers match.
 
             :param file_path: Path to the STL file.
             :param output_path: Output path.  Defaults to overwriting the input.
-            :returns: Dict with rotation angles, overhang stats, and new dimensions.
+            :param material: Material the score is judged for (default ``"pla"``).
+            :param printer_id: Optional printer the score is judged for.
+            :returns: Dict with rotation angles, overhang stats, the
+                printability score and grade, and new dimensions.
             """
             if err := _srv._check_auth("generate"):
                 return err
             try:
                 from kiln.generation.validation import optimize_orientation
 
-                result = optimize_orientation(file_path, output_path=output_path or None)
+                result = optimize_orientation(
+                    file_path,
+                    output_path=output_path or None,
+                    material=material or "pla",
+                    printer_id=printer_id or None,
+                )
                 response = {"success": True, **result}
                 try:
                     from kiln_pro.plugins.git_render_tools import (

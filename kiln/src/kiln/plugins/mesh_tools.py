@@ -237,8 +237,9 @@ class _MeshToolsPlugin:
 
             Goes beyond basic validation to compute volume, surface area,
             center of mass, overhang detection, connected components (floating
-            parts), degenerate triangles, and a composite printability score
-            (0-100).
+            parts), degenerate triangles, and ``mesh_check_score`` (0-100), a
+            quick mesh check.  It is not the printability score: call
+            ``analyze_printability`` for that grade.
 
             Use this after generating a model to understand its geometry and
             identify printability issues before sending to the slicer.
@@ -539,7 +540,7 @@ class _MeshToolsPlugin:
             """Compare two mesh files and report geometric differences.
 
             Computes volume change, surface area change, dimension deltas,
-            center-of-mass shift, printability delta, and an approximate
+            center-of-mass shift, the mesh-check delta, and an approximate
             Hausdorff distance showing how far the meshes differ spatially.
 
             Useful for verifying that a repair, rescale, or regeneration

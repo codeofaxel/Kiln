@@ -1167,11 +1167,14 @@ def _step_printability(report: _PipelineReport, working_path: str) -> None:
             else:
                 count = 0
             if count > 0:
+                # The count is of measurement points; the regions are the
+                # distinct places, which is what a person looks for.
+                places = len(getattr(tw, "problematic_regions", None) or []) or count
                 min_w = getattr(tw, "min_wall_thickness_mm", None)
                 if min_w:
-                    details += f", {count} thin wall(s) (min {min_w:.2f}mm)"
+                    details += f", thin walls at {places} place(s) (min {min_w:.2f}mm)"
                 else:
-                    details += f", {count} thin wall(s)"
+                    details += f", thin walls at {places} place(s)"
         if hasattr(pa_report, "overhang_percentage") and pa_report.overhang_percentage:
             details += f", {pa_report.overhang_percentage:.0f}% overhang"
 

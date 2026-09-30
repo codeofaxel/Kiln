@@ -143,7 +143,7 @@ def test_flat_box_has_no_overhangs(tmp_path):
 
     assert a.max_overhang_angle_deg == 0.0
     assert a.overhang_triangle_count == 0
-    assert a.printability_score == 100
+    assert a.mesh_check_score == 100
     assert not any("verhang" in issue for issue in a.printability_issues)
 
 
@@ -261,7 +261,7 @@ def test_scores_are_placement_invariant(tmp_path):
     _box(lifted, 20, 10, 5, z0=25.0)
 
     a, b = analyze_mesh(grounded), analyze_mesh(lifted)
-    assert a.printability_score == b.printability_score == 100
+    assert a.mesh_check_score == b.mesh_check_score == 100
     assert a.max_overhang_angle_deg == b.max_overhang_angle_deg == 0.0
 
     sa = estimate_support_volume(grounded)

@@ -133,7 +133,14 @@ class MeshAnalysis:
     overhang_triangle_count: int = 0
     overhang_percentage: float = 0.0
     max_overhang_angle_deg: float = 0.0
-    printability_score: int = 0
+    #: A quick 0-100 mesh check: watertight, loose parts, overhang
+    #: angle and share, degenerate faces, size.  It is not the
+    #: printability score — :func:`kiln.printability.analyze_printability`
+    #: is the one number called that, and it judges an overhang by whether
+    #: a slicer can print it, which this check cannot (a 9 mm port ceiling
+    #: costs 20 points here and nothing there).  Under one name the two
+    #: read as two verdicts on the same part.
+    mesh_check_score: int = 0
     printability_issues: list[str] = field(default_factory=list)
 
     def has_geometry(self) -> bool:

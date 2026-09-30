@@ -179,11 +179,7 @@ class _EstimateToolsPlugin:
                 return err
 
             from kiln.gcode_metadata import extract_metadata
-            from kiln.printability import (
-                analyze_printability,
-                is_bedslinger,
-                recommend_adhesion,
-            )
+            from kiln.printability import analyze_printability
             from kiln.slicer import SlicerError, SlicerNotFoundError
 
             try:
@@ -238,6 +234,10 @@ class _EstimateToolsPlugin:
                 )
                 filament_mm = meta.filament_used_mm if meta else None
                 filament_g: float | None = None
+                # Where the grams came from, in the cost estimator's words,
+                # so they read apart from the printability block's
+                # mesh-volume estimate beside them.
+                filament_source: str | None = None
                 slicer_grams: float | None = None
                 if result.output_path and os.path.isfile(result.output_path):
                     from kiln.slicer import _parse_gcode_estimates
@@ -245,7 +245,9 @@ class _EstimateToolsPlugin:
                     slicer_grams = _parse_gcode_estimates(result.output_path).get("filament_weight_g")
                 if slicer_grams:
                     filament_g = round(float(slicer_grams), 2)
+                    filament_source = "slicer_header"
                 elif filament_mm is not None:
+                    filament_source = "slicer_length_x_density"
                     import math as _math
 
                     fil = getattr(result, "filament", None)
@@ -268,6 +270,7 @@ class _EstimateToolsPlugin:
                     "estimated_time_human": time_human,
                     "filament_used_mm": filament_mm,
                     "filament_used_grams": filament_g,
+                    "filament_source": filament_source,
                     "material": mat_upper,
                     "slicer": slicer_name,
                 }
@@ -282,37 +285,20 @@ class _EstimateToolsPlugin:
 
                 if ext in _PRINTABLE_EXTENSIONS:
                     try:
+                        # The printer and filament this estimate is FOR, so
+                        # the report, its brim decision and the slice agree.
                         report = analyze_printability(
                             input_path,
-                            material=material,
-                            printer_id=printer_id or None,
+                            material=mat_upper,
+                            printer_id=effective_printer_id or printer_id or None,
                         )
                         printability_dict = report.to_dict()
 
-                        # 6. Adhesion recommendation
-                        if report.bed_adhesion is not None:
-                            has_enclosure = False
-                            is_bs = False
-                            if effective_printer_id:
-                                is_bs = is_bedslinger(effective_printer_id)
-                                try:
-                                    from kiln.printer_intelligence import get_printer_intel
-
-                                    intel = get_printer_intel(effective_printer_id)
-                                    if intel:
-                                        has_enclosure = intel.get("has_enclosure", False)
-                                except Exception:
-                                    pass
-
-                            rec = recommend_adhesion(
-                                report.bed_adhesion,
-                                material=mat_upper,
-                                has_enclosure=has_enclosure,
-                                is_bedslinger_printer=is_bs,
-                                model_height_mm=report.model_height_mm,
-                            )
-                            adhesion_dict = rec.to_dict()
-                            adhesion_rationale = rec.rationale
+                        # 6. Adhesion: the report's own decision, the one
+                        # every brim sentence in the response comes from.
+                        if report.adhesion is not None:
+                            adhesion_dict = report.adhesion.to_dict()
+                            adhesion_rationale = report.adhesion.rationale
                     except Exception as exc:
                         _logger.debug("Printability/adhesion analysis failed: %s", exc)
 
@@ -327,7 +313,9 @@ class _EstimateToolsPlugin:
                         parts.append(f"Printability: {grade} ({score}/100)")
                 if adhesion_rationale:
                     parts.append(adhesion_rationale)
-                message = ". ".join(parts) + "."
+                # Each part is a sentence; one that already ends in a period
+                # must not end in two.
+                message = ". ".join(part.rstrip(".") for part in parts) + "."
 
                 # 8. Assemble response
                 response: dict[str, Any] = {

@@ -1125,11 +1125,6 @@ class TestSliceAndEstimate:
             contact_percentage=25.0,
             adhesion_risk="low",
         )
-        mock_report = mock.MagicMock()
-        mock_report.bed_adhesion = mock_adhesion
-        mock_report.model_height_mm = 30.0
-        mock_report.to_dict.return_value = {"score": 85, "grade": "B"}
-
         mock_rec = AdhesionRecommendation(
             brim_width_mm=0,
             use_raft=False,
@@ -1138,6 +1133,12 @@ class TestSliceAndEstimate:
             rationale="No brim needed.",
             slicer_overrides={},
         )
+        mock_report = mock.MagicMock()
+        mock_report.bed_adhesion = mock_adhesion
+        mock_report.model_height_mm = 30.0
+        # The door reads the report's own adhesion decision.
+        mock_report.adhesion = mock_rec
+        mock_report.to_dict.return_value = {"score": 85, "grade": "B"}
 
         with (
             mock.patch("kiln.server._resolve_slice_profile_context", return_value=(None, None)),
@@ -1145,8 +1146,6 @@ class TestSliceAndEstimate:
             mock.patch("kiln.gcode_metadata.extract_metadata", return_value=meta),
             mock.patch("os.path.isfile", return_value=True),
             mock.patch("kiln.printability.analyze_printability", return_value=mock_report),
-            mock.patch("kiln.printability.recommend_adhesion", return_value=mock_rec),
-            mock.patch("kiln.printability.is_bedslinger", return_value=False),
         ):
             result = fn(input_path="/tmp/cube.stl", material="PLA")
 

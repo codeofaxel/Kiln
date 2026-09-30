@@ -1175,7 +1175,9 @@ def analyze_mesh(file_path: str) -> MeshAnalysis:
     """Perform detailed geometric and printability analysis of a mesh.
 
     Computes volume, surface area, center of mass, overhang detection,
-    connected components, and a composite printability score.
+    connected components, and a quick mesh-check score (see
+    :attr:`MeshAnalysis.mesh_check_score` for why it is not the
+    printability score).
 
     Args:
         file_path: Path to a .stl, .obj, .glb, or .3mf file.
@@ -1274,7 +1276,7 @@ def analyze_mesh(file_path: str) -> MeshAnalysis:
     valid_tris = len(triangles) - degenerate_count
     overhang_pct = (overhang_count / valid_tris * 100) if valid_tris > 0 else 0.0
 
-    # Printability score (0-100)
+    # Mesh-check score (0-100)
     issues: list[str] = []
     score = 100
 
@@ -1324,7 +1326,7 @@ def analyze_mesh(file_path: str) -> MeshAnalysis:
         overhang_triangle_count=overhang_count,
         overhang_percentage=round(overhang_pct, 1),
         max_overhang_angle_deg=round(max_overhang, 1),
-        printability_score=score,
+        mesh_check_score=score,
         printability_issues=issues,
     )
 
@@ -1914,6 +1916,8 @@ def optimize_orientation(
     *,
     output_path: str | None = None,
     candidates: int = 6,
+    material: str = "pla",
+    printer_id: str | None = None,
 ) -> dict[str, Any]:
     """Find the print orientation that minimizes overhangs.
 
@@ -1929,9 +1933,15 @@ def optimize_orientation(
             overwriting the input.
         candidates: Number of candidate rotations per axis (default 6,
             tests 0/30/60/90/120/150 degrees around X and Y = 36 combos).
+        material: Material the printability score is judged for (default
+            ``"pla"``, the same default as :func:`kiln.printability.analyze_printability`).
+        printer_id: Printer the printability score is judged for.
 
     Returns:
-        Dict with best rotation angles, overhang stats, and output path.
+        Dict with best rotation angles, overhang stats, output path, and
+        the printability score and grade of the chosen orientation --
+        :func:`kiln.printability.analyze_printability`'s own, for the same
+        material and printer, so the two can never disagree about one part.
     """
     path = Path(file_path)
     errors: list[str] = []
@@ -2009,6 +2019,13 @@ def optimize_orientation(
 
     # Analyze the result
     analysis = analyze_mesh(out)
+    # The score is the printability score, from the one engine that owns
+    # it.  This used to report analyze_mesh's quick mesh check under
+    # the same name, so a part analyze_printability graded 94/A came back
+    # from here as "printability_score: 80" with nothing rotated.
+    from kiln.printability import analyze_printability
+
+    report = analyze_printability(out, material=material, printer_id=printer_id)
 
     return {
         "path": out,
@@ -2016,7 +2033,9 @@ def optimize_orientation(
         "rotation_y_deg": round(best_ry, 1),
         "overhang_percentage": analysis.overhang_percentage,
         "max_overhang_angle": analysis.max_overhang_angle_deg,
-        "printability_score": analysis.printability_score,
+        "printability_score": report.score,
+        "printability_grade": report.grade,
+        "printability_material": material,
         "dimensions_mm": analysis.dimensions_mm,
     }
 
@@ -2403,10 +2422,11 @@ def compare_meshes(
             math.sqrt(dx * dx + dy * dy + dz * dz), 2
         )
 
-    # Printability comparison
-    result["printability_score_a"] = a.printability_score
-    result["printability_score_b"] = b.printability_score
-    result["printability_delta"] = b.printability_score - a.printability_score
+    # Mesh-check comparison (the quick mesh check, not the
+    # printability score — see MeshAnalysis.mesh_check_score)
+    result["mesh_check_score_a"] = a.mesh_check_score
+    result["mesh_check_score_b"] = b.mesh_check_score
+    result["mesh_check_score_delta"] = b.mesh_check_score - a.mesh_check_score
     result["overhang_pct_a"] = a.overhang_percentage
     result["overhang_pct_b"] = b.overhang_percentage
 
@@ -2723,7 +2743,7 @@ def predict_print_failures(
         "failures": failures,
         "dimensions_mm": dims,
         "triangle_count": len(tris),
-        "printability_score": analysis.printability_score,
+        "mesh_check_score": analysis.mesh_check_score,
     }
 
 
@@ -3041,7 +3061,7 @@ def design_scorecard(file_path: str) -> dict[str, Any]:
     overlay = load_pro_overlay_or_empty("scorecard_weights")
 
     # --- Printability (already a 0-100 score from the upstream analysis) ---
-    printability = analysis.printability_score
+    printability = analysis.mesh_check_score
 
     # --- Structural / Efficiency / Quality (overlay-driven rules) -------
     structural, structural_notes = _score_factor_from_rules(
@@ -3430,7 +3450,7 @@ def cad_intake_report(
             "conversion": _conversion_sentence(conversion),
             "conversion_difference": _conversion_deviation(exact, analysis),
             "printability": {
-                "score": analysis.printability_score,
+                "score": analysis.mesh_check_score,
                 "notes": analysis.printability_issues,
             },
             "structural": {"score": structural, "notes": structural_notes},
@@ -3852,7 +3872,7 @@ def can_print_now(
         "issues": issues,
         "issue_count": len(issues),
         "actions_taken": actions_taken,
-        "printability_score": analysis.printability_score,
+        "mesh_check_score": analysis.mesh_check_score,
         "triangle_count": analysis.triangle_count,
         "dimensions_mm": analysis.dimensions_mm,
     }
