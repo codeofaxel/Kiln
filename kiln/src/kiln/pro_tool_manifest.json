@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-09-30T05:16:31.171630+00:00",
+  "generated": "2026-09-30T09:02:17.479474+00:00",
   "tool_count": 427,
   "categories": {
     "product_generators": {
@@ -21831,19 +21831,27 @@
             "type": "string"
           },
           "texture": {
-            "enum": [
-              "wood",
-              "lava",
-              "alligator",
-              "snakeskin_python",
-              "snakeskin_diamond",
-              "bamboo",
-              "carbon_fiber",
-              "brushed_metal",
-              "honeycomb"
+            "anyOf": [
+              {
+                "enum": [
+                  "wood",
+                  "lava",
+                  "alligator",
+                  "snakeskin_python",
+                  "snakeskin_diamond",
+                  "bamboo",
+                  "carbon_fiber",
+                  "brushed_metal",
+                  "honeycomb"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Texture",
-            "type": "string"
+            "default": null,
+            "title": "Texture"
           },
           "depth_mm": {
             "anyOf": [
@@ -21980,6 +21988,52 @@
             "title": "Falloff Curve",
             "type": "string"
           },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Region"
+          },
+          "region_textures": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Region Textures"
+          },
+          "segmentation_params": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Segmentation Params"
+          },
           "mark_image_path": {
             "anyOf": [
               {
@@ -22048,8 +22102,7 @@
           }
         },
         "required": [
-          "input_path",
-          "texture"
+          "input_path"
         ],
         "title": "apply_geometric_textureArguments",
         "type": "object"
@@ -22206,6 +22259,34 @@
             ],
             "title": "Falloff Curve",
             "type": "string"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Region"
+          },
+          "segmentation_params": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Segmentation Params"
           }
         },
         "required": [
