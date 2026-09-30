@@ -29,7 +29,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
-- **Whole-object wrapped textures look better.**
+- **Whole-object wrapped textures look better, including on round objects like cups.**
 
 - **Agreeing to the Terms before you sign in now counts for your account too.**
 
