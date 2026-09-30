@@ -622,8 +622,32 @@ def _conversion_cache_dir() -> Path:
     if override:
         return Path(override)
     if os.environ.get("PYTEST_CURRENT_TEST") or "pytest" in sys.modules:
-        return Path(tempfile.gettempdir()) / f"kiln_step_cache_pytest_{os.getpid()}"
+        return _test_run_cache_dir()
     return Path(tempfile.gettempdir()) / "kiln_step_cache"
+
+
+_test_run_cache: Path | None = None
+
+
+def _test_run_cache_dir() -> Path:
+    """One cache folder per test process, removed when that process exits.
+
+    Per process, so a test that clears the cache only ever clears its own
+    run's; removed at exit, so a day of test runs leaves nothing behind.
+    """
+    global _test_run_cache
+    if _test_run_cache is None:
+        import atexit
+
+        owner = os.getpid()
+        _test_run_cache = Path(tempfile.mkdtemp(prefix="kiln_step_cache_pytest_"))
+        cache = _test_run_cache
+        # Only the process that made it removes it: a forked child that
+        # exits normally must not take its parent's cache with it.
+        atexit.register(
+            lambda: os.getpid() == owner and shutil.rmtree(cache, ignore_errors=True)
+        )
+    return _test_run_cache
 
 
 # ---------------------------------------------------------------------------
