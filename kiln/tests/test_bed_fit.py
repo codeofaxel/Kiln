@@ -124,6 +124,60 @@ class TestComputeMeshBbox:
     def test_missing_file(self):
         assert compute_mesh_bbox("/nonexistent/path.stl") is None
 
+    def test_ascii_stl(self, tmp_path):
+        stl = tmp_path / "wedge.stl"
+        tris = [((-1, -2, 0), (3, -2, 0), (3, 4, 5.5)), ((-1, -2, 0), (3, 4, 5.5), (-1, 4, 5.5))]
+        stl.write_text(
+            "solid wedge\n"
+            + "".join(
+                "facet normal 0 0 0\nouter loop\n"
+                + "".join(f"vertex {x} {y} {z}\n" for (x, y, z) in tri)
+                + "endloop\nendfacet\n"
+                for tri in tris
+            )
+            + "endsolid wedge\n"
+        )
+        assert compute_mesh_bbox(str(stl)) == {
+            "x_min": -1.0, "x_max": 3.0, "y_min": -2.0, "y_max": 4.0, "z_min": 0.0, "z_max": 5.5,
+        }
+
+    def test_truncated_stl(self, tmp_path):
+        stl = tmp_path / "cut.stl"
+        _write_cube_stl(stl, (0, 1), (0, 1), (0, 1))
+        stl.write_bytes(stl.read_bytes()[:-20])
+        assert compute_mesh_bbox(str(stl)) is None
+
+    def test_memory_follows_the_file_not_a_tuple_per_corner(self, tmp_path):
+        """Six numbers from 200k triangles: the tuple parser this went through
+        held 124 MB to find them; one array of the corners holds about 30."""
+        import tracemalloc
+
+        import numpy as np
+
+        record = np.zeros(
+            200_000, dtype=[("normal", "<f4", (3,)), ("corners", "<f4", (3, 3)), ("attr", "<u2")]
+        )
+        record["corners"] = np.random.default_rng(3).uniform(-50.0, 50.0, size=(200_000, 3, 3))
+        stl = tmp_path / "big.stl"
+        with open(stl, "wb") as fh:
+            fh.write(b"\0" * _STL_HEADER_SIZE)
+            fh.write(struct.pack("<I", len(record)))
+            record.tofile(fh)
+
+        tracemalloc.start()
+        try:
+            bbox = compute_mesh_bbox(str(stl))
+            _now, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        corners = record["corners"].reshape(-1, 3).astype(float)
+        assert bbox == {
+            "x_min": corners[:, 0].min(), "x_max": corners[:, 0].max(),
+            "y_min": corners[:, 1].min(), "y_max": corners[:, 1].max(),
+            "z_min": corners[:, 2].min(), "z_max": corners[:, 2].max(),
+        }
+        assert peak < 60 * 1024 * 1024
+
 
 # ---------------------------------------------------------------------------
 # The fit check — this is the core incident regression
