@@ -385,7 +385,8 @@ def test_freecad_backend(mock_cq, mock_gmsh, mock_fc, sample_step_file, tmp_dir)
         result = convert_step_to_stl(str(sample_step_file))
 
     assert result.body_count == 1
-    assert result.output_path == str(out_stl)
+    # Named after the STEP it came from, in the STEP's own folder.
+    assert Path(result.output_path) == sample_step_file.with_suffix(".stl").resolve()
     assert result.file_size_bytes == 500
 
 
@@ -1839,7 +1840,7 @@ def test_convert_step_auto_plain_solid_stays_classic_stl(real_kernel, tmp_dir):
     result = convert_step(str(step), output_dir=str(out_dir))
 
     assert result.output_format == "stl"
-    assert result.output_path.endswith("merged.stl")
+    assert result.output_path.endswith("box.stl")
     assert result.body_count == 1
     # And explicit 3MF is honoured even for a plain part.
     result3 = convert_step(
@@ -2245,7 +2246,7 @@ def test_gmsh_too_old_to_bound_falls_through_instead_of_failing(
         result = convert_step_to_stl(str(sample_step_file), output_dir=str(tmp_dir))
 
     assert fallback.called, "an un-boundable gmsh must hand off, not hard-fail"
-    assert result.output_path == str(out_stl)
+    assert Path(result.output_path) == (tmp_dir / "test_part.stl").resolve()
     assert any("Gmsh failed" in w for w in result.warnings), (
         "the handoff has to be visible in the result, not silent"
     )
@@ -3411,3 +3412,112 @@ def test_the_cache_does_not_serve_one_backends_mesh_for_another(tmp_path, monkey
         "backend has to be part of the cache key"
     )
     assert kernel_tris > freecad_tris * 5
+
+
+# ---------------------------------------------------------------------------
+# Output names follow the STEP, and never replace a file Kiln did not make.
+# ---------------------------------------------------------------------------
+
+
+def _write_box_step(path: Path, height: float) -> Path:
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.STEPControl import STEPControl_StepModelType, STEPControl_Writer
+
+    writer = STEPControl_Writer()
+    writer.Transfer(
+        BRepPrimAPI_MakeBox(20.0, 10.0, height).Shape(),
+        STEPControl_StepModelType.STEPControl_AsIs,
+    )
+    writer.Write(str(path))
+    return path
+
+
+def _z_extent(stl_path: str) -> float:
+    from kiln.step_import import _read_binary_stl
+
+    zs = [v[2] for tri in _read_binary_stl(stl_path) for v in tri]
+    return max(zs) - min(zs)
+
+
+@pytest.mark.parametrize("door", ["convert_step", "convert_step_to_stl"])
+def test_two_revisions_in_one_folder_keep_two_meshes(real_kernel, tmp_dir, door):
+    """Rev B converted beside rev A must not replace rev A's mesh.
+
+    Every conversion used to be written as merged.stl, so converting rev B
+    next to rev A overwrote rev A's mesh and a later look at "rev A"
+    measured rev B (2026-09-30: a rev B made 5 mm taller read back as A).
+    """
+    from kiln import step_import
+
+    convert = getattr(step_import, door)
+    rev_a = convert(str(_write_box_step(tmp_dir / "hub_revA.step", 5.0)))
+    rev_b = convert(str(_write_box_step(tmp_dir / "hub_revB.step", 10.0)))
+
+    assert Path(rev_a.output_path).name == "hub_revA.stl"
+    assert Path(rev_b.output_path).name == "hub_revB.stl"
+    assert _z_extent(rev_a.output_path) == pytest.approx(5.0, abs=1e-3)
+    assert _z_extent(rev_b.output_path) == pytest.approx(10.0, abs=1e-3)
+
+
+def test_a_same_named_file_kiln_did_not_make_is_left_alone(real_kernel, tmp_dir):
+    from kiln.step_import import convert_step
+
+    step = _write_box_step(tmp_dir / "bracket.step", 5.0)
+    theirs = tmp_dir / "bracket.stl"  # their own export of the same part
+    theirs.write_bytes(b"exported from CAD, not by Kiln")
+
+    result = convert_step(str(step))
+
+    assert theirs.read_bytes() == b"exported from CAD, not by Kiln"
+    assert Path(result.output_path).name == "bracket.kiln.stl"
+    assert _z_extent(result.output_path) == pytest.approx(5.0, abs=1e-3)
+    assert any("bracket.stl" in w and "left as it was" in w for w in result.warnings)
+
+
+def test_reconverting_an_edited_step_replaces_its_own_mesh(real_kernel, tmp_dir):
+    from kiln.step_import import convert_step
+
+    step = tmp_dir / "bracket.step"
+    first = convert_step(str(_write_box_step(step, 5.0)))
+    second = convert_step(str(_write_box_step(step, 8.0)))  # edited, re-exported
+
+    assert second.output_path == first.output_path
+    assert Path(second.output_path).name == "bracket.stl"
+    assert _z_extent(second.output_path) == pytest.approx(8.0, abs=1e-3)
+    assert sorted(p.name for p in tmp_dir.glob("bracket*.stl")) == ["bracket.stl"]
+
+
+def test_a_same_named_3mf_kiln_did_not_make_is_left_alone(real_kernel, tmp_dir):
+    """The coloured-assembly exit was named after the STEP already, and
+    wrote over whatever 3MF of the same name sat beside it."""
+    from kiln.step_import import convert_step
+
+    step = tmp_dir / "assembly.step"
+    _write_colored_two_body_step(step)
+    theirs = tmp_dir / "assembly.3mf"
+    theirs.write_bytes(b"their slicer project")
+
+    result = convert_step(str(step))
+
+    assert theirs.read_bytes() == b"their slicer project"
+    assert result.output_format == "3mf"
+    assert Path(result.output_path).name == "assembly.kiln.3mf"
+    again = convert_step(str(step))  # the .kiln copy is Kiln's own: replaced
+    assert again.output_path == result.output_path
+
+
+def test_the_implicit_door_names_its_mesh_after_the_step(real_kernel, tmp_dir):
+    """ensure_mesh_path: first conversion and cache hit alike."""
+    import time as _time
+
+    from kiln.step_import import ensure_mesh_path
+
+    # Unique bytes, so the first call is a genuine miss in the shared cache.
+    step = _write_box_step(tmp_dir / f"widget_{_time.time_ns()}.step", 6.0)
+    for n in (1, 2):
+        out = tmp_dir / f"out{n}"
+        out.mkdir()
+        mesh, _note = ensure_mesh_path(str(step), output_dir=str(out))
+        assert Path(mesh).name == f"{step.stem}.stl"
+        assert Path(mesh).parent.resolve() == out.resolve()
+        assert _z_extent(mesh) == pytest.approx(6.0, abs=1e-3)

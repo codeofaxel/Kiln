@@ -235,6 +235,13 @@ body_count = max(len(entities), 1)
 
 out_path = os.path.join(output_dir, "merged.stl")
 gmsh.model.mesh.generate(2)
+# Binary, like every other backend: smaller, and it carries the header mark
+# a later conversion reads to know the file is its own.  An ASCII mesh is
+# still a correct mesh, so a gmsh that refuses the option keeps its default.
+try:
+    gmsh.option.setNumber("Mesh.Binary", 1)
+except Exception:
+    pass
 gmsh.write(out_path)
 gmsh.finalize()
 
@@ -592,6 +599,116 @@ def _validate_output_dir(output_dir: str | None, step_path: Path) -> Path:
 
     out.mkdir(parents=True, exist_ok=True)
     return out
+
+
+# ---------------------------------------------------------------------------
+# Output naming
+# ---------------------------------------------------------------------------
+
+#: The header of every binary STL a conversion publishes.  How a later
+#: conversion knows a file at its output name is its own earlier output, the
+#: only kind it may overwrite (:func:`_claim_output_name`).
+_STEP_MESH_STAMP = b"Created by Kiln from STEP | kiln3d.com"
+
+#: The provenance line :func:`_write_3mf` puts in every model it writes, which
+#: is how the same check recognises a 3MF of its own.
+_3MF_CREATED_BY = ' <metadata name="CreatedBy">Kiln — kiln3d.com</metadata>\n'
+
+
+def _made_by_step_conversion(path: Path) -> bool:
+    """True when *path* carries the mark a Kiln STEP conversion writes."""
+    import zipfile
+
+    try:
+        if path.suffix.lower() == ".3mf":
+            with zipfile.ZipFile(path) as zf, zf.open("3D/3dmodel.model") as fh:
+                return _3MF_CREATED_BY.strip().encode("utf-8") in fh.read(4096)
+        with path.open("rb") as fh:
+            return fh.read(len(_STEP_MESH_STAMP)) == _STEP_MESH_STAMP
+    except (OSError, KeyError, zipfile.BadZipFile):
+        return False
+
+
+def _stamp_binary_stl(path: Path) -> None:
+    """Put the conversion's mark in a binary STL's free-text header.
+
+    Every backend writes binary; a file that is not (sized ``84 + 50n``)
+    is left exactly as it was written.
+    """
+    try:
+        size = path.stat().st_size
+        with path.open("r+b") as fh:
+            head = fh.read(84)
+            if len(head) < 84 or size != 84 + 50 * int.from_bytes(head[80:84], "little"):
+                return
+            fh.seek(0)
+            fh.write(_STEP_MESH_STAMP.ljust(80, b"\x00"))
+    except OSError:
+        pass  # an unmarked mesh is still a correct mesh
+
+
+def _claim_output_name(out_dir: Path, base: str, ext: str) -> tuple[Path, str | None]:
+    """Where a conversion may write ``<base><ext>`` in *out_dir*.
+
+    Outputs are named after the STEP they came from, so two parts converted
+    into one folder keep two meshes.  (Every conversion used to be
+    ``merged.stl``: converting rev B beside rev A replaced rev A's mesh, and a
+    later look at "rev A" read rev B without a word.)  Naming after the STEP
+    puts the output where a person's own export of the same part may already
+    sit, so a file already at that name is replaced only when a Kiln
+    conversion made it.  Anything else found there is left alone, and the
+    output goes beside it as ``<base>.kiln<ext>``; the second value is the
+    sentence that says so.
+    """
+    target = out_dir / f"{base}{ext}"
+    if not target.exists() or _made_by_step_conversion(target):
+        return target, None
+    n = 1
+    while True:
+        alt = out_dir / (f"{base}.kiln{ext}" if n == 1 else f"{base}.kiln-{n}{ext}")
+        if not alt.exists() or _made_by_step_conversion(alt):
+            return alt, (
+                f"{target.name} was already in {out_dir} and isn't a file Kiln "
+                f"made, so it was left as it was; this conversion was saved as "
+                f"{alt.name}."
+            )
+        n += 1
+
+
+def _move_into(src: Path, dest: Path) -> None:
+    """Move *src* onto *dest*, atomically even across filesystems."""
+    try:
+        os.replace(src, dest)
+    except OSError:  # a different filesystem: copy beside the target, then swap
+        part = dest.with_name(f".{dest.name}.{os.getpid()}.part")
+        shutil.copyfile(src, part)
+        os.replace(part, dest)
+        with contextlib.suppress(OSError):
+            os.unlink(src)
+
+
+def _publish_outputs(
+    outputs: Sequence[str], out_dir: Path, stem: str
+) -> tuple[list[str], list[str]]:
+    """Move a backend's meshes into *out_dir*, named after their STEP.
+
+    One mesh is ``<stem>.stl``; per-body meshes are ``<stem>_<name>.stl``.
+    Returns the published paths (files the backend promised but never wrote
+    are skipped) and a note for each file left untouched beside one.
+    """
+    published: list[str] = []
+    notes: list[str] = []
+    for src in map(Path, outputs):
+        if not src.is_file():
+            continue
+        base = stem if len(outputs) == 1 else f"{stem}_{src.stem}"
+        dest, note = _claim_output_name(out_dir, base, src.suffix or ".stl")
+        _stamp_binary_stl(src)
+        _move_into(src, dest)
+        published.append(str(dest))
+        if note:
+            notes.append(note)
+    return published, notes
 
 
 # ---------------------------------------------------------------------------
@@ -1536,7 +1653,7 @@ def _write_3mf(
         '<model unit="millimeter" xml:lang="en-US" '
         'xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">\n',
         # Same provenance stamp the STL header and the Bambu wrap carry.
-        " <metadata name=\"CreatedBy\">Kiln — kiln3d.com</metadata>\n",
+        _3MF_CREATED_BY,
         " <resources>\n",
     ]
     if colored:
@@ -2108,9 +2225,16 @@ def ensure_mesh_path(
         # keep the fast path untouched.
         if not with_record or cached_record.is_file():
             Path(output_dir).mkdir(parents=True, exist_ok=True)
-            out = str(Path(output_dir) / "merged.stl")
+            # Named and guarded exactly as a fresh conversion would be.
+            claimed, left_alone = _claim_output_name(
+                Path(output_dir), Path(path).stem, ".stl"
+            )
+            out = str(claimed)
             _shutil.copyfile(cached, out)
+            _stamp_binary_stl(claimed)  # an entry cached before the mark
             note = f"Converted from STEP ({Path(path).name}) to mesh — cached, 0.0s."
+            if left_alone:
+                note = f"{note} {left_alone}"
             if not with_record:
                 return out, note
             return out, note, _read_cached_conversion(cached_record)
@@ -2198,6 +2322,10 @@ def convert_step_to_stl(
 
     Tries backends in order: FreeCADCmd → gmsh → OCCT kernel (OCP) → cadquery.
 
+    Output is named after the STEP (``part.step`` → ``part.stl``, per body
+    ``part_body_0.stl``) and never replaces a file Kiln did not make — see
+    :func:`_claim_output_name`.
+
     Args:
         step_path: Path to the STEP file.
         output_dir: Directory for output STL(s).  Defaults to the STEP
@@ -2217,7 +2345,22 @@ def convert_step_to_stl(
     """
     validated_path = _validate_step_path(step_path)
     out_dir = _validate_output_dir(output_dir, validated_path)
+    # Backends write into a folder of their own; only the finished meshes
+    # reach out_dir, under their STEP's name (_publish_outputs).
+    scratch = Path(tempfile.mkdtemp(prefix="kiln_step_work_"))
+    try:
+        return _convert_step_to_stl_via(validated_path, out_dir, scratch, merge_bodies)
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
 
+
+def _convert_step_to_stl_via(
+    validated_path: Path,
+    out_dir: Path,
+    scratch: Path,
+    merge_bodies: bool,
+) -> StepImportResult:
+    """:func:`convert_step_to_stl`, with the backends writing into *scratch*."""
     warnings: list[str] = []
     # Set where a backend SUCCEEDS, never where one is merely attempted: the
     # fall-through means the backend that ran is not the one the priority
@@ -2231,7 +2374,7 @@ def convert_step_to_stl(
         logger.info("Converting STEP via FreeCAD (%s)", freecad_cmd)
         try:
             outputs, body_count = _convert_via_freecad(
-                validated_path, out_dir, merge_bodies, freecad_cmd
+                validated_path, scratch, merge_bodies, freecad_cmd
             )
             conversion = MeshConversion(backend="freecad", bound=_FREECAD_BOUND)
         except StepImportError:
@@ -2251,7 +2394,7 @@ def convert_step_to_stl(
                     "producing merged output."
                 )
             try:
-                outputs, body_count = _convert_via_gmsh(validated_path, out_dir)
+                outputs, body_count = _convert_via_gmsh(validated_path, scratch)
                 conversion = MeshConversion(backend="gmsh", bound=_GMSH_BOUND)
             except StepImportError:
                 raise
@@ -2267,7 +2410,7 @@ def convert_step_to_stl(
             if _ocp_available():
                 logger.info("Converting STEP via OCCT (OCP)")
                 outputs, body_count, topology = _convert_via_ocp(
-                    validated_path, out_dir, merge_bodies
+                    validated_path, scratch, merge_bodies
                 )
                 conversion = MeshConversion(
                     backend="occt", bound=_KERNEL_BOUND, source=topology
@@ -2275,7 +2418,7 @@ def convert_step_to_stl(
             elif _cadquery_available():
                 logger.info("Converting STEP via CadQuery")
                 outputs, body_count, topology = _convert_via_cadquery(
-                    validated_path, out_dir, merge_bodies
+                    validated_path, scratch, merge_bodies
                 )
                 conversion = MeshConversion(
                     backend="cadquery", bound=_KERNEL_BOUND, source=topology
@@ -2303,8 +2446,11 @@ def convert_step_to_stl(
     if note is not None:
         warnings.append(note)
 
+    outputs, left_alone = _publish_outputs(outputs, out_dir, validated_path.stem)
+    warnings.extend(left_alone)
+
     # Compute total file size.
-    total_size = sum(Path(p).stat().st_size for p in existing)
+    total_size = sum(Path(p).stat().st_size for p in outputs)
 
     primary = outputs[0] if len(outputs) == 1 else str(out_dir)
 
@@ -2376,11 +2522,28 @@ def convert_step(
 
     validated_path = _validate_step_path(step_path)
     out_dir = _validate_output_dir(output_dir, validated_path)
+    # As in convert_step_to_stl: the per-part scaffolding never touches
+    # out_dir, and what does is named after the STEP.
+    scratch = Path(tempfile.mkdtemp(prefix="kiln_step_work_"))
+    try:
+        return _convert_step_colour_aware(
+            validated_path, out_dir, scratch, output_format
+        )
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
 
+
+def _convert_step_colour_aware(
+    validated_path: Path,
+    out_dir: Path,
+    scratch: Path,
+    output_format: str,
+) -> StepImportResult:
+    """:func:`convert_step` on the OCCT kernel, which can see colours."""
     from kiln.threemf_parser import unique_object_names
 
     t0 = time.monotonic()
-    data = _convert_via_ocp_xcaf(validated_path, out_dir)
+    data = _convert_via_ocp_xcaf(validated_path, scratch)
     # Named once, above the branch, so both exits report the same thing: a
     # caller reading :attr:`StepImportResult.part_names` should never have to
     # know which output format produced them.
@@ -2404,9 +2567,13 @@ def convert_step(
     wants_3mf = output_format == "3mf" or has_color or len(parts) > 1
 
     if not wants_3mf:
-        # A plain single solid: keep the classic contract (merged.stl).
-        final = str(out_dir / "merged.stl")
-        os.replace(parts[0]["stl_path"], final)
+        # A plain single solid: one STL, as convert_step_to_stl writes it.
+        published, left_alone = _publish_outputs(
+            [parts[0]["stl_path"]], out_dir, validated_path.stem
+        )
+        if not published:
+            raise StepImportError("Conversion produced no output files.")
+        final = published[0]
         elapsed = time.monotonic() - t0
         return StepImportResult(
             output_path=final,
@@ -2417,11 +2584,14 @@ def convert_step(
             output_format="stl",
             part_names=names,
             part_colors=data["colors"],
-            warnings=surface_warnings,
+            warnings=surface_warnings + left_alone,
             conversion=conversion,
         )
 
-    out_3mf = str(out_dir / f"{validated_path.stem}.3mf")
+    claimed, left_alone_note = _claim_output_name(out_dir, validated_path.stem, ".3mf")
+    out_3mf = str(claimed)
+    if left_alone_note:
+        surface_warnings.append(left_alone_note)
     # These names are already unique; the writer re-establishes that for
     # callers who did not, and returns what it wrote.
     _write_3mf(parts, out_3mf)
