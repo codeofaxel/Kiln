@@ -61,6 +61,7 @@ import logging
 import os
 import time
 from collections import defaultdict
+from collections.abc import Iterator
 from typing import Any
 
 import numpy as np
@@ -97,6 +98,15 @@ MAX_TRACKED_FACES = 400_000
 #: are exact up to this radius — far above ``DISTANCE_EPS_MM``, which is
 #: all the classification compares against.
 _GRID_CELL_MM = 2.0
+
+#: Most (point, triangle) pairs the distance pass measures at once.  A pair
+#: holds about 410 bytes while it is measured (301 bytes of temporaries in
+#: :func:`_point_triangle_distances`, measured, plus the gathered point,
+#: triangle and index copies), so this caps the pass near 100 MB.  Measuring
+#: every pair in one go let memory grow with the mesh: a textured cup's diff
+#: (115k new triangles against a 1k-triangle original) took the pass to
+#: 1.3 GB; batched, the same diff peaks at 0.12 GB with identical distances.
+_MAX_PAIRS_PER_BATCH = 250_000
 
 #: Floors vs walls: a decoration face whose normal is within ~45 deg of
 #: (anti)parallel to the decorated face's normal is a floor (or emboss
@@ -234,8 +244,26 @@ def _min_distance_to_mesh(
     each point tests only triangles from its 3x3x3 cell neighborhood.
     Exact for distances up to ``cell``; a point with no nearby candidate
     reports ``inf`` — unambiguously off-surface, which is all the caller's
-    epsilon comparison needs.
+    epsilon comparison needs.  Pairs are measured in batches of about
+    :data:`_MAX_PAIRS_PER_BATCH`, so memory stays flat however many points
+    and triangles meet.
     """
+    out = np.full(len(points), np.inf)
+    for pp, tt in _candidate_pairs(points, triangles, cell):
+        d = _point_triangle_distances(points[pp], triangles[tt])
+        np.minimum.at(out, pp, d)
+    return out
+
+
+def _candidate_pairs(
+    points: np.ndarray,
+    triangles: np.ndarray,
+    cell: float,
+) -> Iterator[tuple[np.ndarray, np.ndarray]]:
+    """Yield ``(point_indices, triangle_indices)`` pairing each point with the
+    triangles binned in its 3x3x3 cell neighborhood, about
+    :data:`_MAX_PAIRS_PER_BATCH` pairs at a time.  A point's candidates are
+    never split across batches."""
     lo = triangles.min(axis=(0, 1)) - 1e-9
     tri_lo = np.floor((triangles.min(axis=1) - lo) / cell).astype(np.int64)
     tri_hi = np.floor((triangles.max(axis=1) - lo) / cell).astype(np.int64)
@@ -248,9 +276,9 @@ def _min_distance_to_mesh(
                     grid[(x, y, z)].append(i)
 
     pt_cell = np.floor((points - lo) / cell).astype(np.int64)
-    out = np.full(len(points), np.inf)
     pair_points: list[np.ndarray] = []
     pair_tris: list[np.ndarray] = []
+    pending = 0
     for pi in range(len(points)):
         px, py, pz = pt_cell[pi]
         cands: list[int] = []
@@ -262,12 +290,12 @@ def _min_distance_to_mesh(
             uniq = np.unique(np.asarray(cands, dtype=np.int64))
             pair_points.append(np.full(len(uniq), pi, dtype=np.int64))
             pair_tris.append(uniq)
+            pending += len(uniq)
+            if pending >= _MAX_PAIRS_PER_BATCH:
+                yield np.concatenate(pair_points), np.concatenate(pair_tris)
+                pair_points, pair_tris, pending = [], [], 0
     if pair_points:
-        pp = np.concatenate(pair_points)
-        tt = np.concatenate(pair_tris)
-        d = _point_triangle_distances(points[pp], triangles[tt])
-        np.minimum.at(out, pp, d)
-    return out
+        yield np.concatenate(pair_points), np.concatenate(pair_tris)
 
 
 def _triangle_normals(triangles: np.ndarray) -> np.ndarray:
