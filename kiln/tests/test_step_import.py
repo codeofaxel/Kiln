@@ -2634,8 +2634,22 @@ def test_a_cache_hit_reports_the_same_record_as_the_conversion(
     assert hit == miss, "a hit must describe the same conversion as the miss"
 
 
+@pytest.fixture()
+def own_step_cache(tmp_path, monkeypatch):
+    """A conversion cache no other test can see.
+
+    For the tests below that delete or corrupt EVERY record in the cache:
+    pointed at the shared one, they took out other tests' records mid-run
+    and, before the cache learned to keep test runs to themselves, the real
+    server's too.
+    """
+    cache = tmp_path / "step_cache"
+    monkeypatch.setenv("KILN_STEP_CACHE_DIR", str(cache))
+    return cache
+
+
 def test_a_cache_entry_from_before_the_record_reconverts_rather_than_shrugging(
-    real_kernel, tmp_dir
+    real_kernel, tmp_dir, own_step_cache
 ):
     """Entries written by an older Kiln have no sidecar — and the key carries
     no format version, so they are indistinguishable from current ones and
@@ -2663,8 +2677,7 @@ def test_a_cache_entry_from_before_the_record_reconverts_rather_than_shrugging(
 
     _, _, first = ensure_mesh_path(str(step), output_dir=str(d1), with_record=True)
 
-    cache_dir = Path(tempfile.gettempdir()) / "kiln_step_cache"
-    sidecars = sorted(cache_dir.glob("*.json"))
+    sidecars = sorted(own_step_cache.glob("*.json"))
     assert sidecars, "the conversion should have left a sidecar"
     for s in sidecars:
         s.unlink()
@@ -2683,7 +2696,9 @@ def test_a_cache_entry_from_before_the_record_reconverts_rather_than_shrugging(
     assert third is not None
 
 
-def test_a_caller_that_wanted_no_record_keeps_the_fast_path(real_kernel, tmp_dir):
+def test_a_caller_that_wanted_no_record_keeps_the_fast_path(
+    real_kernel, tmp_dir, own_step_cache
+):
     """The fall-through is scoped to callers who asked for a record; everyone
     else must not pay a re-conversion for a field they never read."""
     from kiln.step_import import ensure_mesh_path
@@ -2694,7 +2709,7 @@ def test_a_caller_that_wanted_no_record_keeps_the_fast_path(real_kernel, tmp_dir
         d.mkdir()
 
     ensure_mesh_path(str(step), output_dir=str(d1), with_record=True)
-    for s in sorted((Path(tempfile.gettempdir()) / "kiln_step_cache").glob("*.json")):
+    for s in sorted(own_step_cache.glob("*.json")):
         s.unlink()
 
     _out, note = ensure_mesh_path(str(step), output_dir=str(d2))
@@ -2702,7 +2717,7 @@ def test_a_caller_that_wanted_no_record_keeps_the_fast_path(real_kernel, tmp_dir
 
 
 def test_an_unreadable_sidecar_says_nothing_rather_than_guessing(
-    real_kernel, tmp_dir
+    real_kernel, tmp_dir, own_step_cache
 ):
     """The property the re-conversion above must not cost us.
 
@@ -2720,7 +2735,7 @@ def test_an_unreadable_sidecar_says_nothing_rather_than_guessing(
 
     ensure_mesh_path(str(step), output_dir=str(d1), with_record=True)
 
-    sidecars = sorted((Path(tempfile.gettempdir()) / "kiln_step_cache").glob("*.json"))
+    sidecars = sorted(own_step_cache.glob("*.json"))
     assert sidecars
     for s in sidecars:
         s.write_text("{ not json at all", encoding="utf-8")
@@ -3521,3 +3536,40 @@ def test_the_implicit_door_names_its_mesh_after_the_step(real_kernel, tmp_dir):
         assert Path(mesh).name == f"{step.stem}.stl"
         assert Path(mesh).parent.resolve() == out.resolve()
         assert _z_extent(mesh) == pytest.approx(6.0, abs=1e-3)
+
+
+def test_a_test_run_never_writes_the_real_conversion_cache(
+    real_kernel, tmp_dir, monkeypatch
+):
+    """The cache shared by every Kiln process on the machine is off limits.
+
+    The suite had no way to keep out of it: its isolation moves HOME, and this
+    cache lives in the OS temp dir.  So every run wrote its conversions into
+    the one the real server reads, and the tests above that clear or corrupt
+    "every record" cleared and corrupted the real server's records along with
+    their own (2026-09-30).  Judged by content, so a real server converting
+    something else meanwhile cannot make this pass or fail.
+    """
+    import time as _time
+
+    from kiln.step_import import ensure_mesh_path
+
+    monkeypatch.delenv("KILN_STEP_CACHE_DIR", raising=False)
+    real_cache = Path(tempfile.gettempdir()) / "kiln_step_cache"
+    started = _time.time() - 1
+
+    step = _unique_step(tmp_dir, name="isolation.step")
+    out = tmp_dir / "out"
+    out.mkdir()
+    mesh, _note, _record = ensure_mesh_path(
+        str(step), output_dir=str(out), with_record=True
+    )
+    ours = Path(mesh).read_bytes()
+
+    written = [
+        p for p in (real_cache.glob("*.stl") if real_cache.is_dir() else [])
+        if p.stat().st_mtime >= started
+    ]
+    assert not any(p.read_bytes() == ours for p in written), (
+        "this run's conversion landed in the cache the real server uses"
+    )

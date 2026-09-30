@@ -602,6 +602,31 @@ def _validate_output_dir(output_dir: str | None, step_path: Path) -> Path:
 
 
 # ---------------------------------------------------------------------------
+# The conversion cache
+# ---------------------------------------------------------------------------
+
+
+def _conversion_cache_dir() -> Path:
+    """Where converted meshes and exact reads are cached.
+
+    The OS temp dir, shared by every Kiln process of this user, unless
+    ``KILN_STEP_CACHE_DIR`` names another.  A test run gets a folder of its
+    own either way: the shared one holds the real server's entries, and the
+    suite's cache tests delete every record they can see, then overwrite what
+    is left with junk (2026-09-30: one run on a developer machine did both to
+    the cache its real server was reading).  Same rule as
+    ``daily_stats._recording_suppressed``, for the same reason: a test must
+    not be able to reach the state of the person running it.
+    """
+    override = os.environ.get("KILN_STEP_CACHE_DIR")
+    if override:
+        return Path(override)
+    if os.environ.get("PYTEST_CURRENT_TEST") or "pytest" in sys.modules:
+        return Path(tempfile.gettempdir()) / f"kiln_step_cache_pytest_{os.getpid()}"
+    return Path(tempfile.gettempdir()) / "kiln_step_cache"
+
+
+# ---------------------------------------------------------------------------
 # Output naming
 # ---------------------------------------------------------------------------
 
@@ -1895,7 +1920,7 @@ def read_exact_geometry(path: str) -> ExactGeometry:
     except OSError as exc:
         return _exact_unavailable(f"Could not read that file: {exc}")
 
-    cache_dir = Path(tempfile.gettempdir()) / "kiln_step_cache"
+    cache_dir = _conversion_cache_dir()
     cached = cache_dir / f"{key}.exact.json"
     if cached.is_file():
         hit = _exact_from_payload(_read_json_or_none(cached))
@@ -2193,7 +2218,7 @@ def ensure_mesh_path(
         + repr((_OCP_LINEAR_DEFLECTION, _OCP_ANGULAR_DEFLECTION,
                 backend_fingerprint)).encode()
     ).hexdigest()
-    cache_dir = Path(tempfile.gettempdir()) / "kiln_step_cache"
+    cache_dir = _conversion_cache_dir()
     cached = cache_dir / f"{key}.stl"
     # The record rides WITH the cached mesh, in a sidecar beside it.  Without
     # one, a cache hit would return no record at all — so the same file would
