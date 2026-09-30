@@ -13,10 +13,10 @@ It is a serializer, not a second source of truth.  A profile is authored once,
 in PrusaSlicer's vocabulary, and this file is the only place that knows how
 that vocabulary is spelled on the other side.
 
-Everything below was measured against OrcaSlicer 2.3.2 on 2026-08-11, by
-slicing a 20 mm cube from presets built here and reading the values back out
-of the emitted G-code.  Four findings shape the whole design, and each one is
-a silent failure if you get it wrong:
+Everything below was measured against OrcaSlicer 2.3.2 -- from 2026-08-11 on,
+each later finding dated where it is stated -- by slicing from presets built
+here and reading the values back out of the emitted G-code.  These findings
+shape the whole design, and each one is a silent failure if you get it wrong:
 
 1.  **Presets must be FLAT.**  Orca does not resolve ``inherits`` for a preset
     handed to it by path — it loads the file as written.  Its own system
@@ -52,6 +52,29 @@ a silent failure if you get it wrong:
     for the identical file.  This was not just a bad estimate — the G-code
     itself printed at a fraction of the intended speed.
 
+6.  **Every speed the profile means must be mapped**, for the reason behind
+    (4) and (5): an unmapped key reaches Orca as Orca's own default.
+    Measured 2026-09-30 through ``bambu_a1``: internal solid infill, the top
+    surface and gap fill came out at 100, 100 and 30 mm/s under a profile
+    asking 250 for sparse infill.  ``_PROCESS_SPEED`` carries every speed the
+    bundled profiles state or derive
+    (:func:`kiln.slicer_profiles._ensure_speed_coverage`).
+
+7.  **Acceleration, too — and here the default is written INTO the print.**
+    PrusaSlicer's defaults use machine limits for the estimate only and emit
+    no ``M204`` unless a profile asks, so the printer keeps the acceleration
+    its own firmware or start sequence set.  Orca's defaults write generic
+    limits and per-role accelerations into every file.  Measured 2026-09-30
+    through ``bambu_a1``: ``M201 X1000 Y1000``, then ``M204`` at 10000, 1500,
+    500, 300 and 250 by role (a Klipper-flavour profile gets
+    ``SET_VELOCITY_LIMIT`` instead); stating ``emit_machine_limits_to_gcode =
+    0`` and ``default_acceleration = 0`` removed every one of them and took
+    the estimate from 1h31m to 1h18m.  On a Bambu the wrap keeps the
+    slicer's ``M201`` after the maker's own ``M201 X12000``, so the lower
+    limit was the last one the printer read.  Limits and accelerations are
+    now translated when the settings state them and stated as PrusaSlicer's
+    defaults when they do not.
+
 One upstream crash is worth knowing about, and it is narrower than it looks.
 OrcaSlicer 2.3.2 SIGSEGVs inside
 ``update_values_to_printer_extruders_for_multiple_filaments`` when it is fed
@@ -74,6 +97,8 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Any
+
+from kiln.slicer_profiles import speed_mm_s
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +139,57 @@ _MACHINE_GCODE: dict[str, str] = {
     "layer_gcode": "layer_change_gcode",
 }
 
+# Machine limits: the same names on both sides except that PrusaSlicer's
+# "feedrate" is Orca's "speed".  A PrusaSlicer vector ("1500,1250": normal
+# mode, then stealth) becomes Orca's list.  Whether they reach the G-code is
+# decided once, below (finding 7); either way they feed the estimate.
+_MACHINE_LIMITS: dict[str, str] = {
+    "machine_max_acceleration_e": "machine_max_acceleration_e",
+    "machine_max_acceleration_extruding": "machine_max_acceleration_extruding",
+    "machine_max_acceleration_retracting": "machine_max_acceleration_retracting",
+    "machine_max_acceleration_travel": "machine_max_acceleration_travel",
+    "machine_max_acceleration_x": "machine_max_acceleration_x",
+    "machine_max_acceleration_y": "machine_max_acceleration_y",
+    "machine_max_acceleration_z": "machine_max_acceleration_z",
+    "machine_max_feedrate_e": "machine_max_speed_e",
+    "machine_max_feedrate_x": "machine_max_speed_x",
+    "machine_max_feedrate_y": "machine_max_speed_y",
+    "machine_max_feedrate_z": "machine_max_speed_z",
+    "machine_max_jerk_e": "machine_max_jerk_e",
+    "machine_max_jerk_x": "machine_max_jerk_x",
+    "machine_max_jerk_y": "machine_max_jerk_y",
+    "machine_max_jerk_z": "machine_max_jerk_z",
+    "machine_min_extruding_rate": "machine_min_extruding_rate",
+    "machine_min_travel_rate": "machine_min_travel_rate",
+}
+
+# PrusaSlicer acceleration key -> (Orca key, the PrusaSlicer key a zero falls
+# back to).  The fallbacks are PrusaSlicer's own documented rules: an outer
+# wall with no acceleration of its own uses the perimeters', solid infill
+# uses infill's, the top surface uses solid infill's, and every other role
+# uses the default.  Orca's own per-role defaults differ (inner walls and
+# travel at 10000, outer walls at 500), so an unstated role is written out
+# with PrusaSlicer's answer rather than left for Orca to fill.
+_PROCESS_ACCELERATION: dict[str, tuple[str, str]] = {
+    "perimeter_acceleration": ("inner_wall_acceleration", "default_acceleration"),
+    "external_perimeter_acceleration": ("outer_wall_acceleration", "perimeter_acceleration"),
+    "infill_acceleration": ("sparse_infill_acceleration", "default_acceleration"),
+    "solid_infill_acceleration": ("internal_solid_infill_acceleration", "infill_acceleration"),
+    "top_solid_infill_acceleration": ("top_surface_acceleration", "solid_infill_acceleration"),
+    "first_layer_acceleration": ("initial_layer_acceleration", "default_acceleration"),
+    "bridge_acceleration": ("bridge_acceleration", "default_acceleration"),
+    "travel_acceleration": ("travel_acceleration", "default_acceleration"),
+}
+
+# The machine limits Orca clamps a role's acceleration to (same name on both
+# sides).
+_ACCELERATION_CLAMP_LIMITS: tuple[str, ...] = (
+    "machine_max_acceleration_extruding",
+    "machine_max_acceleration_travel",
+    "machine_max_acceleration_x",
+    "machine_max_acceleration_y",
+)
+
 # PrusaSlicer key -> Orca key on the PROCESS preset.  Orca renamed most of
 # these; the shape is the same scalar on both sides.
 _PROCESS_SCALAR: dict[str, str] = {
@@ -124,15 +200,27 @@ _PROCESS_SCALAR: dict[str, str] = {
     "bottom_solid_layers": "bottom_shell_layers",
     "fill_density": "sparse_infill_density",
     "fill_pattern": "sparse_infill_pattern",
-    "perimeter_speed": "inner_wall_speed",
-    "external_perimeter_speed": "outer_wall_speed",
-    "infill_speed": "sparse_infill_speed",
     "first_layer_speed": "initial_layer_speed",
     "travel_speed": "travel_speed",
     "support_material": "enable_support",
     "brim_width": "brim_width",
     "skirts": "skirt_loops",
     "skirt_distance": "skirt_distance",
+}
+
+# PrusaSlicer speed key -> Orca key on the PROCESS preset, written as the
+# absolute mm/s the settings state (finding 6).  A percentage cannot be
+# copied across: the two slicers read it against different bases -- a small
+# perimeter's "50%" is of the perimeter speed in PrusaSlicer and of the outer
+# wall in Orca.
+_PROCESS_SPEED: dict[str, str] = {
+    "perimeter_speed": "inner_wall_speed",
+    "external_perimeter_speed": "outer_wall_speed",
+    "infill_speed": "sparse_infill_speed",
+    "solid_infill_speed": "internal_solid_infill_speed",
+    "top_solid_infill_speed": "top_surface_speed",
+    "gap_fill_speed": "gap_infill_speed",
+    "small_perimeter_speed": "small_perimeter_speed",
 }
 
 # PrusaSlicer key -> Orca key on the FILAMENT preset.  Orca stores every
@@ -310,6 +398,34 @@ def _unescape_gcode(value: str) -> str:
     return value.replace("\\n", "\n").replace("\\r", "")
 
 
+def _acceleration(settings: dict[str, str], key: str) -> float:
+    """The acceleration PrusaSlicer would use for *key*, in mm/s².
+
+    The key's own value, else its documented fallback's (``_PROCESS_ACCELERATION``),
+    down to ``default_acceleration``; ``0`` means no acceleration control.
+    """
+    seen: set[str] = set()
+    while key not in seen:
+        seen.add(key)
+        try:
+            value = float(str(settings.get(key, "")).strip() or 0)
+        except ValueError:
+            value = 0.0
+        if value > 0 or key == "default_acceleration":
+            return max(value, 0.0)
+        key = _PROCESS_ACCELERATION.get(key, ("", "default_acceleration"))[1]
+    return 0.0
+
+
+def _positive(value: str) -> float | None:
+    """*value* as a number above zero, else ``None`` (zero means no limit)."""
+    try:
+        number = float(value)
+    except ValueError:
+        return None
+    return number if number > 0 else None
+
+
 def _as_list(value: str) -> list[str]:
     """One-item list, the shape Orca uses for every per-extruder value.
 
@@ -388,6 +504,15 @@ def settings_to_orca_presets(
         if corners:
             machine["printable_area"] = corners
 
+    # Finding 7: limits the settings state are translated, and they reach the
+    # G-code only when the settings say so -- PrusaSlicer's default.  Stated
+    # either way, because Orca's own default writes its generic ones.
+    for src, dst in _MACHINE_LIMITS.items():
+        if src in settings:
+            machine[dst] = [p.strip() for p in str(settings[src]).split(",") if p.strip()]
+    usage = str(settings.get("machine_limits_usage", "")).strip()
+    machine["emit_machine_limits_to_gcode"] = "1" if usage == "emit_to_gcode" else "0"
+
     # --- process -------------------------------------------------------
     process: dict[str, Any] = {
         "type": "process",
@@ -400,6 +525,38 @@ def settings_to_orca_presets(
     for src, dst in _PROCESS_SCALAR.items():
         if src in settings:
             process[dst] = str(settings[src])
+    for src, dst in _PROCESS_SPEED.items():
+        raw = str(settings.get(src, "")).strip()
+        if raw.endswith("%"):
+            resolved = speed_mm_s(settings, src)
+            if resolved is None:
+                # A percentage of a speed nobody stated: Orca's own value
+                # stands rather than a number made up here.
+                continue
+            raw = f"{round(resolved, 2):g}"
+        if raw:
+            process[dst] = raw
+
+    # Finding 7 again: "0" when the settings state no acceleration, which is
+    # PrusaSlicer's own default and leaves the printer's acceleration alone.
+    # Once a default is stated, every role is written out, so none of them
+    # falls through to Orca's per-role numbers.
+    default_accel = _acceleration(settings, "default_acceleration")
+    process["default_acceleration"] = f"{default_accel:g}"
+    if default_accel:
+        role_accels = {src: _acceleration(settings, src) for src in _PROCESS_ACCELERATION}
+        for src, (dst, _fallback) in _PROCESS_ACCELERATION.items():
+            process[dst] = f"{role_accels[src]:g}"
+        # Orca clamps every M204 to its machine limits even when it does not
+        # emit them -- measured: 5500 and 8000 came out as 1500, its default,
+        # where PrusaSlicer wrote them as asked.  A limit the settings do not
+        # state is set to the highest acceleration they ask for, so the clamp
+        # changes nothing; the printer's firmware stays the real ceiling.
+        ceiling = f"{max(default_accel, *role_accels.values()):g}"
+        for key in _ACCELERATION_CLAMP_LIMITS:
+            if key not in settings:
+                machine[key] = [ceiling, ceiling]
+
     if "sparse_infill_pattern" in process:
         pattern = process["sparse_infill_pattern"]
         process["sparse_infill_pattern"] = _FILL_PATTERN_ALIASES.get(pattern, pattern)
@@ -457,9 +614,17 @@ def settings_to_orca_presets(
     # one that says nothing gets 0, which is what PrusaSlicer has always
     # done with these same profiles — so the two slicers agree instead of
     # silently disagreeing, and no material figure is invented here.
-    filament[_FILAMENT_MAX_VOLUMETRIC_SPEED] = _as_list(
-        settings.get("filament_max_volumetric_speed", "0")
-    )
+    #
+    # PrusaSlicer also takes a print-level ceiling -- the hotend's, which
+    # kiln.slicer_profiles._ensure_flow_ceiling states -- and uses the lower
+    # of the two.  Orca has only the filament's, so it carries that lower
+    # value.
+    limits = [
+        value
+        for key in (_FILAMENT_MAX_VOLUMETRIC_SPEED, "max_volumetric_speed")
+        if (value := _positive(_as_list(settings.get(key, "0"))[0])) is not None
+    ]
+    filament[_FILAMENT_MAX_VOLUMETRIC_SPEED] = [f"{min(limits):g}" if limits else "0"]
 
     bed = settings.get("bed_temperature")
     bed_first = settings.get("first_layer_bed_temperature", bed)

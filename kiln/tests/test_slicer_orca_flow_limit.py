@@ -106,9 +106,25 @@ class TestVolumetricSpeedIsStated:
         assert body["filament_max_volumetric_speed"] == ["0"]
 
     def test_a_real_bundled_profile_carries_it(self):
+        """Stated, and never Orca's default: the bundled profile carries the
+        printer's own hotend ceiling (kiln.slicer_profiles._ensure_flow_ceiling),
+        which PrusaSlicer reads as max_volumetric_speed and Orca only has a
+        filament key for."""
+        from kiln.safety_profiles import get_profile
+
         settings = ini_to_settings(resolve_slicer_profile("bambu_a1"))
         p = settings_to_orca_presets(settings, name="t")
-        assert p.filament["filament_max_volumetric_speed"] == ["0"]
+        ceiling = get_profile("bambu_a1").max_volumetric_flow
+        assert p.filament["filament_max_volumetric_speed"] == [f"{ceiling:g}"]
+
+    def test_the_lower_of_the_two_ceilings_crosses(self):
+        p = settings_to_orca_presets(
+            dict(_SETTINGS, filament_max_volumetric_speed="12", max_volumetric_speed="28"),
+            name="t",
+        )
+        assert p.filament["filament_max_volumetric_speed"] == ["12"]
+        p = settings_to_orca_presets(dict(_SETTINGS, max_volumetric_speed="28"), name="t")
+        assert p.filament["filament_max_volumetric_speed"] == ["28"]
 
 
 # ---------------------------------------------------------------------------

@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -258,6 +259,146 @@ def _ensure_start_temperatures(settings: dict[str, str]) -> None:
     settings["start_gcode"] = "\\n".join(lines)
 
 
+#: PrusaSlicer's documented base for each speed it accepts as a percentage:
+#: ``"50%"`` is half of THIS key's speed.  Every other speed key is mm/s only.
+_SPEED_PERCENT_BASE: dict[str, str] = {
+    "external_perimeter_speed": "perimeter_speed",
+    "small_perimeter_speed": "perimeter_speed",
+    "solid_infill_speed": "infill_speed",
+    "top_solid_infill_speed": "solid_infill_speed",
+}
+
+#: Gap fill and small perimeters (holes and bosses, radius 6.5 mm or less)
+#: print at this share of the outer-wall speed: both are short, tight moves
+#: the slicer's own help says to keep slow.
+_SHORT_MOVE_SHARE_OF_EXTERNAL = 0.5
+
+
+def speed_mm_s(settings: Mapping[str, str], key: str) -> float | None:
+    """The speed *settings* state for *key*, in mm/s, or ``None``.
+
+    A percentage is read against the key PrusaSlicer documents as its base,
+    so ``external_perimeter_speed = 50%`` is half the perimeter speed.
+    ``None`` when the key is unstated, unreadable, zero (the slicer's
+    "auto"), or a percentage of something unstated: a derivation needs a
+    speed somebody chose.
+    """
+    raw = str(settings.get(key, "")).strip()
+    if not raw:
+        return None
+    try:
+        if raw.endswith("%"):
+            base_key = _SPEED_PERCENT_BASE.get(key)
+            base = speed_mm_s(settings, base_key) if base_key else None
+            value = None if base is None else float(raw[:-1]) / 100.0 * base
+        else:
+            value = float(raw)
+    except ValueError:
+        return None
+    return value if value is not None and value > 0 else None
+
+
+def _speed_value(value: float) -> str:
+    """A speed as an INI value: ``200``, ``67.5``."""
+    return f"{round(value, 2):g}"
+
+
+def _ensure_speed_coverage(settings: dict[str, str]) -> None:
+    """Give every feature the profile's pace instead of the slicer's, in place.
+
+    A bundled profile states five speeds -- perimeters, the outer wall,
+    sparse infill, the first layer and travel -- and PrusaSlicer fills every
+    speed it was not given from its own defaults: 20 mm/s for solid infill,
+    15 for the top surface, 20 for gap fill, 15 for small perimeters.  Those
+    suit a 60 mm/s machine.  Under a profile that prints sparse infill at
+    250 they are a floor of a twelfth of that, and the floor is real: the
+    feedrates are written into the G-code, so every part's top, bottom and
+    solid layers print at 15-20 mm/s, and the time estimate grows with them.
+    Measured 2026-09-30 through ``bambu_a1`` on an 80 x 55 x 28 mm enclosure
+    in PETG: 2h28m as emitted, 1h13m with the speeds derived here.
+
+    Each missing speed is tied to the nearest feature the author did state,
+    and never runs faster than that feature:
+
+    * solid infill -- the slower of the perimeter and sparse-infill speeds;
+    * the top surface -- the outer-wall speed, no faster than solid infill;
+    * gap fill and small perimeters -- half the outer-wall speed.
+
+    Printer makers' own presets hold the same relationships, and in most of
+    them each of these features runs at the derived speed or faster, so a
+    derived speed is never the aggressive choice.  Flow is bounded
+    separately, by :func:`_ensure_flow_ceiling`: the slicer's widest solid
+    lines run wider than its widest walls, so a speed that suits the walls
+    can ask more of the hotend than they do.
+
+    A stated key is the author speaking and is never replaced -- an override
+    wins, and so does a profile that states the slicer's own value on
+    purpose.  A profile that states no anchor speed is left to the slicer:
+    its defaults at least agree with each other.
+    """
+    perimeter = speed_mm_s(settings, "perimeter_speed")
+    external = speed_mm_s(settings, "external_perimeter_speed")
+    infill = speed_mm_s(settings, "infill_speed")
+
+    if "solid_infill_speed" not in settings and perimeter and infill:
+        settings["solid_infill_speed"] = _speed_value(min(perimeter, infill))
+    solid = speed_mm_s(settings, "solid_infill_speed")
+
+    if external:
+        top = min(external, solid) if solid else external
+        short_move = external * _SHORT_MOVE_SHARE_OF_EXTERNAL
+        settings.setdefault("top_solid_infill_speed", _speed_value(top))
+        settings.setdefault("gap_fill_speed", _speed_value(short_move))
+        settings.setdefault("small_perimeter_speed", _speed_value(short_move))
+
+
+def _ensure_flow_ceiling(settings: dict[str, str], profile_id: str) -> None:
+    """Hand the slicer the hotend's flow ceiling for *profile_id*, in place.
+
+    A speed times a line's cross-section is a flow, and a hotend melts only
+    so much plastic a second.  Kiln's safety profile states that ceiling for
+    each printer; nothing passed it to the slicer, whose default is no limit,
+    so any speed -- stated, derived, or a caller's override at a thicker
+    layer -- could ask for more.  Measured 2026-09-30 from the extruder's own
+    E values, slicing an 80 x 55 x 28 mm enclosure through every bundled
+    profile: the derived speeds took the fastest flow on the Bambu-class
+    profiles from 20.4 to 21.4 mm³/s, under every stated ceiling, while
+    ``aon_m2_plus``'s own sparse infill already asked for 36.6 against its
+    ceiling of 30.  With the ceiling stated, that profile's feedrates were
+    the only ones to change.  Where a profile and its ceiling disagree, the
+    ceiling wins until one of them is re-read: it is the conservative of
+    the two.
+
+    Read through :func:`kiln.safety_profiles.get_profile`, the one door for
+    printer limits, so a declared hotend variant or an owner's tightened
+    ceiling is honoured here as everywhere else.  A value the settings state
+    -- a caller's override -- is theirs; a printer with no stated ceiling is
+    left without one.
+    """
+    if "max_volumetric_speed" in settings:
+        return
+    from kiln.safety_profiles import get_profile
+
+    try:
+        ceiling = get_profile(profile_id).max_volumetric_flow
+    except KeyError:
+        return
+    if ceiling:
+        settings["max_volumetric_speed"] = f"{ceiling:g}"
+
+
+def _apply_profile_invariants(settings: dict[str, str]) -> None:
+    """Every rule an ``.ini`` must satisfy before a slicer reads it, in place.
+
+    One call for every door that writes one -- the bundled resolver, the
+    multi-extruder builder and the override fallback -- so a rule added here
+    reaches all three, and no door can carry a copy that drifts.
+    """
+    _ensure_layer_e_reset(settings)
+    _ensure_start_temperatures(settings)
+    _ensure_speed_coverage(settings)
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -324,12 +465,12 @@ def resolve_slicer_profile(
     merged = dict(profile.settings)
     if overrides:
         merged.update(overrides)
-    # After the merge: an override can switch relative-E on, or replace the
-    # layer_gcode that was satisfying the rule.
-    _ensure_layer_e_reset(merged)
-    # Likewise after the merge, so the floor quotes the temperatures this job
-    # will actually print at rather than the ones the profile shipped with.
-    _ensure_start_temperatures(merged)
+    # After the merge: an override can switch relative-E on, replace the
+    # layer_gcode that was satisfying the rule, change the temperatures the
+    # start floor quotes, change a speed a derived one is tied to, or state
+    # a flow ceiling of its own.
+    _ensure_flow_ceiling(merged, profile.id)
+    _apply_profile_invariants(merged)
 
     # Build a cache key from the effective settings.
     cache_key = f"{profile.id}:{_settings_hash(merged)}"
@@ -408,20 +549,21 @@ def profile_with_overrides(
         lines.append("")
     lines.extend(f"{key} = {remaining[key]}" for key in sorted(remaining))
 
-    # The same invariant the bundled resolvers apply, for the same reason:
+    # The same invariants the bundled resolvers apply, for the same reason:
     # this door writes an .ini too, and slice_and_print pushes
     # use_relative_e_distances=1 through it for every Bambu whose model is
     # unset or unmappable — the exact callers this helper exists to serve.
+    # Every key an invariant adds or changes is written back, not a named
+    # few: a list here is a second copy of the rules, and it drifts.
     effective = {
         raw.split("=", 1)[0].strip(): raw.split("=", 1)[1].strip()
         for raw in lines
         if "=" in raw and not raw.lstrip().startswith("#")
     }
     patched = dict(effective)
-    _ensure_layer_e_reset(patched)
-    _ensure_start_temperatures(patched)
-    for key in ("layer_gcode", "start_gcode"):
-        if patched.get(key) == effective.get(key):
+    _apply_profile_invariants(patched)
+    for key in patched:
+        if patched[key] == effective.get(key):
             continue
         patched_line = f"{key} = {patched[key]}"
         for idx, raw in enumerate(lines):
@@ -703,9 +845,9 @@ def resolve_multiextruder_profile(
         merged.update(overrides)
     # This builder used to set layer_gcode unconditionally, which was right
     # for the Bambu profiles it is used with and wrong for anything with
-    # absolute E.  The shared invariant checks before it writes.
-    _ensure_layer_e_reset(merged)
-    _ensure_start_temperatures(merged)
+    # absolute E.  The shared invariants check before they write.
+    _ensure_flow_ceiling(merged, profile.id)
+    _apply_profile_invariants(merged)
 
     cache_key = f"{profile.id}_mme{num_extruders}:{_settings_hash(merged)}"
     if cache_key in _temp_cache and os.path.isfile(_temp_cache[cache_key]):
