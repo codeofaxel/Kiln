@@ -122,7 +122,7 @@ kiln filament wipe --plan         # Same for the wipe-pad pass; --plate-clear wh
 kiln status --json
 ```
 
-Global option: `--printer <name>` targets a specific printer per command. The full command reference is in [Project Docs](docs/PROJECT_DOCS.md).
+Global option: `--printer <name>` targets a specific printer per command. The full command reference is in [Project Docs](https://www.kiln3d.com/docs?utm_source=github&utm_medium=readme).
 </details>
 
 <details>
@@ -453,7 +453,7 @@ The Kiln MCP server (`kiln serve`) exposes **<!-- KILN_MCP_TOOL_COUNT:OLD --> 93
 - **fulfillment_quote**
   - Get a manufacturing quote from Craftcloud's network — printing without owning a printer
 
-Beyond this slice, the catalog covers fleet orchestration, print-failure prediction, design version control, assembly manuals, and per-machine calibration; the deeper tiers are described at [kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&utm_medium=readme). The complete tool catalog, grouped by subsystem, lives in **[Project Docs](docs/PROJECT_DOCS.md)**. If you *are* the agent, [**kiln3d.com/agents**](https://kiln3d.com/agents?utm_source=github&utm_medium=readme) covers the same ground written in the second person, including the refusals worth knowing before you hit them.
+Beyond this slice, the catalog covers fleet orchestration, print-failure prediction, design version control, assembly manuals, and per-machine calibration; the deeper tiers are described at [kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&utm_medium=readme). The complete tool catalog, grouped by subsystem, lives in **[Project Docs](https://www.kiln3d.com/docs?utm_source=github&utm_medium=readme)**. If you *are* the agent, [**kiln3d.com/agents**](https://kiln3d.com/agents?utm_source=github&utm_medium=readme) covers the same ground written in the second person, including the refusals worth knowing before you hit them.
 
 <details>
 <summary>MCP resources (read-only context for agents)</summary>
@@ -624,7 +624,7 @@ kiln-pro ([kiln3d.com](https://kiln3d.com/?utm_source=github&utm_medium=readme))
 
 | Document | Description |
 |----------|-------------|
-| [Project Docs](docs/PROJECT_DOCS.md) | Complete reference (CLI, MCP tools, adapters, config) |
+| [Project Docs](https://www.kiln3d.com/docs?utm_source=github&utm_medium=readme) | Complete reference (CLI, MCP tools, adapters, config) |
 
 <details>
 <summary>Brand assets</summary>

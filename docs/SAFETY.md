@@ -333,7 +333,7 @@ The safety system actively prevents the following:
   says go -- in their AI app's approval dialog, by typing a code Kiln shows on
   their screen, or at the terminal, or under an auto-print setting they
   switched on themselves -- and an agent cannot supply that yes itself.  Stopping, pausing and watching a print never need that yes.  See
-  "Saying Go" in [PROJECT_DOCS.md](PROJECT_DOCS.md#saying-go).
+  "Saying Go" in [the Kiln docs](https://www.kiln3d.com/docs#saying-go).
 - **Allow agents to modify firmware settings.**  EEPROM writes (M500/M501/M502),
   network configuration (M552-M554), and firmware updates (M997) are all
   blocked at the G-code validation layer.
