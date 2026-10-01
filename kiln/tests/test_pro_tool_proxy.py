@@ -528,3 +528,57 @@ def test_only_the_allowlisted_fields_are_read_from_the_manifest(
     assert set(server._PRO_TOOL_NUDGES["known_schema_tool"]) == set(
         server._NUDGE_FIELDS
     )
+
+
+# ---------------------------------------------------------------------------
+# How long a request waits follows what the tool does
+# ---------------------------------------------------------------------------
+#
+# Every request used to wait thirty seconds.  Kiln's servers allow a tool
+# up to five minutes, so a drawing or a texture that took forty seconds
+# came back as "no answer" while the server finished it -- and asking again
+# did the work, and spent the allowance, twice.
+
+
+def _waited(monkeypatch, tool: str, **kwargs) -> float:
+    seen = {}
+
+    def fake_urlopen(req, timeout):
+        seen["timeout"] = timeout
+        return _FakeUrlopenResponse(b'{"status": "ok"}')
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    assert _pro_api_call(tool, **kwargs) == {"status": "ok"}
+    return seen["timeout"]
+
+
+def test_a_tool_that_makes_something_waits_as_long_as_the_server_may_take(
+    tmp_path, monkeypatch,
+):
+    _paired_env(tmp_path, monkeypatch)
+    for tool in ("generate_technical_drawing", "apply_procedural_texture", "make_printable"):
+        assert _waited(monkeypatch, tool) == 300, tool
+
+
+def test_a_lookup_still_gives_up_after_thirty_seconds(tmp_path, monkeypatch):
+    _paired_env(tmp_path, monkeypatch)
+    for tool in ("list_designs", "check_chemical_resistance", "record_print_outcome"):
+        assert _waited(monkeypatch, tool) == 30, tool
+
+
+def test_the_manifests_kind_decides_before_the_name_does(tmp_path, monkeypatch):
+    import kiln.server as server
+
+    _paired_env(tmp_path, monkeypatch)
+    monkeypatch.setitem(server._PRO_TOOL_OFFLINE_KIND, "list_designs", "made")
+    monkeypatch.setitem(server._PRO_TOOL_OFFLINE_KIND, "generate_technical_drawing", "read")
+    assert _waited(monkeypatch, "list_designs") == 300
+    assert _waited(monkeypatch, "generate_technical_drawing") == 30
+
+
+def test_a_caller_that_must_fail_fast_keeps_its_own_wait(tmp_path, monkeypatch):
+    """A check on the way into a print passes its own short wait, and a
+    tool's kind never stretches it."""
+    _paired_env(tmp_path, monkeypatch)
+    assert _waited(monkeypatch, "generate_technical_drawing", _timeout=4.0) == 4.0
+    assert _waited(monkeypatch, "list_designs", _timeout=0.5) == 0.5
