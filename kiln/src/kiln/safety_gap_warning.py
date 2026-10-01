@@ -29,6 +29,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln.printer_setup import AGENT_REMEDY
+
 logger = logging.getLogger(__name__)
 
 
@@ -62,14 +64,7 @@ def safety_gap_warning() -> dict[str, Any] | None:
                 "temperatures — those checks are skipped and an unsafe "
                 "print could reach the printer."
             ),
-            "remediation": (
-                "Ask the user which printer model they have, then add "
-                "`printer_model: <value>` under the printer entry in "
-                "~/.kiln/config.yaml.  Examples: bambu_a1, bambu_x1c, "
-                "prusa_mk4, prusa_mini, ender3, klipper_generic.  See "
-                "kiln/data/printer_intelligence.json for the full list "
-                "of valid keys."
-            ),
+            "remediation": AGENT_REMEDY,
         }
 
         # Best-effort Bambu serial suggestion — doesn't AUTO-APPLY

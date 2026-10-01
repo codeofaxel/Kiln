@@ -2150,8 +2150,8 @@ class BambuAdapter(PrinterAdapter):
         if serial_family and mqtt_family and serial_family != mqtt_family:
             logger.warning(
                 "Bambu identity channels disagree: serial prefix %r says %r, "
-                "firmware product_name %r says %r. Reporting no model — set "
-                "`printer_model` in ~/.kiln/config.yaml to settle it.",
+                "firmware product_name %r says %r. Reporting no model — settle "
+                "it with `kiln set-model` or the `set_printer_model` tool.",
                 self._serial[:3],
                 serial_family,
                 product_name,

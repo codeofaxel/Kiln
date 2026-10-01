@@ -37,6 +37,7 @@ from kiln.printer_backends import (
     PRINTER_TYPES,
     format_printer_types,
 )
+from kiln.printer_setup import CLI_REMEDY
 from kiln.printers.base import PrinterError
 from kiln.printers.command_verdict import CommandVerdict
 
@@ -2183,15 +2184,11 @@ def status(ctx: click.Context, json_mode: bool) -> None:
                         )
                         if suggestion:
                             click.echo(click.style(
-                                f"  Suggested: add `printer_model: {suggestion}` "
-                                f"to ~/.kiln/config.yaml",
+                                f"  Suggested: kiln set-model {suggestion}",
                                 fg="cyan",
                             ))
                         else:
-                            click.echo(
-                                "  Fix: add `printer_model: <value>` to the "
-                                "printer entry in ~/.kiln/config.yaml"
-                            )
+                            click.echo(f"  {CLI_REMEDY}")
                         click.echo(
                             "  Or run `kiln setup` for the interactive flow."
                         )
@@ -4175,6 +4172,39 @@ def use(name: str) -> None:
         click.echo(f"Active printer set to '{name}'.")
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
+
+
+@cli.command("set-model")
+@click.argument("model", required=False)
+@click.option(
+    "--from-file",
+    "slicer_file",
+    type=click.Path(dir_okay=False),
+    help="Read the model from a project saved in Bambu Studio, OrcaSlicer or PrusaSlicer.",
+)
+@click.option("--printer", "printer_name", help="The saved printer to set (default: the active one).")
+@click.option("--replace", is_flag=True, help="Change a printer that already has a different model.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def set_model(
+    model: str | None, slicer_file: str | None, printer_name: str | None, replace: bool, json_mode: bool,
+) -> None:
+    """Tell Kiln which printer model a saved printer is.
+
+    Name the MODEL ("Bambu Lab A1", "MK4"), or pass --from-file with a
+    project saved from your slicer.  Kiln checks prints against that
+    model's bed and temperature limits; with no model set, it cannot.
+    """
+    from kiln.printer_setup import set_printer_model
+
+    result = set_printer_model(model, slicer_file=slicer_file, printer_name=printer_name, replace=replace)
+    if json_mode:
+        click.echo(json.dumps(result, indent=2))
+        if not result["success"]:
+            sys.exit(1)
+        return
+    if not result["success"]:
+        raise click.ClickException(result["error"])
+    click.echo(result["message"])
 
 
 @cli.command("remove")
@@ -8888,14 +8918,10 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
                     )
                     if suggestion:
                         click.echo(click.style(
-                            f"    Suggested value for your Bambu: printer_model: {suggestion}",
+                            f"    Suggested for your Bambu: kiln set-model {suggestion}",
                             fg="cyan",
                         ))
-                    click.echo(
-                        "    Fix: add `printer_model: <value>` under the printer "
-                        "entry in\n    ~/.kiln/config.yaml.  Run `kiln setup` to "
-                        "re-run the interactive\n    flow which now asks for this."
-                    )
+                    click.echo(f"    {CLI_REMEDY}")
                 results["setup"]["missing_printer_model"] = missing
         except Exception:
             pass
@@ -11074,7 +11100,7 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
                                 "detail": (
                                     "not set and not self-reported — model-specific "
                                     "checks (temperature limits, bed fit) fall back to "
-                                    "defaults. Add printer_model to ~/.kiln/config.yaml."
+                                    "defaults. " + CLI_REMEDY
                                 ),
                             }
                         )

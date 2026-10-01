@@ -12240,6 +12240,64 @@ def register_printer(
 # — extracted to plugins/fleet_tools.py
 
 
+@mcp.tool()
+def set_printer_model(
+    printer_model: str | None = None,
+    slicer_file: str | None = None,
+    printer_name: str | None = None,
+    replace: bool = False,
+) -> dict:
+    """Tell Kiln which printer model a saved printer is -- by name, or from a slicer file.
+
+    Kiln checks every print against the bed it will land on and the
+    temperatures the machine can take, and slices with the model's own
+    profile.  All three are read from the printer's model.  With no model
+    set, those checks are SKIPPED.  Use this as soon as ``kiln_health`` or a
+    log says the model is not configured.
+
+    Two ways to say it -- give exactly one:
+
+    * ``printer_model``: any name the catalogue recognises (``"Bambu Lab
+      A1"``, ``"bambu_a1"``, ``"MK4"``, ``"K1 Max"``).
+    * ``slicer_file``: a project the user saved from Bambu Studio,
+      OrcaSlicer or PrusaSlicer (File > Save Project), or a printer
+      settings file exported from one.  It already names the printer it
+      was set up for.  Ask a new user for one instead of asking them to
+      look up a model key.
+
+    Args:
+        printer_model: The model, in any spelling the catalogue knows.
+        slicer_file: Path to a saved slicer project or exported settings.
+        printer_name: The saved printer to set.  Omit for the active one.
+        replace: Allow changing a printer that already has a different
+            model.  Off by default: the model decides the limits Kiln
+            checks against, so a wrong one is worse than none.
+
+    Returns ``applied`` (whether anything changed), the ``printer`` and its
+    ``printer_model``, and a ``message`` to relay.  From a slicer file it
+    also returns ``file`` -- the printer, bed, nozzle size and material the
+    file states -- and ``notes`` where the file's bed or nozzle differs from
+    what Kiln holds.  The notes change nothing: relay them, and if the
+    file's nozzle is the one fitted, record it.
+
+    Nothing is written for a model the catalogue does not hold
+    (``UNKNOWN_MODEL``, with the closest matches), a model that does not
+    suit the printer's connection, or a printer that already has another
+    model unless ``replace`` is set.
+    """
+    if err := _check_auth("admin"):
+        return err
+    try:
+        from kiln.printer_setup import set_printer_model as _set_printer_model
+
+        return _set_printer_model(
+            printer_model, slicer_file=slicer_file, printer_name=printer_name, replace=replace,
+        )
+    except Exception as exc:
+        logger.exception("Error in set_printer_model")
+        return _error_dict(f"Could not set the printer model: {exc}", code="SET_PRINTER_MODEL_ERROR")
+
+
 # ---------------------------------------------------------------------------
 # Per-project cost tracking tools (Enterprise)
 # ---------------------------------------------------------------------------
@@ -20547,7 +20605,8 @@ def extract_file_metadata(file_path: str) -> dict:
     Parses file headers for estimated print time, layer count, filament usage,
     dimensions, slicer info, and material hints — without re-slicing.  A
     project saved from Bambu Studio, OrcaSlicer or PrusaSlicer also gives the
-    printer, nozzle size, layer height and material it was set up for.
+    printer, nozzle size, layer height and material it was set up for; hand
+    the same file to ``set_printer_model`` to set a saved printer up from it.
 
     .. note::
         For multi-object .gcode.3mf files, also consider using

@@ -152,9 +152,9 @@ def _read_printer_model_from_config() -> str | None:
             "Kiln can't check that prints fit the bed or stay within safe "
             "temperatures — those checks are skipped, so an unsafe print "
             "could reach the printer.  Ask the user which printer model "
-            "they have and add `printer_model: <model>` under `printers.%s` "
-            "in the config file (e.g. bambu_a1, prusa_mk4, ender3).",
-            ptype, _CONFIG_PATH, active_printer,
+            "they have and set it with the `set_printer_model` tool or "
+            "`kiln set-model` (a project saved from their slicer names it too).",
+            ptype, _CONFIG_PATH,
         )
     return None
 
@@ -198,8 +198,8 @@ def resolve_printer_model_for(printer_name: str | None) -> str | None:
         # really will skip for it, so say so at a level they will see.
         logger.warning(
             "No `printer_model` set for printer %r in %s.  Bed-fit and "
-            "temperature checks for prints aimed at it will be skipped.  Add "
-            "`printer_model: <model>` under `printers.%s` in the config file.",
+            "temperature checks for prints aimed at it will be skipped.  Set "
+            "it with the `set_printer_model` tool or `kiln set-model --printer %s`.",
             printer_name, _CONFIG_PATH, printer_name,
         )
     else:

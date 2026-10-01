@@ -2218,7 +2218,7 @@ class IdentityConflict:
         parts = ", ".join(f"{src} says {model}" for src, model in self.claims.items())
         return (
             f"Printer identity is ambiguous — {parts}. "
-            "Set printer_model in ~/.kiln/config.yaml to the correct value; "
+            "Set the correct model with `kiln set-model --replace` (or the `set_printer_model` tool); "
             "if it is already correct, this means one of Kiln's identity "
             "tables is wrong and should be reported."
         )
@@ -4614,9 +4614,9 @@ class PrinterAdapter(ABC):
         if model:
             return (
                 f"Kiln has no motion record for {model!r} -- not a catalogue key it knows. "
-                "Run `kiln setup` (it asks which printer this is and writes the answer), or set "
-                "printer_model for this printer in config.yaml (KILN_PRINTER_MODEL for the env door) to a "
-                "catalogue key from printer_intelligence.json."
+                "Set it with `kiln set-model` or the `set_printer_model` tool, which accept the printer's "
+                "name or a project saved from your slicer and write the catalogue's own key "
+                "(KILN_PRINTER_MODEL for the env door)."
             )
         return (
             "Kiln does not know which printer this is: no printer_model is declared for it. "

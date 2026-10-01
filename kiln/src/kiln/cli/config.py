@@ -464,6 +464,28 @@ def save_printer(
     return path
 
 
+def set_printer_model(
+    name: str,
+    printer_model: str,
+    *,
+    config_path: Path | None = None,
+) -> Path:
+    """Record which catalogue model the saved printer *name* is.
+
+    Changes that one field of that one entry.  Raises :class:`ValueError`
+    when no printer of that name is saved.  Returns the path to the config
+    file.
+    """
+    path = config_path or get_config_path()
+    raw = _read_config_file(path)
+    printers = raw.get("printers")
+    if not isinstance(printers, dict) or not isinstance(printers.get(name), dict):
+        raise ValueError(f"Printer {name!r} not found.")
+    printers[name]["printer_model"] = printer_model
+    _write_config_file(path, raw)
+    return path
+
+
 def set_active_printer(
     name: str,
     *,

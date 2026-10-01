@@ -384,15 +384,45 @@ def _parse_3mf_slicer_metadata(zf: zipfile.ZipFile, meta: FileMetadata) -> None:
     :data:`_SETTINGS_MEMBER_BYTES`, is left unread and costs the others
     nothing.
     """
+    for content in _settings_members(zf):
+        _parse_config_text(content, meta)
+
+
+def _settings_members(zf: zipfile.ZipFile) -> list[str]:
+    """The text of every settings member of a 3MF, the project's own first."""
     members = [name for name in zf.namelist() if name.lower().endswith(".config") and "metadata" in name.lower()]
     members.sort(key=lambda name: (name.lower().rsplit("/", 1)[-1] not in _PROJECT_SETTINGS_MEMBERS, name))
+    texts: list[str] = []
     for name in members:
         try:
-            content = read_member_text(zf, name, _SETTINGS_MEMBER_BYTES)
+            texts.append(read_member_text(zf, name, _SETTINGS_MEMBER_BYTES))
         except (OSError, KeyError, ValueError, zipfile.BadZipFile, zlib.error) as exc:
             logger.debug("Left a 3MF's %s unread: %s", name, exc)
-            continue
-        _parse_config_text(content, meta)
+    return texts
+
+
+def slicer_settings(file_path: str) -> dict[str, str]:
+    """Every setting a slicer wrote into the file at *file_path*.
+
+    A saved project (``.3mf``) gives its settings members, the project's own
+    first and the first statement of a key kept.  Any other file is read as
+    one exported settings file: PrusaSlicer's ``key = value`` config, or a
+    Bambu Studio / OrcaSlicer preset, which is one JSON object.  Empty for a
+    file that states no settings -- a bare model, a format Kiln does not
+    read.  Raises ``OSError`` for a file that cannot be opened.
+    """
+    settings: dict[str, str] = {}
+    if os.path.splitext(file_path)[1].lower() in _3MF_EXTENSIONS:
+        try:
+            with zipfile.ZipFile(file_path) as zf:
+                for content in _settings_members(zf):
+                    for key, value in _settings_of(content).items():
+                        settings.setdefault(key, value)
+        except zipfile.BadZipFile:
+            return {}
+        return settings
+    with open(file_path, encoding="utf-8", errors="replace") as fh:
+        return _settings_of(fh.read(_SETTINGS_MEMBER_BYTES))
 
 
 def _parse_config_text(content: str, meta: FileMetadata) -> None:
