@@ -451,8 +451,16 @@ class _PrintabilityToolsPlugin:
                         )
 
                         intel = get_printer_intel(effective_pid)
-                        if intel:
-                            signals["printer_has_enclosure"] = intel.get("has_enclosure", False)
+                        # A PrinterIntel, not a dict: reading it as one
+                        # raised into the except below, so no diagnosis
+                        # ever heard the printer's enclosure or its failure
+                        # modes.  An id the catalogue does not know comes
+                        # back as its "default" stand-in, which says
+                        # nothing about this printer -- it stays unknown,
+                        # so neither the stand-in's enclosure nor its
+                        # generic failure modes are read as this machine's.
+                        if intel.id != "default":
+                            signals["printer_has_enclosure"] = intel.has_enclosure
                             # Build symptom queries from state
                             symptom_queries = _build_symptom_queries(state_data, signals)
                             modes: list[dict[str, str]] = []
