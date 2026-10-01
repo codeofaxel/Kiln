@@ -160,8 +160,15 @@ class TestWarpingAnalysis:
         # ABS should have equal or higher risk than PLA for same geometry
         assert abs_report.warping.score_deduction <= pla_report.warping.score_deduction
 
-    def test_recommendations_include_brim(self, tmp_path):
-        """High warp risk should recommend adding a brim."""
+    def test_high_warp_risk_gets_its_brim_from_the_one_decision(self, tmp_path):
+        """High warp risk should end in a brim recommendation.
+
+        The brim is decided once, on the report's ``adhesion`` block, which
+        reads the warping verdict.  The warping advice states the risk and
+        names no brim of its own, so one report cannot both call for a brim
+        and say none is needed (the rule ``test_printability_one_voice``
+        pins across every block).
+        """
         stl = str(tmp_path / "wide_plate.stl")
         _write_box_stl(stl, 200.0, 200.0, 2.0)
 
@@ -170,8 +177,14 @@ class TestWarpingAnalysis:
         report = analyze_printability(stl, material="abs")
 
         assert report.warping is not None
-        recs_text = " ".join(report.warping.recommendations).lower()
-        assert "brim" in recs_text
+        assert report.warping.risk_level in ("high", "critical")
+        assert report.adhesion is not None
+        assert report.adhesion.brim_width_mm >= 5
+        # The warping verdict is what set it, not the precautionary brim an
+        # unnamed printer also earns ABS: the decision names the risk level.
+        assert report.warping.risk_level in report.adhesion.rationale
+        assert "brim" in report.adhesion.rationale.lower()
+        assert "brim" not in " ".join(report.warping.recommendations).lower()
 
     def test_recommendations_include_chamber(self, tmp_path):
         """ABS with high warp risk should recommend an enclosed chamber."""

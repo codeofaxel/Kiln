@@ -1,10 +1,11 @@
 """``kiln.mesh_payload`` on an install that has no trimesh.
 
-trimesh ships in the ``mesh-diagnostics`` extra, not the base install, so
-most people who ``pip install kiln3d`` do not have it.  Every module in
-public Kiln that touches trimesh therefore imports it lazily, inside the
-function that needs it — the package has to import, and the test suite has
-to COLLECT, on a bare install.
+trimesh has been a core dependency since 2026-07-30 (it reads the mesh
+behind the 3D stage, which every install gets), so a normal ``pip install
+kiln3d`` has it.  The stage still imports it lazily, inside the function
+that needs it, and degrades rather than raising when it is missing — an
+install made with ``--no-deps``, or a broken environment.  These tests keep
+that degrade path honest; they do not mean trimesh is optional.
 
 ``test_mesh_payload`` cannot pin that: it needs trimesh to build its fixture
 meshes, so it skips on exactly the install this contract is about.  This
@@ -13,9 +14,11 @@ to be run somewhere trimesh is missing — a guard that only runs where the
 bug cannot be observed proves nothing.
 
 Why it is worth a file: on 2026-07-30 ``test_mesh_payload`` imported trimesh
-at module scope.  pytest treats a collection ImportError as fatal, so one
-file that needed an optional dependency took all ~11.6k public tests down
-with it, on every Python version, for a day.
+at module scope while trimesh was still an optional extra.  pytest treats a
+collection ImportError as fatal, so one file that needed an optional
+dependency took all ~11.6k public tests down with it, on every Python
+version, for a day.  The check that keeps that class out now reads which
+packages are optional from ``pyproject.toml`` rather than naming one.
 """
 
 from __future__ import annotations
@@ -188,33 +191,66 @@ def test_the_stage_degrades_instead_of_raising(tmp_path):
         assert local_stage._inline_payload(token) is None
 
 
-def test_no_test_module_imports_trimesh_at_module_scope():
+def test_no_test_module_imports_an_optional_dependency_at_module_scope():
     """The regression itself, kept from coming back by a different route.
 
-    A lazy import inside a test function is fine; a module-scope ``import
-    trimesh`` is not, because pytest resolves it during collection, where an
-    ImportError is fatal for the WHOLE run rather than for one file.
-    ``pytest.importorskip`` is the supported way to say the same thing.
+    A lazy import inside a test function is fine; a module-scope import of a
+    package a test run cannot count on is not, because pytest resolves it
+    during collection, where an ImportError is fatal for the WHOLE run rather
+    than for one file.  ``pytest.importorskip`` is the supported way to say
+    the same thing.
+
+    What a test run can count on is read from ``pyproject.toml``: the core
+    dependencies and the ``dev`` extra.  Every other extra is optional.  This
+    check began as a hand-typed ``trimesh``, written the day trimesh was
+    promoted to a core dependency; from then on it refused imports of a
+    package every install has, and could not see the packages that really
+    are optional.  The decision is read where it is made, so it cannot go
+    stale that way again.
     """
     import ast
+    import re
+    from importlib.metadata import packages_distributions
     from pathlib import Path
 
+    from packaging.requirements import Requirement
+
+    # stdlib from 3.11; the file it reads is the same on every version.
+    tomllib = pytest.importorskip("tomllib")
+
+    def norm(name: str) -> str:
+        return re.sub(r"[-_.]+", "-", name).lower()
+
+    tests_dir = Path(__file__).parent
+    project = tomllib.loads((tests_dir.parent / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    extras = project.get("optional-dependencies", {})
+    assumed = {norm(Requirement(r).name) for r in [*project["dependencies"], *extras.get("dev", [])]}
+    optional = {norm(Requirement(r).name) for reqs in extras.values() for r in reqs} - assumed
+    assert optional, "no optional extras found in pyproject.toml: the check would pass vacuously"
+
+    # Import name -> distribution, for what is installed here.  A package that
+    # is not installed cannot be resolved, but a module-scope import of it
+    # already fails collection in this same run, so nothing slips through.
+    distributions = packages_distributions()
+
     offenders = []
-    for path in sorted(Path(__file__).parent.glob("test_*.py")):
+    for path in sorted(tests_dir.glob("test_*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in tree.body:  # module scope only — nested imports are lazy
             names = []
             if isinstance(node, ast.Import):
                 names = [a.name for a in node.names]
-            elif isinstance(node, ast.ImportFrom) and node.module:
+            elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
                 names = [node.module]
-            if any(n == "trimesh" or n.startswith("trimesh.") for n in names):
-                offenders.append(f"{path.name}:{node.lineno}")
+            for name in names:
+                owners = {norm(d) for d in distributions.get(name.split(".")[0], [])}
+                if owners & optional:
+                    offenders.append(f"{path.name}:{node.lineno} ({name}, from {', '.join(sorted(owners & optional))})")
 
     assert not offenders, (
-        "module-scope `import trimesh` breaks collection on a base install "
-        "(trimesh is in the mesh-diagnostics extra); use "
-        '`pytest.importorskip("trimesh")` instead: ' + ", ".join(offenders)
+        "a module-scope import of an optional dependency breaks collection on an "
+        "install without that extra; import it inside the test with "
+        "`pytest.importorskip(...)` instead: " + "; ".join(offenders)
     )
 
 
