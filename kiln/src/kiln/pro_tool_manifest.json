@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-01T04:39:33.810877+00:00",
-  "tool_count": 427,
+  "generated": "2026-10-01T22:07:12.051979+00:00",
+  "tool_count": 428,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -3034,6 +3034,50 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
+      }
+    },
+    {
+      "name": "find_closest_filaments",
+      "description": "Which filaments could I buy for this colour? Up to three per colour, from different makers.",
+      "tier": "free",
+      "access": "free",
+      "category": "decoration",
+      "parameters": {
+        "properties": {
+          "colours": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Colours"
+          },
+          "material": {
+            "default": "",
+            "title": "Material",
+            "type": "string"
+          },
+          "brand": {
+            "default": "",
+            "title": "Brand",
+            "type": "string"
+          }
+        },
+        "required": [
+          "colours"
+        ],
+        "title": "find_closest_filamentsArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
