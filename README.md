@@ -436,7 +436,8 @@ The Kiln MCP server (`kiln serve`) exposes **<!-- KILN_MCP_TOOL_COUNT:OLD --> 93
 - **park_head**
   - Move the head somewhere safe, away from the plate, and leave it there — raise, home X, off-plate spot; never a Z touch, never heat
 - **plate_status**
-  - What Kiln knows is on the build plate: the print that left a part there and how tall it is, or a person's word that it is clear (`kiln plate clear` — a person's door on purpose, no tool marks the plate clear); home and park refuse to cross a recorded part
+  - What Kiln knows is on the build plate: the print that left a part there, how tall it is and how long ago, or that it is clear — a person's word (`kiln plate clear`, or `plate_clear` on home and park) or a look through the printer's camera (`look_at_plate`); nothing marks it clear on its own
+  - Home, park, slicing and starting a print refuse to cross a recorded part, and the refusal shows the plate through the camera where the printer has one, so an old record is checked rather than trusted
 - **diagnose_print_failure_live**
   - Diagnose a failing print from live printer state plus the model's own geometry
 - **retry_print_with_fix**

@@ -322,8 +322,9 @@ def plate_status(printer_name: str | None = None) -> dict[str, Any]:
     Returns ``plate`` with ``status`` (``unknown`` / ``occupied`` /
     ``clear``), ``source``, ``since``, ``job`` (``file``, ``footprint_mm``,
     ``max_z_mm``, ``printer_id``), ``from_camera`` and ``looked_by`` when a
-    look wrote it, and a one-line ``description``; plus ``camera``, whether
-    this machine has one that could settle an unknown plate.
+    look wrote it, ``recorded_ago`` (how old the record is, in words), and a
+    one-line ``description``; plus ``camera``, whether this machine has one
+    that could settle an unknown plate.
     """
     import kiln.server as _srv
 

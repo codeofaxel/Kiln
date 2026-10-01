@@ -4232,8 +4232,9 @@ def analyze_printability(
     :returns: A :class:`PrintabilityReport` with scores, grades, and
         recommendations.  When the kiln-pro package is installed (Pro+
         tier), the report is enriched with material-specific tuning
-        and the ``enrichment`` field is populated; free / public
-        installs see the safety-floor result unchanged.  See
+        and the ``enrichment`` field is populated -- a finding there may
+        lower the score, never raise it; free / public installs see the
+        safety-floor result unchanged.  See
         https://kiln3d.com for tier details.
     :raises ValueError: If the file cannot be parsed -- including a STEP
         file that could not be turned into a mesh, whose message is the
