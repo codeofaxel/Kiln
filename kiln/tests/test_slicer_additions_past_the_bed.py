@@ -349,3 +349,139 @@ class TestTheRetryDoor:
         assert result["error"]["code"] == "BRIM_PAST_BED" and "8 mm brim" in result["error"]["message"]
         adapter.upload_file.assert_not_called()
         adapter.start_print.assert_not_called()
+
+
+class TestEveryDoorThatSlices:
+    """Every door that reaches the shared step meets the same answer.  The
+    shared step is pinned above; these pin the wiring, door by door, with
+    the slicer stood in by one that draws what its profile asks for."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("KILN_HOME", str(tmp_path / "home"))
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
+
+    def test_slice_and_print_refuses_the_brim_it_chose_before_upload(self, tmp_path: Path) -> None:
+        """The headline case: ABS on the turned MK4 part gets an 8 mm brim,
+        and 2.7 mm of room is not 8 mm."""
+        import kiln.server as srv
+        from kiln.plugins.slicer_tools import _SlicerToolsPlugin
+
+        tools: dict = {}
+
+        class _Mcp:
+            def tool(self, name=None, **_kwargs):
+                def decorator(fn):
+                    tools[name or fn.__name__] = fn
+                    return fn
+
+                return decorator
+
+        _SlicerToolsPlugin().register(_Mcp())
+        adapter = MagicMock(spec=["get_state", "upload_file", "start_print"])
+        slicer = _Slicer(tmp_path)
+        with patch.object(srv, "_check_auth", return_value=None), \
+                patch.object(srv, "_resolve_adapter", return_value=adapter), \
+                patch.object(srv, "_resolve_target_printer_type", return_value="octoprint"), \
+                patch("kiln.slicer.slice_file", side_effect=slicer):
+            resp = tools["slice_and_print"](
+                input_path=_part_stl(tmp_path), printer_id=_MK4, material="ABS", skip_validation=True,
+            )
+        assert slicer.profiles[0].get("brim_width") == "8", "the brim Kiln chose for ABS"
+        assert resp.get("success") is False and resp["error"]["code"] == "BRIM_PAST_BED", resp
+        assert "8 mm brim" in resp["error"]["message"] and "brim_width=2" in resp["error"]["message"]
+        adapter.upload_file.assert_not_called()
+        adapter.start_print.assert_not_called()
+
+    def test_slice_and_estimate_estimates_the_file_without_the_skirt(self, tmp_path: Path) -> None:
+        from kiln.plugins.estimate_tools import _EstimateToolsPlugin
+
+        tools: dict = {}
+
+        class _Mcp:
+            def tool(self, name=None, **_kwargs):
+                def decorator(fn):
+                    tools[name or fn.__name__] = fn
+                    return fn
+
+                return decorator
+
+        _EstimateToolsPlugin().register(_Mcp())
+        slicer = _Slicer(tmp_path)
+        with patch("kiln.server._check_auth", return_value=None), patch("kiln.slicer.slice_file", side_effect=slicer):
+            resp = tools["slice_and_estimate"](input_path=_part_stl(tmp_path), printer_id=_MK4, material="PLA")
+        assert resp["success"], resp
+        assert len(slicer.files) == 2 and resp["slice"]["output_path"] == slicer.files[1]
+        assert "without one" in resp["bed_fit"]["skirt_dropped"]
+
+    def test_the_quick_print_pipeline_slices_without_the_skirt_and_says_so(self, tmp_path: Path) -> None:
+        from kiln.pipelines import quick_print
+
+        slicer = _Slicer(tmp_path)
+        with patch("kiln.slicer.slice_file", side_effect=slicer), \
+                patch("kiln.pipelines._resolve_pipeline_adapter", side_effect=RuntimeError("no printer")):
+            result = quick_print(model_path=_part_stl(tmp_path), printer_id=_MK4, skip_validation=True)
+        step = next(s for s in result.steps if s.name == "slice")
+        assert step.success and step.data["output_path"] == slicer.files[1]
+        assert "skirt would have printed 3.7 mm past the edge" in step.message
+
+    def test_kiln_slice_says_the_skirt_went(self, tmp_path: Path) -> None:
+        import json
+
+        from click.testing import CliRunner
+
+        from kiln.cli.main import cli
+
+        slicer = _Slicer(tmp_path)
+        with patch("kiln.slicer.slice_file", side_effect=slicer):
+            out = CliRunner().invoke(cli, ["slice", _part_stl(tmp_path), "--printer-id", _MK4, "--json"])
+        assert out.exit_code == 0, out.output
+        data = json.loads(out.output)["data"]
+        assert data["output_path"] == slicer.files[1]
+        assert "skirt would have printed 3.7 mm past the edge" in data["message"]
+
+    def test_kiln_slice_refuses_a_brim_that_does_not_fit(self, tmp_path: Path) -> None:
+        import json
+
+        from click.testing import CliRunner
+
+        from kiln.cli.main import cli
+
+        profile = _profile(tmp_path, brim_width="8")
+        slicer = _Slicer(tmp_path)
+        with patch("kiln.slicer.slice_file", side_effect=slicer):
+            out = CliRunner().invoke(
+                cli, ["slice", _part_stl(tmp_path), "--printer-id", _MK4, "--profile", profile, "--json"],
+            )
+        assert out.exit_code == 1, out.output
+        assert json.loads(out.output)["error"]["code"] == "BRIM_PAST_BED"
+
+    def test_generate_and_print_hands_on_the_file_without_the_skirt(self, tmp_path: Path) -> None:
+        from kiln.generation.base import GenerationJob, GenerationResult, GenerationStatus
+        from kiln.printers.base import UploadResult
+        from kiln.server import generate_and_print
+
+        part = _part_stl(tmp_path)
+        provider = MagicMock(display_name="OpenSCAD")
+        provider.generate.return_value = GenerationJob(
+            id="job-1", provider="openscad", prompt="a plate", status=GenerationStatus.SUCCEEDED, progress=100,
+        )
+        provider.download_result.return_value = GenerationResult(
+            job_id="job-1", provider="openscad", local_path=part, format="stl", file_size_bytes=1, prompt="a plate",
+        )
+        adapter = MagicMock()
+        adapter.upload_file.return_value = UploadResult(success=True, file_name="part.gcode", message="Uploaded")
+        validated = {
+            "ready_to_print": True, "printability_score": 92, "validated_path": part, "summary": "Print-ready.",
+            "next_action": None, "repaired": False, "model_info": {}, "checks": [], "status": "pass",
+        }
+        slicer = _Slicer(tmp_path)
+        with patch("kiln.server._check_auth", return_value=None), \
+                patch("kiln.server._get_generation_provider", return_value=provider), \
+                patch("kiln.server._get_adapter", return_value=adapter), \
+                patch("kiln.plugins.validation_pipeline_tools.run_full_validation_pipeline", return_value=validated), \
+                patch("kiln.slicer.slice_file", side_effect=slicer):
+            result = generate_and_print("a plate", provider="openscad", printer_id=_MK4)
+        assert result.get("success") is True, result
+        assert len(slicer.files) == 2 and result["slice"]["output_path"] == slicer.files[1]
+        assert "skirt would have printed 3.7 mm past the edge" in result["slice"]["message"]
