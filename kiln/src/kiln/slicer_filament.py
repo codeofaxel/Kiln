@@ -61,6 +61,14 @@ from typing import Any
 # The last rung is the table's own default, PLA: its figure is the table's,
 # never restated here.
 from kiln.cost_estimator import DEFAULT_MATERIAL
+from kiln.slicer_material import (
+    MaterialRefused,
+    MaterialReport,
+    apply_material_needs,
+    compare_material_needs,
+    material_needs,
+    unknown_material_report,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +136,10 @@ class SliceFilament:
     #: by the machine, ``user_reported`` to Kiln, ``inferred``).  ``None`` on
     #: every other rung.
     determined_by: str | None = None
+    #: What the slice was set to for this material -- temperatures, melt
+    #: rate, cooling -- and why (:mod:`kiln.slicer_material`).  ``None`` only
+    #: where no profile was read.
+    settings: MaterialReport | None = None
 
     def __post_init__(self) -> None:
         if not self.filament_type:
@@ -144,6 +156,8 @@ class SliceFilament:
         }
         if self.determined_by is not None:
             d["determined_by"] = self.determined_by
+        if self.settings is not None:
+            d["settings"] = self.settings.to_dict()
         return d
 
 
@@ -417,7 +431,28 @@ def ensure_profile_filament(
         loaded_determined_by=loaded_determined_by,
         settings=settings,
     )
+    material_overrides, report = _material_settings(
+        filament, settings, profile, material=material, loaded_type=loaded_type,
+    )
+    filament = replace(filament, settings=report)
+    overrides = {**_identity_overrides(filament, settings), **material_overrides}
+    if not overrides:
+        return profile, filament
 
+    from pathlib import Path
+
+    from kiln.slicer_profiles import profile_with_overrides
+
+    # Named for the printer profile it derives from, so the slice is still
+    # counted against that printer and Orca's presets still carry its name.
+    # Not the caller's keys: the next slice that names another material
+    # must be free to set its own.
+    prefix = f"{Path(profile).stem}_" if profile else None
+    return profile_with_overrides(profile, overrides, prefix=prefix, stated=False), filament
+
+
+def _identity_overrides(filament: SliceFilament, settings: dict[str, str]) -> dict[str, str]:
+    """The density, type and diameter keys the profile still needs."""
     # One value per extruder, in each key's own vector spelling (PrusaSlicer
     # reads floats ``,``-joined and strings ``;``-joined), so a multi-slot
     # profile weighs and names every slot rather than the first.
@@ -428,21 +463,65 @@ def ensure_profile_filament(
     # Already carrying exactly this identity (its own earlier output, or a
     # profile whose stated density answered): nothing to write.
     if settings.get(DENSITY_KEY) == density_value and settings.get(TYPE_KEY) == type_value:
-        return profile, filament
+        return {}
     if filament.source == SOURCE_PROFILE and _first_number(settings.get(DENSITY_KEY)) is not None:
-        return profile, filament
+        return {}
 
     overrides = {DENSITY_KEY: density_value, TYPE_KEY: type_value}
     # A stated diameter is kept as stated -- a multi-extruder profile
     # carries a vector here, and a scalar would shorten it.
     if _first_number(settings.get(DIAMETER_KEY)) is None:
         overrides[DIAMETER_KEY] = ",".join([f"{filament.diameter_mm:g}"] * slots)
+    return overrides
 
-    from pathlib import Path
 
-    from kiln.slicer_profiles import profile_with_overrides
+def _material_settings(
+    filament: SliceFilament,
+    settings: dict[str, str],
+    profile: str | None,
+    *,
+    material: str | None,
+    loaded_type: str | None,
+) -> tuple[dict[str, str], MaterialReport]:
+    """The keys the material sets on this profile, and the report of it.
 
-    # Named for the printer profile it derives from, so the slice is still
-    # counted against that printer and Orca's presets still carry its name.
-    prefix = f"{Path(profile).stem}_" if profile else None
-    return profile_with_overrides(profile, overrides, prefix=prefix), filament
+    The material is the one the ladder answered with: the caller's word, the
+    printer's spool, or -- with neither -- the material the printer profiles
+    are tuned for, which is the one a default slice says it is.  Kiln's own
+    profiles are written to (leaving every key a caller stated); a profile
+    that is the caller's own file is only compared.  Raises
+    :class:`kiln.slicer_material.MaterialRefused` when the printer cannot
+    melt the material at all.
+    """
+    from kiln.slicer_material import PROFILE, PROFILE_MATERIAL
+    from kiln.slicer_profiles import ProfileOrigin, profile_origin
+
+    if filament.source == SOURCE_PROFILE:
+        return {}, MaterialReport(
+            material=filament.material,
+            outcome=PROFILE,
+            note=f"{filament.material}: the profile names its own filament, and its settings were used as written.",
+        )
+    if filament.source == SOURCE_DECLARED:
+        word = material
+    elif filament.source == SOURCE_LOADED:
+        word = loaded_type
+    else:
+        word = material or loaded_type or PROFILE_MATERIAL
+    # No profile at all is an overrides-only file Kiln writes: Kiln's, with
+    # no printer behind it and nothing stated.
+    origin = profile_origin(profile) if profile else ProfileOrigin(kiln=True)
+    # The word as the caller or the printer said it ("PA-CF", not the
+    # weight table's "NYLON"), unless the ladder stood PLA in for a word it
+    # had no row for: then the material's own name says what was asked.
+    label = filament.filament_type if filament.source != SOURCE_DEFAULT else None
+    needs = material_needs(word, printer_id=origin.printer_id, label=label)
+    if needs is None:
+        return {}, unknown_material_report(filament.material)
+    if needs.refusal is not None:
+        raise MaterialRefused(needs.refusal)
+    if not origin.kiln:
+        return {}, compare_material_needs(settings, needs)
+    work = dict(settings)
+    report = apply_material_needs(work, needs, stated=origin.stated)
+    return {k: v for k, v in work.items() if settings.get(k) != v}, report

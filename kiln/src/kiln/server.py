@@ -15971,7 +15971,8 @@ def design_to_gcode_pipeline(
 
     :param description: Natural-language design description.
     :param output_dir: Directory for output files (uses tempdir if empty).
-    :param material: Material for weight estimation and slicing.
+    :param material: Material the slice is set for -- temperatures, melt
+        rate and cooling -- and weighed as.
     :param printer_model: Printer model for slicer profile lookup.
     :param infill_percent: Infill percentage for weight estimation.
     :returns: Dict with paths to SCAD, STL, G-code files, weight, risks.
@@ -16831,10 +16832,11 @@ def run_quick_print(
         printer_id: Printer model ID for auto-profile selection
             (e.g. ``"ender3"``, ``"bambu_x1c"``, ``"klipper_generic"``).
         profile_path: Explicit slicer profile. Overrides printer_id auto-selection.
-        material: Filament material (e.g. ``"PLA"``).  Its density is what
-            the slicer weighs the print with (omitted: the spool the
-            printer reports loaded, then PLA — the slice step says which),
-            and AMS auto-routing prefers a loaded tray whose type matches.
+        material: Filament material (e.g. ``"PLA"``).  It sets the slice's
+            temperatures, melt rate and cooling, its density weighs the
+            print (omitted: the spool the printer reports loaded, then PLA —
+            the slice step says which), and AMS auto-routing prefers a
+            loaded tray whose type matches.
         use_ams: AMS feeding mode (Bambu): ``"auto"`` (default — detect and
             route to a loaded tray), ``"true"``, or ``"false"``.
         ams_mapping: Explicit AMS slot mapping as a JSON array string,
@@ -16963,9 +16965,11 @@ def run_reslice_and_print(
         overrides: JSON string of PrusaSlicer INI key-value pairs to override.
         profile_path: Explicit slicer profile. Overrides printer_id auto-selection.
         slicer_path: Explicit path to the slicer binary.
-        material: Filament material (e.g. ``"PLA"``).  Its density is what
-            the slicer weighs the print with (omitted: the spool the
-            printer reports loaded, then PLA — the slice step says which).
+        material: Filament material (e.g. ``"PLA"``).  It sets the slice's
+            temperatures, melt rate and cooling -- a setting you also pass in
+            ``overrides`` stays yours -- and its density weighs the print
+            (omitted: the spool the printer reports loaded, then PLA — the
+            slice step says which).
             For fully-auto raw-gcode reslices, AMS routing prefers a loaded
             tray of this material.  (3MF plates carry their own filament
             map, so routing defers to the adapter there.)
@@ -19034,118 +19038,72 @@ def build_material_overrides(
     material_id: str,
     printer_id: str | None = None,
 ) -> dict:
-    """Auto-generate slicer override dict for a specific material.
+    """The slicer settings a material gets on a printer: temperatures, melt rate, cooling.
 
-    Combines material thermal data (from the material database) with
-    printer-specific tuning (from printer intelligence) to produce a
-    ready-to-use JSON override dict for ``reslice_with_overrides`` or
-    ``run_reslice_and_print``.
+    Every slicing door applies these itself when it is told the material --
+    ``material=`` on ``slice_model``, ``slice_and_print``,
+    ``reslice_with_overrides``, ``run_quick_print``, ``run_reslice_and_print``
+    and ``kiln slice`` -- so naming the material is all a slice needs.  This
+    tool shows what that will be and why, from the same resolver
+    (:mod:`kiln.slicer_material`): a product's own figures when you name one
+    (``"bambu_tpu_95a"``), else Kiln's settings for the material on this
+    printer, else the middle of the material's range, never above what the
+    printer is rated for.  The melt-rate ceiling
+    (``filament_max_volumetric_speed``) slows every feature of the print to
+    suit the material, the outer wall and the first layer included.
 
-    This is the key tool for material switching — call it to get the
-    correct temperatures, speeds, and retraction settings when changing
-    from one material to another.
+    Its ``overrides`` can still be passed to ``reslice_with_overrides`` to
+    pin them; a setting passed that way is the caller's, and a slice leaves
+    it alone.
 
-    Example workflow::
+    Example::
 
-        # 1. Get overrides for PETG on your printer
-        overrides = build_material_overrides("petg", "bambu_a1")
-        # 2. Reslice and print with those overrides
-        run_reslice_and_print(model_path, overrides=json.dumps(overrides["overrides"]))
+        build_material_overrides("tpu", "bambu_a1")
+        # overrides: temperature 225, bed_temperature 50, max_fan_speed 50, ...
 
     Args:
-        material_id: Target material (e.g. ``"petg"``, ``"tpu"``).
-        printer_id: Optional printer model for printer-specific tuning.
-            If omitted, uses material database defaults.
+        material_id: Material (``"petg"``, ``"tpu"``, ``"PA-CF"``) or a
+            product (``"bambu_tpu_95a"``).
+        printer_id: Printer model, for its own settings and limits.
+            Omitted, the material's own.
     """
     if err := _check_auth("slicer"):
         return err
     try:
-        from kiln.design_intelligence import get_material_profile
+        from kiln.slicer_material import CONCEPT_KEYS, apply_material_needs, material_needs
+        from kiln.slicer_profiles import get_slicer_profile
 
-        profile = get_material_profile(material_id)
-        if profile is None:
-            return _error_dict(
-                f"Unknown material '{material_id}'.",
-                code="NOT_FOUND",
-            )
+        needs = material_needs(material_id, printer_id=printer_id)
+        if needs is None:
+            return _error_dict(f"Unknown material '{material_id}'.", code="NOT_FOUND")
+        if needs.refusal is not None:
+            refused = _error_dict(str(needs.refusal.get("reason")), code=str(needs.refusal.get("code")))
+            refused["refusal"] = needs.refusal
+            return refused
 
-        thermal = profile.thermal
-        overrides: dict[str, str] = {}
-
-        # Temperature overrides from material database
-        temp_range = thermal.get("print_temp_range_c", [])
-        if len(temp_range) >= 2:
-            # Use midpoint of the recommended range
-            mid_temp = (temp_range[0] + temp_range[1]) // 2
-            overrides["temperature"] = str(mid_temp)
-            # First layer slightly hotter for adhesion
-            overrides["first_layer_temperature"] = str(mid_temp + 5)
-
-        bed_range = thermal.get("bed_temp_range_c", [])
-        if len(bed_range) >= 2:
-            overrides["bed_temperature"] = str((bed_range[0] + bed_range[1]) // 2)
-            overrides["first_layer_bed_temperature"] = str(bed_range[1])
-
-        # Material-specific speed/retraction adjustments
-        mat_lower = material_id.lower()
-        if mat_lower in ("petg", "cf_petg", "petg_cf", "pet_cf", "petg_hf"):
-            overrides.setdefault("perimeter_speed", "40")
-            overrides.setdefault("retract_length", "4.0")
-            overrides.setdefault("retract_speed", "30")
-        elif mat_lower == "tpu_85a":
-            # Ultra-soft TPU — even slower than standard TPU
-            overrides.setdefault("perimeter_speed", "15")
-            overrides.setdefault("infill_speed", "15")
-            overrides.setdefault("retract_length", "0.8")
-            overrides.setdefault("retract_speed", "15")
-        elif mat_lower in ("tpu", "tpu_95a"):
-            overrides.setdefault("perimeter_speed", "20")
-            overrides.setdefault("infill_speed", "20")
-            overrides.setdefault("retract_length", "1.0")
-            overrides.setdefault("retract_speed", "20")
-        elif mat_lower in ("abs", "asa", "asa_plus", "hips"):
-            overrides.setdefault("perimeter_speed", "40")
-            overrides.setdefault("retract_length", "3.5")
-        elif mat_lower in ("nylon", "cf_nylon", "pa6_gf"):
-            overrides.setdefault("perimeter_speed", "35")
-            overrides.setdefault("retract_length", "4.0")
-            overrides.setdefault("retract_speed", "25")
-        elif mat_lower in ("polycarbonate", "pc_abs"):
-            overrides.setdefault("perimeter_speed", "35")
-            overrides.setdefault("retract_length", "3.5")
-
-        # Printer-specific tuning (overrides material defaults if available)
-        printer_tuning: dict[str, Any] | None = None
+        # What a slice for this printer would be: its bundled profile with
+        # the material written in -- or kept, where the profile is already
+        # tuned for it -- so this answer and the slice are the same answer.
+        settings: dict[str, str] = {}
         if printer_id:
-            try:
-                from kiln.printer_intelligence import get_material_settings
-
-                mp = get_material_settings(printer_id, material_id)
-                if mp is not None:
-                    printer_tuning = {
-                        "hotend_temp": mp.hotend,
-                        "bed_temp": mp.bed,
-                        "fan_speed": mp.fan,
-                        "notes": mp.notes,
-                    }
-                    # Printer-specific temps override material defaults
-                    overrides["temperature"] = str(mp.hotend)
-                    overrides["first_layer_temperature"] = str(mp.hotend + 5)
-                    overrides["bed_temperature"] = str(mp.bed)
-            except (KeyError, ValueError, TypeError):
-                pass  # Fall back to material database defaults
-
+            with contextlib.suppress(KeyError):
+                settings = dict(get_slicer_profile(printer_id).settings)
+        report = apply_material_needs(settings, needs)
+        overrides = {
+            key: settings[key]
+            for keys in CONCEPT_KEYS.values()
+            for key in keys
+            if key in settings and key != "max_volumetric_speed"
+        }
         return {
             "success": True,
             "material": material_id,
             "printer_id": printer_id,
             "overrides": overrides,
-            "printer_tuning": printer_tuning,
+            "settings": report.to_dict(),
             "notes": (
-                f"Slicer overrides for {profile.display_name}"
-                + (f" on {printer_id}" if printer_id else "")
-                + ". Pass this as the 'overrides' parameter to "
-                "reslice_with_overrides or run_reslice_and_print."
+                f"{report.note} A slice told material={material_id!r} applies these by itself; "
+                "pass them as overrides only to pin them."
             ),
         }
     except Exception as exc:
@@ -19167,12 +19125,13 @@ def reprint_with_material(
     ams_mapping: str | list[int] | None = None,
     preview_token: str | None = None,
 ) -> dict:
-    """Reprint a model with a different material — auto-adjusts temperatures,
-    speeds, and retraction for the new material.
+    """Reprint a model with a different material — the slice is set for it.
 
-    One-shot convenience tool: looks up the target material's optimal slicer
-    settings, merges any extra overrides you provide, reslices the model,
-    runs a safety check, uploads to the printer, and starts the print.
+    One-shot convenience tool: reslices the model for the new material
+    (its temperatures, melt rate and cooling, from the same resolver every
+    slice uses -- see ``build_material_overrides``), merges any extra
+    overrides you provide, runs a safety check, uploads to the printer, and
+    starts the print.  The file is labelled and weighed as the new material.
 
     Use this when you want to reprint an existing model in a different
     material (e.g. PLA → PETG for outdoor durability, or PLA → TPU for
@@ -19211,28 +19170,33 @@ def reprint_with_material(
     try:
         import json as _json
 
-        # Step 1: Build material-specific overrides
-        mat_result = build_material_overrides(material_id, printer_id)
+        # Step 1: The material's settings on the printer this slice is for
+        # -- what the slice will apply, and the refusal when the printer
+        # cannot melt it, before anything is resliced.
+        mat_result = build_material_overrides(
+            material_id, _resolve_printer_profile_id(printer_id, printer_name),
+        )
         if not mat_result.get("success"):
             return mat_result
 
-        overrides = dict(mat_result["overrides"])
-
-        # Step 2: Merge extra overrides if provided
+        # Step 2: Extra overrides are the caller's, and win.
         extra, _arg_err = parse_json_object(extra_overrides, "extra_overrides")
         if _arg_err is not None:
             return _arg_err
-        if extra:
-            overrides.update(extra)
+        applied = {**mat_result["overrides"], **{str(k): str(v) for k, v in (extra or {}).items()}}
 
-        # Step 3: Delegate to run_reslice_and_print
+        # Step 3: Delegate to run_reslice_and_print, TOLD the material: the
+        # slice writes its settings and labels and weighs the file as it.
+        # Passing the settings as overrides instead used to leave the label
+        # and the weight at whatever spool was loaded.
         # Token and all: it is the same file the person previewed, so the
         # inner gate is the gate.
         result = run_reslice_and_print(
             model_path=file_path,
             printer_name=printer_name,
             printer_id=printer_id,
-            overrides=_json.dumps(overrides),
+            overrides=_json.dumps(extra) if extra else None,
+            material=material_id,
             use_ams=use_ams,
             ams_mapping=ams_mapping,
             preview_token=preview_token,
@@ -19241,11 +19205,8 @@ def reprint_with_material(
         # Enrich the result with material context
         if isinstance(result, dict) and result.get("success"):
             result["material"] = material_id
-            result["material_overrides_applied"] = overrides
-            result["notes"] = (
-                f"Resliced and printing with {material_id.upper()} settings. "
-                f"Overrides applied: {', '.join(f'{k}={v}' for k, v in overrides.items())}"
-            )
+            result["material_overrides_applied"] = applied
+            result["notes"] = f"Resliced and printing for {material_id.upper()}. {mat_result['settings']['note']}"
 
         return result
     except Exception as exc:
@@ -19650,7 +19611,8 @@ def multi_material_print(
         1. Looks up each material's properties (temps, colors)
         2. Arranges the objects side by side on the plate (per ``group``)
            and builds a multi-object 3MF with per-object material assignments
-        3. Generates merged slicer overrides (uses the highest-temp material)
+        3. Sets the plate for its materials: the hottest one's temperatures,
+           the slowest one's melt rate, the gentlest cooling
         4. Checks AMS slots for matching materials
         5. Slices and prints with correct AMS mapping
 
@@ -19904,30 +19866,38 @@ def multi_material_print(
                 code="INTERNAL_ERROR",
             )
 
-        # Step 3: Build merged overrides (use highest-temp material)
-        max_temp = 0
-        max_bed = 0
-        dominant_mat: str | None = None
-        dominant_overrides: dict[str, str] = {}
-        for mat_id in unique_mat_ids:
-            mat_result = build_material_overrides(mat_id, printer_id)
-            if mat_result.get("success"):
-                ov = mat_result["overrides"]
-                temp = int(ov.get("temperature", "0"))
-                bed = int(ov.get("bed_temperature", "0"))
-                if temp > max_temp:
-                    max_temp = temp
-                    dominant_mat = mat_id
-                    dominant_overrides = dict(ov)
-                if bed > max_bed:
-                    max_bed = bed
+        # Step 3: One set of settings for the plate.  Every slot shares one
+        # nozzle and one bed, so the plate prints at the hottest material's
+        # temperatures -- and at the SLOWEST material's melt rate and the
+        # gentlest cooling, because a ceiling one material needs is a
+        # ceiling for the whole file.  (The hottest material's own set used
+        # to be applied whole: TPU beside PETG printed at PETG's pace.)
+        # From the one resolver every slice uses (kiln.slicer_material).
+        from kiln.slicer_material import material_needs as _material_needs
 
-        # Use the dominant (highest temp) material's full overrides
+        _plate_pid = _resolve_printer_profile_id(printer_id, printer_name)
+        per_material = {m: _material_needs(m, printer_id=_plate_pid) for m in unique_mat_ids}
+        for needs in per_material.values():
+            if needs is not None and needs.refusal is not None:
+                return _error_dict(str(needs.refusal.get("reason")), code=str(needs.refusal.get("code")))
+        known = {m: n.values() for m, n in per_material.items() if n is not None}
+
+        def _plate_values(key: str) -> list[float]:
+            return [float(v[key]) for v in known.values() if v.get(key)]
+
         merged_overrides: dict[str, str] = {}
-        if dominant_mat:
-            merged_overrides = dominant_overrides
-            # Override bed temp with the max across all materials
-            merged_overrides["bed_temperature"] = str(max_bed)
+        dominant_mat: str | None = None
+        if known:
+            dominant_mat = max(known, key=lambda m: float(known[m].get("temperature") or 0))
+            for key in ("temperature", "first_layer_temperature"):
+                if key in known[dominant_mat]:
+                    merged_overrides[key] = known[dominant_mat][key]
+            if beds := _plate_values("bed_temperature"):
+                merged_overrides["bed_temperature"] = merged_overrides["first_layer_bed_temperature"] = f"{max(beds):g}"
+            if flows := _plate_values("filament_max_volumetric_speed"):
+                merged_overrides["filament_max_volumetric_speed"] = f"{min(flows):g}"
+            if fans := _plate_values("max_fan_speed"):
+                merged_overrides["max_fan_speed"] = f"{min(fans):g}"
 
         # Merge extra overrides
         extra, _arg_err = parse_json_object(extra_overrides, "extra_overrides")
@@ -20411,14 +20381,10 @@ def multi_color_copies(
                 code="INTERNAL_ERROR",
             )
 
-        # --- Build slicer overrides for the material ---
-        overrides: dict[str, str] = {}
-        try:
-            mat_overrides = build_material_overrides(material.lower(), printer_id)
-            if mat_overrides.get("success"):
-                overrides = dict(mat_overrides["overrides"])
-        except Exception:
-            pass  # best-effort — slicer profile defaults are fine
+        # The material's settings are the slice's own business: it is told
+        # the material below, and writes them for every copy.  (This door
+        # used to build them itself and swallow any failure as "the profile
+        # defaults are fine" -- PLA settings under any material's name.)
 
         # --- Refuse honestly, or slice and print with explicit AMS mapping ---
         # The slot map below is a Bambu instruction.  At a printer Kiln does
@@ -20433,8 +20399,8 @@ def multi_color_copies(
             result = run_reslice_and_print(
                 model_path=output_3mf,
                 printer_id=printer_id,
-                overrides=_json.dumps(overrides) if overrides else None,
                 slicer_path=slicer_path,
+                material=material,
                 use_ams=True,
                 ams_mapping=_json.dumps(resolved_slots),
             )

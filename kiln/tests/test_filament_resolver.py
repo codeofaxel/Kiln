@@ -4,7 +4,7 @@ Covers:
     - resolve_filament: brand lookup, parent fallback, unknown materials
     - Brand-specific density used in estimator
     - Printer compatibility warnings (enclosure, nozzle, AMS)
-    - brand_overrides_for_slicer: temp override generation
+    - a product's own temperatures reach the slice (kiln.slicer_material)
     - MaterialRecommendation.recommended_brands population
     - ResolvedFilament serialization
 """
@@ -20,7 +20,7 @@ from kiln.design_intelligence import (
     resolve_filament,
 )
 from kiln.pre_estimate import _get_material_profile
-from kiln.slicer_profiles import brand_overrides_for_slicer
+from kiln.slicer_material import material_needs
 
 # ---------------------------------------------------------------------------
 # resolve_filament — brand lookup
@@ -182,30 +182,30 @@ class TestEstimatorBrandIntegration:
 # ---------------------------------------------------------------------------
 
 
-class TestSlicerBrandOverrides:
-    """Tests for brand_overrides_for_slicer()."""
+class TestProductSettingsReachTheSlice:
+    """A product's own temperatures are what a slice for it is set to.
 
-    def test_brand_returns_overrides(self):
-        overrides = brand_overrides_for_slicer("bambu_petg_cf")
-        assert overrides is not None
-        assert "temperature" in overrides
-        assert overrides["temperature"] == "255"
-        assert "bed_temperature" in overrides
-        assert overrides["bed_temperature"] == "70"
+    These figures used to be produced by ``brand_overrides_for_slicer``, a
+    helper no slicing door ever called: a slice declared for a product got
+    the printer profile's PLA temperatures.  The same expectations now run
+    through the resolver the slicing chokepoint uses.
+    """
 
-    def test_prusament_tpu_overrides(self):
-        overrides = brand_overrides_for_slicer("prusament_tpu_95a")
-        assert overrides is not None
-        assert overrides["temperature"] == "230"
-        assert overrides["bed_temperature"] == "65"
+    def test_brand_sets_the_temperatures(self):
+        values = material_needs("bambu_petg_cf").values()
+        assert values["temperature"] == "255"
+        assert values["bed_temperature"] == "70"
 
-    def test_generic_returns_none(self):
-        overrides = brand_overrides_for_slicer("PLA")
-        assert overrides is None
+    def test_prusament_tpu_temperatures(self):
+        values = material_needs("prusament_tpu_95a").values()
+        assert values["temperature"] == "230"
+        assert values["bed_temperature"] == "65"
 
-    def test_unknown_returns_none(self):
-        overrides = brand_overrides_for_slicer("nonexistent_brand_xyz")
-        assert overrides is None
+    def test_generic_material_is_not_a_product(self):
+        assert material_needs("PLA").product is False
+
+    def test_unknown_word_has_no_settings(self):
+        assert material_needs("nonexistent_brand_xyz") is None
 
 
 # ---------------------------------------------------------------------------

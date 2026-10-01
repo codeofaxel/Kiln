@@ -40,12 +40,28 @@ def _tokens(slug: str) -> frozenset[str]:
     return frozenset(t for t in slug.split("_") if t)
 
 
+#: Short names for materials the catalog spells out in full.  The same
+#: material, not a family: "PC" is polycarbonate, "PA" is polyamide, which
+#: the catalog calls nylon.  These are the spellings a printer's own unit
+#: and its maker's slicer use ("PA-CF", "PC"), so without them a spool the
+#: printer reports was a material Kiln had never heard of.
+_MATERIAL_ABBREVIATIONS: dict[str, str] = {
+    "pa": "nylon",
+    "pa6": "nylon",
+    "pa12": "nylon",
+    "pc": "polycarbonate",
+}
+
+
 def resolve_material_key(material_id: str, keys: Iterable[str]) -> str | None:
     """The catalog key ``material_id`` spells, or ``None``.
 
     Exact (case-insensitive) first; then the slug ("PLA+" → ``pla_plus``,
     "petg-cf" → ``petg_cf``); then the same tokens in any order ("pla_cf" →
-    ``cf_pla``).  Never a family fallback.
+    ``cf_pla``); then the same tokens with an abbreviation written out
+    ("PA-CF" → ``cf_nylon``, "PC" → ``polycarbonate``) -- after the plain
+    tokens, so a key that uses the short name itself (``pc_abs``, ``pa6_gf``)
+    still matches as spelled.  Never a family fallback.
     """
     if not material_id:
         return None
@@ -57,9 +73,12 @@ def resolve_material_key(material_id: str, keys: Iterable[str]) -> str | None:
     if slug in catalog:
         return slug
     want = _tokens(slug)
-    if want:
+    spelled_out = frozenset(_MATERIAL_ABBREVIATIONS.get(t, t) for t in want)
+    for tokens in (want, spelled_out) if want != spelled_out else (want,):
+        if not tokens:
+            continue
         for key in catalog:
-            if _tokens(key) == want:
+            if _tokens(key) == tokens:
                 return key
     return None
 

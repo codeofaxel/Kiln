@@ -89,7 +89,7 @@ from kiln.cli.output import (
     format_status,
 )
 from kiln.cli.spend_caps_commands import register_spend_caps_cli
-from kiln.materials import MATERIAL_TEMPS, normalise_material_type
+from kiln.materials import normalise_material_type
 from kiln.routing_candidates import (
     adapter_supports_extension,
     collect_routing_candidates,
@@ -98,43 +98,17 @@ from kiln.routing_candidates import (
 logger = logging.getLogger(__name__)
 
 _MATERIAL_CHOICES: tuple[str, ...] = ("PLA", "PETG", "ABS", "TPU", "ASA", "Nylon", "PC")
-# Material temps and name normalisation moved to kiln.materials, and
-# candidate building to kiln.routing_candidates, so the route_print_job
-# tool can reach the same code without importing the CLI.  Aliased back
-# under their original private names: this module's call sites and the
-# tests that patch them are unchanged.
-_MATERIAL_TEMPS = MATERIAL_TEMPS
+# Name normalisation moved to kiln.materials, and candidate building to
+# kiln.routing_candidates, so the route_print_job tool can reach the same
+# code without importing the CLI.  Aliased back under their original
+# private names: this module's call sites and the tests that patch them are
+# unchanged.  A material's slicer temperatures are the slice's own
+# (kiln.slicer_material), never this module's.
 _normalise_material_type = normalise_material_type
 _adapter_supports_extension = adapter_supports_extension
 _collect_routing_candidates = collect_routing_candidates
 _SUPPORT_MODE_CHOICES: tuple[str, ...] = ("off", "auto", "minimal", "aggressive")
 _INGEST_EXTENSIONS: tuple[str, ...] = (".gcode", ".gco", ".g", ".3mf")
-
-
-def _material_profile_overrides(material: str) -> dict[str, str]:
-    """Build slicer profile overrides for a material."""
-    nozzle, first_nozzle, bed, first_bed = _MATERIAL_TEMPS[material]
-    return {
-        "temperature": str(nozzle),
-        "first_layer_temperature": str(first_nozzle),
-        "bed_temperature": str(bed),
-        "first_layer_bed_temperature": str(first_bed),
-    }
-
-
-def _material_extra_args(material: str) -> list[str]:
-    """Build CLI temperature args for slicers when no bundled profile is used."""
-    nozzle, first_nozzle, bed, first_bed = _MATERIAL_TEMPS[material]
-    return [
-        "--temperature",
-        str(nozzle),
-        "--first-layer-temperature",
-        str(first_nozzle),
-        "--bed-temperature",
-        str(bed),
-        "--first-layer-bed-temperature",
-        str(first_bed),
-    ]
 
 
 #: Where the CLI's material came from: ``--material``, the spool Kiln
@@ -321,25 +295,22 @@ def _resolve_slice_plan(
     ) = _resolve_material_for_slice_with_source(ctx, material)
     support_style, support_reason = _resolve_support_style(support_mode, input_file)
 
-    use_material_defaults = material_is_explicit or profile is None
-
+    # The material's temperatures, melt rate and cooling are not set here:
+    # the slice writes them from the material it is told (below), the same
+    # resolver every slicing door uses (kiln.slicer_material).  This command
+    # used to write its own seven-material temperature table into the
+    # profile, so the same --material sliced at different temperatures here
+    # and through the tools -- and set no melt rate at all.
     if effective_profile is None and effective_printer_id:
         try:
-            overrides: dict[str, str] = {}
-            if use_material_defaults:
-                overrides.update(_material_profile_overrides(material_key))
-            if support_style:
-                overrides.update(_support_profile_overrides(support_style))
             effective_profile = resolve_slicer_profile(
                 effective_printer_id,
-                overrides=overrides or None,
+                overrides=_support_profile_overrides(support_style) if support_style else None,
             )
         except Exception as exc:
             logger.debug("Profile resolution failed for %s: %s", effective_printer_id, exc)
 
     # Fallback to direct CLI overrides when no bundled profile is active.
-    if use_material_defaults and effective_profile is None:
-        extra_args.extend(_material_extra_args(material_key))
     if support_style and effective_profile is None:
         extra_args.extend(_support_extra_args(support_style))
 
@@ -4207,7 +4178,10 @@ def remove(name: str) -> None:
     "-m",
     default=None,
     type=click.Choice(_MATERIAL_CHOICES),
-    help="Material type — sets the temperatures and what the print is weighed as (defaults to the loaded material, then PLA).",
+    help=(
+        "Material type — sets the slice's temperatures, melt rate and cooling, and what the "
+        "print is weighed as (defaults to the loaded material, then PLA)."
+    ),
 )
 @click.option(
     "--support-mode",
@@ -4586,7 +4560,7 @@ def slice(
         click.echo(format_error(str(exc), code="SLICER_NOT_FOUND", json_mode=json_mode))
         sys.exit(1)
     except SlicerError as exc:
-        click.echo(format_error(str(exc), code="SLICER_ERROR", json_mode=json_mode))
+        click.echo(format_error(str(exc), code=getattr(exc, "code", "SLICER_ERROR"), json_mode=json_mode))
         sys.exit(1)
     except click.ClickException:
         raise
@@ -9608,7 +9582,10 @@ def generate_download(
     "-m",
     default=None,
     type=click.Choice(_MATERIAL_CHOICES),
-    help="Material type — sets the temperatures and what the print is weighed as (defaults to the loaded material, then PLA).",
+    help=(
+        "Material type — sets the slice's temperatures, melt rate and cooling, and what the "
+        "print is weighed as (defaults to the loaded material, then PLA)."
+    ),
 )
 @click.option(
     "--support-mode",

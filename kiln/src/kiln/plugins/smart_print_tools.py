@@ -76,8 +76,9 @@ class _SmartPrintToolsPlugin:
                 model_path: Path to the STL/OBJ/3MF that failed.
                 printer_name: Target printer name.  Omit for the default
                     printer.
-                material: Filament material (e.g. ``"PLA"``, ``"ABS"``).
-                    Auto-detected from AMS when omitted.
+                material: Filament material (e.g. ``"PLA"``, ``"ABS"``); the
+                    reslice is set for it (temperatures, melt rate,
+                    cooling).  Auto-detected from AMS when omitted.
                 printer_id: Printer model ID for intelligence lookup
                     (e.g. ``"bambu_a1"``).
                 custom_overrides: JSON object of additional slicer overrides
@@ -222,7 +223,7 @@ class _SmartPrintToolsPlugin:
             # machine's own PRINT_START — chamber, mesh, purge — matters most.
             start_handoff: str | None = None
             _sg_patch, _sg_reason = start_gcode_override_from_printer(
-                adapter, effective_pid, merged_overrides
+                adapter, effective_pid, merged_overrides, material=effective_material,
             )
             if _sg_patch:
                 merged_overrides.update(_sg_patch)
@@ -321,7 +322,7 @@ class _SmartPrintToolsPlugin:
                 )
             except SlicerError as exc:
                 return _srv._error_dict(
-                    f"Slicing failed: {exc}", code="SLICER_ERROR"
+                    f"Slicing failed: {exc}", code=getattr(exc, "code", "SLICER_ERROR")
                 )
             except FileNotFoundError as exc:
                 return _srv._error_dict(

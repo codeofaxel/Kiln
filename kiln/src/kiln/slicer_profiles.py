@@ -22,7 +22,7 @@ import json
 import logging
 import os
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -234,7 +234,21 @@ def _ensure_start_temperatures(settings: dict[str, str]) -> None:
     """
     if "start_gcode" in settings:
         return
+    floor = start_floor(settings)
+    if floor is not None:
+        settings["start_gcode"] = floor
 
+
+def start_floor(settings: Mapping[str, str]) -> str | None:
+    """The warm-up floor :func:`_ensure_start_temperatures` writes for *settings*.
+
+    A pure function of the temperatures, so a later layer that changes them
+    (a declared material, at the slicing chokepoint) can tell the floor from
+    an author's own start block -- the floor is exactly this text -- and
+    write it again at the new temperatures rather than leave the printer
+    heating for the old material.  ``None`` when the settings do not name
+    both temperatures.
+    """
     bed = settings.get("first_layer_bed_temperature") or settings.get("bed_temperature")
     hotend = settings.get("first_layer_temperature") or settings.get("temperature")
 
@@ -245,7 +259,7 @@ def _ensure_start_temperatures(settings: dict[str, str]) -> None:
     # ``G28``.  A half-floor is worse than none, so a profile that does not
     # name both temperatures is left to the slicer entirely.
     if not (bed and hotend):
-        return
+        return None
 
     lines = [
         _START_FLOOR_BED.format(bed=str(bed).strip()),
@@ -256,7 +270,7 @@ def _ensure_start_temperatures(settings: dict[str, str]) -> None:
     # ``\n`` stays escaped: PrusaSlicer reads a literal backslash-n in an INI
     # value as a newline, and a real one would end the key.  Same rule the
     # E-reset follows.
-    settings["start_gcode"] = "\\n".join(lines)
+    return "\\n".join(lines)
 
 
 #: PrusaSlicer's documented base for each speed it accepts as a percentage:
@@ -563,12 +577,17 @@ def resolve_slicer_profile(
     # a flow ceiling or machine limits of its own.
     _apply_printer_invariants(merged, profile.id)
 
-    # Build a cache key from the effective settings.
-    cache_key = f"{profile.id}:{_settings_hash(merged)}"
+    # Build a cache key from the effective settings -- and from which of
+    # them the caller stated, which the file records: an override that
+    # happens to equal the printer's own value is still the caller's.
+    stated = sorted(overrides or ())
+    cache_key = f"{profile.id}:{_settings_hash(merged)}:{','.join(stated)}"
     if cache_key in _temp_cache and os.path.isfile(_temp_cache[cache_key]):
         return _temp_cache[cache_key]
 
-    ini_content = _settings_to_ini(merged, profile.display_name)
+    ini_content = _settings_to_ini(
+        merged, profile.display_name, printer_id=profile.id, stated=stated,
+    )
 
     tmp_dir = os.path.join(tempfile.gettempdir(), "kiln_slicer_profiles")
     os.makedirs(tmp_dir, mode=0o700, exist_ok=True)
@@ -595,6 +614,7 @@ def profile_with_overrides(
     overrides: dict[str, str] | None,
     *,
     prefix: str | None = None,
+    stated: bool = True,
 ) -> str | None:
     """Return a profile path that CARRIES *overrides*, whatever the base.
 
@@ -621,6 +641,13 @@ def profile_with_overrides(
     derives from a bundled profile passes that profile's stem so the file
     still reads as the printer's -- slice telemetry counts by that stem.
 
+    *stated* says whose the overrides are.  ``True`` (a caller's, or a door
+    deciding for its caller) adds their keys to the file's record of stated
+    keys (:class:`ProfileOrigin`), so a later layer leaves them alone;
+    ``False`` is Kiln's own layers at the slicing chokepoint -- the filament
+    identity and the material's settings -- which must stay replaceable by
+    the next slice that names a different material.
+
     Returns ``None`` only when there is nothing at all to say.
     """
     if not overrides:
@@ -628,15 +655,23 @@ def profile_with_overrides(
 
     lines: list[str] = []
     remaining = dict(overrides)
+    newly_stated = set(overrides) if stated else set()
     if base_profile and os.path.isfile(base_profile):
+        origin = profile_origin(base_profile)
         for raw in Path(base_profile).read_text(encoding="utf-8").splitlines():
             key = raw.split("=", 1)[0].strip() if "=" in raw else ""
             if key and key in remaining:
                 lines.append(f"{key} = {remaining.pop(key)}")
+            elif origin.kiln and raw.startswith(_STATED_LINE.rstrip()):
+                continue  # rewritten below, with this call's keys added
             else:
                 lines.append(raw)
+        if origin.kiln:
+            at = 2 if len(lines) > 1 and lines[1].startswith(_PRINTER_LINE) else 1
+            lines[at:at] = _origin_lines(None, origin.stated | newly_stated)
     else:
-        lines.append("# Kiln auto-generated profile: overrides only")
+        lines.append(f"{_KILN_HEADER}overrides only")
+        lines.extend(_origin_lines(None, newly_stated))
         lines.append("")
     lines.extend(f"{key} = {remaining[key]}" for key in sorted(remaining))
 
@@ -687,6 +722,8 @@ def start_gcode_override_from_printer(
     adapter: Any,
     printer_id: str | None,
     overrides: dict[str, str] | None,
+    *,
+    material: str | None = None,
 ) -> tuple[dict[str, str] | None, str]:
     """Ask kiln-pro for a start G-code that calls the printer's OWN macro.
 
@@ -703,12 +740,23 @@ def start_gcode_override_from_printer(
     into the overrides it was already resolving, where the floor's
     "a stated start_gcode wins" rule makes the two mutually exclusive by
     construction.  Never raises.
+
+    *material* is the material the slice will be told.  The macro takes the
+    heat-up temperatures as arguments, decided here before the slice runs,
+    so it is handed the temperatures the slice will print at
+    (:func:`kiln.slicer_material.preview_material_values`) -- not the
+    printer profile's, or a TPU print would warm up for PLA.
     """
     try:
         from kiln_pro.bridge import pro_features
     except Exception:
         return None, "kiln-pro-not-installed"
     try:
+        from kiln.slicer_material import preview_material_values
+
+        heat = preview_material_values(printer_id, material, overrides=overrides)
+        if heat:
+            overrides = {**heat, **(overrides or {})}
         return pro_features.start_gcode_override(adapter, printer_id, overrides)
     except Exception:
         logger.debug("start-gcode handoff declined", exc_info=True)
@@ -733,42 +781,12 @@ def slicer_profile_to_dict(profile: SlicerProfile) -> dict[str, Any]:
     }
 
 
-def brand_overrides_for_slicer(brand_id: str) -> dict[str, str] | None:
-    """Generate slicer setting overrides from a brand filament profile.
-
-    Returns a dict of PrusaSlicer INI key-value pairs that override the
-    default profile temperatures with brand-specific optimal values.
-    Returns ``None`` if the brand profile is not found.
-
-    Usage::
-
-        overrides = brand_overrides_for_slicer("bambu_petg_cf")
-        if overrides:
-            ini_path = resolve_slicer_profile("bambu_a1", overrides=overrides)
-
-    :param brand_id: Brand profile ID (e.g. ``"prusament_tpu_95a"``).
-    """
-    try:
-        from kiln.design_intelligence import resolve_filament
-
-        resolved = resolve_filament(brand_id)
-        if not resolved.is_brand_specific:
-            return None
-
-        overrides: dict[str, str] = {
-            "temperature": str(resolved.nozzle_temp_optimal_c),
-            "first_layer_temperature": str(resolved.nozzle_temp_optimal_c),
-            "bed_temperature": str(resolved.bed_temp_optimal_c),
-            "first_layer_bed_temperature": str(resolved.bed_temp_optimal_c),
-        }
-
-        return overrides
-    except Exception:
-        logger.debug("brand_overrides_for_slicer failed for '%s'", brand_id)
-        return None
-
-
-def validate_profile_for_printer(profile_id: str, printer_model: str) -> dict[str, Any]:
+def validate_profile_for_printer(
+    profile_id: str,
+    printer_model: str,
+    *,
+    settings: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
     """Check if a slicer profile is compatible with a printer model.
 
     Compares the slicer profile's temperature settings against the printer's
@@ -777,6 +795,11 @@ def validate_profile_for_printer(profile_id: str, printer_model: str) -> dict[st
 
     :param profile_id: Slicer profile identifier (e.g. ``"bambu_x1c"``).
     :param printer_model: Registered printer model (e.g. ``"ender3"``).
+    :param settings: The settings the slice will actually use -- the bundled
+        profile's when omitted.  A door that took temperature overrides
+        passes the file it is about to slice: judging the bundled profile
+        instead passed every override, however hot (``reslice_with_overrides``
+        did exactly that until 2026-10-01).
     :returns: Dict with ``compatible`` (bool), ``warnings`` (list[str]),
         and ``errors`` (list[str]).
     """
@@ -816,7 +839,7 @@ def validate_profile_for_printer(profile_id: str, printer_model: str) -> dict[st
         )
 
     # --- Check 2: Hotend temperature ---
-    settings = slicer_prof.settings
+    settings = slicer_prof.settings if settings is None else settings
     hotend_temps: list[tuple[str, float]] = []
     for key in ("temperature", "first_layer_temperature"):
         val = settings.get(key)
@@ -939,13 +962,16 @@ def resolve_multiextruder_profile(
     # absolute E.  The shared invariants check before they write.
     _apply_printer_invariants(merged, profile.id)
 
-    cache_key = f"{profile.id}_mme{num_extruders}:{_settings_hash(merged)}"
+    stated = sorted(overrides or ())
+    cache_key = f"{profile.id}_mme{num_extruders}:{_settings_hash(merged)}:{','.join(stated)}"
     if cache_key in _temp_cache and os.path.isfile(_temp_cache[cache_key]):
         return _temp_cache[cache_key]
 
     ini_content = _settings_to_ini(
         merged,
         f"{profile.display_name} (AMS {num_extruders}-color)",
+        printer_id=profile.id,
+        stated=stated,
     )
 
     tmp_dir = os.path.join(tempfile.gettempdir(), "kiln_slicer_profiles")
@@ -977,13 +1003,78 @@ def resolve_multiextruder_profile(
 # ---------------------------------------------------------------------------
 
 
-def _settings_to_ini(settings: dict[str, str], header: str = "") -> str:
-    """Convert a flat dict to PrusaSlicer INI format."""
-    lines = [f"# Kiln auto-generated profile: {header}", ""]
+def _settings_to_ini(
+    settings: dict[str, str],
+    header: str = "",
+    *,
+    printer_id: str | None = None,
+    stated: Iterable[str] = (),
+) -> str:
+    """Convert a flat dict to PrusaSlicer INI format, with its origin on top."""
+    lines = [f"{_KILN_HEADER}{header}", *_origin_lines(printer_id, stated), ""]
     for key in sorted(settings):
         lines.append(f"{key} = {settings[key]}")
     lines.append("")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Where a profile came from
+# ---------------------------------------------------------------------------
+
+#: The first line of every ``.ini`` Kiln writes.  A profile without it is
+#: somebody's own: every value in it is the author speaking.
+_KILN_HEADER = "# Kiln auto-generated profile: "
+#: The bundled printer profile the file was built from.
+_PRINTER_LINE = "# kiln-printer: "
+#: The keys a caller (or a door, for the caller) stated on top of it.
+_STATED_LINE = "# kiln-stated: "
+
+
+def _origin_lines(printer_id: str | None, stated: Iterable[str]) -> list[str]:
+    lines = [f"{_PRINTER_LINE}{printer_id}"] if printer_id else []
+    return [*lines, f"{_STATED_LINE}{' '.join(sorted(set(stated)))}".rstrip()]
+
+
+@dataclass(frozen=True)
+class ProfileOrigin:
+    """Where an ``.ini`` came from, read off its first lines.
+
+    ``kiln`` is False for a profile Kiln did not write -- the caller's own,
+    every value of which they chose.  For one Kiln wrote, ``printer_id`` is
+    the bundled printer profile it was built from (``None`` for an
+    overrides-only file), and ``stated`` the keys a caller set on top of it:
+    the values a later layer must leave alone.  The material a slice is
+    declared for writes its settings at the slicing chokepoint, long after
+    the doors resolved their profiles, and this is how it knows which of the
+    file's numbers are the printer's defaults and which are somebody's
+    decision (:mod:`kiln.slicer_material`).
+    """
+
+    kiln: bool
+    printer_id: str | None = None
+    stated: frozenset[str] = frozenset()
+
+
+def profile_origin(path: str | None) -> ProfileOrigin:
+    """Read :class:`ProfileOrigin` from *path*; an unreadable file is the caller's own."""
+    if not path:
+        return ProfileOrigin(kiln=False)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            head = [fh.readline().rstrip("\n") for _ in range(4)]
+    except (OSError, UnicodeDecodeError):
+        return ProfileOrigin(kiln=False)
+    if not head[0].startswith(_KILN_HEADER):
+        return ProfileOrigin(kiln=False)
+    printer_id: str | None = None
+    stated: frozenset[str] = frozenset()
+    for line in head[1:]:
+        if line.startswith(_PRINTER_LINE):
+            printer_id = line[len(_PRINTER_LINE):].strip() or None
+        elif line.startswith(_STATED_LINE.rstrip()):
+            stated = frozenset(line[len(_STATED_LINE.rstrip()):].split())
+    return ProfileOrigin(kiln=True, printer_id=printer_id, stated=stated)
 
 
 def _settings_hash(settings: dict[str, str]) -> str:

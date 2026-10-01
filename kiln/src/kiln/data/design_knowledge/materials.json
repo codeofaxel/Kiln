@@ -13,7 +13,8 @@
       "update_cadence": "annual for established materials (PLA, PETG, ABS), semi-annual for newer composites (CF-Nylon, PA6-GF, PET-CF); high-performance polymers (PEI, PEEK, PEKK, PPSU, PPS) annual — their datasheets change rarely, but vendor process windows do",
       "methodology": "Conservative/worst-case values used for composites where manufacturer specs vary. Mechanical values represent typical FDM-printed properties (not injection-molded datasheets). Design limits empirically validated where possible."
     },
-    "_split_note": "Safety-floor profiles for AI-controlled FDM printing.  Engineering depth (how strong each material really is, what it is good for, and how to print it well) is available in Kiln Pro.  See https://kiln3d.com/pricing."
+    "_split_note": "Safety-floor profiles for AI-controlled FDM printing.  Engineering depth (how strong each material really is, what it is good for, and how to print it well) is available in Kiln Pro.  See https://kiln3d.com/pricing.",
+    "_slicing_note": "slicing.max_volumetric_speed_mm3s is the most plastic a second (mm³/s) a slice for the material pushes through a standard 0.4 mm nozzle: the lowest figure the major slicer makers state for it in their generic presets, or where they publish none, their own-brand presets for it. A floor that holds on every printer, so it is cautious on fast ones; a material with no figure here is held only by the printer's own ceiling. Applied at every slice (kiln.slicer_material)."
   },
   "pla": {
     "display_name": "PLA (Polylactic Acid)",
@@ -30,6 +31,9 @@
         65
       ],
       "warping_tendency": "low"
+    },
+    "slicing": {
+      "max_volumetric_speed_mm3s": 12
     },
     "chemical": {
       "uv_resistance": "poor",
@@ -116,6 +120,9 @@
       ],
       "warping_tendency": "low"
     },
+    "slicing": {
+      "max_volumetric_speed_mm3s": 8
+    },
     "chemical": {
       "uv_resistance": "moderate",
       "moisture_absorption": "low",
@@ -201,6 +208,9 @@
       ],
       "warping_tendency": "high"
     },
+    "slicing": {
+      "max_volumetric_speed_mm3s": 11
+    },
     "chemical": {
       "uv_resistance": "poor",
       "moisture_absorption": "moderate",
@@ -271,6 +281,9 @@
         60
       ],
       "warping_tendency": "none"
+    },
+    "slicing": {
+      "max_volumetric_speed_mm3s": 1.2
     },
     "chemical": {
       "uv_resistance": "moderate",
@@ -360,6 +373,9 @@
       ],
       "warping_tendency": "moderate"
     },
+    "slicing": {
+      "max_volumetric_speed_mm3s": 12
+    },
     "chemical": {
       "uv_resistance": "excellent",
       "moisture_absorption": "low",
@@ -446,6 +462,9 @@
         90
       ],
       "warping_tendency": "high"
+    },
+    "slicing": {
+      "max_volumetric_speed_mm3s": 8
     },
     "chemical": {
       "uv_resistance": "moderate",
@@ -553,6 +572,9 @@
       ],
       "warping_tendency": "very_high"
     },
+    "slicing": {
+      "max_volumetric_speed_mm3s": 12
+    },
     "chemical": {
       "uv_resistance": "moderate",
       "moisture_absorption": "moderate",
@@ -640,6 +662,9 @@
       ],
       "warping_tendency": "low"
     },
+    "slicing": {
+      "max_volumetric_speed_mm3s": 12
+    },
     "chemical": {
       "uv_resistance": "poor",
       "moisture_absorption": "low",
@@ -692,6 +717,9 @@
         90
       ],
       "warping_tendency": "low"
+    },
+    "slicing": {
+      "max_volumetric_speed_mm3s": 8
     },
     "chemical": {
       "uv_resistance": "moderate",
@@ -761,6 +789,9 @@
         100
       ],
       "warping_tendency": "moderate"
+    },
+    "slicing": {
+      "max_volumetric_speed_mm3s": 8
     },
     "chemical": {
       "uv_resistance": "moderate",
@@ -852,6 +883,9 @@
       ],
       "warping_tendency": "low"
     },
+    "slicing": {
+      "max_volumetric_speed_mm3s": 5
+    },
     "chemical": {
       "uv_resistance": "moderate",
       "moisture_absorption": "low",
@@ -903,6 +937,9 @@
         65
       ],
       "warping_tendency": "low"
+    },
+    "slicing": {
+      "max_volumetric_speed_mm3s": 7
     },
     "chemical": {
       "uv_resistance": "poor",
@@ -956,6 +993,9 @@
         65
       ],
       "warping_tendency": "low"
+    },
+    "slicing": {
+      "max_volumetric_speed_mm3s": 10
     },
     "chemical": {
       "uv_resistance": "poor",
@@ -1025,6 +1065,9 @@
         60
       ],
       "warping_tendency": "low"
+    },
+    "slicing": {
+      "max_volumetric_speed_mm3s": 12
     },
     "chemical": {
       "uv_resistance": "poor",
@@ -1252,6 +1295,9 @@
       ],
       "warping_tendency": "low"
     },
+    "slicing": {
+      "max_volumetric_speed_mm3s": 8
+    },
     "chemical": {
       "uv_resistance": "moderate",
       "moisture_absorption": "low",
@@ -1321,6 +1367,9 @@
       ],
       "warping_tendency": "moderate"
     },
+    "slicing": {
+      "max_volumetric_speed_mm3s": 10.5
+    },
     "chemical": {
       "uv_resistance": "moderate",
       "moisture_absorption": "moderate",
@@ -1377,6 +1426,9 @@
         65
       ],
       "warping_tendency": "low"
+    },
+    "slicing": {
+      "max_volumetric_speed_mm3s": 11
     },
     "chemical": {
       "uv_resistance": "poor",
@@ -1447,6 +1499,9 @@
       ],
       "warping_tendency": "low"
     },
+    "slicing": {
+      "max_volumetric_speed_mm3s": 16
+    },
     "chemical": {
       "uv_resistance": "moderate",
       "moisture_absorption": "low",
@@ -1500,6 +1555,9 @@
       ],
       "warping_tendency": "low"
     },
+    "slicing": {
+      "max_volumetric_speed_mm3s": 21
+    },
     "chemical": {
       "uv_resistance": "poor",
       "moisture_absorption": "low",
@@ -1552,6 +1610,9 @@
         60
       ],
       "warping_tendency": "low"
+    },
+    "slicing": {
+      "max_volumetric_speed_mm3s": 2.5
     },
     "chemical": {
       "uv_resistance": "moderate",
@@ -1625,6 +1686,9 @@
       ],
       "warping_tendency": "low"
     },
+    "slicing": {
+      "max_volumetric_speed_mm3s": 2.2
+    },
     "chemical": {
       "uv_resistance": "moderate",
       "moisture_absorption": "moderate",
@@ -1680,6 +1744,9 @@
         80
       ],
       "warping_tendency": "low"
+    },
+    "slicing": {
+      "max_volumetric_speed_mm3s": 8
     },
     "chemical": {
       "uv_resistance": "poor",
@@ -1748,6 +1815,9 @@
         100
       ],
       "warping_tendency": "very_high"
+    },
+    "slicing": {
+      "max_volumetric_speed_mm3s": 12
     },
     "chemical": {
       "uv_resistance": "poor",
@@ -2151,6 +2221,9 @@
       ],
       "requires_heated_chamber": false,
       "warping_tendency": "high"
+    },
+    "slicing": {
+      "max_volumetric_speed_mm3s": 4
     },
     "chemical": {
       "uv_resistance": "excellent",

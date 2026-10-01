@@ -258,8 +258,10 @@ class TestBuildMaterialOverrides:
         assert 220 <= temp <= 250
         bed = int(ov["bed_temperature"])
         assert 70 <= bed <= 85
-        # PETG specific speed/retraction
-        assert "retract_length" in ov
+        # PETG's melt rate, not a hand-kept retraction table: the old 4 mm
+        # retraction was a Bowden figure handed to direct-drive printers.
+        assert float(ov["filament_max_volumetric_speed"]) > 0
+        assert "retract_length" not in ov
 
     @patch("kiln.server._check_auth", side_effect=_no_auth)
     def test_tpu_slow_speeds(self, _auth):
@@ -268,9 +270,9 @@ class TestBuildMaterialOverrides:
         result = build_material_overrides("tpu")
         assert result["success"] is True
         ov = result["overrides"]
-        # TPU needs very slow speeds
-        assert int(ov.get("perimeter_speed", "50")) <= 25
-        assert float(ov.get("retract_length", "5")) <= 2.0
+        # TPU needs a slow melt rate, which slows every feature -- the
+        # inner-wall speed this used to check left the outer wall at 150.
+        assert float(ov["filament_max_volumetric_speed"]) <= 5
 
     @patch("kiln.server._check_auth", side_effect=_no_auth)
     def test_pla_baseline(self, _auth):
@@ -312,15 +314,15 @@ class TestBuildMaterialOverrides:
         assert bed >= 80  # ABS needs hot bed
 
     @patch("kiln.server._check_auth", side_effect=_no_auth)
-    def test_first_layer_temp_higher(self, _auth):
+    def test_first_layer_temp_is_the_materials_own(self, _auth):
+        """The first layer prints at the material's temperature.  A "+5 °C
+        for adhesion" rule was Kiln's own invention, stated by no source."""
         from kiln.server import build_material_overrides
 
         result = build_material_overrides("petg")
         assert result["success"] is True
         ov = result["overrides"]
-        base = int(ov["temperature"])
-        first = int(ov["first_layer_temperature"])
-        assert first > base  # First layer should be hotter
+        assert ov["first_layer_temperature"] == ov["temperature"]
 
     @patch("kiln.server._check_auth", side_effect=_no_auth)
     def test_notes_field_populated(self, _auth):
@@ -338,8 +340,8 @@ class TestBuildMaterialOverrides:
         result = build_material_overrides("nylon")
         assert result["success"] is True
         ov = result["overrides"]
-        # Nylon-specific retraction
-        assert float(ov.get("retract_length", "0")) >= 4.0
+        assert 240 <= int(ov["temperature"]) <= 270
+        assert "retract_length" not in ov  # the Bowden figure is gone
 
     @patch("kiln.server._check_auth", side_effect=_no_auth)
     def test_cf_petg_overrides(self, _auth):
@@ -348,8 +350,7 @@ class TestBuildMaterialOverrides:
         result = build_material_overrides("cf_petg")
         assert result["success"] is True
         ov = result["overrides"]
-        # Should have PETG-family speed/retraction
-        assert "retract_length" in ov
+        assert float(ov["filament_max_volumetric_speed"]) > 0
 
 
 # ---------------------------------------------------------------------------
@@ -448,7 +449,10 @@ class TestReprintWithMaterial:
 
         assert result["success"] is True
         applied = result["material_overrides_applied"]
-        assert int(applied.get("perimeter_speed", "50")) <= 25
+        # TPU slows through its melt rate: every feature, the outer wall
+        # and the first layer included -- not a slower inner wall.
+        assert float(applied["filament_max_volumetric_speed"]) <= 5
+        assert mock_reslice.call_args.kwargs["material"] == "tpu"
 
     @patch("kiln.server._check_auth", side_effect=_no_auth)
     @patch("kiln.server.run_reslice_and_print")
@@ -533,35 +537,31 @@ class TestNewMaterialOverrides:
     """Tests for build_material_overrides with new material families."""
 
     @patch("kiln.server._check_auth", side_effect=_no_auth)
-    def test_petg_hf_uses_petg_family_speeds(self, _auth):
+    def test_petg_hf_flows_faster_than_petg(self, _auth):
+        """High-flow PETG is its own material, not PETG's speeds."""
         from kiln.server import build_material_overrides
 
-        result = build_material_overrides("petg_hf")
-        assert result["success"] is True
-        ov = result["overrides"]
-        assert int(ov["perimeter_speed"]) == 40
-        assert float(ov["retract_length"]) == 4.0
+        hf = build_material_overrides("petg_hf")["overrides"]
+        petg = build_material_overrides("petg")["overrides"]
+        assert float(hf["filament_max_volumetric_speed"]) > float(petg["filament_max_volumetric_speed"])
 
     @patch("kiln.server._check_auth", side_effect=_no_auth)
-    def test_tpu_95a_uses_tpu_family_speeds(self, _auth):
+    def test_tpu_95a_has_its_own_melt_rate(self, _auth):
         from kiln.server import build_material_overrides
 
         result = build_material_overrides("tpu_95a")
         assert result["success"] is True
         ov = result["overrides"]
-        assert int(ov["perimeter_speed"]) == 20
-        assert float(ov["retract_length"]) == 1.0
+        assert 0 < float(ov["filament_max_volumetric_speed"]) <= 5
 
     @patch("kiln.server._check_auth", side_effect=_no_auth)
-    def test_tpu_85a_slower_than_standard_tpu(self, _auth):
+    def test_tpu_85a_slower_than_tpu_95a(self, _auth):
+        """The softer the TPU, the less of it a nozzle can push."""
         from kiln.server import build_material_overrides
 
-        result = build_material_overrides("tpu_85a")
-        assert result["success"] is True
-        ov = result["overrides"]
-        # 85A needs even slower speeds
-        assert int(ov["perimeter_speed"]) <= 15
-        assert float(ov["retract_length"]) <= 1.0
+        soft = build_material_overrides("tpu_85a")["overrides"]
+        firm = build_material_overrides("tpu_95a")["overrides"]
+        assert float(soft["filament_max_volumetric_speed"]) <= float(firm["filament_max_volumetric_speed"])
 
     @patch("kiln.server._check_auth", side_effect=_no_auth)
     def test_pla_matte_no_special_speed_overrides(self, _auth):

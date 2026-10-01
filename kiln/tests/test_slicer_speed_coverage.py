@@ -282,18 +282,15 @@ class TestEveryDoorDerivesThem:
         assert s["small_perimeter_speed"] == "75"
 
     def test_slowed_walls_are_never_outrun_by_a_derived_speed(self) -> None:
-        """A material or a caller that slows the inner walls and leaves the
-        outer one alone must not get holes and gap fill at half the outer
-        wall's pace -- 75 mm/s for TPU on an A1, measured on the first cut of
-        this rule, against the slicer's old 15."""
-        from unittest.mock import patch
-
-        from kiln.server import build_material_overrides
-
-        with patch("kiln.server._check_auth", return_value=None):
-            tpu = build_material_overrides("tpu")["overrides"]
-        s = _ini(resolve_slicer_profile("bambu_a1", overrides=tpu))
-        wall = float(tpu["perimeter_speed"])
+        """A caller that slows the inner walls and leaves the outer one alone
+        must not get holes and gap fill at half the outer wall's pace -- 75
+        mm/s for a TPU part on an A1, measured on the first cut of this rule,
+        against the slicer's old 15.  (A material no longer arrives this
+        way: it caps every feature through its melt rate,
+        kiln.slicer_material.  A caller still can.)"""
+        slowed = {"perimeter_speed": "20", "infill_speed": "20"}
+        s = _ini(resolve_slicer_profile("bambu_a1", overrides=slowed))
+        wall = float(slowed["perimeter_speed"])
         assert float(s["solid_infill_speed"]) <= wall
         assert float(s["top_solid_infill_speed"]) <= wall
         assert float(s["gap_fill_speed"]) <= wall / 2
@@ -688,6 +685,87 @@ class TestTheGcodeKeepsThePace:
         fast = _estimate_seconds(_prusa_slice(emitted, model, tempfile.mkdtemp(dir=tmp_path)))
         slow = _estimate_seconds(_prusa_slice(reverted, model, tempfile.mkdtemp(dir=tmp_path)))
         assert fast < 0.8 * slow, f"{fast}s as emitted against {slow}s with the slicer's defaults"
+
+
+# ---------------------------------------------------------------------------
+# The material axis: a slice declared for a material keeps ITS pace
+# ---------------------------------------------------------------------------
+
+#: Two flavours: a Bambu (wrapped later, relative E) and a Klipper machine.
+_MATERIAL_PRINTERS = ("bambu_a1", "voron_2")
+
+
+def _materials_with_a_melt_rate() -> list[str]:
+    from kiln.design_intelligence import _get_kb
+
+    return sorted(m for m, rec in _get_kb().materials.items() if (rec.get("slicing") or {}).get("max_volumetric_speed_mm3s"))
+
+
+@pytest.fixture(scope="module")
+def material_slices(tmp_path_factory: pytest.TempPathFactory) -> dict[tuple[str, str], tuple[object, str]]:
+    """Every material Kiln states a melt rate for, sliced through slice_file on each printer."""
+    from kiln.slicer import MaterialNotPrintableError, slice_file
+    from kiln.slicer_material import material_needs
+
+    work = tmp_path_factory.mktemp("material_pace")
+    model = _write_fixture(work / "plate.stl")
+    jobs = [(pid, m) for pid in _MATERIAL_PRINTERS for m in _materials_with_a_melt_rate()]
+
+    def run(job: tuple[str, str]):
+        pid, material = job
+        needs = material_needs(material, printer_id=pid)
+        if needs is None or needs.refusal is not None:
+            return job, (needs, "")
+        try:
+            result = slice_file(
+                model, profile=resolve_slicer_profile(pid), material=material,
+                output_dir=tempfile.mkdtemp(dir=work), slicer_path=_PRUSA,
+            )
+        except MaterialNotPrintableError:
+            return job, (needs, "")
+        if result.filament.settings.outcome != "applied":
+            # The profile's own material: its author's tuning stands
+            # (kiln.slicer_material.PROFILE_MATERIAL), judged by the rest of
+            # this file at the profile's own pace.
+            return job, (needs, "")
+        return job, (needs, Path(result.output_path).read_text(encoding="utf-8", errors="replace"))
+
+    with ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 2)) as pool:
+        return dict(pool.map(run, jobs))
+
+
+@pytest.mark.skipif(_PRUSA is None, reason="PrusaSlicer not installed")
+class TestEveryMaterialKeepsItsOwnPace:
+    """Found 2026-10-01: a TPU slice was a PLA slice with TPU's density --
+    220 °C and outer walls at 150 mm/s -- because ``material`` reached the
+    slicer as a weight and nothing else (:mod:`kiln.slicer_material`)."""
+
+    def test_no_line_asks_for_more_plastic_than_the_material_takes(self, material_slices) -> None:
+        over: list[str] = []
+        for (pid, material), (needs, gcode) in sorted(material_slices.items()):
+            if not gcode:
+                continue
+            ceiling = needs.flow_ceiling
+            peak = _peak_flow(gcode, 1.75)
+            # 2% for E's own rounding on the shortest moves counted.
+            if ceiling and peak > ceiling * 1.02:
+                over.append(f"{pid} {material}: {peak:.2f} mm³/s against {ceiling:g}")
+        assert not over, "\n".join(over)
+
+    def test_the_file_heats_to_the_materials_temperature(self, material_slices) -> None:
+        wrong: list[str] = []
+        for (pid, material), (needs, gcode) in sorted(material_slices.items()):
+            if not gcode:
+                continue
+            want = needs.values().get("first_layer_temperature")
+            m = re.search(r"^; first_layer_temperature = (\d+)", gcode, re.MULTILINE)
+            if want and (not m or m.group(1) != want):
+                wrong.append(f"{pid} {material}: {m.group(1) if m else None} against {want}")
+        assert not wrong, "\n".join(wrong)
+
+    def test_the_axis_sliced_something(self, material_slices) -> None:
+        """A run where every job was refused or skipped proves nothing."""
+        assert sum(1 for _, gcode in material_slices.values() if gcode) >= len(_MATERIAL_PRINTERS) * 5
 
 
 # Orca: one profile per G-code flavour is enough to prove the translation.

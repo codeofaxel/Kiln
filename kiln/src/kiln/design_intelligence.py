@@ -476,6 +476,10 @@ class MaterialProfile:
     # / compatible_adhesive_chemistries / bonding_note).  Present only when
     # the overlay merged (Pro+); empty for free tier.  See bonding_caveat().
     bonding: dict[str, Any] = field(default_factory=dict)
+    # What a slicer must be told for this material whatever the printer:
+    # the melt-rate ceiling and the part fan's range.  A floor every tier
+    # gets, read by kiln.slicer_material at every slice.
+    slicing: dict[str, Any] = field(default_factory=dict)
 
     def has_engineering_data(self) -> bool:
         """True when the kiln-pro engineering overlay is loaded.
@@ -1290,6 +1294,7 @@ def get_material_profile(material_id: str) -> MaterialProfile | None:
         use_case_ratings=data.get("use_case_ratings", {}),
         agent_guidance=data.get("agent_guidance", []),
         bonding=data.get("bonding", {}),
+        slicing=data.get("slicing", {}),
     )
 
 

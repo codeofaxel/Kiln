@@ -172,9 +172,12 @@ class _EstimateToolsPlugin:
                     auto-selection (e.g. ``"bambu_a1"``, ``"prusa_mini"``).
                 profile: Path to a slicer profile/config file (.ini or .json).
                     Takes precedence over ``printer_id`` auto-selection.
-                material: Filament material for weight and adhesion estimates
-                    (e.g. ``"PLA"``, ``"PETG"``, ``"ABS"``).  Default is
-                    ``"PLA"``.
+                material: Filament material (e.g. ``"PLA"``, ``"PETG"``,
+                    ``"TPU"``).  The slice is set for it -- temperatures,
+                    melt rate and cooling -- so the time is the time THIS
+                    material takes (a TPU part is far slower than the same
+                    part in PLA), and its density gives the weight.
+                    Default is ``"PLA"``.
                 printer_name: Registered printer this estimate is FOR.  Omit
                     for the default printer.  An estimate is only as true as
                     the profile behind it, so naming a second machine costs
@@ -381,7 +384,7 @@ class _EstimateToolsPlugin:
             except SlicerError as exc:
                 return _srv._error_dict(
                     f"Failed to slice model: {exc}",
-                    code="SLICER_ERROR",
+                    code=getattr(exc, "code", "SLICER_ERROR"),
                 )
             except FileNotFoundError as exc:
                 return _srv._error_dict(

@@ -2987,7 +2987,8 @@ def design_to_gcode(
 
     :param description: Natural-language design description.
     :param output_dir: Directory for output files (uses tempdir if empty).
-    :param material: Material for weight estimation and slicing.
+    :param material: Material the slice is set for -- temperatures, melt
+        rate and cooling -- and weighed as.
     :param printer_model: Printer model for slicer profile lookup.
     :param infill_percent: Infill percentage for weight estimation.
     :returns: ``DesignToGCodeResult`` with paths and metadata.

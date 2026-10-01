@@ -41,6 +41,7 @@ from typing import Any
 
 from kiln.openscad_runner import present_signals
 from kiln.slicer_filament import LOADED_OBSERVED, SliceFilament, ensure_profile_filament
+from kiln.slicer_material import MaterialRefused
 from kiln.slicer_orca import (
     PRIME_TOWER_WIDTH_MM,
     ini_to_settings,
@@ -127,6 +128,21 @@ class SlicerError(Exception):
 
 class SlicerNotFoundError(SlicerError):
     """Raised when no slicer binary is found on the system."""
+
+
+class MaterialNotPrintableError(SlicerError):
+    """The target printer cannot melt the material the slice was declared for.
+
+    The print gate's own verdict, raised before the slicer runs: a file
+    sliced for a temperature the hotend never reaches is a file that cannot
+    print.  ``code`` is the gate's (``MATERIAL_EXCEEDS_HOTEND``), so a door
+    refuses in the words and with the code a print would.
+    """
+
+    def __init__(self, message: str, *, code: str, verdict: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.verdict = verdict or {}
 
 
 # ---------------------------------------------------------------------------
@@ -1066,12 +1082,15 @@ def slice_file(
     # whatever door it entered by.  The derived file keeps the printer
     # profile's name, so telemetry still counts the slice against the
     # printer and Orca's presets are still named for it.
-    slicer_profile, filament = ensure_profile_filament(
-        profile,
-        material=material,
-        loaded_type=loaded_material,
-        loaded_determined_by=loaded_determined_by,
-    )
+    try:
+        slicer_profile, filament = ensure_profile_filament(
+            profile,
+            material=material,
+            loaded_type=loaded_material,
+            loaded_determined_by=loaded_determined_by,
+        )
+    except MaterialRefused as exc:
+        raise MaterialNotPrintableError(str(exc), code=exc.code, verdict=exc.verdict) from exc
 
     # Prepare output
     out_dir = output_dir or _DEFAULT_OUTPUT_DIR
