@@ -110,12 +110,14 @@ def free_tier(monkeypatch):
     _block_kiln_pro(monkeypatch)
 
 
-def _install_pro_wall_floor(monkeypatch, floor_mm: float | None, calls: list[dict] | None = None) -> None:
+def _install_pro_wall_floor(
+    monkeypatch, floor_mm: float | None, calls: list[dict] | None = None, *, enrich=None,
+) -> None:
     """A kiln-pro stand-in that answers only the wall-floor question.
 
     Its ``enrich_printability_report`` hands the report back untouched, so
     what the test sees is public Kiln's own measurement at the floor Pro
-    named.
+    named -- unless *enrich* is given, which answers in its place.
     """
     _block_kiln_pro(monkeypatch)
     overlay = types.ModuleType("kiln_pro.printability_overlay")
@@ -126,7 +128,7 @@ def _install_pro_wall_floor(monkeypatch, floor_mm: float | None, calls: list[dic
         return floor_mm
 
     overlay.resolve_wall_floor = resolve_wall_floor
-    overlay.enrich_printability_report = lambda report, **_kw: dict(report)
+    overlay.enrich_printability_report = enrich or (lambda report, **_kw: dict(report))
 
     class _ProFeatures:
         printability_overlay = overlay
@@ -239,6 +241,65 @@ class TestOnePrintabilityScore:
                 f"{door} calls something other than analyze_printability's score a printability score: {named}"
             )
             assert any(k.startswith("mesh_check_score") for k in out), f"{door} dropped the mesh check entirely"
+
+
+class TestAnOverlayAddsFindingsNotAGrade:
+    """An overlay may lower the verdict with a finding; it never grades afresh.
+
+    2026-10-01: an enclosure base printed open side down -- a roof to
+    bridge, supports under all of it, a rim for bed contact -- graded 42/F
+    here and came back from the overlay as 92/A, printable, in the same
+    reply as ``score_if_placed: 42``: the overlay's own score was written
+    over this one.  Stand-ins below answer the way that overlay did, and
+    the other way.
+    """
+
+    @pytest.fixture
+    def face_down(self, enclosure_stl, tmp_path) -> str:
+        import numpy as np
+        import trimesh
+
+        mesh = trimesh.load(enclosure_stl)
+        mesh.apply_transform(trimesh.transformations.rotation_matrix(np.pi, (1, 0, 0)))
+        mesh.apply_translation((0, 0, -mesh.bounds[0][2]))
+        path = tmp_path / "face_down.stl"
+        mesh.export(str(path))
+        return str(path)
+
+    @staticmethod
+    def _answering(score: int, grade: str, printable: bool, seen: list[dict]):
+        def enrich(report, **_kw):
+            seen.append({k: report.get(k) for k in ("score", "grade", "printable")})
+            return {
+                **report, "score": score, "grade": grade, "printable": printable,
+                "enrichment": {"enriched_score": score, "added_warnings": ["a finding"]},
+            }
+
+        return enrich
+
+    def test_a_higher_score_from_the_overlay_is_not_taken(self, face_down, monkeypatch):
+        from kiln.printability import analyze_printability
+
+        seen: list[dict] = []
+        _install_pro_wall_floor(monkeypatch, None, enrich=self._answering(92, "A", True, seen))
+        report = analyze_printability(face_down, material="PLA", printer_id="bambu_a1")
+        public = seen[0]
+        assert public["score"] < 80, "the fixture has to be a part the public rubric marks down"
+        assert (report.score, report.grade, report.printable) == (public["score"], public["grade"], public["printable"])
+        assert not report.placement.faults and report.score == report.placement.score_if_placed
+        assert report.grade == report.placement.grade_if_placed
+        assert report.enrichment["added_warnings"] == ["a finding"], "the findings still arrive"
+
+    def test_a_finding_lowers_the_score_and_the_grade_and_printable_follow(self, enclosure, monkeypatch):
+        from kiln.printability import _PRINTABLE_SCORE_MIN, analyze_printability
+
+        seen: list[dict] = []
+        # The overlay says 30 and, in the same breath, "A" and printable.
+        _install_pro_wall_floor(monkeypatch, None, enrich=self._answering(30, "A", True, seen))
+        report = analyze_printability(enclosure, material="PLA", printer_id="bambu_a1")
+        assert seen[0]["score"] > 30 and seen[0]["printable"] is True
+        assert _PRINTABLE_SCORE_MIN > 30
+        assert (report.score, report.grade, report.printable) == (30, "F", False)
 
 
 # ---------------------------------------------------------------------------

@@ -14,6 +14,7 @@ from kiln.printability import (
     AdhesionRecommendation,
     BedAdhesionAnalysis,
     PrintFailureDiagnosis,
+    _adhesion_risk_for_contact,
     diagnose_from_signals,
     is_bedslinger,
     recommend_adhesion,
@@ -253,6 +254,76 @@ class TestRecommendAdhesion:
         """contact_percentage is passed through to the recommendation."""
         rec = recommend_adhesion(_adhesion(contact_percentage=7.5, adhesion_risk="medium"))
         assert rec.contact_percentage == 7.5
+
+
+def _measured(contact_percentage: float) -> BedAdhesionAnalysis:
+    """A bed-adhesion reading labelled by the engine's own bands."""
+    return _adhesion(
+        contact_percentage=contact_percentage,
+        adhesion_risk=_adhesion_risk_for_contact(contact_percentage),
+    )
+
+
+class TestTheBrimAgreesWithTheRisk:
+    """The brim decision and the risk label describe the same part.
+
+    2026-10-01: an enclosure base printed open side down touched the bed
+    over 7.1% of its footprint.  The report labelled it ``high`` adhesion
+    risk and, in the same block, said "Good bed contact (7.1%), no brim
+    needed" -- the table had rows for under 5% and for 10-30% and none for
+    the band between, so a part there fell through to the row written for
+    a part that sits flat.
+    """
+
+    def test_the_part_from_the_report(self):
+        rec = recommend_adhesion(_measured(7.1), material="PLA", is_bedslinger_printer=True)
+        assert rec.adhesion_risk == "high"
+        assert rec.brim_width_mm == 5
+        assert "7.1%" in rec.rationale and "brim" in rec.rationale
+        assert "Good bed contact" not in rec.rationale
+        assert rec.slicer_overrides["brim_width"] == "5"
+
+    def test_a_warping_material_in_the_band_gets_the_wide_brim(self):
+        for enclosed in (True, False):
+            rec = recommend_adhesion(_measured(7.1), material="ABS", has_enclosure=enclosed)
+            assert rec.brim_width_mm == 8 and rec.use_raft is False
+
+    @staticmethod
+    def _sweep():
+        tenths = [t / 10.0 for t in range(0, 1001)]
+        for material in ("PLA", "PETG", "ABS", "ASA"):
+            for enclosed in (False, True):
+                for bedslinger in (False, True):
+                    for height in (20.0, 80.0):
+                        yield material, enclosed, bedslinger, height, [
+                            (pct, recommend_adhesion(
+                                _measured(pct), material=material, has_enclosure=enclosed,
+                                is_bedslinger_printer=bedslinger, model_height_mm=height,
+                            ))
+                            for pct in tenths
+                        ]
+
+    def test_no_brim_is_only_ever_said_of_a_part_at_low_risk(self):
+        for material, enclosed, bedslinger, height, recs in self._sweep():
+            for pct, rec in recs:
+                where = f"{material} enclosed={enclosed} bedslinger={bedslinger} h={height} at {pct}%"
+                if rec.adhesion_risk != "low":
+                    assert rec.brim_width_mm > 0 or rec.use_raft, f"no brim at {rec.adhesion_risk} risk: {where}"
+                    assert "Good bed contact" not in rec.rationale, where
+                if rec.brim_width_mm == 0 and not rec.use_raft:
+                    assert rec.slicer_overrides == {}, where
+
+    def test_less_contact_never_gets_less_help(self):
+        for material, enclosed, bedslinger, height, recs in self._sweep():
+            previous = None
+            for pct, rec in recs:
+                strength = (rec.use_raft, rec.brim_width_mm)
+                if previous is not None:
+                    assert strength <= previous[1], (
+                        f"{material} enclosed={enclosed} bedslinger={bedslinger} h={height}: "
+                        f"{pct}% contact gets {strength}, more than {previous[0]}% got ({previous[1]})"
+                    )
+                previous = (pct, strength)
 
 
 # ---------------------------------------------------------------------------

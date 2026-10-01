@@ -1015,7 +1015,11 @@ class TestWhereItFitsIsThePaidHalf:
             placement=placement, adapter=machine,
         )
         message = err["error"]["message"]
-        assert message.endswith(" 3 spots beside it would fit."), message
+        # With no placement named the refusal goes on to offer a look at the
+        # plate; the count is said either way, before it.
+        assert " 3 spots beside it would fit." in message, message
+        if placement is not None:
+            assert message.endswith(" 3 spots beside it would fit."), message
         assert "No spot on the plate is safe" not in message, "room exists; only a start beside it does not"
         assert "kiln3d.com" not in message and "kiln-pro" not in message
         assert err["tier_note"] == "The clearance verdict is free on every tier."
