@@ -105,7 +105,7 @@ def mjpeg_server():
 
 class TestTheKeyShapeIsThePrivacyBoundary:
     def test_a_model_becomes_a_token(self):
-        assert daily_stats.video_model_token("Saturn 4 Ultra 16K") == "saturn_4_ultra_16k"
+        assert daily_stats.video_model_token("Centauri Carbon 2 Combo") == "centauri_carbon_2_combo"
         assert daily_stats.video_model_token("bambu_a1") == "bambu_a1"
         assert daily_stats.video_model_token(None) == "unknown"
         assert daily_stats.video_model_token("   ") == "unknown"
