@@ -2660,6 +2660,21 @@ def _analyze_bridging(
     )
 
 
+def _adhesion_risk_for_contact(contact_pct: float) -> str:
+    """The adhesion band for a contact percentage: ``low`` / ``medium`` / ``high``.
+
+    The one place the bands are drawn.  :func:`_analyze_bed_adhesion`
+    labels a part with it and :func:`recommend_adhesion` decides the brim
+    from that label, so the label and the advice cannot describe two
+    different parts.
+    """
+    if contact_pct > 30.0:
+        return "low"
+    if contact_pct > 10.0:
+        return "medium"
+    return "high"
+
+
 def _analyze_bed_adhesion(
     triangles: list[tuple[tuple[float, ...], ...]],
     z_min: float,
@@ -2684,17 +2699,10 @@ def _analyze_bed_adhesion(
     footprint = (bbox["x_max"] - bbox["x_min"]) * (bbox["y_max"] - bbox["y_min"])
     contact_pct = (contact_area / footprint * 100.0) if footprint > 0 else 0.0
 
-    if contact_pct > 30.0:
-        risk = "low"
-    elif contact_pct > 10.0:
-        risk = "medium"
-    else:
-        risk = "high"
-
     return BedAdhesionAnalysis(
         contact_area_mm2=round(contact_area, 2),
         contact_percentage=round(contact_pct, 1),
-        adhesion_risk=risk,
+        adhesion_risk=_adhesion_risk_for_contact(contact_pct),
     )
 
 
@@ -4804,26 +4812,34 @@ def analyze_printability(
                 enriched = None
             if isinstance(enriched, dict) and "enrichment" in enriched:
                 report.enrichment = enriched.get("enrichment")
-                # Mirror the overlay's recomputed top-level fields onto
-                # the dataclass so dict-consumers and dataclass-consumers
-                # agree.  Other nested analysis blocks (overhangs,
-                # thin_walls, etc.) remain authoritative on the dataclass.
-                if "score" in enriched:
-                    report.score = int(enriched["score"])
-                if "grade" in enriched:
-                    report.grade = str(enriched["grade"])
-                if "printable" in enriched:
-                    report.printable = bool(enriched["printable"])
+                # An overlay adds findings to this verdict; it does not
+                # grade the part afresh.  Its score is taken only where it
+                # is LOWER -- a finding this analysis could not make -- and
+                # the grade and ``printable`` are then read off that score
+                # by the rules above.  A higher score from elsewhere, taken
+                # as given, once handed a part that needs supports under
+                # all of it back as a printable A.  Other nested analysis
+                # blocks (overhangs, thin_walls, etc.) remain authoritative
+                # on the dataclass.
+                try:
+                    overlay_score = int(enriched["score"])
+                except (KeyError, TypeError, ValueError):
+                    overlay_score = report.score
+                if overlay_score < report.score:
+                    report.score = max(0, overlay_score)
+                    report.grade = _score_to_grade(report.score)
+                    report.printable = report.printable and report.score >= _PRINTABLE_SCORE_MIN
                 if isinstance(enriched.get("recommendations"), list):
                     report.recommendations = list(enriched["recommendations"])
 
-    # Safety floor.  The overlay above recomputes score / grade /
-    # printable from its own analysis and writes them straight onto the
-    # report — which silently undid the placement verdict and handed an
-    # off-bed or oversized part back as a printable A.  Placement is
-    # physics, not tuning, so it gets the last word on every tier.
-    # Clamping (never raising) keeps this idempotent: re-applying the
-    # floor cannot deduct twice.
+    # Safety floor.  An overlay once wrote its own score / grade /
+    # printable straight onto the report — which silently undid the
+    # placement verdict and handed an off-bed or oversized part back as a
+    # printable A.  The mirror above no longer lets any overlay raise the
+    # verdict; this stays as the second lock on the one failure that
+    # cannot print at all.  Placement is physics, not tuning, so it gets
+    # the last word on every tier.  Clamping (never raising) keeps this
+    # idempotent: re-applying the floor cannot deduct twice.
     # Re-asserted here, not only at construction, so the structured
     # verdict is governed by the same last-word rule as the score: no
     # overlay, on any tier, can hand back a report whose placement block
@@ -4918,7 +4934,10 @@ def recommend_adhesion(
     raft = False
     rationale = ""
 
-    # Decision matrix — first match wins
+    # Decision matrix — first match wins.  The rows run from least contact
+    # to most and every risk band has one, so a part never gets less help
+    # for having less of itself on the bed, and only a ``low`` reading can
+    # reach the "no brim needed" row at the bottom.
     if pct < 2.0:
         brim = 8
         raft = is_warp_material
@@ -4936,6 +4955,14 @@ def recommend_adhesion(
     elif pct < 5.0:
         brim = 5
         rationale = f"Low contact area ({pct:.1f}%) — 5mm brim recommended."
+    elif risk == "high" and is_warp_material:
+        # The rest of the ``high`` band: 5% and up.  No narrower than the
+        # ``medium`` rows below it and no wider than the rows above.
+        brim = 8
+        rationale = f"Low contact ({pct:.1f}%) with {mat_upper} (high warp) — wide 8mm brim."
+    elif risk == "high":
+        brim = 5
+        rationale = f"Low bed contact ({pct:.1f}%) — 5mm brim recommended."
     elif risk == "medium" and is_warp_material:
         brim = 8
         rationale = f"Moderate contact with {mat_upper} (high warp) — wide 8mm brim."
