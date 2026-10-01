@@ -20450,7 +20450,9 @@ def extract_file_metadata(file_path: str) -> dict:
     """Extract metadata from a 3D printing file (.gcode, .3mf, .stl, .ufp).
 
     Parses file headers for estimated print time, layer count, filament usage,
-    dimensions, slicer info, and material hints — without re-slicing.
+    dimensions, slicer info, and material hints — without re-slicing.  A
+    project saved from Bambu Studio, OrcaSlicer or PrusaSlicer also gives the
+    printer, nozzle size, layer height and material it was set up for.
 
     .. note::
         For multi-object .gcode.3mf files, also consider using

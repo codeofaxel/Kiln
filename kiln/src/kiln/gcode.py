@@ -33,6 +33,7 @@ Usage::
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import re
 from collections.abc import Iterable
@@ -1504,12 +1505,34 @@ def slicer_filament_totals(text: str) -> SlicerFilamentTotals:
 
 #: The filament types a slicer sliced for, one per filament slot:
 #: PrusaSlicer, OrcaSlicer and Bambu Studio write ``; filament_type =
-#: PLA;PLA;PETG`` in their settings block, and a 3MF's settings text writes
-#: the same line without the ``;``.  Cura-style headers write one
-#: ``;MATERIAL:PLA``.  OrcaSlicer's note at each prime-tower tool change,
-#: ``; material : PLA -> PETG``, is not a setting and is never read.
+#: PLA;PLA;PETG`` in a G-code file's settings block, and PrusaSlicer writes
+#: the same line into a project it saves; a settings file of bare lines
+#: writes it without the ``;``.  Bambu Studio and OrcaSlicer save a
+#: project's settings as one JSON object instead, the types a list under
+#: the same key (:func:`slicer_json_settings`).  Cura-style headers write
+#: one ``;MATERIAL:PLA``.  OrcaSlicer's note at each prime-tower tool
+#: change, ``; material : PLA -> PETG``, is not a setting and is never read.
 _FILAMENT_TYPE_LINE = re.compile(r"^(?:;[ \t]*)?filament_type[ \t]*=[ \t]*(?P<v>\S.*?)[ \t]*$", re.I | re.M)
 _CURA_MATERIAL_LINE = re.compile(r"^;[ \t]*MATERIAL:[ \t]*(?P<v>\S.*?)[ \t]*$", re.M)
+
+
+_JSON_OBJECT_START = re.compile(r"\s*\{")
+
+
+def slicer_json_settings(text: str) -> dict[str, Any] | None:
+    """The settings of a project Bambu Studio or OrcaSlicer saved, which
+    they write as one JSON object: each value a string, or a list with one
+    entry per extruder or filament.  ``None`` for text that is not one
+    JSON object -- a G-code file, PrusaSlicer's lines, a file cut short.
+    Never raises.
+    """
+    if _JSON_OBJECT_START.match(text) is None:
+        return None
+    try:
+        settings = json.loads(text)
+    except (ValueError, RecursionError):
+        return None
+    return settings if isinstance(settings, dict) else None
 
 
 def slicer_filament_types(text: str) -> tuple[str, ...]:
@@ -1524,6 +1547,12 @@ def slicer_filament_types(text: str) -> tuple[str, ...]:
     wrapped for a printer states the types it told the printer before the
     slicer's own block.  Never raises.
     """
+    settings = slicer_json_settings(text)
+    if settings is not None:
+        listed = settings.get("filament_type")
+        if isinstance(listed, str):
+            listed = listed.split(";") if listed.strip() else []
+        return tuple(str(slot).strip() for slot in listed) if isinstance(listed, list) else ()
     candidates = "\n".join(
         line.strip()
         for line in text.splitlines()
