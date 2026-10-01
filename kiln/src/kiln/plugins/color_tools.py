@@ -1656,6 +1656,7 @@ class _ColorToolsPlugin:
 
                 return attach_inspect_bundle(
                     response, level="quick", stl_keys=("multicolor_3mf",),
+                    self_check_before=input_path,
                 )
             except ImportError:
                 return response
@@ -1783,6 +1784,7 @@ class _ColorToolsPlugin:
 
                 return attach_inspect_bundle(
                     response, level="quick", stl_keys=("multicolor_3mf",),
+                    self_check_before=input_path,
                 )
             except ImportError:
                 return response

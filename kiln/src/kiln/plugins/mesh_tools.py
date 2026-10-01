@@ -628,6 +628,7 @@ class _MeshToolsPlugin:
 
                     return attach_inspect_bundle(
                         response, level="quick", stl_keys=("path",),
+                        self_check_before=file_path,
                     )
                 except ImportError:
                     return response
@@ -847,6 +848,7 @@ class _MeshToolsPlugin:
 
                     return attach_inspect_bundle(
                         response, level="quick", stl_keys=("path",),
+                        self_check_before=file_path,
                     )
                 except ImportError:
                     return response
@@ -858,48 +860,80 @@ class _MeshToolsPlugin:
             file_path: str,
             amount_mm: float = 0.5,
             output_path: str = "",
+            keep_hole_size: bool = True,
         ) -> dict:
-            """Thicken thin walls in a mesh by offsetting vertices outward.
+            """Thicken a part's walls by moving every surface out *amount_mm*.
 
-            Detects thin-wall regions and pushes vertices outward along their
-            averaged normals.  This is a **geometry-level fix** -- the mesh is
-            surgically modified instead of regenerating from scratch.
+            Two routes, and the reply says which ran:
 
-            Use after ``predict_print_failures()`` detects ``thin_walls`` or
-            after ``design_scorecard()`` flags wall thickness issues.
+            * **The CAD file** -- pass the part's STEP file (``.step`` /
+              ``.stp``), or a mesh Kiln converted from one that still sits
+              beside it.  The CAD kernel moves every face exactly, and round
+              holes keep their size so screws still fit.  Walls gain twice the
+              amount; the outside grows twice the amount on every axis.
+            * **A mesh** with no CAD file -- vertices are moved and the result
+              is MEASURED against the input: the thinnest wall must gain at
+              least the amount, the surface must stay closed, and every hole
+              must survive.  A result that fails is refused with the
+              measurements and your file is left as it was (on a part with
+              holes and thin features this is the usual outcome -- use the
+              CAD route).
 
-            :param file_path: Path to the STL file.
-            :param amount_mm: Offset distance in mm (default 0.5).
+            Openings that are not round holes (slots, vents, cutouts) narrow by
+            twice the amount on either route.
+
+            Use after ``analyze_printability`` or ``predict_print_failures``
+            flags thin walls.
+
+            AGENT DISPLAY CONTRACT: the reply carries a before|after
+            self-check of the part.  Look at it and write what changed before
+            calling the job done.
+
+            :param file_path: The part: a STEP file, or a mesh (STL/OBJ/3MF).
+            :param amount_mm: How far every surface moves out, in mm (0-5).
             :param output_path: Output path (defaults to ``<name>_thickened.stl``).
-            :returns: Dict with number of vertices modified, amounts, and output path.
+            :param keep_hole_size: Keep round holes at their diameter
+                (default).  False lets them close in with everything else.
+            :returns: ``path``, ``method`` (``cad`` or ``mesh``), the
+                measurements before and after, and a ``note``; or a refusal
+                saying why the result was worse than the part.
             """
             from kiln.server import _check_auth, _error_dict
 
             if err := _check_auth("generate"):
                 return err
             try:
-                from kiln.generation.validation import thicken_walls
+                from kiln.wall_thicken import thicken_part
 
-                response = {
-                    "success": True,
-                    **thicken_walls(
-                        file_path,
-                        amount_mm=amount_mm,
-                        output_path=output_path or None,
-                    ),
-                }
-                try:
-                    from kiln_pro.plugins.git_render_tools import (
-                        attach_inspect_bundle,
-                    )
-
-                    return attach_inspect_bundle(
-                        response, level="quick", stl_keys=("path",),
-                    )
-                except ImportError:
-                    return response
+                reply = thicken_part(
+                    file_path,
+                    amount_mm=amount_mm,
+                    output_path=output_path or None,
+                    keep_hole_size=keep_hole_size,
+                )
+            except ValueError as exc:
+                return _error_dict(f"Wall thickening failed: {exc}", code="INVALID_ARGS")
             except Exception as exc:
                 return _error_dict(f"Wall thickening failed: {exc}")
+            if not reply.get("success"):
+                return _error_dict(
+                    reply["message"], code=reply["code"],
+                    extra={k: reply[k] for k in ("measured", "method", "cad_failure") if k in reply},
+                )
+            try:
+                from kiln_pro.plugins.git_render_tools import (
+                    attach_inspect_bundle,
+                )
+
+                from kiln.step_import import ensure_mesh_path
+
+                # A STEP input is graded against Kiln's mesh of it.
+                return attach_inspect_bundle(
+                    reply, level="quick", stl_keys=("path",),
+                    self_check_before=ensure_mesh_path(file_path)[0],
+                )
+            except ImportError:
+                return reply
 
         @mcp.tool()
         def add_mesh_fillet(
@@ -908,49 +942,54 @@ class _MeshToolsPlugin:
             angle_threshold_deg: float = 60.0,
             output_path: str = "",
         ) -> dict:
-            """Add fillets (rounded transitions) at sharp edges.
+            """Round sharp edges -- handed back only if the result measures better.
 
-            Detects edges where adjacent faces meet at a sharp angle and
-            inserts intermediate triangles to approximate a smooth fillet.
-            Reduces stress concentration at corners and improves printability.
+            The edge-rounding runs on the mesh, and its result is MEASURED
+            against the part: the surface must stay closed, the part must not
+            grow (rounding only takes material away), no hole may be lost and
+            the thinnest wall must not shrink.  A result that fails is refused
+            with the measurements and your file is left as it was; round the
+            edges in the design (OpenSCAD source or CAD) instead.
 
-            Use after ``design_scorecard()`` flags sharp corners or
-            ``predict_print_failures()`` detects stress risers.
+            AGENT DISPLAY CONTRACT: a result carries a before|after self-check
+            of the part.  Look at it and write what changed before calling
+            the job done.
 
-            :param file_path: Path to the STL file.
+            :param file_path: The part: a mesh (STL/OBJ/3MF) or a STEP file.
             :param radius_mm: Fillet radius in mm (default 1.0).
             :param angle_threshold_deg: Edges sharper than this get filleted (default 60).
             :param output_path: Output path (defaults to ``<name>_filleted.stl``).
-            :returns: Dict with sharp edge count, triangles added, and output path.
+            :returns: ``path`` and the measurements before and after, or a
+                refusal saying why the result was worse than the part.
             """
             from kiln.server import _check_auth, _error_dict
 
             if err := _check_auth("generate"):
                 return err
             try:
-                from kiln.generation.validation import add_fillet
+                from kiln.edge_finish import fillet_part
 
-                response = {
-                    "success": True,
-                    **add_fillet(
-                        file_path,
-                        radius_mm=radius_mm,
-                        angle_threshold_deg=angle_threshold_deg,
-                        output_path=output_path or None,
-                    ),
-                }
-                try:
-                    from kiln_pro.plugins.git_render_tools import (
-                        attach_inspect_bundle,
-                    )
-
-                    return attach_inspect_bundle(
-                        response, level="quick", stl_keys=("path",),
-                    )
-                except ImportError:
-                    return response
+                reply = fillet_part(
+                    file_path, radius_mm=radius_mm, angle_threshold_deg=angle_threshold_deg,
+                    output_path=output_path or None,
+                )
             except Exception as exc:
                 return _error_dict(f"Fillet failed: {exc}")
+            if not reply.get("success"):
+                return _error_dict(reply["message"], code=reply["code"], extra={"measured": reply["measured"]})
+            try:
+                from kiln_pro.plugins.git_render_tools import (
+                    attach_inspect_bundle,
+                )
+
+                from kiln.step_import import ensure_mesh_path
+
+                return attach_inspect_bundle(
+                    reply, level="quick", stl_keys=("path",),
+                    self_check_before=ensure_mesh_path(file_path)[0],
+                )
+            except ImportError:
+                return reply
 
         @mcp.tool()
         def add_mesh_chamfer(
@@ -959,46 +998,53 @@ class _MeshToolsPlugin:
             angle_threshold_deg: float = 60.0,
             output_path: str = "",
         ) -> dict:
-            """Add chamfers (flat bevels) at sharp edges.
+            """Bevel sharp edges -- handed back only if the result measures better.
 
-            Detects edges where adjacent faces meet at a sharp angle and
-            bevels them with a flat transition face.  Chamfers are faster
-            to print than fillets and reduce stress concentration.
+            Measured like ``add_mesh_fillet``: the surface must stay closed,
+            the part must not grow, no hole may be lost and the thinnest wall
+            must not shrink.  A result that fails is refused with the
+            measurements and your file is left as it was; bevel the edges in
+            the design instead.
 
-            :param file_path: Path to the STL file.
+            AGENT DISPLAY CONTRACT: a result carries a before|after self-check
+            of the part.  Look at it and write what changed before calling
+            the job done.
+
+            :param file_path: The part: a mesh (STL/OBJ/3MF) or a STEP file.
             :param distance_mm: Chamfer distance from edge in mm (default 0.5).
             :param angle_threshold_deg: Edges sharper than this get chamfered (default 60).
             :param output_path: Output path (defaults to ``<name>_chamfered.stl``).
-            :returns: Dict with sharp edge count, triangles added, and output path.
+            :returns: ``path`` and the measurements before and after, or a
+                refusal saying why the result was worse than the part.
             """
             from kiln.server import _check_auth, _error_dict
 
             if err := _check_auth("generate"):
                 return err
             try:
-                from kiln.generation.validation import add_chamfer
+                from kiln.edge_finish import chamfer_part
 
-                response = {
-                    "success": True,
-                    **add_chamfer(
-                        file_path,
-                        distance_mm=distance_mm,
-                        angle_threshold_deg=angle_threshold_deg,
-                        output_path=output_path or None,
-                    ),
-                }
-                try:
-                    from kiln_pro.plugins.git_render_tools import (
-                        attach_inspect_bundle,
-                    )
-
-                    return attach_inspect_bundle(
-                        response, level="quick", stl_keys=("path",),
-                    )
-                except ImportError:
-                    return response
+                reply = chamfer_part(
+                    file_path, distance_mm=distance_mm, angle_threshold_deg=angle_threshold_deg,
+                    output_path=output_path or None,
+                )
             except Exception as exc:
                 return _error_dict(f"Chamfer failed: {exc}")
+            if not reply.get("success"):
+                return _error_dict(reply["message"], code=reply["code"], extra={"measured": reply["measured"]})
+            try:
+                from kiln_pro.plugins.git_render_tools import (
+                    attach_inspect_bundle,
+                )
+
+                from kiln.step_import import ensure_mesh_path
+
+                return attach_inspect_bundle(
+                    reply, level="quick", stl_keys=("path",),
+                    self_check_before=ensure_mesh_path(file_path)[0],
+                )
+            except ImportError:
+                return reply
 
         @mcp.tool()
         def scale_mesh_to_fit(
@@ -1506,6 +1552,7 @@ class _MeshToolsPlugin:
 
                     return attach_inspect_bundle(
                         response, level="quick", stl_keys=("path",),
+                        self_check_before=file_path,
                     )
                 except ImportError:
                     return response
@@ -1550,6 +1597,7 @@ class _MeshToolsPlugin:
 
                     return attach_inspect_bundle(
                         response, level="quick", stl_keys=("path",),
+                        self_check_before=file_path,
                     )
                 except ImportError:
                     return response

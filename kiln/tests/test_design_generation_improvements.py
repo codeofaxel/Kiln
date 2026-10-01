@@ -3510,86 +3510,6 @@ class TestEstimatePrintTimeEdgeCases:
 # ---------------------------------------------------------------------------
 
 
-class TestThickenWalls:
-    """Tests for thicken_walls() — geometry-level thin-wall fix."""
-
-    def test_basic_thickening(self, tmp_path):
-        from kiln.generation.validation import thicken_walls
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-        out = str(tmp_path / "thickened.stl")
-
-        result = thicken_walls(stl, amount_mm=0.5, output_path=out)
-
-        assert result["path"] == out
-        assert result["amount_mm"] == 0.5
-        assert result["triangle_count"] == 12
-        assert os.path.isfile(out)
-
-    def test_thickened_file_is_valid_stl(self, tmp_path):
-        from kiln.generation.validation import thicken_walls, validate_mesh
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-        out = str(tmp_path / "thickened.stl")
-
-        thicken_walls(stl, amount_mm=0.5, output_path=out)
-        val = validate_mesh(out)
-        assert val.valid
-        assert val.triangle_count == 12
-
-    def test_default_output_path(self, tmp_path):
-        from kiln.generation.validation import thicken_walls
-
-        stl = str(tmp_path / "part.stl")
-        _write_cube_stl(stl, 10.0)
-
-        result = thicken_walls(stl, amount_mm=0.3)
-        assert result["path"].endswith("_thickened.stl")
-        assert os.path.isfile(result["path"])
-
-    def test_thin_wall_detection(self, tmp_path):
-        from kiln.generation.validation import thicken_walls
-
-        stl = str(tmp_path / "thin.stl")
-        # A very thin slab (1mm thick) — should detect thin walls
-        _write_thin_wall_stl(stl, width=20.0, height=20.0, thickness=1.0)
-
-        result = thicken_walls(stl, amount_mm=0.5)
-        # Should have modified some vertices
-        assert result["vertices_modified"] > 0
-
-    def test_zero_amount_raises(self, tmp_path):
-        from kiln.generation.validation import thicken_walls
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-
-        with pytest.raises(ValueError, match="positive"):
-            thicken_walls(stl, amount_mm=0)
-
-    def test_negative_amount_raises(self, tmp_path):
-        from kiln.generation.validation import thicken_walls
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-
-        with pytest.raises(ValueError, match="positive"):
-            thicken_walls(stl, amount_mm=-1.0)
-
-    def test_empty_stl_raises(self, tmp_path):
-        from kiln.generation.validation import thicken_walls
-
-        stl = str(tmp_path / "empty.stl")
-        with open(stl, "wb") as fh:
-            fh.write(b"\x00" * 80)
-            fh.write(struct.pack("<I", 0))
-
-        with pytest.raises(ValueError, match="no geometry"):
-            thicken_walls(stl, amount_mm=0.5)
-
-
 class TestAddFillet:
     """Tests for add_fillet() — round sharp edges."""
 
@@ -4524,6 +4444,43 @@ class TestApplyReinforcements:
         assert result.after_grade in ("A", "B", "C", "D", "F")
         assert 0 <= result.before_score <= 100
         assert 0 <= result.after_score <= 100
+
+    def test_sharp_corners_are_rounded_once_at_the_plans_threshold(self, tmp_path):
+        """The default threshold reaches the fillet as a number -- it arrived
+        as None, failed, and was reported as "No sharp edges found at
+        threshold" -- and a fillet acts on the whole part, so it runs once
+        however many corners asked for it (it ran once per corner)."""
+        manifold3d = pytest.importorskip("manifold3d")
+        trimesh = pytest.importorskip("trimesh")
+        import numpy as np
+
+        import kiln.design_reasoning as dr
+
+        cube = manifold3d.Manifold.cube
+        box = cube([40.0, 30.0, 15.0]) - cube([38.0, 28.0, 15.0]).translate([1.0, 1.0, 1.0])
+        flat = box.to_mesh()
+        stl = tmp_path / "box.stl"
+        trimesh.Trimesh(np.asarray(flat.vert_properties)[:, :3], np.asarray(flat.tri_verts), process=False).export(
+            str(stl)
+        )
+        calls = []
+        real = dr._apply_fillet
+
+        def counted(*args):
+            calls.append(args)
+            return real(*args)
+
+        asked = [r for r in dr.generate_improvement_plan(str(stl)).reinforcements if r.reinforcement_type == "fillet"]
+        assert len(asked) > 1  # several corners ask for the one edit
+        with patch.object(dr, "_apply_fillet", counted):
+            result = dr.apply_reinforcements(str(stl), output_path=str(tmp_path / "out.stl"))
+
+        fillets = [e for e in result.applied + result.skipped if e["type"] == "fillet"]
+        assert len(fillets) == 1
+        assert len(calls) == 1
+        assert calls[0][3] == dr._SHARP_ANGLE_THRESHOLD_DEG_PUBLIC
+        assert "could not run" not in fillets[0].get("reason", "")
+        assert {fillets[0]["addresses"], *fillets[0].get("also_addresses", [])} == {r.addresses_risk for r in asked}
 
     def test_skipped_reorient_has_guidance(self, tmp_path):
         """Reorient recommendations should be skipped with guidance."""

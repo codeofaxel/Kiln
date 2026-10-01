@@ -44,6 +44,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _VALID_EXTENSIONS = frozenset({".step", ".stp"})
+#: Two tessellations of one solid agree on its outside size to this, mm.
+_SAME_SIZE_MM = 0.05
 
 #: The first line of every STEP file, mandated by the exchange standard
 #: itself (ISO 10303-21 clause 5).  Every CAD system that writes STEP writes
@@ -696,6 +698,12 @@ def _stamp_binary_stl(path: Path) -> None:
         pass  # an unmarked mesh is still a correct mesh
 
 
+#: What a conversion adds to its mesh's name when a file of the user's already
+#: holds the plain one: ``part.kiln.stl``, then ``part.kiln-2.stl`` ...
+_BESIDE = ".kiln"
+_BESIDE_RE = re.compile(re.escape(_BESIDE) + r"(?:-\d+)?$")
+
+
 def _claim_output_name(out_dir: Path, base: str, ext: str) -> tuple[Path, str | None]:
     """Where a conversion may write ``<base><ext>`` in *out_dir*.
 
@@ -714,7 +722,7 @@ def _claim_output_name(out_dir: Path, base: str, ext: str) -> tuple[Path, str | 
         return target, None
     n = 1
     while True:
-        alt = out_dir / (f"{base}.kiln{ext}" if n == 1 else f"{base}.kiln-{n}{ext}")
+        alt = out_dir / (f"{base}{_BESIDE}{ext}" if n == 1 else f"{base}{_BESIDE}-{n}{ext}")
         if not alt.exists() or _made_by_step_conversion(alt):
             return alt, (
                 f"{target.name} was already in {out_dir} and isn't a file Kiln "
@@ -722,6 +730,38 @@ def _claim_output_name(out_dir: Path, base: str, ext: str) -> tuple[Path, str | 
                 f"{alt.name}."
             )
         n += 1
+
+
+def step_converted_from(mesh_path: str) -> str | None:
+    """The STEP file a Kiln conversion made *mesh_path* from, while it still sits beside it.
+
+    The inverse of :func:`_claim_output_name`.  A mesh without the
+    conversion's mark, or with no same-named STEP beside it, has none.  The
+    candidate must still convert to a mesh of this one's size, so a STEP
+    edited since is not mistaken for the source.
+    """
+    import trimesh
+
+    path = Path(mesh_path)
+    if not _made_by_step_conversion(path):
+        return None
+    stem = _BESIDE_RE.sub("", path.stem)
+    # The folder's own entries, not guessed spellings: on a case-insensitive
+    # disk ``part.STEP`` "exists" whenever ``part.step`` does.
+    beside = sorted(
+        c for c in path.parent.iterdir()
+        if c.stem == stem and c.suffix.lower() in _VALID_EXTENSIONS and c.is_file()
+    )
+    for candidate in beside:
+        try:
+            converted, _note = ensure_mesh_path(str(candidate))
+            theirs = trimesh.load(converted, force="mesh").extents
+            ours = trimesh.load(mesh_path, force="mesh").extents
+        except Exception:  # noqa: BLE001 -- an unreadable candidate is no source
+            return None
+        if all(abs(a - b) <= _SAME_SIZE_MM for a, b in zip(theirs, ours, strict=True)):
+            return str(candidate)
+    return None
 
 
 def _move_into(src: Path, dest: Path) -> None:

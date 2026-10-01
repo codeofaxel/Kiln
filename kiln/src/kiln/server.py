@@ -21055,7 +21055,7 @@ def _refund_decoration_quota(consumed: bool) -> None:
         logger.debug("Decoration quota refund failed", exc_info=True)
 
 
-def _finish_decoration_result(result_dict: dict, *, content: str) -> dict:
+def _finish_decoration_result(result_dict: dict, *, content: str, before: str | None = None) -> dict:
     """Common tail for every SUCCESSFUL decorate_surface exit.
 
     Quota tile, managed-asset lineage, then the inspect bundle.  It is one
@@ -21092,7 +21092,9 @@ def _finish_decoration_result(result_dict: dict, *, content: str) -> dict:
     try:
         from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
 
-        return attach_inspect_bundle(result_dict, level="quick")
+        # The carved part beside the one it was carved into, so the change is
+        # graded before anyone calls it done (kiln-pro's self-check gate).
+        return attach_inspect_bundle(result_dict, level="quick", self_check_before=before)
     except ImportError:
         return result_dict
 
@@ -21614,7 +21616,7 @@ def decorate_surface(
                 record_event("decorations", detail=wall_event)
             except Exception:
                 pass
-            return _finish_decoration_result(result_dict, content=content)
+            return _finish_decoration_result(result_dict, content=content, before=model_path)
 
         # --- Step 2: Find the target face (needed before SVG prep for sizing) ---
         from kiln.surface_intelligence import (
@@ -22098,7 +22100,7 @@ def decorate_surface(
         # sees where they stand ("2 of 3 used") before the wall instead of
         # only hitting it as an error next time. Best-effort — never blocks
         # a decoration that already succeeded.
-        return _finish_decoration_result(result_dict, content=content)
+        return _finish_decoration_result(result_dict, content=content, before=model_path)
 
     except FileNotFoundError as exc:
         _refund_decoration_quota(quota_consumed)
