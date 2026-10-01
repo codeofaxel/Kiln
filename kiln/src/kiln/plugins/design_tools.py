@@ -1301,6 +1301,14 @@ class _DesignToolsPlugin:
             from kiln.assumed_nozzle import assumed_nozzle
             from kiln.cost_estimator import CostEstimator
 
+            # STEP in, mesh out — the one shared door, so a part that arrives
+            # as CAD is estimated as it is instead of refused layers down.
+            from kiln.step_import import resolve_mesh_input
+
+            file_path, _conversion, _refusal = resolve_mesh_input(file_path)
+            if _refusal:
+                return _refusal
+
             try:
                 nozzle = assumed_nozzle(None, stated=nozzle_mm, or_only_printer=True)
                 estimator = CostEstimator()
