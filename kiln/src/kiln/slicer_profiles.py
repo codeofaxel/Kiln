@@ -387,6 +387,95 @@ def _ensure_flow_ceiling(settings: dict[str, str], profile_id: str) -> None:
         settings["max_volumetric_speed"] = f"{ceiling:g}"
 
 
+#: Every acceleration a profile or a door can state for a role.
+_ROLE_ACCELERATIONS: tuple[str, ...] = (
+    "default_acceleration",
+    "perimeter_acceleration",
+    "external_perimeter_acceleration",
+    "infill_acceleration",
+    "solid_infill_acceleration",
+    "top_solid_infill_acceleration",
+    "first_layer_acceleration",
+    "first_layer_acceleration_over_raft",
+    "bridge_acceleration",
+    "travel_acceleration",
+    "travel_short_distance_acceleration",
+    "wipe_tower_acceleration",
+)
+
+#: PrusaSlicer machine limit <- what the start sequence states.
+_ESTIMATE_MOTION_KEYS: dict[str, str] = {
+    "machine_max_acceleration_x": "max_accel_x",
+    "machine_max_acceleration_y": "max_accel_y",
+    "machine_max_feedrate_x": "max_feedrate_x",
+    "machine_max_feedrate_y": "max_feedrate_y",
+    "machine_max_jerk_x": "jerk_x",
+    "machine_max_jerk_y": "jerk_y",
+}
+
+
+def _ensure_estimate_motion(settings: dict[str, str], profile_id: str) -> None:
+    """Estimate at the acceleration the machine will really run, in place.
+
+    PrusaSlicer times a print against machine limits it uses for the
+    estimate only -- never written into the G-code -- and with none stated
+    it assumes 1500 mm/s².  A Bambu print Kiln slices carries no
+    acceleration command of its own and is wrapped after the maker's start
+    sequence, so it runs at whatever that sequence set: 6000 on the A1,
+    10000 (or 5000 after flow calibration) on the X1C.  Measured 2026-09-30
+    on an 80 x 55 x 28 mm enclosure through ``bambu_a1``: 1h19m estimated
+    at 1500, 1h05m at the sequence's own 6000.
+
+    The limits come from :func:`kiln.printers.bambu_3mf.start_sequence_motion`,
+    which reads the same sequence the wrap sends.  The working acceleration
+    is raised to any role acceleration the settings state, because those
+    are written into the print and the machine runs them.  A printer with no
+    start sequence of its own is left at the slicer's default; so is a
+    caller that states any limit of its own, and a profile that writes its
+    limits into the G-code, where a number from here would reach the
+    machine.
+    """
+    if str(settings.get("machine_limits_usage", "")).strip() == "emit_to_gcode":
+        return
+    stated = (
+        "machine_max_acceleration_extruding",
+        "machine_max_acceleration_travel",
+        *_ESTIMATE_MOTION_KEYS,
+    )
+    if any(key in settings for key in stated):
+        return
+    from kiln.printers.bambu_3mf import start_sequence_motion
+
+    nozzle = str(settings.get("nozzle_diameter", "0.4")).replace(";", ",").split(",")[0]
+    motion = start_sequence_motion(profile_id, nozzle)
+    if not motion:
+        return
+
+    def _limit(value: float) -> str:
+        # PrusaSlicer reads machine limits as "normal,stealth".
+        return f"{value:g},{value:g}"
+
+    accel = motion.get("accel")
+    if accel:
+        for key in _ROLE_ACCELERATIONS:
+            try:
+                accel = max(accel, float(str(settings.get(key, "0")).strip() or 0))
+            except ValueError:
+                continue
+        settings["machine_max_acceleration_extruding"] = _limit(accel)
+        settings["machine_max_acceleration_travel"] = _limit(accel)
+    for key, source in _ESTIMATE_MOTION_KEYS.items():
+        if source in motion:
+            settings[key] = _limit(motion[source])
+
+
+def _apply_printer_invariants(settings: dict[str, str], profile_id: str) -> None:
+    """The rules that need to know the printer, then every general one."""
+    _ensure_flow_ceiling(settings, profile_id)
+    _ensure_estimate_motion(settings, profile_id)
+    _apply_profile_invariants(settings)
+
+
 def _apply_profile_invariants(settings: dict[str, str]) -> None:
     """Every rule an ``.ini`` must satisfy before a slicer reads it, in place.
 
@@ -468,9 +557,8 @@ def resolve_slicer_profile(
     # After the merge: an override can switch relative-E on, replace the
     # layer_gcode that was satisfying the rule, change the temperatures the
     # start floor quotes, change a speed a derived one is tied to, or state
-    # a flow ceiling of its own.
-    _ensure_flow_ceiling(merged, profile.id)
-    _apply_profile_invariants(merged)
+    # a flow ceiling or machine limits of its own.
+    _apply_printer_invariants(merged, profile.id)
 
     # Build a cache key from the effective settings.
     cache_key = f"{profile.id}:{_settings_hash(merged)}"
@@ -846,8 +934,7 @@ def resolve_multiextruder_profile(
     # This builder used to set layer_gcode unconditionally, which was right
     # for the Bambu profiles it is used with and wrong for anything with
     # absolute E.  The shared invariants check before they write.
-    _ensure_flow_ceiling(merged, profile.id)
-    _apply_profile_invariants(merged)
+    _apply_printer_invariants(merged, profile.id)
 
     cache_key = f"{profile.id}_mme{num_extruders}:{_settings_hash(merged)}"
     if cache_key in _temp_cache and os.path.isfile(_temp_cache[cache_key]):

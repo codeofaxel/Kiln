@@ -503,6 +503,62 @@ def _nozzle_key(nozzle_diameter: float | str | None) -> str:
         return ""
 
 
+#: Number words on a motion command, comment stripped first.
+_MOTION_WORD_RE = re.compile(r"\b([XYS])(\d+(?:\.\d+)?)\b")
+
+
+def start_sequence_motion(
+    printer_model: str | None,
+    nozzle_diameter: float | str | None = 0.4,
+) -> dict[str, float] | None:
+    """The motion limits this model's own start sequence leaves it with.
+
+    Kiln slices a Bambu print with no acceleration commands of its own and
+    wraps it after the maker's start sequence, so the machine prints at
+    whatever that sequence set.  An estimate that assumes anything else is
+    describing a different machine.  Read here, from the same sequence the
+    wrap sends, so the two cannot disagree:
+
+    * ``accel`` -- the LOWEST ``M204 S`` the sequence can leave in force.
+      On the X1C and X1E a flow-calibration block lowers 10000 to 5000 and
+      nothing restores it; whether that block runs is the printer's choice,
+      so the estimate takes the slower answer, never the faster.
+    * ``max_accel_x`` / ``max_accel_y`` (``M201``), ``max_feedrate_x`` /
+      ``max_feedrate_y`` (``M203``), ``jerk_x`` / ``jerk_y`` (``M205``).
+
+    ``None`` for a model with no sequence of its own: the A1's fallback
+    describes another machine, and a guessed acceleration would be a
+    number nobody stated.
+    """
+    model = _normalize_model(printer_model)
+    if not any(m == model for m, _n in _MODEL_START_GCODE_FILES):
+        return None
+    text, source_model, _source_nozzle = _start_gcode_choice(model, nozzle_diameter)
+    if source_model != model:
+        return None
+
+    motion: dict[str, float] = {}
+    accelerations: list[float] = []
+    for raw in text.splitlines():
+        line = raw.split(";", 1)[0].strip()
+        if not line:
+            continue
+        command = line.split()[0]
+        words = dict(_MOTION_WORD_RE.findall(line))
+        if command == "M204" and "S" in words:
+            accelerations.append(float(words["S"]))
+            continue
+        prefix = {"M201": "max_accel", "M203": "max_feedrate", "M205": "jerk"}.get(command)
+        if prefix is None:
+            continue
+        for axis in ("X", "Y"):
+            if axis in words:
+                motion[f"{prefix}_{axis.lower()}"] = float(words[axis])
+    if accelerations:
+        motion["accel"] = min(accelerations)
+    return motion or None
+
+
 def _start_gcode_choice(
     printer_model: str | None,
     nozzle_diameter: float | str | None = 0.4,
@@ -1473,27 +1529,6 @@ def _fill_slice_info_usage(slice_info: str, usage: FilamentUsage) -> str:
         cursor = tag.end()
     pieces.append(out[cursor:])
     return "".join(pieces)
-
-
-#: The generator stamp these slicers write into their G-code header.
-#: OrcaSlicer and BambuStudio share the fork; PrusaSlicer and the other
-#: Slic3r derivatives write their own names.  Read from the head of the
-#: file only — a body can mention anything in a comment.
-_BAMBU_DIALECT_GENERATORS = ("orcaslicer", "bambustudio", "bambu studio")
-
-_GCODE_HEAD_CHARS = 4096
-
-
-def _gcode_is_bambu_dialect(gcode_body: str) -> bool:
-    """Whether this G-code came from OrcaSlicer / BambuStudio.
-
-    Used to decide whether a PrusaSlicer-calibrated time correction
-    applies.  An unrecognised generator reads as NOT the Bambu dialect,
-    which keeps the historical behaviour for every gcode Kiln was
-    already wrapping.
-    """
-    head = gcode_body[:_GCODE_HEAD_CHARS].lower()
-    return any(name in head for name in _BAMBU_DIALECT_GENERATORS)
 
 
 def _declared_filaments_in_gcode(
@@ -2742,28 +2777,16 @@ def build_bambu_3mf(
         # 20-minute coaster).
         est_time_sec = max(total_layers * 6, len(gcode_body) // 50)
 
-    # Apply Bambu speed correction: PrusaSlicer overestimates by ~2x for
-    # printers with input shaping because it doesn't model their actual
-    # acceleration profiles.  This corrects the M73 R (remaining time)
-    # values so the printer LCD shows accurate time from the first second.
-    #
-    # PrusaSlicer's estimate ONLY.  The correction is calibrated against
-    # that slicer's motion model (see get_slicer_time_factor), and Orca /
-    # BambuStudio are Bambu's own fork: they model the input shaping this
-    # factor exists to compensate for, so halving their number reports a
-    # print as taking half as long as it does.  Measured 2026-08-27 on one
-    # model through one profile — PrusaSlicer 2h19m, OrcaSlicer 1h52m —
-    # Orca already lands BELOW the uncorrected Prusa figure, which is the
-    # correction the factor was approximating.
-    if not _gcode_is_bambu_dialect(gcode_body):
-        try:
-            from kiln.printer_intelligence import get_slicer_time_factor
-
-            time_factor = get_slicer_time_factor("bambu_a1")
-            est_time_sec = max(60, int(est_time_sec * time_factor))
-        except ImportError:
-            pass
-
+    # The screen shows the slicer's own estimate, uncorrected.  It used to be
+    # halved, on the belief that PrusaSlicer over-estimates fast machines by
+    # about 2x for want of their acceleration.  Measured 2026-09-30, that was
+    # never the cause: on an A1 enclosure, acceleration moved the estimate by
+    # 4%, and the 2x came from profile speeds left at the slicer's slow
+    # defaults -- slowness the printer really printed, so halving it showed
+    # about half the real time.  The speeds are now stated, and the estimate
+    # runs at the acceleration this machine's own start sequence leaves it
+    # at (kiln.slicer_profiles._ensure_estimate_motion), so there is nothing
+    # left to correct.
     est_minutes = max(1, est_time_sec // 60)
 
     logger.info(

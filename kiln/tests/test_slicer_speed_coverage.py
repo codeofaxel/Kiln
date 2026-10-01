@@ -84,7 +84,9 @@ _NO_ACCELERATION = (
 )
 _ESTIMATE_ONLY = (
     "Used for the time estimate only (machine_limits_usage defaults to "
-    "time_estimate_only) -- never written into the G-code."
+    "time_estimate_only) -- never written into the G-code.  Where the maker's "
+    "own start sequence states them, Kiln reads them from it "
+    "(slicer_profiles._ensure_estimate_motion); otherwise the slicer's stand."
 )
 _MULTI_MATERIAL = "Filament loading, cooling and ramming moves of a multi-material unit."
 

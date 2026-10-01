@@ -840,7 +840,9 @@ class TestBuildBambu3mf:
         assert result.max_z == 0.4
         assert result.file_size > 0
         assert len(result.md5) == 32  # MD5 hex digest
-        assert result.est_print_time_sec == 480  # 2 layers * 6s + 420s startup overhead
+        # 2 layers * 6 s + 420 s startup.  It read 480 while a since-retired
+        # time factor floored every estimate at 60 s before adding startup.
+        assert result.est_print_time_sec == 432
 
     def test_result_file_md5_matches(self, tmp_path):
         out = str(tmp_path / "test.3mf")
@@ -1019,8 +1021,8 @@ class TestBuildBambu3mf:
             first_line = gcode.split("\n")[0]
             assert first_line.startswith("M73 P0 R")
             # Minutes should include startup overhead (420s = 7min)
-            # 2 layers * 6s = 12s printing + 420s startup = 480s = 8min
-            assert first_line == "M73 P0 R8"
+            # 2 layers * 6s = 12s printing + 420s startup = 432s = 7min
+            assert first_line == "M73 P0 R7"
 
     def test_slice_info_prediction_includes_startup_overhead(self, tmp_path):
         """slice_info prediction should include Bambu startup overhead."""
@@ -1030,8 +1032,8 @@ class TestBuildBambu3mf:
             build_bambu_3mf(MINIMAL_GCODE_BODY, out)
         with zipfile.ZipFile(out) as zf:
             slice_info = zf.read("Metadata/slice_info.config").decode("utf-8")
-            # 12s printing + 420s startup = 480s
-            assert 'key="prediction" value="480"' in slice_info
+            # 12s printing + 420s startup = 432s
+            assert 'key="prediction" value="432"' in slice_info
 
 
 # ---------------------------------------------------------------------------
