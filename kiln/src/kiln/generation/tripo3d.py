@@ -1,12 +1,21 @@
 """Tripo3D text-to-3D generation provider.
 
 Integrates with the Tripo3D API (https://platform.tripo3d.ai) to generate
-3D models from text prompts.  Uses the v2 OpenAPI endpoint for submitting
-tasks and polling results.
+3D models from text prompts.  Uses the v3 API: the dedicated
+``/generation/text-to-model`` endpoint submits a task and
+``/tasks/{task_id}`` polls it.  Reference:
+https://developers.tripo3d.ai/en/docs/introduction
 
 Authentication
 --------------
 Set ``KILN_TRIPO3D_API_KEY`` or pass ``api_key`` to the constructor.
+Keys issued for the v2 API work unchanged on v3.
+
+Model version
+-------------
+v3 requires a ``model`` on every text-to-model request.  Kiln sends
+``v3.1-20260211`` by default; set ``KILN_TRIPO3D_MODEL`` (or pass
+``model``) to pin a different version.
 """
 
 from __future__ import annotations
@@ -15,6 +24,7 @@ import logging
 import os
 import tempfile
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 import requests
@@ -30,15 +40,38 @@ from kiln.generation.base import (
 
 logger = logging.getLogger(__name__)
 
-_BASE_URL = "https://api.tripo3d.ai/v2/openapi"
+_BASE_URL = "https://openapi.tripo3d.ai/v3"
 
+# ``model`` is a required field on v3 text-to-model
+# (https://developers.tripo3d.ai/en/docs/generation-text-to-model/standard).
+_DEFAULT_MODEL = "v3.1-20260211"
+
+# Every status in https://developers.tripo3d.ai/en/docs/task-lifecycle.
+# ``banned`` and ``expired`` are terminal and carry no model, so they are
+# failures.  A status missing from this map is treated as still pending
+# (see ``get_job_status``) -- never as success.
 _STATUS_MAP: dict[str, GenerationStatus] = {
     "queued": GenerationStatus.PENDING,
     "running": GenerationStatus.IN_PROGRESS,
     "success": GenerationStatus.SUCCEEDED,
     "failed": GenerationStatus.FAILED,
     "cancelled": GenerationStatus.CANCELLED,
+    "banned": GenerationStatus.FAILED,
+    "expired": GenerationStatus.FAILED,
 }
+
+# What to tell the user when a terminal status arrives without an
+# ``error_message`` of its own.
+_STATUS_FAILURE_REASONS: dict[str, str] = {
+    "banned": "Tripo3D rejected the prompt under its content policy.  Reword the prompt and try again.",
+    "expired": "The Tripo3D task expired and its output is no longer available.  Generate the model again.",
+}
+
+# Output keys that can hold the model download URL, in preference order.
+# v3 documents ``model_url``; the remaining names are the ones Tripo's own
+# v3 client still falls back to, and cover tasks created on v2, which stay
+# queryable on v3.
+_MODEL_URL_KEYS = ("model_url", "model", "pbr_model", "base_model")
 
 
 _MAX_RETRIES = 3
@@ -50,6 +83,8 @@ class Tripo3DProvider(GenerationProvider):
 
     Args:
         api_key: Tripo3D API key.  Falls back to ``KILN_TRIPO3D_API_KEY``.
+        model: Tripo model version sent with each request.  Falls back to
+            ``KILN_TRIPO3D_MODEL``, then to ``v3.1-20260211``.
         timeout: HTTP request timeout in seconds.
     """
 
@@ -57,6 +92,7 @@ class Tripo3DProvider(GenerationProvider):
         self,
         api_key: str = "",
         *,
+        model: str = "",
         timeout: int = 30,
     ) -> None:
         self._api_key = api_key or os.environ.get("KILN_TRIPO3D_API_KEY", "")
@@ -65,6 +101,7 @@ class Tripo3DProvider(GenerationProvider):
                 "Tripo3D API key required.  Set KILN_TRIPO3D_API_KEY or pass api_key.",
                 code="AUTH_REQUIRED",
             )
+        self._model = model or os.environ.get("KILN_TRIPO3D_MODEL", "").strip() or _DEFAULT_MODEL
         self._timeout = timeout
         self._session = requests.Session()
         self._session.headers.update(
@@ -104,14 +141,13 @@ class Tripo3DProvider(GenerationProvider):
             :class:`GenerationJob` with ``PENDING`` status.
         """
         body: dict[str, Any] = {
-            "type": "text_to_model",
             "prompt": prompt,
+            "model": self._model,
         }
 
-        resp = self._request("POST", f"{_BASE_URL}/task", json_body=body)
+        resp = self._request("POST", f"{_BASE_URL}/generation/text-to-model", json_body=body)
 
-        data = resp.json()
-        task_data = data.get("data", {})
+        task_data = self._envelope_data(resp)
         task_id = task_data.get("task_id", "")
         if not task_id:
             raise GenerationError(
@@ -141,13 +177,22 @@ class Tripo3DProvider(GenerationProvider):
         Returns:
             Updated :class:`GenerationJob`.
         """
-        resp = self._request("GET", f"{_BASE_URL}/task/{job_id}")
+        resp = self._request("GET", f"{_BASE_URL}/tasks/{job_id}")
 
-        data = resp.json()
-        task_data = data.get("data", {})
-        status_str = task_data.get("status", "queued")
-        status = _STATUS_MAP.get(status_str, GenerationStatus.PENDING)
-        progress = task_data.get("progress", 0)
+        task_data = self._envelope_data(resp)
+        status_str = task_data.get("status")
+        status = _STATUS_MAP.get(status_str) if isinstance(status_str, str) else None
+        if status is None:
+            # A status Kiln has no mapping for is evidence of neither success
+            # nor failure.  Keep it pending so the caller's own deadline
+            # decides, and say so in the log.
+            logger.warning(
+                "Tripo3D task %s reported unrecognised status %r; treating it as pending.",
+                job_id,
+                status_str,
+            )
+            status = GenerationStatus.PENDING
+        progress = task_data.get("progress") or 0
         prompt = self._prompts.get(job_id, "")
 
         # Cache output for download.
@@ -157,7 +202,9 @@ class Tripo3DProvider(GenerationProvider):
 
         error_msg: str | None = None
         if status == GenerationStatus.FAILED:
-            error_msg = task_data.get("message") or "Generation failed."
+            error_msg = (
+                task_data.get("error_message") or _STATUS_FAILURE_REASONS.get(status_str) or "Generation failed."
+            )
 
         return GenerationJob(
             id=job_id,
@@ -165,7 +212,7 @@ class Tripo3DProvider(GenerationProvider):
             prompt=prompt,
             status=status,
             progress=progress,
-            created_at=task_data.get("create_time", 0.0),
+            created_at=_parse_created_at(task_data.get("created_at")),
             format="glb",
             style=None,
             error=error_msg,
@@ -195,8 +242,7 @@ class Tripo3DProvider(GenerationProvider):
                     code="NO_RESULT",
                 )
 
-        # Tripo3D returns a model URL in the output dict.
-        url = output.get("model") or output.get("pbr_model") or output.get("base_model")
+        url = next((output[key] for key in _MODEL_URL_KEYS if output.get(key)), None)
         if not url:
             raise GenerationError(
                 "No downloadable model URL found in Tripo3D results.",
@@ -290,6 +336,32 @@ class Tripo3DProvider(GenerationProvider):
             code="RETRY_EXHAUSTED",
         )
 
+    def _envelope_data(self, resp: requests.Response) -> dict[str, Any]:
+        """Return ``data`` from a ``{"code": 0, "data": {...}}`` envelope.
+
+        Tripo marks a failed call with a non-zero ``code`` alongside
+        ``message``.  That is raised here so an error body can never be
+        read as an empty, still-pending task.
+        """
+        try:
+            payload = resp.json()
+        except ValueError:
+            payload = None
+        if not isinstance(payload, dict):
+            raise GenerationError(
+                "Tripo3D API returned a response that is not a JSON object.",
+                code="INVALID_RESPONSE",
+            )
+
+        if payload.get("code") not in (0, None):
+            raise GenerationError(
+                f"Tripo3D API error (code {payload.get('code')}): {payload.get('message') or 'no message'}",
+                code="API_ERROR",
+            )
+
+        data = payload.get("data")
+        return data if isinstance(data, dict) else {}
+
     def _handle_http_error(self, resp: requests.Response) -> None:
         """Raise a typed exception for non-2xx responses."""
         if resp.ok:
@@ -316,3 +388,20 @@ class Tripo3DProvider(GenerationProvider):
             f"Tripo3D API error (HTTP {resp.status_code}): {body}",
             code="API_ERROR",
         )
+
+
+def _parse_created_at(value: Any) -> float:
+    """Convert Tripo's ISO 8601 ``created_at`` to epoch seconds.
+
+    Returns ``0.0`` when the field is absent or unreadable, matching the
+    :class:`GenerationJob` default.
+    """
+    if not isinstance(value, str) or not value:
+        return 0.0
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return 0.0
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
