@@ -102,21 +102,74 @@ def test_get_started_names_the_lapse_and_not_an_account_nudge(lapsed_session):
     assert "tool" not in account  # the free-account nudge is for strangers
 
 
-def test_check_my_tier_leads_with_the_lapse(lapsed_session, monkeypatch):
+def test_the_refusal_verdict_reads_from_the_file_alone(lapsed_session):
+    assert auth_session.session_rejected() is True
+    tokens = json.loads((lapsed_session / ".kiln" / "auth_tokens.json").read_text())
+    tokens["refresh_token"] = "r"  # a fresh sign-in carries one again
+    assert auth_session.session_rejected(tokens) is False
+
+
+def _manager(monkeypatch, tier: str, source: str):
     lic = pytest.importorskip("kiln_pro.enterprise.licensing")
+    mgr = MagicMock()
+    mgr.get_tier.return_value = lic.LicenseTier(tier)
+    mgr.get_info.return_value.source = source
+    mgr.get_info.return_value.to_dict.return_value = {
+        "tier": tier, "source": source, "is_valid": True,
+    }
+    monkeypatch.setattr(lic, "get_license_manager", lambda: mgr)
+    return mgr
+
+
+def test_check_my_tier_says_a_lapsed_plan_comes_back_on_sign_in(lapsed_session, monkeypatch):
+    """A session the server refused grants no paid tier, so this machine
+    reads free -- and its owner hears that, not an invitation to upgrade."""
     from kiln.plugins.tier_diagnostic_tools import _walk_resolution_chain
 
-    mgr = MagicMock()
-    mgr.get_tier.return_value = lic.LicenseTier("enterprise")
-    mgr.get_info.return_value.source = "oauth"
-    monkeypatch.setattr(lic, "get_license_manager", lambda: mgr)
-
+    _manager(monkeypatch, "free", "default")
     out = _walk_resolution_chain()
 
-    assert out["effective_tier"] == "enterprise"  # still what the account holds
+    assert out["effective_tier"] == "free"
     assert out["session_state"] == "needs_signin"
     assert out["agent_summary"].startswith("Your Kiln session")
-    assert "sign back in" in out["agent_summary"]
-    assert "Everything is unlocked" not in out["agent_summary"]
+    assert "your Enterprise plan comes back the moment you sign back in" in out["agent_summary"]
     assert out["action_required"] == auth_session.resolve_session_bearer().detail
     assert out["setup_hint"] == "kiln signin"
+
+
+def test_check_my_tier_still_leads_with_the_lapse_while_a_plan_is_granted(
+    lapsed_session, monkeypatch
+):
+    """An older licence manager still grants the cached plan; the lapse
+    leads the answer all the same."""
+    from kiln.plugins.tier_diagnostic_tools import _walk_resolution_chain
+
+    _manager(monkeypatch, "enterprise", "oauth")
+    out = _walk_resolution_chain()
+
+    assert out["effective_tier"] == "enterprise"
+    assert out["agent_summary"].startswith("Your Kiln session")
+    assert "Everything is unlocked" not in out["agent_summary"]
+
+
+def test_license_status_explains_a_free_answer_a_lapsed_session_caused(
+    lapsed_session, monkeypatch
+):
+    import kiln.server as srv
+
+    _manager(monkeypatch, "free", "default")
+    payload = srv.license_status()
+
+    assert payload["tier"] == "free"
+    assert payload["session_state"] == "needs_signin"
+    assert payload["is_valid"] is False
+    assert "has expired" in payload["action_required"]
+
+
+def test_an_operator_key_reports_exactly_what_it_did_before(lapsed_session, monkeypatch):
+    import kiln.server as srv
+
+    _manager(monkeypatch, "pro", "env")
+    payload = srv.license_status()
+
+    assert "session_state" not in payload and "action_required" not in payload

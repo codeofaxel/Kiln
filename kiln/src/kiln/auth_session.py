@@ -256,6 +256,18 @@ def _rejected_verdict(stored: dict) -> SessionBearer | None:
     return None
 
 
+def session_rejected(stored: dict | None = None) -> bool:
+    """True when the server has refused this machine's sign-in for good.
+
+    The persisted ``needs_signin`` verdict, read from the file alone: no
+    clock, no network.  Not "offline" and not "near expiry", both of which
+    a refresh can still fix; this is the state only a new sign-in clears.
+    What a sign-in GRANTS is decided elsewhere (the licence manager reads
+    this, and stops honouring a paid tier cached by a session that ended).
+    """
+    return _rejected_verdict(_read_tokens() if stored is None else stored) is not None
+
+
 def resolve_session_bearer(
     refresh_margin_s: float = DEFAULT_REFRESH_MARGIN_S,
     *,

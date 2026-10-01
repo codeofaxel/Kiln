@@ -12339,7 +12339,16 @@ def _annotate_session_liveness(payload: dict) -> None:
     can only change what a human is TOLD, never what they may do.
     """
     if payload.get("source") != "oauth":
-        return
+        # With no operator key, a session the server refused is WHY this
+        # reads free: it stopped granting the plan, and saying only "free"
+        # would read to its owner as a lost subscription.
+        try:
+            from kiln.auth_session import session_rejected
+
+            if payload.get("source") != "default" or not session_rejected():
+                return
+        except Exception:  # noqa: BLE001 — a diagnostic must never break the report
+            return
     try:
         from kiln.auth_session import resolve_session_bearer
 

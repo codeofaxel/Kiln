@@ -157,15 +157,16 @@ def _walk_resolution_chain() -> dict[str, Any]:
             matched_source = "license_manager_resolve"
             matched_detail = f"resolved by LicenseManager to {tier_str}"
 
-        # The session only speaks for a tier it supplied: an operator's key
-        # needs no sign-in and reports exactly what it did before.
+        # The session speaks for any tier an operator's key did not supply:
+        # the one it granted, or the free one it left behind when it ended.
+        # A key needs no sign-in and reports exactly what it did before.
         try:
-            from_session = mgr.get_info().source == "oauth"
+            from_key = mgr.get_info().source in ("env", "file")
         except Exception:  # noqa: BLE001
-            from_session = False
+            from_key = False
         return _build_response(
             effective_tier, chain, matched_source, matched_detail,
-            session=session if from_session else None,
+            session=None if from_key else session,
         )
 
     except ImportError:
@@ -258,6 +259,19 @@ def _build_response(
                 "anything that goes through Kiln's servers (browser 3D links, "
                 "the cloud library, hosted tools) needs you to sign back in first."
             )
+        else:
+            # A session that ended stops granting its plan here, so this
+            # machine reads free.  Its owner hears what they had, and that
+            # signing back in brings it back: not an invitation to upgrade.
+            from kiln.auth_session import _read_tokens
+
+            plan = str(_read_tokens().get("tier") or "").lower()
+            if plan and plan != "free":
+                agent_summary = (
+                    f"{extra['action_required']} Until then this machine runs "
+                    f"Kiln Free; your {plan.title()} plan comes back the moment "
+                    "you sign back in."
+                )
 
     return {
         "success": True,
