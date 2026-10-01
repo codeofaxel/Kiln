@@ -10376,10 +10376,14 @@ def wrap_gcode_as_3mf(
             "num_filaments": num_filaments,
         }
         if filament_colors:
-            # The colours were chosen here; say now whether they are loaded.
+            # The colours were chosen here; say now whether they are loaded,
+            # and which filaments you could buy for them.
             advisory = _spool_advisory(list(filament_colors), adapter=adapter)
             if advisory:
                 result["ams_advisory"] = advisory
+            from kiln._pro_colour_bridge import attach_closest_filaments
+
+            attach_closest_filaments(result, list(filament_colors))
         return result
     except FileNotFoundError as exc:
         return _error_dict(f"G-code file not found: {exc}")
@@ -16163,6 +16167,9 @@ def compose_multicolor_3mf(
             advisory = None
         if advisory:
             result["ams_advisory"] = advisory
+        from kiln._pro_colour_bridge import attach_closest_filaments
+
+        attach_closest_filaments(result, [p.get("color") for p in parts])
     return result
 
 
@@ -17567,12 +17574,23 @@ def _served_wait_seconds(tool_name: str) -> float:
     return _SERVED_MAKE_WAIT_S if kind == "made" else _SERVED_WAIT_S
 
 
-def _pro_api_call(tool_name: str, _timeout: float | None = None, **kwargs) -> dict:
+def _pro_api_call(
+    tool_name: str,
+    _timeout: float | None = None,
+    _asked_by_user: bool = True,
+    **kwargs,
+) -> dict:
     """Call a hosted kiln-pro tool through the public REST API.
 
     ``_timeout`` is how long to wait for the answer.  Left out, it follows
     what the tool does (:func:`_served_wait_seconds`); a caller that must
     fail fast -- a check made on the way into a print -- passes its own.
+
+    ``_asked_by_user=False`` marks an ask the person never made -- extra
+    information a tool fetches on its own, like the filaments to buy beside
+    a colouring.  Without a sign-in it gets the same answer, but it is not
+    counted as someone reaching for the feature: that counter
+    (:func:`kiln.daily_stats.record_account_wall`) means a person asked.
 
     Bearer-token resolution order:
       1. ``KILN_LICENSE_KEY`` env var (operator-supplied license)
@@ -17636,13 +17654,15 @@ def _pro_api_call(tool_name: str, _timeout: float | None = None, **kwargs) -> di
     if not bearer:
         # The most-hit refusal in the product, and until now the only one
         # that recorded nothing: it returns here without ever reaching a
-        # server, so no server-side counter could see it.  Best-effort.
-        try:
-            from kiln.daily_stats import record_account_wall
+        # server, so no server-side counter could see it.  Best-effort, and
+        # only for an ask a person made (see ``_asked_by_user``).
+        if _asked_by_user:
+            try:
+                from kiln.daily_stats import record_account_wall
 
-            record_account_wall(tool_name)
-        except Exception:
-            pass
+                record_account_wall(tool_name)
+            except Exception:
+                pass
         required_tier = _PRO_TOOL_TIERS.get(tool_name, "")
         allowance = _PRO_TOOL_QUOTA.get(tool_name)
         # Two audiences, two fields — the same split ``_tier_required_error``

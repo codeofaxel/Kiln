@@ -1155,6 +1155,29 @@ def _attach_spool_advisory(
         response["ams_advisory"] = advisory
 
 
+def _attach_colour_advice(
+    response: dict[str, Any],
+    colours: list[str | None],
+    printer_id: str | None = None,
+) -> None:
+    """Everything a colouring says about the colours it chose, in one call.
+
+    Whether the printer has them loaded (:func:`_attach_spool_advisory`),
+    and the closest filaments you can buy for each one
+    (:func:`kiln._pro_colour_bridge.attach_closest_filaments`).  Every
+    colouring tool in this file calls this helper rather than either half,
+    so a door cannot carry one without the other.  Both are best-effort:
+    neither ever fails a good colouring.
+    """
+    _attach_spool_advisory(response, colours, printer_id)
+    try:
+        from kiln._pro_colour_bridge import attach_closest_filaments
+
+        attach_closest_filaments(response, colours)
+    except Exception as exc:  # a courtesy layer never fails a good colouring
+        _logger.debug("closest filaments skipped: %s", exc)
+
+
 def _build_result(
     zones: list[_ColorZone],
     output_dir: str,
@@ -1648,7 +1671,7 @@ class _ColorToolsPlugin:
                 compose_3mf_error=compose_err,
                 band_warning=warn,
             )
-            _attach_spool_advisory(response, palette[:num_colors], printer_id)
+            _attach_colour_advice(response, palette[:num_colors], printer_id)
             try:
                 from kiln_pro.plugins.git_render_tools import (
                     attach_inspect_bundle,
@@ -1775,7 +1798,7 @@ class _ColorToolsPlugin:
                 compose_3mf_error=compose_err,
                 band_warning=warn,
             )
-            _attach_spool_advisory(response, palette[:num_colors], printer_id)
+            _attach_colour_advice(response, palette[:num_colors], printer_id)
             try:
                 from kiln_pro.plugins.git_render_tools import (
                     attach_inspect_bundle,
@@ -2056,7 +2079,7 @@ class _ColorToolsPlugin:
             for key in ("colors", "bed_translation", "native_paint_truncated"):
                 if key in composed:
                     response[key] = composed[key]
-            _attach_spool_advisory(
+            _attach_colour_advice(
                 response, sorted({c for c in colors if c}), printer_id,
             )
             if "floor_indices" in record and target == "all":
