@@ -852,6 +852,8 @@ _SLICER_ENTRIES = frozenset({"slice_file", "estimate_print", "slice_multicolor_c
 #: reaches the slicer through the gate by construction.
 _SHARED_STEPS = frozenset({"_placed_slice", "_slice_step", "_cli_placed_slice"})
 _PLATE_GATES = ("_apply_plate_placement", "_verify_plate_placement")
+#: The one function in the package that calls the slicer itself.
+_THE_SHARED_STEP = ("plugins/slicer_tools.py", "_placed_slice")
 
 
 def _called_names(fn: Any) -> set[str]:
@@ -944,20 +946,24 @@ def _slicer_reachers() -> tuple[dict[tuple[str, str], bool], set[str]]:
 class TestEveryCallerOfTheSlicer:
     """The one-door fallacy, closed: every function that reaches the slicer
     -- ``slice_file``, ``estimate_print`` or ``slice_multicolor_copies`` --
-    does so through the plate gate and the second verdict, and every module
-    that does is walked behaviourally here."""
+    does so through the one shared step, and every module that does is
+    walked behaviourally here."""
 
     def test_every_slicer_entry_is_reached_through_the_gate_and_walked(self):
         raw, modules = _slicer_reachers()
-        assert ("plugins/slicer_tools.py", "_placed_slice") in raw, "the walk itself is broken"
-        # A function that slices directly must gate and verify in that same
-        # function; a function that slices through the shared step needs
-        # nothing more.  Nested functions count for their enclosing one.
-        ungated = sorted(f"{rel}:{name}" for (rel, name), gated in raw.items() if not gated)
-        assert not ungated, (
-            f"these functions reach the slicer without the plate gate and the post-slice verdict: "
-            f"{ungated}.  Slice through _placed_slice (one helper, no per-door branch), or call "
-            f"_apply_plate_placement and _verify_plate_placement in the same function, and walk the door here."
+        assert raw.get(_THE_SHARED_STEP) is True, (
+            "the walk itself is broken, or the shared step no longer gates and verifies the plate"
+        )
+        # Only the shared step calls the slicer.  A door that slices itself
+        # is a copy of the step, even with both plate gates beside it, and a
+        # copy misses whatever the step learns later: until 2026-10-01 the
+        # retry and generate_and_print doors sliced that way, and neither
+        # got the bed-fit gate nor a skirt or brim past the bed's edge
+        # settled.  Nested functions count for their enclosing one.
+        copies = sorted(f"{rel}:{name}" for rel, name in raw if (rel, name) != _THE_SHARED_STEP)
+        assert not copies, (
+            f"these functions call the slicer themselves: {copies}.  Slice through _placed_slice (one "
+            f"helper, no per-door branch) -- pass slicer= for another way of slicing -- and walk the door here."
         )
         assert modules == _WALKED, (
             f"the modules that reach the slicer changed: {sorted(modules ^ _WALKED)}.  A new one must be "
