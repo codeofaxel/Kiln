@@ -16,6 +16,8 @@ Coverage:
       faces (island untouched)
     - a stale mesh (content changed after recording) refuses loudly
     - the compile hook's scad-import wiring records without OpenSCAD
+    - the distance pass is exact across batches, and its memory stays flat
+      however many point/triangle pairs meet
 """
 
 from __future__ import annotations
@@ -188,6 +190,78 @@ class TestComputeDecorationFaces:
 # ---------------------------------------------------------------------------
 # Sidecar: record / load round-trip and staleness
 # ---------------------------------------------------------------------------
+
+
+def _brute_force_distances(points, triangles):
+    """Every point against every triangle -- the answer the grid must give."""
+    import numpy as np
+
+    from kiln.decoration_faces import _point_triangle_distances
+
+    pp = np.repeat(np.arange(len(points)), len(triangles))
+    tt = np.tile(np.arange(len(triangles)), len(points))
+    out = np.full(len(points), np.inf)
+    np.minimum.at(out, pp, _point_triangle_distances(points[pp], triangles[tt]))
+    return out
+
+
+class TestDistancePass:
+    def test_batched_pass_matches_brute_force(self, monkeypatch):
+        """Seven pairs per batch still gives every near point its exact
+        nearest distance: batching changes when pairs are measured, never
+        which pairs are."""
+        import numpy as np
+
+        import kiln.decoration_faces as df
+
+        rng = np.random.default_rng(7)
+        triangles = rng.uniform(0.0, 20.0, size=(80, 3, 3))
+        # Points on the triangles, nudged off them, so most have a true
+        # nearest distance inside the grid's exact radius.
+        owners = rng.integers(0, len(triangles), size=600)
+        bary = rng.dirichlet((1.0, 1.0, 1.0), size=600)
+        points = np.einsum("ij,ijk->ik", bary, triangles[owners])
+        points += rng.uniform(-1.5, 1.5, size=points.shape)
+
+        monkeypatch.setattr(df, "_MAX_PAIRS_PER_BATCH", 7)
+        got = df._min_distance_to_mesh(points, triangles)
+
+        expected = _brute_force_distances(points, triangles)
+        near = expected <= df._GRID_CELL_MM
+        assert near.sum() > 400
+        np.testing.assert_allclose(got[near], expected[near], rtol=0, atol=1e-12)
+        # A point beyond the exact radius may only ever read as farther away,
+        # never as lying on the surface.
+        assert (got[~near] > df._GRID_CELL_MM).all()
+
+    def test_memory_stays_flat_however_many_pairs_meet(self):
+        """Every point here sees all 600 triangles: 1.2M pairs, which the
+        all-at-once pass held as ~500 MB of temporaries (a textured cup's
+        real diff reached 1.3 GB).  Batched, it stays near one batch."""
+        import tracemalloc
+
+        import numpy as np
+
+        from kiln.decoration_faces import _min_distance_to_mesh
+
+        # 600 stacked triangles inside one 4 x 4 x 3 mm block, so every
+        # point's 3x3x3 cell neighbourhood holds all of them.
+        corner = np.array([[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [0.0, 4.0, 0.0]])
+        lift = np.zeros((600, 1, 3))
+        lift[:, 0, 2] = np.linspace(0.0, 3.0, 600)
+        triangles = corner[None, :, :] + lift
+        points = np.random.default_rng(11).uniform(
+            (0.0, 0.0, 0.0), (4.0, 4.0, 3.0), size=(2_000, 3)
+        )
+
+        tracemalloc.start()
+        try:
+            distances = _min_distance_to_mesh(points, triangles)
+            _now, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        assert np.isfinite(distances).all()
+        assert peak < 200 * 1024 * 1024
 
 
 class TestSidecar:

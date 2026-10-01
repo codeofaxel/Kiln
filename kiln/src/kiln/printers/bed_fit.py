@@ -208,8 +208,8 @@ def compute_mesh_bbox(mesh_path: str) -> dict[str, float] | None:
     """Compute bounding box of a mesh file (STL/OBJ/3MF-geometry).
 
     Returns a dict with x_min/x_max/y_min/y_max/z_min/z_max in mm, or
-    ``None`` if the file cannot be parsed.  Uses the existing STL parser
-    for .stl files (consistent with other kiln tools), the
+    ``None`` if the file cannot be parsed.  Reads a .stl as one numpy array
+    (:func:`kiln.generation.validation.read_stl_triangles`), the
     transform-aware 3MF parser for .3mf files, and falls back to
     trimesh for other formats.
 
@@ -231,12 +231,19 @@ def compute_mesh_bbox(mesh_path: str) -> dict[str, float] | None:
     ext = path.suffix.lower()
     try:
         if ext == ".stl":
-            from kiln.generation.validation import _bounding_box, _parse_stl
-            errors: list[str] = []
-            _, vertices = _parse_stl(path, errors)
-            if errors or not vertices:
+            from kiln.generation.validation import read_stl_triangles
+            try:
+                corners = read_stl_triangles(path).reshape(-1, 3)
+            except ValueError:
                 return None
-            return _bounding_box(vertices)
+            if not len(corners):
+                return None
+            lo, hi = corners.min(axis=0), corners.max(axis=0)
+            return {
+                "x_min": float(lo[0]), "x_max": float(hi[0]),
+                "y_min": float(lo[1]), "y_max": float(hi[1]),
+                "z_min": float(lo[2]), "z_max": float(hi[2]),
+            }
         if ext == ".3mf":
             bbox = compute_3mf_geometry_bbox(str(path))
             if bbox is not None:
