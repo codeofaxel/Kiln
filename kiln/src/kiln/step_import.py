@@ -1547,8 +1547,29 @@ def _parse_kiln_result(
 
     raise StepImportError(
         f"{backend_name} conversion produced no result. "
-        f"stdout: {(result.stdout or '')[:300]}"
+        f"stdout: {_own_output(result.stdout)[:300]}"
     )
+
+
+_ENV_LINE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def _own_output(stdout: str | None) -> str:
+    """What a converter said itself, without the environment its launcher printed.
+
+    The FreeCAD launcher prints the whole environment ahead of the script's
+    output, and an error that quotes that output is shown to the person,
+    handed to an agent and written to logs -- with whatever keys the
+    environment holds.  Each variable this process passed down is removed
+    whole where it starts a line (a value may span lines; matching only at
+    a line start keeps ``PWD=...`` from biting a piece out of
+    ``OLDPWD=...`` and leaving the rest), then any line still shaped like
+    ``NAME=value``, for a variable the launcher set or changed on its own.
+    """
+    text = stdout or ""
+    for name, value in sorted(os.environ.items(), key=lambda item: -len(item[1])):
+        text = re.sub(rf"(?m)^{re.escape(f'{name}={value}')}$", "", text)
+    return "\n".join(line for line in text.splitlines() if line.strip() and not _ENV_LINE_RE.match(line)).strip()
 
 
 def _topology_from_result(data: dict[str, Any]) -> SourceTopology | None:
