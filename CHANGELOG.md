@@ -306,6 +306,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Your Bambu's screen shows the same print time Kiln does.**
+
+- **A STEP file sent straight to slicing shows on the 3D stage, and one too big for your bed says so plainly.**
+
 - **Convert two CAD files in the same folder and both models survive.** Each is named after the file it came from, so a new revision no longer replaces the last one's model.
 
 - **A design you import still opens after a restart.** Kiln keeps its own copy of the model with the design, instead of pointing at a temporary file your Mac clears.
