@@ -520,8 +520,12 @@ def _call(name: str, **arguments):
     from kiln import server
 
     out = asyncio.run(server.mcp.call_tool(name, arguments))
-    content = out[0] if isinstance(out, tuple) else out
-    return json.loads(content[0].text)
+    if isinstance(out, tuple):
+        out = out[0]
+    # A list of content blocks, or a result object carrying them: the SDK
+    # majors differ, and the reply is the same text either way.
+    blocks = out if isinstance(out, list) else out.content
+    return json.loads(blocks[0].text)
 
 
 class TestTheEstimatesFollowTheNozzle:

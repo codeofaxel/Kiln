@@ -44,6 +44,9 @@ PRINTER_KEYED_FILES: tuple[str, ...] = (
 #: fail-closed half of the manifest: adding a data file without
 #: classifying it fails the manifest check.
 REFERENCE_DATA_FILES: dict[str, str] = {
+    "bambu_start_variants.json": (
+        "lines of a start sequence that depend on the print in hand, keyed by model"
+    ),
     "component_catalog.json": "COTS component dimensions, keyed by component",
     "design_templates.json": "parametric template definitions, keyed by template",
     "material_catalog.json": "material properties, keyed by material",
