@@ -25,9 +25,21 @@ _logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
-# The formats the printability engine reads — asked of the engine, not
-# restated here, so a format it gains is analysed here the same day.
-from kiln.generation.validation import _SUPPORTED_MESH_FORMATS as _PRINTABLE_EXTENSIONS  # noqa: E402
+#: What an estimate says about its printability block when the analysis ran
+#: on Kiln's mesh of a CAD file rather than on the file itself.
+STEP_PRINTABILITY_NOTE = "Printability and the brim decision were read from Kiln's mesh of this STEP file."
+
+
+def _printability_not_checked(exc: Exception) -> str:
+    """The sentence an estimate carries when the printability analysis could
+    not be made, with the engine's own reason: a CAD file this machine cannot
+    convert, a format the engine does not read, a mesh it could not parse.
+
+    An estimate still stands without the analysis, so the door does not
+    refuse -- but until 2026-09-30 it said nothing, and a result with no
+    score and no brim decision read the same as one with nothing to report.
+    """
+    return f"Printability and the brim decision were not checked: {' '.join(str(exc).split())}"
 
 
 def _format_time(seconds: int | None) -> str:
@@ -145,8 +157,11 @@ class _EstimateToolsPlugin:
 
             Slices the model using PrusaSlicer or OrcaSlicer, parses the
             output G-code for time and filament metadata, runs printability
-            analysis (for STL/OBJ/3MF inputs), and returns adhesion
-            recommendations — all without uploading or starting a print.
+            analysis on the file as it was sliced (a STEP file as Kiln's
+            mesh of it), and returns adhesion recommendations — all without
+            uploading or starting a print.  When the analysis could not be
+            made, ``printability`` is null and ``printability_note`` says
+            why.
 
             Use this tool to answer "how long will this take?" or "how much
             filament will I use?" before committing to a print job.
@@ -195,7 +210,7 @@ class _EstimateToolsPlugin:
                 # file was not created" (bambu_p1s, 2026-08-24), where
                 # slice_model says EXCEEDS_BED with the dimensions.  Same
                 # helper, same refusal shape, so the two doors cannot differ.
-                from kiln.plugins.slicer_tools import _attach_placement
+                from kiln.plugins.slicer_tools import _attach_bed_fit, _attach_placement
 
                 # The same shared step as the slice doors, so an estimate is
                 # of the part where it will actually print -- but it never
@@ -277,30 +292,44 @@ class _EstimateToolsPlugin:
                 if isinstance(getattr(result, "filament", None), SliceFilament):
                     estimate["filament"] = result.filament.to_dict()
 
-                # 5. Printability analysis (STL/OBJ/3MF only)
-                ext = os.path.splitext(input_path)[1].lower()
+                # 5. Printability analysis, of the file that was SLICED: the
+                # bed-fit gate may have turned the part to fit, and the brim
+                # decision has to be for the face that is on the bed.  The
+                # engine reads every mesh format and takes a CAD file as
+                # Kiln's mesh of it, so there is no format list here to fall
+                # behind it.  An analysis that could not be made is said in
+                # the result (``printability_note``), never skipped quietly.
+                from kiln.step_import import is_step_file
+
+                analysed_path = sinfo.get("effective_input") or input_path
                 printability_dict: dict[str, Any] | None = None
                 adhesion_dict: dict[str, Any] | None = None
                 adhesion_rationale: str | None = None
+                printability_note: str | None = None
+                printability_checked = False
 
-                if ext in _PRINTABLE_EXTENSIONS:
-                    try:
-                        # The printer and filament this estimate is FOR, so
-                        # the report, its brim decision and the slice agree.
-                        report = analyze_printability(
-                            input_path,
-                            material=mat_upper,
-                            printer_id=effective_printer_id or printer_id or None,
-                        )
-                        printability_dict = report.to_dict()
+                try:
+                    # The printer and filament this estimate is FOR, so
+                    # the report, its brim decision and the slice agree.
+                    report = analyze_printability(
+                        analysed_path,
+                        material=mat_upper,
+                        printer_id=effective_printer_id or printer_id or None,
+                    )
+                    printability_dict = report.to_dict()
+                    printability_checked = True
+                    if is_step_file(analysed_path):
+                        printability_note = STEP_PRINTABILITY_NOTE
 
-                        # 6. Adhesion: the report's own decision, the one
-                        # every brim sentence in the response comes from.
-                        if report.adhesion is not None:
-                            adhesion_dict = report.adhesion.to_dict()
-                            adhesion_rationale = report.adhesion.rationale
-                    except Exception as exc:
-                        _logger.debug("Printability/adhesion analysis failed: %s", exc)
+                    # 6. Adhesion: the report's own decision, the one
+                    # every brim sentence in the response comes from.
+                    if report.adhesion is not None:
+                        adhesion_dict = report.adhesion.to_dict()
+                        adhesion_rationale = report.adhesion.rationale
+                except Exception as exc:  # noqa: BLE001 -- the estimate stands without it, and says so
+                    _logger.debug("Printability/adhesion analysis failed: %s", exc)
+                    if not printability_checked:
+                        printability_note = _printability_not_checked(exc)
 
                 # 7. Build human-readable summary message
                 parts: list[str] = [f"Estimated {time_human}"]
@@ -313,6 +342,8 @@ class _EstimateToolsPlugin:
                         parts.append(f"Printability: {grade} ({score}/100)")
                 if adhesion_rationale:
                     parts.append(adhesion_rationale)
+                if not printability_checked:
+                    parts.append("Printability and the brim decision were not checked")
                 # Each part is a sentence; one that already ends in a period
                 # must not end in two.
                 message = ". ".join(part.rstrip(".") for part in parts) + "."
@@ -328,6 +359,11 @@ class _EstimateToolsPlugin:
                     "profile_path": effective_profile,
                     "message": message,
                 }
+                if printability_note:
+                    response["printability_note"] = printability_note
+                # A part the gate turned or moved to fit is estimated as it
+                # was sliced; the block says so, as on the slice doors.
+                _attach_bed_fit(response, sinfo.get("bed_fit"))
                 _attach_placement(response, place_info)
                 if sinfo.get("plate_note"):
                     # In the summary as well as beside it: the summary is what

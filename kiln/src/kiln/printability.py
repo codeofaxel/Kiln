@@ -24,7 +24,7 @@ from typing import Any, Literal
 
 import numpy as np
 
-from kiln import _vec
+from kiln import _vec, step_import
 from kiln.generation.validation import (
     _SUPPORTED_MESH_FORMATS,
     _bed_threshold_z,
@@ -4183,7 +4183,8 @@ def analyze_printability(
 ) -> PrintabilityReport:
     """Run a full printability analysis on a mesh file.
 
-    :param file_path: Path to an STL or OBJ file.
+    :param file_path: Path to a mesh (STL, OBJ, GLB, 3MF) or a STEP file,
+        which is analysed as Kiln's mesh of it.
     :param nozzle_diameter: Printer nozzle diameter in mm.
     :param layer_height: Print layer height in mm.
     :param max_overhang_angle: Max overhang angle (degrees) before
@@ -4226,9 +4227,29 @@ def analyze_printability(
         and the ``enrichment`` field is populated; free / public
         installs see the safety-floor result unchanged.  See
         https://kiln3d.com for tier details.
-    :raises ValueError: If the file cannot be parsed.
+    :raises ValueError: If the file cannot be parsed -- including a STEP
+        file that could not be turned into a mesh, whose message is the
+        converter's own and whose ``__cause__`` is the
+        :class:`kiln.step_import.StepImportError` (a
+        :class:`~kiln.step_import.NoBackendError` carries ``remedy``).
+        Raised, never swallowed: a CAD file nobody could read must not come
+        back looking analysed.
     """
     from kiln.design_intelligence import load_pro_overlay_or_empty
+
+    # A CAD file is analysed as Kiln's mesh of it, through the shared door
+    # (cached by content; anything already a mesh passes straight through).
+    # Here rather than in each caller: until 2026-09-30 a STEP was refused
+    # below as an unsupported type, so every door that sliced one either
+    # skipped this analysis without a word or grew its own conversion.
+    # A failed conversion keeps this function's one error type, so every
+    # caller that already handles an unreadable mesh handles this too.
+    try:
+        file_path, _conversion_note = step_import.ensure_mesh_path(file_path)
+    except step_import.NoBackendError as exc:
+        raise ValueError(str(exc)) from exc
+    except step_import.StepImportError as exc:
+        raise ValueError(f"Could not read that CAD file: {exc}") from exc
 
     triangles, vertices = _parse_mesh(file_path)
     # Membranes must go BEFORE winding normalization: a zero-thickness
