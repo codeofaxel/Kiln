@@ -31,6 +31,7 @@ from kiln.generation.validation import (
     _is_bed_supported_triangle,
     _mesh_bed_z,
     _parse_mesh_file,
+    unprintable_geometry_reason,
 )
 
 logger = logging.getLogger(__name__)
@@ -1186,10 +1187,9 @@ def _parse_mesh(
         )
     triangles, vertices = _parse_mesh_file(path, errors)
 
-    if errors:
-        raise ValueError(f"Failed to parse mesh: {'; '.join(errors)}")
-    if not triangles:
-        raise ValueError("Mesh contains no geometry.")
+    problem = unprintable_geometry_reason(triangles, vertices, parse_errors=errors)
+    if problem:
+        raise ValueError(problem)
 
     return triangles, vertices
 

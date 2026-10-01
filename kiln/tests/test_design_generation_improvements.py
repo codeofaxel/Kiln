@@ -3319,21 +3319,22 @@ class TestScorecardGrades:
         assert result["grade"] in ("A", "B"), f"Cube should be A/B, got {result['grade']}"
         assert result["overall_score"] >= 60
 
-    def test_single_triangle_scores_lower_than_cube(self, tmp_path):
-        """A single open triangle should score strictly lower than a cube."""
+    def test_a_single_triangle_gets_no_grade(self, tmp_path):
+        """A single open triangle is no part, so it gets no grade at all.
+
+        It used to score lower than a cube -- an A, at 94 -- which still read
+        as a printable part to anyone looking at the grade.
+        """
         from kiln.generation.validation import design_scorecard
 
         cube_stl = str(tmp_path / "cube.stl")
         _write_cube_stl(cube_stl, 20.0)
-        cube_score = design_scorecard(cube_stl)["overall_score"]
+        assert design_scorecard(cube_stl)["overall_score"] > 0
 
         single_stl = str(tmp_path / "single.stl")
         _write_single_triangle_stl(single_stl)
-        single_score = design_scorecard(single_stl)["overall_score"]
-
-        assert single_score < cube_score, (
-            f"Single triangle ({single_score}) should score lower than cube ({cube_score})"
-        )
+        with pytest.raises(ValueError, match="flat"):
+            design_scorecard(single_stl)
 
 
 class TestRepairErrorPaths:

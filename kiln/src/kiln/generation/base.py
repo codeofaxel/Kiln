@@ -142,6 +142,11 @@ class MeshAnalysis:
     #: read as two verdicts on the same part.
     mesh_check_score: int = 0
     printability_issues: list[str] = field(default_factory=list)
+    #: Why this file cannot print as a part at all -- unreadable, empty,
+    #: every triangle degenerate, or flat (every point in one plane) -- or
+    #: ``None`` when it can.  Every print verdict asks this before judging anything else
+    #: (:func:`kiln.generation.validation.unprintable_geometry_reason`).
+    unprintable_geometry: str | None = None
 
     def has_geometry(self) -> bool:
         """True when the analysis is about an actual mesh.

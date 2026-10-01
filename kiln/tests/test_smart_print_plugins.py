@@ -961,8 +961,11 @@ class TestRetryPrintValidationGate:
         # must be the repaired path, not the original.
         assert call_args.args[0] == "/tmp/repaired_cube.stl"
 
-    def test_validation_pipeline_crash_does_not_block_retry(self, smart_print_fns):
-        """Validator infrastructure failure must not block a legitimate retry."""
+    def test_a_check_that_crashes_does_not_retry(self, smart_print_fns):
+        """A check that raised never looked at the mesh, so the retry does not
+        print it.  This test used to assert the opposite -- a crashed check
+        was skipped and the retry printed -- which is how an unchecked file
+        could reach a printer."""
         fn = smart_print_fns["retry_print_with_fix"]
         adapter = mock.MagicMock(spec=["get_state", "upload_file", "start_print"])
         adapter.get_state.return_value = _make_state()
@@ -987,11 +990,11 @@ class TestRetryPrintValidationGate:
         ):
             result = fn(model_path="/tmp/cube.stl", skip_diagnosis=True)
 
-        # Retry succeeded — validator crash logged, gate skipped.
-        assert result["success"] is True
-        # No validation summary attached because the pipeline raised.
-        assert result.get("validation") is None
-        adapter.start_print.assert_called_once()
+        assert result["success"] is False
+        assert result["error"]["code"] == "VALIDATION_ERROR", result
+        message = result["error"]["message"]
+        assert "could not check" in message and "skip_validation=True" in message
+        adapter.start_print.assert_not_called()
 
 
 # ===========================================================================

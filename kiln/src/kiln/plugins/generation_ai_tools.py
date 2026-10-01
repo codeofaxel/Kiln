@@ -786,10 +786,7 @@ class _GenerationAIToolsPlugin:
                 bed_size_source = None
                 bed_size_model_id = None
                 if result.format in ("stl", "obj", "glb"):
-                    from kiln.plugins.validation_pipeline_tools import (
-                        run_full_validation_pipeline,
-                        score_phrase,
-                    )
+                    from kiln.plugins.validation_pipeline_tools import gate_for_print
                     from kiln.printers.bed_fit import resolve_build_volume
 
                     # Resolve build volume from printer if available
@@ -822,38 +819,22 @@ class _GenerationAIToolsPlugin:
                                 code="UNKNOWN_PRINTER_MODEL",
                             )
 
-                    try:
-                        pipeline_result = run_full_validation_pipeline(
-                            result.local_path,
-                            printer_id=printer_id or "",
-                            material="PLA",
-                        )
-                    except Exception as exc:
-                        _logger.error("Validation pipeline crashed: %s", exc, exc_info=True)
-                        return _srv._error_dict(
-                            f"Validation pipeline error: {exc}",
-                            code="VALIDATION_ERROR",
-                        )
-
-                    if not pipeline_result.get("ready_to_print", False):
-                        score = score_phrase(pipeline_result)
-                        summary = pipeline_result.get(
-                            "summary", "Generated mesh failed validation",
-                        )
+                    gate = gate_for_print(
+                        result.local_path, printer_id=printer_id or "", material="PLA",
+                    )
+                    if gate.reason:
                         err_resp = _srv._error_dict(
-                            f"Generated mesh failed pre-print validation "
-                            f"({score}): {summary}",
-                            code="VALIDATION_FAILED",
+                            f"The generated model cannot print: {gate.reason}",
+                            code=gate.code,
                         )
-                        err_resp["validation"] = pipeline_result
+                        if gate.report is not None:
+                            err_resp["validation"] = gate.report
                         return err_resp
+                    pipeline_result = gate.report
 
                     # Use the (possibly repaired/scaled) validated path
                     # going forward.
-                    validated_path = (
-                        pipeline_result.get("validated_path")
-                        or result.local_path
-                    )
+                    validated_path = gate.path
                     result = GenerationResult(
                         job_id=result.job_id,
                         provider=result.provider,

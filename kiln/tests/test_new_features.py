@@ -7,6 +7,7 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
+import trimesh
 from click.testing import CliRunner
 
 from kiln.cli.main import cli
@@ -420,7 +421,10 @@ class TestSliceCommand:
 
     def test_slice_and_print(self, tmp_path):
         stl = tmp_path / "model.stl"
-        stl.write_bytes(b"solid test\nendsolid test\n")
+        # A real part: --print-after runs the pre-print check on it.
+        _box = trimesh.creation.box(extents=(20, 20, 20))
+        _box.apply_translation((0, 0, 10))
+        _box.export(str(stl))
 
         gcode_path = str(tmp_path / "model.gcode")
         (tmp_path / "model.gcode").write_text("; gcode")

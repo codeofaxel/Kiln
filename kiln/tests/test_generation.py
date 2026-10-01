@@ -724,20 +724,28 @@ class TestMeshValidation:
         assert result.is_manifold is True
         assert not any("manifold" in w.lower() for w in result.warnings)
 
-    def test_non_manifold_single_triangle(self, tmp_path):
-        single_tri = [((0, 0, 0), (10, 0, 0), (5, 10, 0))]
-        f = tmp_path / "tri.stl"
-        f.write_bytes(make_binary_stl(single_tri))
+    def test_non_manifold_open_surface(self, tmp_path):
+        # Two faces of a tent: open edges, but depth in every direction.
+        tent = [((0, 0, 0), (10, 0, 0), (5, 5, 5)), ((0, 0, 0), (5, 5, 5), (0, 10, 0))]
+        f = tmp_path / "tent.stl"
+        f.write_bytes(make_binary_stl(tent))
         result = validate_mesh(str(f))
         assert result.valid is True
         assert result.is_manifold is False
         assert any("manifold" in w.lower() for w in result.warnings)
 
+    def test_a_single_flat_triangle_is_no_part(self, tmp_path):
+        f = tmp_path / "tri.stl"
+        f.write_bytes(make_binary_stl([((0, 0, 0), (10, 0, 0), (5, 10, 3))]))
+        result = validate_mesh(str(f))
+        assert result.valid is False
+        assert any("flat" in e for e in result.errors), result.errors
+
     def test_dimension_warning_very_large(self, tmp_path):
         # Create a triangle that spans beyond _MAX_DIMENSION_MM (1000mm).
         large_tri = [
             ((0, 0, 0), (2000, 0, 0), (1000, 2000, 0)),
-            ((0, 0, 0), (1000, 2000, 0), (0, 2000, 0)),
+            ((0, 0, 0), (1000, 2000, 0), (0, 2000, 5)),
         ]
         f = tmp_path / "large.stl"
         f.write_bytes(make_binary_stl(large_tri))
@@ -749,7 +757,7 @@ class TestMeshValidation:
         # Create a triangle smaller than _MIN_DIMENSION_MM (0.1mm).
         tiny_tri = [
             ((0, 0, 0), (0.01, 0, 0), (0, 0.01, 0)),
-            ((0, 0, 0), (0, 0.01, 0), (0.01, 0.01, 0)),
+            ((0, 0, 0), (0, 0.01, 0), (0.01, 0.01, 0.01)),
         ]
         f = tmp_path / "tiny.stl"
         f.write_bytes(make_binary_stl(tiny_tri))
@@ -819,7 +827,7 @@ class TestMeshValidation:
     outer loop
       vertex 0 0 0
       vertex 5 10 0
-      vertex 0 10 0
+      vertex 0 10 5
     endloop
   endfacet
 endsolid test
@@ -836,7 +844,7 @@ endsolid test
 v 0 0 0
 v 10 0 0
 v 10 10 0
-v 0 10 0
+v 0 10 5
 f 1 2 3
 f 1 3 4
 """
@@ -852,7 +860,7 @@ f 1 3 4
         obj_content = """v 0 0 0
 v 10 0 0
 v 10 10 0
-v 0 10 0
+v 0 10 5
 f 1 2 3 4
 """
         f = tmp_path / "quad.obj"
@@ -866,17 +874,19 @@ f 1 2 3 4
         obj_content = """v 0 0 0
 v 10 0 0
 v 10 10 0
+v 0 0 5
 vt 0 0
 vt 1 0
 vt 1 1
 vn 0 0 1
 f 1/1/1 2/2/1 3/3/1
+f 1/1/1 3/3/1 4/1/1
 """
         f = tmp_path / "textured.obj"
         f.write_text(obj_content)
         result = validate_mesh(str(f))
         assert result.valid is True
-        assert result.triangle_count == 1
+        assert result.triangle_count == 2
 
     def test_mesh_validation_result_includes_all_fields(self):
         mvr = MeshValidationResult(
@@ -945,7 +955,7 @@ v 0 1 0
         obj_content = """v 0 0 0
 v 10 0 0
 v 10 10 0
-v 5 15 0
+v 5 15 5
 v 0 10 0
 f 1 2 3 4 5
 """
@@ -1024,7 +1034,7 @@ class TestConvertToStl:
     def test_converts_obj_to_stl(self, tmp_path):
         """Basic OBJ with triangles converts to a valid STL."""
         obj = tmp_path / "model.obj"
-        obj.write_text("v 0 0 0\nv 10 0 0\nv 10 10 0\nv 0 10 0\nf 1 2 3\nf 1 3 4\n")
+        obj.write_text("v 0 0 0\nv 10 0 0\nv 10 10 0\nv 0 10 5\nf 1 2 3\nf 1 3 4\n")
         stl_path = convert_to_stl(str(obj))
 
         assert stl_path.endswith(".stl")
@@ -1067,7 +1077,7 @@ class TestConvertToStl:
     def test_triangulates_quads(self, tmp_path):
         """Quad faces in OBJ are triangulated during conversion."""
         obj = tmp_path / "quad.obj"
-        obj.write_text("v 0 0 0\nv 10 0 0\nv 10 10 0\nv 0 10 0\nf 1 2 3 4\n")
+        obj.write_text("v 0 0 0\nv 10 0 0\nv 10 10 0\nv 0 10 5\nf 1 2 3 4\n")
         stl_path = convert_to_stl(str(obj))
 
         result = validate_mesh(stl_path)
@@ -1094,15 +1104,16 @@ class TestConvertToStl:
         """OBJ with v/vt/vn face format is parsed correctly."""
         obj = tmp_path / "textured.obj"
         obj.write_text(
-            "v 0 0 0\nv 5 0 0\nv 5 5 0\n"
+            "v 0 0 0\nv 5 0 0\nv 5 5 0\nv 0 0 5\n"
             "vt 0 0\nvt 1 0\nvt 1 1\n"
             "vn 0 0 1\n"
             "f 1/1/1 2/2/1 3/3/1\n"
+            "f 1/1/1 3/3/1 4/1/1\n"
         )
         stl_path = convert_to_stl(str(obj))
         result = validate_mesh(stl_path)
         assert result.valid is True
-        assert result.triangle_count == 1
+        assert result.triangle_count == 2
 
 
 # ---------------------------------------------------------------------------

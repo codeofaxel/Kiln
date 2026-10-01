@@ -368,6 +368,30 @@ def _resolve_slice_plan(
     }
 
 
+def _cli_print_gate(
+    input_file: str, plan: dict[str, Any], *, json_mode: bool, bypass: str | None,
+) -> str:
+    """The shared pre-print check, as a command that prints applies it.
+
+    The same gate every MCP print door runs.  Returns the mesh to slice -- the
+    input, or the repaired / rescaled / converted one -- and exits with the
+    reason when the model must not print.  These commands used to print
+    without it.
+
+    :param bypass: How to print anyway, or ``None`` when the command has none.
+    """
+    from kiln.plugins.validation_pipeline_tools import gate_for_print
+
+    gate = gate_for_print(
+        input_file, printer_id=plan.get("printer_id") or "", material=plan.get("material") or "",
+    )
+    if gate.reason:
+        hint = f" {bypass}" if bypass else ""
+        click.echo(format_error(f"{gate.reason}{hint}", code=gate.code, json_mode=json_mode))
+        sys.exit(1)
+    return gate.path
+
+
 def _cli_placed_slice(
     ctx: click.Context,
     input_file: str,
@@ -4194,6 +4218,10 @@ def remove(name: str) -> None:
 )
 @click.option("--print-after", is_flag=True, help="Upload and start printing after slicing.")
 @click.option(
+    "--skip-validation", is_flag=True,
+    help="With --print-after, print without Kiln's pre-print check of the model.",
+)
+@click.option(
     "--preview-token", "preview_token", default=None,
     help="Preview sign-off token from issue_preview_token for INPUT_FILE. Required with --print-after.",
 )
@@ -4232,6 +4260,7 @@ def slice(
     material: str | None,
     support_mode: str,
     print_after: bool,
+    skip_validation: bool,
     preview_token: str | None,
     copies: int,
     spacing: float,
@@ -4279,6 +4308,12 @@ def slice(
         )
 
         extra_args = plan["extra_args"] or []
+
+        if print_after and not skip_validation:
+            input_file = _cli_print_gate(
+                input_file, plan, json_mode=json_mode,
+                bypass="Re-run with --skip-validation to print it without the check.",
+            )
 
         # Parse --ams-mapping if provided
         parsed_ams_mapping: list[int] | None = None
@@ -9708,12 +9743,15 @@ def generate_and_print_cmd(
             support_mode=support_mode,
         )
 
+        # A generated model has no bypass: one that cannot print is regenerated.
+        model_path = _cli_print_gate(result.local_path, plan, json_mode=json_mode, bypass=None)
+
         if not json_mode:
             click.echo("Slicing...")
         # The plate may still hold the last print: same shared step as
         # kiln slice (plate gate, slice, second verdict).
         slice_result, _placement_info = _cli_placed_slice(
-            ctx, result.local_path, plan=plan, placement=placement, json_mode=json_mode,
+            ctx, model_path, plan=plan, placement=placement, json_mode=json_mode,
             extra_args=plan["extra_args"] or None,
             material=plan.get("declared_material"),
             loaded_material=plan.get("loaded_material"),

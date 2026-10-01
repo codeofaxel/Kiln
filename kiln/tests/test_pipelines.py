@@ -423,22 +423,25 @@ class TestQuickPrintValidationStep:
         side_effect=ValueError("validator infrastructure failure"),
     )
     @patch("kiln.slicer.slice_file", side_effect=RuntimeError("slicer mock"))
-    def test_validation_pipeline_crash_does_not_block_print(
+    def test_a_check_that_crashes_does_not_print(
         self,
         mock_slice: MagicMock,
         mock_validate: MagicMock,
     ) -> None:
-        """If the validator itself raises, the pipeline still proceeds —
-        an infrastructure-side bug must not block users from printing."""
+        """If the check itself raises, the file was never checked, so it does
+        not print.  This test used to assert the opposite -- that a crashed
+        check was a soft skip and the pipeline sliced anyway -- which is how
+        a file nothing had looked at could reach a printer.  The refusal says
+        why and how to print without the check."""
         result = quick_print(model_path="/tmp/model.stl")
 
-        # validate_mesh step recorded as a soft skip, not a fatal
         validate_steps = [s for s in result.steps if s.name == "validate_mesh"]
         assert len(validate_steps) == 1
-        assert validate_steps[0].success is True
-        # Pipeline reached slice
-        slice_steps = [s for s in result.steps if s.name == "slice"]
-        assert len(slice_steps) == 1
+        assert validate_steps[0].success is False
+        assert "could not check" in validate_steps[0].message
+        assert "skip_validation=True" in validate_steps[0].message
+        assert not [s for s in result.steps if s.name == "slice"]
+        mock_slice.assert_not_called()
 
     def test_unsupported_format_skips_validation_cleanly(self) -> None:
         """An input format the validator doesn't understand (e.g. .gcode)

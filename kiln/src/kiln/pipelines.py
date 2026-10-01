@@ -36,10 +36,13 @@ import secrets
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from kiln.print_signoff import grant_from_record
 from kiln.print_start_verdict import resolve_print_start
+
+if TYPE_CHECKING:
+    from kiln.plugins.validation_pipeline_tools import PrintGate
 
 logger = logging.getLogger(__name__)
 
@@ -521,6 +524,44 @@ def _slice_step(
     return step, result.output_path
 
 
+def _validate_mesh_step(
+    model_path: str, *, printer_id: str, label: str,
+) -> tuple[PipelineStep, PrintGate]:
+    """Every pipeline's validate_mesh step, from the one shared print gate.
+
+    The step fails, and the pipeline stops, whenever the gate refuses --
+    including when the check could not run at all, which each pipeline used
+    to log and print through.
+
+    :returns: ``(step, gate)`` -- the step to record and the gate it came
+        from, whose ``path`` is the mesh to slice.
+    """
+    from kiln.plugins._validation_pipeline_internals import score_phrase
+    from kiln.plugins.validation_pipeline_tools import gate_for_print
+
+    step_start = time.time()
+    gate = gate_for_print(model_path, printer_id=printer_id)
+    data = gate.summary or {}
+    if gate.reason:
+        if gate.report is not None:
+            data["next_action"] = gate.report.get("next_action")
+        message = gate.refusal
+    elif gate.report is None:
+        message = f"Validation skipped (unsupported format {os.path.splitext(model_path)[1].lower()})"
+    else:
+        if gate.path != model_path:
+            logger.info("%s: using validated path %s", label, gate.path)
+        message = f"Print-ready ({score_phrase(gate.report)})"
+    step = PipelineStep(
+        name="validate_mesh",
+        success=gate.reason is None,
+        message=message,
+        data=data,
+        duration_seconds=time.time() - step_start,
+    )
+    return step, gate
+
+
 def _target_printer_id(printer_id: str | None, printer_name: str | None) -> str | None:
     """The printer-model id EVERY step of an aimed pipeline should use.
 
@@ -613,105 +654,19 @@ def quick_print(
     effective_pid = _target_printer_id(printer_id, printer_name)
 
     def _validate_mesh() -> PipelineStep:
-        step_start = time.time()
         if skip_validation:
             return PipelineStep(
                 name="validate_mesh",
                 success=True,
                 message="Validation skipped (skip_validation=True)",
-                duration_seconds=time.time() - step_start,
             )
-
-        try:
-            from kiln.plugins._validation_pipeline_internals import (
-                _SUPPORTED_FORMATS,
-                score_phrase,
-            )
-            from kiln.plugins.validation_pipeline_tools import (
-                run_full_validation_pipeline,
-            )
-        except ImportError as exc:
-            logger.debug("Validation pipeline import failed: %s", exc, exc_info=True)
-            return PipelineStep(
-                name="validate_mesh",
-                success=True,
-                message="Validation skipped (pipeline unavailable)",
-                duration_seconds=time.time() - step_start,
-            )
-
-        ext = os.path.splitext(model_path)[1].lower()
-        if ext not in _SUPPORTED_FORMATS:
-            return PipelineStep(
-                name="validate_mesh",
-                success=True,
-                message=f"Validation skipped (unsupported format {ext})",
-                duration_seconds=time.time() - step_start,
-            )
-
-        try:
-            report = run_full_validation_pipeline(
-                model_path,
-                printer_id=effective_pid or "",
-                material="",
-            )
-        except Exception as exc:
-            logger.warning(
-                "Validation pipeline raised — proceeding without gate: %s",
-                exc, exc_info=True,
-            )
-            return PipelineStep(
-                name="validate_mesh",
-                success=True,
-                message=f"Validation skipped ({exc.__class__.__name__})",
-                duration_seconds=time.time() - step_start,
-            )
-
-        ctx["validation_report"] = report
-        ready = report.get("ready_to_print", True)
-        score = score_phrase(report)
-        summary = report.get("summary", "")
-
-        if not ready:
-            return PipelineStep(
-                name="validate_mesh",
-                success=False,
-                message=(
-                    f"Mesh failed pre-print validation ({score}): "
-                    f"{summary} Pass skip_validation=True to bypass."
-                ),
-                data={
-                    "printability_score": report.get("printability_score"),
-                    "readiness_score": report.get("readiness_score"),
-                    "ready_to_print": False,
-                    "next_action": report.get("next_action"),
-                    "summary": summary,
-                },
-                duration_seconds=time.time() - step_start,
-            )
-
-        # Slice the (possibly repaired/scaled) validated mesh.
-        validated_path = report.get("validated_path") or model_path
-        if validated_path and validated_path != model_path:
-            ctx["model_path"] = validated_path
-            logger.info(
-                "quick_print: using validated path %s (repaired=%s)",
-                validated_path,
-                report.get("repaired", False),
-            )
-
-        return PipelineStep(
-            name="validate_mesh",
-            success=True,
-            message=f"Print-ready ({score})",
-            data={
-                "printability_score": report.get("printability_score"),
-                "readiness_score": report.get("readiness_score"),
-                "ready_to_print": True,
-                "repaired": report.get("repaired", False),
-                "summary": summary,
-            },
-            duration_seconds=time.time() - step_start,
+        step, gate = _validate_mesh_step(
+            model_path, printer_id=effective_pid or "", label="quick_print",
         )
+        ctx["validation_report"] = gate.report
+        if not gate.reason:
+            ctx["model_path"] = gate.path
+        return step
 
     def _resolve_profile() -> PipelineStep:
         if ctx["effective_profile"]:
@@ -1112,104 +1067,19 @@ def reslice_and_print(
     effective_pid = _target_printer_id(printer_id, printer_name)
 
     def _validate_mesh() -> PipelineStep:
-        step_start = time.time()
         if skip_validation:
             return PipelineStep(
                 name="validate_mesh",
                 success=True,
                 message="Validation skipped (skip_validation=True)",
-                duration_seconds=time.time() - step_start,
             )
-
-        try:
-            from kiln.plugins._validation_pipeline_internals import (
-                _SUPPORTED_FORMATS,
-                score_phrase,
-            )
-            from kiln.plugins.validation_pipeline_tools import (
-                run_full_validation_pipeline,
-            )
-        except ImportError as exc:
-            logger.debug("Validation pipeline import failed: %s", exc, exc_info=True)
-            return PipelineStep(
-                name="validate_mesh",
-                success=True,
-                message="Validation skipped (pipeline unavailable)",
-                duration_seconds=time.time() - step_start,
-            )
-
-        ext = os.path.splitext(model_path)[1].lower()
-        if ext not in _SUPPORTED_FORMATS:
-            return PipelineStep(
-                name="validate_mesh",
-                success=True,
-                message=f"Validation skipped (unsupported format {ext})",
-                duration_seconds=time.time() - step_start,
-            )
-
-        try:
-            report = run_full_validation_pipeline(
-                model_path,
-                printer_id=effective_pid or "",
-                material="",
-            )
-        except Exception as exc:
-            logger.warning(
-                "Validation pipeline raised — proceeding without gate: %s",
-                exc, exc_info=True,
-            )
-            return PipelineStep(
-                name="validate_mesh",
-                success=True,
-                message=f"Validation skipped ({exc.__class__.__name__})",
-                duration_seconds=time.time() - step_start,
-            )
-
-        ctx["validation_report"] = report
-        ready = report.get("ready_to_print", True)
-        score = score_phrase(report)
-        summary = report.get("summary", "")
-
-        if not ready:
-            return PipelineStep(
-                name="validate_mesh",
-                success=False,
-                message=(
-                    f"Mesh failed pre-print validation ({score}): "
-                    f"{summary} Pass skip_validation=True to bypass."
-                ),
-                data={
-                    "printability_score": report.get("printability_score"),
-                    "readiness_score": report.get("readiness_score"),
-                    "ready_to_print": False,
-                    "next_action": report.get("next_action"),
-                    "summary": summary,
-                },
-                duration_seconds=time.time() - step_start,
-            )
-
-        validated_path = report.get("validated_path") or model_path
-        if validated_path and validated_path != model_path:
-            ctx["model_path"] = validated_path
-            logger.info(
-                "reslice_and_print: using validated path %s (repaired=%s)",
-                validated_path,
-                report.get("repaired", False),
-            )
-
-        return PipelineStep(
-            name="validate_mesh",
-            success=True,
-            message=f"Print-ready ({score})",
-            data={
-                "printability_score": report.get("printability_score"),
-                "readiness_score": report.get("readiness_score"),
-                "ready_to_print": True,
-                "repaired": report.get("repaired", False),
-                "summary": summary,
-            },
-            duration_seconds=time.time() - step_start,
+        step, gate = _validate_mesh_step(
+            model_path, printer_id=effective_pid or "", label="reslice_and_print",
         )
+        ctx["validation_report"] = gate.report
+        if not gate.reason:
+            ctx["model_path"] = gate.path
+        return step
 
     def _resolve_profile() -> PipelineStep:
         if ctx["effective_profile"]:
@@ -1794,115 +1664,22 @@ def benchmark(
     # benchmark meshes get the same engineering review.  Skipped for
     # known-good reference models via skip_validation=True.
     if not skip_validation:
-        step_start = time.time()
-        try:
-            from kiln.plugins._validation_pipeline_internals import (
-                _SUPPORTED_FORMATS,
-                score_phrase,
+        step, gate = _validate_mesh_step(
+            model_path, printer_id=effective_pid or "", label="benchmark",
+        )
+        steps.append(step)
+        if gate.reason:
+            return PipelineResult(
+                pipeline="benchmark",
+                success=False,
+                message=(
+                    "Benchmark blocked at validation: "
+                    f"{(gate.report or {}).get('summary') or gate.refusal}"
+                ),
+                steps=steps,
+                total_duration_seconds=time.time() - start,
             )
-            from kiln.plugins.validation_pipeline_tools import (
-                run_full_validation_pipeline,
-            )
-        except ImportError as exc:
-            logger.debug(
-                "Validation pipeline import failed: %s", exc, exc_info=True,
-            )
-            steps.append(
-                PipelineStep(
-                    name="validate_mesh",
-                    success=True,
-                    message="Validation skipped (pipeline unavailable)",
-                    duration_seconds=time.time() - step_start,
-                )
-            )
-        else:
-            ext = os.path.splitext(model_path)[1].lower()
-            if ext not in _SUPPORTED_FORMATS:
-                steps.append(
-                    PipelineStep(
-                        name="validate_mesh",
-                        success=True,
-                        message=f"Validation skipped (unsupported format {ext})",
-                        duration_seconds=time.time() - step_start,
-                    )
-                )
-            else:
-                try:
-                    report = run_full_validation_pipeline(
-                        model_path,
-                        printer_id=effective_pid or "",
-                        material="",
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Validation pipeline raised — proceeding without gate: %s",
-                        exc, exc_info=True,
-                    )
-                    steps.append(
-                        PipelineStep(
-                            name="validate_mesh",
-                            success=True,
-                            message=f"Validation skipped ({exc.__class__.__name__})",
-                            duration_seconds=time.time() - step_start,
-                        )
-                    )
-                else:
-                    ready = report.get("ready_to_print", True)
-                    score = score_phrase(report)
-                    summary = report.get("summary", "")
-                    if not ready:
-                        steps.append(
-                            PipelineStep(
-                                name="validate_mesh",
-                                success=False,
-                                message=(
-                                    f"Mesh failed pre-print validation "
-                                    f"({score}): {summary} "
-                                    f"Pass skip_validation=True to bypass."
-                                ),
-                                data={
-                                    "printability_score": report.get("printability_score"),
-                                    "readiness_score": report.get("readiness_score"),
-                                    "ready_to_print": False,
-                                    "next_action": report.get("next_action"),
-                                    "summary": summary,
-                                },
-                                duration_seconds=time.time() - step_start,
-                            )
-                        )
-                        return PipelineResult(
-                            pipeline="benchmark",
-                            success=False,
-                            message=(
-                                f"Benchmark blocked at validation: {summary}"
-                            ),
-                            steps=steps,
-                            total_duration_seconds=time.time() - start,
-                        )
-                    # Slice the (possibly auto-repaired) mesh.
-                    validated_path = report.get("validated_path") or model_path
-                    if validated_path and validated_path != model_path:
-                        logger.info(
-                            "benchmark: using validated path %s (repaired=%s)",
-                            validated_path,
-                            report.get("repaired", False),
-                        )
-                        model_path = validated_path
-                    steps.append(
-                        PipelineStep(
-                            name="validate_mesh",
-                            success=True,
-                            message=f"Print-ready ({score})",
-                            data={
-                                "printability_score": report.get("printability_score"),
-                                "readiness_score": report.get("readiness_score"),
-                                "ready_to_print": True,
-                                "repaired": report.get("repaired", False),
-                                "summary": summary,
-                            },
-                            duration_seconds=time.time() - step_start,
-                        )
-                    )
+        model_path = gate.path
     else:
         steps.append(
             PipelineStep(

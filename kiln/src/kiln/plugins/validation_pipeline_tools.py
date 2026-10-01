@@ -22,6 +22,8 @@ working.
 from __future__ import annotations
 
 import logging
+import os
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -124,9 +126,6 @@ from kiln.plugins._validation_pipeline_internals import (
     _step_printability as _step_printability,
 )
 from kiln.plugins._validation_pipeline_internals import (
-    score_phrase as score_phrase,
-)
-from kiln.plugins._validation_pipeline_internals import (
     _step_repair as _step_repair,
 )
 from kiln.plugins._validation_pipeline_internals import (
@@ -143,6 +142,9 @@ from kiln.plugins._validation_pipeline_internals import (
 )
 from kiln.plugins._validation_pipeline_internals import (
     _UnitVerdict as _UnitVerdict,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    score_phrase as score_phrase,
 )
 
 _logger = logging.getLogger(__name__)
@@ -237,6 +239,19 @@ def run_full_validation_pipeline(
 
     # Step 2: Mesh analysis
     _step_mesh_analysis(report, input_path, ext)
+
+    # Nothing after this can judge a file with no part in it: each step
+    # would measure nothing, find nothing wrong and pass, which is how an
+    # empty file once came back ready to print at 65/100.
+    geometry = next(c for c in reversed(report.checks) if c.name == "mesh_geometry")
+    if not geometry.passed:
+        report.status = "fail"
+        report.ready_to_print = False
+        report.readiness_score = 0
+        report.validated_path = input_path
+        report.summary = f"Not ready (readiness 0/100). {geometry.details}"
+        report.next_action = None
+        return _with_conversion(report.to_dict(), _step_conversion)
 
     # Step 2b: Auto-scale
     input_path, _auto_scaled = _step_auto_scale(report, input_path, ext)
@@ -395,17 +410,99 @@ def run_full_validation_pipeline(
         else:
             report.next_action = None
 
-    out = report.to_dict()
-    if _step_conversion is not None:
-        # Every score below was measured on triangles, and this says how
-        # closely those triangles follow the CAD they came from.  A
-        # printability verdict taken on a 0.162 mm approximation is a
-        # different claim from the same verdict on a 0.0068 mm one, and
-        # without this the report reads identically either way.
-        from dataclasses import asdict as _asdict
+    return _with_conversion(report.to_dict(), _step_conversion)
 
-        out["conversion"] = _asdict(_step_conversion)
+
+def _with_conversion(out: dict[str, Any], conversion: Any) -> dict[str, Any]:
+    """Attach how a CAD file became the triangles the report measured.
+
+    A printability verdict taken on a 0.162 mm approximation is a different
+    claim from the same verdict on a 0.0068 mm one, and without this the
+    report reads identically either way.
+    """
+    if conversion is not None:
+        out["conversion"] = asdict(conversion)
     return out
+
+
+#: How to print anyway, by refusal code, for a door that takes skip_validation.
+_BYPASS = {
+    "VALIDATION_FAILED": "Pass skip_validation=True to bypass.",
+    "VALIDATION_ERROR": "Pass skip_validation=True to print it without the check.",
+}
+
+
+@dataclass(frozen=True)
+class PrintGate:
+    """The pre-print check's answer for one file, in the form a print door uses.
+
+    When ``reason`` is ``None``, print ``path`` -- the input, or the repaired /
+    rescaled / converted mesh the check produced.  Otherwise the file must not
+    print: ``reason`` says why, ``code`` is the error code, and ``refusal`` adds
+    how to print anyway for a door that takes ``skip_validation``.  ``report``
+    is the check's full report whenever it ran.
+    """
+
+    path: str
+    reason: str | None = None
+    code: str | None = None
+    report: dict[str, Any] | None = None
+
+    @property
+    def how_to_bypass(self) -> str:
+        """How to print anyway, for a door that takes skip_validation."""
+        return _BYPASS.get(self.code or "", "")
+
+    @property
+    def refusal(self) -> str | None:
+        """``reason`` and how to print anyway, for a door with skip_validation."""
+        if self.reason is None:
+            return None
+        return f"{self.reason} {self.how_to_bypass}".rstrip()
+
+    @property
+    def summary(self) -> dict[str, Any] | None:
+        """The short block a door attaches to its own result."""
+        if self.report is None:
+            return None
+        return {
+            key: self.report.get(key)
+            for key in ("printability_score", "readiness_score", "ready_to_print", "repaired", "summary")
+        }
+
+
+def gate_for_print(input_path: str, *, printer_id: str = "", material: str = "") -> PrintGate:
+    """Run the pre-print check the way every print door must.
+
+    A file that is not a mesh (G-code, a sliced project) has nothing to check
+    and passes as it is.  A mesh prints only when the check ran and found it
+    ready: one that failed, or that could not be checked at all, is refused
+    with the reason.  Each door used to carry its own copy of this, and most
+    printed anyway when the check crashed.
+    """
+    if os.path.splitext(input_path)[1].lower() not in _SUPPORTED_FORMATS:
+        return PrintGate(path=input_path)
+    try:
+        report = run_full_validation_pipeline(input_path, printer_id=printer_id, material=material)
+    except Exception as exc:  # noqa: BLE001 -- a check that cannot run is not a pass
+        _logger.warning("Pre-print check could not run on %s", input_path, exc_info=True)
+        cause = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+        return PrintGate(
+            path=input_path,
+            reason=f"Kiln could not check this file before printing ({cause}).",
+            code="VALIDATION_ERROR",
+        )
+    if not report.get("ready_to_print"):
+        # The summary already leads with the score ("Not ready (printability
+        # 45/100). ..."); saying it again in front read as a stutter.
+        summary = report.get("summary") or f"Not ready ({score_phrase(report)})."
+        return PrintGate(
+            path=input_path,
+            reason=f"Mesh failed pre-print validation. {summary}",
+            code="VALIDATION_FAILED",
+            report=report,
+        )
+    return PrintGate(path=report.get("validated_path") or input_path, report=report)
 
 
 class _ValidationPipelinePlugin:

@@ -62,6 +62,17 @@ def _make_job(
     )
 
 
+def _real_model(tmp_path) -> str:
+    """A generated 20 mm cube on disk: the pre-print check reads the file."""
+    import trimesh
+
+    box = trimesh.creation.box(extents=(20, 20, 20))
+    box.apply_translation((0, 0, 10))
+    path = tmp_path / "model.stl"
+    box.export(str(path))
+    return str(path)
+
+
 def _make_result(
     *,
     job_id: str = "gen-abc-123",
@@ -358,7 +369,7 @@ class TestGenerateDownload:
 
 
 class TestGenerateAndPrint:
-    def test_generate_and_print_json_includes_preview_and_support_metadata(self, runner):
+    def test_generate_and_print_json_includes_preview_and_support_metadata(self, runner, tmp_path):
         with patch("kiln.generation.OpenSCADProvider") as MockProvider, \
              patch("kiln.generation.validate_mesh") as mock_validate, \
              patch("kiln.preview.render_multi_view_preview") as mock_preview, \
@@ -374,6 +385,7 @@ class TestGenerateAndPrint:
                 progress=100,
             )
             provider.download_result.return_value = _make_result(
+                local_path=_real_model(tmp_path),
                 provider="openscad",
                 prompt="cube([10,10,10]);",
             )
@@ -421,7 +433,7 @@ class TestGenerateAndPrint:
         assert data["data"]["support_style"] == "minimal"
 
     @pytest.mark.parametrize("person_present", [False, True])
-    def test_auto_print_asks_a_person_and_refuses_a_bare_shell(self, runner, monkeypatch, person_present):
+    def test_auto_print_asks_a_person_and_refuses_a_bare_shell(self, runner, monkeypatch, person_present, tmp_path):
         """--auto-print is not consent: the object did not exist when the
         flag was typed.  A person at the terminal is shown the generated
         model and asked; a shell with nobody at it is refused, so an agent
@@ -445,6 +457,7 @@ class TestGenerateAndPrint:
                 status=GenerationStatus.SUCCEEDED, progress=100,
             )
             provider.download_result.return_value = _make_result(
+                local_path=_real_model(tmp_path),
                 provider="openscad", prompt="cube([10,10,10]);",
             )
             mock_validate.return_value = _make_validation(valid=True)

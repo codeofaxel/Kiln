@@ -904,10 +904,12 @@ def _step_mesh_analysis(
             if w and d and h:
                 details += f", {w:.1f} x {d:.1f} x {h:.1f} mm"
 
+        problem = mesh_info.get("unprintable_geometry")
         report.checks.append(_CheckResult(
             name="mesh_geometry",
-            passed=tri_count > 0,
-            details=details,
+            passed=problem is None,
+            details=problem or details,
+            severity="error" if problem else "info",
         ))
     except ImportError:
         _logger.debug("kiln.generation.validation not available, using inline STL parser")
@@ -927,10 +929,12 @@ def _step_mesh_analysis(
                 d_mm = fallback.get("dimensions_mm")
                 if d_mm:
                     details += f", {d_mm['x']:.1f} x {d_mm['y']:.1f} x {d_mm['z']:.1f} mm"
+                readable = tri_count > 0
                 report.checks.append(_CheckResult(
                     name="mesh_geometry",
-                    passed=tri_count > 0,
-                    details=details,
+                    passed=readable,
+                    details=details if readable else "Kiln could not read any geometry from this file.",
+                    severity="info" if readable else "error",
                 ))
             else:
                 report.checks.append(_CheckResult(
@@ -942,17 +946,20 @@ def _step_mesh_analysis(
         else:
             report.checks.append(_CheckResult(
                 name="mesh_geometry",
-                passed=True,
-                details="Skipped — analysis module unavailable for non-STL format",
-                severity="warning",
+                passed=False,
+                details=(
+                    "Kiln could not check this file's geometry: the mesh "
+                    "analysis is unavailable in this install."
+                ),
+                severity="error",
             ))
     except Exception as exc:
         _logger.debug("Mesh analysis failed: %s", exc, exc_info=True)
         report.checks.append(_CheckResult(
             name="mesh_geometry",
-            passed=True,
-            details=f"Skipped — analysis error: {exc}",
-            severity="warning",
+            passed=False,
+            details=f"Kiln could not check this file's geometry: {exc}",
+            severity="error",
         ))
     return mesh_info
 
@@ -1231,17 +1238,20 @@ def _step_printability(
     except ImportError:
         report.checks.append(_CheckResult(
             name="printability",
-            passed=True,
-            details="Skipped — printability module unavailable",
-            severity="warning",
+            passed=False,
+            details=(
+                "Kiln could not run the printability analysis: it is "
+                "unavailable in this install."
+            ),
+            severity="error",
         ))
     except Exception as exc:
         _logger.debug("Printability analysis failed: %s", exc, exc_info=True)
         report.checks.append(_CheckResult(
             name="printability",
-            passed=True,
-            details=f"Skipped — analysis error: {exc}",
-            severity="warning",
+            passed=False,
+            details=f"Kiln could not run the printability analysis: {exc}",
+            severity="error",
         ))
 
 

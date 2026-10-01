@@ -24,6 +24,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+import trimesh
 import yaml
 from click.testing import CliRunner
 
@@ -276,7 +277,10 @@ class TestFullPipeline:
 
         # Create a fake STL file (slice_file will be mocked)
         stl = tmp_path / "model.stl"
-        stl.write_text("solid model\nendsolid model\n")
+        # A real part: --print-after runs the pre-print check on it.
+        _box = trimesh.creation.box(extents=(20, 20, 20))
+        _box.apply_translation((0, 0, 10))
+        _box.export(str(stl))
 
         mock_slice_result = MagicMock()
         mock_slice_result.message = "Sliced model.stl → model.gcode"

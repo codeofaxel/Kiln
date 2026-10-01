@@ -18,6 +18,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+from kiln import _vec
 from kiln.generation.base import MeshAnalysis, MeshValidationResult
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,12 @@ _MAX_TRIANGLES = 10_000_000
 _WARN_TRIANGLES = 2_000_000
 _MAX_DIMENSION_MM = 1000.0
 _MIN_DIMENSION_MM = 0.1
+#: A mesh whose points all lie within this of one plane is flat by
+#: construction rather than thin: a micron is two orders under any printer's
+#: resolution, so this fires on a sheet with no thickness and never on a part.
+_FLAT_EXTENT_MM = 1e-3
+#: A triangle with less area than this is a line or a point.
+_DEGENERATE_AREA_MM2 = 1e-10
 _STL_HEADER_SIZE = 80
 _STL_COUNT_SIZE = 4
 _STL_TRIANGLE_SIZE = 50  # 12 floats (normal + 3 vertices) + 2 byte attr
@@ -178,6 +185,10 @@ def validate_mesh(file_path: str) -> MeshValidationResult:
         "y": bbox["y_max"] - bbox["y_min"],
         "z": bbox["z_max"] - bbox["z_min"],
     }
+
+    problem = unprintable_geometry_reason(triangles, vertices)
+    if problem:
+        errors.append(problem)
 
     for axis, size_mm in dims.items():
         if size_mm > _MAX_DIMENSION_MM:
@@ -428,6 +439,57 @@ def _parse_obj(
 # ---------------------------------------------------------------------------
 # Geometry analysis
 # ---------------------------------------------------------------------------
+
+
+def unprintable_geometry_reason(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    vertices: list[tuple[float, ...]],
+    *,
+    parse_errors: list[str] | None = None,
+) -> str | None:
+    """Why this geometry cannot print as a part, or ``None`` when it can.
+
+    Every print verdict asks this before it judges anything else.  With
+    nothing readable, only degenerate triangles, or every point in one
+    plane there is nothing for a printer to build -- and each check after
+    this one measures nothing, finds nothing wrong and comes back clean,
+    which is how an empty file used to read as ready to print.
+
+    Flat means every point lies in one plane at any angle -- a tilted
+    sheet is as flat as one lying on the bed.  This does not prove the mesh
+    is a closed solid; the watertight check and repair judge that.
+
+    :param parse_errors: What the parser reported, folded into the reason.
+    """
+    if parse_errors or not triangles:
+        detail = f": {'; '.join(parse_errors)}" if parse_errors else ""
+        return f"Kiln could not read any geometry from this file{detail}."
+    if not any(
+        _vec.length(_vec.cross(_vec.sub(b, a), _vec.sub(c, a))) / 2.0 >= _DEGENERATE_AREA_MM2
+        for a, b, c in triangles
+    ):
+        return (
+            "Every triangle in this file is degenerate (a line or a point), "
+            "so it holds no surface to print."
+        )
+    if _thickness_mm(vertices) < _FLAT_EXTENT_MM:
+        return "This file is flat: all of it lies in one plane, so there is no solid to print."
+    return None
+
+
+def _thickness_mm(vertices: list[tuple[float, ...]]) -> float:
+    """How far the points spread off their best-fit plane, in mm.
+
+    The spread along the direction of least variance: zero for points that
+    share a plane, whatever its tilt, where an axis-aligned box would only
+    catch a plane lying square to an axis.
+    """
+    import numpy as np
+
+    points = np.asarray(vertices, dtype=float)
+    centered = points - points.mean(axis=0)
+    _, axes = np.linalg.eigh(centered.T @ centered)
+    return float(np.ptp(centered @ axes[:, 0]))
 
 
 def _bounding_box(vertices: list[tuple[float, ...]]) -> dict[str, float]:
@@ -1188,13 +1250,21 @@ def analyze_mesh(file_path: str) -> MeshAnalysis:
     path = Path(file_path)
 
     if not path.is_file():
-        return MeshAnalysis(printability_issues=["File not found"])
+        return MeshAnalysis(
+            printability_issues=["File not found"],
+            unprintable_geometry=f"File not found: {file_path}",
+        )
 
     errors: list[str] = []
     triangles, vertices = _parse_mesh_file(path, errors)
 
     if errors or not triangles:
-        return MeshAnalysis(printability_issues=errors or ["No geometry found"])
+        return MeshAnalysis(
+            printability_issues=errors or ["No geometry found"],
+            unprintable_geometry=unprintable_geometry_reason(
+                triangles, vertices, parse_errors=errors,
+            ),
+        )
 
     bbox = _bounding_box(vertices)
     dims = {
@@ -1225,7 +1295,7 @@ def analyze_mesh(file_path: str) -> MeshAnalysis:
         area_2 = math.sqrt(cross[0] ** 2 + cross[1] ** 2 + cross[2] ** 2)
         tri_area = area_2 / 2.0
 
-        if tri_area < 1e-10:
+        if tri_area < _DEGENERATE_AREA_MM2:
             degenerate_count += 1
             continue
 
@@ -1328,6 +1398,7 @@ def analyze_mesh(file_path: str) -> MeshAnalysis:
         max_overhang_angle_deg=round(max_overhang, 1),
         mesh_check_score=score,
         printability_issues=issues,
+        unprintable_geometry=unprintable_geometry_reason(triangles, vertices),
     )
 
 
@@ -3086,8 +3157,8 @@ def design_scorecard(
     from kiln.design_intelligence import load_pro_overlay_or_empty
 
     analysis = analyze_mesh(file_path)
-    if analysis.printability_issues and not analysis.triangle_count:
-        raise ValueError(f"Cannot analyze mesh: {analysis.printability_issues}")
+    if analysis.unprintable_geometry:
+        raise ValueError(f"Cannot analyze mesh: {analysis.unprintable_geometry}")
 
     overlay = load_pro_overlay_or_empty("scorecard_weights")
 
@@ -3811,13 +3882,18 @@ def can_print_now(
     actions_taken: list[str] = []
     working_path = file_path
 
-    # Step 1: Basic parse check
+    # Step 1: is there a part here at all?  No fix makes an empty, flat or
+    # all-degenerate file printable, and every check below would measure
+    # nothing and find nothing wrong.
     analysis = analyze_mesh(file_path)
-    if analysis.printability_issues and not analysis.triangle_count:
+    if analysis.unprintable_geometry:
         return {
             "can_print": False,
             "verdict": "unprintable",
-            "issues": [{"type": "parse_failure", "detail": str(analysis.printability_issues)}],
+            "issues": [{
+                "type": "parse_failure" if not analysis.has_geometry() else "no_printable_solid",
+                "detail": analysis.unprintable_geometry,
+            }],
             "actions_taken": [],
         }
 

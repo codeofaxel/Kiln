@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import click
 import pytest
+import trimesh
 import yaml
 from click.testing import CliRunner
 
@@ -347,7 +348,10 @@ class TestSlice:
 
     def test_slice_print_after(self, runner, mock_adapter, config_file, tmp_path):
         stl = tmp_path / "model.stl"
-        stl.write_text("solid\nendsolid\n")
+        # A real part: --print-after runs the pre-print check on it.
+        _box = trimesh.creation.box(extents=(20, 20, 20))
+        _box.apply_translation((0, 0, 10))
+        _box.export(str(stl))
         gcode_out = tmp_path / "model.gcode"
         gcode_out.write_text("G28\n")
         mock_result = MagicMock()

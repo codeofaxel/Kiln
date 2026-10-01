@@ -261,69 +261,29 @@ class _SmartPrintToolsPlugin:
             # ------------------------------------------------------------------
             validation_summary: dict | None = None
             if not skip_validation:
-                try:
-                    from kiln.plugins._validation_pipeline_internals import (
-                        _SUPPORTED_FORMATS,
-                        score_phrase,
-                    )
-                    from kiln.plugins.validation_pipeline_tools import (
-                        run_full_validation_pipeline,
-                    )
+                from kiln.plugins.validation_pipeline_tools import gate_for_print
 
-                    _ext = os.path.splitext(model_path)[1].lower()
-                    if _ext in _SUPPORTED_FORMATS:
-                        val_report = run_full_validation_pipeline(
-                            model_path,
-                            printer_id=effective_pid or "",
-                            material=effective_material or "",
-                        )
-                        if not val_report.get("ready_to_print", True):
-                            score = score_phrase(val_report)
-                            summary = val_report.get(
-                                "summary", "Validation failed",
-                            )
-                            err_resp = _srv._error_dict(
-                                f"Retry blocked — mesh failed pre-print "
-                                f"validation ({score}): {summary} "
-                                f"Slicer-override fixes won't repair the "
-                                f"underlying mesh.  Pass skip_validation=True "
-                                f"to bypass.",
-                                code="VALIDATION_FAILED",
-                            )
-                            err_resp["validation"] = val_report
-                            return err_resp
-
-                        validated_path = (
-                            val_report.get("validated_path") or model_path
-                        )
-                        if validated_path and validated_path != model_path:
-                            _logger.info(
-                                "retry_print_with_fix: using validated path "
-                                "%s (repaired=%s)",
-                                validated_path,
-                                val_report.get("repaired", False),
-                            )
-                            model_path = validated_path
-
-                        validation_summary = {
-                            "printability_score": val_report.get("printability_score"),
-                            "readiness_score": val_report.get("readiness_score"),
-                            "ready_to_print": val_report.get("ready_to_print"),
-                            "repaired": val_report.get("repaired"),
-                            "summary": val_report.get("summary"),
-                        }
-                except ImportError:
-                    _logger.debug(
-                        "Validation pipeline unavailable, proceeding without",
-                        exc_info=True,
+                gate = gate_for_print(
+                    model_path,
+                    printer_id=effective_pid or "",
+                    material=effective_material or "",
+                )
+                if gate.reason:
+                    mesh_note = (
+                        " Slicer-override fixes won't repair the underlying mesh."
+                        if gate.code == "VALIDATION_FAILED" else ""
                     )
-                except Exception:
-                    # Validator infrastructure failure must not block a
-                    # legitimate retry — log and proceed.
-                    _logger.warning(
-                        "Validation pipeline raised — proceeding without gate",
-                        exc_info=True,
+                    err_resp = _srv._error_dict(
+                        f"Retry blocked — {gate.reason}{mesh_note} {gate.how_to_bypass}",
+                        code=gate.code,
                     )
+                    if gate.report is not None:
+                        err_resp["validation"] = gate.report
+                    return err_resp
+                if gate.path != model_path:
+                    _logger.info("retry_print_with_fix: using validated path %s", gate.path)
+                    model_path = gate.path
+                validation_summary = gate.summary
 
             # ------------------------------------------------------------------
             # 6. Slice, upload, print — mirroring slice_and_print's flow.
