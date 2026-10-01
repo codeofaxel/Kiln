@@ -57,6 +57,11 @@ _last_miss: dict[str, Any] = {}
 #: The hosted door that holds Kiln's record of a printer's nozzle, asked for
 #: the pre-flight's record comparison when kiln-pro is not installed here.
 RECORD_TOOL = "get_nozzle_state"
+#: How long a record lookup is remembered, answered or not.  A design check
+#: is asked many times in a row; the record changes when a nozzle does, and
+#: the tools that write it clear this (:func:`forget_recorded_nozzle`).
+RECORD_MEMO_S: float = 120.0
+_record_memo: dict[str, tuple[float, dict[str, Any]]] = {}
 #: Why the last record comparison for each machine had no answer, the same way.
 _last_record_miss: dict[str, Any] = {}
 
@@ -219,6 +224,61 @@ def nozzle_unchecked(printer_id: str, *, at: str = "preflight") -> dict[str, Any
             safe_remedy="Print as usual", then="run the pre-flight again",
         )
     return {"word": "unchecked", "line": line, **fields(miss)}
+
+
+def consult_recorded_nozzle(printer_id: str) -> dict[str, Any]:
+    """The nozzle size on record for *printer_id*, when somebody recorded one.
+
+    ``{"diameter_mm": float | None, "answered": bool}``.  ``diameter_mm`` is
+    set only for a record a person or the machine stated; a catalogue
+    default is nobody's record and comes back ``None``.  ``answered`` is
+    ``False`` when the record could not be asked at all (offline, signed
+    out, no answer), so a caller can tell "no record" from "could not ask".
+    From kiln-pro locally when it is installed, else from the hosted door
+    with a short timeout; remembered for :data:`RECORD_MEMO_S`.
+    """
+    pid = (printer_id or "").strip() if isinstance(printer_id, str) else ""
+    if not pid:
+        return {"diameter_mm": None, "answered": True}
+    now = time.monotonic()
+    memo = _record_memo.get(pid)
+    if memo is not None and now - memo[0] < RECORD_MEMO_S:
+        return memo[1]
+    if available():
+        summary = consult_nozzle_summary(pid)
+        found = summary is not None and summary.get("trusted_for_verdicts")
+        answer = {"diameter_mm": summary.get("diameter_mm") if found else None, "answered": True}
+    else:
+        answer = _served_recorded_nozzle(pid)
+    _record_memo[pid] = (now, answer)
+    return answer
+
+
+def _served_recorded_nozzle(printer_id: str) -> dict[str, Any]:
+    global _service_down_until, _service_down_miss
+    from kiln.served_answer import classify_transport_error
+
+    unanswered = {"diameter_mm": None, "answered": False}
+    if time.monotonic() < _service_down_until:
+        return unanswered
+    try:
+        from kiln.server import _pro_api_call
+
+        answer = _pro_api_call(RECORD_TOOL, _timeout=_CONSULT_TIMEOUT_S, printer_id=printer_id)
+    except Exception as exc:  # noqa: BLE001 -- the network is a degrade, never a check
+        logger.debug("nozzle record not served", exc_info=True)
+        _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
+        _service_down_miss = classify_transport_error(exc)
+        return unanswered
+    if not (isinstance(answer, dict) and answer.get("success")):
+        return unanswered
+    stated = answer.get("found") and answer.get("trusted_for_verdicts")
+    return {"diameter_mm": answer.get("diameter_mm") if stated else None, "answered": True}
+
+
+def forget_recorded_nozzle() -> None:
+    """Drop every remembered record lookup: the record was just written."""
+    _record_memo.clear()
 
 
 def consult_sliced_file(printer_id: str, file_nozzle_mm: float) -> dict[str, Any] | None:
@@ -451,12 +511,15 @@ def record_print_odometer(
 
 
 __all__ = [
+    "RECORD_MEMO_S",
     "RECORD_TOOL",
     "SERVICE_BACKOFF_S",
     "WIRE_TOOL",
     "available",
     "consult_capacity",
+    "consult_recorded_nozzle",
     "consult_sliced_file",
+    "forget_recorded_nozzle",
     "nozzle_unchecked",
     "sliced_file_unchecked",
     "consult_abrasive_escalation",

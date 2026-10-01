@@ -40,7 +40,7 @@ class _PrintabilityToolsPlugin:
         @mcp.tool(annotations=read_only("Analyze printability"))
         def analyze_printability(
             file_path: str,
-            nozzle_diameter: float = 0.4,
+            nozzle_diameter: float | None = None,
             layer_height: float = 0.2,
             max_overhang_angle: float | None = None,
             build_volume_x: float | None = None,
@@ -74,7 +74,11 @@ class _PrintabilityToolsPlugin:
 
             Args:
                 file_path: Path to an STL or OBJ mesh file.
-                nozzle_diameter: Printer nozzle diameter in mm (default 0.4).
+                nozzle_diameter: Printer nozzle diameter in mm.  Leave unset
+                    and name the printer: Kiln then checks for the nozzle on
+                    record for it, else the printer's own setting, else the
+                    model's stock size, and ``report.nozzle`` says which.
+                    With neither, the check assumes 0.4 and says so.
                 layer_height: Print layer height in mm (default 0.2).
                 max_overhang_angle: Maximum overhang angle in degrees before
                     supports are needed.  Leave unset for the material's own
@@ -105,12 +109,15 @@ class _PrintabilityToolsPlugin:
                     material=material,
                     printer_id=printer_id or None,
                 )
+                # Which nozzle the check ran for, said beside the score.
+                nozzle_note = (getattr(report, "nozzle", None) or {}).get("note")
                 resp: dict[str, Any] = {
                     "success": True,
                     "report": report.to_dict(),
                     "message": (
                         f"Printability score: {report.score}/100 (grade {report.grade}).  "
                         f"{'Printable' if report.printable else 'Not recommended for printing'}."
+                        + (f"  {nozzle_note}" if nozzle_note else "")
                     ),
                 }
 

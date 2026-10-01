@@ -209,7 +209,7 @@ class _DesignToolsPlugin:
             build_volume_x: float | None = None,
             build_volume_y: float | None = None,
             build_volume_z: float | None = None,
-            nozzle_diameter: float = 0.4,
+            nozzle_diameter: float | None = None,
             layer_height: float = 0.2,
             max_overhang_angle: float = 45.0,
         ) -> dict:

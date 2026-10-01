@@ -17911,9 +17911,16 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
 
                 # Likewise a blade-status request carries this install's
                 # recent fault codes: the hosted side has no event log.
-                return _pro_api_call(
+                answer = _pro_api_call(
                     _name, **with_recent_faults(_name, with_local_reading(_name, kwargs))
                 )
+                if _name in ("set_nozzle_state", "record_nozzle_replacement"):
+                    # The record just changed: a check must not answer from
+                    # the size it remembered a moment ago.
+                    from kiln._pro_nozzle_bridge import forget_recorded_nozzle
+
+                    forget_recorded_nozzle()
+                return answer
             return _stub
 
         stub = _make_stub(name)

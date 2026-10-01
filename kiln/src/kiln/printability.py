@@ -465,6 +465,10 @@ class PrintabilityReport:
     # :func:`recommend_adhesion`).  Every brim sentence in the report comes
     # from here; ``None`` only on reports built directly by a client.
     adhesion: AdhesionRecommendation | None = None
+    # The nozzle size every check above ran with, and where Kiln got it
+    # (:mod:`kiln.assumed_nozzle`).  ``None`` only on reports built directly
+    # by a client.
+    nozzle: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -4171,7 +4175,7 @@ def _material_wall_floor(
 def analyze_printability(
     file_path: str,
     *,
-    nozzle_diameter: float = 0.4,
+    nozzle_diameter: float | None = None,
     layer_height: float = 0.2,
     max_overhang_angle: float | None = None,
     build_volume: tuple[float, float, float] | None = None,
@@ -4185,7 +4189,11 @@ def analyze_printability(
 
     :param file_path: Path to a mesh (STL, OBJ, GLB, 3MF) or a STEP file,
         which is analysed as Kiln's mesh of it.
-    :param nozzle_diameter: Printer nozzle diameter in mm.
+    :param nozzle_diameter: Printer nozzle diameter in mm.  Left unsaid,
+        the size is the one :func:`kiln.assumed_nozzle.assumed_nozzle`
+        picks for *printer_id* -- the nozzle on record, else the printer's
+        own setting, else the model's stock size, else 0.4 -- and
+        ``report.nozzle`` says which.
     :param layer_height: Print layer height in mm.
     :param max_overhang_angle: Max overhang angle (degrees) before
         supports are needed.
@@ -4235,7 +4243,12 @@ def analyze_printability(
         Raised, never swallowed: a CAD file nobody could read must not come
         back looking analysed.
     """
+    from kiln.assumed_nozzle import assumed_nozzle
     from kiln.design_intelligence import load_pro_overlay_or_empty
+
+    # One size for every check below, and the report says where it came from.
+    nozzle = assumed_nozzle(printer_id, stated=nozzle_diameter)
+    nozzle_diameter = nozzle.diameter_mm
 
     # A CAD file is analysed as Kiln's mesh of it, through the shared door
     # (cached by content; anything already a mesh passes straight through).
@@ -4737,6 +4750,7 @@ def analyze_printability(
         genus=mesh_genus,
         placement=placement,
         adhesion=adhesion,
+        nozzle=nozzle.to_dict(),
     )
 
     # Optional kiln-pro enrichment: when the kiln-pro package is
