@@ -795,7 +795,9 @@ def _apply_plate_placement(
       means Kiln never put a part on this plate -- not that one might be
       there -- and a manual print of the person's own is theirs to clear;
     * plate ``occupied`` and no *placement*: refuse
-      (``PLACEMENT_PLATE_OCCUPIED``) with what is there and, when a verdict
+      (``PLACEMENT_PLATE_OCCUPIED``) with what is there, a look at the
+      plate (:func:`kiln.plate_state.offer_look` -- how old the record is
+      and, where the machine has a camera, a frame) and, when a verdict
       is obtainable, the spots that would work;
     * a spot ``[x, y]``, ``"keep"`` or a named region: ask the bridge.  A
       region is resolved here, never in the engine -- the spots of an
@@ -853,12 +855,20 @@ def _apply_plate_placement(
         # A region is offered only where one can be resolved: without the
         # places, naming one could only be refused.
         ways = "placement=[x, y] in mm" if _places_withheld(probe) else 'placement=[x, y] in mm, or a region such as "front-left"'
+        # The caller named no spot, so nothing says they know a part is
+        # there: this is the refusal a stale record produces.  It carries
+        # a look at the plate rather than leaving the record's word as the
+        # last one.
+        offer = plate_state.offer_look(adapter, state)
         message = (
             f"{holds} Slicing now would put the new part on top of it. Name a spot beside it "
             f"({ways}), or clear the plate and say so."
             + (_spots_clause(probe) if isinstance(probe, dict) else "")
+            + f" {offer.sentence}"
         )
-        return input_path, _placement_refusal(message, "PLACEMENT_PLATE_OCCUPIED", state=state, bed=bed, verdict=probe), occupied_info
+        refusal = _placement_refusal(message, "PLACEMENT_PLATE_OCCUPIED", state=state, bed=bed, verdict=probe)
+        refusal.update(offer.fields())
+        return input_path, refusal, occupied_info
 
     if kind == "region":
         if bed is None:
@@ -1063,7 +1073,12 @@ def _attach_placement(response: dict, info: dict | None) -> None:
         response["start"] = {"allowed": False, "mode": "quiet_start", "why": _refusal_sentences(start)}
         return
     if state is not None:
-        response["start"] = {"allowed": False, "why": state.start_refusal_sentence()}
+        # A response that IS the start refusal says why in its own words,
+        # once: the block beside it quotes that sentence rather than
+        # composing a second one that has to match.
+        refused = response.get("error") if response.get("success") is False else None
+        own = refused.get("message") if isinstance(refused, dict) else None
+        response["start"] = {"allowed": False, "why": own or state.start_refusal_sentence()}
 
 
 def _placed_slice(

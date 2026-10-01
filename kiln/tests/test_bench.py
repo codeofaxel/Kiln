@@ -57,7 +57,11 @@ class _Adapter:
     def reported_firmware_version(self):
         return self._firmware
 
+    @property
     def snapshot_source(self):
+        # A property, as on a real adapter.  As a method this stand-in kept
+        # the bench's pictures green while every real printer read as having
+        # no camera (2026-10-01).
         return "printer" if self._camera else None
 
     def get_snapshot(self):

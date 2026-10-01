@@ -226,7 +226,9 @@ def park_head(
         plate_clear: A PERSON's statement that the plate is empty.  Lets a
             park proceed over a plate the record says holds a part, and lets
             the full home (Z included) stand in for the park on a machine
-            whose Z home touches the plate.
+            whose Z home touches the plate.  Written to the plate record,
+            as on ``home_axes``: the plate reads ``clear`` until the next
+            print starts.  Never set it on a person's behalf.
         printer_name: Which printer.  Omit for the default one.
     """
     args = {"wait_seconds": wait_seconds, "step": step, "plan_only": plan_only,
@@ -289,9 +291,9 @@ def plate_status(printer_name: str | None = None) -> dict[str, Any]:
     Kiln records the plate at the moments it can be sure of: a print Kiln
     started puts a part there (``occupied``, with the file and, where Kiln
     could read it, the part's height); a print seen ending leaves it there;
-    a PERSON says it is empty (``plate_clear=true`` on ``home_axes``, or
-    ``kiln plate clear`` at the command line); and a LOOK through the
-    machine's camera settles it either way (``look_at_plate``).  Anything
+    a PERSON says it is empty (``plate_clear=true`` on ``home_axes`` or
+    ``park_head``, or ``kiln plate clear`` at the command line); and a LOOK
+    through the machine's camera settles it either way (``look_at_plate``).  Anything
     else -- no record, a torn record, a print started at the printer's own
     screen -- reads as ``unknown``, and the answer then says whether a
     camera could settle it.
@@ -304,6 +306,11 @@ def plate_status(printer_name: str | None = None) -> dict[str, Any]:
     onto the plate (the A1 mini) asks on every call regardless -- the
     record cannot see a print started from the printer's own screen, and
     that press is the one motion a stale record must never answer for.
+
+    An ``occupied`` record says a part WAS there.  ``recorded_ago`` says
+    how long ago, and every refusal that rests on it carries a look at the
+    plate where the machine has a camera -- so look (``look_at_plate``)
+    rather than take an old record's word that the part is still there.
 
     There is deliberately no tool that marks the plate clear from nothing:
     that is a statement someone has to make, at the machine, at the command
@@ -332,10 +339,17 @@ def look_at_plate(
     """Look at the build plate through the machine's camera, and record what is there.
 
     Two steps, one tool.  Called WITHOUT ``seen`` it fetches a frame and
-    hands it back for you to look at: ``image_b64`` is the picture, and
-    nothing is recorded.  Look at it, then call again with ``seen="clear"``
-    (nothing on the plate) or ``seen="occupied"`` (something is), and that
-    answer becomes the plate record with you named as the one who looked.
+    hands it back for you to look at: ``snapshot_path`` is the picture on
+    disk (``image_b64`` is the same picture inline), and nothing is
+    recorded.  Look at it, then call again with ``seen="clear"`` (nothing on
+    the plate) or ``seen="occupied"`` (something is), and that answer
+    becomes the plate record with you named as the one who looked.
+
+    A refusal over a recorded part (a slice with no spot named, a print
+    start, a park or home that would cross it) already carries that frame
+    as ``snapshot_path`` and says how old the record is: look at it and
+    come straight here with ``seen``.  A record days old most likely
+    describes a part someone took off -- look before you ask a person.
 
     Kiln ships no vision model and judges nothing here.  The eyes are
     yours; this tool is the camera and the pen.  Say what you actually see:
@@ -380,6 +394,7 @@ def look_at_plate(
                 "success": True,
                 "printer_name": target_name,
                 "look": found.to_dict(),
+                "snapshot_path": plate_state.save_frame(found),
                 "image_b64": found.image_b64,
                 "media_type": found.media_type,
                 "plate": plate_state.read(adapter).to_dict(),
@@ -396,7 +411,7 @@ def look_at_plate(
             )
         # An agent is calling this tool, so an agent is what did the looking.
         # A person's own statement has its own doors (`kiln plate clear`,
-        # plate_clear=true on home_axes) and is recorded as theirs.
+        # plate_clear=true on home_axes or park_head) and is recorded as theirs.
         status = plate_state.mark_from_camera(adapter, seen=seen, judged_by="agent")
         state = plate_state.read(adapter)
         if status is None or state.status != seen:

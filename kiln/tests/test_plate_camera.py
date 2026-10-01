@@ -16,8 +16,10 @@ source:
   the parts already named; "clear" is written as a camera-sourced record;
 * ``look_at_plate`` is the two-step door -- a frame, then the answer -- and
   an agent's answer is recorded as an agent's;
-* a refusal about an unknown plate offers the camera when there is one and
-  does not when there is not.
+* a refusal about a recorded part LOOKS instead of assuming: it carries how
+  old the record is and, where there is a camera, a frame of the plate and
+  the one call that records what the frame shows -- and with no camera it
+  says so and names the person's own doors.
 
 Nothing here runs a vision model: Kiln ships none, and the point of the
 design is that the looking is done by eyes and the record says whose.
@@ -34,6 +36,8 @@ import pytest
 
 from kiln.plate_state import (
     CAMERA_SOURCE_PREFIX,
+    LIKELY_GONE_AFTER_HOURS,
+    START_NOT_YET_CODE,
     PlateJob,
     camera_could_settle,
     camera_of,
@@ -41,7 +45,9 @@ from kiln.plate_state import (
     mark_clear,
     mark_from_camera,
     mark_occupied,
+    offer_look,
     read,
+    start_refusal,
 )
 
 
@@ -69,9 +75,12 @@ def _machine(name="cam", *, camera="printer", frame=b"", raises=False):
             raise RuntimeError("camera timed out")
         return frame
 
+    # ``snapshot_source`` is a value, as it is on a real adapter (a property
+    # there) -- a stand-in that hands over a function is how a look that
+    # worked on no real printer stayed green.
     return SimpleNamespace(
         name=name, serial=f"01P00A00000{name}", _printer_model="bambu_a1",
-        snapshot_source=lambda: camera, get_snapshot=get_snapshot,
+        snapshot_source=camera, get_snapshot=get_snapshot,
     )
 
 
@@ -93,6 +102,25 @@ class TestWhetherKilnCanLook:
     def test_a_machine_with_no_camera_says_so_rather_than_raising(self):
         assert camera_of(_machine(camera=None)) is None
         assert camera_of(SimpleNamespace()) is None
+        assert camera_of(SimpleNamespace(snapshot_source=lambda: "printer")) is None, "not how an adapter states it"
+
+    @pytest.mark.parametrize("backend", ["bambu", "octoprint", "moonraker"])
+    def test_a_real_adapter_with_a_camera_reads_as_having_one(self, backend, monkeypatch):
+        """The adapter class itself, not a stand-in: every one of these has
+        ``can_snapshot`` and read as camera-less from 2026-09-22 to
+        2026-10-01."""
+        from kiln.printers.base import ExternalCamera
+
+        from .test_filament_handling import _build
+
+        adapter = _build(backend)
+        assert adapter.capabilities.can_snapshot
+        assert camera_of(adapter) == "printer"
+        monkeypatch.setattr(adapter, "get_snapshot", lambda: _png())
+        found = look(adapter)
+        assert found.available and found.camera == "printer"
+        adapter._external_camera = ExternalCamera(snapshot_url="http://cam.local/snap.jpg", stream_url=None)
+        assert camera_of(adapter) == "user_supplied"
 
     def test_the_refusal_clause_offers_the_camera_only_when_there_is_one(self):
         assert camera_could_settle(_machine(camera=None)) is None
@@ -100,6 +128,10 @@ class TestWhetherKilnCanLook:
         assert own is not None and "this printer's own camera" in own
         mine = camera_could_settle(_machine(camera="user_supplied"))
         assert mine is not None and "the camera you registered" in mine
+
+    def test_a_camera_that_answers_with_something_that_is_not_a_picture_is_no_look(self):
+        found = look(_machine(frame="not bytes"))
+        assert found.available is False and "no image" in found.why
 
 
 class TestTheLook:
@@ -208,6 +240,109 @@ class TestTheAsymmetry:
 
 
 # ---------------------------------------------------------------------------
+# 2b. A refusal looks instead of assuming
+# ---------------------------------------------------------------------------
+
+
+def _recorded(machine, monkeypatch, *, hours_ago: float, file: str = "cube.gcode.3mf") -> None:
+    """A part recorded *hours_ago*, the way a print seen ending records it."""
+    from datetime import datetime, timedelta
+
+    from kiln import plate_state
+
+    then = (datetime.now().astimezone() - timedelta(hours=hours_ago)).isoformat(timespec="seconds")
+    with monkeypatch.context() as patched:
+        patched.setattr(plate_state, "_now_iso", lambda: then)
+        mark_occupied(machine, PlateJob(file=file, max_z_mm=20.0), source="print_ended")
+
+
+class TestARefusalLooksInsteadOfAssuming:
+    """2026-10-01, a live demo: the record said a cube was on the plate, from
+    a print days earlier.  The plate was empty and the printer has a camera.
+    The refusal said "clear the plate and say so", named no camera and no
+    tool, and the agent took the record's word for it.
+    """
+
+    def test_the_demo_a_stale_record_a_camera_and_an_empty_plate(self, monkeypatch):
+        machine = _machine(frame=_png())
+        _recorded(machine, monkeypatch, hours_ago=3 * 24 + 2)
+        block = start_refusal(machine, file_name="base.gcode.3mf")
+        assert block is not None and block["error"]["code"] == START_NOT_YET_CODE
+        message = block["error"]["message"]
+        assert message.startswith("The last print, cube, is still on the plate (since ")
+        assert "3 days ago" in message and "most likely been taken off" in message
+        # The frame is on disk, named in the sentence, with the call that records it.
+        path = block["snapshot_path"]
+        assert path and path in message
+        with open(path, "rb") as fh:
+            assert fh.read() == _png()
+        assert 'look_at_plate with seen="clear"' in message
+        assert block["look"]["settle_with"] == "look_at_plate" and block["look"]["likely_gone"] is True
+        assert block["look"]["recorded_ago"] == "3 days ago" and block["look"]["camera"] == "printer"
+        assert block["plate"]["recorded_ago"] == "3 days ago"
+        assert "image_b64" not in str(block), "the frame rides as a path, never as base64 in an answer"
+        # Offering a look writes nothing: the record changes when eyes answer.
+        assert read(machine).occupied
+        mark_from_camera(machine, seen="clear", judged_by="agent")
+        assert start_refusal(machine, file_name="base.gcode.3mf") is None
+
+    def test_age_alone_never_clears_the_record(self, monkeypatch):
+        machine = _machine(camera=None)
+        _recorded(machine, monkeypatch, hours_ago=90 * 24)
+        block = start_refusal(machine)
+        assert block is not None and read(machine).occupied
+        assert "90 days ago" in block["error"]["message"]
+
+    def test_a_fresh_record_is_not_called_stale(self, monkeypatch):
+        machine = _machine(frame=_png())
+        _recorded(machine, monkeypatch, hours_ago=0.5)
+        block = start_refusal(machine)
+        assert "30 minutes ago" in block["error"]["message"]
+        assert "most likely" not in block["error"]["message"] and block["look"]["likely_gone"] is False
+
+    def test_the_line_between_fresh_and_most_likely_gone(self, monkeypatch):
+        machine = _machine(camera=None)
+        _recorded(machine, monkeypatch, hours_ago=LIKELY_GONE_AFTER_HOURS - 1)
+        assert offer_look(machine).likely_gone is False
+        _recorded(machine, monkeypatch, hours_ago=LIKELY_GONE_AFTER_HOURS + 1)
+        assert offer_look(machine).likely_gone is True
+
+    def test_no_camera_says_so_and_names_the_persons_own_doors(self, monkeypatch):
+        machine = _machine(camera=None)
+        _recorded(machine, monkeypatch, hours_ago=5)
+        block = start_refusal(machine)
+        message = block["error"]["message"]
+        assert "5 hours ago" in message and "no camera Kiln can read" in message
+        assert "`kiln plate clear`" in message and "look_at_plate" not in message
+        assert block["snapshot_path"] is None and block["look"]["settle_with"] is None
+        assert block["look"]["possible"] is False
+
+    def test_a_camera_that_cannot_settle_it_says_why_and_falls_back_to_the_person(self, monkeypatch):
+        for machine, why in ((_machine(raises=True), "did not answer"), (_machine(frame=b""), "no image")):
+            _recorded(machine, monkeypatch, hours_ago=5)
+            block = start_refusal(machine)
+            message = block["error"]["message"]
+            assert "This printer's own camera could settle it, but" in message and why in message
+            assert "`kiln plate clear`" in message and "look_at_plate" not in message
+            assert block["snapshot_path"] is None and block["look"]["possible"] is True
+
+    def test_a_registered_camera_is_named_as_the_persons(self, monkeypatch):
+        machine = _machine(camera="user_supplied", frame=_png())
+        _recorded(machine, monkeypatch, hours_ago=5)
+        assert "the camera you registered for it" in start_refusal(machine)["error"]["message"]
+
+    def test_the_offer_never_raises_and_never_blocks_the_refusal(self, monkeypatch):
+        from unittest import mock
+
+        machine = _machine(frame=_png())
+        _recorded(machine, monkeypatch, hours_ago=5)
+        with mock.patch("kiln.plate_state.look", side_effect=RuntimeError("camera stack fell over")):
+            block = start_refusal(machine)
+        assert block is not None and block["error"]["code"] == START_NOT_YET_CODE
+        assert "`kiln plate clear`" in block["error"]["message"] and block["snapshot_path"] is None
+
+
+# ---------------------------------------------------------------------------
 # 3. The door
 # ---------------------------------------------------------------------------
 
@@ -248,6 +383,8 @@ class TestTheDoor:
         result = door(machine)["look_at_plate"]()
         assert result["success"] is True
         assert base64.b64decode(result["image_b64"]) == _png()
+        with open(result["snapshot_path"], "rb") as fh:
+            assert fh.read() == _png(), "the same picture, where eyes with a file reader can open it"
         assert result["look"]["camera"] == "printer"
         assert "seen=" in result["next"]
         assert read(machine).status == "unknown", "handing over a picture is not an answer"

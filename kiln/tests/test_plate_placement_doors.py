@@ -303,10 +303,33 @@ class TestEveryDoor:
         assert "about 42 mm tall" in msg and "on top of it" in msg
         assert "Spots with room: [40, 200] (30 mm clear)." in msg
         assert resp["spots"] == [{"at_mm": [40.0, 200.0], "clearance_mm": 30.0}]
+        # This machine has no camera, and the refusal says so rather than
+        # leaving the record's word as the last one.
+        assert "no camera Kiln can read" in msg and "`kiln plate clear`" in msg
+        assert resp["snapshot_path"] is None and resp["look"]["possible"] is False
         assert resp["occupancy"]["kind"] == bridge.OCCUPANCY_KIND
         assert resp["plate"]["status"] == "occupied"
         assert asked.asked[0]["placement"] == "auto" and asked.asked[0]["placed_by"] == "auto"
         assert not spy.called, "nothing is sliced onto an occupied plate without a spot"
+
+    def test_the_refusal_hands_over_a_look_where_the_machine_has_a_camera(self, door, registry, extra, tmp_path, machine, monkeypatch):
+        if door in ESTIMATE_DOORS:
+            pytest.skip("an estimate asks nothing of the plate")
+        from .test_plate_camera import _png
+
+        machine.snapshot_source = "printer"
+        machine.get_snapshot = _png
+        _occupy(machine)
+        monkeypatch.setattr(bridge, "ask", _Bridge((_verdict(ok=False), None)))
+        spy, _ = _fake_slice(tmp_path)
+        with patch("kiln.slicer.slice_file", spy):
+            resp = _call(door, registry, extra, input_path=_cube(tmp_path / "part.stl"))
+        assert resp["success"] is False and resp["error"]["code"] == "PLACEMENT_PLATE_OCCUPIED"
+        path = resp["snapshot_path"]
+        assert path and os.path.isfile(path) and path in resp["error"]["message"]
+        assert 'look_at_plate with seen="clear"' in resp["error"]["message"]
+        assert resp["look"]["settle_with"] == "look_at_plate"
+        spy.assert_not_called()
 
     def test_a_named_spot_with_an_ok_verdict_translates_slices_and_checks_the_sliced_file(self, door, registry, extra, tmp_path, machine, monkeypatch):
         _occupy(machine)
@@ -1299,10 +1322,16 @@ class TestEveryDoorThatStartsAPrint:
         assert block["success"] is False and block["error"]["code"] == START_NOT_YET_CODE == "PLATE_OCCUPIED_START_NOT_YET"
         assert block["error"]["retryable"] is False
         monkeypatch.setattr(PlateState, "since_clock", lambda self: "18:12")
-        assert start_refusal(machine)["error"]["message"] == (
+        message = start_refusal(machine)["error"]["message"]
+        assert message.startswith(
             "The last print, jar v2, is still on the plate (since 18:12, about 42 mm tall). "
             "Kiln can't start a print onto an occupied plate yet — the printer's own start sequence "
-            "drives the head across it — so it won't start this one. Clear the plate and say so."
+            "drives the head across it — so it won't start this one. Clear the plate and say so. "
+        )
+        # ...and then looks instead of assuming: this machine has no camera.
+        assert message.endswith(
+            "This printer has no camera Kiln can read, so look at the plate yourself, then say so: "
+            "`kiln plate clear`, or plate_clear=true on park_head."
         )
         assert block["plate"]["status"] == "occupied" and block["occupancy"]["kind"] == bridge.OCCUPANCY_KIND
         assert start_refusal(machine, resume=True) is None, "a resume is the same job, still on the plate"

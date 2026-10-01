@@ -10,9 +10,9 @@ cannot report: **is there a part on the plate, and how tall is it?**
 This module is the record that answers it.  Written at the two moments
 Kiln can be sure of -- a print Kiln started (the plate now holds a part),
 and a print seen ending (the part is still there) -- by a person who
-says the plate is empty (``plate_clear=True`` on ``home_axes``, or
-``kiln plate clear``), and by a LOOK through the machine's camera
-(:func:`look`, :func:`mark_from_camera`).
+says the plate is empty (``plate_clear=True`` on ``home_axes`` or
+``park_head``, or ``kiln plate clear``), and by a LOOK through the
+machine's camera (:func:`look`, :func:`mark_from_camera`).
 
 **The camera is a source here, not an afterthought.**  A machine with a
 camera -- the printer's own, or one the person registered against it
@@ -88,6 +88,13 @@ CAMERA_SOURCE_PREFIX = "camera:"
 #: Who may be recorded as having looked.  An unknown judge is refused
 #: rather than written as an anonymous look.
 CAMERA_JUDGES = ("agent", "human")
+
+#: How long a recorded part has to have sat before a refusal says it has
+#: most likely been taken off: a finished print is rarely left on a plate
+#: for a day.  This changes the sentence a refusal speaks, never the gate --
+#: an old record is weaker evidence, not a different record, and only a look
+#: or a person's word clears it (:func:`offer_look`).
+LIKELY_GONE_AFTER_HOURS = 24.0
 
 #: The block the 3D stage draws an occupied plate from, and the shape the
 #: placement verdict's ``occupancy`` carries (:mod:`kiln._pro_placement_bridge`).
@@ -315,6 +322,40 @@ class PlateState:
             return when.strftime("%H:%M")
         return when.strftime("%b %d %H:%M")
 
+    def age_hours(self) -> float | None:
+        """Hours since this record was written, or ``None`` when it cannot say."""
+        if not self.since:
+            return None
+        try:
+            when = datetime.fromisoformat(self.since)
+        except ValueError:
+            return None
+        if when.tzinfo is None:
+            when = when.astimezone()
+        return max(0.0, (datetime.now().astimezone() - when).total_seconds() / 3600.0)
+
+    def recorded_ago(self) -> str:
+        """``3 days ago`` / ``5 hours ago`` / ``12 minutes ago``; ``""`` when unknown."""
+        hours = self.age_hours()
+        if hours is None:
+            return ""
+        if hours >= 48:
+            return f"{int(hours // 24)} days ago"
+        if hours >= 24:
+            return "a day ago"
+        if hours >= 2:
+            return f"{int(hours)} hours ago"
+        if hours >= 1:
+            return "an hour ago"
+        minutes = int(hours * 60)
+        return f"{minutes} minutes ago" if minutes >= 2 else "a moment ago"
+
+    @property
+    def likely_gone(self) -> bool:
+        """A recorded part old enough that it has most likely been taken off."""
+        hours = self.age_hours()
+        return self.occupied and hours is not None and hours >= LIKELY_GONE_AFTER_HOURS
+
     def describe(self) -> str:
         """One clause a refusal can quote: what is there, since when, how tall."""
         if self.status == "occupied":
@@ -411,6 +452,10 @@ class PlateState:
             "fingerprint": fingerprint(self) if self.occupied else None,
             "note": self.note,
             "description": self.describe(),
+            # How old the record is, in words.  A part recorded days ago is
+            # weaker evidence than one recorded an hour ago, and a reader
+            # should not have to do date arithmetic to notice.
+            "recorded_ago": self.recorded_ago() or None,
             # Whether a look wrote this, and whose eyes.  A reader that
             # weighs a camera answer differently from a person at the
             # machine needs both, and neither is derivable from `source`
@@ -480,10 +525,12 @@ def start_refusal(
     every start door returns, in the standard error envelope
     (``{"success": False, "error": {"code", "message", "retryable"}}`` --
     the same shape :func:`kiln.server._error_dict` builds -- with the
-    record and its occupancy block beside it).  The reason is physical: the
-    file a print starts from carries the maker's own start sequence, which
-    drives the head across the plate at a few millimetres, so a part left
-    there is hit before the first layer.  A *resume* is that same job,
+    record and its occupancy block beside it, and a look at the plate:
+    how old the record is and, where the machine has a camera, a frame
+    saved to ``snapshot_path`` for eyes to judge; see :func:`offer_look`).
+    The reason is physical: the file a print starts from carries the
+    maker's own start sequence, which drives the head across the plate at
+    a few millimetres, so a part left there is hit before the first layer.  A *resume* is that same job,
     still on the plate where it paused, and passes.
 
     A QUIET-START file passes too, when its contract names this plate as
@@ -510,17 +557,29 @@ def start_refusal(
         planned_machine = str(contract.get("planned_for_machine") or "")
         if planned_plate == fingerprint(state) and planned_machine and planned_machine == _machine_contract_id(adapter):
             return None
+        # Planned beside a part and the plate has changed since: the remedy
+        # is the plan's, not a look.
         return {
             "success": False,
             "error": {"code": PLATE_CHANGED_CODE, "message": state.plate_changed_sentence(), "retryable": False},
             "plate": state.to_dict(),
             "occupancy": state.occupancy(None),
         }
+    # The record says a part is there; it does not say the part is STILL
+    # there.  So the refusal hands over a look, where the machine has a
+    # camera, and says how old the record is -- rather than asking a person
+    # to vouch for a plate Kiln could have looked at.
+    offer = offer_look(adapter, state)
     return {
         "success": False,
-        "error": {"code": START_NOT_YET_CODE, "message": state.start_refusal_sentence(), "retryable": False},
+        "error": {
+            "code": START_NOT_YET_CODE,
+            "message": f"{state.start_refusal_sentence()} {offer.sentence}",
+            "retryable": False,
+        },
         "plate": state.to_dict(),
         "occupancy": state.occupancy(None),
+        **offer.fields(),
     }
 
 
@@ -716,12 +775,21 @@ def camera_of(adapter: Any) -> str | None:
 
     Asked before a refusal is worded, so a machine that COULD answer the
     question is never told to go and look by hand.  Never raises.
+
+    Read the way every adapter states it:
+    :attr:`~kiln.printers.base.PrinterAdapter.snapshot_source` is a
+    property.  This used to CALL it, which raised on every real adapter
+    (a string is not callable), was swallowed as "cannot say", and read
+    every printer Kiln supports as having no camera -- so no look was
+    ever offered or taken on a real machine, while the tests, whose
+    stand-in handed over a function, stayed green.  Only the two values
+    an adapter can state count; anything else is no camera.
     """
     try:
-        source = adapter.snapshot_source()
+        source = adapter.snapshot_source
     except Exception:  # noqa: BLE001 -- a machine that cannot say has no camera Kiln can use
         return None
-    return str(source) if source else None
+    return source if source in ("user_supplied", "printer") else None
 
 
 def look(adapter: Any) -> PlateLook:
@@ -741,7 +809,7 @@ def look(adapter: Any) -> PlateLook:
     except Exception as exc:  # noqa: BLE001
         logger.debug("plate look: snapshot failed", exc_info=True)
         return PlateLook(False, camera, why=f"the camera did not answer ({str(exc)[:120]})")
-    if not frame:
+    if not frame or not isinstance(frame, (bytes, bytearray)):
         return PlateLook(False, camera, why="the camera answered with no image")
     try:
         from kiln.snapshot_analysis import analyze_snapshot, image_dimensions
@@ -809,13 +877,134 @@ def camera_could_settle(adapter: Any) -> str | None:
     """One clause a refusal can append when a camera could answer instead.
 
     ``None`` when the machine has no camera, so a refusal that has nothing
-    to offer does not offer it.
+    to offer does not offer it.  Reads the declared camera only and never
+    fetches a frame -- a survey of many machines words its rows with this;
+    a refusal about one machine hands over the frame itself
+    (:func:`offer_look`).
     """
     camera = camera_of(adapter)
     if camera is None:
         return None
     whose = "the camera you registered for it" if camera == "user_supplied" else "this printer's own camera"
     return f"or look through {whose} and tell Kiln what you see"
+
+
+#: What a person says when they have looked themselves -- the fallback every
+#: offer ends on, and the default for a door that names no verb of its own.
+SAY_SO = "`kiln plate clear`, or plate_clear=true on park_head"
+
+
+@dataclass(frozen=True)
+class LookOffer:
+    """What a refusal about a recorded part hands over instead of assuming.
+
+    ``sentence`` is appended to the refusal; ``snapshot_path`` is the frame
+    on disk for eyes to judge (``None`` without a usable one); ``look`` says
+    which camera and, when there is no frame, why.
+    """
+
+    sentence: str
+    look: PlateLook
+    snapshot_path: str | None = None
+    recorded_ago: str = ""
+    likely_gone: bool = False
+
+    def fields(self) -> dict[str, Any]:
+        """The keys a refusal carries beside its sentence."""
+        return {
+            "snapshot_path": self.snapshot_path,
+            "look": {
+                **self.look.to_dict(),
+                "recorded_ago": self.recorded_ago or None,
+                "likely_gone": self.likely_gone,
+                "settle_with": "look_at_plate" if self.snapshot_path else None,
+            },
+        }
+
+
+def save_frame(found: PlateLook) -> str | None:
+    """Write a look's frame where eyes can open it; ``None`` when it cannot be."""
+    if not found.available or not found.image_b64:
+        return None
+    try:
+        import base64 as _base64
+        import time as _time
+
+        suffix = "png" if found.media_type == "image/png" else "jpg"
+        path = Path(tempfile.gettempdir()) / f"kiln_plate_{int(_time.time() * 1000)}.{suffix}"
+        path.write_bytes(_base64.b64decode(found.image_b64))
+        return str(path)
+    except Exception:  # noqa: BLE001 -- a frame that cannot be saved is reported as no frame
+        logger.debug("plate look: frame could not be saved", exc_info=True)
+        return None
+
+
+def offer_look(adapter: Any, state: PlateState | None = None, *, say_so: str = SAY_SO) -> LookOffer:
+    """Look instead of assume: what every refusal about a recorded part offers.
+
+    A record says a part was there when it was written.  Whether it is
+    still there is a question the machine's camera can usually answer and
+    the record cannot -- and a record days old most likely describes a
+    part someone took off long ago.  So a door that refuses over a
+    recorded part calls this, and its refusal then carries:
+
+    * how old the record is, and -- past :data:`LIKELY_GONE_AFTER_HOURS`
+      -- that the part has most likely been taken off;
+    * where the machine has a camera, a frame of the plate saved to disk,
+      and the one call that records what the frame shows
+      (``look_at_plate``, with ``seen``);
+    * where it has none, or the camera gave nothing usable, the reason
+      and the person's own doors (*say_so*).
+
+    Kiln judges nothing here and clears nothing: the record changes only
+    when eyes -- an agent's on the frame, or a person's on the plate --
+    say what they saw.  A stale ``occupied`` costs one look; a wrong
+    ``clear`` drives a head into a part, so age alone never clears it.
+    The Z home that presses the nozzle onto the plate does not use this:
+    that motion asks a person on every call (see
+    :meth:`~kiln.printers.base.PrinterAdapter._plate_gate`).  Never
+    raises, never moves a head, never writes the record.
+    """
+    try:
+        if state is None:
+            state = read(adapter)
+        ago = state.recorded_ago() if state.occupied else ""
+        likely_gone = state.likely_gone
+        age = ""
+        if ago:
+            age = f"Kiln recorded that {ago} and has not looked since"
+            age += (
+                " -- a finished part is rarely left on a plate that long, so it has most likely been taken off. "
+                if likely_gone else ". "
+            )
+        found = look(adapter)
+        path = save_frame(found)
+        if found.camera is None:
+            sentence = (
+                f"{age}This printer has no camera Kiln can read, so look at the plate yourself, "
+                f"then say so: {say_so}."
+            )
+        else:
+            whose = "the camera you registered for it" if found.camera == "user_supplied" else "this printer's own camera"
+            if path:
+                sentence = (
+                    f"{age}Here is the plate now, through {whose}: {path}. Look at the picture, then call "
+                    'look_at_plate with seen="clear" if the plate is empty, or seen="occupied" if anything is on '
+                    f"it or you cannot tell -- and ask again. (Standing at the machine? Say so yourself: {say_so}.)"
+                )
+            else:
+                why = (found.why or "it gave no picture").rstrip(". ")
+                sentence = (
+                    f"{age}{whose[0].upper()}{whose[1:]} could settle it, but {why}. Look at the plate "
+                    f"yourself, then say so: {say_so}."
+                )
+        return LookOffer(sentence=sentence, look=found, snapshot_path=path, recorded_ago=ago, likely_gone=likely_gone)
+    except Exception:  # noqa: BLE001 -- the offer is a courtesy; the refusal stands without it
+        logger.debug("offer_look failed", exc_info=True)
+        return LookOffer(
+            sentence=f"Look at the plate, then say so: {say_so}.",
+            look=PlateLook(False, None, why="Kiln could not look"),
+        )
 
 
 def mark_unknown(adapter: Any, why: str) -> None:

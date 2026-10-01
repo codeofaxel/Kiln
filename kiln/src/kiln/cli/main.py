@@ -3887,7 +3887,7 @@ def home_cmd(axes, wait_seconds, step, plan_only, plate_clear, printer_name, jso
 @click.option("--wait", "wait_seconds", type=float, default=None, help="Seconds to watch for a fault code afterwards.")
 @click.option("--step", type=int, default=None, help="Send only this step (1-based); the answer describes the next one.")
 @click.option("--plan", "plan_only", is_flag=True, help="Describe the steps; send nothing.")
-@click.option("--plate-clear", "plate_clear", is_flag=True, help="You have looked: the plate is empty. Lets a park cross a plate the record says holds a part.")
+@click.option("--plate-clear", "plate_clear", is_flag=True, help="You have looked: the plate is empty. Lets a park cross a plate the record says holds a part, and records the plate as clear.")
 @click.option("--printer", "printer_name", default=None, help="Target printer name.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def park_cmd(wait_seconds, step, plan_only, plate_clear, printer_name, json_mode) -> None:
