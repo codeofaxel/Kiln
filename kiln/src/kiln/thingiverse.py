@@ -23,6 +23,7 @@ import logging
 import os
 import time
 import warnings
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -30,11 +31,30 @@ from urllib.parse import quote
 
 import requests
 
+from kiln.daily_stats import counts_outside_service, record_marketplace_use
+
 logger = logging.getLogger(__name__)
 
 _BASE_URL = "https://api.thingiverse.com"
 _REQUEST_TIMEOUT = 30  # seconds
 _DOWNLOAD_TIMEOUT = 120  # seconds
+
+#: The name this marketplace is counted under in the daily usage stats: the
+#: one :class:`kiln.marketplaces.thingiverse.ThingiverseAdapter` gives itself.
+MARKETPLACE_NAME = "thingiverse"
+
+
+def _counted(kind: str) -> Callable[[Callable], Callable]:
+    """Count a client call that returns as one ``kind`` of Thingiverse use.
+
+    The single-marketplace tools call this client directly rather than
+    through the adapter, so the adapter's own count never sees them.  A
+    call that arrives THROUGH the adapter is counted once, there.
+    """
+    return counts_outside_service(
+        "marketplace",
+        lambda _client, _result: record_marketplace_use(MARKETPLACE_NAME, kind),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -268,6 +288,7 @@ class ThingiverseClient:
 
     # -- search ------------------------------------------------------------
 
+    @_counted("search")
     def search(
         self,
         query: str,
@@ -326,6 +347,7 @@ class ThingiverseClient:
             return []
         return [self._parse_file(f) for f in data]
 
+    @_counted("download")
     def download_file(
         self,
         file_id: int,
@@ -382,6 +404,7 @@ class ThingiverseClient:
 
     # -- browse endpoints --------------------------------------------------
 
+    @_counted("search")
     def popular(self, *, page: int = 1, per_page: int = 20) -> list[ThingSummary]:
         """Browse popular (trending) things."""
         data = self._request(
@@ -394,6 +417,7 @@ class ThingiverseClient:
         )
         return self._parse_thing_list(data)
 
+    @_counted("search")
     def newest(self, *, page: int = 1, per_page: int = 20) -> list[ThingSummary]:
         """Browse newest things."""
         data = self._request(
@@ -406,6 +430,7 @@ class ThingiverseClient:
         )
         return self._parse_thing_list(data)
 
+    @_counted("search")
     def featured(self, *, page: int = 1, per_page: int = 20) -> list[ThingSummary]:
         """Browse featured things."""
         data = self._request(
@@ -439,6 +464,7 @@ class ThingiverseClient:
             )
         return results
 
+    @_counted("search")
     def category_things(
         self,
         category_slug: str,

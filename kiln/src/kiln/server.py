@@ -13130,10 +13130,12 @@ def download_and_upload(
                 f"Downloaded from {source} and uploaded to printer. Call start_print('{file_name}') to begin printing."
             )
 
-        # Telemetry: count marketplace download by source
+        # Telemetry: count the download.  WHICH marketplace it came from is
+        # recorded where the file is fetched (the marketplace adapter and
+        # the Thingiverse client), so naming it here too would count it twice.
         try:
             from kiln.daily_stats import record_event
-            record_event("downloads", detail=source or "unknown")
+            record_event("downloads")
         except Exception:
             pass
 

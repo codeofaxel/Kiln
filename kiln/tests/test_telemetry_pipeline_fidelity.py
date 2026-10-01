@@ -158,6 +158,75 @@ def test_template_uses_never_carries_a_parameter_value(pipeline):
     assert all(isinstance(v, int) for v in shipped.values())
 
 
+def test_which_outside_service_did_the_work_reaches_the_dashboard(pipeline):
+    """Provider and marketplace names have to survive the whole chain.
+
+    Driven through the real dispatch points rather than the recorders: a
+    provider's ``generate`` and a marketplace's ``search`` and
+    ``download_file``.  A user's own API key and their own network mean
+    Kiln's servers see none of these calls, so this heartbeat is the only
+    evidence of which service anyone uses.  Same day, and across midnight
+    in the complete-day block.
+    """
+    from kiln.generation.base import GenerationJob, GenerationProvider, GenerationStatus
+    from kiln.marketplaces.base import MarketplaceAdapter
+
+    class _Provider(GenerationProvider):
+        name = "meshy"
+        display_name = "Meshy"
+
+        def generate(self, prompt, *, format="stl", style=None, **kwargs):
+            return GenerationJob(
+                id="j", provider=self.name, prompt=prompt, status=GenerationStatus.PENDING,
+            )
+
+        def get_job_status(self, job_id):  # pragma: no cover
+            raise NotImplementedError
+
+        def download_result(self, job_id, output_dir=""):  # pragma: no cover
+            raise NotImplementedError
+
+    class _Marketplace(MarketplaceAdapter):
+        name = "makerworld"
+        display_name = "MakerWorld"
+
+        def search(self, query, *, page=1, per_page=20, sort="relevant"):
+            return []
+
+        def get_details(self, model_id):  # pragma: no cover
+            raise NotImplementedError
+
+        def get_files(self, model_id):  # pragma: no cover
+            return []
+
+        def download_file(self, file_id, dest_dir, *, file_name=None):
+            return "/tmp/part.stl"
+
+    sent = pipeline
+
+    _Provider().generate("a private prompt")
+    _Provider().generate("another private prompt")
+    _Marketplace().search("a private query")
+    _Marketplace().download_file("file-9", "/tmp")
+    expected = {
+        "generation_providers": {"meshy": 2},
+        "marketplace_searches": {"makerworld": 1},
+        "marketplace_sources": {"makerworld": 1},
+    }
+
+    heartbeat._send_heartbeat()
+    details = sent[0]["p_details"]
+    assert {k: details[k] for k in expected} == expected
+    assert "private" not in json.dumps(sent[0])
+
+    _FakeDate._today = real_date(2026, 7, 26)
+    heartbeat._send_heartbeat()
+    prev = sent[1]["p_details"]["previous_day"]
+    assert prev["date"] == "2026-07-25"
+    assert {k: prev[k] for k in expected} == expected
+    assert "private" not in json.dumps(sent[1])
+
+
 def test_every_breakdown_map_leaves_the_machine(pipeline):
     """The failure that hid five maps at once, pinned generically.
 
