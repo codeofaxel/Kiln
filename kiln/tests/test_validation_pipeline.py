@@ -2007,6 +2007,21 @@ class TestUnitVerdictPublicName:
         assert [unit_verdict(size).below_printable for size in (0.0005, 0.02, 0.5, 0.999)] == [True] * 4
         assert [unit_verdict(size).below_printable for size in (0.0, 1.0, 2.0, 50.0, 1500.0, 4e9)] == [False] * 6
 
+    def test_a_reading_too_big_to_print_is_still_named_for_a_door_that_scales(self) -> None:
+        """2 units is 2000mm in meters: no printer makes that, so it is not a
+        candidate for a part printed as drawn — and it is exactly what a
+        full-size object scaled down to print was written in."""
+        from kiln.generation.validation import unit_verdict
+
+        two = unit_verdict(2.0)
+        assert two.beyond_printable == (("meters", 1000.0),)
+        assert ("meters", 1000.0) not in two.candidates
+        # 0.5 units is 500mm in meters: printable, so a candidate, not beyond.
+        assert unit_verdict(0.5).beyond_printable == ()
+        # 50 units: meters gives 50000mm and inches 1270mm; centimeters 500mm fits.
+        assert unit_verdict(50.0).beyond_printable == (("meters", 1000.0), ("inches", 25.4))
+        assert unit_verdict(0.0).beyond_printable == ()
+
     def test_every_other_reading_keeps_its_own_sentence(self) -> None:
         from kiln.generation.validation import unit_verdict
 

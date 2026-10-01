@@ -2025,6 +2025,22 @@ class _UnitVerdict:
         what it says."""
         return 0 < self.max_dim_mm < _PRINTABLE_MIN_MM
 
+    @property
+    def beyond_printable(self) -> tuple[tuple[str, float], ...]:
+        """The conversions that would make this larger than any printer.
+
+        Ruled out for a part printed at the size it was drawn, which is why
+        they are not among ``candidates``.  They stay real readings for a
+        model that is scaled DOWN before it is printed — a full-size object
+        drawn in meters — so a door that scales can name them instead of
+        staying silent about the one reading that fits.
+        """
+        return tuple(
+            (unit, factor)
+            for unit, factor in _UNIT_CONVERSIONS
+            if self.max_dim_mm * factor > _PRINTABLE_MAX_MM
+        )
+
     def _readings(self) -> str:
         return ", ".join(
             f"{unit} → {self.max_dim_mm * factor:g}mm"
