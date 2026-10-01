@@ -137,6 +137,17 @@ class TestTheRecordLookup:
         )
         assert bridge.consult_recorded_nozzle("shop_a1") == {"diameter_mm": 0.6, "answered": True}
 
+    def test_with_kiln_pro_beside_it_the_record_is_asked_every_time(self, monkeypatch):
+        # A nozzle recorded a moment ago must be the next check's answer,
+        # and a process answering for many accounts must remember none of them.
+        on_record = {"diameter_mm": 0.4, "trusted_for_verdicts": True}
+        monkeypatch.setattr(bridge, "available", lambda: True)
+        monkeypatch.setattr(bridge, "consult_nozzle_summary", lambda pid: dict(on_record))
+        assert bridge.consult_recorded_nozzle("shop_a1")["diameter_mm"] == 0.4
+        on_record["diameter_mm"] = 0.6
+        assert bridge.consult_recorded_nozzle("shop_a1")["diameter_mm"] == 0.6
+        assert bridge._record_memo == {}
+
     def test_a_catalogue_default_is_nobodys_record(self, monkeypatch):
         monkeypatch.setattr(bridge, "available", lambda: True)
         monkeypatch.setattr(

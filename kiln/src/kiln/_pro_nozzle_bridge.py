@@ -57,9 +57,11 @@ _last_miss: dict[str, Any] = {}
 #: The hosted door that holds Kiln's record of a printer's nozzle, asked for
 #: the pre-flight's record comparison when kiln-pro is not installed here.
 RECORD_TOOL = "get_nozzle_state"
-#: How long a record lookup is remembered, answered or not.  A design check
-#: is asked many times in a row; the record changes when a nozzle does, and
-#: the tools that write it clear this (:func:`forget_recorded_nozzle`).
+#: How long a SERVED record lookup is remembered, answered or not.  A design
+#: check is asked many times in a row and each ask is a network call; the
+#: tools that write the record clear this (:func:`forget_recorded_nozzle`).
+#: An install that asks the hosted door is one person's, so the memory is
+#: theirs alone.
 RECORD_MEMO_S: float = 120.0
 _record_memo: dict[str, tuple[float, dict[str, Any]]] = {}
 #: Why the last record comparison for each machine had no answer, the same way.
@@ -234,22 +236,26 @@ def consult_recorded_nozzle(printer_id: str) -> dict[str, Any]:
     default is nobody's record and comes back ``None``.  ``answered`` is
     ``False`` when the record could not be asked at all (offline, signed
     out, no answer), so a caller can tell "no record" from "could not ask".
-    From kiln-pro locally when it is installed, else from the hosted door
-    with a short timeout; remembered for :data:`RECORD_MEMO_S`.
+    From kiln-pro locally when it is installed, asked every time; else
+    from the hosted door with a short timeout, and only that answer is
+    remembered, for :data:`RECORD_MEMO_S`.
     """
     pid = (printer_id or "").strip() if isinstance(printer_id, str) else ""
     if not pid:
         return {"diameter_mm": None, "answered": True}
+    if available():
+        # Asked of the store each time, never remembered: the read is local,
+        # the record can change between two checks, and a process that
+        # answers for more than one account must not hand one caller's
+        # nozzle to the next.
+        summary = consult_nozzle_summary(pid)
+        found = summary is not None and summary.get("trusted_for_verdicts")
+        return {"diameter_mm": summary.get("diameter_mm") if found else None, "answered": True}
     now = time.monotonic()
     memo = _record_memo.get(pid)
     if memo is not None and now - memo[0] < RECORD_MEMO_S:
         return memo[1]
-    if available():
-        summary = consult_nozzle_summary(pid)
-        found = summary is not None and summary.get("trusted_for_verdicts")
-        answer = {"diameter_mm": summary.get("diameter_mm") if found else None, "answered": True}
-    else:
-        answer = _served_recorded_nozzle(pid)
+    answer = _served_recorded_nozzle(pid)
     _record_memo[pid] = (now, answer)
     return answer
 
