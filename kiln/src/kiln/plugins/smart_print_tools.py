@@ -73,7 +73,9 @@ class _SmartPrintToolsPlugin:
                overrides, uploads the result, and starts the print.
 
             Args:
-                model_path: Path to the STL/OBJ/3MF that failed.
+                model_path: Path to the model that failed (STL, OBJ, 3MF,
+                    STEP, ...).  One the diagnosis cannot read is said in
+                    ``printability_note``.
                 printer_name: Target printer name.  Omit for the default
                     printer.
                 material: Filament material (e.g. ``"PLA"``, ``"ABS"``).
@@ -165,6 +167,7 @@ class _SmartPrintToolsPlugin:
             # ------------------------------------------------------------------
             diagnosis_dict: dict[str, Any] | None = None
             diagnosis_overrides: dict[str, str] = {}
+            printability_note: str | None = None
 
             if not skip_diagnosis:
                 try:
@@ -174,10 +177,11 @@ class _SmartPrintToolsPlugin:
                     except Exception as exc:
                         _logger.debug("Could not read printer state: %s", exc)
 
+                    # Every format the engine reads, a STEP as Kiln's mesh of
+                    # it; one it cannot read is said in the result, and the
+                    # diagnosis goes on with what the printer reported.
                     report = None
-                    if model_path and model_path.lower().endswith(
-                        (".stl", ".obj", ".3mf")
-                    ):
+                    if model_path:
                         try:
                             report = analyze_printability(
                                 model_path,
@@ -186,6 +190,10 @@ class _SmartPrintToolsPlugin:
                             )
                         except Exception as exc:
                             _logger.debug("Model analysis failed: %s", exc)
+                            printability_note = (
+                                "The diagnosis was made without the model's geometry: "
+                                f"{' '.join(str(exc).split())}"
+                            )
 
                     # The one way every diagnosis door gathers its signals.
                     signals = collect_failure_signals(
@@ -506,6 +514,8 @@ class _SmartPrintToolsPlugin:
                 result["what_you_will_see"] = list(verdict.what_you_will_see)
             if validation_summary is not None:
                 result["validation"] = validation_summary
+            if printability_note:
+                result["printability_note"] = printability_note
             if effective_pid:
                 result["printer_id"] = effective_pid
             if effective_profile:

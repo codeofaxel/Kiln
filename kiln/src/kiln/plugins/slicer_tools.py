@@ -2456,7 +2456,8 @@ class _SlicerToolsPlugin:
             Automatically analyzes bed adhesion and adds brim/raft when needed
             based on model geometry, material warp tendency, and printer type.
             This adhesion intelligence only activates when no custom profile is
-            supplied.
+            supplied; when it could not read the model, ``printability_note``
+            says why.
 
             Pre-print validation gate: mesh inputs (.stl/.obj/.3mf/.step/.glb)
             run through Kiln's full validation pipeline before slicing —
@@ -2628,19 +2629,36 @@ class _SlicerToolsPlugin:
                     validation_summary = gate.summary
 
                 # --- Auto-adhesion: analyse model and inject brim/raft if needed ---
+                # Every format the engine reads, a STEP as Kiln's mesh of it:
+                # there is no format list here to fall behind the engine's
+                # (one skipped a STEP's brim decision without a word until
+                # 2026-10-01).  An analysis that could not be made is said
+                # in the result, never skipped quietly.
                 adhesion_rec = None
                 adhesion_overrides: dict[str, str] = {}
-                if profile is None and input_path.lower().endswith((".stl", ".obj", ".3mf")):
-                    try:
-                        from kiln.printability import (
-                            analyze_printability as _analyze_printability,
-                        )
+                printability_note: str | None = None
+                if profile is None:
+                    from kiln.plugins.estimate_tools import (
+                        STEP_PRINTABILITY_NOTE,
+                        _printability_not_checked,
+                    )
+                    from kiln.printability import (
+                        analyze_printability as _analyze_printability,
+                    )
+                    from kiln.step_import import is_step_file
 
+                    try:
                         report = _analyze_printability(
                             input_path,
                             material=material or "pla",
                             printer_id=effective_printer_id or None,
                         )
+                    except Exception as exc:  # noqa: BLE001 -- the print stands without it, and says so
+                        _logger.debug("Auto-adhesion analysis failed, proceeding without", exc_info=True)
+                        printability_note = _printability_not_checked(exc)
+                    else:
+                        if is_step_file(input_path):
+                            printability_note = STEP_PRINTABILITY_NOTE
                         # The report's own brim decision — the one its
                         # recommendations and every estimate door speak of.
                         rec = report.adhesion
@@ -2653,8 +2671,6 @@ class _SlicerToolsPlugin:
                                 rec.use_raft,
                                 rec.rationale,
                             )
-                    except Exception:
-                        _logger.debug("Auto-adhesion analysis failed, proceeding without", exc_info=True)
 
                 # Bambu printers: wrap_gcode_as_3mf expects M83 (relative extrusion)
                 # and provides its own start/end gcode, so override PrusaSlicer defaults.
@@ -2993,6 +3009,8 @@ class _SlicerToolsPlugin:
                     resp["validation"] = validation_summary
                 if adhesion_rec:
                     resp["adhesion"] = adhesion_rec
+                if printability_note:
+                    resp["printability_note"] = printability_note
                 name_stage_file(resp["slice"], print_file=upload_path)
                 if start_handoff:
                     resp["start_gcode_source"] = (
