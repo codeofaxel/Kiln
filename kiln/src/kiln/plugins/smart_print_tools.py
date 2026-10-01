@@ -105,6 +105,7 @@ class _SmartPrintToolsPlugin:
 
             from kiln.printability import (
                 analyze_printability,
+                collect_failure_signals,
                 diagnose_from_signals,
             )
             from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
@@ -167,21 +168,13 @@ class _SmartPrintToolsPlugin:
 
             if not skip_diagnosis:
                 try:
-                    signals: dict[str, Any] = {}
-
-                    # Printer state signals.
+                    state = None
                     try:
                         state = adapter.get_state()
-                        signals["tool_temp_actual"] = state.tool_temp_actual
-                        signals["tool_temp_target"] = state.tool_temp_target
-                        signals["bed_temp_actual"] = state.bed_temp_actual
-                        signals["bed_temp_target"] = state.bed_temp_target
-                        if state.print_error:
-                            signals["print_error"] = state.print_error
                     except Exception as exc:
                         _logger.debug("Could not read printer state: %s", exc)
 
-                    # Model geometry signals.
+                    report = None
                     if model_path and model_path.lower().endswith(
                         (".stl", ".obj", ".3mf")
                     ):
@@ -191,52 +184,16 @@ class _SmartPrintToolsPlugin:
                                 material=material or "pla",
                                 printer_id=printer_id or None,
                             )
-                            if report.bed_adhesion:
-                                signals["adhesion_risk"] = (
-                                    report.bed_adhesion.adhesion_risk
-                                )
-                                signals["contact_percentage"] = (
-                                    report.bed_adhesion.contact_percentage
-                                )
-                            if report.overhangs:
-                                signals["overhang_pct"] = (
-                                    report.overhangs.overhang_percentage
-                                )
-                            if report.bridging:
-                                signals["max_bridge_mm"] = (
-                                    report.bridging.max_bridge_length
-                                )
                         except Exception as exc:
                             _logger.debug("Model analysis failed: %s", exc)
 
-                    # Printer intelligence signals.
-                    if effective_pid:
-                        try:
-                            from kiln.printer_intelligence import (
-                                diagnose_issue,
-                                get_printer_intel,
-                            )
-
-                            intel = get_printer_intel(effective_pid)
-                            if intel:
-                                signals["printer_has_enclosure"] = intel.get(
-                                    "has_enclosure", False
-                                )
-                                symptom_queries = _build_symptom_queries(signals)
-                                modes: list[dict[str, str]] = []
-                                for symptom in symptom_queries:
-                                    modes.extend(
-                                        diagnose_issue(effective_pid, symptom)
-                                    )
-                                if modes:
-                                    signals["failure_modes_from_intel"] = modes
-                        except Exception as exc:
-                            _logger.debug(
-                                "Printer intelligence lookup failed: %s", exc
-                            )
-
-                    if effective_material:
-                        signals["material"] = effective_material.upper()
+                    # The one way every diagnosis door gathers its signals.
+                    signals = collect_failure_signals(
+                        state=state,
+                        report=report,
+                        printer_id=effective_pid,
+                        material=effective_material,
+                    )
 
                     diagnosis = diagnose_from_signals(
                         signals,
@@ -307,6 +264,7 @@ class _SmartPrintToolsPlugin:
                 try:
                     from kiln.plugins._validation_pipeline_internals import (
                         _SUPPORTED_FORMATS,
+                        score_phrase,
                     )
                     from kiln.plugins.validation_pipeline_tools import (
                         run_full_validation_pipeline,
@@ -320,13 +278,13 @@ class _SmartPrintToolsPlugin:
                             material=effective_material or "",
                         )
                         if not val_report.get("ready_to_print", True):
-                            score = val_report.get("printability_score", 0)
+                            score = score_phrase(val_report)
                             summary = val_report.get(
                                 "summary", "Validation failed",
                             )
                             err_resp = _srv._error_dict(
                                 f"Retry blocked — mesh failed pre-print "
-                                f"validation (score {score}/100): {summary} "
+                                f"validation ({score}): {summary} "
                                 f"Slicer-override fixes won't repair the "
                                 f"underlying mesh.  Pass skip_validation=True "
                                 f"to bypass.",
@@ -348,9 +306,8 @@ class _SmartPrintToolsPlugin:
                             model_path = validated_path
 
                         validation_summary = {
-                            "printability_score": val_report.get(
-                                "printability_score",
-                            ),
+                            "printability_score": val_report.get("printability_score"),
+                            "readiness_score": val_report.get("readiness_score"),
                             "ready_to_print": val_report.get("ready_to_print"),
                             "repaired": val_report.get("repaired"),
                             "summary": val_report.get("summary"),
@@ -600,52 +557,6 @@ class _SmartPrintToolsPlugin:
             return result
 
         _logger.debug("Registered smart print tools")
-
-
-def _build_symptom_queries(signals: dict[str, Any]) -> list[str]:
-    """Build symptom query strings for printer intelligence lookup."""
-    queries: list[str] = []
-
-    risk = signals.get("adhesion_risk")
-    if risk == "high":
-        queries.append("bed adhesion failure")
-        queries.append("print detached from bed")
-    elif risk == "medium":
-        queries.append("poor bed adhesion")
-
-    tool_actual = signals.get("tool_temp_actual")
-    tool_target = signals.get("tool_temp_target")
-    if tool_actual is not None and tool_target is not None and abs(tool_actual - tool_target) > 10:
-        queries.append("temperature fluctuation")
-
-    if signals.get("print_error"):
-        # The screen's form, not the raw field.  Bambu reports print_error as
-        # a 32-bit decimal (302022663), and the machine's own display and
-        # every searchable reference render that as 1200-8007.  The decimal
-        # matched nothing here and is not a string any user or catalog would
-        # recognise; the screen form is what the failure modes claim.
-        from kiln.printers.base import format_error_code
-
-        queries.append(
-            format_error_code(signals["print_error"]) or str(signals["print_error"])
-        )
-
-    if signals.get("overhang_pct", 0) > 30:
-        queries.append("overhang failure")
-    if signals.get("max_bridge_mm", 0) > 15:
-        queries.append("bridge failure")
-
-    mat = signals.get("material", "")
-    if mat.upper() in {"ABS", "ASA", "PA", "PC"} and not signals.get(
-        "printer_has_enclosure"
-    ):
-        queries.append("warping")
-        queries.append("layer splitting")
-
-    if not queries:
-        queries.append("print failure")
-
-    return queries
 
 
 plugin = _SmartPrintToolsPlugin()

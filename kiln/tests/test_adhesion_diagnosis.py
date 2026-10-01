@@ -4,7 +4,7 @@ Covers:
     - recommend_adhesion() decision matrix (all branches)
     - diagnose_from_signals() priority-ordered diagnosis
     - is_bedslinger() lookup
-    - _build_symptom_queries() helper
+    - failure_symptom_queries() helper
     - AdhesionRecommendation / PrintFailureDiagnosis dataclasses
 """
 
@@ -370,63 +370,59 @@ class TestDiagnoseFromSignals:
 
 
 # ---------------------------------------------------------------------------
-# _build_symptom_queries() -- module-level helper in plugin
+# failure_symptom_queries() -- the one builder every diagnosis door uses
 # ---------------------------------------------------------------------------
 
 
 class TestBuildSymptomQueries:
-    """Tests for the _build_symptom_queries helper in the plugin."""
+    """Tests for failure_symptom_queries, shared by every diagnosis door."""
 
     def test_high_adhesion_risk(self):
-        from kiln.plugins.printability_tools import _build_symptom_queries
+        from kiln.printability import failure_symptom_queries
 
-        queries = _build_symptom_queries(None, {"adhesion_risk": "high"})
+        queries = failure_symptom_queries({"adhesion_risk": "high"})
         assert any("adhesion" in q for q in queries)
 
     def test_medium_adhesion_risk(self):
-        from kiln.plugins.printability_tools import _build_symptom_queries
+        from kiln.printability import failure_symptom_queries
 
-        queries = _build_symptom_queries(None, {"adhesion_risk": "medium"})
+        queries = failure_symptom_queries({"adhesion_risk": "medium"})
         assert any("adhesion" in q for q in queries)
 
     def test_thermal_delta(self):
-        from kiln.plugins.printability_tools import _build_symptom_queries
+        from kiln.printability import failure_symptom_queries
 
-        queries = _build_symptom_queries(
-            None,
-            {"tool_temp_actual": 180.0, "tool_temp_target": 210.0},
+        queries = failure_symptom_queries({"tool_temp_actual": 180.0, "tool_temp_target": 210.0},
         )
         assert any("temperature" in q or "thermal" in q for q in queries)
 
     def test_print_error(self):
-        from kiln.plugins.printability_tools import _build_symptom_queries
+        from kiln.printability import failure_symptom_queries
 
-        queries = _build_symptom_queries(None, {"print_error": "nozzle_clog"})
+        queries = failure_symptom_queries({"print_error": "nozzle_clog"})
         assert "nozzle_clog" in queries
 
     def test_overhang(self):
-        from kiln.plugins.printability_tools import _build_symptom_queries
+        from kiln.printability import failure_symptom_queries
 
-        queries = _build_symptom_queries(None, {"overhang_pct": 40.0})
+        queries = failure_symptom_queries({"overhang_pct": 40.0})
         assert any("overhang" in q for q in queries)
 
     def test_bridge(self):
-        from kiln.plugins.printability_tools import _build_symptom_queries
+        from kiln.printability import failure_symptom_queries
 
-        queries = _build_symptom_queries(None, {"max_bridge_mm": 20.0})
+        queries = failure_symptom_queries({"max_bridge_mm": 20.0})
         assert any("bridge" in q for q in queries)
 
     def test_warp_material_no_enclosure(self):
-        from kiln.plugins.printability_tools import _build_symptom_queries
+        from kiln.printability import failure_symptom_queries
 
-        queries = _build_symptom_queries(
-            None,
-            {"material": "ABS", "printer_has_enclosure": False},
+        queries = failure_symptom_queries({"material": "ABS", "printer_has_enclosure": False},
         )
         assert any("warp" in q for q in queries)
 
     def test_empty_signals_fallback(self):
-        from kiln.plugins.printability_tools import _build_symptom_queries
+        from kiln.printability import failure_symptom_queries
 
-        queries = _build_symptom_queries(None, {})
+        queries = failure_symptom_queries({})
         assert queries == ["print failure"]

@@ -1131,11 +1131,13 @@ class _DesignReasoningToolsPlugin:
             bed_y_mm: float = 256.0,
             bed_z_mm: float = 256.0,
             printer_id: str = "",
+            material: str = "pla",
         ) -> dict:
             """Single-call print readiness check with optional auto-repair.
 
             Runs the full validation battery: parseable, manifold, no floating
-            regions, overhangs within limits, fits build plate, no degenerate
+            regions, supports (``analyze_printability``'s own verdict, which
+            knows a short ceiling bridges), fits build plate, no degenerate
             triangles.
 
             With ``auto_fix=True``, automatically repairs degenerate triangles,
@@ -1149,6 +1151,9 @@ class _DesignReasoningToolsPlugin:
             :param bed_z_mm: Build plate Z dimension (default 256).
             :param printer_id: Optional supported printer model id.  When
                 provided, printer intelligence supplies the build volume.
+            :param material: Material the supports verdict and the
+                ``printability_score`` are judged for (default ``"pla"``) —
+                ``analyze_printability``'s own, so the two agree.
             :returns: Dict with can_print verdict, issues, and actions taken.
             """
             if auto_fix and (err := _srv._check_auth("generate")):
@@ -1169,6 +1174,8 @@ class _DesignReasoningToolsPlugin:
                         auto_fix=auto_fix,
                         output_path=output_path or None,
                         printer_bed_mm=(bed_x_mm, bed_y_mm, bed_z_mm),
+                        printer_id=resolved_model_id,
+                        material=material or "pla",
                     ),
                 }
                 if resolved_model_id:

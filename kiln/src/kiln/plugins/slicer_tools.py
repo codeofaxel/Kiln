@@ -2409,6 +2409,7 @@ class _SlicerToolsPlugin:
                     try:
                         from kiln.plugins._validation_pipeline_internals import (
                             _SUPPORTED_FORMATS,
+                            score_phrase,
                         )
                         from kiln.plugins.validation_pipeline_tools import (
                             run_full_validation_pipeline,
@@ -2422,11 +2423,11 @@ class _SlicerToolsPlugin:
                                 material=material or "",
                             )
                             if not val_report.get("ready_to_print", True):
-                                score = val_report.get("printability_score", 0)
+                                score = score_phrase(val_report)
                                 summary = val_report.get("summary", "Validation failed")
                                 err_resp = _srv._error_dict(
                                     f"Mesh failed pre-print validation "
-                                    f"(score {score}/100): {summary} "
+                                    f"({score}): {summary} "
                                     f"Pass skip_validation=True to bypass.",
                                     code="VALIDATION_FAILED",
                                 )
@@ -2445,6 +2446,7 @@ class _SlicerToolsPlugin:
 
                             validation_summary = {
                                 "printability_score": val_report.get("printability_score"),
+                                "readiness_score": val_report.get("readiness_score"),
                                 "ready_to_print": val_report.get("ready_to_print"),
                                 "repaired": val_report.get("repaired"),
                                 "summary": val_report.get("summary"),

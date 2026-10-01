@@ -73,7 +73,9 @@ class PrintServiceQuote:
     reasoning: str
     total_cost_usd: float
     estimated_time_hours: float
-    printability_score: int
+    # analyze_printability's score for the model and material; ``None``
+    # until there is a mesh to judge (see ``_printability_score``).
+    printability_score: int | None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -105,6 +107,27 @@ class PrintServiceOrder:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _printability_score(model_path: str | None, material: str) -> int | None:
+    """analyze_printability's score for an order's model and material.
+
+    ``None`` until there is a mesh to judge — a prompt not yet generated, a
+    URL not yet fetched, a file that cannot be read.  The quote used to
+    guess from the file extension (90 for an STL, 60 for a prompt), a
+    number no analysis produced that read exactly like one.
+    """
+    if not model_path or not os.path.isfile(model_path):
+        return None
+    try:
+        from kiln.printability import analyze_printability
+        from kiln.step_import import ensure_mesh_path
+
+        mesh_path, _note = ensure_mesh_path(model_path)
+        return analyze_printability(mesh_path, material=material).score
+    except Exception:  # noqa: BLE001 — an unreadable model has no score; the quote stands
+        _logger.debug("Could not score %s for a quote", model_path, exc_info=True)
+        return None
 
 
 def _generate_order_id() -> str:
@@ -221,18 +244,7 @@ def create_print_order(request: PrintServiceRequest) -> PrintServiceQuote:
         else:
             reasoning += " Warning: both options exceed budget."
 
-    # Compute printability score (simple heuristic).
-    printability_score = 85  # default
-    if request.model_path and os.path.isfile(request.model_path):
-        ext = os.path.splitext(request.model_path)[1].lower()
-        if ext in (".stl", ".3mf"):
-            printability_score = 90
-        elif ext in (".obj",):
-            printability_score = 75
-        elif ext in (".step", ".stp"):
-            printability_score = 70
-    elif request.prompt:
-        printability_score = 60  # AI-generated models less reliable
+    printability_score = _printability_score(request.model_path, request.material)
 
     # Save order to DB.
     now = time.time()

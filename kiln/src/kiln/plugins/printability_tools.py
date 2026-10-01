@@ -394,28 +394,21 @@ class _PrintabilityToolsPlugin:
                     Enables printer-specific intelligence lookup.
             """
             import kiln.server as _srv
-            from kiln.printability import diagnose_from_signals
+            from kiln.printability import collect_failure_signals, diagnose_from_signals
 
             try:
-                # --- Gather signals ---
-                signals: dict[str, Any] = {}
-
-                # 1. Printer state (mandatory if printer available)
+                # 1. Printer state (when a printer answers)
+                state = None
                 state_data: dict[str, Any] | None = None
                 try:
                     adapter = _srv._resolve_adapter(printer_name)
                     state = adapter.get_state()
                     state_data = state.to_dict()
-                    signals["tool_temp_actual"] = state.tool_temp_actual
-                    signals["tool_temp_target"] = state.tool_temp_target
-                    signals["bed_temp_actual"] = state.bed_temp_actual
-                    signals["bed_temp_target"] = state.bed_temp_target
-                    if state.print_error:
-                        signals["print_error"] = state.print_error
                 except Exception as exc:
                     _logger.debug("Could not get printer state: %s", exc)
 
                 # 2. Model analysis (optional)
+                report = None
                 model_analysis: dict[str, Any] | None = None
                 if model_path:
                     try:
@@ -427,53 +420,21 @@ class _PrintabilityToolsPlugin:
                             printer_id=printer_id or None,
                         )
                         model_analysis = report.to_dict()
-                        if report.bed_adhesion:
-                            signals["adhesion_risk"] = report.bed_adhesion.adhesion_risk
-                            signals["contact_percentage"] = report.bed_adhesion.contact_percentage
-                        if report.overhangs:
-                            signals["overhang_pct"] = report.overhangs.overhang_percentage
-                        if report.bridging:
-                            signals["max_bridge_mm"] = report.bridging.max_bridge_length
                     except Exception as exc:
                         _logger.debug("Could not analyze model: %s", exc)
 
-                # 3. Printer intelligence (optional)
-                # Diagnose with the intelligence of the machine being
+                # 3. Signals, gathered the one way every diagnosis door
+                # gathers them — with the intelligence of the machine being
                 # diagnosed: an aimed call fell back to the default
                 # printer's model, so a second machine's failure was read
                 # against another printer's enclosure and failure modes.
                 effective_pid = _srv._resolve_printer_profile_id(printer_id, printer_name)
-                if effective_pid:
-                    try:
-                        from kiln.printer_intelligence import (
-                            diagnose_issue,
-                            get_printer_intel,
-                        )
-
-                        intel = get_printer_intel(effective_pid)
-                        # A PrinterIntel, not a dict: reading it as one
-                        # raised into the except below, so no diagnosis
-                        # ever heard the printer's enclosure or its failure
-                        # modes.  An id the catalogue does not know comes
-                        # back as its "default" stand-in, which says
-                        # nothing about this printer -- it stays unknown,
-                        # so neither the stand-in's enclosure nor its
-                        # generic failure modes are read as this machine's.
-                        if intel.id != "default":
-                            signals["printer_has_enclosure"] = intel.has_enclosure
-                            # Build symptom queries from state
-                            symptom_queries = _build_symptom_queries(state_data, signals)
-                            modes: list[dict[str, str]] = []
-                            for symptom in symptom_queries:
-                                modes.extend(diagnose_issue(effective_pid, symptom))
-                            if modes:
-                                signals["failure_modes_from_intel"] = modes
-                    except Exception as exc:
-                        _logger.debug("Could not query printer intelligence: %s", exc)
-
-                # 4. Material
-                if material:
-                    signals["material"] = material.upper()
+                signals = collect_failure_signals(
+                    state=state,
+                    report=report,
+                    printer_id=effective_pid,
+                    material=material,
+                )
 
                 # --- Run diagnosis ---
                 diagnosis = diagnose_from_signals(
@@ -505,61 +466,6 @@ class _PrintabilityToolsPlugin:
                 )
 
         _logger.debug("Registered printability tools")
-
-
-def _build_symptom_queries(
-    state_data: dict[str, Any] | None,
-    signals: dict[str, Any],
-) -> list[str]:
-    """Build symptom query strings for printer intelligence lookup."""
-    queries: list[str] = []
-
-    # Adhesion-related
-    risk = signals.get("adhesion_risk")
-    if risk == "high":
-        queries.append("bed adhesion failure")
-        queries.append("print detached from bed")
-    elif risk == "medium":
-        queries.append("poor bed adhesion")
-
-    # Thermal
-    tool_actual = signals.get("tool_temp_actual")
-    tool_target = signals.get("tool_temp_target")
-    if tool_actual is not None and tool_target is not None:
-        delta = abs(tool_actual - tool_target)
-        if delta > 10:
-            queries.append("temperature fluctuation")
-            queries.append("thermal runaway")
-
-    # Error state
-    if signals.get("print_error"):
-        # The screen's form, not the raw field.  Bambu reports print_error as
-        # a 32-bit decimal (302022663), and the machine's own display and
-        # every searchable reference render that as 1200-8007.  The decimal
-        # matched nothing here and is not a string any user or catalog would
-        # recognise; the screen form is what the failure modes claim.
-        from kiln.printers.base import format_error_code
-
-        queries.append(
-            format_error_code(signals["print_error"]) or str(signals["print_error"])
-        )
-
-    # Geometry
-    if signals.get("overhang_pct", 0) > 30:
-        queries.append("overhang failure")
-    if signals.get("max_bridge_mm", 0) > 15:
-        queries.append("bridge failure")
-
-    # Material
-    mat = signals.get("material", "")
-    if mat.upper() in {"ABS", "ASA", "PA", "PC"} and not signals.get("printer_has_enclosure"):
-        queries.append("warping")
-        queries.append("layer splitting")
-
-    if not queries:
-        queries.append("print failure")
-
-    return queries
 
 
 plugin = _PrintabilityToolsPlugin()

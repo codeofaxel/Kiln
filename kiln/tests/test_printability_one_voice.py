@@ -223,6 +223,7 @@ class TestOnePrintabilityScore:
             compare_meshes,
             predict_print_failures,
         )
+        from kiln.printability import analyze_printability
 
         doors = {
             "analyze_mesh": analyze_mesh(enclosure).to_dict(),
@@ -230,9 +231,13 @@ class TestOnePrintabilityScore:
             "predict_print_failures": predict_print_failures(enclosure),
             "compare_meshes": compare_meshes(enclosure, enclosure),
         }
+        expected = analyze_printability(enclosure).score
         for door, out in doors.items():
-            named_printability = [k for k in out if k.startswith("printability_score") or k == "printability_delta"]
-            assert not named_printability, f"{door} still calls the mesh check a printability score: {named_printability}"
+            # The one printability score a door may carry is the analyzer's.
+            named = {k: v for k, v in out.items() if k.startswith("printability_score") or k == "printability_delta"}
+            assert all(k == "printability_score" and v == expected for k, v in named.items()), (
+                f"{door} calls something other than analyze_printability's score a printability score: {named}"
+            )
             assert any(k.startswith("mesh_check_score") for k in out), f"{door} dropped the mesh check entirely"
 
 
@@ -495,3 +500,76 @@ def _fake_slice(tmp_path: Path, *, grams: float) -> MagicMock:
         message="Sliced", filament=resolve_slice_filament("PETG"),
     )
     return MagicMock(return_value=result)
+
+
+# ---------------------------------------------------------------------------
+# 5. The readiness check takes its supports verdict from the analyzer
+# ---------------------------------------------------------------------------
+
+
+def _cantilever_stl(path: Path) -> str:
+    """A 10 x 10 x 20 mm pillar with a 30 mm arm sticking out one side."""
+    from trimesh.creation import box
+
+    pillar = box(extents=(10.0, 10.0, 20.0))
+    pillar.apply_translation((0, 0, 10.0))
+    arm = box(extents=(30.0, 10.0, 3.0))
+    arm.apply_translation((5.0 + 15.0 - 0.01, 0, 20.0 - 1.5))
+    body = pillar.union(arm)
+    body.export(str(path))
+    return str(path)
+
+
+class TestReadinessSupports:
+    def test_short_ceilings_do_not_make_a_part_need_supports(self, enclosure, free_tier):
+        from kiln.generation.validation import analyze_mesh, can_print_now
+        from kiln.printability import analyze_printability
+
+        report = analyze_printability(enclosure, material="petg")
+        assert analyze_mesh(enclosure).max_overhang_angle_deg > 60  # the old trigger
+        assert report.overhangs.needs_supports is False
+
+        result = can_print_now(enclosure, material="petg")
+
+        assert result["verdict"] == "ready_to_print", result["issues"]
+        assert (result["printability_score"], result["printability_grade"]) == (report.score, report.grade)
+
+    def test_a_real_cantilever_still_needs_supports(self, tmp_path, free_tier):
+        from kiln.generation.validation import can_print_now
+        from kiln.printability import analyze_printability
+
+        arm = _cantilever_stl(tmp_path / "arm.stl")
+        assert analyze_printability(arm).overhangs.needs_supports is True  # the premise
+
+        result = can_print_now(arm)
+
+        assert result["verdict"] == "printable_with_supports", result["issues"]
+        assert [i["type"] for i in result["issues"]] == ["needs_supports"]
+
+
+class TestValidateAndPrepareScores:
+    """validate_and_prepare's ``printability_score`` is analyze_printability's.
+
+    It used to be the tally of the pipeline's own checks, which read 100 for
+    the enclosure beside the score analyze_printability gives the same part.
+    The tally is still there, as ``readiness_score``.
+    """
+
+    def test_the_score_is_the_analyzers_for_the_material_and_printer(self, enclosure, free_tier, no_auth):
+        from kiln.plugins.validation_pipeline_tools import _ValidationPipelinePlugin
+        from kiln.printability import analyze_printability
+
+        validate = _register(_ValidationPipelinePlugin)["validate_and_prepare"]
+        report = analyze_printability(enclosure, material="petg", printer_id="bambu_a1")
+
+        result = validate(input_path=enclosure, printer_id="bambu_a1", material="petg")
+
+        assert (result["printability_score"], result["printability_grade"]) == (report.score, report.grade)
+        assert isinstance(result["readiness_score"], int) and result["score_breakdown"] is not None
+        assert f"printability {report.score}/100" in result["summary"], result["summary"]
+
+    def test_the_tally_keeps_its_own_name(self):
+        from kiln.plugins._validation_pipeline_internals import score_phrase
+
+        assert score_phrase({"printability_score": 89, "readiness_score": 100}) == "printability 89/100"
+        assert score_phrase({"printability_score": None, "readiness_score": 0}) == "readiness 0/100"

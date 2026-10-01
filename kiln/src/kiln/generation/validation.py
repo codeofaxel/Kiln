@@ -3751,6 +3751,7 @@ def can_print_now(
     output_path: str | None = None,
     printer_bed_mm: tuple[float, float, float] | None = None,
     printer_id: str | None = None,
+    material: str = "pla",
 ) -> dict[str, Any]:
     """Single-call print readiness check with optional auto-repair.
 
@@ -3758,7 +3759,9 @@ def can_print_now(
     1. Mesh parseable and non-empty
     2. Manifold (watertight)
     3. No floating regions
-    4. Overhangs within limits
+    4. Supports — :func:`kiln.printability.analyze_printability`'s own
+       verdict for ``material`` and ``printer_id``, which knows a short
+       ceiling bridges; its score and grade ride along
     5. Fits on build plate
     6. No degenerate triangles
 
@@ -3777,6 +3780,8 @@ def can_print_now(
         printer_id: Optional supported printer model id.  When provided and
             ``printer_bed_mm`` is omitted, printer intelligence supplies the
             build volume.
+        material: Material the supports verdict and printability score are
+            judged for (default ``"pla"``, as in ``analyze_printability``).
 
     Returns:
         Dict with pass/fail verdict, issues found, and actions taken.
@@ -3864,10 +3869,21 @@ def can_print_now(
             "fix": "Run with auto_fix=True or use remove_floating_regions()",
         })
 
-    if analysis.max_overhang_angle_deg > 60:
+    # Supports are the printability analyzer's call, not the steepest
+    # facet's: the quick check read any downward face past 60° as needing
+    # supports, so a part whose only overhangs are short ceilings a slicer
+    # bridges came back "printable_with_supports" while analyze_printability
+    # said it needed none.
+    from kiln.printability import analyze_printability
+
+    report = analyze_printability(working_path, material=material, printer_id=printer_id)
+    if report.overhangs.needs_supports:
         issues.append({
-            "type": "severe_overhangs",
-            "detail": f"Max overhang {analysis.max_overhang_angle_deg}° (limit: 60°)",
+            "type": "needs_supports",
+            "detail": (
+                f"{report.overhangs.overhang_percentage:.0f}% of the surface "
+                "overhangs further than prints without support"
+            ),
             "fix": "Use optimize_print_orientation() or enable supports in slicer",
         })
 
@@ -3897,7 +3913,7 @@ def can_print_now(
     if len(issues) == 0:
         verdict = "ready_to_print"
         can_print = True
-    elif all(i["type"] in ("severe_overhangs",) for i in issues):
+    elif all(i["type"] == "needs_supports" for i in issues):
         verdict = "printable_with_supports"
         can_print = True  # printable — just needs support enabled in slicer
     else:
@@ -3910,6 +3926,9 @@ def can_print_now(
         "issues": issues,
         "issue_count": len(issues),
         "actions_taken": actions_taken,
+        "printability_score": report.score,
+        "printability_grade": report.grade,
+        "printability_material": material,
         "mesh_check_score": analysis.mesh_check_score,
         "triangle_count": analysis.triangle_count,
         "dimensions_mm": analysis.dimensions_mm,

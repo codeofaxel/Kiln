@@ -65,8 +65,17 @@ class _PipelineReport:
     recommendations: list[str] = field(default_factory=list)
     ready_to_print: bool = True
     model_info: dict[str, Any] = field(default_factory=dict)
-    printability_score: int = 100
+    # The pass/fail tally of the checks above (100 less a fixed amount per
+    # failed or degraded check) — how ready this run found the file, not
+    # how printable the part is.  ``score_breakdown`` itemises it.
+    readiness_score: int = 100
     score_breakdown: list[str] = field(default_factory=list)
+    # analyze_printability's own score and grade for the pipeline's material
+    # and printer, from the printability check; ``None`` when that check
+    # could not run.  The tally used to sit under this name, so one part
+    # read 100 here and 89 everywhere else.
+    printability_score: int | None = None
+    printability_grade: str | None = None
 
     summary: str = ""
     validated_path: str = ""
@@ -83,6 +92,8 @@ class _PipelineReport:
             "ready_to_print": self.ready_to_print,
             "model_info": self.model_info,
             "printability_score": self.printability_score,
+            "printability_grade": self.printability_grade,
+            "readiness_score": self.readiness_score,
             "score_breakdown": self.score_breakdown,
             "summary": self.summary,
             "validated_path": self.validated_path,
@@ -327,12 +338,29 @@ def _get_build_volume_for_printer(printer_id: str) -> tuple[float, float, float]
 # ---------------------------------------------------------------------------
 
 
-def _compute_printability_score(
+def score_phrase(report: dict[str, Any]) -> str:
+    """How a validation result's score reads in a sentence.
+
+    The printability score when the analyzer ran, else the readiness
+    tally — each named for what it is, never a bare "score" that could be
+    either.
+    """
+    printability = report.get("printability_score")
+    if printability is not None:
+        return f"printability {printability}/100"
+    return f"readiness {report.get('readiness_score', 0)}/100"
+
+
+def _compute_readiness_score(
     checks: list[_CheckResult],
     *,
     repaired: bool,
 ) -> tuple[int, list[str]]:
-    """Compute a 0-100 printability score from the pipeline check results.
+    """Compute the 0-100 readiness tally from the pipeline check results.
+
+    Not a printability score: it counts how the checks went, and a part
+    whose checks all pass scores 100 here whatever
+    :func:`kiln.printability.analyze_printability` makes of it.
 
     Scoring formula:
         - Start at 100
@@ -371,6 +399,10 @@ def _compute_printability_score(
 
     score = max(0, min(100, score))
     return score, breakdown
+
+
+# The recovery gate in kiln-pro imports the tally by its old name.
+_compute_printability_score = _compute_readiness_score
 
 
 # ---------------------------------------------------------------------------
@@ -811,7 +843,7 @@ def _step_format_check(report: _PipelineReport, input_path: str) -> str | None:
         report.ready_to_print = False
         report.validated_path = input_path
         report.summary = f"Not ready (0/100). 1 issue: File not found: {input_path}"
-        report.printability_score = 0
+        report.readiness_score = 0
         report.next_action = None
         return None
 
@@ -827,7 +859,7 @@ def _step_format_check(report: _PipelineReport, input_path: str) -> str | None:
         report.ready_to_print = False
         report.validated_path = input_path
         report.summary = f"Not ready (0/100). 1 issue: Unsupported format: {ext}"
-        report.printability_score = 0
+        report.readiness_score = 0
         report.next_action = None
         return None
 
@@ -1143,14 +1175,24 @@ def _step_repair(
     return report.repaired_path or input_path
 
 
-def _step_printability(report: _PipelineReport, working_path: str) -> None:
-    """Step 5: printability analysis."""
+def _step_printability(
+    report: _PipelineReport,
+    working_path: str,
+    *,
+    material: str = "pla",
+    printer_id: str | None = None,
+) -> None:
+    """Step 5: printability analysis, for the pipeline's material and printer."""
     try:
         from kiln.printability import analyze_printability
 
-        pa_report = analyze_printability(working_path)
+        pa_report = analyze_printability(
+            working_path, material=material, printer_id=printer_id,
+        )
         score = pa_report.score
         grade = pa_report.grade
+        report.printability_score = score
+        report.printability_grade = grade
 
         passed = score >= _MIN_PASS_SCORE
         details = f"Score {score}/100 (grade {grade})"

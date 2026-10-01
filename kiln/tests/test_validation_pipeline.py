@@ -933,7 +933,8 @@ class TestPrintabilityScore:
         ):
             result = _invoke_tool(stl)
 
-        assert result["printability_score"] == 100
+        assert result["readiness_score"] == 100
+        assert result["printability_score"] == mock_printability.score
 
     def test_score_less_than_100_when_warnings_present(self, tmp_path: Path) -> None:
         """Skipped modules produce warning checks → score < 100."""
@@ -947,7 +948,8 @@ class TestPrintabilityScore:
         ):
             result = _invoke_tool(stl)
 
-        assert result["printability_score"] < 100
+        assert result["readiness_score"] < 100
+        assert result["printability_score"] is None  # the analyzer never ran
         assert isinstance(result["score_breakdown"], list)
         assert len(result["score_breakdown"]) > 0
 
@@ -959,29 +961,29 @@ class TestPrintabilityScore:
         # Easiest: use a non-existent file to get 1 error, then check clamp.
         # But that exits early. Instead: call 5 error-severity checks via
         # multiple bed-fit mismatches isn't possible in one call.
-        # Simplest reproducible approach: patch _compute_printability_score
+        # Simplest reproducible approach: patch _compute_readiness_score
         # directly to verify clamping, then also test a realistic multi-error
         # scenario from existing helpers.
-        from kiln.plugins.validation_pipeline_tools import _CheckResult, _compute_printability_score
+        from kiln.plugins.validation_pipeline_tools import _CheckResult, _compute_readiness_score
 
         # 5 failed-error checks → 5*25 = 125 deductions → clamped to 0
         checks = [
             _CheckResult(name=f"check_{i}", passed=False, severity="error", details="x")
             for i in range(5)
         ]
-        score, breakdown = _compute_printability_score(checks, repaired=False)
+        score, breakdown = _compute_readiness_score(checks, repaired=False)
         assert score == 0
         assert len(breakdown) == 5
 
     def test_score_breakdown_lists_deductions(self, tmp_path: Path) -> None:
         """score_breakdown contains human-readable deduction strings."""
-        from kiln.plugins.validation_pipeline_tools import _CheckResult, _compute_printability_score
+        from kiln.plugins.validation_pipeline_tools import _CheckResult, _compute_readiness_score
 
         checks = [
             _CheckResult(name="watertight", passed=False, severity="warning", details="x"),
             _CheckResult(name="printability", passed=True, severity="warning", details="x"),
         ]
-        score, breakdown = _compute_printability_score(checks, repaired=True)
+        score, breakdown = _compute_readiness_score(checks, repaired=True)
         # -10 (warning fail) + -5 (skipped) + -15 (repaired) = -30 → 70
         assert score == 70
         assert any("watertight" in s for s in breakdown)
@@ -1382,16 +1384,16 @@ class TestStructuralAssessment:
 
 
 # ---------------------------------------------------------------------------
-# Tests — _compute_printability_score unit tests
+# Tests — _compute_readiness_score unit tests
 # ---------------------------------------------------------------------------
 
 
 class TestComputePrintabilityScore:
-    """Unit tests for the _compute_printability_score function."""
+    """Unit tests for the _compute_readiness_score function."""
 
     def test_all_pass_returns_100(self) -> None:
         """All checks pass with info severity → score 100, no deductions."""
-        from kiln.plugins.validation_pipeline_tools import _CheckResult, _compute_printability_score
+        from kiln.plugins.validation_pipeline_tools import _CheckResult, _compute_readiness_score
 
         checks = [
             _CheckResult(name="format", passed=True, details="ok"),
@@ -1399,55 +1401,55 @@ class TestComputePrintabilityScore:
             _CheckResult(name="watertight", passed=True, details="ok"),
             _CheckResult(name="structural", passed=True, details="ok"),
         ]
-        score, breakdown = _compute_printability_score(checks, repaired=False)
+        score, breakdown = _compute_readiness_score(checks, repaired=False)
         assert score == 100
         assert breakdown == []
 
     def test_one_warning_deducts_10(self) -> None:
         """One failed warning check → -10 deduction."""
-        from kiln.plugins.validation_pipeline_tools import _CheckResult, _compute_printability_score
+        from kiln.plugins.validation_pipeline_tools import _CheckResult, _compute_readiness_score
 
         checks = [
             _CheckResult(name="format", passed=True, details="ok"),
             _CheckResult(name="watertight", passed=False, severity="warning", details="non-manifold"),
         ]
-        score, breakdown = _compute_printability_score(checks, repaired=False)
+        score, breakdown = _compute_readiness_score(checks, repaired=False)
         assert score == 90
         assert len(breakdown) == 1
         assert "watertight" in breakdown[0]
 
     def test_one_error_deducts_25(self) -> None:
         """One failed error check → -25 deduction."""
-        from kiln.plugins.validation_pipeline_tools import _CheckResult, _compute_printability_score
+        from kiln.plugins.validation_pipeline_tools import _CheckResult, _compute_readiness_score
 
         checks = [
             _CheckResult(name="bed_fit", passed=False, severity="error", details="too big"),
         ]
-        score, breakdown = _compute_printability_score(checks, repaired=False)
+        score, breakdown = _compute_readiness_score(checks, repaired=False)
         assert score == 75
         assert len(breakdown) == 1
         assert "bed_fit" in breakdown[0]
 
     def test_repair_deducts_15(self) -> None:
         """Repair needed → -15 deduction."""
-        from kiln.plugins.validation_pipeline_tools import _CheckResult, _compute_printability_score
+        from kiln.plugins.validation_pipeline_tools import _CheckResult, _compute_readiness_score
 
         checks = [
             _CheckResult(name="format", passed=True, details="ok"),
         ]
-        score, breakdown = _compute_printability_score(checks, repaired=True)
+        score, breakdown = _compute_readiness_score(checks, repaired=True)
         assert score == 85
         assert any("repair" in s for s in breakdown)
 
     def test_score_clamps_at_zero(self) -> None:
         """Many failures clamp score to 0, never negative."""
-        from kiln.plugins.validation_pipeline_tools import _CheckResult, _compute_printability_score
+        from kiln.plugins.validation_pipeline_tools import _CheckResult, _compute_readiness_score
 
         checks = [
             _CheckResult(name=f"fail_{i}", passed=False, severity="error", details="x")
             for i in range(10)
         ]
-        score, breakdown = _compute_printability_score(checks, repaired=True)
+        score, breakdown = _compute_readiness_score(checks, repaired=True)
         assert score == 0
         assert len(breakdown) == 11  # 10 errors + 1 repair
 
@@ -2464,6 +2466,7 @@ class TestRunFullValidationPipeline:
         for key in (
             "ready_to_print",
             "printability_score",
+            "readiness_score",
             "validated_path",
             "summary",
             "next_action",
@@ -2481,7 +2484,8 @@ class TestRunFullValidationPipeline:
 
         report = run_full_validation_pipeline(str(tmp_path / "missing.stl"))
         assert report["ready_to_print"] is False
-        assert report["printability_score"] == 0
+        assert report["readiness_score"] == 0
+        assert report["printability_score"] is None
 
     def test_unsupported_format_returns_not_ready(self, tmp_path: Path) -> None:
         """An unsupported format also fails — but slice_and_print /

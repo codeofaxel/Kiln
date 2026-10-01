@@ -788,6 +788,7 @@ class _GenerationAIToolsPlugin:
                 if result.format in ("stl", "obj", "glb"):
                     from kiln.plugins.validation_pipeline_tools import (
                         run_full_validation_pipeline,
+                        score_phrase,
                     )
                     from kiln.printers.bed_fit import resolve_build_volume
 
@@ -835,13 +836,13 @@ class _GenerationAIToolsPlugin:
                         )
 
                     if not pipeline_result.get("ready_to_print", False):
-                        score = pipeline_result.get("printability_score", 0)
+                        score = score_phrase(pipeline_result)
                         summary = pipeline_result.get(
                             "summary", "Generated mesh failed validation",
                         )
                         err_resp = _srv._error_dict(
                             f"Generated mesh failed pre-print validation "
-                            f"(score {score}/100): {summary}",
+                            f"({score}): {summary}",
                             code="VALIDATION_FAILED",
                         )
                         err_resp["validation"] = pipeline_result

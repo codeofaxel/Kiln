@@ -289,17 +289,35 @@ class TestCreatePrintOrder:
         with patch("kiln.persistence.get_db", return_value=db), pytest.raises(ValueError):
             create_print_order(req)
 
-    def test_printability_score_stl(self, db, model_file):
-        req = _make_request(model_path=model_file)
+    def test_printability_score_is_the_analyzers(self, db, tmp_path):
+        """The quote scores the model as analyze_printability does, for the
+        order's material — it used to say 90 for any STL."""
+        trimesh = pytest.importorskip("trimesh")
+        from kiln.printability import analyze_printability
+
+        tower = trimesh.creation.box(extents=(8.0, 8.0, 60.0))
+        tower.apply_translation((0, 0, 30.0))
+        path = str(tmp_path / "tower.stl")
+        tower.export(path)
+        expected = analyze_printability(path, material="petg").score
+        assert expected != 90  # the premise: the old guess cannot pass
+
+        req = _make_request(model_path=path, material="petg")
         with patch("kiln.persistence.get_db", return_value=db):
             quote = create_print_order(req)
-        assert quote.printability_score == 90
+        assert quote.printability_score == expected
 
-    def test_printability_score_prompt(self, db):
+    def test_a_model_that_cannot_be_read_has_no_score(self, db, model_file):
+        req = _make_request(model_path=model_file)  # an STL with no triangles
+        with patch("kiln.persistence.get_db", return_value=db):
+            quote = create_print_order(req)
+        assert quote.printability_score is None
+
+    def test_a_prompt_has_no_score_yet(self, db):
         req = _make_request(prompt="a cube")
         with patch("kiln.persistence.get_db", return_value=db):
             quote = create_print_order(req)
-        assert quote.printability_score == 60
+        assert quote.printability_score is None
 
     def test_order_saved_to_db(self, db, model_file):
         req = _make_request(model_path=model_file)

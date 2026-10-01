@@ -625,6 +625,7 @@ def quick_print(
         try:
             from kiln.plugins._validation_pipeline_internals import (
                 _SUPPORTED_FORMATS,
+                score_phrase,
             )
             from kiln.plugins.validation_pipeline_tools import (
                 run_full_validation_pipeline,
@@ -667,7 +668,7 @@ def quick_print(
 
         ctx["validation_report"] = report
         ready = report.get("ready_to_print", True)
-        score = report.get("printability_score", 0)
+        score = score_phrase(report)
         summary = report.get("summary", "")
 
         if not ready:
@@ -675,11 +676,12 @@ def quick_print(
                 name="validate_mesh",
                 success=False,
                 message=(
-                    f"Mesh failed pre-print validation (score {score}/100): "
+                    f"Mesh failed pre-print validation ({score}): "
                     f"{summary} Pass skip_validation=True to bypass."
                 ),
                 data={
-                    "printability_score": score,
+                    "printability_score": report.get("printability_score"),
+                    "readiness_score": report.get("readiness_score"),
                     "ready_to_print": False,
                     "next_action": report.get("next_action"),
                     "summary": summary,
@@ -700,9 +702,10 @@ def quick_print(
         return PipelineStep(
             name="validate_mesh",
             success=True,
-            message=f"Print-ready (score {score}/100)",
+            message=f"Print-ready ({score})",
             data={
-                "printability_score": score,
+                "printability_score": report.get("printability_score"),
+                "readiness_score": report.get("readiness_score"),
                 "ready_to_print": True,
                 "repaired": report.get("repaired", False),
                 "summary": summary,
@@ -1121,6 +1124,7 @@ def reslice_and_print(
         try:
             from kiln.plugins._validation_pipeline_internals import (
                 _SUPPORTED_FORMATS,
+                score_phrase,
             )
             from kiln.plugins.validation_pipeline_tools import (
                 run_full_validation_pipeline,
@@ -1163,7 +1167,7 @@ def reslice_and_print(
 
         ctx["validation_report"] = report
         ready = report.get("ready_to_print", True)
-        score = report.get("printability_score", 0)
+        score = score_phrase(report)
         summary = report.get("summary", "")
 
         if not ready:
@@ -1171,11 +1175,12 @@ def reslice_and_print(
                 name="validate_mesh",
                 success=False,
                 message=(
-                    f"Mesh failed pre-print validation (score {score}/100): "
+                    f"Mesh failed pre-print validation ({score}): "
                     f"{summary} Pass skip_validation=True to bypass."
                 ),
                 data={
-                    "printability_score": score,
+                    "printability_score": report.get("printability_score"),
+                    "readiness_score": report.get("readiness_score"),
                     "ready_to_print": False,
                     "next_action": report.get("next_action"),
                     "summary": summary,
@@ -1195,9 +1200,10 @@ def reslice_and_print(
         return PipelineStep(
             name="validate_mesh",
             success=True,
-            message=f"Print-ready (score {score}/100)",
+            message=f"Print-ready ({score})",
             data={
-                "printability_score": score,
+                "printability_score": report.get("printability_score"),
+                "readiness_score": report.get("readiness_score"),
                 "ready_to_print": True,
                 "repaired": report.get("repaired", False),
                 "summary": summary,
@@ -1792,6 +1798,7 @@ def benchmark(
         try:
             from kiln.plugins._validation_pipeline_internals import (
                 _SUPPORTED_FORMATS,
+                score_phrase,
             )
             from kiln.plugins.validation_pipeline_tools import (
                 run_full_validation_pipeline,
@@ -1841,7 +1848,7 @@ def benchmark(
                     )
                 else:
                     ready = report.get("ready_to_print", True)
-                    score = report.get("printability_score", 0)
+                    score = score_phrase(report)
                     summary = report.get("summary", "")
                     if not ready:
                         steps.append(
@@ -1850,11 +1857,12 @@ def benchmark(
                                 success=False,
                                 message=(
                                     f"Mesh failed pre-print validation "
-                                    f"(score {score}/100): {summary} "
+                                    f"({score}): {summary} "
                                     f"Pass skip_validation=True to bypass."
                                 ),
                                 data={
-                                    "printability_score": score,
+                                    "printability_score": report.get("printability_score"),
+                                    "readiness_score": report.get("readiness_score"),
                                     "ready_to_print": False,
                                     "next_action": report.get("next_action"),
                                     "summary": summary,
@@ -1884,9 +1892,10 @@ def benchmark(
                         PipelineStep(
                             name="validate_mesh",
                             success=True,
-                            message=f"Print-ready (score {score}/100)",
+                            message=f"Print-ready ({score})",
                             data={
-                                "printability_score": score,
+                                "printability_score": report.get("printability_score"),
+                                "readiness_score": report.get("readiness_score"),
                                 "ready_to_print": True,
                                 "repaired": report.get("repaired", False),
                                 "summary": summary,

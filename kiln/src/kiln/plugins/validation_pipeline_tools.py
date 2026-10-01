@@ -73,7 +73,7 @@ from kiln.plugins._validation_pipeline_internals import (
     _CheckResult as _CheckResult,
 )
 from kiln.plugins._validation_pipeline_internals import (
-    _compute_printability_score as _compute_printability_score,
+    _compute_readiness_score as _compute_readiness_score,
 )
 from kiln.plugins._validation_pipeline_internals import (
     _get_build_volume_for_printer as _get_build_volume_for_printer,
@@ -124,6 +124,9 @@ from kiln.plugins._validation_pipeline_internals import (
     _step_printability as _step_printability,
 )
 from kiln.plugins._validation_pipeline_internals import (
+    score_phrase as score_phrase,
+)
+from kiln.plugins._validation_pipeline_internals import (
     _step_repair as _step_repair,
 )
 from kiln.plugins._validation_pipeline_internals import (
@@ -161,7 +164,9 @@ def run_full_validation_pipeline(
     auto-repair, printability analysis, support assessment, structural check,
     bed-fit, material check, and estimation.  Returns the same dict shape as
     ``validate_and_prepare`` — including ``ready_to_print``, ``validated_path``,
-    ``printability_score``, ``next_action``, and ``summary``.
+    ``printability_score`` (analyze_printability's, for ``material`` and
+    ``printer_id``), ``readiness_score`` (the tally of the checks),
+    ``next_action``, and ``summary``.
 
     :param input_path: Path to a 3D model file (.stl, .3mf, .obj, .step, .glb).
     :param printer_id: Optional printer model ID for bed-fit checking.
@@ -197,10 +202,10 @@ def run_full_validation_pipeline(
         report.ready_to_print = False
         report.validated_path = input_path
         report.summary = (
-            "Not ready (0/100). This is a STEP file and no converter is "
-            "installed."
+            "Not ready (readiness 0/100). This is a STEP file and no "
+            "converter is installed."
         )
-        report.printability_score = 0
+        report.readiness_score = 0
         report.next_action = None
         result = report.to_dict()
         # The structured remedy travels with the report so the agent can tell
@@ -217,8 +222,8 @@ def run_full_validation_pipeline(
         report.status = "fail"
         report.ready_to_print = False
         report.validated_path = input_path
-        report.summary = f"Not ready (0/100). STEP conversion failed: {exc}"
-        report.printability_score = 0
+        report.summary = f"Not ready (readiness 0/100). STEP conversion failed: {exc}"
+        report.readiness_score = 0
         report.next_action = None
         return report.to_dict()
 
@@ -245,7 +250,9 @@ def run_full_validation_pipeline(
     )
 
     # Step 5: Printability
-    _step_printability(report, working_path)
+    _step_printability(
+        report, working_path, material=material or "pla", printer_id=printer_id or None,
+    )
 
     # Step 5b: Support assessment
     _step_support_assessment(
@@ -287,9 +294,9 @@ def run_full_validation_pipeline(
         report.ready_to_print = True
 
     # ----------------------------------------------------------
-    # Step 11: Printability score
+    # Step 11: Readiness tally
     # ----------------------------------------------------------
-    report.printability_score, report.score_breakdown = _compute_printability_score(
+    report.readiness_score, report.score_breakdown = _compute_readiness_score(
         report.checks,
         repaired=report.repaired,
     )
@@ -310,7 +317,7 @@ def run_full_validation_pipeline(
         elif not c.passed and c.severity == "warning":
             warnings.append(_sanitize_summary_detail(c.details))
 
-    score_str = f"{report.printability_score}/100"
+    score_str = score_phrase(vars(report))
 
     # Build cost/time snippet for summary from model_info
     _est_snippet = ""
@@ -448,7 +455,11 @@ class _ValidationPipelinePlugin:
                 "asa", "tpu").  When provided, adds a material-specific check
                 for known print-quality risks.  If empty, material check is skipped.
             :returns: Dict with pass/fail status, per-check details, recommendations,
-                ``printability_score`` (0-100), and ``score_breakdown``.
+                ``printability_score`` and ``printability_grade``
+                (analyze_printability's, for ``material`` and ``printer_id``;
+                ``None`` when the analysis could not run), and
+                ``readiness_score`` (0-100, the tally of the checks) with its
+                ``score_breakdown``.
             """
             import kiln.server as _srv
             if err := _srv._check_auth("generate"):
@@ -515,7 +526,8 @@ class _ValidationPipelinePlugin:
             original_info: dict[str, Any] = {
                 "dimensions_mm": baseline.get("model_info", {}).get("dimensions_mm", {}),
                 "triangles": baseline.get("model_info", {}).get("triangles", 0),
-                "printability_score": baseline.get("printability_score", 0),
+                "printability_score": baseline.get("printability_score"),
+                "readiness_score": baseline.get("readiness_score", 0),
             }
 
             # Extract dimensions for scaling logic.  ``or``-chaining, not
@@ -674,7 +686,8 @@ class _ValidationPipelinePlugin:
             prepared_info: dict[str, Any] = {
                 "dimensions_mm": prepared_dims,
                 "triangles": prepared_report.get("model_info", {}).get("triangles", 0),
-                "printability_score": prepared_report.get("printability_score", 0),
+                "printability_score": prepared_report.get("printability_score"),
+                "readiness_score": prepared_report.get("readiness_score", 0),
                 "stl_path": working_path,
             }
 

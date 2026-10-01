@@ -4989,6 +4989,117 @@ def recommend_adhesion(
 # ---------------------------------------------------------------------------
 
 
+def failure_symptom_queries(signals: dict[str, Any]) -> list[str]:
+    """Symptom strings to search a printer's curated failure modes with.
+
+    One builder for every diagnosis door.  The live diagnosis and the
+    retry each kept their own copy, and the copies drifted (only one asked
+    about thermal runaway); both also named the warp-prone materials by
+    hand, four of the twenty :data:`_HIGH_WARP_MATERIALS` lists.
+    """
+    queries: list[str] = []
+
+    risk = signals.get("adhesion_risk")
+    if risk == "high":
+        queries.append("bed adhesion failure")
+        queries.append("print detached from bed")
+    elif risk == "medium":
+        queries.append("poor bed adhesion")
+
+    tool_actual = signals.get("tool_temp_actual")
+    tool_target = signals.get("tool_temp_target")
+    if tool_actual is not None and tool_target is not None and abs(tool_actual - tool_target) > 10:
+        queries.append("temperature fluctuation")
+        queries.append("thermal runaway")
+
+    if signals.get("print_error"):
+        # The screen's form, not the raw field.  Bambu reports print_error as
+        # a 32-bit decimal (302022663), and the machine's own display and
+        # every searchable reference render that as 1200-8007.  The decimal
+        # matched nothing and is not a string any user or catalog would
+        # recognise; the screen form is what the failure modes claim.
+        from kiln.printers.base import format_error_code
+
+        queries.append(
+            format_error_code(signals["print_error"]) or str(signals["print_error"])
+        )
+
+    if signals.get("overhang_pct", 0) > 30:
+        queries.append("overhang failure")
+    if signals.get("max_bridge_mm", 0) > 15:
+        queries.append("bridge failure")
+
+    if (
+        str(signals.get("material") or "").upper() in _HIGH_WARP_MATERIALS
+        and not signals.get("printer_has_enclosure")
+    ):
+        queries.append("warping")
+        queries.append("layer splitting")
+
+    if not queries:
+        queries.append("print failure")
+    return queries
+
+
+def collect_failure_signals(
+    *,
+    state: Any = None,
+    report: PrintabilityReport | None = None,
+    printer_id: str | None = None,
+    material: str | None = None,
+) -> dict[str, Any]:
+    """The signals :func:`diagnose_from_signals` reads, gathered one way.
+
+    Every door that diagnoses a failure builds this dict here: the live
+    diagnosis and the retry each built their own, and both copies carried
+    the same two silent faults — the printer profile read as a dict (it is
+    a :class:`~kiln.printer_intelligence.PrinterIntel`, so the read raised
+    into a best-effort ``except`` and no diagnosis heard the enclosure or
+    the printer's failure modes) and ``bridging.max_bridge_length`` (the
+    field is ``max_bridge_length_mm``, so a long bridge never reached a
+    verdict).  The material is set before the failure-mode search, which
+    asks about it.
+
+    :param state: The printer's state (``PrinterState``) or ``None``.
+    :param report: The failed model's printability report, or ``None``.
+    :param printer_id: Catalogue id of the machine being diagnosed.  An id
+        the catalogue does not know comes back as its ``"default"``
+        stand-in, which says nothing about this printer, so it stays
+        unknown: no enclosure claim and no stand-in failure modes.
+    :param material: The material that was printed.
+    """
+    signals: dict[str, Any] = {}
+    if state is not None:
+        signals["tool_temp_actual"] = state.tool_temp_actual
+        signals["tool_temp_target"] = state.tool_temp_target
+        signals["bed_temp_actual"] = state.bed_temp_actual
+        signals["bed_temp_target"] = state.bed_temp_target
+        if state.print_error:
+            signals["print_error"] = state.print_error
+    if report is not None:
+        signals["adhesion_risk"] = report.bed_adhesion.adhesion_risk
+        signals["contact_percentage"] = report.bed_adhesion.contact_percentage
+        signals["overhang_pct"] = report.overhangs.overhang_percentage
+        signals["max_bridge_mm"] = report.bridging.max_bridge_length_mm
+    if material:
+        signals["material"] = material.upper()
+    if printer_id:
+        try:
+            from kiln.printer_intelligence import diagnose_issue, get_printer_intel
+
+            intel = get_printer_intel(printer_id)
+            if getattr(intel, "id", "default") != "default":
+                signals["printer_has_enclosure"] = bool(intel.has_enclosure)
+                modes: list[dict[str, str]] = []
+                for symptom in failure_symptom_queries(signals):
+                    modes.extend(diagnose_issue(printer_id, symptom))
+                if modes:
+                    signals["failure_modes_from_intel"] = modes
+        except Exception:  # noqa: BLE001 — a catalogue miss is not a diagnosis error
+            logger.debug("printer intelligence unavailable for %s", printer_id, exc_info=True)
+    return signals
+
+
 def diagnose_from_signals(
     signals: dict[str, Any],
     *,
@@ -4998,8 +5109,7 @@ def diagnose_from_signals(
     """Produce a failure diagnosis from collected physical signals.
 
     This is pure logic — no I/O, no adapter calls — making it easy to test.
-    The ``signals`` dict is assembled by the MCP tool from printer state,
-    model analysis, gcode metadata, and printer intelligence.
+    The ``signals`` dict comes from :func:`collect_failure_signals`.
 
     :param signals: Dict of signal values (see source for expected keys).
     :param printer_id: Printer model identifier for context.
