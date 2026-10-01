@@ -31,6 +31,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Name a screw or insert the way you'd say it and get the right hole first time (Pro+).** See https://kiln3d.com/pricing.
+
 - **Whole-object wrapped textures look better, including on round objects like cups.**
 
 - **Agreeing to the Terms before you sign in now counts for your account too.**
