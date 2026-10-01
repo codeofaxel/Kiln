@@ -743,6 +743,28 @@ class TestConsentFloor:
         mark_occupied(bambu, PlateJob(file="coin.gcode", max_z_mm=3.0))
         assert bambu.park_head().success
 
+    def test_a_travel_refusal_hands_over_a_look_and_the_press_does_not(self, bambu, monkeypatch):
+        """A travel over a recorded part is a question a look can settle;
+        the press onto the plate asks a person, whatever a camera shows."""
+        from kiln.plate_state import PlateJob, mark_from_camera, mark_occupied
+
+        from .test_plate_camera import _png
+
+        self._mini(bambu, monkeypatch)
+        assert bambu.snapshot_source == "printer"
+        monkeypatch.setattr(bambu, "get_snapshot", _png)
+        mark_occupied(bambu, PlateJob(file="vase.gcode", max_z_mm=60.0))
+        with pytest.raises(PlateClearRequired) as info:
+            bambu.park_head()
+        text = str(info.value)
+        assert info.value.snapshot_path and info.value.snapshot_path in text
+        assert 'look_at_plate with seen="clear"' in text
+        mark_from_camera(bambu, seen="clear", judged_by="agent")
+        assert bambu.park_head().success, "a look that saw an empty plate answers the row"
+        with pytest.raises(PlateClearRequired) as press:
+            bambu.home_axes()
+        assert "look_at_plate" not in str(press.value) and "plate_clear=true on home_axes" in str(press.value)
+
 
 class TestPlateRecordDoors:
     def test_kiln_plate_clear_records_a_persons_word(self, bambu, monkeypatch):
@@ -755,6 +777,57 @@ class TestPlateRecordDoors:
         out = run_plate(action="clear", note="looked")
         assert out["success"] is True and out["plate"]["status"] == "clear" and out["plate"]["source"] == "human"
         assert plate_status()["plate"]["status"] == "clear"
+
+    @pytest.mark.parametrize("verb", ["home", "park"])
+    def test_a_persons_word_on_either_verb_is_written_down(self, bambu, monkeypatch, verb):
+        """``plate_clear=true`` is the same statement on ``park_head`` as on ``home_axes``.
+
+        2026-10-01: a park ran on the person's word and left the record
+        ``occupied``, so the slice that followed still refused; only a
+        home afterwards flipped it.  Through the tool door, on a recorded
+        part taller than the raise -- the case where the word is needed.
+        """
+        import kiln.server as srv
+        from kiln.plate_state import PlateJob, mark_occupied
+        from kiln.plugins.homing_tools import home_axes, park_head, plate_status
+
+        travel = _fake_home_doc(verb="park")
+        _serve(monkeypatch, {"home": travel, "park": travel})
+        bambu._printer_model = "bambu_a1"
+        _idle(bambu, monkeypatch)
+        monkeypatch.setattr(srv, "_resolve_control_target", lambda name: (bambu, "default"))
+        monkeypatch.setattr(srv, "_emergency_latch_error", lambda *a, **k: None)
+        monkeypatch.setattr(srv, "_check_auth", lambda *a, **k: None)
+        monkeypatch.setattr(srv, "_check_rate_limit", lambda *a, **k: None)
+        monkeypatch.setattr(srv, "_check_confirmation", lambda *a, **k: None)
+        mark_occupied(bambu, PlateJob(file="cube.gcode.3mf", max_z_mm=20.0), source="print_ended")
+
+        def door(**kwargs):
+            return home_axes(axes="X", **kwargs) if verb == "home" else park_head(**kwargs)
+
+        refused = door()
+        assert refused["success"] is False and refused["error"]["code"] == "PLATE_CLEAR_REQUIRED"
+        assert plate_status()["plate"]["status"] == "occupied"
+        planned = door(plan_only=True, plate_clear=True)
+        assert planned["success"] is True
+        assert plate_status()["plate"]["status"] == "occupied", "a plan sends nothing and records nothing"
+        assert door(plate_clear=True)["success"] is True
+        plate = plate_status()["plate"]
+        assert plate["status"] == "clear" and plate["source"] == "human"
+        assert door()["success"] is True, "the record now answers the row question on its own"
+
+    @pytest.mark.parametrize("verb", ["home", "park"])
+    def test_the_word_is_recorded_on_a_backend_that_never_asked(self, monkeypatch, verb):
+        from kiln.plate_state import mark_occupied, plate_occupancy
+
+        adapter = _build("octoprint")
+        _idle(adapter, monkeypatch)
+        monkeypatch.setattr(adapter, "send_gcode", lambda cmds: CommandVerdict.accepted_only("ok"))
+        mark_occupied(adapter, None, source="print_ended")
+        result = adapter.home_axes(axes="X", plate_clear=True) if verb == "home" else adapter.park_head(plate_clear=True)
+        assert result.success
+        state = plate_occupancy(adapter)
+        assert state.clear and state.source == "human"
 
 
 class TestDoctorWithoutAPlan:

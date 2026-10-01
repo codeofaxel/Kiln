@@ -33,6 +33,7 @@ Usage::
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import re
 from collections.abc import Iterable
@@ -1504,12 +1505,34 @@ def slicer_filament_totals(text: str) -> SlicerFilamentTotals:
 
 #: The filament types a slicer sliced for, one per filament slot:
 #: PrusaSlicer, OrcaSlicer and Bambu Studio write ``; filament_type =
-#: PLA;PLA;PETG`` in their settings block, and a 3MF's settings text writes
-#: the same line without the ``;``.  Cura-style headers write one
-#: ``;MATERIAL:PLA``.  OrcaSlicer's note at each prime-tower tool change,
-#: ``; material : PLA -> PETG``, is not a setting and is never read.
+#: PLA;PLA;PETG`` in a G-code file's settings block, and PrusaSlicer writes
+#: the same line into a project it saves; a settings file of bare lines
+#: writes it without the ``;``.  Bambu Studio and OrcaSlicer save a
+#: project's settings as one JSON object instead, the types a list under
+#: the same key (:func:`slicer_json_settings`).  Cura-style headers write
+#: one ``;MATERIAL:PLA``.  OrcaSlicer's note at each prime-tower tool
+#: change, ``; material : PLA -> PETG``, is not a setting and is never read.
 _FILAMENT_TYPE_LINE = re.compile(r"^(?:;[ \t]*)?filament_type[ \t]*=[ \t]*(?P<v>\S.*?)[ \t]*$", re.I | re.M)
 _CURA_MATERIAL_LINE = re.compile(r"^;[ \t]*MATERIAL:[ \t]*(?P<v>\S.*?)[ \t]*$", re.M)
+
+
+_JSON_OBJECT_START = re.compile(r"\s*\{")
+
+
+def slicer_json_settings(text: str) -> dict[str, Any] | None:
+    """The settings of a project Bambu Studio or OrcaSlicer saved, which
+    they write as one JSON object: each value a string, or a list with one
+    entry per extruder or filament.  ``None`` for text that is not one
+    JSON object -- a G-code file, PrusaSlicer's lines, a file cut short.
+    Never raises.
+    """
+    if _JSON_OBJECT_START.match(text) is None:
+        return None
+    try:
+        settings = json.loads(text)
+    except (ValueError, RecursionError):
+        return None
+    return settings if isinstance(settings, dict) else None
 
 
 def slicer_filament_types(text: str) -> tuple[str, ...]:
@@ -1524,6 +1547,12 @@ def slicer_filament_types(text: str) -> tuple[str, ...]:
     wrapped for a printer states the types it told the printer before the
     slicer's own block.  Never raises.
     """
+    settings = slicer_json_settings(text)
+    if settings is not None:
+        listed = settings.get("filament_type")
+        if isinstance(listed, str):
+            listed = listed.split(";") if listed.strip() else []
+        return tuple(str(slot).strip() for slot in listed) if isinstance(listed, list) else ()
     candidates = "\n".join(
         line.strip()
         for line in text.splitlines()
@@ -1543,6 +1572,43 @@ def slicer_material_label(types: Iterable[str]) -> str | None:
     raw per-slot list, which read as one material called ``"PLA;PLA"``."""
     words = [str(t).strip().upper() for t in types]
     return " + ".join(dict.fromkeys(w for w in words if w)) or None
+
+
+# ---------------------------------------------------------------------------
+# The nozzle a file was sliced for
+# ---------------------------------------------------------------------------
+
+#: PrusaSlicer, OrcaSlicer and Bambu Studio write ``; nozzle_diameter = 0.4``
+#: in their settings block, one entry per extruder (``0.4,0.4``).  Cura
+#: writes no such line.
+_NOZZLE_DIAMETER_LINE = re.compile(r"^;[ \t]*nozzle_diameter[ \t]*=[ \t]*(?P<v>\S.*?)[ \t]*$", re.I | re.M)
+#: Nozzles run from 0.2 mm to under 2 mm; a figure outside this is not one.
+_NOZZLE_DIAMETER_BOUNDS_MM = (0.0, 5.0)
+
+
+def slicer_nozzle_diameters(text: str) -> tuple[tuple[float, ...], ...]:
+    """Every statement *text* makes of the nozzle it was sliced for, in file
+    order: one tuple per ``nozzle_diameter`` setting line, one entry per
+    extruder.  ``()`` when it states none.
+
+    A file a printer's package was wrapped around can state it twice -- in
+    the header the printer reads, then in the slicer's own block.  The LAST
+    statement is the slicer's: the size the toolpath was laid out for.
+    Never raises.
+    """
+    candidates = "\n".join(line.strip() for line in text.splitlines() if "nozzle_diameter" in line.lower())
+    low, high = _NOZZLE_DIAMETER_BOUNDS_MM
+    statements: list[tuple[float, ...]] = []
+    for m in _NOZZLE_DIAMETER_LINE.finditer(candidates):
+        sizes: list[float] = []
+        for part in re.split(r"[,;]", m.group("v")):
+            with contextlib.suppress(ValueError):
+                size = float(part)
+                if low < size <= high:
+                    sizes.append(size)
+        if sizes:
+            statements.append(tuple(sizes))
+    return tuple(statements)
 
 
 # ---------------------------------------------------------------------------

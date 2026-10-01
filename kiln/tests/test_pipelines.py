@@ -681,7 +681,7 @@ class TestResliceAndPrintPipeline:
             overrides=overrides,
             skip_validation=True,
         )
-        mock_resolve.assert_called_once_with("ender3", overrides=overrides)
+        mock_resolve.assert_called_once_with("ender3", overrides=overrides, printer_name=None)
 
     @patch("kiln.slicer.slice_file", side_effect=Exception("slice error"))
     @patch("kiln.slicer_profiles.resolve_slicer_profile", return_value="/tmp/profile.ini")
@@ -995,7 +995,7 @@ class TestResliceAndPrintPipeline:
                 overrides={},
                 skip_validation=True,
             )
-            mock_resolve.assert_called_once_with("ender3", overrides={})
+            mock_resolve.assert_called_once_with("ender3", overrides={}, printer_name=None)
 
     def test_registered_in_pipelines_dict(self) -> None:
         assert "reslice_and_print" in PIPELINES

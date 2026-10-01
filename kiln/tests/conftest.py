@@ -15,8 +15,30 @@ from __future__ import annotations
 import contextlib
 import functools
 import os
+import site
 import sys
 import tempfile
+
+# ---------------------------------------------------------------------------
+# Pin the user site before HOME moves.  MUST stay above the HOME move.
+# ---------------------------------------------------------------------------
+# Python derives the per-user package directory from HOME when an
+# interpreter STARTS, so every interpreter launched after the move below
+# looks for it under the scratch home and the packages installed there
+# (``pip install --user``: requests, mcp, numpy on a developer machine)
+# are gone.  That is every child a test spawns with ``sys.executable`` --
+# and every pytest-xdist worker, which the controller launches after it
+# has loaded this file.  A worker still imports those packages, because
+# xdist hands it the controller's ``sys.path``, but its own
+# ``site.getuserbase()`` answers with the controller's scratch home, so a
+# test that reads it to build a child's environment is right in a serial
+# run and wrong in a parallel one.
+#
+# Naming the directory in the environment fixes every interpreter at once:
+# a worker inherits it, and so does any child of any test.  ``setdefault``
+# because the first process to get here is the only one that still knows
+# the real answer; a worker must keep what it was handed.
+os.environ.setdefault("PYTHONUSERBASE", site.getuserbase())
 
 # ---------------------------------------------------------------------------
 # Relocate HOME before anything imports kiln.  MUST stay first.

@@ -42,6 +42,13 @@ injected preamble (``M201``/``M203`` machine limits, ``M73`` progress) and
 postamble (``; MACHINE_END_GCODE_END``, spaghetti detector).  They are the
 A1-proven artifacts and are left exactly as they are.
 
+A start capture also holds a few values that were its one print's: the patch
+of bed the levelling probes, and on some machines a check that depends on
+the print's height and a nozzle trim that depends on the plate and the bed
+temperature.  The files keep them as recorded; the build puts this print's
+in their place (see ``_fit_start_to_print``), from the lines the maker's own
+slicer writes in each case (``bambu_start_variants.json``).
+
 The end capture is no longer what an A1 receives, though.  A capture holds
 the numbers of the one print it was taken from, and two of the end block's
 lifts are the part's own height: this one froze "100 mm above the part" as
@@ -114,6 +121,7 @@ from kiln.gcode import (
     has_axis_word,
     slicer_filament_totals,
     slicer_filament_types,
+    slicer_nozzle_diameters,
     slicer_print_time,
 )
 
@@ -283,25 +291,32 @@ _fallback_warned: set[tuple[str, str]] = set()
 class BambuPrintSettings:
     """Print-specific settings for Bambu 3MF building.
 
-    All temperatures are in degrees Celsius.  ``hotend_temp``, ``bed_temp``
-    and ``filament_type`` left ``None`` mean "the caller did not say": the
-    build reads them off the G-code being wrapped -- the temperatures its
-    first heating commands ask for and the ``filament_type`` its slicer
-    wrote (every Kiln slice carries one, see :mod:`kiln.slicer_filament`)
-    -- and falls back to PLA on the A1 (220 / 65 / ``PLA``) only for a body
-    that says nothing.  A value the caller states always wins.  Whatever
-    the type's origin, it reaches the printer in Bambu's own vocabulary
-    (:func:`bambu_filament_type`).
+    All temperatures are in degrees Celsius.  ``hotend_temp``, ``bed_temp``,
+    ``filament_type`` and ``nozzle_diameter`` left ``None`` mean "the caller
+    did not say": the build reads them off the G-code being wrapped -- the
+    temperatures its first heating commands ask for, and the
+    ``filament_type`` and ``nozzle_diameter`` its slicer wrote (every Kiln
+    slice carries both, see :mod:`kiln.slicer_filament`) -- and falls back
+    to PLA on the A1 with its stock nozzle (220 / 65 / ``PLA`` / 0.4) only
+    for a body that says nothing.  A value the caller states always wins.
+    Whatever the type's origin, it reaches the printer in Bambu's own
+    vocabulary (:func:`bambu_filament_type`).
 
     For multi-color prints, set ``num_filaments`` > 1 and provide
     ``filament_colors`` / ``filament_types`` lists with that many entries.
+
+    ``bed_type`` is the plate fitted, by the key the maker's own files use
+    for it (:data:`BED_TYPES`).  The start sequence lowers the nozzle onto a
+    textured plate by a small trim it does not apply to the others, so a
+    plate left unsaid is the textured one, which every sequence here was
+    recorded on.
     """
 
     hotend_temp: int | None = None
     bed_temp: int | None = None
     filament_type: str | None = None
     filament_color: str = "#FFFFFF"
-    nozzle_diameter: float = 0.4
+    nozzle_diameter: float | None = None
     layer_height: float = 0.2
     bed_type: str = "textured_plate"
     model_name: str = "model"
@@ -375,6 +390,30 @@ class Bambu3MFResult:
     filament_type: str = "PLA"
     hotend_temp: int = 220
     bed_temp: int = 65
+    #: The patch of bed the start sequence levels, ``(x, y, width, depth)``,
+    #: and where it came from: ``"first_layer"`` (what this print's first
+    #: layer covers), ``"whole_bed"`` (the first layer could not be read),
+    #: or ``"capture"`` (neither could be had, so the sequence's own patch
+    #: stands).  The plate the sequence was written for.
+    levelling_region: tuple[float, float, float, float] | None = None
+    levelling_source: str = "capture"
+    bed_type: str = "textured_plate"
+
+    @property
+    def levelling_warning(self) -> str | None:
+        """Say so when the bed is not levelled where this print goes."""
+        if self.levelling_source == "first_layer" or self.quiet_start:
+            return None
+        if self.levelling_source == "whole_bed":
+            return (
+                "Kiln could not read where this print's first layer goes, so the start "
+                "sequence levels the whole plate. That takes longer and loses nothing."
+            )
+        return (
+            "Kiln could not read where this print's first layer goes and has no bed size "
+            "for this machine, so the start sequence levels the patch it was recorded "
+            "with, not this print's. Watch the first layer."
+        )
 
     @property
     def start_gcode_warning(self) -> str | None:
@@ -441,6 +480,11 @@ class Bambu3MFResult:
             "start_gcode_nozzle": self.start_gcode_nozzle,
             "end_gcode_model": self.end_gcode_model,
         }
+        if self.levelling_region is not None:
+            d["levelling_region"] = [round(v, 3) for v in self.levelling_region]
+            d["levelling_source"] = self.levelling_source
+        if self.levelling_warning:
+            d["levelling_warning"] = self.levelling_warning
         if self.start_gcode_warning:
             d["start_gcode_warning"] = self.start_gcode_warning
         if self.end_gcode_warning:
@@ -713,11 +757,24 @@ def _assert_fully_resolved(gcode: str, *, source: str) -> None:
 
 _CAPTURE_HOTEND_TEMP = 220  # every start sequence here holds PLA's 220C
 
+#: The plates the maker's slicer knows, by the key its own files use for
+#: each, and the name its start sequences test.  Every capture here was
+#: taken on the textured one.
+TEXTURED_PLATE = "textured_plate"
+BED_TYPES: dict[str, str] = {
+    TEXTURED_PLATE: "Textured PEI Plate",
+    "hot_plate": "High Temp Plate",
+    "cool_plate": "Cool Plate",
+    "eng_plate": "Engineering Plate",
+    "supertack_plate": "Supertack Plate",
+}
+
 #: What a settings field falls back to when neither the caller nor the
 #: G-code says: PLA on the A1, the values every capture was taken with.
 _FALLBACK_HOTEND_TEMP = 220
 _FALLBACK_BED_TEMP = 65
 _FALLBACK_FILAMENT_TYPE = "PLA"
+_FALLBACK_NOZZLE_DIAMETER = 0.4
 
 #: The filament types Bambu's firmware is written to -- every distinct
 #: ``filament_type`` across the filament presets the maker's own slicer
@@ -818,12 +875,18 @@ def resolve_settings_from_gcode(settings: BambuPrintSettings, gcode_body: str) -
 
     The G-code is the artifact that knows what the slice was for: the type
     its slicer wrote (``; filament_type = PETG``, the resolved material of
-    a Kiln slice) and the temperatures it heats to.  A caller that stated a
-    value keeps it.  Every type -- stated, read, or fallen back to -- is
-    then put into Bambu's vocabulary, so nothing outside it reaches the
-    machine.
+    a Kiln slice), the nozzle it was sliced for, and the temperatures it
+    heats to.  A caller that stated a value keeps it.  Every type --
+    stated, read, or fallen back to -- is then put into Bambu's vocabulary,
+    so nothing outside it reaches the machine.
     """
     hotend, bed = _print_temperatures(gcode_body)
+    nozzle_diameter = settings.nozzle_diameter
+    if nozzle_diameter is None:
+        # The slicer's own statement is the last one: what the toolpath was
+        # laid out for is what the printer is told.
+        stated = slicer_nozzle_diameters(gcode_body)
+        nozzle_diameter = stated[-1][0] if stated else _FALLBACK_NOZZLE_DIAMETER
     filament_type = settings.filament_type
     if not filament_type:
         read = slicer_filament_types(gcode_body)
@@ -839,6 +902,7 @@ def resolve_settings_from_gcode(settings: BambuPrintSettings, gcode_body: str) -
         bed_temp=settings.bed_temp if settings.bed_temp is not None else (bed or _FALLBACK_BED_TEMP),
         filament_type=bambu_filament_type(filament_type or _FALLBACK_FILAMENT_TYPE),
         filament_types=filament_types,
+        nozzle_diameter=nozzle_diameter,
     )
 
 
@@ -865,14 +929,34 @@ def _resolve_start_gcode(
     hotend_temp: int = 220,
     bed_temp: int = 65,
     filament_type: str = "PLA",
+    source_model: str | None = None,
+    levelling_region: tuple[float, float, float, float] | None = None,
+    max_z: float | None = None,
+    bed_type: str = TEXTURED_PLATE,
 ) -> str:
-    """Put this print's temperatures into a captured start sequence.
+    """Put this print's own values into a captured start sequence.
 
     The captures are post-expansion G-code, so this is a substitution of the
     values the capture was taken with --- not template resolution.  Fixed init
     temperatures (140C preheat, 250C flush, 170C wipe) are left alone, and so
     is anything at a temperature the capture did not use for the print itself.
+
+    A capture also holds what its one print was: the patch of bed its first
+    layer covered, its height, the plate it was on.  Those are this print's
+    to state (:func:`_fit_start_to_print`), and they go in first, so a line
+    that arrives with them is heated to this print's temperature like any
+    other.  *source_model* left ``None`` skips that step: the text is then
+    the capture's, temperatures aside, as it was before any of this.
     """
+    if source_model is not None:
+        template = _fit_start_to_print(
+            template,
+            source_model=source_model,
+            levelling_region=levelling_region,
+            max_z=max_z,
+            bed_type=bed_type,
+            bed_temp=bed_temp,
+        )
     capture_bed = _capture_bed_temp(template)
     lines = template.split("\n")
     resolved: list[str] = []
@@ -905,6 +989,216 @@ def _resolve_start_gcode(
         resolved.append(line)
 
     return "\n".join(resolved)
+
+
+# ---------------------------------------------------------------------------
+# This print's own values in a captured start sequence
+# ---------------------------------------------------------------------------
+#
+# A capture is what the maker's slicer wrote for one print, and a few of its
+# lines are about that print rather than about the machine: the patch of bed
+# the pre-print levelling probes (the maker's sequence probes where the first
+# layer goes), a check under the heated bed that some machines run before a
+# tall print, and a nozzle-height trim that depends on the plate and, on two
+# machines, on how hot the bed is.  Shipped as captured, every print levelled
+# the capture's patch, no tall print got its check, and every plate got the
+# textured plate's trim.
+#
+# ``bambu_start_variants.json`` holds, per model, the lines the maker's own
+# slicer writes in each of those cases; this section applies them.  At the
+# capture's own conditions the text comes back byte for byte.
+
+_START_VARIANTS_PATH = _DATA_DIR / "bambu_start_variants.json"
+_start_variants: dict[str, Any] | None = None
+
+#: A levelling line: the command and its flags, then the patch as a corner
+#: (``X`` ``Y``) and a size (``I`` ``J``), then whatever the capture ends with.
+_LEVELLING_PATCH_RE = re.compile(
+    r"^(?P<head>\s*G29(?:\.30| A\d?)(?: O)?) X\S+ Y\S+ I\S+ J\S+(?P<tail>.*)$"
+)
+
+
+def _load_start_variants() -> dict[str, Any]:
+    global _start_variants  # noqa: PLW0603
+    if _start_variants is None:
+        _start_variants = json.loads(_START_VARIANTS_PATH.read_text(encoding="utf-8"))
+    return _start_variants
+
+
+def bed_type_name(bed_type: str | None) -> str:
+    """The maker's own name for a plate, from the key its files use for it.
+
+    :raises ValueError: For a key that is not one of :data:`BED_TYPES`.  The
+        plate decides how far the nozzle is lowered onto it, so a word Kiln
+        does not know is refused rather than read as the textured plate.
+    """
+    key = str(bed_type or "").strip().lower()
+    if key not in BED_TYPES:
+        msg = (
+            f"Unknown plate {bed_type!r}. Kiln knows: {', '.join(sorted(BED_TYPES))}."
+        )
+        raise ValueError(msg)
+    return BED_TYPES[key]
+
+
+def first_layer_region(gcode_body: str) -> tuple[float, float, float, float] | None:
+    """The patch of bed a body's first layer covers: ``(x, y, width, depth)``.
+
+    The box around everything the first layer extrudes -- part, skirt, brim,
+    supports -- out to each line's edge where the slicer wrote its width.
+    That is the patch the maker's start sequence levels.  ``None`` for a body
+    whose first layer extrudes nothing this can read.
+    """
+    x = y = None
+    half_width = 0.0
+    relative_e = True
+    last_e = 0.0
+    low_x = low_y = float("inf")
+    high_x = high_y = float("-inf")
+    layers_seen = 0
+    for raw in gcode_body.split("\n"):
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith(";"):
+            if line.startswith(";LAYER_CHANGE"):
+                layers_seen += 1
+                if layers_seen == 2:
+                    break
+            elif line.startswith(";WIDTH:"):
+                with contextlib.suppress(ValueError):
+                    half_width = float(line[7:]) / 2.0
+            continue
+        code = line.split(";", 1)[0]
+        words = code.split()
+        if not words:
+            continue
+        command = words[0]
+        if command == "M83":
+            relative_e = True
+            continue
+        if command == "M82":
+            relative_e = False
+            continue
+        values: dict[str, float] = {}
+        for word in words[1:]:
+            if word[0] in "XYE" and len(word) > 1:
+                with contextlib.suppress(ValueError):
+                    values[word[0]] = float(word[1:])
+        if command == "G92":
+            if "E" in values:
+                last_e = values["E"]
+            continue
+        if command not in ("G0", "G1", "G2", "G3"):
+            continue
+        new_x, new_y = values.get("X", x), values.get("Y", y)
+        extruding = False
+        if "E" in values:
+            extruding = values["E"] > 0 if relative_e else values["E"] > last_e
+            if not relative_e:
+                last_e = values["E"]
+        moved = ("X" in values or "Y" in values) and new_x is not None and new_y is not None
+        if layers_seen == 1 and extruding and moved:
+            for px, py in ((x, y), (new_x, new_y)):
+                if px is None or py is None:
+                    continue
+                low_x, high_x = min(low_x, px - half_width), max(high_x, px + half_width)
+                low_y, high_y = min(low_y, py - half_width), max(high_y, py + half_width)
+        x, y = new_x, new_y
+    # A patch with no width or no depth is a point or a hairline, not a
+    # first layer: nothing to level over, so it is not an answer.
+    if high_x - low_x <= 0 or high_y - low_y <= 0:
+        return None
+    return low_x, low_y, high_x - low_x, high_y - low_y
+
+
+def _whole_bed_region(printer_model: str | None) -> tuple[float, float, float, float] | None:
+    """The whole plate as a levelling patch, for a body whose first layer
+    could not be read: more than this print needs, never less.  ``None`` for
+    a machine the catalogue has no bed size for."""
+    center = _bed_center(printer_model) if printer_model else None
+    if center is None:
+        return None
+    return 0.0, 0.0, center[0] * 2.0, center[1] * 2.0
+
+
+def _replace_run(lines: list[str], find: list[str], replace: list[str], *, what: str) -> list[str]:
+    """*lines* with the one run equal to *find* swapped for *replace*.
+
+    Trailing spaces are not compared.  A run that is missing, or there more
+    than once, raises: this text goes to a printer, and a capture that no
+    longer reads the way the table says is not one to edit by guesswork.
+    """
+    bare = [line.rstrip() for line in lines]
+    span = len(find)
+    hits = [i for i in range(len(bare) - span + 1) if bare[i:i + span] == find]
+    if len(hits) != 1:
+        msg = (
+            f"Cannot fit the start sequence to this print ({what}): expected one place to "
+            f"change and found {len(hits)}. Refusing to build a 3MF: this text is sent to "
+            f"the printer verbatim."
+        )
+        raise ValueError(msg)
+    at = hits[0]
+    return lines[:at] + list(replace) + lines[at + span:]
+
+
+def _fit_start_to_print(
+    template: str,
+    *,
+    source_model: str,
+    levelling_region: tuple[float, float, float, float] | None,
+    max_z: float | None,
+    bed_type: str,
+    bed_temp: int,
+) -> str:
+    """A captured start sequence with this print's patch, height and plate.
+
+    * The levelling patch becomes *levelling_region* on every levelling line
+      (``None`` leaves the capture's own).
+    * A print at least as tall as the maker's own threshold gets the check
+      under the heated bed, on the machines whose sequence has one.
+    * The plate lines are the ones the maker writes for this plate at this
+      bed temperature.
+
+    :raises ValueError: For a plate Kiln does not know, or a capture that no
+        longer matches its table.
+    """
+    plate = bed_type_name(bed_type)
+    table = _load_start_variants()
+    variants = table["models"].get(_normalize_model(source_model), {})
+    lines = template.split("\n")
+
+    conditions: list[str] = []
+    if max_z is not None and math.ceil(max_z) >= table["tall_from_mm"]:
+        conditions.append("tall")
+    textured = str(bed_type).strip().lower() == TEXTURED_PLATE
+    hot_above = table["hot_bed_above"].get(_normalize_model(source_model))
+    hot = hot_above is not None and bed_temp > hot_above
+    if not textured:
+        conditions.append("other_plate_hot_bed" if hot else "other_plate")
+    elif hot:
+        conditions.append("hot_bed")
+
+    values = {
+        "{max_print_z}": str(math.ceil(max_z)) if max_z is not None else "",
+        "{curr_bed_type}": plate,
+    }
+    for condition in conditions:
+        for change in variants.get(condition, ()):
+            replace = list(change["replace"])
+            for token, value in values.items():
+                replace = [line.replace(token, value) for line in replace]
+            lines = _replace_run(lines, list(change["find"]), replace, what=f"{source_model}, {condition}")
+
+    if levelling_region is not None:
+        x, y, width, depth = (_format_template_number(v) for v in levelling_region)
+        patch = f" X{x} Y{y} I{width} J{depth}"
+        lines = [
+            _LEVELLING_PATCH_RE.sub(lambda m: m.group("head") + patch + m.group("tail"), line)
+            for line in lines
+        ]
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -2803,11 +3097,29 @@ def build_bambu_3mf(
     start_template, start_source, start_nozzle = _start_gcode_choice(
         printer_model, settings.nozzle_diameter,
     )
+    # The patch of bed this print's first layer covers is the patch the
+    # start sequence levels.  A body whose first layer cannot be read gets
+    # the whole plate -- more than it needs, never less -- and a machine the
+    # catalogue has no bed size for keeps the capture's own patch, said.
+    levelling_region = first_layer_region(gcode_body)
+    levelling_source = "first_layer"
+    if levelling_region is None:
+        levelling_region = _whole_bed_region(printer_model or start_source)
+        levelling_source = "whole_bed" if levelling_region is not None else "capture"
+        if quiet_start is None and not resume_mode:
+            logger.warning(
+                "Could not read where this print's first layer goes; the start sequence levels %s.",
+                "the whole plate" if levelling_region is not None else "the patch it was recorded with",
+            )
     start_gcode = _resolve_start_gcode(
         start_template,
         hotend_temp=settings.hotend_temp,
         bed_temp=settings.bed_temp,
         filament_type=settings.filament_type,
+        source_model=start_source,
+        levelling_region=levelling_region,
+        max_z=max_z,
+        bed_type=settings.bed_type,
     )
     _assert_fully_resolved(start_gcode, source=f"{start_source} start gcode")
 
@@ -3087,6 +3399,9 @@ def build_bambu_3mf(
         bed_temp=int(settings.bed_temp),
         quiet_start=quiet_start is not None,
         lift_floor_mm=lift_floor_mm,
+        levelling_region=levelling_region,
+        levelling_source=levelling_source,
+        bed_type=str(settings.bed_type).strip().lower(),
     )
 
 

@@ -7,6 +7,11 @@ This gate blocks ONLY cases that are *certain* to fail or damage hardware:
   * the material's *minimum* required nozzle temperature exceeds the
     printer's rated hotend ceiling (it physically cannot melt the filament).
 
+One more block is not a physical limit but two facts that contradict each
+other: the file states one nozzle size and the printer's own setting states
+another (:mod:`kiln.nozzle_size_check`).  One of them is wrong, and the gate
+does not start a print while they disagree.
+
 Everything *probabilistic* — overhangs, thin walls, bed-adhesion/warp risk,
 abrasive nozzle wear — is the advisory layer's job and is deliberately NOT
 gated here.  (Membership test, from the safety review: "is failure or damage
@@ -45,6 +50,7 @@ import logging
 import os
 from typing import Any
 
+from kiln.nozzle_size_check import MISMATCH_CODE as NOZZLE_SIZE_MISMATCH
 from kiln.tiers_and_terms import upgrade_nudge_block
 
 _logger = logging.getLogger(__name__)
@@ -684,6 +690,51 @@ def _read_back_refusal(
             "If you know this file is safe, the single-use human override, "
             "force_print_oversize, covers this block too: a human calls it for this "
             "printer and re-issues the print once; an autonomous agent cannot "
+            "self-approve it."
+        ),
+    }
+
+
+def _nozzle_size_verdict(
+    adapter: Any, job_path: str, file_name: str, printer_id: str | None, override: bool,
+) -> dict[str, Any] | None:
+    """The verdict when the file and the printer state different nozzle
+    sizes (:func:`kiln.nozzle_size_check.check_nozzle_size`), or ``None``.
+
+    ``None`` whenever the two agree or either could not say: a size nobody
+    could read never blocks a start.  The single-use human override lets one
+    start through, the way it does for every other block.
+    """
+    from kiln.nozzle_size_check import check_nozzle_size
+
+    check = check_nozzle_size(adapter, job_path)
+    if not check.refuses:
+        return None
+    reason = check.sentence(os.path.basename(str(file_name)))
+    if override:
+        _logger.warning("print_gate: OVERRIDE engaged for %s (%s)", printer_id, NOZZLE_SIZE_MISMATCH)
+        return {
+            "ok": True,
+            "blocked": False,
+            "overridden": True,
+            "override_code": NOZZLE_SIZE_MISMATCH,
+            "reason": f"OVERRIDE (human-confirmed): {reason}",
+            "nozzle_size": check.to_dict(),
+        }
+    return {
+        "ok": False,
+        "blocked": True,
+        "code": NOZZLE_SIZE_MISMATCH,
+        "reason": reason,
+        "nozzle_size": check.to_dict(),
+        "suggestions": [
+            f"Slice the part again for a {check.printer_mm:g} mm nozzle, if that is the one fitted.",
+            f"Correct the nozzle setting on the printer, if a {check.file_mm:g} mm nozzle is the one fitted.",
+        ],
+        "override_hint": (
+            "If you know the file suits the nozzle that is fitted, the single-use human "
+            "override, force_print_oversize, covers this block too: a human calls it for "
+            "this printer and re-issues the print once; an autonomous agent cannot "
             "self-approve it."
         ),
     }
@@ -1406,13 +1457,21 @@ def run_adapter_gate(
                         + "; ".join(problems) + "."
                     ),
                 }
+        if inspected and not verdict.get("blocked"):
+            # A file that passed everything above can still be for a nozzle
+            # this printer says it does not have.
+            sized = _nozzle_size_verdict(adapter, inspected, file_name, printer_id, override)
+            if sized is not None:
+                verdict = sized
     finally:
         if fetched:
             with contextlib.suppress(OSError):
                 os.unlink(fetched)
     if fetched:
         verdict["inspected"] = "printer_copy"
-        if verdict.get("blocked"):
+        # A nozzle-size block is about the printer and the file together;
+        # nothing is wrong with the file, so it is not told to be deleted.
+        if verdict.get("blocked") and verdict.get("code") != NOZZLE_SIZE_MISMATCH:
             verdict["reason"] = (
                 f"{verdict.get('reason', '')} This is the printer's own copy of "
                 f"{os.path.basename(str(file_name))}, read back from its storage: the file "

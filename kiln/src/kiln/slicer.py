@@ -163,6 +163,10 @@ class SliceResult:
     #: The density the slicer was handed and where it came from, so every
     #: door's response can say which (see :mod:`kiln.slicer_filament`).
     filament: SliceFilament | None = None
+    #: The nozzle size the profile was written for and where that size came
+    #: from (:func:`kiln.slicer_profiles.nozzle_fit_of`); ``None`` for a
+    #: profile Kiln did not write.
+    nozzle: dict[str, Any] | None = None
     #: The mesh the slicer was handed, absolute — or for a STEP file, Kiln's
     #: mesh of it (:func:`_drawn_mesh_for`) — the file Kiln's 3D stage
     #: shows for this slice, dressed in the slice's own additions.  Every
@@ -182,6 +186,8 @@ class SliceResult:
             d["stage_mesh_path"] = self.stage_mesh_path
         if self.filament is not None:
             d["filament"] = self.filament.to_dict()
+        if self.nozzle is not None:
+            d["nozzle"] = self.nozzle
         if self.stderr:
             d["stderr"] = self.stderr[:500]
         return d
@@ -1072,6 +1078,11 @@ def slice_file(
         loaded_type=loaded_material,
         loaded_determined_by=loaded_determined_by,
     )
+    # Which nozzle the profile was written for, read from the profile itself
+    # so every door's reply says it whichever door resolved the profile.
+    from kiln.slicer_profiles import nozzle_fit_of
+
+    nozzle = nozzle_fit_of(slicer_profile)
 
     # Prepare output
     out_dir = output_dir or _DEFAULT_OUTPUT_DIR
@@ -1121,6 +1132,7 @@ def slice_file(
             drawn_as=drawn,
         )
         result.filament = filament
+        result.nozzle = nozzle
         result.stage_mesh_path = drawn
         if multicolor_switched:
             result.message += (
@@ -1197,6 +1209,7 @@ def slice_file(
         stdout=(result.stdout or "").strip(),
         stderr=(result.stderr or "").strip(),
         filament=filament,
+        nozzle=nozzle,
         stage_mesh_path=drawn,
     )
 

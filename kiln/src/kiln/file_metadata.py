@@ -8,7 +8,7 @@ inspection.
 Supported formats:
 
 - **G-code**: ``.gcode``, ``.gco``, ``.g`` (the slicer's comments, top and end)
-- **3MF**: ``.3mf`` (ZIP with XML metadata)
+- **3MF**: ``.3mf`` (the model's XML metadata, and the settings of a project a slicer saved)
 - **UFP**: ``.ufp`` (Ultimaker format package)
 - **STL**: ``.stl`` (mesh only, limited metadata — file size and binary/ASCII)
 
@@ -29,6 +29,7 @@ import os
 import re
 import xml.etree.ElementTree as ET
 import zipfile
+import zlib
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -37,6 +38,7 @@ from kiln.gcode import (
     _MAX_SCAN_BYTES,
     slicer_filament_totals,
     slicer_filament_types,
+    slicer_json_settings,
     slicer_layer_count,
     slicer_material_label,
     slicer_print_time,
@@ -360,53 +362,111 @@ def _parse_3mf_model(
         logger.warning("Failed to parse 3MF model XML: %s", exc)
 
 
+#: The member each slicer saves a whole project's settings in: Bambu Studio
+#: and OrcaSlicer the first, PrusaSlicer the second.  Any other ``.config``
+#: under ``Metadata/`` is read after these, so the preset Bambu Studio saves
+#: for one changed object never outranks the project.
+_PROJECT_SETTINGS_MEMBERS = ("project_settings.config", "slic3r_pe.config")
+
+#: The most of one settings member Kiln unpacks.  A saved project's
+#: settings run to tens of kilobytes; its start and end G-code can add more.
+_SETTINGS_MEMBER_BYTES = 16 * 1024 * 1024
+
+_SETTING_LINE = re.compile(r";?\s*([A-Za-z_]\w*)\s*=\s*(.*)")
+_LEADING_NUMBER = re.compile(r"\d+\.?\d*")
+
+
 def _parse_3mf_slicer_metadata(zf: zipfile.ZipFile, meta: FileMetadata) -> None:
-    """Parse slicer-specific metadata files within the 3MF archive.
+    """Read what a saved project was set up for out of the 3MF archive.
 
-    PrusaSlicer stores config in ``Metadata/Slic3r_PE.config``;
-    BambuStudio uses ``Metadata/plate_*.json`` and ``Metadata/project_settings.config``.
+    Every ``.config`` under ``Metadata/``, the project's own settings
+    first.  A member that cannot be unpacked, or unpacks past
+    :data:`_SETTINGS_MEMBER_BYTES`, is left unread and costs the others
+    nothing.
     """
-    for name in zf.namelist():
-        lower = name.lower()
+    for content in _settings_members(zf):
+        _parse_config_text(content, meta)
 
-        # PrusaSlicer / OrcaSlicer config inside 3MF
-        if lower.endswith(".config") and "metadata" in lower:
-            try:
-                with zf.open(name) as fh:
-                    content = fh.read().decode("utf-8", errors="replace")
-                _parse_config_text(content, meta)
-            except (OSError, KeyError):
-                pass
+
+def _settings_members(zf: zipfile.ZipFile) -> list[str]:
+    """The text of every settings member of a 3MF, the project's own first."""
+    members = [name for name in zf.namelist() if name.lower().endswith(".config") and "metadata" in name.lower()]
+    members.sort(key=lambda name: (name.lower().rsplit("/", 1)[-1] not in _PROJECT_SETTINGS_MEMBERS, name))
+    texts: list[str] = []
+    for name in members:
+        try:
+            texts.append(read_member_text(zf, name, _SETTINGS_MEMBER_BYTES))
+        except (OSError, KeyError, ValueError, zipfile.BadZipFile, zlib.error) as exc:
+            logger.debug("Left a 3MF's %s unread: %s", name, exc)
+    return texts
+
+
+def slicer_settings(file_path: str) -> dict[str, str]:
+    """Every setting a slicer wrote into the file at *file_path*.
+
+    A saved project (``.3mf``) gives its settings members, the project's own
+    first and the first statement of a key kept.  Any other file is read as
+    one exported settings file: PrusaSlicer's ``key = value`` config, or a
+    Bambu Studio / OrcaSlicer preset, which is one JSON object.  Empty for a
+    file that states no settings -- a bare model, a format Kiln does not
+    read.  Raises ``OSError`` for a file that cannot be opened.
+    """
+    settings: dict[str, str] = {}
+    if os.path.splitext(file_path)[1].lower() in _3MF_EXTENSIONS:
+        try:
+            with zipfile.ZipFile(file_path) as zf:
+                for content in _settings_members(zf):
+                    for key, value in _settings_of(content).items():
+                        settings.setdefault(key, value)
+        except zipfile.BadZipFile:
+            return {}
+        return settings
+    with open(file_path, encoding="utf-8", errors="replace") as fh:
+        return _settings_of(fh.read(_SETTINGS_MEMBER_BYTES))
 
 
 def _parse_config_text(content: str, meta: FileMetadata) -> None:
-    """Parse key=value slicer config text for metadata fields."""
+    """Fill *meta* from one settings member, in the form its slicer wrote.
+
+    A value an earlier member gave is kept.  The XML members Bambu Studio
+    and PrusaSlicer save under the same suffix hold no settings, and give
+    none.
+    """
     if meta.material_hint is None:
         meta.material_hint = slicer_material_label(slicer_filament_types(content))
-    for line in content.splitlines()[:200]:
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
+    settings = _settings_of(content)
+    for key in ("layer_height", "nozzle_diameter"):
+        # One number, or one per extruder: the first is the one reported.
+        number = _LEADING_NUMBER.match(settings.get(key, ""))
+        if number and key not in meta.extra:
+            meta.extra[key] = float(number.group())
+    # A project saved with no printer preset chosen names its printer "".
+    if settings.get("printer_model") and "printer_model" not in meta.extra:
+        meta.extra["printer_model"] = settings["printer_model"]
 
-        # layer_height = 0.2
-        if "layer_height" not in meta.extra:
-            m = re.match(r"layer_height\s*=\s*(\d+\.?\d*)", stripped, re.IGNORECASE)
-            if m:
-                with contextlib.suppress(ValueError):
-                    meta.extra["layer_height"] = float(m.group(1))
 
-        # nozzle_diameter = 0.4
-        if "nozzle_diameter" not in meta.extra:
-            m = re.match(r"nozzle_diameter\s*=\s*(\d+\.?\d*)", stripped, re.IGNORECASE)
-            if m:
-                with contextlib.suppress(ValueError):
-                    meta.extra["nozzle_diameter"] = float(m.group(1))
+def _settings_of(content: str) -> dict[str, str]:
+    """One settings member as ``key -> value``, each value as text.
 
-        # printer_model = MK3S
-        if "printer_model" not in meta.extra:
-            m = re.match(r"printer_model\s*=\s*(.+)", stripped, re.IGNORECASE)
-            if m:
-                meta.extra["printer_model"] = m.group(1).strip()
+    Bambu Studio and OrcaSlicer save one JSON object; a list in it is
+    joined with commas, the way PrusaSlicer writes a per-extruder value on
+    its one line.  PrusaSlicer saves ``; key = value`` lines, a few hundred
+    of them in key order; a settings file of bare ``key = value`` lines is
+    read the same way.  The first of a repeated key wins.
+    """
+    as_json = slicer_json_settings(content)
+    if as_json is not None:
+        return {
+            str(key).lower(): ",".join(map(str, value)) if isinstance(value, list) else str(value)
+            for key, value in as_json.items()
+            if isinstance(value, (str, int, float, list))
+        }
+    settings: dict[str, str] = {}
+    for line in content.splitlines():
+        m = _SETTING_LINE.fullmatch(line.strip())
+        if m:
+            settings.setdefault(m.group(1).lower(), m.group(2).strip())
+    return settings
 
 
 # ---------------------------------------------------------------------------

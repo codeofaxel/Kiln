@@ -209,7 +209,7 @@ class _DesignToolsPlugin:
             build_volume_x: float | None = None,
             build_volume_y: float | None = None,
             build_volume_z: float | None = None,
-            nozzle_diameter: float = 0.4,
+            nozzle_diameter: float | None = None,
             layer_height: float = 0.2,
             max_overhang_angle: float = 45.0,
         ) -> dict:
@@ -1267,7 +1267,7 @@ class _DesignToolsPlugin:
             infill_percent: float = 20.0,
             wall_layers: int = 3,
             layer_height_mm: float = 0.2,
-            nozzle_mm: float = 0.4,
+            nozzle_mm: float | None = None,
             include_supports: bool = False,
             support_density: float = 15.0,
             adhesion_type: str = "none",
@@ -1289,13 +1289,16 @@ class _DesignToolsPlugin:
                 infill_percent: Interior fill percentage 0-100 (default 20).
                 wall_layers: Number of perimeter shells (default 3).
                 layer_height_mm: Layer height in mm (default 0.2).
-                nozzle_mm: Nozzle diameter in mm (default 0.4).
+                nozzle_mm: Nozzle diameter in mm.  Leave unset for the only
+                    printer Kiln knows of, else 0.4; ``nozzle`` in the reply
+                    says which.
                 include_supports: Estimate support material cost (default False).
                 support_density: Support infill percentage (default 15).
                 adhesion_type: Bed adhesion type: "none", "brim", or "raft".
                 electricity_rate: Electricity cost in $/kWh (default 0.12).
                 printer_wattage: Printer power consumption in watts (default 200).
             """
+            from kiln.assumed_nozzle import assumed_nozzle
             from kiln.cost_estimator import CostEstimator
 
             # STEP in, mesh out — the one shared door, so a part that arrives
@@ -1307,6 +1310,7 @@ class _DesignToolsPlugin:
                 return _refusal
 
             try:
+                nozzle = assumed_nozzle(None, stated=nozzle_mm, or_only_printer=True)
                 estimator = CostEstimator()
                 estimate = estimator.estimate_from_mesh(
                     file_path,
@@ -1314,7 +1318,7 @@ class _DesignToolsPlugin:
                     infill_percent=infill_percent,
                     wall_layers=wall_layers,
                     layer_height_mm=layer_height_mm,
-                    nozzle_mm=nozzle_mm,
+                    nozzle_mm=nozzle.diameter_mm,
                     include_supports=include_supports,
                     support_density=support_density,
                     adhesion_type=adhesion_type,
@@ -1323,6 +1327,7 @@ class _DesignToolsPlugin:
                 )
                 result = estimate.to_dict()
                 result["success"] = True
+                result["nozzle"] = nozzle.to_dict()
                 return result
             except FileNotFoundError as exc:
                 _logger.error("Cost estimation file not found: %s", exc)
@@ -1961,7 +1966,11 @@ class _DesignToolsPlugin:
             - large_flat_surfaces: detected flat areas prone to warping
             - height_to_base_ratio: geometry aspect ratio risk factor
             - material_warping_tendency: material's inherent warp behavior
-            - recommendations: actionable mitigation advice
+            - recommendations: actionable mitigation advice, led by the brim
+              or raft to use when the part calls for one
+            - adhesion: the brim / raft decision for this part (width, raft,
+              reason, slicer overrides) — the same one analyze_printability
+              reports
 
             Args:
                 file_path: Path to STL, OBJ, GLB, or 3MF file to analyze.
@@ -1983,7 +1992,7 @@ class _DesignToolsPlugin:
             if _refusal:
                 return _refusal
 
-            from kiln.printability import analyze_printability
+            from kiln.printability import adhesion_advice, analyze_printability
 
             try:
                 report = analyze_printability(
@@ -1991,6 +2000,16 @@ class _DesignToolsPlugin:
                 )
                 if report.warping is not None:
                     result = report.warping.to_dict()
+                    # The warping block states the risk and leaves the brim
+                    # to the report's one adhesion decision.  This door
+                    # serves that block alone, so it carries the decision
+                    # with it: a high-risk part is never answered with no
+                    # brim in the reply.
+                    result["recommendations"] = (
+                        adhesion_advice(report.adhesion) + result["recommendations"]
+                    )
+                    if report.adhesion is not None:
+                        result["adhesion"] = report.adhesion.to_dict()
                     result["success"] = True
                     result["overall_score"] = report.score
                     result["overall_grade"] = report.grade

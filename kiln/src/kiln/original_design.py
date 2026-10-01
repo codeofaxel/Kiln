@@ -441,7 +441,7 @@ def audit_original_design(
     material: str | None = None,
     printer_model: str | None = None,
     build_volume: tuple[float, float, float] | None = None,
-    nozzle_diameter: float = 0.4,
+    nozzle_diameter: float | None = None,
     layer_height: float = 0.2,
     max_overhang_angle: float | None = None,
     inspection_bundle: dict[str, Any] | None = None,
@@ -517,13 +517,19 @@ def audit_original_design(
             bundle_printability_findings
         )
     else:
+        from kiln.assumed_nozzle import assumed_nozzle
+
+        nozzle = assumed_nozzle(printer_model, stated=nozzle_diameter)
         printability = analyze_printability(
             file_path,
-            nozzle_diameter=nozzle_diameter,
+            nozzle_diameter=nozzle.diameter_mm,
             layer_height=layer_height,
             max_overhang_angle=max_overhang_angle,
             build_volume=build_volume_tuple,
         )
+        # The engine was handed a size, not the printer: say where the size
+        # really came from.
+        printability.nozzle = nozzle.to_dict()
     design_validation = validate_design(
         file_path,
         requirements_text,
@@ -935,11 +941,21 @@ def audit_original_design(
     ):
         try:
             overlay = _po_pro_features.printability_overlay
-            enriched = overlay.enrich_printability_report(
-                printability.to_dict(),
-                material,
-                printer_model,
-            )
+            # For the nozzle the check above ran with, not the overlay's
+            # own baseline: its floors scale with the size.
+            checked_for = (getattr(printability, "nozzle", None) or {}).get("diameter_mm")
+            try:
+                enriched = overlay.enrich_printability_report(
+                    printability.to_dict(),
+                    material,
+                    printer_model,
+                    **({"nozzle_diameter_mm": checked_for} if checked_for else {}),
+                )
+            except TypeError:
+                # A kiln-pro from before the overlay took a nozzle size.
+                enriched = overlay.enrich_printability_report(
+                    printability.to_dict(), material, printer_model,
+                )
             enrichment_block = (
                 enriched.get("enrichment") if isinstance(enriched, dict) else None
             )
@@ -999,7 +1015,7 @@ def generate_original_design(
     style: str | None = None,
     output_dir: str | None = None,
     build_volume: tuple[float, float, float] | None = None,
-    nozzle_diameter: float = 0.4,
+    nozzle_diameter: float | None = None,
     layer_height: float = 0.2,
     max_overhang_angle: float | None = None,
     timeout: int = 600,

@@ -559,11 +559,14 @@ class _EstimateToolsPlugin:
             infill_pct: float = 20.0,
             wall_layers: int = 3,
             cost_per_kg: float = 0.0,
+            nozzle_mm: float | None = None,
         ) -> dict:
             """Estimate material usage and cost for printing a mesh.
 
             Computes filament weight, length, and cost based on mesh volume,
-            infill percentage, wall shell count, and material density.
+            infill percentage, wall shell count, and material density.  The
+            walls are as wide as the nozzle, and the reply's ``nozzle`` says
+            which size was used and where it came from.
 
             **See also:** ``estimate_print_cost_from_mesh`` for a richer
             estimate that includes support material, adhesion, and electricity.
@@ -576,15 +579,19 @@ class _EstimateToolsPlugin:
             :param infill_pct: Interior fill percentage 0-100 (default 20).
             :param wall_layers: Number of perimeter shells (default 3).
             :param cost_per_kg: Override material cost in $/kg (0 = use default).
-            :returns: Dict with weight, filament length, and cost.
+            :param nozzle_mm: Nozzle size in mm.  Left out, Kiln uses the
+                nozzle of the only printer it knows of, else its default.
+            :returns: Dict with weight, filament length, cost, and ``nozzle``.
             """
             import kiln.server as _srv
 
             try:
+                from kiln.assumed_nozzle import assumed_nozzle
                 from kiln.generation.validation import (
                     estimate_material_cost as _estimate_cost,
                 )
 
+                nozzle = assumed_nozzle(None, stated=nozzle_mm, or_only_printer=True)
                 return {
                     "success": True,
                     **_estimate_cost(
@@ -593,7 +600,9 @@ class _EstimateToolsPlugin:
                         infill_pct=infill_pct,
                         wall_layers=wall_layers,
                         cost_per_kg=cost_per_kg if cost_per_kg > 0 else None,
+                        nozzle_mm=nozzle.diameter_mm,
                     ),
+                    "nozzle": nozzle.to_dict(),
                 }
             except Exception as exc:
                 return _srv._error_dict(f"Cost estimation failed: {exc}")
@@ -666,7 +675,7 @@ class _EstimateToolsPlugin:
             material_roles: str = "",
             infill_percent: float = -1.0,
             layer_height_mm: float = 0.0,
-            nozzle_mm: float = 0.4,
+            nozzle_mm: float | None = None,
             wall_layers: int = 3,
             printer_id: str = "",
             tool_changer_addon: str = "",
@@ -714,7 +723,9 @@ class _EstimateToolsPlugin:
             :param infill_percent: Infill density override (0-100).
                 Default: from printer profile or 20%.  Pass ``-1`` for auto.
             :param layer_height_mm: Layer height override.  ``0`` = auto.
-            :param nozzle_mm: Nozzle diameter in mm (default 0.4).
+            :param nozzle_mm: Nozzle diameter in mm.  Leave unset for the
+                nozzle Kiln has for ``printer_id`` (or the only printer it
+                knows of), else 0.4.
             :param wall_layers: Number of perimeter shells (default 3).
             :param printer_id: Printer model for speed/setting lookup
                 (e.g. ``"bambu_a1"``, ``"prusa_mk4"``).
@@ -754,6 +765,10 @@ class _EstimateToolsPlugin:
                 eff_infill: float | None = None if infill_percent < 0 else infill_percent
                 eff_layer: float | None = layer_height_mm if layer_height_mm > 0 else None
                 eff_printer: str | None = printer_id if printer_id else None
+                from kiln.assumed_nozzle import assumed_nozzle
+
+                nozzle = assumed_nozzle(eff_printer, stated=nozzle_mm, or_only_printer=True)
+                nozzle_mm = nozzle.diameter_mm
                 eff_addon: str | None = tool_changer_addon if tool_changer_addon.strip() else None
 
                 # Parse template overrides
@@ -828,6 +843,7 @@ class _EstimateToolsPlugin:
                     "estimate": est.to_dict(),
                     "message": " | ".join(parts),
                     "filament_summary": filament_summary,
+                    "nozzle": nozzle.to_dict(),
                 }
 
             except ValueError as exc:

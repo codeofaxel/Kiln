@@ -216,7 +216,10 @@ class TestOctoPrint:
             "ender": {"current": True, "extruder": {"nozzleDiameter": 0.6}},
         }})
 
-        assert adapter.read_nozzle_setting() == NozzleSetting(material=None, diameter_mm=0.6, source="octoprint_printer_profile")
+        # The profile is OctoPrint's record, not the printer's own.
+        assert adapter.read_nozzle_setting() == NozzleSetting(
+            material=None, diameter_mm=0.6, source="octoprint_printer_profile", held_by="host",
+        )
 
     def test_no_current_profile_is_none(self, monkeypatch):
         from kiln.printers.octoprint import OctoPrintAdapter

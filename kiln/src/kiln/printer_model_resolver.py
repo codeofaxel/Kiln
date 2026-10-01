@@ -132,13 +132,14 @@ def _read_printer_model_from_config() -> str | None:
         # get_build_volume returns None for unknown printers; unlike
         # get_printer_intel which silently falls back to "default".
         try:
-            from kiln.printers.bed_fit import get_build_volume
-            if model_str != model_str.lower() or get_build_volume(model_str) is None:
+            from kiln.printers.bed_fit import get_build_volume, owner_stated_build_volume
+            known = get_build_volume(model_str) is not None or owner_stated_build_volume(model_str) is not None
+            if model_str != model_str.lower() or not known:
                 logger.warning(
-                    "printer_model=%r in %s doesn't match any known printer "
-                    "in printer_intelligence.json.  Safety checks will be "
-                    "skipped.  Keys are case-sensitive (bambu_a1, not "
-                    "bambu_A1).  Check the JSON file for valid values.",
+                    "printer_model=%r in %s doesn't match any known printer.  "
+                    "Safety checks will be skipped.  Set it again with "
+                    "`kiln set-model` or the `set_printer_model` tool, which "
+                    "write the spelling Kiln reads.",
                     model_str, _CONFIG_PATH,
                 )
         except Exception:
@@ -152,9 +153,9 @@ def _read_printer_model_from_config() -> str | None:
             "Kiln can't check that prints fit the bed or stay within safe "
             "temperatures — those checks are skipped, so an unsafe print "
             "could reach the printer.  Ask the user which printer model "
-            "they have and add `printer_model: <model>` under `printers.%s` "
-            "in the config file (e.g. bambu_a1, prusa_mk4, ender3).",
-            ptype, _CONFIG_PATH, active_printer,
+            "they have and set it with the `set_printer_model` tool or "
+            "`kiln set-model` (a project saved from their slicer names it too).",
+            ptype, _CONFIG_PATH,
         )
     return None
 
@@ -198,8 +199,8 @@ def resolve_printer_model_for(printer_name: str | None) -> str | None:
         # really will skip for it, so say so at a level they will see.
         logger.warning(
             "No `printer_model` set for printer %r in %s.  Bed-fit and "
-            "temperature checks for prints aimed at it will be skipped.  Add "
-            "`printer_model: <model>` under `printers.%s` in the config file.",
+            "temperature checks for prints aimed at it will be skipped.  Set "
+            "it with the `set_printer_model` tool or `kiln set-model --printer %s`.",
             printer_name, _CONFIG_PATH, printer_name,
         )
     else:

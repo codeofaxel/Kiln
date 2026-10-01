@@ -879,8 +879,13 @@ def _install_fake_printability_overlay(
     recommended_actions: list[dict] | None,
     apply_result: dict | None = None,
     apply_raises: bool = False,
+    takes_nozzle: bool = True,
 ):
     """Inject a fake ``kiln_pro.bridge`` exposing only ``printability_overlay``.
+
+    ``takes_nozzle=False`` gives the fake the signature the overlay had
+    before it took a nozzle size, so the fallback for an older kiln-pro is
+    exercised.
 
     ``recommended_actions`` controls what the fake's
     ``enrich_printability_report`` puts in the enrichment block.  When
@@ -909,12 +914,13 @@ def _install_fake_printability_overlay(
 
     overlay_module = types.ModuleType("kiln_pro.printability_overlay")
 
-    def _enrich(public_report, material, printer_id=None):
+    def _enriched(public_report, material, printer_id, nozzle_diameter_mm):
         spy["enrich_calls"].append(
             {
                 "report": public_report,
                 "material": material,
                 "printer_id": printer_id,
+                "nozzle_diameter_mm": nozzle_diameter_mm,
             }
         )
         if not isinstance(public_report, dict):
@@ -923,6 +929,13 @@ def _install_fake_printability_overlay(
         if recommended_actions is not None:
             out["enrichment"] = {"recommended_actions": list(recommended_actions)}
         return out
+
+    if takes_nozzle:
+        def _enrich(public_report, material, printer_id=None, nozzle_diameter_mm=None, **_kwargs):
+            return _enriched(public_report, material, printer_id, nozzle_diameter_mm)
+    else:
+        def _enrich(public_report, material, printer_id=None):
+            return _enriched(public_report, material, printer_id, None)
 
     def _apply(enrichment_block, mesh_path, **kwargs):
         spy["apply_calls"].append(
@@ -1030,6 +1043,26 @@ class TestAuditOriginalDesignPrintabilityRemedies:
 
         # And the dispatcher was NOT called.
         assert spy["apply_calls"] == []
+
+    def test_the_overlay_is_asked_for_the_nozzle_the_check_ran_with(self, monkeypatch):
+        """The overlay scales its floors with the nozzle.  The audit used to
+        leave the size out, so a part checked for a 0.6 mm nozzle got the
+        overlay's depth for its own 0.4 baseline."""
+        spy = _install_fake_printability_overlay(monkeypatch, recommended_actions=[])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(10.0), "cube.stl")
+            audit_original_design(path, "simple coaster", material="PLA", printer_model="bambu_a1", nozzle_diameter=0.6)
+        audit_level = [call for call in spy["enrich_calls"] if call["printer_id"] == "bambu_a1"]
+        assert audit_level and all(call["nozzle_diameter_mm"] == 0.6 for call in audit_level)
+
+    def test_an_overlay_from_before_it_took_a_nozzle_still_answers(self, monkeypatch):
+        candidates = [{"rule_id": "thin_wall", "remedy_design": "Thicken walls to 1.2mm"}]
+        _install_fake_printability_overlay(monkeypatch, recommended_actions=candidates, takes_nozzle=False)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(10.0), "cube.stl")
+            audit = audit_original_design(path, "simple coaster", material="PLA", printer_model="bambu_a1")
+        assert audit.recommended_remedies is not None
+        assert audit.recommended_remedies["actions"][0]["rule_id"] == "thin_wall"
 
     def test_apply_remedies_invokes_dispatcher(self, monkeypatch):
         """``apply_remedies=True`` dispatches the overlay's remediation

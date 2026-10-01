@@ -303,10 +303,33 @@ class TestEveryDoor:
         assert "about 42 mm tall" in msg and "on top of it" in msg
         assert "Spots with room: [40, 200] (30 mm clear)." in msg
         assert resp["spots"] == [{"at_mm": [40.0, 200.0], "clearance_mm": 30.0}]
+        # This machine has no camera, and the refusal says so rather than
+        # leaving the record's word as the last one.
+        assert "no camera Kiln can read" in msg and "`kiln plate clear`" in msg
+        assert resp["snapshot_path"] is None and resp["look"]["possible"] is False
         assert resp["occupancy"]["kind"] == bridge.OCCUPANCY_KIND
         assert resp["plate"]["status"] == "occupied"
         assert asked.asked[0]["placement"] == "auto" and asked.asked[0]["placed_by"] == "auto"
         assert not spy.called, "nothing is sliced onto an occupied plate without a spot"
+
+    def test_the_refusal_hands_over_a_look_where_the_machine_has_a_camera(self, door, registry, extra, tmp_path, machine, monkeypatch):
+        if door in ESTIMATE_DOORS:
+            pytest.skip("an estimate asks nothing of the plate")
+        from .test_plate_camera import _png
+
+        machine.snapshot_source = "printer"
+        machine.get_snapshot = _png
+        _occupy(machine)
+        monkeypatch.setattr(bridge, "ask", _Bridge((_verdict(ok=False), None)))
+        spy, _ = _fake_slice(tmp_path)
+        with patch("kiln.slicer.slice_file", spy):
+            resp = _call(door, registry, extra, input_path=_cube(tmp_path / "part.stl"))
+        assert resp["success"] is False and resp["error"]["code"] == "PLACEMENT_PLATE_OCCUPIED"
+        path = resp["snapshot_path"]
+        assert path and os.path.isfile(path) and path in resp["error"]["message"]
+        assert 'look_at_plate with seen="clear"' in resp["error"]["message"]
+        assert resp["look"]["settle_with"] == "look_at_plate"
+        spy.assert_not_called()
 
     def test_a_named_spot_with_an_ok_verdict_translates_slices_and_checks_the_sliced_file(self, door, registry, extra, tmp_path, machine, monkeypatch):
         _occupy(machine)
@@ -829,6 +852,8 @@ _SLICER_ENTRIES = frozenset({"slice_file", "estimate_print", "slice_multicolor_c
 #: reaches the slicer through the gate by construction.
 _SHARED_STEPS = frozenset({"_placed_slice", "_slice_step", "_cli_placed_slice"})
 _PLATE_GATES = ("_apply_plate_placement", "_verify_plate_placement")
+#: The one function in the package that calls the slicer itself.
+_THE_SHARED_STEP = ("plugins/slicer_tools.py", "_placed_slice")
 
 
 def _called_names(fn: Any) -> set[str]:
@@ -921,20 +946,24 @@ def _slicer_reachers() -> tuple[dict[tuple[str, str], bool], set[str]]:
 class TestEveryCallerOfTheSlicer:
     """The one-door fallacy, closed: every function that reaches the slicer
     -- ``slice_file``, ``estimate_print`` or ``slice_multicolor_copies`` --
-    does so through the plate gate and the second verdict, and every module
-    that does is walked behaviourally here."""
+    does so through the one shared step, and every module that does is
+    walked behaviourally here."""
 
     def test_every_slicer_entry_is_reached_through_the_gate_and_walked(self):
         raw, modules = _slicer_reachers()
-        assert ("plugins/slicer_tools.py", "_placed_slice") in raw, "the walk itself is broken"
-        # A function that slices directly must gate and verify in that same
-        # function; a function that slices through the shared step needs
-        # nothing more.  Nested functions count for their enclosing one.
-        ungated = sorted(f"{rel}:{name}" for (rel, name), gated in raw.items() if not gated)
-        assert not ungated, (
-            f"these functions reach the slicer without the plate gate and the post-slice verdict: "
-            f"{ungated}.  Slice through _placed_slice (one helper, no per-door branch), or call "
-            f"_apply_plate_placement and _verify_plate_placement in the same function, and walk the door here."
+        assert raw.get(_THE_SHARED_STEP) is True, (
+            "the walk itself is broken, or the shared step no longer gates and verifies the plate"
+        )
+        # Only the shared step calls the slicer.  A door that slices itself
+        # is a copy of the step, even with both plate gates beside it, and a
+        # copy misses whatever the step learns later: until 2026-10-01 the
+        # retry and generate_and_print doors sliced that way, and neither
+        # got the bed-fit gate nor a skirt or brim past the bed's edge
+        # settled.  Nested functions count for their enclosing one.
+        copies = sorted(f"{rel}:{name}" for rel, name in raw if (rel, name) != _THE_SHARED_STEP)
+        assert not copies, (
+            f"these functions call the slicer themselves: {copies}.  Slice through _placed_slice (one "
+            f"helper, no per-door branch) -- pass slicer= for another way of slicing -- and walk the door here."
         )
         assert modules == _WALKED, (
             f"the modules that reach the slicer changed: {sorted(modules ^ _WALKED)}.  A new one must be "
@@ -1299,10 +1328,16 @@ class TestEveryDoorThatStartsAPrint:
         assert block["success"] is False and block["error"]["code"] == START_NOT_YET_CODE == "PLATE_OCCUPIED_START_NOT_YET"
         assert block["error"]["retryable"] is False
         monkeypatch.setattr(PlateState, "since_clock", lambda self: "18:12")
-        assert start_refusal(machine)["error"]["message"] == (
+        message = start_refusal(machine)["error"]["message"]
+        assert message.startswith(
             "The last print, jar v2, is still on the plate (since 18:12, about 42 mm tall). "
             "Kiln can't start a print onto an occupied plate yet — the printer's own start sequence "
-            "drives the head across it — so it won't start this one. Clear the plate and say so."
+            "drives the head across it — so it won't start this one. Clear the plate and say so. "
+        )
+        # ...and then looks instead of assuming: this machine has no camera.
+        assert message.endswith(
+            "This printer has no camera Kiln can read, so look at the plate yourself, then say so: "
+            "`kiln plate clear`, or plate_clear=true on park_head."
         )
         assert block["plate"]["status"] == "occupied" and block["occupancy"]["kind"] == bridge.OCCUPANCY_KIND
         assert start_refusal(machine, resume=True) is None, "a resume is the same job, still on the plate"

@@ -15,6 +15,8 @@ import os
 import time
 from typing import Any
 
+from kiln.printer_setup import AGENT_REMEDY
+
 _logger = logging.getLogger(__name__)
 
 def _template_part_count() -> int:
@@ -480,12 +482,7 @@ class _UtilityToolsPlugin:
                         "printer_model is NOT configured, so Kiln can't check "
                         "that prints fit the bed or stay within safe temperatures "
                         "— those checks are skipped and an unsafe print can reach "
-                        "the printer. Ask the user which printer they're using, "
-                        "then add `printer_model: <model>` under "
-                        "`printers.<name>` in ~/.kiln/config.yaml (examples: "
-                        "bambu_a1, bambu_x1c, prusa_mk4, prusa_mini, ender3, "
-                        "creality_k1_max). "
-                        "Valid keys are in kiln/data/printer_intelligence.json."
+                        "the printer. " + AGENT_REMEDY
                     )
             except Exception as exc:
                 safety_profile_info["hint"] = f"resolver error: {exc}"
@@ -1105,9 +1102,7 @@ class _UtilityToolsPlugin:
                         "kiln_health — check `safety_profile.gates_active`. "
                         "If false, printer_model is unset in ~/.kiln/config.yaml "
                         "and Kiln can't check that prints fit the bed or stay "
-                        "within safe temperatures.  Ask the user their printer "
-                        "model (e.g. bambu_a1, prusa_mk4) and add "
-                        "`printer_model: <value>` to the printer entry."
+                        "within safe temperatures.  " + AGENT_REMEDY
                     ),
                 ],
                 "session_recovery": {

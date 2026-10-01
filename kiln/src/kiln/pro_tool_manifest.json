@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-01T04:39:33.810877+00:00",
+  "generated": "2026-10-01T06:50:26.874716+00:00",
   "tool_count": 427,
   "categories": {
     "product_generators": {
@@ -14966,9 +14966,16 @@
             "type": "number"
           },
           "nozzle_mm": {
-            "default": 0.4,
-            "title": "Nozzle Mm",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Nozzle Mm"
           }
         },
         "required": [
@@ -16261,6 +16268,18 @@
             ],
             "default": null,
             "title": "Printer Reading"
+          },
+          "file_nozzle_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Nozzle Mm"
           }
         },
         "required": [
@@ -16552,9 +16571,16 @@
             "type": "string"
           },
           "nozzle_mm": {
-            "default": 0.4,
-            "title": "Nozzle Mm",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Nozzle Mm"
           },
           "printer_id": {
             "default": "",
@@ -17831,9 +17857,16 @@
             "type": "number"
           },
           "nozzle_mm": {
-            "default": 0.4,
-            "title": "Nozzle Mm",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Nozzle Mm"
           },
           "include_fusions": {
             "default": false,
@@ -19766,9 +19799,16 @@
             "type": "number"
           },
           "nozzle_mm": {
-            "default": 0.4,
-            "title": "Nozzle Mm",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Nozzle Mm"
           }
         },
         "required": [

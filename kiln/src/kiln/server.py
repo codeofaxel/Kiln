@@ -7123,14 +7123,19 @@ def upload_file(file_path: str, printer_name: str | None = None) -> dict:
                             "bbox": bed_fit_result.get("bbox"),
                         },
                     )
+                    # A part that fits is not moved by centring it: the
+                    # message already names what prints past the edge.
+                    remedy = "" if bed_fit_result.get("part_fits_the_bed") else (
+                        " This would have driven the nozzle into the printer frame. "
+                        "Re-slice with auto_center=True or call center_model_on_bed first."
+                    )
                     return {
                         "success": False,
                         "error": {
                             "code": code,
                             "message": (
-                                f"Upload blocked: {bed_fit_result.get('error_message', 'off-bed geometry')}. "
-                                f"This would have driven the nozzle into the printer frame. "
-                                f"Re-slice with auto_center=True or call center_model_on_bed first."
+                                f"Upload blocked: {str(bed_fit_result.get('error_message') or 'off-bed geometry').rstrip('.')}."
+                                f"{remedy}"
                             ),
                         },
                         "bed_fit": bed_fit_result,
@@ -9208,6 +9213,8 @@ def force_print_oversize(printer_id: str = "", ttl_minutes: int = 5) -> dict:
     crash) or a material whose minimum nozzle temperature exceeds the
     printer's hotend ceiling (it cannot melt the filament).  Those are
     hard physical limits, not warnings, so a normal print call is blocked.
+    It also refuses a file sliced for one nozzle size when the printer's
+    own setting says another is fitted; this override covers that too.
 
     This is the human's "I understand — print it anyway" escape hatch, e.g.
     when you are deliberately sending the file to a *different* printer than
@@ -10246,6 +10253,7 @@ def wrap_gcode_as_3mf(
     thumbnail_path: str | None = None,
     stl_path: str | None = None,
     resume_mode: bool = False,
+    bed_type: str | None = None,
 ) -> dict:
     """Wrap raw PrusaSlicer G-code in a Bambu-compatible 3MF (Bambu Lab only).
 
@@ -10278,6 +10286,11 @@ def wrap_gcode_as_3mf(
         stl_path: Optional path to the source STL file.  When provided,
             a thumbnail is auto-generated from the model geometry via
             OpenSCAD (512x512, shown on the Bambu printer screen).
+        bed_type: The plate fitted: ``"textured_plate"``, ``"hot_plate"``
+            (smooth PEI), ``"cool_plate"``, ``"eng_plate"`` or
+            ``"supertack_plate"``.  Omitted, the textured plate.  The
+            printer's start sequence trims the nozzle height for the plate
+            it is told, so say it when the plate is not the textured one.
 
     Returns a dict with ``output_path`` pointing to the generated 3MF.
     Use ``upload_file()`` to send it to the printer, then ``start_print()``
@@ -10316,6 +10329,7 @@ def wrap_gcode_as_3mf(
             filament_types=filament_types,
             stl_paths=None if caller_supplied_thumbnail else stl_paths,
             resume_mode=resume_mode,
+            bed_type=bed_type,
         )
         # Inject thumbnail PNG if provided and not already in the 3MF.
         # Bambu printers read from Auxiliaries/.thumbnails/ — not just
@@ -11210,6 +11224,65 @@ def preflight_check(
                         )
         except Exception as exc:
             logger.debug("Nozzle capacity check skipped: %s", exc)
+
+        # -- Nozzle size: the file against the printer's own setting ---------
+        # The same comparison the start gate makes, said here first.  It
+        # fails the pre-flight only where the start would be refused; a
+        # printer or a file that cannot say is listed as not checked,
+        # never as fine.
+        if file_path is not None:
+            try:
+                from kiln.nozzle_size_check import check_nozzle_size
+
+                _size = check_nozzle_size(adapter, str(file_path))
+                _size_row: dict[str, Any] = {
+                    "name": "nozzle_size",
+                    "passed": not _size.refuses,
+                    "message": _size.sentence(Path(str(file_path)).name),
+                    "status": _size.status,
+                }
+                if _size.status == "unchecked":
+                    _size_row["checked"] = False
+                elif _size.status == "differs" and not _size.refuses:
+                    _size_row["advisory"] = True
+                checks.append(_size_row)
+                if _size.refuses:
+                    errors.append(_size_row["message"])
+                # The record of what was fitted is a third statement of the
+                # nozzle.  It never fails the pre-flight: a record can be
+                # out of date.  When it could not be asked, the list says so.
+                if _size.file_mm is not None and pf_target:
+                    from kiln import _pro_nozzle_bridge
+
+                    _on_record = _pro_nozzle_bridge.consult_sliced_file(pf_target, _size.file_mm)
+                    if _on_record is not None:
+                        _record_row: dict[str, Any] = {
+                            "name": "nozzle_record",
+                            "passed": True,
+                            "message": _on_record.get("summary", ""),
+                            "status": _on_record.get("verdict"),
+                        }
+                        if _on_record.get("verdict") == "not_compared":
+                            _record_row["checked"] = False
+                        elif _on_record.get("verdict") != "agrees":
+                            _record_row["advisory"] = True
+                        checks.append(_record_row)
+                    else:
+                        _record_gap = _pro_nozzle_bridge.sliced_file_unchecked(pf_target)
+                        if _record_gap is not None:
+                            checks.append(
+                                {
+                                    "name": "nozzle_record",
+                                    "passed": True,
+                                    "checked": False,
+                                    "message": _record_gap["line"],
+                                    "advisory": True,
+                                    "word": "unchecked",
+                                    "why": _record_gap["why"],
+                                }
+                            )
+            except Exception as exc:
+                logger.debug("Nozzle size check skipped: %s", exc)
 
         # -- Filament-cutter blade (advisory) ------------------------------
         # One line when the blade is due, past due, or the machine has
@@ -12176,6 +12249,73 @@ def register_printer(
 
 # list_fleet_sites, fleet_status_by_site, update_printer_site
 # — extracted to plugins/fleet_tools.py
+
+
+@mcp.tool()
+def set_printer_model(
+    printer_model: str | None = None,
+    slicer_file: str | None = None,
+    printer_name: str | None = None,
+    replace: bool = False,
+) -> dict:
+    """Tell Kiln which printer model a saved printer is -- by name, or from a slicer file.
+
+    Kiln checks every print against the bed it will land on and the
+    temperatures the machine can take, and slices with the model's own
+    profile.  All three are read from the printer's model.  With no model
+    set, those checks are SKIPPED.  Use this as soon as ``kiln_health`` or a
+    log says the model is not configured.
+
+    Two ways to say it -- give exactly one:
+
+    * ``printer_model``: any name the catalogue recognises (``"Bambu Lab
+      A1"``, ``"bambu_a1"``, ``"MK4"``, ``"K1 Max"``).
+    * ``slicer_file``: a project the user saved from Bambu Studio,
+      OrcaSlicer or PrusaSlicer (File > Save Project), or a printer
+      settings file exported from one.  It already names the printer it
+      was set up for.  Ask a new user for one instead of asking them to
+      look up a model key.
+
+    A printer that is NOT in Kiln's catalogue can still be set up, but only
+    from a slicer file: the file states its bed, which is the one fact Kiln
+    cannot do without.  Kiln then saves the printer on this machine with
+    that bed and its own generic limits (never a limit read from the file),
+    lays slices out on that bed and measures designs against it.  It has no
+    tuned profile for such a printer and will not move its head.  A name
+    alone for a printer outside the catalogue is refused (``UNKNOWN_MODEL``,
+    with the closest matches); ask for the slicer file.
+
+    Args:
+        printer_model: The model, in any spelling the catalogue knows.
+        slicer_file: Path to a saved slicer project or exported settings.
+        printer_name: The saved printer to set.  Omit for the active one.
+        replace: Allow changing a printer that already has a different
+            model, or taking a newer file's bed for a printer set up from
+            an earlier file.  Off by default: the model decides the limits
+            Kiln checks against, so a wrong one is worse than none.
+
+    Returns ``applied`` (whether anything changed), the ``printer``, its
+    ``printer_model`` and ``in_catalogue``, and a ``message`` to relay.
+    From a slicer file it also returns ``file`` -- the printer, bed, nozzle
+    size and material the file states -- and ``notes`` where the file's bed
+    or nozzle differs from what Kiln holds.  The notes change nothing:
+    relay them, and if the file's nozzle is the one fitted, record it.
+
+    Nothing is written for a model that does not suit the printer's
+    connection, or over another model unless ``replace`` is set.  Limits an
+    owner typed for a printer are never written over.
+    """
+    if err := _check_auth("admin"):
+        return err
+    try:
+        from kiln.printer_setup import set_printer_model as _set_printer_model
+
+        return _set_printer_model(
+            printer_model, slicer_file=slicer_file, printer_name=printer_name, replace=replace,
+        )
+    except Exception as exc:
+        logger.exception("Error in set_printer_model")
+        return _error_dict(f"Could not set the printer model: {exc}", code="SET_PRINTER_MODEL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -13300,7 +13440,8 @@ def _resolve_slice_profile_context(
     if effective_profile is None and effective_printer_id:
         try:
             effective_profile = resolve_slicer_profile(
-                effective_printer_id, overrides=overrides or None
+                effective_printer_id, overrides=overrides or None,
+                printer_name=printer_name,
             )
         except Exception as exc:
             logger.debug("Profile resolution failed for %s: %s", effective_printer_id, exc)
@@ -15875,9 +16016,11 @@ def validate_openscad_code(scad_code: str = "", code: str = "") -> dict:
 @mcp.tool()
 def predict_print_failure(
     file_path: str,
-    min_wall_mm: float = 0.8,
+    min_wall_mm: float | None = None,
     max_bridge_mm: float = 15.0,
     max_overhang_deg: float = 55.0,
+    printer_id: str | None = None,
+    nozzle_mm: float | None = None,
 ) -> dict:
     """Predict common 3D printing failure modes from mesh geometry.
 
@@ -15886,23 +16029,40 @@ def predict_print_failure(
     non-manifold issues.  Returns a risk score (0-100) and
     per-failure details with fix suggestions.
 
+    The thin-wall floor follows the nozzle: two lines of it, so 0.8 mm for
+    a 0.4 mm nozzle and 1.2 mm for a 0.6.  The answer says which nozzle it
+    was judged for and where that size came from.
+
     :param file_path: Path to mesh file (.stl, .obj, .glb, or .3mf).
-    :param min_wall_mm: Minimum printable wall thickness (default 0.8).
+    :param min_wall_mm: Minimum printable wall thickness.  Leave it out to
+        use two lines of the nozzle.
     :param max_bridge_mm: Maximum unsupported bridge length (default 15).
     :param max_overhang_deg: Maximum overhang angle before failure (default 55).
-    :returns: Dict with verdict, risk score, and failure list.
+    :param printer_id: The printer the part is for.  Left out, the only
+        printer Kiln knows of stands in.
+    :param nozzle_mm: The nozzle fitted, when you know it.  Left out, the
+        nozzle on record for the printer, then the printer's own setting,
+        then its stock size.
+    :returns: Dict with verdict, risk score, failure list, the wall floor
+        used and the nozzle it was judged for.
     """
     try:
+        from kiln.assumed_nozzle import assumed_nozzle
         from kiln.generation.validation import predict_print_failures
 
+        nozzle = assumed_nozzle(printer_id or None, stated=nozzle_mm, or_only_printer=True)
+        result = predict_print_failures(
+            file_path,
+            min_wall_mm=min_wall_mm,
+            max_bridge_mm=max_bridge_mm,
+            max_overhang_deg=max_overhang_deg,
+            nozzle_mm=nozzle.diameter_mm,
+        )
         return {
             "success": True,
-            **predict_print_failures(
-                file_path,
-                min_wall_mm=min_wall_mm,
-                max_bridge_mm=max_bridge_mm,
-                max_overhang_deg=max_overhang_deg,
-            ),
+            **result,
+            "nozzle": nozzle.to_dict(),
+            "message": nozzle.sentence(),
         }
     except Exception as exc:
         return _error_dict(f"Failure prediction failed: {exc}")
@@ -17877,9 +18037,16 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
 
                 # Likewise a blade-status request carries this install's
                 # recent fault codes: the hosted side has no event log.
-                return _pro_api_call(
+                answer = _pro_api_call(
                     _name, **with_recent_faults(_name, with_local_reading(_name, kwargs))
                 )
+                if _name in ("set_nozzle_state", "record_nozzle_replacement"):
+                    # The record just changed: a check must not answer from
+                    # the size it remembered a moment ago.
+                    from kiln._pro_nozzle_bridge import forget_recorded_nozzle
+
+                    forget_recorded_nozzle()
+                return answer
             return _stub
 
         stub = _make_stub(name)
@@ -20477,7 +20644,10 @@ def extract_file_metadata(file_path: str) -> dict:
     """Extract metadata from a 3D printing file (.gcode, .3mf, .stl, .ufp).
 
     Parses file headers for estimated print time, layer count, filament usage,
-    dimensions, slicer info, and material hints — without re-slicing.
+    dimensions, slicer info, and material hints — without re-slicing.  A
+    project saved from Bambu Studio, OrcaSlicer or PrusaSlicer also gives the
+    printer, nozzle size, layer height and material it was set up for; hand
+    the same file to ``set_printer_model`` to set a saved printer up from it.
 
     .. note::
         For multi-object .gcode.3mf files, also consider using
@@ -21869,10 +22039,14 @@ def decorate_surface(
 
         effective_depth = depth_mm if depth_mm > 0 else get_default_depth(material)
 
-        nozzle_mm = 0.4
+        # The nozzle the detail has to survive: the only printer Kiln knows
+        # of, else 0.4 (see kiln.assumed_nozzle).
+        from kiln.assumed_nozzle import assumed_nozzle
+
+        nozzle_mm = assumed_nozzle(None, or_only_printer=True).diameter_mm
         if effective_depth < nozzle_mm * 0.5:
             warnings.append(
-                f"Depth {effective_depth:.1f}mm < half nozzle ({nozzle_mm}mm). "
+                f"Depth {effective_depth:.1f}mm < half nozzle ({nozzle_mm:g}mm). "
                 f"Details may not be visible. Try >= {nozzle_mm * 0.75:.1f}mm."
             )
 
