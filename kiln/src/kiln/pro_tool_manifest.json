@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-01T23:10:36.040921+00:00",
-  "tool_count": 428,
+  "generated": "2026-10-01T23:32:54.700996+00:00",
+  "tool_count": 429,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -13520,6 +13520,60 @@
       "offline": {
         "schema_version": 1,
         "kind": "action"
+      }
+    },
+    {
+      "name": "fleet_colour_match",
+      "description": "Which of my printers already has each of these colours loaded, and what to buy for the rest (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "colours": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Colours"
+          },
+          "printer_names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Names"
+          },
+          "material": {
+            "default": "",
+            "title": "Material",
+            "type": "string"
+          }
+        },
+        "required": [
+          "colours"
+        ],
+        "title": "fleet_colour_matchArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
