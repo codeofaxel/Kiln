@@ -282,3 +282,12 @@ class TestTheSliceModelTool:
         assert y1 - y0 == pytest.approx(200.0, abs=1.5)
         assert x0 >= 0.0 and x1 <= 250.0 and y0 >= 0.0 and y1 <= 210.0
         assert "outside of the print volume" not in str(result)
+        # A part this close to the edge may be sliced with its skirt past
+        # it.  Whenever the file's print moves leave the bed, the result
+        # says so -- in the block and in the warnings people read.
+        printed = fit["bbox"]
+        leaves_the_bed = (
+            printed["x_min"] < -0.5 or printed["x_max"] > 250.5 or printed["y_min"] < -0.5 or printed["y_max"] > 210.5
+        )
+        assert bool(fit.get("prints_past_bed")) == leaves_the_bed
+        assert any("past the edge of the bed" in w for w in result.get("warnings", [])) == leaves_the_bed

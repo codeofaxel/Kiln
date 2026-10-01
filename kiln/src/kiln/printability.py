@@ -4244,12 +4244,15 @@ def analyze_printability(
     # skipped this analysis without a word or grew its own conversion.
     # A failed conversion keeps this function's one error type, so every
     # caller that already handles an unreadable mesh handles this too.
-    try:
-        file_path, _conversion_note = step_import.ensure_mesh_path(file_path)
-    except step_import.NoBackendError as exc:
-        raise ValueError(str(exc)) from exc
-    except step_import.StepImportError as exc:
-        raise ValueError(f"Could not read that CAD file: {exc}") from exc
+    # A path that is not a file is left for the parser below, which says so
+    # in the same words whatever the extension.
+    if step_import.is_step_file(file_path) and Path(file_path).is_file():
+        try:
+            file_path, _conversion_note = step_import.ensure_mesh_path(file_path)
+        except step_import.NoBackendError as exc:
+            raise ValueError(str(exc)) from exc
+        except step_import.StepImportError as exc:
+            raise ValueError(f"Could not read that CAD file: {exc}") from exc
 
     triangles, vertices = _parse_mesh(file_path)
     # Membranes must go BEFORE winding normalization: a zero-thickness

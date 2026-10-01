@@ -572,7 +572,7 @@ class TestSetFan:
             adapter.set_fan("part", 101)
 
     def test_machine_without_a_fan_is_refused(self, adapter_with_ws: ElegooAdapter) -> None:
-        adapter_with_ws._last_status["Name"] = "Saturn 4 Ultra"
+        adapter_with_ws._last_status["Name"] = "Unrecognised Machine"
         with (
             mock.patch.object(adapter_with_ws, "_send_command_checked") as m,
             pytest.raises(PrinterError, match="no part-cooling fan"),
@@ -1051,11 +1051,11 @@ class TestGetPrinterInfo:
 
     def test_unmapped_name_reported_verbatim(self) -> None:
         adapter = _adapter()
-        adapter._last_status = {"MachineName": "Mars 5 Ultra"}
+        adapter._last_status = {"MachineName": "Workshop Special 9"}
         info = adapter.get_printer_info()
         assert info is not None
-        assert info.model == "Mars 5 Ultra"
-        assert info.raw_model == "Mars 5 Ultra"
+        assert info.model == "Workshop Special 9"
+        assert info.raw_model == "Workshop Special 9"
 
     def test_fresh_attributes_fetched_when_nothing_cached(self) -> None:
         adapter = _adapter()

@@ -59,6 +59,39 @@ class TestOneFootprint:
         _report_the_sliced_footprint(info, _gcode(tmp_path / "job.gcode"))
         assert info["bed_fit"]["slicer_moved_the_part"] is True
 
+    def test_a_skirt_past_the_edge_of_the_bed_is_said_at_slice_time(self, tmp_path):
+        """MK4, measured 2026-09-30: a 245 mm part on the 250 mm bed slices
+        with its skirt at X -3.7 .. 253.7.  The part fits, the slice
+        succeeds, and the check before a print refuses the file."""
+        from kiln.plugins.slicer_tools import _attach_bed_fit
+
+        fit = _mesh_fit(2.5, 5.0, 247.5, 205.0)
+        fit["build_volume"] = (250.0, 210.0, 220.0)
+        info = {"bed_fit": fit}
+        gcode = _gcode(tmp_path / "job.gcode", part=(2.7, 5.2, 247.3, 204.8), tower=(-3.7, -1.2, 253.7, 211.2))
+        _report_the_sliced_footprint(info, gcode)
+        assert fit["prints_past_bed_mm"] == 3.7
+        assert "3.7 mm past the edge of the bed" in fit["prints_past_bed"] and "skirts=0" in fit["prints_past_bed"]
+        # And it reaches the part of a result people read, without touching
+        # a warnings list the door may share with another block.
+        shared = ["an earlier warning"]
+        response = {"warnings": shared}
+        _attach_bed_fit(response, fit)
+        assert response["warnings"] == ["an earlier warning", fit["prints_past_bed"]]
+        assert shared == ["an earlier warning"]
+
+    def test_a_print_inside_the_bed_carries_no_such_note(self, tmp_path):
+        from kiln.plugins.slicer_tools import _attach_bed_fit
+
+        fit = _mesh_fit(100, 100, 140, 130)
+        fit["build_volume"] = (250.0, 210.0, 220.0)
+        info = {"bed_fit": fit}
+        _report_the_sliced_footprint(info, _gcode(tmp_path / "job.gcode"))
+        assert "prints_past_bed" not in fit and "prints_past_bed_mm" not in fit
+        response: dict = {}
+        _attach_bed_fit(response, fit)
+        assert "warnings" not in response
+
     def test_no_gcode_leaves_the_gate_block_as_written(self, tmp_path):
         info = {"bed_fit": _mesh_fit(100, 100, 140, 130)}
         _report_the_sliced_footprint(info, str(tmp_path / "missing.gcode"))

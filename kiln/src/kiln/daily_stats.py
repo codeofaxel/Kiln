@@ -1153,7 +1153,7 @@ _VIDEO_MODEL_UNSAFE = re.compile(r"[^a-z0-9]+")
 def video_model_token(raw: object) -> str:
     """A printer model as a video-outcome key token, or ``"unknown"``.
 
-    The config-declared model is free text ("Saturn 4 Ultra 16K"); the key
+    The config-declared model is free text ("Centauri Carbon 2 Combo"); the key
     needs a token.  Lowercased, every run of other characters folded to one
     underscore, capped at 48.  Nothing is mapped or guessed — a model the
     catalogue spells differently stays spelled the owner's way.
