@@ -165,9 +165,12 @@ def _served(
     except Exception:  # noqa: BLE001
         return None, Miss("unanswered", _NOT_ASKED, "this install could not open its connection to Kiln's servers")
     try:
+        # The person asked for an estimate; this enrichment rides along with
+        # it, so a signed-out install does not count it as reaching for it.
         answer = _pro_api_call(
             WIRE_TOOL,
             _timeout=_CONSULT_TIMEOUT_S,
+            _asked_by_user=False,
             gcode_gz_b64=base64.b64encode(gzip.compress(body, compresslevel=6)).decode("ascii"),
             file_name=os.path.basename(file_path),
             filaments=filaments,
