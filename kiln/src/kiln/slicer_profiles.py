@@ -473,6 +473,27 @@ def _ensure_estimate_motion(settings: dict[str, str], profile_id: str) -> None:
             settings[key] = _limit(motion[source])
 
 
+def _ensure_bed(settings: dict[str, str], profile_id: str, printer_id: str) -> None:
+    """Give the generic profile the bed of the printer it is standing in for.
+
+    A printer with no bundled profile slices with the generic one, which
+    states no bed, so the slicer lays the part out for its own default bed
+    whatever the machine's is.  When its owner set *printer_id* up on this
+    machine with a bed, the generic profile is given that bed.  A bundled
+    profile's own bed is never touched.
+    """
+    if profile_id != "default" or "bed_shape" in settings:
+        return
+    from kiln.printers.bed_fit import owner_stated_build_volume
+
+    volume = owner_stated_build_volume(printer_id)
+    if volume is None:
+        return
+    x, y, z = (f"{side:g}" for side in volume)
+    settings["bed_shape"] = f"0x0,{x}x0,{x}x{y},0x{y}"
+    settings.setdefault("max_print_height", z)
+
+
 #: The comment line a written profile carries its nozzle answer on.  A
 #: comment, so both slicers ignore it and every profile derived from this
 #: one (:func:`profile_with_overrides` copies its base line for line) still
@@ -732,6 +753,7 @@ def resolve_slicer_profile(
     """
     profile = get_slicer_profile(printer_id)
     merged = dict(profile.settings)
+    _ensure_bed(merged, profile.id, printer_id)
     if overrides:
         merged.update(overrides)
     # Before the printer invariants: the estimate's motion limits are read

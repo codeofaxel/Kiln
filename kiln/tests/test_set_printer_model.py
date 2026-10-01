@@ -26,6 +26,7 @@ import yaml
 
 import kiln._pro_nozzle_bridge as bridge
 import kiln.assumed_nozzle as assumed
+import kiln.safety_profiles as sp
 from kiln.printer_setup import (
     AGENT_REMEDY,
     CLI_REMEDY,
@@ -91,6 +92,23 @@ def config(tmp_path, monkeypatch) -> Path:
     monkeypatch.setattr("kiln.printer_model_resolver._CONFIG_PATH", path)
     monkeypatch.setattr("kiln.printer_model_resolver._cache", (0.0, None))
     return path
+
+
+@pytest.fixture(autouse=True)
+def _own_override_store(monkeypatch, tmp_path):
+    """This machine's printer overrides, in a folder of the test's own."""
+    store = tmp_path / "kiln_home"
+    store.mkdir()
+    monkeypatch.setattr(sp, "_LOCAL_OVERRIDE_FILE", store / "local_printer_overrides.json")
+    monkeypatch.setattr(sp, "_LEGACY_OVERRIDE_FILE", store / "community_profiles.json")
+    monkeypatch.setattr(sp, "_LOCK_FILE", store / "locked_profiles.json")
+    monkeypatch.setattr(sp, "_LOCAL_DIR", store)
+    monkeypatch.delenv("KILN_HOSTED_MULTITENANT", raising=False)
+    sp._local_overrides_loaded = False
+    sp._local_override_cache.clear()
+    yield store
+    sp._local_overrides_loaded = False
+    sp._local_override_cache.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -218,6 +236,14 @@ class TestTheModelIsSet:
         os.utime(config, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
         assert resolve_printer_model() == "bambu_a1"
 
+    def test_a_saved_value_kiln_does_not_recognise_was_doing_nothing_and_is_replaced(self, config):
+        raw = yaml.safe_load(config.read_text(encoding="utf-8"))
+        raw["printers"]["garage"]["printer_model"] = "bambu_a11"
+        config.write_text(yaml.safe_dump(raw), encoding="utf-8")
+        out = set_printer_model("Bambu Lab A1", config_path=config)
+        assert out["applied"] and out["previous"] == "bambu_a11"
+        assert _saved(config)["garage"]["printer_model"] == "bambu_a1"
+
     def test_setting_it_again_changes_nothing_and_says_so(self, config):
         set_printer_model("Bambu Lab A1", config_path=config)
         out = set_printer_model("bambu_a1", config_path=config)
@@ -244,11 +270,23 @@ class TestNothingIsWrittenWhenItShouldNotBe:
         assert out["close_matches"] and "Closest in the catalogue" in out["error"]
         assert self._unchanged(config, before)
 
-    def test_an_unknown_printer_in_a_file_still_reports_what_the_file_said(self, config, tmp_path):
-        project = _bambu_project(tmp_path / "part.3mf", printer_model="Acme Printomatic 9", printer_settings_id="")
+    def test_an_unknown_printer_in_a_file_with_no_bed_cannot_be_set_up(self, config, tmp_path):
+        """The bed is the one fact Kiln cannot do without; a file that
+        names an unknown printer and no bed is a name, and is refused as one."""
+        before = config.read_text(encoding="utf-8")
+        project = _bambu_project(
+            tmp_path / "part.3mf", printer_model="Acme Printomatic 9", printer_settings_id="",
+            printable_area=[], printable_height="",
+        )
         out = set_printer_model(slicer_file=project, config_path=config)
         assert out["code"] == "UNKNOWN_MODEL" and out["recognised"] is False
-        assert out["file"]["bed_mm"] == [256.0, 256.0, 256.0]
+        assert out["file"]["printer"] == "Acme Printomatic 9" and out["file"]["bed_mm"] is None
+        assert self._unchanged(config, before) and sp.list_local_printer_overrides() == []
+
+    def test_an_unknown_printer_by_name_is_told_what_would_set_it_up(self, config):
+        out = set_printer_model("Acme Printomatic 9", config_path=config)
+        assert out["code"] == "UNKNOWN_MODEL" and "project saved from your slicer" in out["error"]
+        assert sp.list_local_printer_overrides() == []
 
     def test_a_different_model_already_set_is_kept_unless_asked(self, config):
         set_printer_model("Bambu Lab A1", config_path=config)
@@ -311,6 +349,215 @@ class TestNothingIsWrittenWhenItShouldNotBe:
         config.write_text(yaml.safe_dump(raw), encoding="utf-8")
         out = set_printer_model("Voron 2.4", config_path=config)
         assert out["applied"] is False and "name which one with printer_name" in out["message"]
+
+
+# ---------------------------------------------------------------------------
+# A printer outside the catalogue
+# ---------------------------------------------------------------------------
+
+ACME = "custom_acme_printomatic_9"
+
+
+def _acme_project(path: Path, **changes) -> str:
+    """A 300 x 300 x 400 mm printer no catalogue row describes."""
+    return _bambu_project(path, **{
+        "printer_model": "Acme Printomatic 9",
+        "printer_settings_id": "Acme Printomatic 9 0.4 nozzle",
+        "printable_area": ["0x0", "300x0", "300x300", "0x300"],
+        "printable_height": "400",
+        **changes,
+    })
+
+
+class TestAPrinterOutsideTheCatalogue:
+    def test_its_slicer_file_sets_it_up_on_this_machine(self, config, tmp_path):
+        out = set_printer_model(slicer_file=_acme_project(tmp_path / "part.3mf"), printer_name="shed", config_path=config)
+        assert (out["success"], out["applied"], out["printer_model"]) == (True, True, ACME)
+        assert out["in_catalogue"] is False
+        assert _saved(config)["shed"]["printer_model"] == ACME
+        assert "not in Kiln's catalogue" in out["message"] and "300 x 300 x 400 mm bed" in out["message"]
+
+    def test_the_bed_is_the_files_and_every_limit_is_kilns_generic_one(self, config, tmp_path):
+        """Nothing in the file raises a limit: a file stating a 320 C
+        nozzle range and 500 mm/s leaves the generic ceilings where they
+        were, and the profile says the limits are not this printer's own."""
+        project = _acme_project(
+            tmp_path / "part.3mf", nozzle_temperature_range_high=["320"], hot_plate_temp=["120"],
+            machine_max_speed_x=["500", "500"],
+        )
+        set_printer_model(slicer_file=project, printer_name="shed", config_path=config)
+        generic, saved = sp.get_profile("default"), sp.get_profile(ACME)
+        assert saved.build_volume == [300.0, 300.0, 400.0]
+        assert (saved.max_hotend_temp, saved.max_bed_temp, saved.max_feedrate) == (
+            generic.max_hotend_temp, generic.max_bed_temp, generic.max_feedrate,
+        )
+        assert saved.curated_base is False
+
+    def test_a_design_is_now_measured_against_its_bed_and_told_whose_number_it_is(self, config, tmp_path):
+        """The validation pipeline had nothing to measure against.  It now
+        has the bed -- and says it is the owner's, because a bed nobody
+        verified can be bigger on paper than in the room."""
+        from kiln.plugins._validation_pipeline_internals import _resolve_build_volume
+        from kiln.printer_model_resolver import resolve_printer_model_for
+        from kiln.printers.bed_fit import check_bed_fit, owner_stated_build_volume
+
+        assert owner_stated_build_volume(ACME) is None
+        set_printer_model(slicer_file=_acme_project(tmp_path / "part.3mf"), printer_name="shed", config_path=config)
+        model = resolve_printer_model_for("shed")
+        assert model == ACME and owner_stated_build_volume(model) == (300.0, 300.0, 400.0)
+
+        resolved = _resolve_build_volume(model)
+        assert resolved.dims == (300.0, 300.0, 400.0)
+        assert "owner-set limit, not Kiln-verified" in resolved.provenance
+
+        def box(size: float) -> dict[str, float]:
+            return {"x_min": 0.0, "x_max": size, "y_min": 0.0, "y_max": size, "z_min": 0.0, "z_max": 10.0}
+
+        assert check_bed_fit(box(280.0), resolved.dims, source="mesh")["ok"] is True
+        assert check_bed_fit(box(320.0), resolved.dims, source="mesh")["error_code"] == "EXCEEDS_BED"
+
+    def test_the_motion_planner_and_the_print_start_bounds_still_read_the_catalogue_alone(self, config, tmp_path):
+        """A bed somebody's file stated lays a slice out; it never tells
+        Kiln where a head may travel."""
+        from kiln.printers.bed_fit import get_build_volume, resolve_build_volume, validate_mesh_for_printer
+
+        set_printer_model(slicer_file=_acme_project(tmp_path / "part.3mf"), printer_name="shed", config_path=config)
+        assert get_build_volume(ACME) is None and resolve_build_volume(ACME) is None
+        assert validate_mesh_for_printer(str(tmp_path / "absent.stl"), ACME)["build_volume"] is None
+
+    def test_a_slice_for_it_is_laid_out_on_its_own_bed(self, config, tmp_path):
+        from kiln.slicer_orca import ini_to_settings
+        from kiln.slicer_profiles import resolve_slicer_profile
+
+        set_printer_model(slicer_file=_acme_project(tmp_path / "part.3mf"), printer_name="shed", config_path=config)
+        settings = ini_to_settings(resolve_slicer_profile(ACME))
+        assert settings["bed_shape"] == "0x0,300x0,300x300,0x300"
+        assert settings["max_print_height"] == "400"
+
+    def test_the_generic_profile_and_a_bundled_one_keep_their_own_bed(self, config, tmp_path):
+        from kiln.slicer_orca import ini_to_settings
+        from kiln.slicer_profiles import resolve_slicer_profile
+
+        before = ini_to_settings(resolve_slicer_profile("bambu_a1")).get("bed_shape")
+        set_printer_model(slicer_file=_acme_project(tmp_path / "part.3mf"), printer_name="shed", config_path=config)
+        assert "bed_shape" not in ini_to_settings(resolve_slicer_profile("default"))
+        assert ini_to_settings(resolve_slicer_profile("bambu_a1")).get("bed_shape") == before
+
+    def test_a_bundled_profiles_bed_is_its_own_whatever_else_kiln_holds(self, monkeypatch):
+        from kiln.slicer_orca import ini_to_settings
+        from kiln.slicer_profiles import resolve_slicer_profile
+
+        monkeypatch.setattr("kiln.printers.bed_fit.get_build_volume", lambda printer_id: (999.0, 999.0, 999.0))
+        assert ini_to_settings(resolve_slicer_profile("bambu_a1"))["bed_shape"] == "0x0,256x0,256x256,0x256"
+
+    def test_it_can_then_be_named_like_any_other(self, config, tmp_path):
+        set_printer_model(slicer_file=_acme_project(tmp_path / "part.3mf"), printer_name="shed", config_path=config)
+        raw = yaml.safe_load(config.read_text(encoding="utf-8"))
+        raw["printers"]["attic"] = {"type": "octoprint", "host": "http://attic.local"}
+        config.write_text(yaml.safe_dump(raw), encoding="utf-8")
+        for said in ("Acme Printomatic 9", ACME):
+            out = set_printer_model(said, printer_name="attic", replace=True, config_path=config)
+            assert out["success"] and out["printer_model"] == ACME and out["in_catalogue"] is False
+
+    def test_a_setup_already_on_this_machine_is_never_overwritten(self, config, tmp_path):
+        """An owner who tightened this printer's limits keeps them: the
+        file is a second opinion about the bed, said as a note."""
+        sp.set_local_printer_override(ACME, {
+            "max_hotend_temp": 220.0, "max_bed_temp": 70.0, "max_feedrate": 6000.0, "build_volume": [280.0, 280.0, 380.0],
+        })
+        out = set_printer_model(slicer_file=_acme_project(tmp_path / "part.3mf"), printer_name="shed", config_path=config)
+        assert out["applied"] and sp.get_profile(ACME).max_hotend_temp == 220.0
+        assert sp.get_profile(ACME).build_volume == [280.0, 280.0, 380.0]
+        assert any("300 x 300 x 400 mm" in note and "280 x 280 x 380 mm" in note for note in out["notes"])
+
+    def test_a_refusal_saves_nothing(self, config, tmp_path):
+        set_printer_model("Voron 2.4", printer_name="shed", config_path=config)
+        out = set_printer_model(slicer_file=_acme_project(tmp_path / "part.3mf"), printer_name="shed", config_path=config)
+        assert out["code"] == "MODEL_ALREADY_SET"
+        assert sp.list_local_printer_overrides() == []
+
+    def test_with_no_printer_to_set_nothing_is_saved_and_the_next_step_is_said(self, tmp_path):
+        out = set_printer_model(slicer_file=_acme_project(tmp_path / "part.3mf"), config_path=tmp_path / "none.yaml")
+        assert (out["success"], out["applied"], out["printer_model"]) == (True, False, None)
+        assert "add the printer with register_printer" in out["message"]
+        assert sp.list_local_printer_overrides() == []
+
+    def test_a_bambu_connection_may_be_a_model_the_catalogue_has_not_met(self, config, tmp_path):
+        out = set_printer_model(slicer_file=_acme_project(tmp_path / "part.3mf"), config_path=config)
+        assert out["applied"] and out["printer"] == "garage"
+
+    def test_a_locked_setup_is_refused_by_name(self, config, tmp_path):
+        sp._load_locks()
+        sp._locked_profiles.add(ACME)
+        try:
+            out = set_printer_model(slicer_file=_acme_project(tmp_path / "part.3mf"), printer_name="shed", config_path=config)
+        finally:
+            sp._locked_profiles.discard(ACME)
+        assert out["code"] == "LOCAL_SETUP_REFUSED" and "admin-locked" in out["error"]
+        assert "printer_model" not in _saved(config)["shed"]
+
+    def test_a_refused_head_move_says_why_not_to_set_a_model_already_set(self, config, tmp_path):
+        from types import SimpleNamespace
+
+        from kiln.printers.base import PrinterAdapter
+
+        set_printer_model(slicer_file=_acme_project(tmp_path / "part.3mf"), printer_name="shed", config_path=config)
+        local = PrinterAdapter._declare_model_text(SimpleNamespace(declared_printer_model=lambda: ACME))
+        assert "outside Kiln's catalogue" in local and "set-model" not in local
+        typo = PrinterAdapter._declare_model_text(SimpleNamespace(declared_printer_model=lambda: "bambu_a11"))
+        assert "set-model" in typo
+
+    def test_a_catalogue_printers_bed_is_never_the_one_somebody_typed(self):
+        """An override filed under a loose spelling of a catalogue printer
+        is a tightened limit, not that printer's bed."""
+        from kiln.printers.bed_fit import get_build_volume, owner_stated_build_volume
+
+        catalogue = get_build_volume("Bambu Lab A1")
+        sp.set_local_printer_override("bambu_lab_a1", {
+            "max_hotend_temp": 200.0, "max_bed_temp": 60.0, "max_feedrate": 6000.0, "build_volume": [100.0, 100.0, 100.0],
+        })
+        assert get_build_volume("Bambu Lab A1") == catalogue
+        for spelling in ("Bambu Lab A1", "bambu_lab_a1", "bambu_a1"):
+            assert owner_stated_build_volume(spelling) is None
+
+    def test_the_generic_rows_name_is_not_a_printers(self):
+        from kiln.printers.bed_fit import get_build_volume, owner_stated_build_volume
+
+        sp.set_local_printer_override("default", {
+            "max_hotend_temp": 200.0, "max_bed_temp": 60.0, "max_feedrate": 6000.0, "build_volume": [100.0, 100.0, 100.0],
+        })
+        assert get_build_volume("default") is None and owner_stated_build_volume("default") is None
+
+    def test_a_newer_file_corrects_the_bed_only_when_asked(self, config, tmp_path):
+        set_printer_model(slicer_file=_acme_project(tmp_path / "old.3mf"), printer_name="shed", config_path=config)
+        newer = _acme_project(
+            tmp_path / "new.3mf", printable_area=["0x0", "350x0", "350x350", "0x350"], printable_height="400",
+        )
+        kept = set_printer_model(slicer_file=newer, printer_name="shed", config_path=config)
+        assert kept["applied"] is False and sp.get_profile(ACME).build_volume == [300.0, 300.0, 400.0]
+        assert any("pass replace=True to take this file's" in note for note in kept["notes"])
+
+        taken = set_printer_model(slicer_file=newer, printer_name="shed", replace=True, config_path=config)
+        assert taken["applied"] is True and sp.get_profile(ACME).build_volume == [350.0, 350.0, 400.0]
+        assert _saved(config)["shed"]["printer_model"] == ACME
+        assert not any("printable volume" in note for note in taken["notes"])
+
+    def test_limits_an_owner_typed_are_not_written_over_even_when_asked(self, config, tmp_path):
+        sp.set_local_printer_override(ACME, {
+            "max_hotend_temp": 220.0, "max_bed_temp": 70.0, "max_feedrate": 6000.0, "build_volume": [280.0, 280.0, 380.0],
+        })
+        out = set_printer_model(
+            slicer_file=_acme_project(tmp_path / "part.3mf"), printer_name="shed", replace=True, config_path=config,
+        )
+        assert out["success"] and sp.get_profile(ACME).build_volume == [280.0, 280.0, 380.0]
+        assert sp.get_profile(ACME).max_hotend_temp == 220.0
+        assert not any("replace=True" in note for note in out["notes"])
+
+    def test_a_printer_set_up_here_is_not_swapped_for_another_model_unasked(self, config, tmp_path):
+        set_printer_model(slicer_file=_acme_project(tmp_path / "part.3mf"), printer_name="shed", config_path=config)
+        out = set_printer_model("Voron 2.4", printer_name="shed", config_path=config)
+        assert (out["code"], out["previous"]) == ("MODEL_ALREADY_SET", ACME)
+        assert _saved(config)["shed"]["printer_model"] == ACME
 
 
 class TestWhatTheFileSaysBesideWhatKilnHolds:

@@ -4612,6 +4612,13 @@ class PrinterAdapter(ABC):
         """
         model = self.declared_printer_model()
         if model:
+            from kiln.printers.bed_fit import owner_stated_build_volume
+
+            if owner_stated_build_volume(model) is not None:
+                return (
+                    f"{model!r} is a printer outside Kiln's catalogue, set up on this machine. Kiln has no "
+                    "motion record for it, and does not move a head it has no record for."
+                )
             return (
                 f"Kiln has no motion record for {model!r} -- not a catalogue key it knows. "
                 "Set it with `kiln set-model` or the `set_printer_model` tool, which accept the printer's "
@@ -4621,10 +4628,9 @@ class PrinterAdapter(ABC):
         return (
             "Kiln does not know which printer this is: no printer_model is declared for it. "
             "The facts that decide whether the head may move -- which part moves in Z, how Z is found "
-            "and where, whether the firmware refuses an unhomed move -- are looked up by model. Run "
-            "`kiln setup` (it asks which printer this is and writes the answer), or set printer_model "
-            "for this printer in config.yaml (KILN_PRINTER_MODEL for the env door) to a catalogue key "
-            "such as bambu_a1, bambu_p1s, prusa_mk4, k1 or ender3_v3_ke, and call again."
+            "and where, whether the firmware refuses an unhomed move -- are looked up by model. Say "
+            "which printer it is with `kiln set-model` or the `set_printer_model` tool -- by name, or "
+            "from a project saved from your slicer (KILN_PRINTER_MODEL for the env door) -- and call again."
         )
 
     @staticmethod

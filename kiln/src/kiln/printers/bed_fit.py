@@ -159,29 +159,53 @@ def get_build_volume(printer_id: str | None) -> tuple[float, float, float] | Non
     ``printer_id`` may be a canonical id (``bambu_a1``), a vendor-prefixed
     id (``creality_k1_max``), or a common human label (``Bambu Lab A1``).
     """
-    for candidate in _printer_id_candidates(printer_id):
-        looked_up = _lookup_build_volume_exact(candidate)
-        if looked_up is not None:
-            return looked_up
-    return None
+    resolved = resolve_build_volume(printer_id)
+    return resolved[1] if resolved else None
 
 
 def resolve_build_volume_printer_id(printer_id: str | None) -> str | None:
     """Return the canonical id that provided a known build volume."""
-    for candidate in _printer_id_candidates(printer_id):
-        if _lookup_build_volume_exact(candidate) is not None:
-            return candidate
-    return None
+    resolved = resolve_build_volume(printer_id)
+    return resolved[0] if resolved else None
 
 
 def resolve_build_volume(
     printer_id: str | None,
 ) -> tuple[str, tuple[float, float, float]] | None:
-    """Return ``(canonical_printer_id, build_volume_mm)`` if known."""
+    """Return ``(canonical_printer_id, build_volume_mm)`` if known.
+
+    The catalogue's answer, and only the catalogue's: this is the bed the
+    motion planner, the print-start gate and the G-code bounds read, and
+    none of them takes a number somebody typed.  A bed its owner stated
+    for a printer outside the catalogue is
+    :func:`owner_stated_build_volume`, asked for by name.
+    """
     for candidate in _printer_id_candidates(printer_id):
         looked_up = _lookup_build_volume_exact(candidate)
         if looked_up is not None:
             return candidate, looked_up
+    return None
+
+
+def owner_stated_build_volume(printer_id: str | None) -> tuple[float, float, float] | None:
+    """The bed its owner stated on this machine for a printer the catalogue
+    has no row for, or ``None``.
+
+    Never an answer for a catalogue printer, under any spelling: that
+    printer's bed is the catalogue's.  Never for the generic row, whose
+    name is not a printer's.  The number is the owner's and unverified --
+    it can be larger than the machine -- so a caller that passes a verdict
+    on it says whose it is (the validation pipeline's resolver does), and
+    a caller that only lays a part out on it need not.
+    """
+    if resolve_build_volume(printer_id) is not None:
+        return None
+    from kiln.safety_profiles import local_printer_build_volume
+
+    for candidate in _printer_id_candidates(printer_id):
+        stated = local_printer_build_volume(candidate) if candidate != "default" else None
+        if stated is not None:
+            return stated
     return None
 
 

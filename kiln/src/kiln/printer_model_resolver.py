@@ -132,8 +132,9 @@ def _read_printer_model_from_config() -> str | None:
         # get_build_volume returns None for unknown printers; unlike
         # get_printer_intel which silently falls back to "default".
         try:
-            from kiln.printers.bed_fit import get_build_volume
-            if model_str != model_str.lower() or get_build_volume(model_str) is None:
+            from kiln.printers.bed_fit import get_build_volume, owner_stated_build_volume
+            known = get_build_volume(model_str) is not None or owner_stated_build_volume(model_str) is not None
+            if model_str != model_str.lower() or not known:
                 logger.warning(
                     "printer_model=%r in %s doesn't match any known printer "
                     "in printer_intelligence.json.  Safety checks will be "
