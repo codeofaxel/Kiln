@@ -316,8 +316,17 @@ def test_two_backends_grade_one_file_differently(tmp_path, monkeypatch):
 
     A 150 mm sphere, written once, converted by each installed backend.  The
     two disagree on density by more than an order of magnitude and land on
-    different letters — one object, one file, two grades.  The exact read is
+    different scores — one object, one file, two verdicts.  The exact read is
     unmoved by any of it, which is the whole point.
+
+    This asserted different LETTERS until 2026-09-30, when the scorecard's
+    printability factor became analyze_printability's own score: that judges
+    overhangs by what a slicer can print rather than by the steepest facet,
+    so it stopped swinging with the tessellation and this sphere now lands on
+    one letter either way.  Re-measured rather than retuned: the quality
+    factor still grades Kiln's copy, so the score still moves with the
+    converter, and a grade that moves with the converter is still not a
+    grade of the user's design.
 
     Asserted as a relationship rather than as fixed numbers: the specific
     figures depend on the backends a machine has and on the scorecard's
@@ -402,9 +411,10 @@ def test_two_backends_grade_one_file_differently(tmp_path, monkeypatch):
         "the two backends should disagree on density; if they no longer do, "
         "re-measure before trusting the rest of this"
     )
-    assert occt["grade"] != freecad["grade"], (
-        f"one file graded {occt['grade']} by occt and {freecad['grade']} by "
-        "freecad is the reason a CAD file gets no letter"
+    assert occt["overall_score"] != freecad["overall_score"], (
+        f"one file scored {occt['overall_score']} by occt and "
+        f"{freecad['overall_score']} by freecad is the reason a CAD file gets "
+        "no letter"
     )
     # And the number that does not move, whichever converter ran.
     assert exact.volume_mm3 == pytest.approx(4 / 3 * math.pi * 75.0**3, rel=1e-9)

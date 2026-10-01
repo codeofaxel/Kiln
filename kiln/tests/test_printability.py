@@ -861,11 +861,14 @@ class TestThinWallLatticeAndComponent:
 
     def test_lattice_thin_strut_still_flagged(self):
         # The fix mustn't silently swallow legitimately-thin struts.
-        # 0.4 mm at a 0.4 mm nozzle is at the floor — still flagged.
-        tris = _cubic_lattice_triangles(strut_mm=0.4)
+        # This used a 0.4 mm strut "at the floor", which passed only because
+        # float32 coordinates measured it 0.39999 mm: walls are judged at the
+        # precision they are reported, and a 0.4 mm wall is not below a
+        # 0.4 mm nozzle.  0.35 mm is genuinely under it.
+        tris = _cubic_lattice_triangles(strut_mm=0.35)
         result = _analyze_thin_walls(tris, [], nozzle_diameter=0.4)
         assert result.thin_wall_count > 0
-        assert abs(result.min_wall_thickness_mm - 0.4) < 0.05
+        assert abs(result.min_wall_thickness_mm - 0.35) < 0.05
 
     def test_thread_cap_artifact_filtered(self):
         # The end-cap artifact: a helical face near the rod's +Z cap

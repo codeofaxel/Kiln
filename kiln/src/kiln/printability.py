@@ -1907,10 +1907,16 @@ def _measure_thin_walls(
     counted = supported if supported.any() else finite_mask
     measured_min = float(exit_dist[counted].min())
 
-    thin_mask = counted & (exit_dist < threshold)
+    # Judged at the precision every thickness is reported at (µm), so a
+    # wall reported as "1.2 mm" is never thin against a 1.2 mm floor.  The
+    # raw chords carry float32 STL noise: a CAD 1.2 mm ledge measures
+    # 1.1999 mm, and comparing raw counted it thin while the material
+    # rule, reading the reported 1.2, did not.
+    reported = np.round(exit_dist, 3)
+    thin_mask = counted & (reported < threshold)
     thin_count = int(thin_mask.sum())
     thin_pct = thin_count / n_sample * 100.0
-    sub_nozzle_pct = int((counted & (exit_dist < nozzle_diameter)).sum()) / n_sample * 100.0
+    sub_nozzle_pct = int((counted & (reported < nozzle_diameter)).sum()) / n_sample * 100.0
 
     # ``min_wall_thickness_mm`` carries the absolute smallest measured
     # wall thickness on the mesh, regardless of the nozzle threshold —
@@ -4918,6 +4924,12 @@ def recommend_adhesion(
     elif is_warp_material and model_height_mm > 50.0:
         brim = 5
         rationale = f"Tall model ({model_height_mm:.0f}mm) with {mat_upper} — precautionary 5mm brim."
+    elif is_warp_material and not has_enclosure:
+        # An unknown printer counts as open-frame here, as it does for the
+        # open-frame warping warning: a brim is cheap where it proves
+        # unneeded, and a lifted corner on an open frame is not.
+        brim = 5
+        rationale = f"{mat_upper} warps without an enclosure — precautionary 5mm brim."
     else:
         rationale = f"Good bed contact ({pct:.1f}%), no brim needed."
 

@@ -3028,12 +3028,40 @@ def _score_factor_from_rules(
     return max(0, score), notes
 
 
-def design_scorecard(file_path: str) -> dict[str, Any]:
+def _printability_factor(
+    mesh_path: str, *, material: str, printer_id: str | None,
+) -> dict[str, Any]:
+    """A scorecard's printability factor: the printability score itself.
+
+    :func:`kiln.printability.analyze_printability`'s score, grade and
+    advice for ``material`` and ``printer_id`` — never the quick mesh
+    check's ``mesh_check_score``, which once sat in this slot as a second
+    "printability" number that disagreed with the first on the same part.
+    """
+    from kiln.printability import analyze_printability
+
+    report = analyze_printability(mesh_path, material=material, printer_id=printer_id)
+    return {
+        "score": report.score,
+        "grade": report.grade,
+        "material": material,
+        "notes": list(report.recommendations),
+    }
+
+
+def design_scorecard(
+    file_path: str,
+    *,
+    material: str = "pla",
+    printer_id: str | None = None,
+) -> dict[str, Any]:
     """Generate a multi-factor quality scorecard for a mesh.
 
     Evaluates four factors (each 0-100):
 
-    - **Printability**: overhangs, manifold, supports needed
+    - **Printability**: the printability score from
+      :func:`kiln.printability.analyze_printability`, judged for
+      ``material`` and ``printer_id``
     - **Structural**: aspect ratio, base stability, component count
     - **Efficiency**: fill ratio, overhang waste
     - **Quality**: triangle density, degenerate count
@@ -3047,6 +3075,9 @@ def design_scorecard(file_path: str) -> dict[str, Any]:
 
     Args:
         file_path: Path to mesh file.
+        material: Material the printability factor is judged for (default
+            ``"pla"``, as in ``analyze_printability``).
+        printer_id: Printer the printability factor is judged for.
 
     Returns:
         Dict with per-factor scores, overall score, and grade.  Shape
@@ -3060,8 +3091,11 @@ def design_scorecard(file_path: str) -> dict[str, Any]:
 
     overlay = load_pro_overlay_or_empty("scorecard_weights")
 
-    # --- Printability (already a 0-100 score from the upstream analysis) ---
-    printability = analysis.mesh_check_score
+    # --- Printability: the printability score itself -------------------
+    printability_factor = _printability_factor(
+        file_path, material=material, printer_id=printer_id,
+    )
+    printability = printability_factor["score"]
 
     # --- Structural / Efficiency / Quality (overlay-driven rules) -------
     structural, structural_notes = _score_factor_from_rules(
@@ -3102,7 +3136,7 @@ def design_scorecard(file_path: str) -> dict[str, Any]:
     return {
         "overall_score": overall,
         "grade": grade,
-        "printability": {"score": printability, "notes": analysis.printability_issues},
+        "printability": printability_factor,
         "structural": {"score": structural, "notes": structural_notes},
         "efficiency": {"score": efficiency, "notes": efficiency_notes},
         "quality": {"score": quality, "notes": quality_notes},
@@ -3354,6 +3388,9 @@ def cad_intake_report(
     file_path: str,
     mesh_path: str,
     conversion: Any = None,
+    *,
+    material: str = "pla",
+    printer_id: str | None = None,
 ) -> dict[str, Any]:
     """Compose a CAD file's three bands: exact, measured, and about our copy.
 
@@ -3387,6 +3424,8 @@ def cad_intake_report(
         conversion: The ``MeshConversion`` record that came back with it, for
             naming how the copy was cut.  ``None`` is honest for a cache
             entry whose sidecar is unreadable.
+        material: Material the measured band's printability is judged for.
+        printer_id: Printer the measured band's printability is judged for.
 
     Returns:
         The report dict.  ``exact`` degrades to ``available: False`` with a
@@ -3449,10 +3488,9 @@ def cad_intake_report(
             "measured_on": "Kiln's mesh copy of your file, not the file itself",
             "conversion": _conversion_sentence(conversion),
             "conversion_difference": _conversion_deviation(exact, analysis),
-            "printability": {
-                "score": analysis.mesh_check_score,
-                "notes": analysis.printability_issues,
-            },
+            "printability": _printability_factor(
+                mesh_path, material=material, printer_id=printer_id,
+            ),
             "structural": {"score": structural, "notes": structural_notes},
             "efficiency": {"score": efficiency, "notes": efficiency_notes},
             "max_overhang_angle_deg": analysis.max_overhang_angle_deg,

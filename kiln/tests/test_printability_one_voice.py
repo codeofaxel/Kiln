@@ -206,6 +206,16 @@ class TestOnePrintabilityScore:
         assert oriented["printability_score"] == graded["report"]["score"]
         assert oriented["printability_grade"] == graded["report"]["grade"]
 
+    def test_the_scorecard_printability_factor_is_the_printability_score(self, enclosure, free_tier):
+        from kiln.generation.validation import design_scorecard
+        from kiln.printability import analyze_printability
+
+        factor = design_scorecard(enclosure, material="petg")["printability"]
+        report = analyze_printability(enclosure, material="petg")
+
+        assert (factor["score"], factor["grade"]) == (report.score, report.grade)
+        assert factor["material"] == "petg"
+
     def test_the_quick_mesh_check_is_never_called_a_printability_score(self, enclosure, free_tier):
         from kiln.generation.validation import (
             analyze_mesh,
@@ -281,6 +291,24 @@ class TestOneBrimDecision:
         brim_lines = [line for line in _all_advice(report) if _speaks_of_brim(line)]
         assert len(brim_lines) == 1, brim_lines
 
+    def test_a_warp_prone_material_without_an_enclosure_gets_a_brim(self, tmp_path, free_tier):
+        """A small ABS block: full contact, low warping risk, steady force
+        balance — nothing else asks for a brim, but ABS on an open frame
+        (or a printer nobody named) still wants one, and an enclosure does
+        not."""
+        from kiln.printability import analyze_printability
+
+        block = _box_stl(tmp_path / "block.stl", 20.0, 20.0, 10.0)
+        open_frame = analyze_printability(block, material="abs", printer_id="bambu_a1")
+        unnamed = analyze_printability(block, material="abs")
+        enclosed = analyze_printability(block, material="abs", printer_id="bambu_x1c")
+
+        assert open_frame.warping.risk_level == "low"  # the premise
+        assert open_frame.adhesion_force.risk_level == "secure"
+        assert (open_frame.adhesion.brim_width_mm, unnamed.adhesion.brim_width_mm) == (5, 5)
+        assert "without an enclosure" in open_frame.adhesion.rationale
+        assert enclosed.adhesion.brim_width_mm == 0
+
     def test_the_decision_sees_an_enclosed_printer(self, tmp_path, free_tier):
         """Low contact wants a wider brim on an open frame than in an
         enclosure; the enclosure was never seen, because the doors read the
@@ -343,6 +371,20 @@ class TestEveryThinFeature:
             assert any(_near(r, xy, 3.5) for r in standoffs), (xy, standoffs)
         for xy in BOSS_XY:
             assert any(_near(r, xy, 4.5) for r in bosses), (xy, bosses)
+
+    def test_a_wall_exactly_at_the_floor_is_not_thin(self, enclosure, monkeypatch):
+        """The ledge is a CAD 1.2 mm wall that measures 1.1999 mm through
+        float32 STL coordinates.  Against a 1.2 mm floor it is reported as
+        1.2 mm, so it must not count as thin — the material rule, which reads
+        the reported number, does not count it either."""
+        from kiln.printability import analyze_printability
+
+        _install_pro_wall_floor(monkeypatch, ENCLOSURE_WALL_FEATURES_MM[0])
+        walls = analyze_printability(enclosure, material="petg").thin_walls
+
+        assert walls.min_wall_thickness_mm == pytest.approx(ENCLOSURE_WALL_FEATURES_MM[0])
+        assert walls.threshold_basis == "material"
+        assert (walls.thin_wall_count, walls.problematic_regions) == (0, [])
 
     def test_the_score_still_deducts_only_for_walls_under_the_nozzle(self, enclosure, monkeypatch):
         from kiln.printability import analyze_printability

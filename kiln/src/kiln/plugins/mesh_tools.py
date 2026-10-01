@@ -460,12 +460,16 @@ class _MeshToolsPlugin:
                 return _error_dict(f"Cross-section failed: {exc}")
 
         @mcp.tool()
-        def mesh_quality_scorecard(file_path: str) -> dict:
+        def mesh_quality_scorecard(
+            file_path: str, material: str = "pla", printer_id: str = "",
+        ) -> dict:
             """Assess a model — a graded scorecard for a mesh, an intake
             report for a CAD file.
 
             **For a mesh** (.stl, .obj, .glb) it evaluates four dimensions:
-            - **Printability** (35%): overhangs, manifold, support needs
+            - **Printability** (35%): ``analyze_printability``'s own score and
+              grade for ``material`` / ``printer_id`` — pass the ones you gave
+              ``analyze_printability`` and the two match
             - **Structural** (25%): aspect ratio, base stability, component count
             - **Efficiency** (20%): fill ratio, support waste
             - **Quality** (20%): triangle density, degenerate count
@@ -495,6 +499,10 @@ class _MeshToolsPlugin:
 
             :param file_path: Path to a mesh (.stl, .obj, .glb) or a CAD file
                 (.step, .stp).
+            :param material: Material the printability factor is judged for
+                (default ``"pla"``).
+            :param printer_id: Optional printer the printability factor is
+                judged for.
             :returns: Dict with scores and a grade for a mesh; the three-band
                 intake report with ``grade: null`` for a CAD file.
             """
@@ -519,7 +527,11 @@ class _MeshToolsPlugin:
 
                     return {
                         "success": True,
-                        **cad_intake_report(file_path, mesh_path, conversion),
+                        **cad_intake_report(
+                            file_path, mesh_path, conversion,
+                            material=material or "pla",
+                            printer_id=printer_id or None,
+                        ),
                     }
                 except Exception as exc:
                     return _error_dict(f"CAD intake failed: {exc}")
@@ -530,7 +542,11 @@ class _MeshToolsPlugin:
                 return {
                     "success": True,
                     "subject": "mesh",
-                    **design_scorecard(file_path),
+                    **design_scorecard(
+                        file_path,
+                        material=material or "pla",
+                        printer_id=printer_id or None,
+                    ),
                 }
             except Exception as exc:
                 return _error_dict(f"Scorecard generation failed: {exc}")
