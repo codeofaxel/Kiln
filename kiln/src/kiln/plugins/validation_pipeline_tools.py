@@ -249,7 +249,7 @@ def run_full_validation_pipeline(
         report.ready_to_print = False
         report.readiness_score = 0
         report.validated_path = input_path
-        report.summary = f"Not ready (readiness 0/100). {geometry.details}"
+        report.summary = f"Not ready: {geometry.details}"  # nothing here to score
         report.next_action = None
         return _with_conversion(report.to_dict(), _step_conversion)
 
@@ -493,12 +493,11 @@ def gate_for_print(input_path: str, *, printer_id: str = "", material: str = "")
             code="VALIDATION_ERROR",
         )
     if not report.get("ready_to_print"):
-        # The summary already leads with the score ("Not ready (printability
-        # 45/100). ..."); saying it again in front read as a stutter.
-        summary = report.get("summary") or f"Not ready ({score_phrase(report)})."
+        # The check's own summary says it: "Not ready (printability 45/100).
+        # 1 issue: ..." -- the same sentence validate_and_prepare shows.
         return PrintGate(
             path=input_path,
-            reason=f"Mesh failed pre-print validation. {summary}",
+            reason=report.get("summary") or f"Not ready ({score_phrase(report)}).",
             code="VALIDATION_FAILED",
             report=report,
         )

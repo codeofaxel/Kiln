@@ -169,7 +169,7 @@ def test_the_shared_check_says_why_and_stops_before_judging(files):
     report = run_full_validation_pipeline(files["single_flat_triangle.stl"])
 
     assert report["ready_to_print"] is False and report["readiness_score"] == 0
-    assert "flat" in report["summary"], report["summary"]
+    assert report["summary"].startswith("Not ready: This file is flat"), report["summary"]
     assert [c["name"] for c in report["checks"]] == ["format", "mesh_geometry"]
 
 
@@ -422,6 +422,25 @@ class TestTheCommandLine:
         assert error["code"] == "VALIDATION_FAILED" and "--skip-validation" in error["message"]
         slice_file.assert_not_called()
 
+    @pytest.mark.parametrize("name", BROKEN_NAMES)
+    def test_validate_fails_a_broken_file(self, name, files):
+        from click.testing import CliRunner
+
+        from kiln.cli.main import cli
+
+        if name == "missing.stl":
+            pytest.skip("click refuses a path that does not exist before validate runs")
+        result = CliRunner().invoke(cli, ["validate", files[name]])
+        assert result.exit_code == 1 and "PASS" not in result.output, result.output
+
+    def test_validate_still_passes_a_real_part(self, files):
+        from click.testing import CliRunner
+
+        from kiln.cli.main import cli
+
+        result = CliRunner().invoke(cli, ["validate", files["cube.stl"]])
+        assert result.exit_code == 0 and "Printability: PASS" in result.output, result.output
+
     def test_slice_without_printing_is_left_to_the_slicer(self, files):
         """Making G-code is not a print: the gate is on --print-after only."""
         _, slice_file = self._slice(files["garbage.stl"])
@@ -457,10 +476,12 @@ CALLERS = {
     ),
     "plugins/generation_ai_tools.py::register.generate_and_print": "door: tested above",
     "cli/main.py::_cli_print_gate": "door: kiln slice --print-after and kiln generate-and-print, tested above",
+    "cli/main.py::validate": "door: kiln validate, tested above",
     "plugins/validation_pipeline_tools.py::gate_for_print": "the gate itself, tested above",
     # The verdict tools and engines.
     "plugins/validation_pipeline_tools.py::register.validate_and_prepare": "tool: tested above",
     "plugins/design_reasoning_tools.py::register.check_print_readiness": "tool: tested above",
+    "plugins/printability_tools.py::register.analyze_printability": "tool: tested above",
     "plugins/generation_tools.py::register.validate_and_prepare_mesh": "tool: tested above",
     "plugins/mesh_tools.py::register.validate_generated_mesh": "tool: tested above",
     "plugins/mesh_tools.py::register.mesh_quality_scorecard": "tool: tested above",
@@ -469,6 +490,7 @@ CALLERS = {
     "mesh_validation_pipeline.py::run_validation_pipeline": "engine: tested above",
     "plugins/_validation_pipeline_internals.py::_step_printability": "engine: a step of the shared check",
     "plugins/_validation_pipeline_internals.py::_step_watertight_check": "engine: a step of the shared check",
+    "plugins/_validation_pipeline_internals.py::_step_repair": "engine: a step of the shared check",
     # Callers that read an engine for information and decide nothing.
     "cli/main.py::_auto_support_style": "reads: picks a support style for the slice",
     "cli/main.py::generate": "reads: reports the generated mesh; prints nothing",
@@ -479,6 +501,9 @@ CALLERS = {
     "original_design.py::audit_original_design": "reads: an originality audit; prints nothing",
     "original_design.py::generate_original_design": "reads: checks a generated design; prints nothing",
     "plugins/design_tools.py::register.analyze_warping_risk": "reads: a warping report",
+    "plugins/printability_tools.py::register.recommend_adhesion_settings": "reads: an adhesion recommendation",
+    "plugins/printability_tools.py::register.diagnose_print_failure_live": "reads: failure signals for a diagnosis",
+    "plugins/material_tools.py::register.check_print_health": "reads: adhesion risk for a print already running",
     "plugins/estimate_tools.py::register.slice_and_estimate": "reads: the brim decision for an estimate; prints nothing",
     "plugins/generation_ai_tools.py::register.download_generated_model": "reads: reports the downloaded mesh; prints nothing",
     "print_service.py::_printability_score": "reads: the quote's score, None when the file cannot be read",
@@ -487,12 +512,18 @@ CALLERS = {
 
 
 class _CallSites(ast.NodeVisitor):
-    """``rel::enclosing.function`` for every call to *names* in one module."""
+    """``rel::enclosing.function`` for every call to *names* in one module,
+    through an import alias too (``analyze_printability as _analyze``)."""
 
-    def __init__(self, rel: str, names: frozenset[str]) -> None:
+    def __init__(self, rel: str, names: frozenset[str], tree: ast.Module) -> None:
         self.rel, self.names = rel, names
         self.stack: list[str] = []
         self.found: set[str] = set()
+        self.aliases = {
+            alias.asname: alias.name
+            for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
+            for alias in node.names if alias.asname
+        }
 
     def visit_FunctionDef(self, node) -> None:
         self.stack.append(node.name)
@@ -504,7 +535,7 @@ class _CallSites(ast.NodeVisitor):
     def visit_Call(self, node) -> None:
         func = node.func
         name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
-        if name in self.names:
+        if self.aliases.get(name, name) in self.names:
             self.found.add(f"{self.rel}::{'.'.join(self.stack) or '<module>'}")
         self.generic_visit(node)
 
@@ -513,8 +544,9 @@ def _calls(names: frozenset[str]) -> set[str]:
     """``path::enclosing.function`` for every call to *names* in Kiln."""
     found: set[str] = set()
     for path in sorted(SRC.rglob("*.py")):
-        sites = _CallSites(path.relative_to(SRC).as_posix(), names)
-        sites.visit(ast.parse(path.read_text()))
+        tree = ast.parse(path.read_text())
+        sites = _CallSites(path.relative_to(SRC).as_posix(), names, tree)
+        sites.visit(tree)
         found |= sites.found
     return found
 
