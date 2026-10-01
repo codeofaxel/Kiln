@@ -183,7 +183,7 @@ class TestTheSharedSliceStep:
         result, err, _info = _sliced(tmp_path, slicer, _profile(tmp_path))
         assert result is None and err["error"]["code"] == "PRINTS_PAST_BED"
         message = err["error"]["message"]
-        assert message.startswith("Kiln sliced it again without a skirt and won't hand it on")
+        assert message.startswith("Kiln won't slice this as asked: without its skirt, the file prints")
         assert "the prime tower" in message and "wipe_tower_x" in message
         assert "skirts=0" not in message, "the skirt is already gone"
         assert len(slicer.files) == 2, "one bounded retry"

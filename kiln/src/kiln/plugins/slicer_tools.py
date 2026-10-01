@@ -16,6 +16,7 @@ import math
 import os
 import re
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -1280,7 +1281,7 @@ def _keep_the_print_on_the_bed(
     *,
     printer_id: str | None,
     profile_path: str | None,
-    reslice: Any,
+    reslice: Callable[[str | None], Any],
 ) -> tuple[Any, dict | None, str | None]:
     """Settle a skirt or brim that prints past the edge of the bed.
 
@@ -1373,7 +1374,7 @@ def _brim_past_the_bed(brim: float, edge: dict[str, Any], volume: Any) -> dict:
     else:
         elsewhere = f". No spot on this {bed_x:g} x {bed_y:g} mm bed leaves {brim:g} mm all round a part this size."
     resp = _error_dict(
-        f"Kiln won't hand this slice on: the {brim:g} mm brim it asks for would print past the edge of the bed. "
+        f"Kiln won't slice this as asked: the {brim:g} mm brim it asks for would print past the edge of the bed. "
         f"The part is printed {room:.1f} mm from the nearest edge, a brim needs its full width on every side, "
         f"and Kiln does not narrow a brim on its own. Ask for {ask}{elsewhere}",
         code="BRIM_PAST_BED",
@@ -1389,7 +1390,7 @@ def _still_past_the_bed(edge: dict[str, Any], *, resliced: bool) -> dict:
     from kiln.server import _error_dict
 
     sentence = past_the_bed_sentence(edge)
-    lead = "Kiln sliced it again without a skirt and won't hand it on: " if resliced else "Kiln won't hand this slice on: "
+    lead = "Kiln won't slice this as asked: without its skirt, " if resliced else "Kiln won't slice this as asked: "
     resp = _error_dict(lead + sentence[0].lower() + sentence[1:], code="PRINTS_PAST_BED")
     resp["past_the_bed"] = {"past_mm": edge["past_mm"], "part_fits": edge["part_fits"], "added": list(edge["added"])}
     return resp
