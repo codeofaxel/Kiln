@@ -244,6 +244,16 @@ class TestTheCheckRunsForTheNozzleOnRecord:
         out = asyncio.run(server.mcp.call_tool("analyze_printability", {"file_path": fin, "printer_id": "bambu_a1"}))
         assert "Checked for a 0.6 mm nozzle: the nozzle on record for bambu_a1." in str(out)
 
+    def test_the_tool_with_no_printer_named_uses_the_only_one(self, fin, monkeypatch):
+        import asyncio
+
+        from kiln import server
+
+        _registered(monkeypatch)
+        _only_record(monkeypatch, "bambu_a1", 0.6)
+        out = str(asyncio.run(server.mcp.call_tool("analyze_printability", {"file_path": fin})))
+        assert "Checked for a 0.6 mm nozzle: the nozzle on record for bambu_a1, the only printer Kiln knows of." in out
+
     def test_the_mesh_pipeline_checks_for_the_printer_it_was_given(self, fin, monkeypatch):
         from kiln.mesh_validation_pipeline import run_validation_pipeline
 
@@ -253,3 +263,199 @@ class TestTheCheckRunsForTheNozzleOnRecord:
         assert for_printer.printability_details["nozzle"]["source"] == "record"
         assert for_nobody.printability_details["nozzle"]["source"] == "default"
         assert for_printer.printability_score < for_nobody.printability_score
+
+
+# ---------------------------------------------------------------------------
+# No printer named: the only printer Kiln knows of
+# ---------------------------------------------------------------------------
+
+
+def _registered(monkeypatch, *names):
+    class _Registry:
+        def list_machines(self):
+            return list(names)
+
+    monkeypatch.setattr("kiln.registry.get_printer_registry", lambda: _Registry())
+
+
+def _only_record(monkeypatch, printer_id, size, *, answered=True):
+    monkeypatch.setattr(
+        bridge, "consult_only_recorded_nozzle",
+        lambda: {"printer_id": printer_id, "diameter_mm": size, "answered": answered},
+    )
+
+
+class TestTheOnlyPrinterStandsIn:
+    def test_one_registered_machine_is_the_printer(self, monkeypatch):
+        _registered(monkeypatch, "workshop")
+        _on_record(monkeypatch, 0.6)
+        answer = assumed_nozzle(None, or_only_printer=True)
+        assert (answer.diameter_mm, answer.source, answer.printer_id) == (0.6, "record", "workshop")
+        assert answer.inferred_printer is True
+        assert "the only printer Kiln knows of" in answer.sentence()
+
+    def test_two_registered_machines_are_never_picked_between(self, monkeypatch):
+        _registered(monkeypatch, "workshop", "garage")
+        _on_record(monkeypatch, 0.6)
+        _only_record(monkeypatch, "workshop", 0.6)
+        assert assumed_nozzle(None, or_only_printer=True).source == "default"
+
+    def test_with_no_machine_here_the_one_nozzle_on_record_answers(self, monkeypatch):
+        _registered(monkeypatch)
+        _only_record(monkeypatch, "bambu_a1", 0.6)
+        answer = assumed_nozzle(None, or_only_printer=True)
+        assert (answer.diameter_mm, answer.source, answer.printer_id) == (0.6, "record", "bambu_a1")
+        assert answer.inferred_printer is True
+
+    def test_no_single_record_is_the_default(self, monkeypatch):
+        _registered(monkeypatch)
+        _only_record(monkeypatch, None, None)
+        assert assumed_nozzle(None, or_only_printer=True).source == "default"
+
+    def test_records_that_could_not_be_asked_are_said(self, monkeypatch):
+        _registered(monkeypatch)
+        _only_record(monkeypatch, None, None, answered=False)
+        answer = assumed_nozzle(None, or_only_printer=True)
+        assert answer.source == "default" and answer.record_unreachable is True
+
+    def test_a_check_that_did_not_ask_for_it_never_infers(self, monkeypatch):
+        _registered(monkeypatch, "workshop")
+        _on_record(monkeypatch, 0.6)
+        assert assumed_nozzle(None).source == "default"
+
+    def test_a_named_printer_is_never_overridden(self, monkeypatch):
+        _registered(monkeypatch, "workshop")
+        assert assumed_nozzle("aon_m2_plus", or_only_printer=True).printer_id == "aon_m2_plus"
+
+
+class TestTheOnlyRecordLookup:
+    @pytest.fixture(autouse=True)
+    def _real_lookup(self, monkeypatch):
+        monkeypatch.undo()
+        monkeypatch.setattr(bridge, "_record_memo", {})
+        monkeypatch.setattr(bridge, "_service_down_until", 0.0)
+
+    def _served(self, monkeypatch, states):
+        asked: list[str] = []
+
+        def served(tool_name, _timeout=30.0, **kwargs):
+            asked.append(tool_name)
+            return {"success": True, "states": states, "count": len(states)}
+
+        monkeypatch.setattr(bridge, "available", lambda: False)
+        monkeypatch.setattr("kiln.server._pro_api_call", served)
+        return asked
+
+    def test_exactly_one_stated_record_is_the_answer(self, monkeypatch):
+        asked = self._served(monkeypatch, [
+            {"printer_id": "bambu_a1", "diameter_mm": 0.6, "trusted_for_verdicts": True},
+        ])
+        assert bridge.consult_only_recorded_nozzle() == {"printer_id": "bambu_a1", "diameter_mm": 0.6, "answered": True}
+        bridge.consult_only_recorded_nozzle()
+        assert asked == ["list_nozzle_states"], "a served answer is remembered"
+
+    def test_two_records_are_no_answer(self, monkeypatch):
+        self._served(monkeypatch, [
+            {"printer_id": "a", "diameter_mm": 0.6, "trusted_for_verdicts": True},
+            {"printer_id": "b", "diameter_mm": 0.4, "trusted_for_verdicts": True},
+        ])
+        assert bridge.consult_only_recorded_nozzle()["printer_id"] is None
+
+    def test_a_catalogue_default_is_not_counted(self, monkeypatch):
+        self._served(monkeypatch, [
+            {"printer_id": "a", "diameter_mm": 0.6, "trusted_for_verdicts": True},
+            {"printer_id": "b", "diameter_mm": 0.4, "trusted_for_verdicts": False},
+        ])
+        assert bridge.consult_only_recorded_nozzle()["printer_id"] == "a"
+
+    def test_no_answer_is_said_as_not_answered(self, monkeypatch):
+        def served(tool_name, _timeout=30.0, **kwargs):
+            raise OSError("network is unreachable")
+
+        monkeypatch.setattr(bridge, "available", lambda: False)
+        monkeypatch.setattr("kiln.server._pro_api_call", served)
+        assert bridge.consult_only_recorded_nozzle()["answered"] is False
+
+
+# ---------------------------------------------------------------------------
+# The detail-depth floor every product's text and relief goes through
+# ---------------------------------------------------------------------------
+
+
+class TestTheDepthFloorFollowsTheNozzle:
+    def test_a_wider_nozzle_on_record_raises_the_floor_and_says_why(self, tmp_path, monkeypatch):
+        from kiln.decoration_helpers import DepthBelowLegibilityFloor, emboss_text_on_face
+
+        _registered(monkeypatch)
+        _only_record(monkeypatch, "bambu_a1", 0.6)
+        body = tmp_path / "body.stl"
+        body.write_text("solid body\nendsolid body\n")
+        with pytest.raises(DepthBelowLegibilityFloor) as refused:
+            emboss_text_on_face(str(body), "KILN", depth_mm=1.2)
+        assert refused.value.floor_mm == pytest.approx(1.8)
+        assert refused.value.nozzle_diameter_mm == pytest.approx(0.6)
+        assert "the nozzle on record for bambu_a1, the only printer Kiln knows of" in str(refused.value)
+
+    def test_the_same_depth_is_refused_for_several_lines_too(self, tmp_path, monkeypatch):
+        from kiln.decoration_helpers import DepthBelowLegibilityFloor, emboss_text_lines_on_face
+
+        _registered(monkeypatch)
+        _only_record(monkeypatch, "bambu_a1", 0.6)
+        body = tmp_path / "body.stl"
+        body.write_text("solid body\nendsolid body\n")
+        with pytest.raises(DepthBelowLegibilityFloor) as refused:
+            emboss_text_lines_on_face(str(body), ["KILN", "2026"], depth_mm=1.2)
+        assert refused.value.floor_mm == pytest.approx(1.8)
+
+    def test_with_nothing_known_the_floor_is_the_one_it_always_was(self, monkeypatch):
+        from kiln.decoration_helpers import _depth_legibility_floor_mm, _legibility_nozzle
+
+        _registered(monkeypatch)
+        _only_record(monkeypatch, None, None)
+        said: list[str] = []
+        nozzle, note = _legibility_nozzle(None, said)
+        assert (nozzle, note, said) == (0.4, "", [])
+        assert _depth_legibility_floor_mm(nozzle) == pytest.approx(1.2)
+
+    def test_a_stated_nozzle_is_used_as_given_and_said_once(self, monkeypatch):
+        from kiln.decoration_helpers import _legibility_nozzle
+
+        _registered(monkeypatch)
+        _only_record(monkeypatch, "bambu_a1", 0.6)
+        assert _legibility_nozzle(0.4, [])[0] == 0.4
+        said: list[str] = []
+        assert _legibility_nozzle(None, said)[0] == 0.6
+        _legibility_nozzle(None, said)
+        assert len(said) == 1 and "0.6 mm" in said[0]
+
+
+# ---------------------------------------------------------------------------
+# The layer plan follows the nozzle too
+# ---------------------------------------------------------------------------
+
+
+class TestTheLayerPlanFollowsTheNozzle:
+    def test_the_material_profile_is_for_the_only_printers_nozzle(self, monkeypatch):
+        from kiln.plugins.adaptive_slicing_tools import get_material_slicing_profile
+
+        _registered(monkeypatch)
+        _only_record(monkeypatch, None, None)
+        stock = get_material_slicing_profile("PLA")
+        _only_record(monkeypatch, "bambu_a1", 0.6)
+        wide = get_material_slicing_profile("PLA")
+        told = get_material_slicing_profile("PLA", nozzle_diameter_mm=0.6)
+
+        assert stock["nozzle"]["source"] == "default" and stock["nozzle"]["diameter_mm"] == 0.4
+        assert wide["nozzle"]["source"] == "record" and wide["nozzle"]["diameter_mm"] == 0.6
+        # Sensitive to the nozzle at all, and the record moves it exactly
+        # the way stating the size does.
+        assert told["profile"] != stock["profile"]
+        assert wide["profile"] == told["profile"]
+
+    def test_a_plan_for_a_named_printer_uses_its_nozzle(self, monkeypatch):
+        from kiln.plugins.adaptive_slicing_tools import quick_adaptive_plan
+
+        _on_record(monkeypatch, 0.6)
+        plan = quick_adaptive_plan(material="PLA", model_height_mm=20.0, printer="bambu_a1")
+        assert plan["success"] is True
+        assert plan["nozzle"]["source"] == "record" and plan["nozzle"]["printer_id"] == "bambu_a1"

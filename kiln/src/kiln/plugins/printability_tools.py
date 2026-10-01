@@ -78,7 +78,8 @@ class _PrintabilityToolsPlugin:
                     and name the printer: Kiln then checks for the nozzle on
                     record for it, else the printer's own setting, else the
                     model's stock size, and ``report.nozzle`` says which.
-                    With neither, the check assumes 0.4 and says so.
+                    With no printer named, the only printer Kiln knows of
+                    stands in; with none, the check assumes 0.4 and says so.
                 layer_height: Print layer height in mm (default 0.2).
                 max_overhang_angle: Maximum overhang angle in degrees before
                     supports are needed.  Leave unset for the material's own
@@ -100,9 +101,14 @@ class _PrintabilityToolsPlugin:
                 if build_volume_x is not None and build_volume_y is not None and build_volume_z is not None:
                     build_volume = (build_volume_x, build_volume_y, build_volume_z)
 
+                # No printer named: the only printer Kiln knows of stands
+                # in for the nozzle, and the report says so.
+                from kiln.assumed_nozzle import assumed_nozzle
+
+                nozzle = assumed_nozzle(printer_id or None, stated=nozzle_diameter, or_only_printer=True)
                 report = _analyze(
                     file_path,
-                    nozzle_diameter=nozzle_diameter,
+                    nozzle_diameter=nozzle.diameter_mm,
                     layer_height=layer_height,
                     max_overhang_angle=max_overhang_angle,
                     build_volume=build_volume,
@@ -110,7 +116,9 @@ class _PrintabilityToolsPlugin:
                     printer_id=printer_id or None,
                 )
                 # Which nozzle the check ran for, said beside the score.
-                nozzle_note = (getattr(report, "nozzle", None) or {}).get("note")
+                if getattr(report, "nozzle", None) is not None:
+                    report.nozzle = nozzle.to_dict()
+                nozzle_note = nozzle.sentence()
                 resp: dict[str, Any] = {
                     "success": True,
                     "report": report.to_dict(),

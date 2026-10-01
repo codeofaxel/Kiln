@@ -282,6 +282,69 @@ def _served_recorded_nozzle(printer_id: str) -> dict[str, Any]:
     return {"diameter_mm": answer.get("diameter_mm") if stated else None, "answered": True}
 
 
+#: The memo key for :func:`consult_only_recorded_nozzle`; no printer is named so.
+_ONLY_RECORD_KEY = "*"
+
+
+def consult_only_recorded_nozzle() -> dict[str, Any]:
+    """The one nozzle on record for this account, when there is exactly one.
+
+    ``{"printer_id": str | None, "diameter_mm": float | None, "answered": bool}``.
+    For a check nobody told which printer a part is for.  ``printer_id`` is
+    set only when exactly one recorded nozzle exists; none or several is no
+    answer, never a pick.  Asked and remembered the way
+    :func:`consult_recorded_nozzle` is.
+    """
+    nothing = {"printer_id": None, "diameter_mm": None, "answered": True}
+    if available():
+        try:
+            from kiln_pro.nozzle_intelligence.store_resolver import only_recorded_nozzle
+        except ImportError:  # a kiln-pro from before this door existed
+            return nothing
+        try:
+            state = only_recorded_nozzle(tool_name="list_nozzle_states")
+        except Exception:  # noqa: BLE001 -- one rung of a check, never the check
+            logger.debug("only recorded nozzle lookup failed", exc_info=True)
+            return nothing
+        if state is None:
+            return nothing
+        return {"printer_id": state.printer_id, "diameter_mm": state.diameter_mm, "answered": True}
+    now = time.monotonic()
+    memo = _record_memo.get(_ONLY_RECORD_KEY)
+    if memo is not None and now - memo[0] < RECORD_MEMO_S:
+        return memo[1]
+    answer = _served_only_recorded_nozzle()
+    _record_memo[_ONLY_RECORD_KEY] = (now, answer)
+    return answer
+
+
+def _served_only_recorded_nozzle() -> dict[str, Any]:
+    global _service_down_until, _service_down_miss
+    from kiln.served_answer import classify_transport_error
+
+    unanswered = {"printer_id": None, "diameter_mm": None, "answered": False}
+    if time.monotonic() < _service_down_until:
+        return unanswered
+    try:
+        from kiln.server import _pro_api_call
+
+        answer = _pro_api_call("list_nozzle_states", _timeout=_CONSULT_TIMEOUT_S)
+    except Exception as exc:  # noqa: BLE001 -- the network is a degrade, never a check
+        logger.debug("nozzle records not served", exc_info=True)
+        _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
+        _service_down_miss = classify_transport_error(exc)
+        return unanswered
+    if not (isinstance(answer, dict) and answer.get("success")):
+        return unanswered
+    stated = [
+        s for s in (answer.get("states") or [])
+        if isinstance(s, dict) and s.get("trusted_for_verdicts") and s.get("printer_id")
+    ]
+    if len(stated) != 1:
+        return {"printer_id": None, "diameter_mm": None, "answered": True}
+    return {"printer_id": stated[0]["printer_id"], "diameter_mm": stated[0].get("diameter_mm"), "answered": True}
+
+
 def forget_recorded_nozzle() -> None:
     """Drop every remembered record lookup: the record was just written."""
     _record_memo.clear()
@@ -523,6 +586,7 @@ __all__ = [
     "WIRE_TOOL",
     "available",
     "consult_capacity",
+    "consult_only_recorded_nozzle",
     "consult_recorded_nozzle",
     "consult_sliced_file",
     "forget_recorded_nozzle",

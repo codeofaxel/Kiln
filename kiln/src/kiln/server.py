@@ -21910,10 +21910,14 @@ def decorate_surface(
 
         effective_depth = depth_mm if depth_mm > 0 else get_default_depth(material)
 
-        nozzle_mm = 0.4
+        # The nozzle the detail has to survive: the only printer Kiln knows
+        # of, else 0.4 (see kiln.assumed_nozzle).
+        from kiln.assumed_nozzle import assumed_nozzle
+
+        nozzle_mm = assumed_nozzle(None, or_only_printer=True).diameter_mm
         if effective_depth < nozzle_mm * 0.5:
             warnings.append(
-                f"Depth {effective_depth:.1f}mm < half nozzle ({nozzle_mm}mm). "
+                f"Depth {effective_depth:.1f}mm < half nozzle ({nozzle_mm:g}mm). "
                 f"Details may not be visible. Try >= {nozzle_mm * 0.75:.1f}mm."
             )
 

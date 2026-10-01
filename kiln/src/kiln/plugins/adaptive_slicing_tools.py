@@ -60,7 +60,7 @@ def analyze_model_geometry(
 
 def get_material_slicing_profile(
     material: str,
-    nozzle_diameter_mm: float = 0.4,
+    nozzle_diameter_mm: float | None = None,
 ) -> dict:
     """Get material-specific slicing constraints for adaptive slicing.
 
@@ -71,16 +71,20 @@ def get_material_slicing_profile(
         material: Material name — PLA, PETG, ABS, TPU, ASA, Nylon, PC,
             PVA, or HIPS.
         nozzle_diameter_mm: Nozzle diameter in mm (affects layer height
-            limits).  Default 0.4mm.
+            limits).  Leave unset for the only printer Kiln knows of,
+            else 0.4; the reply's ``nozzle`` says which.
     """
     from kiln.adaptive_slicer import get_adaptive_slicer
+    from kiln.assumed_nozzle import assumed_nozzle
 
     try:
+        nozzle = assumed_nozzle(None, stated=nozzle_diameter_mm, or_only_printer=True)
         slicer = get_adaptive_slicer()
-        profile = slicer.get_material_profile(material, nozzle_diameter_mm=nozzle_diameter_mm)
+        profile = slicer.get_material_profile(material, nozzle_diameter_mm=nozzle.diameter_mm)
         return {
             "success": True,
             "profile": profile.to_dict(),
+            "nozzle": nozzle.to_dict(),
         }
     except Exception as exc:
         _logger.exception("Error in get_material_slicing_profile")
@@ -93,7 +97,7 @@ def generate_adaptive_slicing_plan(
     model_height_mm: float,
     model_name: str = "",
     printer: str | None = None,
-    nozzle_diameter_mm: float = 0.4,
+    nozzle_diameter_mm: float | None = None,
     mode: str = "balanced",
 ) -> dict:
     """Generate a per-layer adaptive slicing plan.
@@ -109,7 +113,9 @@ def generate_adaptive_slicing_plan(
         model_height_mm: Total model height in mm.
         model_name: Optional model name for record keeping.
         printer: Optional printer identifier.
-        nozzle_diameter_mm: Nozzle diameter in mm.
+        nozzle_diameter_mm: Nozzle diameter in mm.  Leave unset for the
+            nozzle Kiln has for ``printer`` (or the only printer it knows
+            of), else 0.4; the reply's ``nozzle`` says which.
         mode: Adaptive strategy — "balanced" (default), "quality_first",
             "speed_first", or "material_optimized".
     """
@@ -118,8 +124,11 @@ def generate_adaptive_slicing_plan(
         AdaptiveSlicerError,
         get_adaptive_slicer,
     )
+    from kiln.assumed_nozzle import assumed_nozzle
 
     try:
+        nozzle = assumed_nozzle(printer, stated=nozzle_diameter_mm, or_only_printer=True)
+        nozzle_diameter_mm = nozzle.diameter_mm
         slicer = get_adaptive_slicer()
         mat_profile = slicer.get_material_profile(material, nozzle_diameter_mm=nozzle_diameter_mm)
 
@@ -165,6 +174,7 @@ def generate_adaptive_slicing_plan(
         return {
             "success": True,
             "plan": plan.to_dict(),
+            "nozzle": nozzle.to_dict(),
         }
     except AdaptiveSlicerError as exc:
         return {"success": False, "error": str(exc)}
@@ -296,7 +306,7 @@ def quick_adaptive_plan(
     material: str,
     model_height_mm: float,
     model_name: str = "",
-    nozzle_diameter_mm: float = 0.4,
+    nozzle_diameter_mm: float | None = None,
     mode: str = "balanced",
     printer: str | None = None,
     regions: list[dict[str, Any]] | None = None,
@@ -311,7 +321,9 @@ def quick_adaptive_plan(
         material: Material name (PLA, PETG, ABS, etc.).
         model_height_mm: Total model height in mm.
         model_name: Optional model name.
-        nozzle_diameter_mm: Nozzle diameter (default 0.4mm).
+        nozzle_diameter_mm: Nozzle diameter in mm.  Leave unset for the
+            nozzle Kiln has for ``printer`` (or the only printer it knows
+            of), else 0.4; the reply's ``nozzle`` says which.
         mode: Adaptive strategy — "balanced", "quality_first",
             "speed_first", or "material_optimized".
         printer: Optional printer identifier.
@@ -319,6 +331,7 @@ def quick_adaptive_plan(
             STANDARD region spanning the full height is used.
     """
     from kiln.adaptive_slicer import AdaptiveMode, AdaptiveSlicerError, get_adaptive_slicer
+    from kiln.assumed_nozzle import assumed_nozzle
 
     try:
         try:
@@ -330,12 +343,13 @@ def quick_adaptive_plan(
                 "error": f"Invalid mode '{mode}'. Valid: {valid}.",
             }
 
+        nozzle = assumed_nozzle(printer, stated=nozzle_diameter_mm, or_only_printer=True)
         slicer = get_adaptive_slicer()
         plan = slicer.quick_plan(
             material=material,
             model_height_mm=model_height_mm,
             model_name=model_name,
-            nozzle_diameter_mm=nozzle_diameter_mm,
+            nozzle_diameter_mm=nozzle.diameter_mm,
             mode=adaptive_mode,
             printer=printer,
             regions=regions,
@@ -343,6 +357,7 @@ def quick_adaptive_plan(
         return {
             "success": True,
             "plan": plan.to_dict(),
+            "nozzle": nozzle.to_dict(),
         }
     except AdaptiveSlicerError as exc:
         return {"success": False, "error": str(exc)}
