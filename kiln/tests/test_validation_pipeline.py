@@ -2001,6 +2001,12 @@ class TestUnitVerdictPublicName:
         assert "x1000" in told and "not rescaled here" in told
         assert not told.startswith("Rescaled")
 
+    def test_only_a_size_under_the_floor_is_below_printable(self) -> None:
+        from kiln.generation.validation import unit_verdict
+
+        assert [unit_verdict(size).below_printable for size in (0.0005, 0.02, 0.5, 0.999)] == [True] * 4
+        assert [unit_verdict(size).below_printable for size in (0.0, 1.0, 2.0, 50.0, 1500.0, 4e9)] == [False] * 6
+
     def test_every_other_reading_keeps_its_own_sentence(self) -> None:
         from kiln.generation.validation import unit_verdict
 

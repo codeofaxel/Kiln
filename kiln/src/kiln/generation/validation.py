@@ -2018,6 +2018,13 @@ class _UnitVerdict:
     def corrected(self) -> bool:
         return self.status == "corrected"
 
+    @property
+    def below_printable(self) -> bool:
+        """Read as millimeters, the model is smaller than anything a printer
+        makes — so until its units are settled, no size taken from it means
+        what it says."""
+        return 0 < self.max_dim_mm < _PRINTABLE_MIN_MM
+
     def _readings(self) -> str:
         return ", ".join(
             f"{unit} → {self.max_dim_mm * factor:g}mm"
