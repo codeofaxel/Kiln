@@ -163,7 +163,7 @@ def _served_capacity(
     if model:
         kwargs["printer_model"] = model
     try:
-        answer = _pro_api_call(WIRE_TOOL, _timeout=_CONSULT_TIMEOUT_S, **kwargs)
+        answer = _pro_api_call(WIRE_TOOL, _timeout=_CONSULT_TIMEOUT_S, _asked_by_user=False, **kwargs)
     except Exception as exc:  # noqa: BLE001 -- the network is a degrade, never a print
         logger.debug("nozzle capacity not served", exc_info=True)
         miss = classify_transport_error(exc)

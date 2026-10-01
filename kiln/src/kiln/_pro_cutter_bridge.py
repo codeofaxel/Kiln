@@ -266,7 +266,7 @@ def _served_report(printer_name: str, payload: dict[str, Any]) -> None:
     except Exception:  # noqa: BLE001
         return
     try:
-        answer = _pro_api_call(WIRE_TOOL, printer_id=printer_name, **payload)
+        answer = _pro_api_call(WIRE_TOOL, _asked_by_user=False, printer_id=printer_name, **payload)
     except Exception as exc:  # noqa: BLE001 -- the network is a degrade, never a print
         logger.debug("cutter report not served", exc_info=True)
         _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
@@ -360,7 +360,9 @@ def _served_status(printer_name: str, model: str | None) -> dict[str, Any] | Non
     if model:
         kwargs["printer_model"] = model
     try:
-        answer = _pro_api_call("cutter_wear_status", _timeout=_CONSULT_TIMEOUT_S, **kwargs)
+        answer = _pro_api_call(
+            "cutter_wear_status", _timeout=_CONSULT_TIMEOUT_S, _asked_by_user=False, **kwargs
+        )
     except Exception as exc:  # noqa: BLE001
         miss = classify_transport_error(exc)
         _service_down_until = time.monotonic() + SERVICE_BACKOFF_S

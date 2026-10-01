@@ -235,7 +235,7 @@ def _served(request: dict[str, Any]) -> tuple[dict[str, Any] | None, served_answ
     except Exception:  # noqa: BLE001
         return None, served_answer.Miss(UNANSWERED, detail="the served door is not importable")
     try:
-        answer = srv._pro_api_call(TOOL, **hosted_form(request))
+        answer = srv._pro_api_call(TOOL, _asked_by_user=False, **hosted_form(request))
     except Exception as exc:  # noqa: BLE001 -- the network is a degrade, never a slice onto a part
         logger.debug("placement_plan request failed", exc_info=True)
         return None, served_answer.classify_transport_error(exc, host=getattr(srv, "_HOSTED_KILN_API_URL", None))
