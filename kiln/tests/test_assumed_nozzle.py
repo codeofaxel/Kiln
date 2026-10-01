@@ -209,6 +209,18 @@ def fin(tmp_path) -> str:
     return str(path)
 
 
+@pytest.fixture
+def block(tmp_path) -> str:
+    """A 40 mm cube: thick enough that its walls are a part of its plastic
+    and not all of it, so a wider line shows in the weight.  The fin is so
+    thin that its shell is the whole solid at any nozzle size."""
+    solid = trimesh.creation.box(extents=[40.0, 40.0, 40.0])
+    solid.apply_translation([20.0, 20.0, 20.0])
+    path = tmp_path / "block.stl"
+    solid.export(str(path))
+    return str(path)
+
+
 class TestTheCheckRunsForTheNozzleOnRecord:
     def test_a_recorded_nozzle_changes_the_verdict_the_way_stating_it_does(self, fin, monkeypatch):
         from kiln.printability import analyze_printability
@@ -489,13 +501,13 @@ class TestTheEstimatesFollowTheNozzle:
             ("estimate_print_cost_from_mesh", lambda out: out["cost_breakdown"]["filament"]),
         ],
     )
-    def test_a_mesh_estimate(self, fin, monkeypatch, tool, weight):
+    def test_a_mesh_estimate(self, block, monkeypatch, tool, weight):
         _registered(monkeypatch)
         _only_record(monkeypatch, None, None)
-        stock = _call(tool, file_path=fin)
-        told = _call(tool, file_path=fin, nozzle_mm=0.6)
+        stock = _call(tool, file_path=block)
+        told = _call(tool, file_path=block, nozzle_mm=0.6)
         _only_record(monkeypatch, "bambu_a1", 0.6)
-        wide = _call(tool, file_path=fin)
+        wide = _call(tool, file_path=block)
 
         assert stock["nozzle"]["source"] == "default" and stock["nozzle"]["diameter_mm"] == 0.4
         assert told["nozzle"]["source"] == "stated"
