@@ -31,6 +31,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **A session that has run out says so everywhere, and signing back in restores your plan.** Your plan stays on your account; this machine just needs you to sign in again before anything that uses Kiln's servers.
+
 - **Name a screw or insert the way you'd say it and get the right hole first time (Pro+).** See https://kiln3d.com/pricing.
 
 - **Whole-object wrapped textures look better, including on round objects like cups.**
@@ -303,6 +305,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   https://kiln3d.com/pricing.
 
 ### Fixed
+
+- **Convert two CAD files in the same folder and both models survive.** Each is named after the file it came from, so a new revision no longer replaces the last one's model.
+
+- **A design you import still opens after a restart.** Kiln keeps its own copy of the model with the design, instead of pointing at a temporary file your Mac clears.
+
+- **A dimensioned drawing works for an imported design (Business+).** Ask for one by design and Kiln draws its measured model, instead of saying it has nothing to draw. See https://kiln3d.com/pricing.
 
 - **Texturing a large model no longer times out.** The preview now finishes within your assistant's wait.
 
