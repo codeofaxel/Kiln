@@ -987,10 +987,14 @@ def offer_look(adapter: Any, state: PlateState | None = None, *, say_so: str = S
         else:
             whose = "the camera you registered for it" if found.camera == "user_supplied" else "this printer's own camera"
             if path:
+                # The frame is a file here; an agent whose host cannot open
+                # files sees it by calling look_at_plate, which hands the
+                # picture over as an image.
                 sentence = (
-                    f"{age}Here is the plate now, through {whose}: {path}. Look at the picture, then call "
-                    'look_at_plate with seen="clear" if the plate is empty, or seen="occupied" if anything is on '
-                    f"it or you cannot tell -- and ask again. (Standing at the machine? Say so yourself: {say_so}.)"
+                    f"{age}Here is the plate now, through {whose}: {path} (or call look_at_plate to see it). "
+                    'Look at the picture, then call look_at_plate with seen="clear" if the plate is empty, or '
+                    'seen="occupied" if anything is on it or you cannot tell -- and ask again. '
+                    f"(Standing at the machine? Say so yourself: {say_so}.)"
                 )
             else:
                 why = (found.why or "it gave no picture").rstrip(". ")

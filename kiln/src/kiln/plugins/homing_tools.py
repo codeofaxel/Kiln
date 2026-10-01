@@ -335,15 +335,19 @@ def plate_status(printer_name: str | None = None) -> dict[str, Any]:
 def look_at_plate(
     printer_name: str | None = None,
     seen: str | None = None,
-) -> dict[str, Any]:
+) -> dict[str, Any] | list[Any]:
     """Look at the build plate through the machine's camera, and record what is there.
 
     Two steps, one tool.  Called WITHOUT ``seen`` it fetches a frame and
-    hands it back for you to look at: ``snapshot_path`` is the picture on
-    disk (``image_b64`` is the same picture inline), and nothing is
-    recorded.  Look at it, then call again with ``seen="clear"`` (nothing on
-    the plate) or ``seen="occupied"`` (something is), and that answer
-    becomes the plate record with you named as the one who looked.
+    hands it to you as a picture, after a short text record that names
+    ``snapshot_path``, the same picture saved on this computer -- and
+    records nothing.  Look at it, then call again with ``seen="clear"``
+    (nothing on the plate) or ``seen="occupied"`` (something is), and that
+    answer becomes the plate record with you named as the one who looked.
+
+    The picture shows whatever the camera sees, the room around the
+    printer included.  This tool saves it only on this computer and hands
+    it only to you; it is never written to a log.
 
     A refusal over a recorded part (a slice with no spot named, a print
     start, a park or home that would cross it) already carries that frame
@@ -368,7 +372,8 @@ def look_at_plate(
             record what you saw in the picture you were just given.
 
     Returns the ``plate`` record and a ``look`` block saying whether a
-    frame was available and which camera it came from.
+    frame was available and which camera it came from -- followed, when a
+    picture was taken, by the picture itself as image content.
     """
     import kiln.server as _srv
     from kiln import plate_state
@@ -390,12 +395,11 @@ def look_at_plate(
                     code="PLATE_LOOK_UNAVAILABLE",
                     extra={"look": found.to_dict(), "plate": plate_state.read(adapter).to_dict()},
                 )
-            return {
+            answer = {
                 "success": True,
                 "printer_name": target_name,
                 "look": found.to_dict(),
                 "snapshot_path": plate_state.save_frame(found),
-                "image_b64": found.image_b64,
                 "media_type": found.media_type,
                 "plate": plate_state.read(adapter).to_dict(),
                 "next": (
@@ -403,6 +407,12 @@ def look_at_plate(
                     "empty or seen=\"occupied\" if anything is on it. If you cannot tell, say occupied."
                 ),
             }
+            # The picture travels as an image block, never as text.  A real
+            # frame is ~220,000 characters of base64 (a 167 KB A1 frame), and
+            # a host that reads results as text refuses one that size whole --
+            # the record beside it lost too (measured on the monitor door,
+            # 2026-09-16).  A host that cannot open files still sees an image.
+            return [answer, _picture(found)]
 
         if seen not in ("clear", "occupied"):
             return _srv._error_dict(
@@ -424,6 +434,15 @@ def look_at_plate(
     except Exception as exc:
         _logger.exception("Unexpected error in look_at_plate")
         return _srv._error_dict(f"Unexpected error looking at the plate: {exc}", code="INTERNAL_ERROR")
+
+
+def _picture(found: Any) -> Any:
+    """A look's frame as an MCP image, for the host to hand to the model."""
+    import base64
+
+    from kiln.mcp_compat import Image
+
+    return Image(data=base64.b64decode(found.image_b64), format=(found.media_type or "image/jpeg").split("/")[-1])
 
 
 class _HomingToolsPlugin:
@@ -452,7 +471,11 @@ class _HomingToolsPlugin:
         mcp.tool()(home_axes)
         mcp.tool()(park_head)
         mcp.tool()(plate_status)
-        mcp.tool()(look_at_plate)
+        # No structured output: a look answers with [record, picture], and a
+        # schema built from a dict annotation would reject the list -- the
+        # tool would fail exactly when it has a picture to show.  Without one
+        # the record goes out as a text block and the picture as an image.
+        mcp.tool(structured_output=False)(look_at_plate)
 
 
 plugin = _HomingToolsPlugin()
