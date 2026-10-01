@@ -246,20 +246,34 @@ def design_mesh_for(file_path: str | os.PathLike[str]) -> str | None:
     """The mesh this machine sliced *file_path* from, if the slice ledger
     knows one and it is still on disk.  ``None`` for a mesh itself, a file
     Kiln did not slice, or the hosted server (whose ledger is nobody's)."""
+    return design_entry_for(file_path)[0]
+
+
+def design_entry_for(file_path: str | os.PathLike[str]) -> tuple[str | None, str | None]:
+    """``(mesh, cad_file)``: :func:`design_mesh_for`'s mesh, and -- when
+    that mesh is Kiln's mesh of a STEP file the slicer read -- that STEP
+    file.  Each is ``None`` when the ledger has none or it is no longer on
+    disk."""
     if _shared_disk():
-        return None
+        return None, None
     try:
         from kiln.monitor_twin import sliced_entry_for
 
         entry = sliced_entry_for(os.path.basename(str(file_path)))
         if not entry:
-            return None
-        mesh = str(entry.get("input") or "")
-        if mesh and os.path.isfile(mesh) and os.path.abspath(mesh) != os.path.abspath(str(file_path)):
-            return os.path.abspath(mesh)
+            return None, None
+        here = os.path.abspath(str(file_path))
+
+        def _on_disk(value: Any) -> str | None:
+            if not (isinstance(value, str) and value and os.path.isfile(value)):
+                return None
+            found = os.path.abspath(value)
+            return found if found != here else None
+
+        return _on_disk(entry.get("input")), _on_disk(entry.get("source"))
     except Exception:  # noqa: BLE001
         logger.debug("design mesh not resolved", exc_info=True)
-    return None
+    return None, None
 
 
 def _extras_clause(staged: str) -> str:
@@ -324,12 +338,14 @@ def stage_file_for(file_path: str | os.PathLike[str]) -> tuple[str | None, str]:
         )
     else:
         return None, f"the stage draws STL, OBJ and 3MF files, and print files Kiln sliced, not {name}"
-    mesh = design_mesh_for(path)
+    mesh, source = design_entry_for(path)
     if mesh and Path(mesh).suffix.lower() in _MESH_SUFFIXES:
-        return mesh, (
-            f"{os.path.basename(mesh)}, the mesh this machine sliced {name} from "
-            f"({name} carries {carried})" + _extras_clause(mesh)
+        drawn = (
+            f"Kiln's mesh of {os.path.basename(source)}, the CAD file this machine sliced {name} from"
+            if source
+            else f"{os.path.basename(mesh)}, the mesh this machine sliced {name} from"
         )
+        return mesh, f"{drawn} ({name} carries {carried})" + _extras_clause(mesh)
     return None, (
         f"{name} carries {carried}, and this machine has no record of the mesh it was sliced from"
     )
@@ -374,10 +390,11 @@ def evidence_for(file_path: str | os.PathLike[str]) -> dict[str, Any]:
     absent — see :data:`EVIDENCE_TTL_S`.
     """
     path = str(file_path)
+    design_mesh, design_source = design_entry_for(path)
     out: dict[str, Any] = {
         "file": os.path.basename(path),
         "file_hash": _file_hash(path),
-        "design_mesh": design_mesh_for(path),
+        "design_mesh": design_mesh,
         DOOR_STAGE: None,
         DOOR_URL: None,
         DOOR_PNG: None,
@@ -390,11 +407,15 @@ def evidence_for(file_path: str | os.PathLike[str]) -> dict[str, Any]:
         own = _entry(out["file_hash"])
         if own:
             sources.append(own)
-    if out["design_mesh"]:
-        mesh_hash = _file_hash(out["design_mesh"])
-        mesh_entry = _entry(mesh_hash) if mesh_hash else None
-        if mesh_entry:
-            sources.append(mesh_entry)
+    # The STEP file a slice was read from counts as well as Kiln's mesh of
+    # it: a look at either was a look at the part.
+    for design in (design_mesh, design_source):
+        if not design:
+            continue
+        design_hash = _file_hash(design)
+        design_entry = _entry(design_hash) if design_hash else None
+        if design_entry:
+            sources.append(design_entry)
     for key in (DOOR_STAGE, DOOR_URL, DOOR_PNG, "url_refusal"):
         for src in sources:
             facts = _fresh(src.get(key))

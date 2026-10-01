@@ -122,11 +122,15 @@ def _release(entries: list[Any], key: str, path: str) -> list[Any]:
 # ---------------------------------------------------------------------------
 
 
-def note_sliced(input_path: str, output_path: str) -> None:
+def note_sliced(input_path: str, output_path: str, *, source: str | None = None) -> None:
     """Remember that ``input_path`` was just sliced to ``output_path``.
 
     Paths only — nothing is copied until a print actually starts, so a
     slice that never prints costs a ledger line, not a file copy.
+
+    ``input`` is the mesh the slice is drawn as, and every reader of this
+    ledger draws it.  For a STEP file that is Kiln's mesh of it, and
+    ``source`` keeps the file the slicer actually read.
 
     Every file path belongs to the newest row that wrote it.  The slicer
     writes a model to a path fixed by its name (``kiln_sliced/<stem>.gcode``
@@ -144,14 +148,15 @@ def note_sliced(input_path: str, output_path: str) -> None:
             entries = []
         output_abs = os.path.abspath(output_path)
         entries = _release(entries, "output", output_abs)
-        entries.append(
-            {
-                "input": os.path.abspath(input_path),
-                "output": output_abs,
-                "wrapped": None,
-                "at": _now_iso(),
-            }
-        )
+        entry: dict[str, Any] = {
+            "input": os.path.abspath(input_path),
+            "output": output_abs,
+            "wrapped": None,
+            "at": _now_iso(),
+        }
+        if source:
+            entry["source"] = os.path.abspath(source)
+        entries.append(entry)
         _write_json(_SLICES_FILE, entries[-_MAX_SLICE_ENTRIES:])
     except Exception:  # noqa: BLE001 — bookkeeping never blocks a slice
         logger.debug("monitor_twin.note_sliced failed", exc_info=True)
@@ -360,9 +365,10 @@ def sliced_output_for(mesh_path: str | os.PathLike[str] | None) -> str | None:
     The 3D stage's door to slicer-added geometry (``kiln.slicer_geometry``):
     a skirt or a prime tower only exists in a slice, and this ledger is the
     one place that knows which slice belongs to which mesh.  Same exact
-    join as every other read here — the path the slicer was handed, or the
-    retained twin copy ``note_print_started`` made of it — never a stem
-    match against whatever happens to sit in the output directory.
+    join as every other read here — the mesh the slice is drawn as, the
+    STEP file the slicer read when that mesh is Kiln's mesh of it, or the
+    retained twin copy ``note_print_started`` made — never a stem match
+    against whatever happens to sit in the output directory.
 
     A slice OLDER than the mesh is not a slice of this mesh: a file edited
     in place after slicing keeps its path and loses its G-code.  Newest
@@ -395,7 +401,7 @@ def sliced_output_for(mesh_path: str | os.PathLike[str] | None) -> str | None:
             for entry in reversed(entries):
                 if not isinstance(entry, dict):
                     continue
-                if entry.get("input") == target:
+                if target in (entry.get("input"), entry.get("source")):
                     found = _fresh(entry.get("output"))
                     if found:
                         return found

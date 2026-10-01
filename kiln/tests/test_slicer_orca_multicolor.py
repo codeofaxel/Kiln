@@ -471,7 +471,7 @@ class TestPrusaAutoSwitch:
         seen: dict = {}
 
         def fake_orca(slicer, input_abs, out_file, *, profile,
-                      extra_args, timeout, multicolor=None):
+                      extra_args, timeout, multicolor=None, drawn_as=None):
             seen["slicer"] = slicer
             seen["multicolor"] = multicolor
             from kiln.slicer import SliceResult

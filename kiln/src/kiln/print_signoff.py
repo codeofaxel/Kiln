@@ -140,7 +140,8 @@ class Clearance:
         mine, theirs = _norm(self.file_name), _norm(file_name)
         if mine == theirs:
             return True
-        return _norm(_sliced_from(file_name)) == mine
+        drawn, source = _sliced_from(file_name)
+        return _norm(drawn) == mine or (source is not None and _norm(source) == mine)
 
 
 def _scope_covers(scope: Any, aimed: str | None, printer_name: str | None) -> bool:
@@ -164,15 +165,23 @@ def _scope_from_record(value: Any) -> tuple[str, ...] | str | None:
     return None
 
 
-def _sliced_from(file_name: str) -> str | None:
-    """The mesh this machine sliced *file_name* from, by the slice ledger."""
+def _sliced_from(file_name: str) -> tuple[str | None, str | None]:
+    """``(mesh, source)``: the mesh this machine sliced *file_name* from, by
+    the slice ledger, and -- when that mesh is Kiln's mesh of a STEP file --
+    the STEP file the slicer read.  A yes given for either covers the print."""
     try:
         from kiln.monitor_twin import sliced_entry_for
 
         entry = sliced_entry_for(os.path.basename(str(file_name or "")))
-        return str(entry.get("input") or "") or None if entry else None
+        if not entry:
+            return None, None
+        source = entry.get("source")
+        return (
+            str(entry.get("input") or "") or None,
+            str(source) if isinstance(source, str) and source else None,
+        )
     except Exception:  # noqa: BLE001
-        return None
+        return None, None
 
 
 _current: ContextVar[Clearance | None] = ContextVar("kiln_print_clearance", default=None)

@@ -4623,14 +4623,16 @@ def extract_model_from_3mf(
     from kiln.printers.bambu_3mf import carries_placeholder_model
 
     if carries_placeholder_model(file_path):
-        from kiln.preview_evidence import design_mesh_for
+        from kiln.preview_evidence import design_entry_for
 
-        source = design_mesh_for(file_path)
+        source, cad_file = design_entry_for(file_path)
         raise ValueError(
             f"{path.name} carries no model of its own (Kiln writes a 1 mm placeholder "
             "cube there when it wraps G-code sliced from an STL), so there is no part "
             "inside to extract. "
             + (
+                f"The CAD file it was sliced from is {cad_file}."
+                if cad_file else
                 f"The mesh it was sliced from is {source}."
                 if source else
                 "This machine has no record of the mesh it was sliced from."

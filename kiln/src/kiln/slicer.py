@@ -163,7 +163,8 @@ class SliceResult:
     #: The density the slicer was handed and where it came from, so every
     #: door's response can say which (see :mod:`kiln.slicer_filament`).
     filament: SliceFilament | None = None
-    #: The mesh the slicer was handed, absolute — the file Kiln's 3D stage
+    #: The mesh the slicer was handed, absolute — or for a STEP file, Kiln's
+    #: mesh of it (:func:`_drawn_mesh_for`) — the file Kiln's 3D stage
     #: shows for this slice, dressed in the slice's own additions.  Every
     #: slice door spreads or nests this dict, so this is the one place to
     #: say it; the key's name is what the stage looks for
@@ -365,10 +366,41 @@ def _gcode_output_is_complete(out_file: str) -> bool:
     return b"filament used" in tail
 
 
+def _drawn_mesh_for(input_abs: str) -> str:
+    """The mesh a slice of *input_abs* is drawn as: the file itself, or for a
+    STEP file, Kiln's mesh of it.
+
+    The slicer reads STEP itself, so slicing one never made a mesh, and
+    everything that shows a slice draws triangles: the 3D stage, the print
+    gate's look at the file before it prints, the Monitor's retained copy.
+    Each was handed the STEP and could draw nothing, so the panel after a
+    STEP slice opened empty.  The mesh comes from the one conversion every
+    mesh tool shares, so it is the mesh an import of the same file shows,
+    and a repeat is a cache hit.  It is made before the slice, so the
+    ledger's freshness check reads the G-code as the newer file.
+
+    The slicer is still handed the STEP: this changes what is drawn, never
+    what prints.  A STEP this machine cannot convert is sliced as it always
+    was and drawn as it always was -- not at all.
+    """
+    try:
+        from kiln.step_import import ensure_mesh_path, is_step_file
+
+        if not is_step_file(input_abs):
+            return input_abs
+        mesh, _note = ensure_mesh_path(input_abs)
+        return os.path.abspath(mesh)
+    except Exception:  # noqa: BLE001 — a picture must never cost a slice
+        logger.debug("no mesh to draw this STEP slice as", exc_info=True)
+        return input_abs
+
+
 def _record_slice(
     profile: str | None,
     input_abs: str | None = None,
     out_file: str | None = None,
+    *,
+    drawn_as: str | None = None,
 ) -> None:
     """Count one successful slice, and note the pair for the monitor twin.
 
@@ -382,6 +414,9 @@ def _record_slice(
     Monitor's layer viewer needs the sliced toolpath of whatever ends up
     printing, and only the slice runner reliably knows the (mesh, gcode)
     pair — a per-tool note would cover one door and miss the pipelines.
+    The mesh noted is the one the slice is drawn as (*drawn_as*, see
+    :func:`_drawn_mesh_for`), with the file the slicer read beside it when
+    the two differ.
     """
     try:
         from kiln.daily_stats import record_event
@@ -393,7 +428,8 @@ def _record_slice(
         try:
             from kiln.monitor_twin import note_sliced
 
-            note_sliced(input_abs, out_file)
+            drawn = drawn_as or input_abs
+            note_sliced(drawn, out_file, source=input_abs if drawn != input_abs else None)
         except Exception:  # noqa: BLE001 — the twin ledger must never fail a slice
             logger.debug("monitor-twin slice note failed", exc_info=True)
 
@@ -713,6 +749,7 @@ def _slice_with_orca(
     extra_args: list[str] | None,
     timeout: int,
     multicolor: dict[str, Any] | None = None,
+    drawn_as: str | None = None,
 ) -> SliceResult:
     """Slice through the BambuStudio/OrcaSlicer command line.
 
@@ -897,7 +934,7 @@ def _slice_with_orca(
 
         shutil.move(str(produced[0]), out_file)
 
-    _record_slice(profile, input_abs, out_file)
+    _record_slice(profile, input_abs, out_file, drawn_as=drawn_as)
     message = f"Sliced {Path(input_abs).name} -> {Path(out_file).name}"
     if crashed_after_finishing:
         message += (
@@ -1065,6 +1102,8 @@ def slice_file(
     with contextlib.suppress(OSError):
         os.unlink(out_file)
 
+    drawn = _drawn_mesh_for(input_abs)
+
     # Two command lines, one function.  Everything below this point is the
     # Slic3r dialect; an Orca/BambuStudio binary needs a different argv AND a
     # different preset format, so it gets its own runner rather than a flag
@@ -1079,9 +1118,10 @@ def slice_file(
             extra_args=extra_args,
             timeout=timeout,
             multicolor=multicolor,
+            drawn_as=drawn,
         )
         result.filament = filament
-        result.stage_mesh_path = input_abs
+        result.stage_mesh_path = drawn
         if multicolor_switched:
             result.message += (
                 f" (multicolor 3MF: auto-selected "
@@ -1140,7 +1180,7 @@ def slice_file(
             f"Slicer said: {reason[:500] if reason else '(no output)'}"
         )
 
-    _record_slice(profile, input_abs, out_file)
+    _record_slice(profile, input_abs, out_file, drawn_as=drawn)
 
     message = f"Sliced {Path(input_abs).name} -> {Path(out_file).name}"
     if crashed_after_finishing:
@@ -1157,7 +1197,7 @@ def slice_file(
         stdout=(result.stdout or "").strip(),
         stderr=(result.stderr or "").strip(),
         filament=filament,
-        stage_mesh_path=input_abs,
+        stage_mesh_path=drawn,
     )
 
 
