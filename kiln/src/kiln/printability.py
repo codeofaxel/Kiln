@@ -57,6 +57,7 @@ class OverhangAnalysis:
     #: per-material overhang limits should be compared against —
     #: ``max_overhang_angle`` reads 90 on any part with any ceiling.
     max_free_air_overhang_deg: float = 0.0
+    score_deduction: int = 0  # what this block took off the score; see _score_terms
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -85,6 +86,7 @@ class ThinWallAnalysis:
     problematic_regions: list[dict[str, float]]
     threshold_mm: float = 0.0
     threshold_basis: str = "nozzle"
+    score_deduction: int = 0  # what this block took off the score; see _score_terms
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -135,6 +137,7 @@ class BridgingAnalysis:
     #: the number per-material bridge limits should be compared
     #: against.
     max_free_air_span_mm: float = 0.0
+    score_deduction: int = 0  # what this block took off the score; see _score_terms
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -147,6 +150,7 @@ class BedAdhesionAnalysis:
     contact_area_mm2: float
     contact_percentage: float  # % of bounding box footprint
     adhesion_risk: str  # "low", "medium", "high"
+    score_deduction: int = 0  # what this block took off the score; see _score_terms
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -176,6 +180,7 @@ class SupportAnalysis:
     support_percentage: float  # % of model volume
     support_regions: list[dict[str, float]]
     likely_substituted_by_bridge: bool = False
+    score_deduction: int = 0  # what this block took off the score; see _score_terms
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -3595,6 +3600,91 @@ def _estimate_adhesion_force(
     )
 
 
+def _score_terms(
+    overhangs: OverhangAnalysis,
+    thin_walls: ThinWallAnalysis,
+    bridging: BridgingAnalysis,
+    bed_adhesion: BedAdhesionAnalysis,
+    supports: SupportAnalysis,
+    warping: WarpingAnalysis | None = None,
+    thermal_stress: ThermalStressAnalysis | None = None,
+    adhesion_force: AdhesionForceEstimate | None = None,
+    overhang_scoring_pct: float | None = None,
+    thin_wall_scoring_pct: float | None = None,
+) -> dict[str, int]:
+    """What each analysis takes off the score, keyed by its block in the
+    report: 0 or a negative number of points.
+
+    Every block the score charges states its own share as
+    ``score_deduction``, so the score is ``100 + sum(terms)``, clamped, and
+    nothing else.  Anyone reading a report -- a person, an agent, or code
+    that re-scores the part from its blocks -- can account for every point.
+
+    ``overhang_scoring_pct`` overrides the overhang percentage used
+    for the deduction — the caller passes the percentage of overhangs
+    that genuinely need supports when part of the reported set is
+    self-supporting (small bridgeable / lateral-reach regions).
+
+    ``thin_wall_scoring_pct`` is the share of measured points thinner
+    than the nozzle.  The thin-wall block may report against a material's
+    higher floor; the score deducts only for walls a nozzle cannot lay
+    at all, so naming more thin walls never lowers anyone's score.
+    """
+    overhang_pct = (
+        overhang_scoring_pct
+        if overhang_scoring_pct is not None
+        else overhangs.overhang_percentage
+    )
+    thin_pct = (
+        thin_wall_scoring_pct
+        if thin_wall_scoring_pct is not None
+        else thin_walls.thin_wall_percentage if thin_walls.thin_wall_count > 0
+        else 0.0
+    )
+    terms = {
+        # Overhangs (max -30)
+        "overhangs": -min(30, int(overhang_pct * 0.5)) if overhangs.needs_supports else 0,
+        # Thin walls (max -25)
+        "thin_walls": -min(25, int(thin_pct * 0.5)) if thin_pct > 0 else 0,
+        # Bridging (max -15) — only when the bridges actually need
+        # support.  ``bridge_count`` alone counts every short, self-supporting
+        # span too: a decorative surface texture's grooves register as 1000+
+        # sub-millimetre "bridges" (each well under the 10 mm self-support
+        # limit, so ``needs_supports_for_bridges`` is False) and used to max
+        # this deduction out, dropping a perfectly printable textured part two
+        # whole grades for relief that prints fine with no supports.  Gate on
+        # ``needs_supports_for_bridges`` — the same > 10 mm span test the
+        # "Long bridges detected" recommendation already uses below — so the
+        # score and the advice finally agree.
+        "bridging": (
+            -min(15, 5 + bridging.bridge_count)
+            if bridging.bridge_count > 0 and bridging.needs_supports_for_bridges
+            else 0
+        ),
+        # Bed adhesion (max -15)
+        "bed_adhesion": {"high": -15, "medium": -7}.get(bed_adhesion.adhesion_risk, 0),
+        # Support volume (max -15)
+        "supports": (
+            -15 if supports.support_percentage > 50
+            else -10 if supports.support_percentage > 20
+            else -5 if supports.support_percentage > 5
+            else 0
+        ),
+    }
+    # The verdicts that grade themselves carry their deduction already.
+    for key, verdict in (
+        ("warping", warping), ("thermal_stress", thermal_stress), ("adhesion_force", adhesion_force),
+    ):
+        if verdict is not None:
+            terms[key] = verdict.score_deduction
+    return terms
+
+
+def _score_from_terms(terms: dict[str, int]) -> int:
+    """100 less every deduction in *terms*, clamped to 0-100."""
+    return max(0, min(100, 100 + sum(terms.values())))
+
+
 def _compute_score(
     overhangs: OverhangAnalysis,
     thin_walls: ThinWallAnalysis,
@@ -3607,78 +3697,13 @@ def _compute_score(
     overhang_scoring_pct: float | None = None,
     thin_wall_scoring_pct: float | None = None,
 ) -> int:
-    """Compute a printability score from 0-100.
-
-    Starts at 100 and deducts points for each issue found.
-
-    ``overhang_scoring_pct`` overrides the overhang percentage used
-    for the deduction — the caller passes the percentage of overhangs
-    that genuinely need supports when part of the reported set is
-    self-supporting (small bridgeable / lateral-reach regions).
-
-    ``thin_wall_scoring_pct`` is the share of measured points thinner
-    than the nozzle.  The thin-wall block may report against a material's
-    higher floor; the score deducts only for walls a nozzle cannot lay
-    at all, so naming more thin walls never lowers anyone's score.
-    """
-    score = 100
-
-    # Overhang deductions (max -30)
-    if overhangs.needs_supports:
-        pct = (
-            overhang_scoring_pct
-            if overhang_scoring_pct is not None
-            else overhangs.overhang_percentage
-        )
-        score -= min(30, int(pct * 0.5))
-
-    # Thin wall deductions (max -25)
-    thin_pct = (
-        thin_wall_scoring_pct
-        if thin_wall_scoring_pct is not None
-        else thin_walls.thin_wall_percentage if thin_walls.thin_wall_count > 0
-        else 0.0
-    )
-    if thin_pct > 0:
-        score -= min(25, int(thin_pct * 0.5))
-
-    # Bridging deductions (max -15) — only when the bridges actually need
-    # support.  ``bridge_count`` alone counts every short, self-supporting
-    # span too: a decorative surface texture's grooves register as 1000+
-    # sub-millimetre "bridges" (each well under the 10 mm self-support
-    # limit, so ``needs_supports_for_bridges`` is False) and used to max
-    # this deduction out, dropping a perfectly printable textured part two
-    # whole grades for relief that prints fine with no supports.  Gate on
-    # ``needs_supports_for_bridges`` — the same > 10 mm span test the
-    # "Long bridges detected" recommendation already uses below — so the
-    # score and the advice finally agree.
-    if bridging.bridge_count > 0 and bridging.needs_supports_for_bridges:
-        score -= min(15, 5 + bridging.bridge_count)
-
-    # Bed adhesion deductions (max -15)
-    if bed_adhesion.adhesion_risk == "high":
-        score -= 15
-    elif bed_adhesion.adhesion_risk == "medium":
-        score -= 7
-
-    # Support volume deductions (max -15)
-    if supports.support_percentage > 50:
-        score -= 15
-    elif supports.support_percentage > 20:
-        score -= 10
-    elif supports.support_percentage > 5:
-        score -= 5
-
-    if warping is not None:
-        score += warping.score_deduction
-
-    if thermal_stress is not None:
-        score += thermal_stress.score_deduction
-
-    if adhesion_force is not None:
-        score += adhesion_force.score_deduction
-
-    return max(0, min(100, score))
+    """Compute a printability score from 0-100: 100 less every deduction
+    :func:`_score_terms` finds."""
+    return _score_from_terms(_score_terms(
+        overhangs, thin_walls, bridging, bed_adhesion, supports,
+        warping=warping, thermal_stress=thermal_stress, adhesion_force=adhesion_force,
+        overhang_scoring_pct=overhang_scoring_pct, thin_wall_scoring_pct=thin_wall_scoring_pct,
+    ))
 
 
 def _score_to_grade(score: int) -> str:
@@ -4572,12 +4597,18 @@ def analyze_printability(
         overlay=judgment_overlay,
     )
 
-    score = _compute_score(
+    score_terms = _score_terms(
         overhangs, thin_walls, bridging, bed_adhesion, supports,
         warping=warping, thermal_stress=thermal_stress, adhesion_force=adhesion_force,
         overhang_scoring_pct=_overhang_scoring_pct,
         thin_wall_scoring_pct=sub_nozzle_wall_pct,
     )
+    for key, block in (
+        ("overhangs", overhangs), ("thin_walls", thin_walls), ("bridging", bridging),
+        ("bed_adhesion", bed_adhesion), ("supports", supports),
+    ):
+        block.score_deduction = score_terms[key]
+    score = _score_from_terms(score_terms)
     grade = _score_to_grade(score)
     # The one brim / raft decision for this part.  Contact, the adhesion
     # force balance and the warping verdict are its inputs; none of them
