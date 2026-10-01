@@ -73,7 +73,9 @@ class _SmartPrintToolsPlugin:
                overrides, uploads the result, and starts the print.
 
             Args:
-                model_path: Path to the STL/OBJ/3MF that failed.
+                model_path: Path to the model that failed (STL, OBJ, 3MF,
+                    STEP, ...).  One the diagnosis cannot read is said in
+                    ``printability_note``.
                 printer_name: Target printer name.  Omit for the default
                     printer.
                 material: Filament material (e.g. ``"PLA"``, ``"ABS"``).
@@ -108,7 +110,7 @@ class _SmartPrintToolsPlugin:
                 collect_failure_signals,
                 diagnose_from_signals,
             )
-            from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
+            from kiln.slicer import SlicerError, SlicerNotFoundError
             from kiln.slicer_profiles import (
                 resolve_slicer_profile,
                 start_gcode_override_from_printer,
@@ -165,6 +167,7 @@ class _SmartPrintToolsPlugin:
             # ------------------------------------------------------------------
             diagnosis_dict: dict[str, Any] | None = None
             diagnosis_overrides: dict[str, str] = {}
+            printability_note: str | None = None
 
             if not skip_diagnosis:
                 try:
@@ -174,10 +177,11 @@ class _SmartPrintToolsPlugin:
                     except Exception as exc:
                         _logger.debug("Could not read printer state: %s", exc)
 
+                    # Every format the engine reads, a STEP as Kiln's mesh of
+                    # it; one it cannot read is said in the result, and the
+                    # diagnosis goes on with what the printer reported.
                     report = None
-                    if model_path and model_path.lower().endswith(
-                        (".stl", ".obj", ".3mf")
-                    ):
+                    if model_path:
                         try:
                             report = analyze_printability(
                                 model_path,
@@ -186,6 +190,10 @@ class _SmartPrintToolsPlugin:
                             )
                         except Exception as exc:
                             _logger.debug("Model analysis failed: %s", exc)
+                            printability_note = (
+                                "The diagnosis was made without the model's geometry: "
+                                f"{' '.join(str(exc).split())}"
+                            )
 
                     # The one way every diagnosis door gathers its signals.
                     signals = collect_failure_signals(
@@ -289,30 +297,20 @@ class _SmartPrintToolsPlugin:
             # ------------------------------------------------------------------
             # 6. Slice, upload, print — mirroring slice_and_print's flow.
             # ------------------------------------------------------------------
-            # The plate may still hold the print that failed: same gate as
-            # slice_and_print, before anything is sliced.
-            from kiln.plugins.slicer_tools import (
-                _apply_plate_placement,
-                _attach_placement,
-                _lift_floor_of,
-                _quiet_start_plan,
-                _verify_plate_placement,
-            )
+            # The plate may still hold the print that failed: the shared
+            # step every slice door takes (plate gate, slicer, a skirt or
+            # brim past the bed's edge settled, the second verdict on the
+            # sliced file).  A retry is where a diagnosis adds a wide brim
+            # to a part that already failed.
+            from kiln.plugins.slicer_tools import _attach_placement, _placed_slice
 
-            model_path, place_err, place_info = _apply_plate_placement(
-                model_path, effective_printer_id=effective_pid, printer_name=printer_name,
-                placement=placement, profile_path=effective_profile, adapter=adapter,
-            )
-            if place_err is not None:
-                return place_err
             try:
                 # The density the slicer weighs the print with: what was
                 # declared, else the tray detected above (kiln.slicer_filament).
-                slice_result = slice_file(
-                    model_path,
-                    profile=effective_profile,
-                    material=material,
-                    loaded_material=material_detected,
+                slice_result, slice_err, sinfo = _placed_slice(
+                    model_path, effective_printer_id=effective_pid, printer_name=printer_name,
+                    placement=placement, profile_path=effective_profile, adapter=adapter,
+                    material=material, loaded_material=material_detected,
                 )
             except SlicerNotFoundError as exc:
                 return _srv._error_dict(
@@ -328,11 +326,9 @@ class _SmartPrintToolsPlugin:
                 return _srv._error_dict(
                     f"Model file not found: {exc}", code="FILE_NOT_FOUND"
                 )
-            # The sliced file goes back to the plate check before any wrap
-            # or upload.
-            verify_err, place_info = _verify_plate_placement(slice_result.output_path, place_info)
-            if verify_err is not None:
-                return verify_err
+            if slice_err is not None:
+                return slice_err
+            model_path, place_info = sinfo["effective_input"], sinfo["placement"]
             # A plate that still holds the print that failed is never
             # started onto: the file carries the maker's own start sequence.
             # Refused before the wrap and the upload, with the slice and its
@@ -342,8 +338,8 @@ class _SmartPrintToolsPlugin:
             # against the printer at the moment of the start.
             from kiln.plate_state import start_refusal
 
-            quiet_plan = _quiet_start_plan(place_info)
-            lift_floor = _lift_floor_of(place_info)
+            quiet_plan = sinfo["quiet_start"]
+            lift_floor = sinfo["lift_floor_mm"]
             if quiet_plan is None and (block := start_refusal(adapter)):
                 block["slice"] = slice_result.to_dict()
                 _attach_placement(block, place_info)
@@ -506,6 +502,8 @@ class _SmartPrintToolsPlugin:
                 result["what_you_will_see"] = list(verdict.what_you_will_see)
             if validation_summary is not None:
                 result["validation"] = validation_summary
+            if printability_note:
+                result["printability_note"] = printability_note
             if effective_pid:
                 result["printer_id"] = effective_pid
             if effective_profile:

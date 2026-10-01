@@ -222,3 +222,186 @@ class TestTheEstimateDoor:
         assert result["printability"]["dimensions_mm"]["width_mm"] == pytest.approx(245.0, abs=0.01)
         assert result["bed_fit"]["auto_oriented"] is True and "Kiln's own mesh" in result["bed_fit"]["note"]
         assert "printability_note" not in result   # the block already says whose mesh this is
+
+
+# ---------------------------------------------------------------------------
+# The doors that used to filter by extension before the engine
+# ---------------------------------------------------------------------------
+#
+# Three doors kept a hand-copy of the engine's format list (".stl", ".obj",
+# ".3mf") in front of it, so a STEP -- which the engine reads since
+# 2026-09-30 -- skipped the analysis without a word: no brim decision in
+# slice_and_print, no geometry for the retry's diagnosis, no supports at the
+# CLI.  The lists are gone; a model the engine cannot read is said.
+
+
+def _overhanging_kernel():
+    """Kiln's mesh of a STEP, stood in: a post with a wide plate on top, so
+    the support check has something to find."""
+
+    def fake_mesh(path: str, *, output_dir: str | None = None, with_record: bool = False):
+        out = Path(output_dir or Path(path).parent) / (Path(path).stem + ".stl")
+        post = trimesh.creation.box(extents=(10.0, 10.0, 40.0))
+        post.apply_translation([30.0, 30.0, 20.0])
+        top = trimesh.creation.box(extents=(60.0, 60.0, 5.0))
+        top.apply_translation([30.0, 30.0, 42.5])
+        trimesh.util.concatenate([post, top]).export(str(out))
+        note = f"Converted from STEP ({Path(path).name}) to mesh."
+        return (str(out), note, None) if with_record else (str(out), note)
+
+    return patch("kiln.step_import.ensure_mesh_path", side_effect=fake_mesh)
+
+
+def _slice_and_print(tmp_path: Path, path: str, monkeypatch, *, material: str = "ABS") -> tuple[dict, list[dict]]:
+    """``slice_and_print`` with the printer and the slicer stood in, and the
+    settings the slicer was handed, one dict per slice."""
+    from unittest.mock import MagicMock
+
+    import kiln.server as srv
+    from kiln.plugins.slicer_tools import _SlicerToolsPlugin
+    from kiln.printers.base import PrinterState, PrinterStatus, PrintResult, UploadResult
+    from kiln.slicer_orca import ini_to_settings
+
+    monkeypatch.setenv("KILN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
+    tools: dict = {}
+
+    class _FakeMcp:
+        def tool(self, name=None, **_kwargs):
+            def decorator(fn):
+                tools[name or fn.__name__] = fn
+                return fn
+
+            return decorator
+
+    _SlicerToolsPlugin().register(_FakeMcp())
+    gcode = tmp_path / "out.gcode"
+    gcode.write_text("G28\n;LAYER_CHANGE\n;TYPE:External perimeter\nG1 X60 Y60 F600\nG1 X120 Y60 E1\n")
+    handed: list[dict] = []
+
+    def fake_slice(_path, *, profile=None, **_kw):
+        handed.append(ini_to_settings(profile) if profile else {})
+        return SliceResult(success=True, output_path=str(gcode), slicer="PrusaSlicer", message="Sliced")
+
+    adapter = MagicMock(spec=["get_state", "upload_file", "start_print"])
+    adapter.get_state.return_value = PrinterState(connected=True, state=PrinterStatus.PRINTING)
+    adapter.upload_file.return_value = UploadResult(success=True, file_name="out.gcode", message="ok")
+    adapter.start_print.return_value = PrintResult(success=True, message="started")
+    with patch.object(srv, "_check_auth", return_value=None), \
+            patch.object(srv, "_resolve_adapter", return_value=adapter), \
+            patch.object(srv, "_resolve_target_printer_type", return_value="octoprint"), \
+            patch.object(srv, "_resolve_effective_printer_name", return_value="p1"), \
+            patch.object(srv, "_emergency_latch_error", return_value=None), \
+            patch.object(srv, "preflight_check", return_value={"ready": True}), \
+            patch.object(srv, "_resolve_use_ams", return_value={"use_ams": False}), \
+            patch.object(srv, "_note_print_started"), \
+            patch.object(srv, "_audit"), \
+            patch("kiln.slicer.slice_file", side_effect=fake_slice):
+        resp = tools["slice_and_print"](input_path=path, printer_id="ender3", material=material, skip_validation=True)
+    return resp, handed
+
+
+class TestSliceAndPrintsBrimDecision:
+    def test_a_step_gets_the_brim_its_mesh_twin_gets(self, tmp_path: Path, monkeypatch) -> None:
+        twin, twin_handed = _slice_and_print(tmp_path, _stl(tmp_path, _PLATE), monkeypatch)
+        assert twin["success"], twin
+        assert twin_handed[0].get("brim_width") == "5", "the twin's brim, or this test proves nothing"
+        size, mesh = _kernel(_PLATE, at=_FAR)
+        with size, mesh:
+            cad, handed = _slice_and_print(tmp_path, _step_named(tmp_path), monkeypatch)
+        assert cad["success"], cad
+        assert handed[0].get("brim_width") == "5" and cad["adhesion"] == twin["adhesion"]
+        assert "Kiln's mesh of this STEP file" in cad["printability_note"]
+        assert "printability_note" not in twin
+
+    def test_a_step_that_cannot_be_read_prints_and_says_so(self, tmp_path: Path, monkeypatch) -> None:
+        with patch("kiln.step_import.ensure_mesh_path", side_effect=step_import.NoBackendError()):
+            resp, handed = _slice_and_print(tmp_path, _step_named(tmp_path), monkeypatch)
+        assert resp["success"], resp
+        assert handed[0].get("brim_width", "0") == "0", "the profile's own brim, nothing decided"
+        assert resp["printability_note"].startswith("Printability and the brim decision were not checked")
+
+
+class TestTheRetrysDiagnosis:
+    def _retry(self, tmp_path: Path, model: str, monkeypatch) -> dict:
+        from unittest.mock import MagicMock
+
+        import kiln.server as srv
+        from kiln.plugins.smart_print_tools import plugin
+        from kiln.printers.base import PrinterState, PrinterStatus, PrintResult, UploadResult
+
+        monkeypatch.setenv("KILN_HOME", str(tmp_path / "home"))
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
+        tools: dict = {}
+
+        class _Mcp:
+            def tool(self, **_kwargs):
+                def decorator(fn):
+                    tools[fn.__name__] = fn
+                    return fn
+
+                return decorator
+
+        plugin.register(_Mcp())
+        gcode = tmp_path / "retry.gcode"
+        gcode.write_text("G28\n;LAYER_CHANGE\n;TYPE:External perimeter\nG1 X60 Y60 F600\nG1 X120 Y60 E1\n")
+        adapter = MagicMock(spec=["get_state", "upload_file", "start_print"])
+        adapter.get_state.return_value = PrinterState(connected=True, state=PrinterStatus.PRINTING)
+        adapter.upload_file.return_value = UploadResult(success=True, file_name="retry.gcode", message="ok")
+        adapter.start_print.return_value = PrintResult(success=True, message="started")
+        sliced = SliceResult(success=True, output_path=str(gcode), slicer="PrusaSlicer", message="Sliced")
+        with patch.object(srv, "_check_auth", return_value=None), \
+                patch.object(srv, "_resolve_adapter", return_value=adapter), \
+                patch.object(srv, "_resolve_effective_printer_name", return_value="p1"), \
+                patch.object(srv, "_emergency_latch_error", return_value=None), \
+                patch.object(srv, "preflight_check", return_value={"ready": True}), \
+                patch.object(srv, "_note_print_started"), \
+                patch("kiln.slicer.slice_file", return_value=sliced):
+            return tools["retry_print_with_fix"](
+                model_path=model, printer_id="ender3", material="PLA", skip_validation=True,
+            )
+
+    def test_a_step_models_geometry_reaches_the_diagnosis(self, tmp_path: Path, monkeypatch) -> None:
+        size, mesh = _kernel(_PLATE, at=_FAR)
+        with size, mesh:
+            result = self._retry(tmp_path, _step_named(tmp_path), monkeypatch)
+        assert result["success"], result
+        assert result["diagnosis"]["signals"]["contact_percentage"] is not None
+        assert "printability_note" not in result
+
+    def test_a_model_the_diagnosis_cannot_read_is_said(self, tmp_path: Path, monkeypatch) -> None:
+        with patch("kiln.step_import.ensure_mesh_path", side_effect=step_import.NoBackendError()):
+            result = self._retry(tmp_path, _step_named(tmp_path), monkeypatch)
+        assert result["success"], result
+        assert "contact_percentage" not in result["diagnosis"]["signals"]
+        assert result["printability_note"].startswith("The diagnosis was made without the model's geometry")
+
+
+class TestTheCliSupportCheck:
+    def _slice(self, path: str) -> tuple[dict, list[str]]:
+        import json
+        from unittest.mock import MagicMock
+
+        from click.testing import CliRunner
+
+        from kiln.cli.main import cli
+
+        sliced = MagicMock(message="Sliced", output_path=path + ".gcode")
+        sliced.to_dict.return_value = {"output_path": sliced.output_path}
+        with patch("kiln.cli.main._autodetect_printer_profile_id", return_value=None), \
+                patch("kiln.slicer.slice_file", return_value=sliced) as slicer:
+            out = CliRunner().invoke(cli, ["slice", path, "--support-mode", "auto", "--json"])
+        assert out.exit_code == 0, out.output
+        return json.loads(out.output)["data"], slicer.call_args.kwargs.get("extra_args") or []
+
+    def test_a_step_that_needs_supports_gets_them(self, tmp_path: Path) -> None:
+        with _overhanging_kernel():
+            data, args = self._slice(_step_named(tmp_path))
+        assert "--support-material" in args
+        assert data["support_style"] == "minimal" and "overhangs=" in data["support_reason"]
+
+    def test_a_model_the_check_cannot_read_says_it_was_not_checked(self, tmp_path: Path) -> None:
+        with patch("kiln.step_import.ensure_mesh_path", side_effect=step_import.NoBackendError()):
+            data, args = self._slice(_step_named(tmp_path))
+        assert "--support-material" not in args
+        assert data["support_reason"].startswith("not checked: ")

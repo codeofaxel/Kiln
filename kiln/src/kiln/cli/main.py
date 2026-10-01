@@ -223,25 +223,26 @@ def _support_extra_args(style: str) -> list[str]:
 
 
 def _auto_support_style(input_file: str) -> tuple[str | None, str | None]:
-    """Infer whether the model needs supports based on printability analysis."""
-    ext = os.path.splitext(input_file)[1].lower()
-    if ext not in {".stl", ".obj"}:
-        return None, None
+    """Infer whether the model needs supports based on printability analysis.
+
+    Every format the engine reads, a STEP as Kiln's mesh of it.  A model it
+    cannot read gets no supports and the reason says the check was not made,
+    rather than reading like a model that needs none.
+    """
+    from kiln.printability import analyze_printability
 
     try:
-        from kiln.printability import analyze_printability
-
         report = analyze_printability(input_file)
-        reasons: list[str] = []
-        if report.overhangs.needs_supports and report.overhangs.overhang_percentage >= 1.0:
-            reasons.append(f"overhangs={report.overhangs.overhang_percentage:.1f}%")
-        if report.bridging.needs_supports_for_bridges:
-            reasons.append(f"bridges={report.bridging.max_bridge_length_mm:.1f}mm")
-        if reasons:
-            return "minimal", ", ".join(reasons)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 -- the slice stands without supports, and says so
         logger.debug("Auto-support analysis failed for %s: %s", input_file, exc)
-
+        return None, f"not checked: {' '.join(str(exc).split())}"
+    reasons: list[str] = []
+    if report.overhangs.needs_supports and report.overhangs.overhang_percentage >= 1.0:
+        reasons.append(f"overhangs={report.overhangs.overhang_percentage:.1f}%")
+    if report.bridging.needs_supports_for_bridges:
+        reasons.append(f"bridges={report.bridging.max_bridge_length_mm:.1f}mm")
+    if reasons:
+        return "minimal", ", ".join(reasons)
     return None, None
 
 
@@ -4475,6 +4476,8 @@ def slice(
                 if plan["support_style"]:
                     note = f" ({plan['support_reason']})" if plan["support_reason"] else ""
                     click.echo(f"Supports: {plan['support_style']}{note}")
+                elif plan["support_reason"]:
+                    click.echo(f"Supports: none ({plan['support_reason']})")
             return
 
         # --print-after: wrap for Bambu if needed, upload, and start
@@ -9793,7 +9796,10 @@ def generate_and_print_cmd(
             loaded_determined_by=plan.get("loaded_determined_by") or "observed",
         )
         if not json_mode:
-            click.echo(f"Sliced: {slice_result.output_path}")
+            # The slice's own message, as kiln slice prints it: it says when
+            # a skirt past the bed's edge was dropped.
+            click.echo(slice_result.message or "Sliced.")
+            click.echo(f"Output: {slice_result.output_path}")
             click.echo(f"Material: {plan['material']}")
             if getattr(slice_result, "filament", None) is not None:
                 click.echo(f"Weighed as: {slice_result.filament.note}")
@@ -9802,6 +9808,8 @@ def generate_and_print_cmd(
             if plan["support_style"]:
                 note = f" ({plan['support_reason']})" if plan["support_reason"] else ""
                 click.echo(f"Supports: {plan['support_style']}{note}")
+            elif plan["support_reason"]:
+                click.echo(f"Supports: none ({plan['support_reason']})")
 
         # --- Step 4: Upload ---
         adapter = _get_adapter_from_ctx(ctx)
