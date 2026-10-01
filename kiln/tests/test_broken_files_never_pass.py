@@ -289,11 +289,26 @@ def test_a_cad_file_is_converted_and_judged(tmp_path):
 
 
 def test_the_gate_refuses_a_broken_file_with_the_check_s_reason(files):
+    """No part to print, so no "print it anyway": that would hand the
+    slicer nothing."""
     from kiln.plugins.validation_pipeline_tools import gate_for_print
 
     gate = gate_for_print(files["garbage.stl"])
 
     assert gate.code == "VALIDATION_FAILED" and "could not read any geometry" in gate.reason
+    assert gate.refusal == gate.reason and "skip_validation" not in gate.refusal
+
+
+def test_a_real_part_that_fails_the_check_can_still_be_printed_anyway(files):
+    from kiln.plugins.validation_pipeline_tools import gate_for_print
+
+    failed = {
+        "ready_to_print": False, "summary": "Not ready (readiness 35/100). 2 issues: thin walls",
+        "checks": [{"name": "mesh_geometry", "passed": True}],
+    }
+    with patch("kiln.plugins.validation_pipeline_tools.run_full_validation_pipeline", return_value=failed):
+        gate = gate_for_print(files["cube.stl"])
+
     assert gate.refusal.endswith("Pass skip_validation=True to bypass.")
 
 
@@ -342,7 +357,8 @@ def test_no_print_pipeline_slices_what_failed_or_was_never_checked(pipeline, tro
 
     step = next(s for s in result.steps if s.name == "validate_mesh")
     assert result.success is False and step.success is False, step.message
-    assert "skip_validation=True" in step.message
+    # Printing anyway is offered for a check that crashed, never for a file with no part.
+    assert ("skip_validation=True" in step.message) == (trouble == "check crashed")
     slice_file.assert_not_called()
 
 
@@ -419,7 +435,7 @@ class TestTheCommandLine:
 
         assert result.exit_code == 1, result.output
         error = json.loads(result.output)["error"]
-        assert error["code"] == "VALIDATION_FAILED" and "--skip-validation" in error["message"]
+        assert error["code"] == "VALIDATION_FAILED" and "--skip-validation" not in error["message"]
         slice_file.assert_not_called()
 
     @pytest.mark.parametrize("name", BROKEN_NAMES)

@@ -386,7 +386,7 @@ def _cli_print_gate(
         input_file, printer_id=plan.get("printer_id") or "", material=plan.get("material") or "",
     )
     if gate.reason:
-        hint = f" {bypass}" if bypass else ""
+        hint = f" {bypass}" if bypass and gate.bypassable else ""
         click.echo(format_error(f"{gate.reason}{hint}", code=gate.code, json_mode=json_mode))
         sys.exit(1)
     return gate.path

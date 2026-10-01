@@ -447,11 +447,14 @@ class PrintGate:
     reason: str | None = None
     code: str | None = None
     report: dict[str, Any] | None = None
+    #: False when there is no part to print at all: skipping the check
+    #: would only hand the slicer nothing, so no door offers it.
+    bypassable: bool = True
 
     @property
     def how_to_bypass(self) -> str:
         """How to print anyway, for a door that takes skip_validation."""
-        return _BYPASS.get(self.code or "", "")
+        return _BYPASS.get(self.code or "", "") if self.bypassable else ""
 
     @property
     def refusal(self) -> str | None:
@@ -495,11 +498,15 @@ def gate_for_print(input_path: str, *, printer_id: str = "", material: str = "")
     if not report.get("ready_to_print"):
         # The check's own summary says it: "Not ready (printability 45/100).
         # 1 issue: ..." -- the same sentence validate_and_prepare shows.
+        no_part = any(
+            c["name"] == "mesh_geometry" and not c["passed"] for c in report.get("checks", [])
+        )
         return PrintGate(
             path=input_path,
             reason=report.get("summary") or f"Not ready ({score_phrase(report)}).",
             code="VALIDATION_FAILED",
             report=report,
+            bypassable=not no_part,
         )
     return PrintGate(path=report.get("validated_path") or input_path, report=report)
 
