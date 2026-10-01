@@ -739,10 +739,18 @@ class CostEstimator:
             profile = BUILTIN_MATERIALS["PLA"]
 
         # --- Shell and infill volume ---
-        shell_thickness_mm = wall_layers * nozzle_mm
-        shell_volume_mm3 = surface_area_mm2 * shell_thickness_mm
-        interior_volume_mm3 = max(0.0, total_volume_mm3 - shell_volume_mm3)
-        infill_volume_mm3 = interior_volume_mm3 * (infill_percent / 100.0)
+        # One statement of what a print deposits, shared with the time
+        # estimate.  It caps the shell at the solid's own volume: before, a
+        # thin-walled part "used" more plastic than it contains.
+        from kiln.generation.validation import deposited_volume_mm3
+
+        shell_volume_mm3, infill_volume_mm3 = deposited_volume_mm3(
+            total_volume_mm3,
+            surface_area_mm2,
+            wall_layers=wall_layers,
+            line_width_mm=nozzle_mm,
+            infill_percent=infill_percent,
+        )
         total_plastic_mm3 = shell_volume_mm3 + infill_volume_mm3
 
         # --- Weight and filament length ---

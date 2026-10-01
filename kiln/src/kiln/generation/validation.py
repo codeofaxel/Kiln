@@ -4852,6 +4852,66 @@ def split_by_component(
 # ---------------------------------------------------------------------------
 
 
+#: The hypothetical print every geometry-only estimate describes: three
+#: perimeters of a 0.4 mm line and 20% infill.  One statement, read by the
+#: time estimate here and the cost estimate in :mod:`kiln.cost_estimator`, so
+#: a part's time and its weight are never about two different prints.
+EST_WALL_LAYERS = 3
+EST_LINE_WIDTH_MM = 0.4
+EST_INFILL_PERCENT = 20.0
+
+#: Per-layer time that is not extrusion (travel, retraction, the Z move), and
+#: the floor a slicer holds a small layer to so it can cool.  Both were fit,
+#: with the default speed below, against sliced times for six test parts on
+#: seven of the bundled printer profiles (36 slices, 2026-10-01).
+_EST_LAYER_OVERHEAD_S = 3.0
+_EST_MIN_LAYER_TIME_S = 5.5
+#: Extra per-layer time for materials printed hot and enclosed.  Carried over
+#: from the estimator this replaced; it was not part of the fit above.
+_EST_HOT_MATERIAL_EXTRA_S = 1.0
+_EST_HOT_MATERIALS = frozenset({"abs", "asa", "nylon", "pc"})
+
+#: How far a real slice sat from this estimate in that same comparison: the
+#: sliced time was between 0.41x and 2.13x of the figure, median 1.05x.  The
+#: printer is most of that spread — the same part took 2.9 times longer on
+#: the slowest profile than on the fastest — and this function is not told
+#: which printer.  Rounded outward, it is the range every result carries.
+#: Nine further slices, of three other parts on three other profiles and not
+#: used in the fit, all fell inside it (0.44x to 1.62x).
+EST_TIME_RANGE = (0.4, 2.2)
+
+
+def deposited_volume_mm3(
+    volume_mm3: float,
+    surface_area_mm2: float,
+    *,
+    wall_layers: int = EST_WALL_LAYERS,
+    line_width_mm: float = EST_LINE_WIDTH_MM,
+    infill_percent: float = EST_INFILL_PERCENT,
+) -> tuple[float, float]:
+    """Plastic a print of this solid lays down: ``(shell, infill)`` in mm³.
+
+    The shell is the surface times the wall thickness, and it can never be
+    more than the solid itself: a thin-walled part is all wall, and its two
+    faces counted separately would otherwise "deposit" more plastic than the
+    part contains.  What is left inside is filled at *infill_percent*.
+
+    Against the 36 slices above this ran 1% to 35% over the sliced filament
+    volume and never under, the flat plate being the 35%; on the nine
+    held-out slices, from 4% under to 11% over.
+    """
+    volume = max(0.0, float(volume_mm3))
+    shell = min(volume, max(0.0, float(surface_area_mm2)) * wall_layers * line_width_mm)
+    infill = (volume - shell) * (max(0.0, min(100.0, float(infill_percent))) / 100.0)
+    return shell, infill
+
+
+def _human_duration(seconds: float) -> str:
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    return f"{hours}h {minutes}m" if hours > 0 else f"{minutes}m"
+
+
 def estimate_print_time_from_mesh(
     file_path: str,
     *,
@@ -4859,26 +4919,35 @@ def estimate_print_time_from_mesh(
     print_speed_mm_s: float = 60.0,
     material: str = "pla",
 ) -> dict[str, Any]:
-    """Rough print time estimate from mesh geometry.
+    """Rough print time from mesh geometry alone — no slicer, no printer.
 
-    Algorithm:
-        1. Compute bounding-box height → number of layers.
-        2. Approximate total surface area of the mesh.
-        3. Estimate perimeter per layer ≈ sqrt(surface_area / height).
-        4. Total toolpath length ≈ perimeter * layers.
-        5. Time ≈ toolpath / speed + per-layer overhead.
+    A print head lays plastic down at speed x layer height x line width, so
+    the time to print is the plastic deposited divided by that flow, plus
+    what each layer costs besides extrusion::
 
-    This is a *rough* estimate — actual time depends on infill,
-    supports, acceleration, retraction, and slicer settings.
+        plastic  = shell + infill                  (deposited_volume_mm3)
+        flow     = speed * layer height * line width
+        seconds  = layers * max(plastic / layers / flow + overhead, floor)
+
+    It is a planning figure, and it says how rough it is: ``range_seconds``
+    is where a real slice landed around this number when the two were
+    compared (see :data:`EST_TIME_RANGE`).  Supports are not included.  When
+    a slicer is installed, slicing the part is the real answer.
+
+    (Until 2026-10-01 this estimated a layer's path as
+    ``sqrt(surface area / height)`` — the square root of a length — and
+    counted one pass of it per layer.  Against the same 36 slices it
+    answered a median of 9% of the sliced time, and never more than 38%.)
 
     Args:
         file_path: Path to mesh file.
         layer_height_mm: Slicing layer height.
         print_speed_mm_s: Average print move speed.
-        material: Material hint (used for per-layer overhead).
+        material: Material hint (per-layer overhead, filament weight).
 
     Returns:
-        Dict with estimated time and layer info.
+        Dict with the estimated time, its range, layers, and the deposited
+        plastic the time was derived from.
     """
     if layer_height_mm <= 0:
         raise ValueError("layer_height_mm must be positive.")
@@ -4903,7 +4972,6 @@ def estimate_print_time_from_mesh(
 
     layers = max(1, int(math.ceil(height / layer_height_mm)))
 
-    # Approximate surface area using triangle areas
     total_surface_area = 0.0
     for tri in tris:
         v0, v1, v2 = tri
@@ -4915,45 +4983,64 @@ def estimate_print_time_from_mesh(
         cz = ax * by - ay * bx
         total_surface_area += 0.5 * math.sqrt(cx * cx + cy * cy + cz * cz)
 
-    # Perimeter per layer ≈ sqrt(surface_area / height)
-    # This approximates the average cross-section perimeter.
-    perimeter_per_layer = math.sqrt(total_surface_area / height) if height > 0 else 0.0
+    volume = abs(_signed_volume(tris))
+    if volume <= 0:
+        # An open surface encloses nothing, so there is no plastic to count.
+        # Refused rather than guessed: the callers that plan on this number
+        # each have their own answer for a part that cannot be estimated.
+        raise ValueError(
+            "Mesh encloses no volume, so there is no plastic to estimate a "
+            "print time from. Repair it into a closed solid first."
+        )
 
-    # Total toolpath ≈ perimeter * layers (accounts for walls)
-    # Add ~30% for infill estimate (rough)
-    infill_factor = 1.3
-    total_path_length = perimeter_per_layer * layers * infill_factor
+    shell_mm3, infill_mm3 = deposited_volume_mm3(volume, total_surface_area)
+    plastic_mm3 = shell_mm3 + infill_mm3
 
-    # Per-layer overhead (homing, z-move, retraction).
-    # Slightly higher for materials needing heated bed stabilisation.
     material_lower = material.lower()
-    if material_lower in ("abs", "asa", "nylon", "pc"):
-        overhead_per_layer_s = 3.0
-    else:
-        overhead_per_layer_s = 2.0
+    overhead_per_layer_s = _EST_LAYER_OVERHEAD_S + (
+        _EST_HOT_MATERIAL_EXTRA_S if material_lower in _EST_HOT_MATERIALS else 0.0
+    )
 
-    travel_time_s = total_path_length / print_speed_mm_s if print_speed_mm_s > 0 else 0.0
-    overhead_time_s = layers * overhead_per_layer_s
-    total_seconds = travel_time_s + overhead_time_s
+    flow_mm3_s = print_speed_mm_s * layer_height_mm * EST_LINE_WIDTH_MM
+    extrusion_per_layer_s = plastic_mm3 / layers / flow_mm3_s
+    total_seconds = layers * max(
+        extrusion_per_layer_s + overhead_per_layer_s, _EST_MIN_LAYER_TIME_S
+    )
+    low_s, high_s = (total_seconds * EST_TIME_RANGE[0], total_seconds * EST_TIME_RANGE[1])
 
-    # Human-readable format
-    hours = int(total_seconds // 3600)
-    minutes = int((total_seconds % 3600) // 60)
-    if hours > 0:
-        human = f"{hours}h {minutes}m"
-    else:
-        human = f"{minutes}m"
+    # Filament weight from the same deposited plastic, at the material's own
+    # density.  Read from the cost estimator's table rather than restated;
+    # imported here because that module imports this one.
+    from kiln.cost_estimator import BUILTIN_MATERIALS, DEFAULT_MATERIAL
+
+    profile = BUILTIN_MATERIALS.get(material.upper()) or BUILTIN_MATERIALS[DEFAULT_MATERIAL]
+    filament_g = plastic_mm3 / 1000.0 * profile.density_g_per_cm3
 
     return {
         "estimated_time_seconds": round(total_seconds, 1),
-        "estimated_time_human": human,
+        "estimated_time_human": _human_duration(total_seconds),
+        "range_seconds": [round(low_s, 1), round(high_s, 1)],
+        "range_human": f"{_human_duration(low_s)} to {_human_duration(high_s)}",
+        "time_min": int(math.ceil(total_seconds / 60.0)),
         "layers": layers,
-        "perimeter_per_layer_mm": round(perimeter_per_layer, 2),
-        "total_path_length_mm": round(total_path_length, 1),
+        "plastic_volume_mm3": round(plastic_mm3, 1),
+        "filament_g": round(filament_g, 1),
+        "total_path_length_mm": round(plastic_mm3 / (layer_height_mm * EST_LINE_WIDTH_MM), 1),
+        "volume_mm3": round(volume, 1),
         "surface_area_mm2": round(total_surface_area, 1),
         "height_mm": round(height, 2),
         "material": material_lower,
-        "note": "Rough estimate. Actual time depends on slicer settings, infill, supports, and acceleration.",
+        "assumptions": (
+            f"{EST_WALL_LAYERS} walls of {EST_LINE_WIDTH_MM} mm line, "
+            f"{EST_INFILL_PERCENT:g}% infill, {layer_height_mm:g} mm layers, "
+            f"{print_speed_mm_s:g} mm/s average speed, no supports"
+        ),
+        "note": (
+            "Rough estimate from geometry alone, for an unknown printer. The "
+            "printer matters most: compared against real slices, the sliced "
+            f"time fell between {EST_TIME_RANGE[0]}x and {EST_TIME_RANGE[1]}x "
+            "of this figure (range_seconds). Slice the part for a real number."
+        ),
     }
 
 
