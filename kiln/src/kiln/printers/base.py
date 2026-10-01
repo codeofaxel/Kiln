@@ -877,6 +877,9 @@ class NozzleSetting:
         cache is worth serving; ``None`` when there is no cache.
     :param firmware_version: The firmware the reading was taken under, when
         the backend reports one.
+    :param held_by: Whose record this is: ``"machine"`` for a setting the
+        printer itself keeps, ``"host"`` for one kept by the software that
+        drives it.
     """
 
     material: str | None
@@ -885,6 +888,7 @@ class NozzleSetting:
     age_seconds: float | None = None
     stale_after_seconds: float | None = None
     firmware_version: str | None = None
+    held_by: str = "machine"
 
     def is_empty(self) -> bool:
         return self.material is None and self.diameter_mm is None

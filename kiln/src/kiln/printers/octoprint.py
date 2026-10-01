@@ -780,7 +780,9 @@ class OctoPrintAdapter(PrinterAdapter):
             diameter = None
         if diameter is None:
             return None
-        return NozzleSetting(material=None, diameter_mm=diameter, source="octoprint_printer_profile")
+        return NozzleSetting(
+            material=None, diameter_mm=diameter, source="octoprint_printer_profile", held_by="host",
+        )
 
     def get_state(self) -> PrinterState:
         """Retrieve the current printer state and temperatures.

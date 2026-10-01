@@ -9208,6 +9208,8 @@ def force_print_oversize(printer_id: str = "", ttl_minutes: int = 5) -> dict:
     crash) or a material whose minimum nozzle temperature exceeds the
     printer's hotend ceiling (it cannot melt the filament).  Those are
     hard physical limits, not warnings, so a normal print call is blocked.
+    It also refuses a file sliced for one nozzle size when the printer's
+    own setting says another is fitted; this override covers that too.
 
     This is the human's "I understand — print it anyway" escape hatch, e.g.
     when you are deliberately sending the file to a *different* printer than
@@ -11211,6 +11213,32 @@ def preflight_check(
                         )
         except Exception as exc:
             logger.debug("Nozzle capacity check skipped: %s", exc)
+
+        # -- Nozzle size: the file against the printer's own setting ---------
+        # The same comparison the start gate makes, said here first.  It
+        # fails the pre-flight only where the start would be refused; a
+        # printer or a file that cannot say is listed as not checked,
+        # never as fine.
+        if file_path is not None:
+            try:
+                from kiln.nozzle_size_check import check_nozzle_size
+
+                _size = check_nozzle_size(adapter, str(file_path))
+                _size_row: dict[str, Any] = {
+                    "name": "nozzle_size",
+                    "passed": not _size.refuses,
+                    "message": _size.sentence(Path(str(file_path)).name),
+                    "status": _size.status,
+                }
+                if _size.status == "unchecked":
+                    _size_row["checked"] = False
+                elif _size.status == "differs" and not _size.refuses:
+                    _size_row["advisory"] = True
+                checks.append(_size_row)
+                if _size.refuses:
+                    errors.append(_size_row["message"])
+            except Exception as exc:
+                logger.debug("Nozzle size check skipped: %s", exc)
 
         # -- Filament-cutter blade (advisory) ------------------------------
         # One line when the blade is due, past due, or the machine has

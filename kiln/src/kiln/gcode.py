@@ -1546,6 +1546,43 @@ def slicer_material_label(types: Iterable[str]) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# The nozzle a file was sliced for
+# ---------------------------------------------------------------------------
+
+#: PrusaSlicer, OrcaSlicer and Bambu Studio write ``; nozzle_diameter = 0.4``
+#: in their settings block, one entry per extruder (``0.4,0.4``).  Cura
+#: writes no such line.
+_NOZZLE_DIAMETER_LINE = re.compile(r"^;[ \t]*nozzle_diameter[ \t]*=[ \t]*(?P<v>\S.*?)[ \t]*$", re.I | re.M)
+#: Nozzles run from 0.2 mm to under 2 mm; a figure outside this is not one.
+_NOZZLE_DIAMETER_BOUNDS_MM = (0.0, 5.0)
+
+
+def slicer_nozzle_diameters(text: str) -> tuple[tuple[float, ...], ...]:
+    """Every statement *text* makes of the nozzle it was sliced for, in file
+    order: one tuple per ``nozzle_diameter`` setting line, one entry per
+    extruder.  ``()`` when it states none.
+
+    A file a printer's package was wrapped around can state it twice -- in
+    the header the printer reads, then in the slicer's own block.  The LAST
+    statement is the slicer's: the size the toolpath was laid out for.
+    Never raises.
+    """
+    candidates = "\n".join(line.strip() for line in text.splitlines() if "nozzle_diameter" in line.lower())
+    low, high = _NOZZLE_DIAMETER_BOUNDS_MM
+    statements: list[tuple[float, ...]] = []
+    for m in _NOZZLE_DIAMETER_LINE.finditer(candidates):
+        sizes: list[float] = []
+        for part in re.split(r"[,;]", m.group("v")):
+            with contextlib.suppress(ValueError):
+                size = float(part)
+                if low < size <= high:
+                    sizes.append(size)
+        if sizes:
+            statements.append(tuple(sizes))
+    return tuple(statements)
+
+
+# ---------------------------------------------------------------------------
 # The slicer's own print time and layer count
 # ---------------------------------------------------------------------------
 

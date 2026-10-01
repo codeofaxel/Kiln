@@ -114,6 +114,7 @@ from kiln.gcode import (
     has_axis_word,
     slicer_filament_totals,
     slicer_filament_types,
+    slicer_nozzle_diameters,
     slicer_print_time,
 )
 
@@ -283,13 +284,14 @@ _fallback_warned: set[tuple[str, str]] = set()
 class BambuPrintSettings:
     """Print-specific settings for Bambu 3MF building.
 
-    All temperatures are in degrees Celsius.  ``hotend_temp``, ``bed_temp``
-    and ``filament_type`` left ``None`` mean "the caller did not say": the
-    build reads them off the G-code being wrapped -- the temperatures its
-    first heating commands ask for and the ``filament_type`` its slicer
-    wrote (every Kiln slice carries one, see :mod:`kiln.slicer_filament`)
-    -- and falls back to PLA on the A1 (220 / 65 / ``PLA``) only for a body
-    that says nothing.  A value the caller states always wins.  Whatever
+    All temperatures are in degrees Celsius.  ``hotend_temp``, ``bed_temp``,
+    ``filament_type`` and ``nozzle_diameter`` left ``None`` mean "the caller
+    did not say": the build reads them off the G-code being wrapped -- the
+    temperatures its first heating commands ask for, and the
+    ``filament_type`` and ``nozzle_diameter`` its slicer wrote (every Kiln
+    slice carries both, see :mod:`kiln.slicer_filament`) -- and falls back
+    to PLA on the A1 with its stock nozzle (220 / 65 / ``PLA`` / 0.4) only
+    for a body that says nothing.  A value the caller states always wins.  Whatever
     the type's origin, it reaches the printer in Bambu's own vocabulary
     (:func:`bambu_filament_type`).
 
@@ -301,7 +303,7 @@ class BambuPrintSettings:
     bed_temp: int | None = None
     filament_type: str | None = None
     filament_color: str = "#FFFFFF"
-    nozzle_diameter: float = 0.4
+    nozzle_diameter: float | None = None
     layer_height: float = 0.2
     bed_type: str = "textured_plate"
     model_name: str = "model"
@@ -718,6 +720,7 @@ _CAPTURE_HOTEND_TEMP = 220  # every start sequence here holds PLA's 220C
 _FALLBACK_HOTEND_TEMP = 220
 _FALLBACK_BED_TEMP = 65
 _FALLBACK_FILAMENT_TYPE = "PLA"
+_FALLBACK_NOZZLE_DIAMETER = 0.4
 
 #: The filament types Bambu's firmware is written to -- every distinct
 #: ``filament_type`` across the filament presets the maker's own slicer
@@ -818,12 +821,18 @@ def resolve_settings_from_gcode(settings: BambuPrintSettings, gcode_body: str) -
 
     The G-code is the artifact that knows what the slice was for: the type
     its slicer wrote (``; filament_type = PETG``, the resolved material of
-    a Kiln slice) and the temperatures it heats to.  A caller that stated a
-    value keeps it.  Every type -- stated, read, or fallen back to -- is
+    a Kiln slice), the nozzle it was sliced for, and the temperatures it
+    heats to.  A caller that stated a value keeps it.  Every type -- stated, read, or fallen back to -- is
     then put into Bambu's vocabulary, so nothing outside it reaches the
     machine.
     """
     hotend, bed = _print_temperatures(gcode_body)
+    nozzle_diameter = settings.nozzle_diameter
+    if nozzle_diameter is None:
+        # The slicer's own statement is the last one: what the toolpath was
+        # laid out for is what the printer is told.
+        stated = slicer_nozzle_diameters(gcode_body)
+        nozzle_diameter = stated[-1][0] if stated else _FALLBACK_NOZZLE_DIAMETER
     filament_type = settings.filament_type
     if not filament_type:
         read = slicer_filament_types(gcode_body)
@@ -839,6 +848,7 @@ def resolve_settings_from_gcode(settings: BambuPrintSettings, gcode_body: str) -
         bed_temp=settings.bed_temp if settings.bed_temp is not None else (bed or _FALLBACK_BED_TEMP),
         filament_type=bambu_filament_type(filament_type or _FALLBACK_FILAMENT_TYPE),
         filament_types=filament_types,
+        nozzle_diameter=nozzle_diameter,
     )
 
 

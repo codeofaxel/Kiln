@@ -146,16 +146,17 @@ class TestBambuPrintSettingsDefaults:
     """BambuPrintSettings dataclass default values and to_dict."""
 
     def test_default_values(self):
-        # Type and temperatures default to "unsaid": the build reads them
-        # off the G-code it wraps, and falls back to PLA on the A1
-        # (220 / 65 / PLA) only for a body that says nothing.
+        # Type, temperatures and nozzle default to "unsaid": the build reads
+        # them off the G-code it wraps, and falls back to PLA on the A1
+        # with its stock nozzle (220 / 65 / PLA / 0.4) only for a body that
+        # says nothing.
         s = BambuPrintSettings()
         assert s.hotend_temp is None
         assert s.bed_temp is None
         assert s.filament_type is None
         assert s.get_filament_types() == ["PLA"]
         assert s.filament_color == "#FFFFFF"
-        assert s.nozzle_diameter == 0.4
+        assert s.nozzle_diameter is None
         assert s.layer_height == 0.2
         assert s.bed_type == "textured_plate"
         assert s.model_name == "model"
