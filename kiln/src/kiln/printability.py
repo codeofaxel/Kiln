@@ -3921,6 +3921,20 @@ def _apply_placement_check(
     return score, _score_to_grade(score), printable, faults
 
 
+def adhesion_advice(adhesion: AdhesionRecommendation | None) -> list[str]:
+    """The brim / raft sentence the adhesion decision makes, if it made one.
+
+    Empty when the decision declined a brim and a raft.  The report's
+    recommendations read it, and so does any door that serves one block of
+    the report on its own — the warping and adhesion-force blocks state
+    their risk and name no brim, so such a door carries the decision with
+    this or the brim is in the reply nowhere.
+    """
+    if adhesion is not None and (adhesion.brim_width_mm > 0 or adhesion.use_raft):
+        return [adhesion.rationale]
+    return []
+
+
 def _build_recommendations(
     overhangs: OverhangAnalysis,
     thin_walls: ThinWallAnalysis,
@@ -3969,8 +3983,7 @@ def _build_recommendations(
         recs.append(
             "Low bed contact area.  Re-orienting the model can increase the contact surface."
         )
-    if adhesion is not None and (adhesion.brim_width_mm > 0 or adhesion.use_raft):
-        recs.append(adhesion.rationale)
+    recs.extend(adhesion_advice(adhesion))
 
     if supports.support_percentage > 20:
         recs.append(

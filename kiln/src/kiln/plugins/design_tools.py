@@ -1966,7 +1966,11 @@ class _DesignToolsPlugin:
             - large_flat_surfaces: detected flat areas prone to warping
             - height_to_base_ratio: geometry aspect ratio risk factor
             - material_warping_tendency: material's inherent warp behavior
-            - recommendations: actionable mitigation advice
+            - recommendations: actionable mitigation advice, led by the brim
+              or raft to use when the part calls for one
+            - adhesion: the brim / raft decision for this part (width, raft,
+              reason, slicer overrides) — the same one analyze_printability
+              reports
 
             Args:
                 file_path: Path to STL, OBJ, GLB, or 3MF file to analyze.
@@ -1988,7 +1992,7 @@ class _DesignToolsPlugin:
             if _refusal:
                 return _refusal
 
-            from kiln.printability import analyze_printability
+            from kiln.printability import adhesion_advice, analyze_printability
 
             try:
                 report = analyze_printability(
@@ -1996,6 +2000,16 @@ class _DesignToolsPlugin:
                 )
                 if report.warping is not None:
                     result = report.warping.to_dict()
+                    # The warping block states the risk and leaves the brim
+                    # to the report's one adhesion decision.  This door
+                    # serves that block alone, so it carries the decision
+                    # with it: a high-risk part is never answered with no
+                    # brim in the reply.
+                    result["recommendations"] = (
+                        adhesion_advice(report.adhesion) + result["recommendations"]
+                    )
+                    if report.adhesion is not None:
+                        result["adhesion"] = report.adhesion.to_dict()
                     result["success"] = True
                     result["overall_score"] = report.score
                     result["overall_grade"] = report.grade
