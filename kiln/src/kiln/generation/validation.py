@@ -36,10 +36,18 @@ _MAX_TRIANGLES = 10_000_000
 _WARN_TRIANGLES = 2_000_000
 _MAX_DIMENSION_MM = 1000.0
 _MIN_DIMENSION_MM = 0.1
-#: A mesh whose points all lie within this of one plane is flat by
-#: construction rather than thin: a micron is two orders under any printer's
-#: resolution, so this fires on a sheet with no thickness and never on a part.
-_FLAT_EXTENT_MM = 1e-3
+#: A mesh is flat when all its points lie within a hair of one plane: a sheet
+#: with no thickness, not a thin part.  The hair is measured against the mesh,
+#: never in millimetres, because flatness is asked before the file's units are
+#: known: a real 0.8 mm plate saved in metres is 0.0008 thick, and a fixed
+#: micron called it flat.  Two allowances, the larger wins.  A hundred-
+#: thousandth of the part's own size: a real part's thinnest side is seldom
+#: under a thousandth of its longest (one 0.2 mm layer across a 256 mm bed is
+#: 0.0008).  And a millionth of how far its points sit from the origin: STL
+#: stores 32-bit floats, whose rounding grows with distance from zero and can
+#: give a flat sheet placed far out a measurable thickness.
+_FLAT_FRACTION_OF_SIZE = 1e-5
+_FLAT_FRACTION_OF_POSITION = 1e-6
 #: A triangle with less area than this is a line or a point.
 _DEGENERATE_AREA_MM2 = 1e-10
 _STL_HEADER_SIZE = 80
@@ -536,24 +544,30 @@ def unprintable_geometry_reason(
             "Every triangle in this file is degenerate (a line or a point), "
             "so it holds no surface to print."
         )
-    if _thickness_mm(vertices) < _FLAT_EXTENT_MM:
+    if _is_flat(vertices):
         return "This file is flat: all of it lies in one plane, so there is no solid to print."
     return None
 
 
-def _thickness_mm(vertices: list[tuple[float, ...]]) -> float:
-    """How far the points spread off their best-fit plane, in mm.
+def _is_flat(vertices: list[tuple[float, ...]]) -> bool:
+    """Whether the points lie in one plane, whatever its tilt or the units.
 
-    The spread along the direction of least variance: zero for points that
-    share a plane, whatever its tilt, where an axis-aligned box would only
-    catch a plane lying square to an axis.
+    Thickness is the spread along the direction of least variance: zero for
+    points that share a plane at any angle, where an axis-aligned box would
+    only catch a plane lying square to an axis.  It is judged against the
+    spread along the direction of most variance and against how far the
+    points sit from the origin, so the answer is the same in any unit (see
+    ``_FLAT_FRACTION_OF_SIZE``).
     """
     import numpy as np
 
     points = np.asarray(vertices, dtype=float)
     centered = points - points.mean(axis=0)
     _, axes = np.linalg.eigh(centered.T @ centered)
-    return float(np.ptp(centered @ axes[:, 0]))
+    thickness = float(np.ptp(centered @ axes[:, 0]))
+    size = float(np.ptp(centered @ axes[:, -1]))
+    reach = float(np.abs(points).max())
+    return thickness <= max(size * _FLAT_FRACTION_OF_SIZE, reach * _FLAT_FRACTION_OF_POSITION)
 
 
 def _bounding_box(vertices: list[tuple[float, ...]]) -> dict[str, float]:
