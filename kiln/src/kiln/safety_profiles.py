@@ -1311,6 +1311,25 @@ def export_profile(printer_model: str) -> dict[str, Any]:
     return result
 
 
+def local_printer_build_volume(printer_model: str) -> tuple[float, float, float] | None:
+    """The bed its owner stated for *printer_model* on this machine, by exact
+    key, or ``None``.
+
+    The raw statement, whatever the key.  Whether it may stand as a
+    printer's bed is :func:`kiln.printers.bed_fit.owner_stated_build_volume`'s
+    call: only for a printer the catalogue has no row for.
+    """
+    _load_local_overrides()
+    override = _local_override_cache.get(_normalise(printer_model or ""))
+    volume = override.build_volume if override is not None else None
+    if not volume or len(volume) < 3:
+        return None
+    try:
+        return (float(volume[0]), float(volume[1]), float(volume[2]))
+    except (TypeError, ValueError):
+        return None
+
+
 def list_local_printer_overrides() -> list[str]:
     """Return model names overridden on this machine."""
     _load_local_overrides()

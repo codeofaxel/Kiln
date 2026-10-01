@@ -280,11 +280,31 @@ def _reply(session: dict[str, Any], ask: str, *, pictures: list[dict[str, Any] |
     }
     if waiting:
         out["check_again_in_seconds"] = CHECK_AGAIN_S
-    if shown:
-        out["image_b64"] = shown[0]["image_b64"]
-        out["media_type"] = shown[0]["media_type"]
     out.update(extra)
     return out
+
+
+def _with_pictures(reply: dict[str, Any]) -> dict[str, Any] | list[Any]:
+    """A reply as the tool hands it over: the text, then its pictures as images.
+
+    The pictures never ride the text.  A camera frame is ~220,000
+    characters of base64, and a host that reads results as text refuses a
+    result that size whole -- the ask beside it lost too (measured on the
+    monitor door, 2026-09-16).  The text keeps what each picture is (its
+    kind, caption and type, in order); the pictures follow it as images.
+    """
+    shown = reply.get("images") or []
+    if not shown:
+        return reply
+    import base64
+
+    from kiln.mcp_compat import Image
+
+    pictures = []
+    for picture in shown:
+        data = base64.b64decode(picture.pop("image_b64"))
+        pictures.append(Image(data=data, format=(picture.get("media_type") or "image/jpeg").split("/")[-1]))
+    return [reply, *pictures]
 
 
 # ---------------------------------------------------------------------------
@@ -543,7 +563,7 @@ def printer_bench(
     printer_name: str | None = None,
     answer: str | None = None,
     restart: bool = False,
-) -> dict[str, Any]:
+) -> dict[str, Any] | list[Any]:
     """Help Kiln get to know your printer in a few minutes: a guided session, one ask at a time.
 
     Kiln judges where a second part can go on an occupied plate from a
@@ -559,8 +579,9 @@ def printer_bench(
     is on.  Runout is never tested.
 
     Call it with no ``answer`` to start or resume.  Every reply carries
-    ``ask`` (one sentence -- relay it word for word), ``images`` to show,
-    ``options`` when the answer is a choice, and ``waiting`` with
+    ``ask`` (one sentence -- relay it word for word), ``images`` (what each
+    picture is; the pictures themselves follow the reply as images, in the
+    same order -- show them), ``options`` when the answer is a choice, and ``waiting`` with
     ``check_again_in_seconds`` when Kiln is watching the print and there is
     nothing to ask yet.  Hand the person's answer back as ``answer``.  The
     test print is a real print: when the reply says so, show the file with
@@ -631,7 +652,7 @@ def printer_bench(
             for doc in bench.observations_of(adapter):
                 if doc.get("block") in session["blanks"]:
                     session["observed"][doc["block"]] = doc
-        return _advance(session, adapter, answer)
+        return _with_pictures(_advance(session, adapter, answer))
     except Exception as exc:  # noqa: BLE001
         _logger.exception("Unexpected error in printer_bench")
         return _srv._error_dict(f"Unexpected error in the bench session: {exc}", code="INTERNAL_ERROR")
@@ -1015,7 +1036,10 @@ class _PrinterBenchPlugin:
 
         for tool_name, limits in _RATE_LIMITS.items():
             _srv._TOOL_RATE_LIMITS.setdefault(tool_name, limits)
-        mcp.tool()(printer_bench)
+        # No structured output: a reply with pictures is [text, image, ...],
+        # and a schema built from the dict annotation would reject it exactly
+        # when there is a picture to show.
+        mcp.tool(structured_output=False)(printer_bench)
 
 
 plugin = _PrinterBenchPlugin()

@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-01T22:07:12.051979+00:00",
-  "tool_count": 428,
+  "generated": "2026-10-01T06:50:26.874716+00:00",
+  "tool_count": 427,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -3034,50 +3034,6 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      }
-    },
-    {
-      "name": "find_closest_filaments",
-      "description": "Which filaments could I buy for this colour? Up to three per colour, from different makers.",
-      "tier": "free",
-      "access": "free",
-      "category": "decoration",
-      "parameters": {
-        "properties": {
-          "colours": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Colours"
-          },
-          "material": {
-            "default": "",
-            "title": "Material",
-            "type": "string"
-          },
-          "brand": {
-            "default": "",
-            "title": "Brand",
-            "type": "string"
-          }
-        },
-        "required": [
-          "colours"
-        ],
-        "title": "find_closest_filamentsArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "read"
       }
     },
     {
@@ -15010,9 +14966,16 @@
             "type": "number"
           },
           "nozzle_mm": {
-            "default": 0.4,
-            "title": "Nozzle Mm",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Nozzle Mm"
           }
         },
         "required": [
@@ -16305,6 +16268,18 @@
             ],
             "default": null,
             "title": "Printer Reading"
+          },
+          "file_nozzle_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Nozzle Mm"
           }
         },
         "required": [
@@ -16596,9 +16571,16 @@
             "type": "string"
           },
           "nozzle_mm": {
-            "default": 0.4,
-            "title": "Nozzle Mm",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Nozzle Mm"
           },
           "printer_id": {
             "default": "",
@@ -17875,9 +17857,16 @@
             "type": "number"
           },
           "nozzle_mm": {
-            "default": 0.4,
-            "title": "Nozzle Mm",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Nozzle Mm"
           },
           "include_fusions": {
             "default": false,
@@ -19810,9 +19799,16 @@
             "type": "number"
           },
           "nozzle_mm": {
-            "default": 0.4,
-            "title": "Nozzle Mm",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Nozzle Mm"
           }
         },
         "required": [

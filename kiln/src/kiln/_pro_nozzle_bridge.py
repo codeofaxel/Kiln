@@ -54,6 +54,18 @@ _service_down_miss: Any = None
 #: :class:`kiln.served_answer.Miss`), cleared by an answer.  A pre-flight
 #: and a start read it to say what was not checked.
 _last_miss: dict[str, Any] = {}
+#: The hosted door that holds Kiln's record of a printer's nozzle, asked for
+#: the pre-flight's record comparison when kiln-pro is not installed here.
+RECORD_TOOL = "get_nozzle_state"
+#: How long a SERVED record lookup is remembered, answered or not.  A design
+#: check is asked many times in a row and each ask is a network call; the
+#: tools that write the record clear this (:func:`forget_recorded_nozzle`).
+#: An install that asks the hosted door is one person's, so the memory is
+#: theirs alone.
+RECORD_MEMO_S: float = 120.0
+_record_memo: dict[str, tuple[float, dict[str, Any]]] = {}
+#: Why the last record comparison for each machine had no answer, the same way.
+_last_record_miss: dict[str, Any] = {}
 
 
 def available() -> bool:
@@ -216,6 +228,215 @@ def nozzle_unchecked(printer_id: str, *, at: str = "preflight") -> dict[str, Any
     return {"word": "unchecked", "line": line, **fields(miss)}
 
 
+def consult_recorded_nozzle(printer_id: str) -> dict[str, Any]:
+    """The nozzle size on record for *printer_id*, when somebody recorded one.
+
+    ``{"diameter_mm": float | None, "answered": bool}``.  ``diameter_mm`` is
+    set only for a record a person or the machine stated; a catalogue
+    default is nobody's record and comes back ``None``.  ``answered`` is
+    ``False`` when the record could not be asked at all (offline, signed
+    out, no answer), so a caller can tell "no record" from "could not ask".
+    From kiln-pro locally when it is installed, asked every time; else
+    from the hosted door with a short timeout, and only that answer is
+    remembered, for :data:`RECORD_MEMO_S`.
+    """
+    pid = (printer_id or "").strip() if isinstance(printer_id, str) else ""
+    if not pid:
+        return {"diameter_mm": None, "answered": True}
+    if available():
+        # Asked of the store each time, never remembered: the read is local,
+        # the record can change between two checks, and a process that
+        # answers for more than one account must not hand one caller's
+        # nozzle to the next.
+        summary = consult_nozzle_summary(pid)
+        found = summary is not None and summary.get("trusted_for_verdicts")
+        return {"diameter_mm": summary.get("diameter_mm") if found else None, "answered": True}
+    now = time.monotonic()
+    memo = _record_memo.get(pid)
+    if memo is not None and now - memo[0] < RECORD_MEMO_S:
+        return memo[1]
+    answer = _served_recorded_nozzle(pid)
+    _record_memo[pid] = (now, answer)
+    return answer
+
+
+def _served_recorded_nozzle(printer_id: str) -> dict[str, Any]:
+    global _service_down_until, _service_down_miss
+    from kiln.served_answer import classify_transport_error
+
+    unanswered = {"diameter_mm": None, "answered": False}
+    if time.monotonic() < _service_down_until:
+        return unanswered
+    try:
+        from kiln.server import _pro_api_call
+
+        answer = _pro_api_call(RECORD_TOOL, _timeout=_CONSULT_TIMEOUT_S, printer_id=printer_id)
+    except Exception as exc:  # noqa: BLE001 -- the network is a degrade, never a check
+        logger.debug("nozzle record not served", exc_info=True)
+        _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
+        _service_down_miss = classify_transport_error(exc)
+        return unanswered
+    if not (isinstance(answer, dict) and answer.get("success")):
+        return unanswered
+    stated = answer.get("found") and answer.get("trusted_for_verdicts")
+    return {"diameter_mm": answer.get("diameter_mm") if stated else None, "answered": True}
+
+
+#: The memo key for :func:`consult_only_recorded_nozzle`; no printer is named so.
+_ONLY_RECORD_KEY = "*"
+
+
+def consult_only_recorded_nozzle() -> dict[str, Any]:
+    """The one nozzle on record for this account, when there is exactly one.
+
+    ``{"printer_id": str | None, "diameter_mm": float | None, "answered": bool}``.
+    For a check nobody told which printer a part is for.  ``printer_id`` is
+    set only when exactly one recorded nozzle exists; none or several is no
+    answer, never a pick.  Asked and remembered the way
+    :func:`consult_recorded_nozzle` is.
+    """
+    nothing = {"printer_id": None, "diameter_mm": None, "answered": True}
+    if available():
+        try:
+            from kiln_pro.nozzle_intelligence.store_resolver import only_recorded_nozzle
+        except ImportError:  # a kiln-pro from before this door existed
+            return nothing
+        try:
+            state = only_recorded_nozzle(tool_name="list_nozzle_states")
+        except Exception:  # noqa: BLE001 -- one rung of a check, never the check
+            logger.debug("only recorded nozzle lookup failed", exc_info=True)
+            return nothing
+        if state is None:
+            return nothing
+        return {"printer_id": state.printer_id, "diameter_mm": state.diameter_mm, "answered": True}
+    now = time.monotonic()
+    memo = _record_memo.get(_ONLY_RECORD_KEY)
+    if memo is not None and now - memo[0] < RECORD_MEMO_S:
+        return memo[1]
+    answer = _served_only_recorded_nozzle()
+    _record_memo[_ONLY_RECORD_KEY] = (now, answer)
+    return answer
+
+
+def _served_only_recorded_nozzle() -> dict[str, Any]:
+    global _service_down_until, _service_down_miss
+    from kiln.served_answer import classify_transport_error
+
+    unanswered = {"printer_id": None, "diameter_mm": None, "answered": False}
+    if time.monotonic() < _service_down_until:
+        return unanswered
+    try:
+        from kiln.server import _pro_api_call
+
+        answer = _pro_api_call("list_nozzle_states", _timeout=_CONSULT_TIMEOUT_S)
+    except Exception as exc:  # noqa: BLE001 -- the network is a degrade, never a check
+        logger.debug("nozzle records not served", exc_info=True)
+        _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
+        _service_down_miss = classify_transport_error(exc)
+        return unanswered
+    if not (isinstance(answer, dict) and answer.get("success")):
+        return unanswered
+    stated = [
+        s for s in (answer.get("states") or [])
+        if isinstance(s, dict) and s.get("trusted_for_verdicts") and s.get("printer_id")
+    ]
+    if len(stated) != 1:
+        return {"printer_id": None, "diameter_mm": None, "answered": True}
+    return {"printer_id": stated[0]["printer_id"], "diameter_mm": stated[0].get("diameter_mm"), "answered": True}
+
+
+def forget_recorded_nozzle() -> None:
+    """Drop every remembered record lookup: the record was just written."""
+    _record_memo.clear()
+
+
+def consult_sliced_file(printer_id: str, file_nozzle_mm: float) -> dict[str, Any] | None:
+    """How the nozzle a file was sliced for sits against the nozzle Kiln has
+    on record for *printer_id*.
+
+    The answer is kiln-pro's (https://kiln3d.com), free at every tier: a
+    ``verdict``, the sizes it compared, and a ``summary`` to show the
+    person.  Asked locally when kiln-pro is installed, else of the hosted
+    door, with this machine's own nozzle reading sent along and a short
+    timeout.  ``None`` when nothing answered -- and then
+    :func:`sliced_file_unchecked` says why, so a pre-flight can say what it
+    could not check.  The local comparison of the file with the printer's
+    own setting (:mod:`kiln.nozzle_size_check`) does not depend on this.
+    """
+    if not printer_id or not isinstance(printer_id, str) or not file_nozzle_mm:
+        return None
+    try:
+        from kiln_pro.nozzle_intelligence.printer_reading import sliced_file_for
+    except ImportError:
+        return _served_sliced_file(printer_id, float(file_nozzle_mm))
+    _last_record_miss.pop(printer_id, None)
+    try:
+        return sliced_file_for(printer_id, float(file_nozzle_mm))
+    except Exception:  # noqa: BLE001 -- a comparison beside the check, never the check
+        logger.debug("nozzle record comparison failed", exc_info=True)
+        return None
+
+
+def _served_sliced_file(printer_id: str, file_nozzle_mm: float) -> dict[str, Any] | None:
+    """The hosted record comparison, or ``None`` with why in :data:`_last_record_miss`."""
+    global _service_down_until, _service_down_miss
+    from kiln.served_answer import Miss, classify_answer, classify_transport_error
+
+    if time.monotonic() < _service_down_until:
+        if _service_down_miss is not None:
+            _last_record_miss[printer_id] = _service_down_miss
+        return None
+    try:
+        from kiln.printer_nozzle_reading import with_local_reading
+        from kiln.server import _pro_api_call
+    except Exception:  # noqa: BLE001
+        _last_record_miss[printer_id] = Miss("unanswered", detail="the served door could not be opened on this install")
+        return None
+    kwargs = with_local_reading(RECORD_TOOL, {"printer_id": printer_id, "file_nozzle_mm": file_nozzle_mm})
+    try:
+        answer = _pro_api_call(RECORD_TOOL, _timeout=_CONSULT_TIMEOUT_S, **kwargs)
+    except Exception as exc:  # noqa: BLE001 -- the network is a degrade, never a print
+        logger.debug("nozzle record comparison not served", exc_info=True)
+        miss = classify_transport_error(exc)
+        _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
+        _service_down_miss = miss
+        _last_record_miss[printer_id] = miss
+        return None
+    block = answer.get("sliced_file") if isinstance(answer, dict) and answer.get("success") else None
+    if isinstance(block, dict) and block.get("verdict"):
+        _last_record_miss.pop(printer_id, None)
+        return block
+    miss = classify_answer(answer) or Miss("unanswered", detail="an answer with no comparison in it")
+    if isinstance(answer, dict) and answer.get("code") == "SERVER_UNREACHABLE":
+        _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
+        _service_down_miss = miss
+    _last_record_miss[printer_id] = miss
+    return None
+
+
+def sliced_file_unchecked(printer_id: str) -> dict[str, Any] | None:
+    """Why the last record comparison for *printer_id* could not be made, as
+    the line a pre-flight carries, or ``None`` when it was answered.
+
+    ``{"word": "unchecked", "line", "why", "why_code", "why_detail"}``.
+    With kiln-pro installed the consult never misses, and this stays ``None``.
+    """
+    if not printer_id or not isinstance(printer_id, str):
+        return None
+    miss = _last_record_miss.get(printer_id)
+    if miss is None:
+        return None
+    from kiln.served_answer import fields, sentence
+
+    line = sentence(
+        miss, feature="servers",
+        on_the_line="This pre-flight says whether the file was sliced for the nozzle Kiln has on record",
+        cannot=f"compare the file with {printer_id}'s nozzle record", wont="says nothing about the record",
+        safe_remedy="The check against the printer's own setting above still stands", then="run the pre-flight again",
+    )
+    return {"word": "unchecked", "line": line, **fields(miss)}
+
+
 def consult_clumping_detection(
     *,
     printer_model: str | None,
@@ -359,11 +580,18 @@ def record_print_odometer(
 
 
 __all__ = [
+    "RECORD_MEMO_S",
+    "RECORD_TOOL",
     "SERVICE_BACKOFF_S",
     "WIRE_TOOL",
     "available",
     "consult_capacity",
+    "consult_only_recorded_nozzle",
+    "consult_recorded_nozzle",
+    "consult_sliced_file",
+    "forget_recorded_nozzle",
     "nozzle_unchecked",
+    "sliced_file_unchecked",
     "consult_abrasive_escalation",
     "consult_nozzle_summary",
     "record_print_odometer",

@@ -3342,18 +3342,49 @@ def match_requirements(text: str) -> list[DesignConstraintSet]:
         triggers = data.get("triggers", [])
         matched_triggers = [t for t in triggers if matches_trigger(lower, t)]
         if matched_triggers:
+            guidance = data.get("agent_guidance", [])
             results.append(
                 DesignConstraintSet(
                     requirement_id=req_id,
                     display_name=data["display_name"],
                     matched_triggers=matched_triggers,
                     constraint_rules=data.get("constraint_rules", {}),
-                    agent_guidance=data.get("agent_guidance", []),
-                    caution=data.get("caution", ""),
+                    agent_guidance=guidance,
+                    caution=_requirement_caution(req_id, data, guidance),
                 )
             )
 
     return results
+
+
+def _requirement_caution(
+    req_id: str, data: dict[str, Any], guidance: list[str]
+) -> str:
+    """The caution a matched requirement carries, never a silent ``""``.
+
+    The rules for a requirement are public; the guidance that explains them
+    is not, and a rule list with no guidance and no caution reads as "that is
+    all there is to know" about food contact, a load or a hot car.  A caution
+    the profile states itself always wins.  Otherwise, when the guidance was
+    read there is nothing to add; when it was not, say so through the shared
+    helper, which tells an unreadable source apart from a requirement nobody
+    has written guidance for.
+    """
+    stated = data.get("caution", "")
+    if stated or guidance:
+        return stated
+    return unestablished_caution(
+        "functional_requirements",
+        "Only the starting rules for this requirement are given here: which "
+        "materials to use or avoid and the minimum settings. Why they apply, "
+        "where they stop being enough, and what to check before relying on "
+        "the part were not established here. Treat them as a starting point "
+        "rather than a clearance, and test the part for this use before you "
+        "depend on it.",
+        curated_entry_exists=curated_entry_exists(
+            "functional_requirements", req_id
+        ),
+    )
 
 
 def get_design_constraints(

@@ -877,6 +877,9 @@ class NozzleSetting:
         cache is worth serving; ``None`` when there is no cache.
     :param firmware_version: The firmware the reading was taken under, when
         the backend reports one.
+    :param held_by: Whose record this is: ``"machine"`` for a setting the
+        printer itself keeps, ``"host"`` for one kept by the software that
+        drives it.
     """
 
     material: str | None
@@ -885,6 +888,7 @@ class NozzleSetting:
     age_seconds: float | None = None
     stale_after_seconds: float | None = None
     firmware_version: str | None = None
+    held_by: str = "machine"
 
     def is_empty(self) -> bool:
         return self.material is None and self.diameter_mm is None
@@ -2214,7 +2218,7 @@ class IdentityConflict:
         parts = ", ".join(f"{src} says {model}" for src, model in self.claims.items())
         return (
             f"Printer identity is ambiguous — {parts}. "
-            "Set printer_model in ~/.kiln/config.yaml to the correct value; "
+            "Set the correct model with `kiln set-model --replace` (or the `set_printer_model` tool); "
             "if it is already correct, this means one of Kiln's identity "
             "tables is wrong and should be reported."
         )
@@ -4355,6 +4359,27 @@ class PrinterAdapter(ABC):
         logger.warning("%s: refusing the planner's %s path around the part on %s: %s", self.name, action, model, why)
         return None, why
 
+    def _record_plate_clear(self, options: dict[str, Any]) -> None:
+        """Write down a person's ``plate_clear=True`` -- for home and park alike.
+
+        The statement is about the plate, not about the verb it arrived
+        on, so both templates call this before they hand over to the
+        backend: the plate stays clear until the next print starts, and
+        home X, park, a slice and a print start stop asking about the
+        row.  (A Z home onto the plate still asks on every call; see
+        :meth:`_plate_gate`.)  Recorded on every backend, whether or not
+        this one needed to ask.  ``plan_only`` sends nothing and records
+        nothing.  The record never blocks the motion.
+        """
+        if options.get("plate_clear") is not True or options.get("plan_only"):
+            return
+        try:
+            from kiln.plate_state import mark_clear
+
+            mark_clear(self, "human")
+        except Exception:  # noqa: BLE001 -- the record never blocks the motion
+            logger.debug("plate_clear could not be recorded", exc_info=True)
+
     def _plate_gate(
         self,
         options: dict[str, Any],
@@ -4377,7 +4402,9 @@ class PrinterAdapter(ABC):
         cleared only by a person -- and decides:
 
         * ``plate_clear=True`` in *options*: a person's word, given now.
-          Proceed.  (The template has already written it down.)
+          Proceed.  (The home and park templates have already written it
+          down, :meth:`_record_plate_clear`; a wipe reads it for its own
+          call and records nothing.)
         * record ``clear`` before a raise-and-travel: proceed without
           asking -- the person said so once and Kiln has seen no print
           since.
@@ -4434,20 +4461,35 @@ class PrinterAdapter(ABC):
             if detour is not None:
                 return detour
             around = self._refused_path_clause(refused)
-        witness = None if options.get("plan_only") else self._plate_witness()
+        tool, cli = {
+            "wipe": ("wipe_nozzle", "kiln filament wipe --plate-clear"),
+            "park": ("park_head", "kiln park --plate-clear"),
+        }.get(action, ("home_axes", "kiln home --plate-clear"))
+        # A travel over a recorded part is the ROW question, and a look can
+        # settle it: the refusal hands one over, with the record's age,
+        # instead of taking the record's word that the part is still there.
+        # The press onto the plate is not that question -- it asks a person
+        # on every call -- so it keeps the witness frame and nothing more.
+        offer = None
+        if blocks_raise and not touches_plate and not options.get("plan_only"):
+            from kiln.plate_state import offer_look
+
+            offer = offer_look(self, state, say_so=f"`kiln plate clear`, or plate_clear=true on {tool}")
+            witness = offer.snapshot_path
+        else:
+            witness = None if options.get("plan_only") else self._plate_witness()
         look = (f" -- look at {witness} first" if witness else
                 " -- this printer has no camera Kiln can read, so look at the plate yourself")
         # What the motion does to the plate, and what still works without a
         # person's word: the plan's own words for a wipe (its record names
         # the datum it takes and where the head has to cross), the homing
-        # sentence otherwise.  A wipe's refusal names the wipe's tool and
-        # command, never home_axes.
+        # sentence otherwise.  A refusal names the tool and command of the
+        # verb that was refused -- a person stopped on a park is never told
+        # to say so on a home.
         contact = contact or (
             "homes Z by pressing the nozzle onto the PLATE (its own sequence: 'find a soft place to home')"
         )
         fallback = fallback or 'Until then, home X and park still work: axes="XY", or park_head.'
-        tool, cli = (("wipe_nozzle", "kiln filament wipe --plate-clear") if action == "wipe"
-                     else ("home_axes", "kiln home --plate-clear"))
         say_so = (
             f"then say so on the call: plate_clear=true on {tool} ({cli}) -- "
             f"the press asks every time; `kiln plate clear` records it for the row checks only. {fallback}"
@@ -4459,7 +4501,8 @@ class PrinterAdapter(ABC):
             message = (
                 f"Refusing to {action} {model}: {state.describe()}, and the first motion lifts the "
                 f"head only {clearance:g} mm before it crosses the row -- the part is taller than that, "
-                f"and on this family a travel collision raises no fault.{around} Clear the plate{look}, {say_so}"
+                f"and on this family a travel collision raises no fault.{around} "
+                + (offer.sentence if offer is not None else f"Clear the plate{look}, {say_so}")
             )
         elif state.occupied:
             message = f"{model} {contact}, and {state.describe()}.{around} Clear the plate{look}, {say_so}"
@@ -4608,19 +4651,25 @@ class PrinterAdapter(ABC):
         """
         model = self.declared_printer_model()
         if model:
+            from kiln.printers.bed_fit import owner_stated_build_volume
+
+            if owner_stated_build_volume(model) is not None:
+                return (
+                    f"{model!r} is a printer outside Kiln's catalogue, set up on this machine. Kiln has no "
+                    "motion record for it, and does not move a head it has no record for."
+                )
             return (
                 f"Kiln has no motion record for {model!r} -- not a catalogue key it knows. "
-                "Run `kiln setup` (it asks which printer this is and writes the answer), or set "
-                "printer_model for this printer in config.yaml (KILN_PRINTER_MODEL for the env door) to a "
-                "catalogue key from printer_intelligence.json."
+                "Set it with `kiln set-model` or the `set_printer_model` tool, which accept the printer's "
+                "name or a project saved from your slicer and write the catalogue's own key "
+                "(KILN_PRINTER_MODEL for the env door)."
             )
         return (
             "Kiln does not know which printer this is: no printer_model is declared for it. "
             "The facts that decide whether the head may move -- which part moves in Z, how Z is found "
-            "and where, whether the firmware refuses an unhomed move -- are looked up by model. Run "
-            "`kiln setup` (it asks which printer this is and writes the answer), or set printer_model "
-            "for this printer in config.yaml (KILN_PRINTER_MODEL for the env door) to a catalogue key "
-            "such as bambu_a1, bambu_p1s, prusa_mk4, k1 or ender3_v3_ke, and call again."
+            "and where, whether the firmware refuses an unhomed move -- are looked up by model. Say "
+            "which printer it is with `kiln set-model` or the `set_printer_model` tool -- by name, or "
+            "from a project saved from your slicer (KILN_PRINTER_MODEL for the env door) -- and call again."
         )
 
     @staticmethod
@@ -4707,15 +4756,22 @@ class PrinterAdapter(ABC):
                 detour, refused = self._detour_around_part(state, station=None, action="park", clearance_mm=None)
                 if detour is not None:
                     return motion, detour
-                witness = None if options.get("plan_only") else self._plate_witness()
-                look = (f" -- look at {witness} first" if witness else
-                        " -- this printer has no camera Kiln can read, so look at the plate yourself")
+                say_so = "`kiln plate clear`, or plate_clear=true on park_head"
+                if options.get("plan_only"):
+                    witness = None
+                    settle = ("Clear the plate -- look at it yourself -- "
+                              f"then say so: {say_so}.")
+                else:
+                    from kiln.plate_state import offer_look
+
+                    offer = offer_look(self, state, say_so=say_so)
+                    witness, settle = offer.snapshot_path, offer.sentence
                 self._count_motion_refusal("PLATE_CLEAR_REQUIRED", "plate_occupied")
                 raise PlateClearRequired(
                     f"Refusing to park {motion.printer_id}: {state.describe()}, and on this backend the "
                     f"park is the firmware's own X/Y home, which travels sideways at whatever height the head "
                     f"has now -- Kiln cannot read that height here.{self._refused_path_clause(refused)} "
-                    f"Clear the plate{look}, then say so: `kiln plate clear`, or plate_clear=true on park_head.",
+                    f"{settle}",
                     snapshot_path=witness,
                 )
         return motion, detour
@@ -4778,18 +4834,7 @@ class PrinterAdapter(ABC):
                 "over the part and homing travels. Resume or cancel the print "
                 "first."
             )
-        if options.get("plate_clear") is True and not options.get("plan_only"):
-            # A person's word, written down: the plate stays clear until the
-            # next print starts, so home X and park stop asking about the
-            # row.  (A Z home onto the plate still asks on every call; see
-            # _plate_gate.)  Recorded on every backend, whether or not this
-            # one needed to ask.
-            try:
-                from kiln.plate_state import mark_clear
-
-                mark_clear(self, "human")
-            except Exception:  # noqa: BLE001 -- the record never blocks the motion
-                logger.debug("plate_clear could not be recorded", exc_info=True)
+        self._record_plate_clear(options)
         result = self._home_axes_impl(wanted, dict(options))
         if result.success:
             self._homing_commanded_axes = self._homing_commanded_axes | frozenset(result.homed_axes)
@@ -4993,6 +5038,8 @@ class PrinterAdapter(ABC):
 
         Same gate as homing (not while printing or paused), same
         ``plan_only`` / ``step`` options, same described steps.
+        ``plate_clear=True`` is written to the plate record exactly as on
+        :meth:`home_axes` (:meth:`_record_plate_clear`).
         """
         step = options.get("step")
         if step is not None and (not isinstance(step, int) or isinstance(step, bool) or step < 1):
@@ -5009,6 +5056,7 @@ class PrinterAdapter(ABC):
                 "already parked the head for the pause, and Kiln does not travel "
                 "over a part mid-print. Resume or cancel the print first."
             )
+        self._record_plate_clear(options)
         result = self._park_head_impl(dict(options))
         result.action = "park"
         if result.success and not options.get("plan_only"):

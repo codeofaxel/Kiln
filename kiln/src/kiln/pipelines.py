@@ -441,7 +441,8 @@ def _loaded_material(adapter: Any, material: str | None) -> str | None:
 
 
 def _slice_step_data(result: Any) -> dict[str, Any]:
-    """What a slice step records: the file, the slicer, and the filament it was weighed with."""
+    """What a slice step records: the file, the slicer, the filament it was
+    weighed with and the nozzle it was sliced for."""
     data: dict[str, Any] = {"output_path": result.output_path, "slicer": result.slicer}
     staged = getattr(result, "stage_mesh_path", None)
     if staged:
@@ -449,6 +450,9 @@ def _slice_step_data(result: Any) -> dict[str, Any]:
     filament = getattr(result, "filament", None)
     if filament is not None:
         data["filament"] = filament.to_dict()
+    nozzle = getattr(result, "nozzle", None)
+    if nozzle:
+        data["nozzle"] = nozzle
     return data
 
 
@@ -685,7 +689,7 @@ def quick_print(
         try:
             from kiln.slicer_profiles import resolve_slicer_profile
 
-            ctx["effective_profile"] = resolve_slicer_profile(effective_pid)
+            ctx["effective_profile"] = resolve_slicer_profile(effective_pid, printer_name=printer_name)
             return PipelineStep(
                 name="resolve_profile",
                 success=True,
@@ -1111,7 +1115,8 @@ def reslice_and_print(
             except Exception:  # noqa: BLE001 — the upload step reports an unreachable printer
                 pass
             ctx["effective_profile"] = resolve_slicer_profile(
-                effective_pid, overrides=effective_overrides
+                effective_pid, overrides=effective_overrides,
+                printer_name=printer_name,
             )
             override_msg = f" with {len(effective_overrides)} override(s)" if effective_overrides else ""
             return PipelineStep(
@@ -1696,7 +1701,7 @@ def benchmark(
         try:
             from kiln.slicer_profiles import resolve_slicer_profile
 
-            effective_profile = resolve_slicer_profile(effective_pid)
+            effective_profile = resolve_slicer_profile(effective_pid, printer_name=printer_name)
             steps.append(
                 PipelineStep(
                     name="resolve_profile",

@@ -1,0 +1,452 @@
+{
+  "_meta": {
+    "what": "Lines of each captured start sequence that depend on the print in hand, and what the maker's own slicer writes in their place.",
+    "how_to_read": "For each model and condition, every entry's 'find' lines occur exactly once in that model's start sequence and become its 'replace' lines. Trailing spaces are not significant. {max_print_z} is the print's height rounded up to a whole millimetre; {curr_bed_type} is the plate's name.",
+    "conditions": {
+      "tall": "the print is at least tall_from_mm high",
+      "other_plate": "the plate is not the textured one",
+      "hot_bed": "the bed is hotter than hot_bed_above for this model, on the textured plate",
+      "other_plate_hot_bed": "both of the above"
+    }
+  },
+  "tall_from_mm": 145,
+  "hot_bed_above": {
+    "bambu_p2s": 89,
+    "bambu_x2d": 70
+  },
+  "models": {
+    "bambu_a1": {
+      "other_plate": [
+        {
+          "find": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            ";curr_bed_type=Textured PEI Plate",
+            "",
+            "G29.1 Z-0.02 ; for Textured PEI Plate"
+          ],
+          "replace": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            ";curr_bed_type={curr_bed_type}"
+          ]
+        }
+      ]
+    },
+    "bambu_a1_mini": {
+      "other_plate": [
+        {
+          "find": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            ";curr_bed_type=Textured PEI Plate",
+            "",
+            "G29.1 Z-0.02 ; for Textured PEI Plate"
+          ],
+          "replace": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            ";curr_bed_type={curr_bed_type}"
+          ]
+        }
+      ]
+    },
+    "bambu_a2l": {
+      "other_plate": [
+        {
+          "find": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            "",
+            "",
+            "      G29.1 Z-0.04 ; for Textured PEI Plate",
+            ""
+          ],
+          "replace": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            "",
+            "    G29.1 Z-0.01"
+          ]
+        }
+      ]
+    },
+    "bambu_h2c": {
+      "tall": [
+        {
+          "find": [
+            "G151 P1 M ; plug the heat nozzle",
+            ""
+          ],
+          "replace": [
+            "G151 P1 M ; plug the heat nozzle",
+            "",
+            "",
+            "M1002 gcode_claim_action : 75 ; Heatbed underside foreign object detection",
+            "G3811 Z{max_print_z}  ; Detect obstacles at the bottom of the heated bed"
+          ]
+        }
+      ],
+      "other_plate": [
+        {
+          "find": [
+            "M104 S0",
+            "",
+            "M972 S26 P0 C0"
+          ],
+          "replace": [
+            "M104 S0",
+            "",
+            "M972 S36 P0 C0 X1"
+          ]
+        },
+        {
+          "find": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            "",
+            "",
+            "            G29.1 Z-0.02 ; for Textured PEI Plate",
+            ""
+          ],
+          "replace": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            "",
+            ""
+          ]
+        }
+      ]
+    },
+    "bambu_h2d": {
+      "tall": [
+        {
+          "find": [
+            "G151 P1 M ; plug the heat nozzle",
+            "",
+            ""
+          ],
+          "replace": [
+            "G151 P1 M ; plug the heat nozzle",
+            "",
+            "",
+            "M1002 gcode_claim_action : 75 ; Heatbed underside foreign object detection",
+            "G3811 Z{max_print_z}  ; Detect obstacles at the bottom of the heated bed",
+            ""
+          ]
+        }
+      ],
+      "other_plate": [
+        {
+          "find": [
+            "M1002 gcode_claim_action : 74 ; Heatbed surface foreign object detection",
+            "",
+            "M972 S26 P0 C0"
+          ],
+          "replace": [
+            "M1002 gcode_claim_action : 74 ; Heatbed surface foreign object detection",
+            "",
+            "M972 S36 P0 C0 X1"
+          ]
+        },
+        {
+          "find": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            "",
+            "",
+            "            G29.1 Z-0.02 ; for Textured PEI Plate",
+            ""
+          ],
+          "replace": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            "",
+            ""
+          ]
+        }
+      ]
+    },
+    "bambu_h2d_pro": {
+      "tall": [
+        {
+          "find": [
+            "G151 P1 M ; plug the heat nozzle",
+            "",
+            ""
+          ],
+          "replace": [
+            "G151 P1 M ; plug the heat nozzle",
+            "",
+            "",
+            "M1002 gcode_claim_action : 75 ; Heatbed underside foreign object detection",
+            "G3811 Z{max_print_z}  ; Detect obstacles at the bottom of the heated bed",
+            ""
+          ]
+        }
+      ],
+      "other_plate": [
+        {
+          "find": [
+            "M1002 gcode_claim_action : 74 ; Heatbed surface foreign object detection",
+            "",
+            "M972 S26 P0 C0"
+          ],
+          "replace": [
+            "M1002 gcode_claim_action : 74 ; Heatbed surface foreign object detection",
+            "",
+            "M972 S36 P0 C0 X1"
+          ]
+        },
+        {
+          "find": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            "",
+            "",
+            "            G29.1 Z-0.02 ; for Textured PEI Plate",
+            ""
+          ],
+          "replace": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            "",
+            ""
+          ]
+        }
+      ]
+    },
+    "bambu_h2s": {
+      "tall": [
+        {
+          "find": [
+            "M17 D",
+            "",
+            ""
+          ],
+          "replace": [
+            "M17 D",
+            "",
+            "",
+            "M1002 gcode_claim_action : 75 ;  Detect obstacles at the botton of the heated bed",
+            "G150.3",
+            "M104 S220 ; rise temp in advance",
+            "G3811 Z{max_print_z}  ; Detect obstacles at the bottom of the heated bed",
+            ""
+          ]
+        }
+      ],
+      "other_plate": [
+        {
+          "find": [
+            "M1002 gcode_claim_action : 74 ; Heatbed surface foreign object detection",
+            "",
+            "M972 S26 P0 C0"
+          ],
+          "replace": [
+            "M1002 gcode_claim_action : 74 ; Heatbed surface foreign object detection",
+            "",
+            "M972 S36 P0 C0 X1"
+          ]
+        },
+        {
+          "find": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            "",
+            "        G29.1 Z-0.01 ; for Textured PEI Plate",
+            ""
+          ],
+          "replace": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            ""
+          ]
+        }
+      ]
+    },
+    "bambu_p1p": {
+      "other_plate": [
+        {
+          "find": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            ";curr_bed_type=Textured PEI Plate",
+            "",
+            "G29.1 Z-0.04 ; for Textured PEI Plate"
+          ],
+          "replace": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            ";curr_bed_type={curr_bed_type}"
+          ]
+        }
+      ]
+    },
+    "bambu_p1s": {
+      "other_plate": [
+        {
+          "find": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            ";curr_bed_type=Textured PEI Plate",
+            "",
+            "G29.1 Z-0.04 ; for Textured PEI Plate"
+          ],
+          "replace": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            ";curr_bed_type={curr_bed_type}"
+          ]
+        }
+      ]
+    },
+    "bambu_p2s": {
+      "tall": [
+        {
+          "find": [
+            "  M972 S19 P0 T5000 ;plate type detection",
+            ""
+          ],
+          "replace": [
+            "  M972 S19 P0 T5000 ;plate type detection",
+            "",
+            "",
+            "    M1002 gcode_claim_action : 75 ;  Detect obstacles at the botton of the heated bed",
+            "    G150.3",
+            "    M104 S220 ; rise temp in advance",
+            "    G3811 Z{max_print_z}  ; Detect obstacles at the bottom of the heated bed"
+          ]
+        }
+      ],
+      "other_plate": [
+        {
+          "find": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            "",
+            "",
+            "      G29.1 Z0.01 ; for Textured PEI Plate"
+          ],
+          "replace": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            "",
+            "",
+            "      G29.1 Z0.03"
+          ]
+        }
+      ],
+      "hot_bed": [
+        {
+          "find": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            "",
+            "",
+            "      G29.1 Z0.01 ; for Textured PEI Plate"
+          ],
+          "replace": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            "",
+            "",
+            "      G29.1 Z-0.02 ; for Textured PEI Plate"
+          ]
+        }
+      ],
+      "other_plate_hot_bed": [
+        {
+          "find": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            "",
+            "",
+            "      G29.1 Z0.01 ; for Textured PEI Plate"
+          ],
+          "replace": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            "",
+            "",
+            "      G29.1 Z0"
+          ]
+        }
+      ]
+    },
+    "bambu_x1c": {
+      "other_plate": [
+        {
+          "find": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            ";curr_bed_type=Textured PEI Plate",
+            "",
+            "G29.1 Z-0.04 ; for Textured PEI Plate"
+          ],
+          "replace": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            ";curr_bed_type={curr_bed_type}"
+          ]
+        }
+      ]
+    },
+    "bambu_x1e": {
+      "other_plate": [
+        {
+          "find": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            ";curr_bed_type=Textured PEI Plate",
+            "",
+            "G29.1 Z-0.04 ; for Textured PEI Plate"
+          ],
+          "replace": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            ";curr_bed_type={curr_bed_type}"
+          ]
+        }
+      ]
+    },
+    "bambu_x2d": {
+      "tall": [
+        {
+          "find": [
+            "  M104 S220 T1 ; rise temp in advance",
+            ""
+          ],
+          "replace": [
+            "  M104 S220 T1 ; rise temp in advance",
+            "",
+            "",
+            "    G151 P1 M ; plug the heat nozzle",
+            "    M1002 gcode_claim_action : 75 ;  Detect obstacles at the botton of the heated bed",
+            "    G3811 Z{max_print_z}  ; Detect obstacles at the bottom of the heated bed"
+          ]
+        }
+      ],
+      "other_plate": [
+        {
+          "find": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            "",
+            "",
+            "      G29.1 Z0.002 ; for Textured PEI Plate"
+          ],
+          "replace": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            "",
+            "",
+            "      G29.1 Z0.022"
+          ]
+        }
+      ],
+      "hot_bed": [
+        {
+          "find": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            "",
+            "",
+            "      G29.1 Z0.002 ; for Textured PEI Plate"
+          ],
+          "replace": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            "",
+            "",
+            "      G29.1 Z-0.003 ; for Textured PEI Plate"
+          ]
+        }
+      ],
+      "other_plate_hot_bed": [
+        {
+          "find": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            "",
+            "",
+            "      G29.1 Z0.002 ; for Textured PEI Plate"
+          ],
+          "replace": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            "",
+            "",
+            "      G29.1 Z0.017"
+          ]
+        }
+      ]
+    }
+  }
+}

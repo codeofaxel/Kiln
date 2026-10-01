@@ -1,0 +1,1212 @@
+{
+ "_meta": {
+  "what": "What the maker's own slicer writes at the start of a print, for each machine, when the print is tall, wide, on another plate or on a hotter bed.",
+  "how_to_read": "Each case gives the print (the patch its first layer covers, its height, its plate, its bed temperature) and what the maker's start block then holds: the lines that leave the block and the lines that join it, against the same machine's block for a 20 mm cube on the textured plate. Progress lines (M73) and trailing spaces are set aside. sha256 is of the whole block and is given where the shipped sequence is the maker's current one line for line.",
+  "cube_patch": "The patch the 20 mm cube covers on each machine: the print every case is stated against."
+ },
+ "cube_patch": {
+  "bambu_a1": [
+   118.0,
+   118.0,
+   20.0,
+   20.0
+  ],
+  "bambu_a1_mini": [
+   80.0,
+   80.0,
+   20.0,
+   20.0
+  ],
+  "bambu_a2l": [
+   155.0,
+   150.0,
+   20.0,
+   20.0
+  ],
+  "bambu_h2c": [
+   165.0,
+   150.0,
+   20.0,
+   20.0
+  ],
+  "bambu_h2d": [
+   165.0,
+   150.0,
+   20.0,
+   20.0
+  ],
+  "bambu_h2d_pro": [
+   165.0,
+   150.0,
+   20.0,
+   20.0
+  ],
+  "bambu_h2s": [
+   160.0,
+   150.0,
+   20.0,
+   20.0
+  ],
+  "bambu_p1p": [
+   118.0,
+   118.0,
+   20.0,
+   20.0
+  ],
+  "bambu_p1s": [
+   118.0,
+   118.0,
+   20.0,
+   20.0
+  ],
+  "bambu_p2s": [
+   118.0,
+   118.0,
+   20.0,
+   20.0
+  ],
+  "bambu_x1c": [
+   118.0,
+   118.0,
+   20.0,
+   20.0
+  ],
+  "bambu_x1e": [
+   118.0,
+   118.0,
+   20.0,
+   20.0
+  ],
+  "bambu_x2d": [
+   128.25,
+   118.0,
+   20.0,
+   20.0
+  ]
+ },
+ "cases": {
+  "bambu_a1/tall": {
+   "printer_model": "bambu_a1",
+   "levelling_region": [
+    113.329,
+    113.329,
+    29.3414,
+    29.3414
+   ],
+   "height_mm": 150,
+   "bed_type": "textured_plate",
+   "bed_temp": 65,
+   "lines_gone": [
+    "    G29 A1 X118 Y118 I20 J20"
+   ],
+   "lines_new": [
+    "    G29 A1 X113.329 Y113.329 I29.3414 J29.3414"
+   ]
+  },
+  "bambu_a1/wide": {
+   "printer_model": "bambu_a1",
+   "levelling_region": [
+    68.0,
+    93.0,
+    120.0,
+    70.0
+   ],
+   "height_mm": 20,
+   "bed_type": "textured_plate",
+   "bed_temp": 65,
+   "lines_gone": [
+    "    G29 A1 X118 Y118 I20 J20"
+   ],
+   "lines_new": [
+    "    G29 A1 X68 Y93 I120 J70"
+   ]
+  },
+  "bambu_a1/smooth": {
+   "printer_model": "bambu_a1",
+   "levelling_region": [
+    118.0,
+    118.0,
+    20.0,
+    20.0
+   ],
+   "height_mm": 20,
+   "bed_type": "hot_plate",
+   "bed_temp": 65,
+   "lines_gone": [
+    "",
+    ";curr_bed_type=Textured PEI Plate",
+    "G29.1 Z-0.02 ; for Textured PEI Plate"
+   ],
+   "lines_new": [
+    ";curr_bed_type=High Temp Plate"
+   ]
+  },
+  "bambu_a1_mini/tall": {
+   "printer_model": "bambu_a1_mini",
+   "levelling_region": [
+    75.3293,
+    75.3293,
+    29.3414,
+    29.3414
+   ],
+   "height_mm": 150,
+   "bed_type": "textured_plate",
+   "bed_temp": 65,
+   "lines_gone": [
+    "    G29 A1 X80 Y80 I20 J20"
+   ],
+   "lines_new": [
+    "    G29 A1 X75.3293 Y75.3293 I29.3414 J29.3414"
+   ]
+  },
+  "bambu_a1_mini/wide": {
+   "printer_model": "bambu_a1_mini",
+   "levelling_region": [
+    30.0,
+    55.0,
+    120.0,
+    70.0
+   ],
+   "height_mm": 20,
+   "bed_type": "textured_plate",
+   "bed_temp": 65,
+   "lines_gone": [
+    "    G29 A1 X80 Y80 I20 J20"
+   ],
+   "lines_new": [
+    "    G29 A1 X30 Y55 I120 J70"
+   ]
+  },
+  "bambu_a1_mini/smooth": {
+   "printer_model": "bambu_a1_mini",
+   "levelling_region": [
+    80.0,
+    80.0,
+    20.0,
+    20.0
+   ],
+   "height_mm": 20,
+   "bed_type": "hot_plate",
+   "bed_temp": 60,
+   "lines_gone": [
+    "",
+    ";curr_bed_type=Textured PEI Plate",
+    "G29.1 Z-0.02 ; for Textured PEI Plate",
+    "M140 S65",
+    "M190 S65;set bed temp"
+   ],
+   "lines_new": [
+    ";curr_bed_type=High Temp Plate",
+    "M140 S60",
+    "M190 S60;set bed temp"
+   ]
+  },
+  "bambu_a2l/tall": {
+   "printer_model": "bambu_a2l",
+   "levelling_region": [
+    150.329,
+    145.329,
+    29.3414,
+    29.3414
+   ],
+   "height_mm": 150,
+   "bed_type": "textured_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "        G29 A1 X155 Y150 I20 J20 O1 R",
+    "        G29 A2 X155 Y150 I20 J20 O1 R",
+    "        G29.30 X155 Y150 I20 J20"
+   ],
+   "lines_new": [
+    "        G29 A1 X150.329 Y145.329 I29.3414 J29.3414 O1 R",
+    "        G29 A2 X150.329 Y145.329 I29.3414 J29.3414 O1 R",
+    "        G29.30 X150.329 Y145.329 I29.3414 J29.3414"
+   ],
+   "sha256": "52fd08f0df24cd64d627c3bfe9e6f9db7f05f8134ff3e2ec2cd4e7f551681987"
+  },
+  "bambu_a2l/wide": {
+   "printer_model": "bambu_a2l",
+   "levelling_region": [
+    105.0,
+    125.0,
+    120.0,
+    70.0
+   ],
+   "height_mm": 20,
+   "bed_type": "textured_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "        G29 A1 X155 Y150 I20 J20 O1 R",
+    "        G29 A2 X155 Y150 I20 J20 O1 R",
+    "        G29.30 X155 Y150 I20 J20"
+   ],
+   "lines_new": [
+    "        G29 A1 X105 Y125 I120 J70 O1 R",
+    "        G29 A2 X105 Y125 I120 J70 O1 R",
+    "        G29.30 X105 Y125 I120 J70"
+   ],
+   "sha256": "459470711c3e19435457f5971d150239e3f7acdbc713c79170cec96135245f2d"
+  },
+  "bambu_a2l/smooth": {
+   "printer_model": "bambu_a2l",
+   "levelling_region": [
+    155.0,
+    150.0,
+    20.0,
+    20.0
+   ],
+   "height_mm": 20,
+   "bed_type": "hot_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "",
+    "",
+    "      G29.1 Z-0.04 ; for Textured PEI Plate"
+   ],
+   "lines_new": [
+    "    G29.1 Z-0.01"
+   ],
+   "sha256": "30477703acff859e245a2692bdf52cd8fb1fdc58ee9795610c6e096ec7285c18"
+  },
+  "bambu_h2c/tall": {
+   "printer_model": "bambu_h2c",
+   "levelling_region": [
+    159.415,
+    144.415,
+    31.1697,
+    31.1697
+   ],
+   "height_mm": 151,
+   "bed_type": "textured_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "        G29 A2 O X165 Y150 I20 J20 R",
+    "    G29 A1 O X165 Y150 I20 J20 R"
+   ],
+   "lines_new": [
+    "",
+    "        G29 A2 O X159.415 Y144.415 I31.1697 J31.1697 R",
+    "    G29 A1 O X159.415 Y144.415 I31.1697 J31.1697 R",
+    "G3811 Z151  ; Detect obstacles at the bottom of the heated bed",
+    "M1002 gcode_claim_action : 75 ; Heatbed underside foreign object detection"
+   ],
+   "sha256": "35a4c0985cc9df6e590695d57aa6732797e9d5044aba43dcdb1c54285837193b"
+  },
+  "bambu_h2c/wide": {
+   "printer_model": "bambu_h2c",
+   "levelling_region": [
+    115.0,
+    125.0,
+    120.0,
+    70.0
+   ],
+   "height_mm": 20,
+   "bed_type": "textured_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "        G29 A2 O X165 Y150 I20 J20 R",
+    "    G29 A1 O X165 Y150 I20 J20 R"
+   ],
+   "lines_new": [
+    "        G29 A2 O X115 Y125 I120 J70 R",
+    "    G29 A1 O X115 Y125 I120 J70 R"
+   ],
+   "sha256": "a016de839bc54fbfc27516dd9116adaa9bd9d7ea76c4da3eee9a6d19ac7c8e5f"
+  },
+  "bambu_h2c/smooth": {
+   "printer_model": "bambu_h2c",
+   "levelling_region": [
+    165.0,
+    150.0,
+    20.0,
+    20.0
+   ],
+   "height_mm": 20,
+   "bed_type": "hot_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "",
+    "            G29.1 Z-0.02 ; for Textured PEI Plate",
+    "M972 S26 P0 C0"
+   ],
+   "lines_new": [
+    "M972 S36 P0 C0 X1"
+   ],
+   "sha256": "117ab5c30291d2e947ca82a368d9802850f1cc81d40a20266ad76e9dfb4a1d7f"
+  },
+  "bambu_h2d/tall": {
+   "printer_model": "bambu_h2d",
+   "levelling_region": [
+    159.415,
+    144.415,
+    31.1697,
+    31.1697
+   ],
+   "height_mm": 151,
+   "bed_type": "textured_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "        G29 A2 O X165 Y150 I20 J20 R",
+    "    G29 A1 O X165 Y150 I20 J20 R"
+   ],
+   "lines_new": [
+    "",
+    "        G29 A2 O X159.415 Y144.415 I31.1697 J31.1697 R",
+    "    G29 A1 O X159.415 Y144.415 I31.1697 J31.1697 R",
+    "G3811 Z151  ; Detect obstacles at the bottom of the heated bed",
+    "M1002 gcode_claim_action : 75 ; Heatbed underside foreign object detection"
+   ],
+   "sha256": "26d33fad06966ff1a46db18cc4518665ee64fde8ffffc582608bd6731b905694"
+  },
+  "bambu_h2d/wide": {
+   "printer_model": "bambu_h2d",
+   "levelling_region": [
+    115.0,
+    125.0,
+    120.0,
+    70.0
+   ],
+   "height_mm": 20,
+   "bed_type": "textured_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "        G29 A2 O X165 Y150 I20 J20 R",
+    "    G29 A1 O X165 Y150 I20 J20 R"
+   ],
+   "lines_new": [
+    "        G29 A2 O X115 Y125 I120 J70 R",
+    "    G29 A1 O X115 Y125 I120 J70 R"
+   ],
+   "sha256": "078f25f6aeb861154dc67230a42f2905722f1e88a28d1d65db8079d42e38f7a8"
+  },
+  "bambu_h2d/smooth": {
+   "printer_model": "bambu_h2d",
+   "levelling_region": [
+    165.0,
+    150.0,
+    20.0,
+    20.0
+   ],
+   "height_mm": 20,
+   "bed_type": "hot_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "",
+    "            G29.1 Z-0.02 ; for Textured PEI Plate",
+    "M972 S26 P0 C0"
+   ],
+   "lines_new": [
+    "M972 S36 P0 C0 X1"
+   ],
+   "sha256": "7250e6916d1bb337e97a14fb7b3b9ac9cc0240c47c08bfa5d7b95f0fc9b37ef5"
+  },
+  "bambu_h2d_pro/tall": {
+   "printer_model": "bambu_h2d_pro",
+   "levelling_region": [
+    159.415,
+    144.415,
+    31.1697,
+    31.1697
+   ],
+   "height_mm": 151,
+   "bed_type": "textured_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "        G29 A2 O X165 Y150 I20 J20 R",
+    "    G29 A1 O X165 Y150 I20 J20 R"
+   ],
+   "lines_new": [
+    "",
+    "        G29 A2 O X159.415 Y144.415 I31.1697 J31.1697 R",
+    "    G29 A1 O X159.415 Y144.415 I31.1697 J31.1697 R",
+    "G3811 Z151  ; Detect obstacles at the bottom of the heated bed",
+    "M1002 gcode_claim_action : 75 ; Heatbed underside foreign object detection"
+   ],
+   "sha256": "ec097d74b8ebba0e57cb3666b16a93de5240d589a9662e877de944f2da4ea6e3"
+  },
+  "bambu_h2d_pro/wide": {
+   "printer_model": "bambu_h2d_pro",
+   "levelling_region": [
+    115.0,
+    125.0,
+    120.0,
+    70.0
+   ],
+   "height_mm": 20,
+   "bed_type": "textured_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "        G29 A2 O X165 Y150 I20 J20 R",
+    "    G29 A1 O X165 Y150 I20 J20 R"
+   ],
+   "lines_new": [
+    "        G29 A2 O X115 Y125 I120 J70 R",
+    "    G29 A1 O X115 Y125 I120 J70 R"
+   ],
+   "sha256": "e783012059ba6bca91f328384538f477298bb76f554ae13185cd7ec2039b0b6d"
+  },
+  "bambu_h2d_pro/smooth": {
+   "printer_model": "bambu_h2d_pro",
+   "levelling_region": [
+    165.0,
+    150.0,
+    20.0,
+    20.0
+   ],
+   "height_mm": 20,
+   "bed_type": "hot_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "",
+    "            G29.1 Z-0.02 ; for Textured PEI Plate",
+    "M972 S26 P0 C0"
+   ],
+   "lines_new": [
+    "M972 S36 P0 C0 X1"
+   ],
+   "sha256": "9e3cc6568af880cba04c6ed0c52c61e33b8a42b34204912e65da64e4350c6395"
+  },
+  "bambu_h2s/tall": {
+   "printer_model": "bambu_h2s",
+   "levelling_region": [
+    154.415,
+    144.415,
+    31.1697,
+    31.1697
+   ],
+   "height_mm": 151,
+   "bed_type": "textured_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "        G29 A2 O X160 Y150 I20 J20",
+    "    G29 A1 O X160 Y150 I20 J20"
+   ],
+   "lines_new": [
+    "",
+    "        G29 A2 O X154.415 Y144.415 I31.1697 J31.1697",
+    "    G29 A1 O X154.415 Y144.415 I31.1697 J31.1697",
+    "G150.3",
+    "G3811 Z151  ; Detect obstacles at the bottom of the heated bed",
+    "M1002 gcode_claim_action : 75 ;  Detect obstacles at the botton of the heated bed",
+    "M104 S220 ; rise temp in advance"
+   ],
+   "sha256": "75bbf8f670cb1d1ff2e683a1e127596a2c5e00931ebfa7ba091c91785b825408"
+  },
+  "bambu_h2s/wide": {
+   "printer_model": "bambu_h2s",
+   "levelling_region": [
+    110.0,
+    125.0,
+    120.0,
+    70.0
+   ],
+   "height_mm": 20,
+   "bed_type": "textured_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "        G29 A2 O X160 Y150 I20 J20",
+    "    G29 A1 O X160 Y150 I20 J20"
+   ],
+   "lines_new": [
+    "        G29 A2 O X110 Y125 I120 J70",
+    "    G29 A1 O X110 Y125 I120 J70"
+   ],
+   "sha256": "ffb273d5967427ba1c6e03913842cd09fd6954e591dbf81f7565159431f9bd6a"
+  },
+  "bambu_h2s/smooth": {
+   "printer_model": "bambu_h2s",
+   "levelling_region": [
+    160.0,
+    150.0,
+    20.0,
+    20.0
+   ],
+   "height_mm": 20,
+   "bed_type": "hot_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "",
+    "        G29.1 Z-0.01 ; for Textured PEI Plate",
+    "M972 S26 P0 C0"
+   ],
+   "lines_new": [
+    "M972 S36 P0 C0 X1"
+   ],
+   "sha256": "9e572c3f582c484ffb233762ae099e735897f98a0bb484cdab801814eeb1a361"
+  },
+  "bambu_p1p/tall": {
+   "printer_model": "bambu_p1p",
+   "levelling_region": [
+    113.329,
+    113.329,
+    29.3414,
+    29.3414
+   ],
+   "height_mm": 150,
+   "bed_type": "textured_plate",
+   "bed_temp": 65,
+   "lines_gone": [
+    "    G29 A X118 Y118 I20 J20"
+   ],
+   "lines_new": [
+    "    G29 A X113.329 Y113.329 I29.3414 J29.3414"
+   ],
+   "sha256": "565e53c72121ac8f0e580bd2320c5e4bce8371432d28a2c084aff57976cfc086"
+  },
+  "bambu_p1p/wide": {
+   "printer_model": "bambu_p1p",
+   "levelling_region": [
+    68.0,
+    93.0,
+    120.0,
+    70.0
+   ],
+   "height_mm": 20,
+   "bed_type": "textured_plate",
+   "bed_temp": 65,
+   "lines_gone": [
+    "    G29 A X118 Y118 I20 J20"
+   ],
+   "lines_new": [
+    "    G29 A X68 Y93 I120 J70"
+   ],
+   "sha256": "b4a082676a7f6765ab06d7a1fc9db5b51186783d7ac2548488bf7b27ed0a4aea"
+  },
+  "bambu_p1p/smooth": {
+   "printer_model": "bambu_p1p",
+   "levelling_region": [
+    118.0,
+    118.0,
+    20.0,
+    20.0
+   ],
+   "height_mm": 20,
+   "bed_type": "hot_plate",
+   "bed_temp": 65,
+   "lines_gone": [
+    "",
+    ";curr_bed_type=Textured PEI Plate",
+    "G29.1 Z-0.04 ; for Textured PEI Plate"
+   ],
+   "lines_new": [
+    ";curr_bed_type=High Temp Plate"
+   ],
+   "sha256": "42d0c0b58eab38a4031cec621408d0bf4662592a3eeaa05f17e5a0a9d54a689a"
+  },
+  "bambu_p1s/tall": {
+   "printer_model": "bambu_p1s",
+   "levelling_region": [
+    113.329,
+    113.329,
+    29.3414,
+    29.3414
+   ],
+   "height_mm": 150,
+   "bed_type": "textured_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "    G29 A X118 Y118 I20 J20"
+   ],
+   "lines_new": [
+    "    G29 A X113.329 Y113.329 I29.3414 J29.3414"
+   ],
+   "sha256": "8be1e36b8adf4f3795020ff35a26a370d3cf4acb5edb8c637045c4dbfd1c8cb9"
+  },
+  "bambu_p1s/wide": {
+   "printer_model": "bambu_p1s",
+   "levelling_region": [
+    68.0,
+    93.0,
+    120.0,
+    70.0
+   ],
+   "height_mm": 20,
+   "bed_type": "textured_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "    G29 A X118 Y118 I20 J20"
+   ],
+   "lines_new": [
+    "    G29 A X68 Y93 I120 J70"
+   ],
+   "sha256": "fac23cc4c3ec8efef883661af1bdcbabb0ae6accf450cda59b1034d4ce51debf"
+  },
+  "bambu_p1s/smooth": {
+   "printer_model": "bambu_p1s",
+   "levelling_region": [
+    118.0,
+    118.0,
+    20.0,
+    20.0
+   ],
+   "height_mm": 20,
+   "bed_type": "hot_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "",
+    ";curr_bed_type=Textured PEI Plate",
+    "G29.1 Z-0.04 ; for Textured PEI Plate"
+   ],
+   "lines_new": [
+    ";curr_bed_type=High Temp Plate"
+   ],
+   "sha256": "d19ef7d5d84e92615d6e520e6ec15c390722d0ff333f54f4f042249d3bf14fbb"
+  },
+  "bambu_p2s/tall": {
+   "printer_model": "bambu_p2s",
+   "levelling_region": [
+    113.329,
+    113.329,
+    29.3414,
+    29.3414
+   ],
+   "height_mm": 151,
+   "bed_type": "textured_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "      G29 A1 X118 Y118 I20 J20",
+    "      G29 A2 X118 Y118 I20 J20"
+   ],
+   "lines_new": [
+    "",
+    "      G29 A1 X113.329 Y113.329 I29.3414 J29.3414",
+    "      G29 A2 X113.329 Y113.329 I29.3414 J29.3414",
+    "    G150.3",
+    "    G3811 Z151  ; Detect obstacles at the bottom of the heated bed",
+    "    M1002 gcode_claim_action : 75 ;  Detect obstacles at the botton of the heated bed",
+    "    M104 S220 ; rise temp in advance"
+   ]
+  },
+  "bambu_p2s/wide": {
+   "printer_model": "bambu_p2s",
+   "levelling_region": [
+    68.0,
+    93.0,
+    120.0,
+    70.0
+   ],
+   "height_mm": 20,
+   "bed_type": "textured_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "      G29 A1 X118 Y118 I20 J20",
+    "      G29 A2 X118 Y118 I20 J20"
+   ],
+   "lines_new": [
+    "      G29 A1 X68 Y93 I120 J70",
+    "      G29 A2 X68 Y93 I120 J70"
+   ]
+  },
+  "bambu_p2s/smooth": {
+   "printer_model": "bambu_p2s",
+   "levelling_region": [
+    118.0,
+    118.0,
+    20.0,
+    20.0
+   ],
+   "height_mm": 20,
+   "bed_type": "hot_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "      G29.1 Z0.01 ; for Textured PEI Plate"
+   ],
+   "lines_new": [
+    "      G29.1 Z0.03"
+   ]
+  },
+  "bambu_p2s/hot": {
+   "printer_model": "bambu_p2s",
+   "levelling_region": [
+    118.0,
+    118.0,
+    20.0,
+    20.0
+   ],
+   "height_mm": 20,
+   "bed_type": "textured_plate",
+   "bed_temp": 100,
+   "lines_gone": [
+    "      G29.1 Z0.01 ; for Textured PEI Plate",
+    "  M140 S55 ; heat heatbed first",
+    "  M190 S55",
+    "  M190 S55; ensure bed temp"
+   ],
+   "lines_new": [
+    "      G29.1 Z-0.02 ; for Textured PEI Plate",
+    "  M140 S100 ; heat heatbed first",
+    "  M190 S100",
+    "  M190 S100; ensure bed temp"
+   ]
+  },
+  "bambu_p2s/smoothhot": {
+   "printer_model": "bambu_p2s",
+   "levelling_region": [
+    118.0,
+    118.0,
+    20.0,
+    20.0
+   ],
+   "height_mm": 20,
+   "bed_type": "hot_plate",
+   "bed_temp": 100,
+   "lines_gone": [
+    "      G29.1 Z0.01 ; for Textured PEI Plate",
+    "  M140 S55 ; heat heatbed first",
+    "  M190 S55",
+    "  M190 S55; ensure bed temp"
+   ],
+   "lines_new": [
+    "      G29.1 Z0",
+    "  M140 S100 ; heat heatbed first",
+    "  M190 S100",
+    "  M190 S100; ensure bed temp"
+   ]
+  },
+  "bambu_p2s/bed70": {
+   "printer_model": "bambu_p2s",
+   "levelling_region": [
+    118.0,
+    118.0,
+    20.0,
+    20.0
+   ],
+   "height_mm": 20,
+   "bed_type": "textured_plate",
+   "bed_temp": 70,
+   "lines_gone": [
+    "  M140 S55 ; heat heatbed first",
+    "  M190 S55",
+    "  M190 S55; ensure bed temp"
+   ],
+   "lines_new": [
+    "  M140 S70 ; heat heatbed first",
+    "  M190 S70",
+    "  M190 S70; ensure bed temp"
+   ]
+  },
+  "bambu_p2s/bed71": {
+   "printer_model": "bambu_p2s",
+   "levelling_region": [
+    118.0,
+    118.0,
+    20.0,
+    20.0
+   ],
+   "height_mm": 20,
+   "bed_type": "textured_plate",
+   "bed_temp": 71,
+   "lines_gone": [
+    "  M140 S55 ; heat heatbed first",
+    "  M190 S55",
+    "  M190 S55; ensure bed temp"
+   ],
+   "lines_new": [
+    "  M140 S71 ; heat heatbed first",
+    "  M190 S71",
+    "  M190 S71; ensure bed temp"
+   ]
+  },
+  "bambu_p2s/bed89": {
+   "printer_model": "bambu_p2s",
+   "levelling_region": [
+    118.0,
+    118.0,
+    20.0,
+    20.0
+   ],
+   "height_mm": 20,
+   "bed_type": "textured_plate",
+   "bed_temp": 89,
+   "lines_gone": [
+    "  M140 S55 ; heat heatbed first",
+    "  M190 S55",
+    "  M190 S55; ensure bed temp"
+   ],
+   "lines_new": [
+    "  M140 S89 ; heat heatbed first",
+    "  M190 S89",
+    "  M190 S89; ensure bed temp"
+   ]
+  },
+  "bambu_p2s/bed90": {
+   "printer_model": "bambu_p2s",
+   "levelling_region": [
+    118.0,
+    118.0,
+    20.0,
+    20.0
+   ],
+   "height_mm": 20,
+   "bed_type": "textured_plate",
+   "bed_temp": 90,
+   "lines_gone": [
+    "      G29.1 Z0.01 ; for Textured PEI Plate",
+    "  M140 S55 ; heat heatbed first",
+    "  M190 S55",
+    "  M190 S55; ensure bed temp"
+   ],
+   "lines_new": [
+    "      G29.1 Z-0.02 ; for Textured PEI Plate",
+    "  M140 S90 ; heat heatbed first",
+    "  M190 S90",
+    "  M190 S90; ensure bed temp"
+   ]
+  },
+  "bambu_x1c/tall": {
+   "printer_model": "bambu_x1c",
+   "levelling_region": [
+    113.329,
+    113.329,
+    29.3414,
+    29.3414
+   ],
+   "height_mm": 150,
+   "bed_type": "textured_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "    G29 A X118 Y118 I20 J20"
+   ],
+   "lines_new": [
+    "    G29 A X113.329 Y113.329 I29.3414 J29.3414"
+   ],
+   "sha256": "b832e7e6c34241c836a8a0f73290f505ea50dc048a128c3d19eacb17bebdd2bf"
+  },
+  "bambu_x1c/wide": {
+   "printer_model": "bambu_x1c",
+   "levelling_region": [
+    68.0,
+    93.0,
+    120.0,
+    70.0
+   ],
+   "height_mm": 20,
+   "bed_type": "textured_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "    G29 A X118 Y118 I20 J20"
+   ],
+   "lines_new": [
+    "    G29 A X68 Y93 I120 J70"
+   ],
+   "sha256": "c376e8f37f21fbe47ca8dab9004d1fa833e357a893adc874e328dcc1b8975a32"
+  },
+  "bambu_x1c/smooth": {
+   "printer_model": "bambu_x1c",
+   "levelling_region": [
+    118.0,
+    118.0,
+    20.0,
+    20.0
+   ],
+   "height_mm": 20,
+   "bed_type": "hot_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "",
+    ";curr_bed_type=Textured PEI Plate",
+    "G29.1 Z-0.04 ; for Textured PEI Plate"
+   ],
+   "lines_new": [
+    ";curr_bed_type=High Temp Plate"
+   ],
+   "sha256": "e5033100299aea9b18508b42343b2dad8923b9c189b7841a6a4e27fad293075f"
+  },
+  "bambu_x1e/tall": {
+   "printer_model": "bambu_x1e",
+   "levelling_region": [
+    113.329,
+    113.329,
+    29.3414,
+    29.3414
+   ],
+   "height_mm": 150,
+   "bed_type": "textured_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "    G29 A X118 Y118 I20 J20"
+   ],
+   "lines_new": [
+    "    G29 A X113.329 Y113.329 I29.3414 J29.3414"
+   ],
+   "sha256": "3a1ace4edf355f2e6111c244ce086a804aa87f180c6f556072c83fe493f182ba"
+  },
+  "bambu_x1e/wide": {
+   "printer_model": "bambu_x1e",
+   "levelling_region": [
+    68.0,
+    93.0,
+    120.0,
+    70.0
+   ],
+   "height_mm": 20,
+   "bed_type": "textured_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "    G29 A X118 Y118 I20 J20"
+   ],
+   "lines_new": [
+    "    G29 A X68 Y93 I120 J70"
+   ],
+   "sha256": "781938cbee498567b41e5e06c25a652d8292785d54c0d415d114d0888e1e4764"
+  },
+  "bambu_x1e/smooth": {
+   "printer_model": "bambu_x1e",
+   "levelling_region": [
+    118.0,
+    118.0,
+    20.0,
+    20.0
+   ],
+   "height_mm": 20,
+   "bed_type": "hot_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "",
+    ";curr_bed_type=Textured PEI Plate",
+    "G29.1 Z-0.04 ; for Textured PEI Plate"
+   ],
+   "lines_new": [
+    ";curr_bed_type=High Temp Plate"
+   ],
+   "sha256": "cd4abf63ab37134a7f917125e75af5f10071e7a49ba22c02e30673d61714b3d0"
+  },
+  "bambu_x2d/tall": {
+   "printer_model": "bambu_x2d",
+   "levelling_region": [
+    123.579,
+    113.329,
+    29.3414,
+    29.3414
+   ],
+   "height_mm": 151,
+   "bed_type": "textured_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "      G29 A1 X128.25 Y118 I20 J20 R",
+    "      G29 A2 X128.25 Y118 I20 J20 R"
+   ],
+   "lines_new": [
+    "",
+    "      G29 A1 X123.579 Y113.329 I29.3414 J29.3414 R",
+    "      G29 A2 X123.579 Y113.329 I29.3414 J29.3414 R",
+    "    G151 P1 M ; plug the heat nozzle",
+    "    G3811 Z151  ; Detect obstacles at the bottom of the heated bed",
+    "    M1002 gcode_claim_action : 75 ;  Detect obstacles at the botton of the heated bed"
+   ],
+   "sha256": "35022b69361dbe312928e16c54f49ce0c808cfda93751bb0f9d273724b1bf747"
+  },
+  "bambu_x2d/wide": {
+   "printer_model": "bambu_x2d",
+   "levelling_region": [
+    78.25,
+    93.0,
+    120.0,
+    70.0
+   ],
+   "height_mm": 20,
+   "bed_type": "textured_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "      G29 A1 X128.25 Y118 I20 J20 R",
+    "      G29 A2 X128.25 Y118 I20 J20 R"
+   ],
+   "lines_new": [
+    "      G29 A1 X78.25 Y93 I120 J70 R",
+    "      G29 A2 X78.25 Y93 I120 J70 R"
+   ],
+   "sha256": "eed19595e0bea3d6e9d4a08ac67e194f6786d29206d5846ab0a47fdeb0b80547"
+  },
+  "bambu_x2d/smooth": {
+   "printer_model": "bambu_x2d",
+   "levelling_region": [
+    128.25,
+    118.0,
+    20.0,
+    20.0
+   ],
+   "height_mm": 20,
+   "bed_type": "hot_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "      G29.1 Z0.002 ; for Textured PEI Plate"
+   ],
+   "lines_new": [
+    "      G29.1 Z0.022"
+   ],
+   "sha256": "a137030b3b89c7270eeb2e053ed947ed8164adfaf47234c8419e261db3d5b61a"
+  },
+  "bambu_x2d/hot": {
+   "printer_model": "bambu_x2d",
+   "levelling_region": [
+    128.25,
+    118.0,
+    20.0,
+    20.0
+   ],
+   "height_mm": 20,
+   "bed_type": "textured_plate",
+   "bed_temp": 100,
+   "lines_gone": [
+    "      G29.1 Z0.002 ; for Textured PEI Plate",
+    "  M140 S55",
+    "  M140 S55 ; heat heatbed first",
+    "  M190 S55",
+    "  M190 S55; ensure bed temp",
+    "  M190 S55; ensure bed temp"
+   ],
+   "lines_new": [
+    "      G29.1 Z-0.003 ; for Textured PEI Plate",
+    "  M140 S100",
+    "  M140 S100 ; heat heatbed first",
+    "  M190 S100",
+    "  M190 S100; ensure bed temp",
+    "  M190 S100; ensure bed temp"
+   ],
+   "sha256": "b674886982da80469ec718160ddda43f568c0855c019a05219fc726c547a9f2b"
+  },
+  "bambu_x2d/smoothhot": {
+   "printer_model": "bambu_x2d",
+   "levelling_region": [
+    128.25,
+    118.0,
+    20.0,
+    20.0
+   ],
+   "height_mm": 20,
+   "bed_type": "hot_plate",
+   "bed_temp": 100,
+   "lines_gone": [
+    "      G29.1 Z0.002 ; for Textured PEI Plate",
+    "  M140 S55",
+    "  M140 S55 ; heat heatbed first",
+    "  M190 S55",
+    "  M190 S55; ensure bed temp",
+    "  M190 S55; ensure bed temp"
+   ],
+   "lines_new": [
+    "      G29.1 Z0.017",
+    "  M140 S100",
+    "  M140 S100 ; heat heatbed first",
+    "  M190 S100",
+    "  M190 S100; ensure bed temp",
+    "  M190 S100; ensure bed temp"
+   ],
+   "sha256": "39ba519fc683c93faf275a7fda8c918420238170161705912b3d28741665d914"
+  },
+  "bambu_x2d/bed70": {
+   "printer_model": "bambu_x2d",
+   "levelling_region": [
+    128.25,
+    118.0,
+    20.0,
+    20.0
+   ],
+   "height_mm": 20,
+   "bed_type": "textured_plate",
+   "bed_temp": 70,
+   "lines_gone": [
+    "  M140 S55",
+    "  M140 S55 ; heat heatbed first",
+    "  M190 S55",
+    "  M190 S55; ensure bed temp",
+    "  M190 S55; ensure bed temp"
+   ],
+   "lines_new": [
+    "  M140 S70",
+    "  M140 S70 ; heat heatbed first",
+    "  M190 S70",
+    "  M190 S70; ensure bed temp",
+    "  M190 S70; ensure bed temp"
+   ],
+   "sha256": "5b504be78c0bced5f60b4d2952f8575bca7e5596fa5799b89744aabff17db6d5"
+  },
+  "bambu_x2d/bed71": {
+   "printer_model": "bambu_x2d",
+   "levelling_region": [
+    128.25,
+    118.0,
+    20.0,
+    20.0
+   ],
+   "height_mm": 20,
+   "bed_type": "textured_plate",
+   "bed_temp": 71,
+   "lines_gone": [
+    "      G29.1 Z0.002 ; for Textured PEI Plate",
+    "  M140 S55",
+    "  M140 S55 ; heat heatbed first",
+    "  M190 S55",
+    "  M190 S55; ensure bed temp",
+    "  M190 S55; ensure bed temp"
+   ],
+   "lines_new": [
+    "      G29.1 Z-0.003 ; for Textured PEI Plate",
+    "  M140 S71",
+    "  M140 S71 ; heat heatbed first",
+    "  M190 S71",
+    "  M190 S71; ensure bed temp",
+    "  M190 S71; ensure bed temp"
+   ],
+   "sha256": "1865e82976d755c7f584a6b61365ef0c190d8dd1bd7850d44a5a2bc7d145f8e9"
+  },
+  "bambu_x2d/bed89": {
+   "printer_model": "bambu_x2d",
+   "levelling_region": [
+    128.25,
+    118.0,
+    20.0,
+    20.0
+   ],
+   "height_mm": 20,
+   "bed_type": "textured_plate",
+   "bed_temp": 89,
+   "lines_gone": [
+    "      G29.1 Z0.002 ; for Textured PEI Plate",
+    "  M140 S55",
+    "  M140 S55 ; heat heatbed first",
+    "  M190 S55",
+    "  M190 S55; ensure bed temp",
+    "  M190 S55; ensure bed temp"
+   ],
+   "lines_new": [
+    "      G29.1 Z-0.003 ; for Textured PEI Plate",
+    "  M140 S89",
+    "  M140 S89 ; heat heatbed first",
+    "  M190 S89",
+    "  M190 S89; ensure bed temp",
+    "  M190 S89; ensure bed temp"
+   ],
+   "sha256": "96cb40f443c7e73ecab420c16b4289b801256f2a1475a8f54a29d559e06bc1d7"
+  },
+  "bambu_x2d/bed90": {
+   "printer_model": "bambu_x2d",
+   "levelling_region": [
+    128.25,
+    118.0,
+    20.0,
+    20.0
+   ],
+   "height_mm": 20,
+   "bed_type": "textured_plate",
+   "bed_temp": 90,
+   "lines_gone": [
+    "      G29.1 Z0.002 ; for Textured PEI Plate",
+    "  M140 S55",
+    "  M140 S55 ; heat heatbed first",
+    "  M190 S55",
+    "  M190 S55; ensure bed temp",
+    "  M190 S55; ensure bed temp"
+   ],
+   "lines_new": [
+    "      G29.1 Z-0.003 ; for Textured PEI Plate",
+    "  M140 S90",
+    "  M140 S90 ; heat heatbed first",
+    "  M190 S90",
+    "  M190 S90; ensure bed temp",
+    "  M190 S90; ensure bed temp"
+   ],
+   "sha256": "4fa032815f660fb4a37e8fc8eee4a429124387c3ea6d066549c45f121ec2dfcd"
+  }
+ }
+}

@@ -2184,6 +2184,115 @@ class TestFreePathCautions:
         assert report.notes == "paid note"
         assert report.caution == ""
 
+    # --- 4. functional requirements ---------------------------------------
+
+    # One ask per profile whose public record states no caution of its own.
+    _RULE_ONLY_ASKS = {
+        "load_bearing": "shelf bracket that holds 10 kg",
+        "watertight": "reservoir that is watertight",
+        "outdoor_use": "garden sign for outside",
+        "food_contact": "cereal bowl for food",
+        "heat_exposure": "phone mount for a car dashboard in summer heat",
+        "flexibility_required": "flexible gasket",
+        "impact_resistant": "drop-proof case, impact resistant",
+        "precision_fit": "precise tolerance, parts fit together",
+        "aesthetic_decorative": "decorative figurine for display",
+        "esd_safe": "esd safe tray for circuit boards",
+    }
+
+    def _matched(self, requirement_id: str, ask: str):
+        found = {s.requirement_id: s for s in match_requirements(ask)}
+        assert requirement_id in found, f"{ask!r} matched {sorted(found)}"
+        return found[requirement_id]
+
+    def test_requirement_cautions_when_its_guidance_is_unreadable(
+        self, monkeypatch
+    ):
+        """Rules with no guidance and no caution read as the whole story.
+
+        The rule list is public; the guidance explaining it is not.  Without
+        it a food-contact or load-bearing match used to come back as bare
+        rules and ``caution=""``, the signal for "checked, nothing to add".
+        """
+        self._overlay(monkeypatch, None)
+        for requirement_id, ask in self._RULE_ONLY_ASKS.items():
+            matched = self._matched(requirement_id, ask)
+            assert matched.constraint_rules  # the rules survive
+            assert matched.agent_guidance == []
+            assert matched.caution, f"{requirement_id}: rules with no caveat"
+            assert "kiln3d.com/pricing" in matched.caution
+
+    def test_requirement_is_silent_when_its_guidance_merged(self, monkeypatch):
+        self._overlay(
+            monkeypatch,
+            {
+                "functional_requirements": {
+                    "food_contact": {"agent_guidance": ["paid guidance"]}
+                }
+            },
+        )
+        matched = self._matched("food_contact", "cereal bowl for food")
+        assert matched.agent_guidance == ["paid guidance"]
+        assert matched.caution == ""
+
+    def test_requirement_nobody_wrote_guidance_for_says_so(self, monkeypatch):
+        # The table merged on the strength of food_contact; that does not
+        # vouch for load_bearing, and no tier has the missing note to sell.
+        self._overlay(
+            monkeypatch,
+            {
+                "functional_requirements": {
+                    "food_contact": {"agent_guidance": ["paid guidance"]}
+                }
+            },
+        )
+        matched = self._matched("load_bearing", "shelf bracket that holds 10 kg")
+        assert matched.caution
+        assert "pricing" not in matched.caution
+
+    def test_requirement_keeps_its_own_stated_caution(self, monkeypatch):
+        # Where the public record states a caution, that is what is said, on
+        # both paths, word for word.
+        stated = _get_kb().requirements["against_skin"]["caution"]
+        assert stated
+        self._overlay(monkeypatch, None)
+        assert self._matched("against_skin", "a bracelet").caution == stated
+        self._overlay(
+            monkeypatch,
+            {
+                "functional_requirements": {
+                    "against_skin": {"agent_guidance": ["paid guidance"]}
+                }
+            },
+        )
+        assert self._matched("against_skin", "a bracelet").caution == stated
+
+    def test_requirement_caution_reaches_the_full_analysis(self, monkeypatch):
+        # Both doors to a requirement must behave the same.
+        self._overlay(monkeypatch, None)
+        direct = self._matched("food_contact", "cereal bowl for food")
+        analysis = get_design_constraints("cereal bowl for food")
+        through = {c.requirement_id: c for c in analysis.functional_constraints}
+        assert through["food_contact"].caution == direct.caution != ""
+
+    def test_requirement_routes_through_the_shared_helper(self, monkeypatch):
+        seen: list[tuple[str, bool | None]] = []
+
+        def spy(
+            overlay_kind: str,
+            what_is_unknown: str,
+            *,
+            curated_entry_exists: bool | None = None,
+        ) -> str:
+            seen.append((overlay_kind, curated_entry_exists))
+            return "spy"
+
+        self._overlay(monkeypatch, None)
+        monkeypatch.setattr(di, "unestablished_caution", spy)
+        assert self._matched("food_contact", "cereal bowl for food").caution == "spy"
+        # The entity-level question is asked, not left at the table level.
+        assert ("functional_requirements", False) in seen
+
     # --- one helper, three call sites -------------------------------------
 
     def test_all_three_sites_route_through_the_shared_helper(self, monkeypatch):

@@ -35,6 +35,24 @@ def _force_free_tier(monkeypatch):
     monkeypatch.setattr(_p, "_material_physics_from_overlay", lambda mat: {})
 
 
+def _design_tools() -> dict:
+    """The design plugin's tools as registered, keyed by name."""
+    from kiln.plugins.design_tools import plugin
+
+    tools: dict = {}
+
+    class _FakeMcp:
+        def tool(self, name=None, **_kwargs):
+            def decorator(fn):
+                tools[name or fn.__name__] = fn
+                return fn
+
+            return decorator
+
+    plugin.register(_FakeMcp())
+    return tools
+
+
 def _write_box_stl(path: str, x: float, y: float, z: float) -> None:
     """Write a binary STL rectangular prism with dimensions x*y*z."""
     # Box centered on XY, sitting on Z=0
@@ -161,7 +179,13 @@ class TestWarpingAnalysis:
         assert abs_report.warping.score_deduction <= pla_report.warping.score_deduction
 
     def test_recommendations_include_brim(self, tmp_path):
-        """High warp risk should recommend adding a brim."""
+        """High warp risk should recommend adding a brim.
+
+        The brim is decided once, by the report's adhesion decision; the
+        warping block states the risk and leaves the brim to it.  So the
+        sentence is read where the report says it, and the decision has to
+        have been raised by the warping verdict.
+        """
         stl = str(tmp_path / "wide_plate.stl")
         _write_box_stl(stl, 200.0, 200.0, 2.0)
 
@@ -170,8 +194,48 @@ class TestWarpingAnalysis:
         report = analyze_printability(stl, material="abs")
 
         assert report.warping is not None
-        recs_text = " ".join(report.warping.recommendations).lower()
+        assert report.warping.risk_level in ("high", "critical")
+        assert report.adhesion is not None
+        assert report.adhesion.brim_width_mm >= 5
+        assert "warping" in report.adhesion.rationale.lower()
+        recs_text = " ".join(report.recommendations).lower()
         assert "brim" in recs_text
+
+    def test_warping_tool_carries_the_brim_decision(self, tmp_path):
+        """``analyze_warping_risk`` serves the warping block on its own, and
+        that block no longer names a brim.  The door has to carry the brim
+        the warping verdict raised, or a critical-risk part is answered
+        with no brim anywhere in the reply.
+        """
+        stl = str(tmp_path / "wide_plate.stl")
+        _write_box_stl(stl, 200.0, 200.0, 2.0)
+
+        from kiln.printability import analyze_printability
+
+        result = _design_tools()["analyze_warping_risk"](stl, material="abs")
+        report = analyze_printability(stl, material="abs")
+
+        assert result["success"] is True
+        assert result["risk_level"] in ("high", "critical")
+        assert result["adhesion"] == report.adhesion.to_dict()
+        assert result["adhesion"]["brim_width_mm"] >= 5
+        brim_lines = [line for line in result["recommendations"] if "brim" in line.lower()]
+        assert brim_lines == [report.adhesion.rationale]
+        # The warping block's own advice still follows the brim.
+        assert result["recommendations"][1:] == report.warping.recommendations
+
+    def test_warping_tool_names_no_brim_the_decision_declined(self, tmp_path):
+        """A small PLA cube needs no brim: the door carries the decision
+        and adds no brim sentence to the advice."""
+        stl = str(tmp_path / "cube.stl")
+        _write_box_stl(stl, 20.0, 20.0, 20.0)
+
+        result = _design_tools()["analyze_warping_risk"](stl, material="pla")
+
+        assert result["success"] is True
+        assert result["adhesion"]["brim_width_mm"] == 0
+        assert result["adhesion"]["use_raft"] is False
+        assert not [line for line in result["recommendations"] if "brim" in line.lower()]
 
     def test_recommendations_include_chamber(self, tmp_path):
         """ABS with high warp risk should recommend an enclosed chamber."""

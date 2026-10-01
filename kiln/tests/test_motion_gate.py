@@ -75,7 +75,7 @@ class TestTheDeclarationDoor:
         with pytest.raises(ModelDeclarationRequired) as exc:
             adapter.home_axes()
         text = str(exc.value)
-        assert "printer_model" in text and "config.yaml" in text
+        assert "printer_model" in text and "set_printer_model" in text
         assert "which part moves in Z" in text
         assert sent == []
 
