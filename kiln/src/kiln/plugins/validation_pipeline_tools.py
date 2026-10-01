@@ -141,9 +141,6 @@ from kiln.plugins._validation_pipeline_internals import (
     _unit_verdict as _unit_verdict,
 )
 from kiln.plugins._validation_pipeline_internals import (
-    _UnitVerdict as _UnitVerdict,
-)
-from kiln.plugins._validation_pipeline_internals import (
     score_phrase as score_phrase,
 )
 

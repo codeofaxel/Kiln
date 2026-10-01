@@ -1859,7 +1859,7 @@ class TestPrepareAiModelAutoScale:
 
     def test_a_correction_only_ever_uses_a_real_conversion(self) -> None:
         """Sweep: no input may produce a factor that is not a real unit."""
-        from kiln.plugins._validation_pipeline_internals import _UNIT_CONVERSIONS
+        from kiln.generation.validation import _UNIT_CONVERSIONS
         from kiln.plugins.validation_pipeline_tools import _unit_verdict
 
         real = {factor for _, factor in _UNIT_CONVERSIONS}
@@ -1972,6 +1972,41 @@ class TestPrepareAiModelAutoScale:
 
         assert result["scale_factor"] > 0
         assert any("120" in a for a in result["actions_taken"])
+
+
+class TestUnitVerdictPublicName:
+    """The verdict under the name other doors import, and the sentence for a
+    door that files a model without rewriting it."""
+
+    def test_the_pipeline_judges_with_the_public_verdict(self) -> None:
+        from kiln.generation.validation import unit_verdict
+        from kiln.plugins import _validation_pipeline_internals as internals
+        from kiln.plugins import validation_pipeline_tools as tools
+
+        assert internals._unit_verdict is unit_verdict
+        assert tools._unit_verdict is unit_verdict
+
+    def test_a_plausible_size_has_nothing_to_say(self) -> None:
+        from kiln.generation.validation import unit_verdict
+
+        assert unit_verdict(50.0).describe_unchanged() == ""
+        assert unit_verdict(0.0).describe_unchanged() == ""
+
+    def test_a_single_explanation_is_named_but_never_called_rescaled(self) -> None:
+        from kiln.generation.validation import unit_verdict
+
+        told = unit_verdict(0.02).describe_unchanged()
+
+        assert "meters" in told and "0.02 → 20mm" in told
+        assert "x1000" in told and "not rescaled here" in told
+        assert not told.startswith("Rescaled")
+
+    def test_every_other_reading_keeps_its_own_sentence(self) -> None:
+        from kiln.generation.validation import unit_verdict
+
+        for size in (2.0, 0.5, 1500.0, 0.0005):
+            verdict = unit_verdict(size)
+            assert verdict.describe_unchanged() == verdict.describe()
 
 
 class TestPrepareAiModelHollowRecommendation:
