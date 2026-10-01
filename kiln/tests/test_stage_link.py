@@ -24,11 +24,16 @@ def _stl(path, triangles: int = 2):
 
 @pytest.fixture(autouse=True)
 def _clean_cache(monkeypatch):
-    stage_link._cache.clear()
-    stage_link._REFUSED_BEARER = None
+    _reset()
     monkeypatch.delenv(stage_link._OPT_OUT_ENV, raising=False)
     yield
+    _reset()
+
+
+def _reset():
     stage_link._cache.clear()
+    stage_link._inflight.clear()
+    stage_link._slow_until = 0.0
     stage_link._REFUSED_BEARER = None
 
 
@@ -517,3 +522,140 @@ class TestRefusalSentences:
 
     def test_an_unknown_reason_is_still_a_clause(self):
         assert stage_link.refusal_sentence("wat") == "no browser link was issued (wat)"
+
+    def test_still_uploading_and_too_busy_read_as_clauses(self):
+        pending = stage_link.refusal_sentence("pending")
+        assert "still uploading" in pending and "next result" in pending
+        assert "still uploading" in stage_link.refusal_sentence("busy")
+
+
+class _SlowServer:
+    """A fake API whose answer the test releases by hand — a server that is
+    slow for as long as the test needs it to be, and not a moment longer."""
+
+    def __init__(self, monkeypatch, resp=None):
+        import threading
+
+        self.calls: list[str] = []
+        self.release = threading.Event()
+        _wire(monkeypatch)
+        import httpx
+
+        def _post(url, **kw):
+            self.calls.append(kw["files"]["file"][0])
+            self.release.wait(10)
+            return resp or _Resp()
+
+        monkeypatch.setattr(httpx, "post", _post)
+
+    def answer(self):
+        """Let every upload finish, and wait until none is running — so no
+        thread outlives its test and writes a link into the next one's cache."""
+        self.release.set()
+        deadline = time.time() + 10
+        while stage_link._inflight and time.time() < deadline:
+            time.sleep(0.01)
+        assert not stage_link._inflight, "an upload never finished"
+
+
+class TestTheWaitBelongsToTheDoor:
+    """2026-09-30: a make that built in 4 s and rendered in 10 s never reached
+    its caller.  Two doors in the one tool call each uploaded the mesh and
+    each sat out the whole transfer timeout while the servers were slow, so
+    the call outran the minute an MCP client allows and the finished mesh
+    and pictures went with it.  The wait is bounded HERE, once per upload,
+    so every caller of the door inherits it."""
+
+    @pytest.fixture(autouse=True)
+    def _short_waits(self, monkeypatch):
+        monkeypatch.setattr(stage_link, "_INLINE_WAIT_S", 0.3)
+        monkeypatch.setattr(stage_link, "_SLOW_WAIT_S", 0.05)
+
+    def test_a_slow_server_does_not_hold_the_caller(self, tmp_path, monkeypatch):
+        server = _SlowServer(monkeypatch)
+        p = _stl(tmp_path / "p.stl")
+        t0 = time.time()
+        assert stage_link.stage_link_for(p) is None
+        waited = time.time() - t0
+        server.answer()
+        assert waited < 1.0, f"the caller sat behind the upload for {waited:.1f}s"
+
+    def test_two_doors_in_one_call_share_one_upload_and_one_wait(
+        self, tmp_path, monkeypatch
+    ):
+        server = _SlowServer(monkeypatch)
+        p = _stl(tmp_path / "p.stl")
+        t0 = time.time()
+        assert stage_link.stage_link_for(p) is None
+        assert stage_link.stage_link_for(p) is None
+        waited = time.time() - t0
+        uploads = len(server.calls)
+        server.answer()
+        assert uploads == 1, f"the same bytes were uploaded {uploads} times at once"
+        assert waited < 1.0, f"the second door waited again ({waited:.1f}s in all)"
+
+    def test_the_link_rides_the_next_result(self, tmp_path, monkeypatch):
+        server = _SlowServer(monkeypatch)
+        p = _stl(tmp_path / "p.stl")
+        assert stage_link.stage_link_for(p) is None
+        assert stage_link.last_refusal(p) == "pending"
+        server.answer()
+        got = stage_link.stage_link_for(p)
+        assert got and got["viewer_url"] and got["cached"] is True
+        assert len(server.calls) == 1, "the finished upload was thrown away"
+        # ...and the record now holds the link, not the wait it replaced.
+        assert stage_link.last_refusal(p) is None
+
+    def test_a_late_link_is_on_record_without_being_asked_for_again(
+        self, tmp_path, monkeypatch
+    ):
+        """The print gate reads the record, not this module's cache: a link
+        that lands after its caller left must still be there to hand over."""
+        from kiln.preview_evidence import evidence_for
+
+        server = _SlowServer(monkeypatch)
+        p = _stl(tmp_path / "p.stl")
+        assert stage_link.stage_link_for(p) is None
+        server.answer()
+        assert (evidence_for(p).get("url") or {}).get("viewer_url")
+
+    def test_a_slow_minute_costs_the_next_mesh_almost_nothing(
+        self, tmp_path, monkeypatch
+    ):
+        server = _SlowServer(monkeypatch)
+        assert stage_link.stage_link_for(_stl(tmp_path / "a.stl", 2)) is None
+        t0 = time.time()
+        assert stage_link.stage_link_for(_stl(tmp_path / "b.stl", 3)) is None
+        waited = time.time() - t0
+        uploads = len(server.calls)
+        server.answer()
+        assert waited < 0.25, f"a second mesh paid the full wait again ({waited:.2f}s)"
+        assert uploads == 2, "the second mesh's upload was not started"
+
+    def test_a_quick_answer_ends_the_slow_minute(self, tmp_path, monkeypatch):
+        server = _SlowServer(monkeypatch)
+        assert stage_link.stage_link_for(_stl(tmp_path / "a.stl", 2)) is None
+        server.answer()
+        assert stage_link._slow_until > 0
+        _wire(monkeypatch)  # the servers are answering at once again
+        assert stage_link.stage_link_for(_stl(tmp_path / "b.stl", 3))
+        assert stage_link._slow_until == 0.0, "one slow minute outlived a quick answer"
+
+    def test_no_more_uploads_start_than_the_ceiling(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(stage_link, "_MAX_IN_FLIGHT", 1)
+        server = _SlowServer(monkeypatch)
+        a, b = _stl(tmp_path / "a.stl", 2), _stl(tmp_path / "b.stl", 3)
+        assert stage_link.stage_link_for(a) is None
+        assert stage_link.stage_link_for(b) is None
+        uploads = len(server.calls)
+        server.answer()
+        assert uploads == 1
+        assert stage_link.last_refusal(b) == "busy"
+
+    def test_a_failed_upload_says_why_once_it_fails(self, tmp_path, monkeypatch):
+        server = _SlowServer(monkeypatch, resp=_Resp(status=503, body={}))
+        p = _stl(tmp_path / "p.stl")
+        assert stage_link.stage_link_for(p) is None
+        assert stage_link.last_refusal(p) == "pending"
+        server.answer()
+        assert stage_link.last_refusal(p) == "http_503"
