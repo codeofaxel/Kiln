@@ -1759,7 +1759,7 @@ class _MeshToolsPlugin:
             infill_percent: float = 20.0,
             wall_thickness_mm: float = 1.2,
         ) -> dict:
-            """Estimate the printed weight of an STL file.
+            """Estimate the printed weight of a model file (a STEP file is converted first).
 
             Uses the divergence theorem to compute mesh volume, then applies
             material density, infill ratio, and shell fraction for a realistic
@@ -1775,6 +1775,14 @@ class _MeshToolsPlugin:
 
             if err := _check_auth("design:analyze"):
                 return err
+            # STEP in, mesh out — the one shared door, so a part that arrives
+            # as CAD is estimated as it is instead of refused layers down.
+            from kiln.step_import import resolve_mesh_input
+
+            file_path, _conversion, _refusal = resolve_mesh_input(file_path)
+            if _refusal:
+                return _refusal
+
             try:
                 from kiln.design_reasoning import estimate_weight
 
@@ -1799,7 +1807,7 @@ class _MeshToolsPlugin:
             print_speed_mm_s: float = 60.0,
             material: str = "pla",
         ) -> dict:
-            """Rough print time estimate from mesh geometry (STL/OBJ/GLB).
+            """Rough print time estimate from mesh geometry (STL/OBJ/GLB; a STEP file is converted first).
 
             Uses model height, surface area, and layer count to approximate
             print duration. This is a ballpark estimate -- actual time depends
@@ -1815,6 +1823,14 @@ class _MeshToolsPlugin:
             :returns: Dict with estimated time, layer count, and note.
             """
             from kiln.server import _error_dict
+
+            # STEP in, mesh out — the one shared door, so a part that arrives
+            # as CAD is estimated as it is instead of refused layers down.
+            from kiln.step_import import resolve_mesh_input
+
+            file_path, _conversion, _refusal = resolve_mesh_input(file_path)
+            if _refusal:
+                return _refusal
 
             try:
                 from kiln.generation.validation import estimate_print_time_from_mesh
