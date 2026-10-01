@@ -17544,8 +17544,33 @@ def _terms_agreement_handed_over(status: int, body: object, bearer: str) -> bool
         return False
 
 
-def _pro_api_call(tool_name: str, _timeout: float = 30.0, **kwargs) -> dict:
+#: How long a request waits for Kiln's servers to answer.
+_SERVED_WAIT_S = 30.0
+#: ...and how long when the tool MAKES something there -- a model, a
+#: texture, a drawing, a manual.  The servers allow a tool up to five
+#: minutes; waiting thirty seconds reported work they were still doing as
+#: "no answer", and a person who then asked again paid for it twice.
+_SERVED_MAKE_WAIT_S = 300.0
+
+
+def _served_wait_seconds(tool_name: str) -> float:
+    """How long *tool_name*'s request waits, by what the tool does.
+
+    The kind is the one :mod:`kiln.served_answer` already words a miss by:
+    the manifest's when the bundle carries one, else derived from the name.
+    """
+    from kiln.served_answer import kind_of_tool
+
+    kind = _PRO_TOOL_OFFLINE_KIND.get(tool_name) or kind_of_tool(tool_name)
+    return _SERVED_MAKE_WAIT_S if kind == "made" else _SERVED_WAIT_S
+
+
+def _pro_api_call(tool_name: str, _timeout: float | None = None, **kwargs) -> dict:
     """Call a hosted kiln-pro tool through the public REST API.
+
+    ``_timeout`` is how long to wait for the answer.  Left out, it follows
+    what the tool does (:func:`_served_wait_seconds`); a caller that must
+    fail fast -- a check made on the way into a print -- passes its own.
 
     Bearer-token resolution order:
       1. ``KILN_LICENSE_KEY`` env var (operator-supplied license)
@@ -17702,9 +17727,10 @@ def _pro_api_call(tool_name: str, _timeout: float = 30.0, **kwargs) -> dict:
             headers=headers,
             method="POST",
         )
+        wait_s = _served_wait_seconds(tool_name) if _timeout is None else _timeout
         for attempt in (1, 2):
             try:
-                with urllib.request.urlopen(req, timeout=_timeout) as resp:
+                with urllib.request.urlopen(req, timeout=wait_s) as resp:
                     return json.loads(resp.read())
             except urllib.error.HTTPError as exc:
                 # Preserve the server's own error body when present — it
