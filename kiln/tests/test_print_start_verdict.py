@@ -303,8 +303,13 @@ def slicer_tools():
     return _register_slicer_tools()
 
 
-def _run_slice_and_print(slicer_tools, tmp_path: Path, adapter: _FakeAdapter) -> dict:
-    """Drive the real tool with the slicer and the printer mocked out."""
+def _run_slice_and_print(
+    slicer_tools, tmp_path: Path, adapter: _FakeAdapter, *, bed_fit: dict | None = None,
+) -> dict:
+    """Drive the real tool with the slicer and the printer mocked out.
+
+    *bed_fit* is the block the bed-fit gate hands back; none by default.
+    """
     from kiln.slicer import SliceResult
 
     stl = tmp_path / INCIDENT_FILE
@@ -339,7 +344,7 @@ def _run_slice_and_print(slicer_tools, tmp_path: Path, adapter: _FakeAdapter) ->
             patch.object(_srv, "_audit", MagicMock()), \
             patch.object(
                 _st, "_apply_bed_fit_gate",
-                return_value=(str(stl), None, {}),
+                return_value=(str(stl), None, bed_fit or {}),
             ), \
             patch.object(
                 _st, "_multicolor_flatten_advisory", return_value=(None, None),
@@ -410,6 +415,37 @@ class TestSliceAndPrintEnvelope:
         assert resp["success"] is True
         assert resp["print"]["confirmed_running"] is True
         assert "started printing" in resp["message"]
+
+    def test_what_the_gate_did_to_the_mesh_rides_the_result(
+        self, slicer_tools, tmp_path,
+    ):
+        """The gate may slice a copy -- centred, turned, Kiln's mesh of a
+        STEP turned -- and this door printed it without saying so until
+        2026-09-30.  ``slice_model`` always carried the block."""
+        turned = {
+            "ok": True, "auto_oriented": True, "turned_deg": [0.0, 0.0, 90.0],
+            "approval_carries": False, "sliced_mesh": "kiln_step_mesh",
+            "note": "Kiln turned this STEP part to fit the bed.",
+        }
+        adapter = _FakeAdapter(
+            result=PrintResult(success=True, message="Started printing."),
+            status=PrinterStatus.PRINTING,
+            age=0.0,
+        )
+        resp = _run_slice_and_print(slicer_tools, tmp_path, adapter, bed_fit=turned)
+
+        assert resp["success"] is True
+        assert resp["bed_fit"]["auto_oriented"] is True
+        assert resp["bed_fit"]["turned_deg"] == [0.0, 0.0, 90.0]
+        assert resp["bed_fit"]["note"] == turned["note"]
+
+    def test_a_gate_with_nothing_to_report_adds_no_block(self, slicer_tools, tmp_path):
+        adapter = _FakeAdapter(
+            result=PrintResult(success=True, message="Started printing."),
+            status=PrinterStatus.PRINTING,
+            age=0.0,
+        )
+        assert "bed_fit" not in _run_slice_and_print(slicer_tools, tmp_path, adapter)
 
     def test_the_command_is_sent_before_the_verdict_is_taken(
         self, slicer_tools, tmp_path,

@@ -613,10 +613,11 @@ def validate_mesh_for_printer(
     a pre-slice gate.
 
     A STEP file too big as modelled but small enough lying on another face
-    is not refused here: Kiln cannot turn a STEP file the way it turns an
-    STL to fit, so the slicer gets it as modelled and makes that call
-    itself -- PrusaSlicer refuses it, a slicer that orients parts may lay it
-    down.  The result says so in ``note``.
+    is not refused here.  This check measures; it does not turn anything.
+    The result carries ``fits_on_another_face`` and says so in ``note``, and
+    the slice gate (``_apply_bed_fit_gate``) reads that to lay the part down
+    as Kiln's mesh of it.  A caller that does not turn it hands the slicer
+    the file as modelled, and the slicer makes the call itself.
     """
     bbox = compute_mesh_bbox(mesh_path)
     volume = get_build_volume(printer_id) if printer_id else None
@@ -626,7 +627,7 @@ def validate_mesh_for_printer(
         and step_import.is_step_file(mesh_path)
         and _fits_on_another_face(bbox, volume)
     ):
-        fit.update(ok=True, error_code=None, error_message=None)
+        fit.update(ok=True, error_code=None, error_message=None, fits_on_another_face=True)
         fit["note"] = (
             "Too big for the bed as modelled, small enough lying on another face. "
             "The slicer gets the file as modelled; turn the part in its CAD file, "

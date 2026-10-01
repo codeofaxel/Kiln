@@ -29,38 +29,124 @@ from kiln.tool_results import unwrap_tool_result
 _logger = logging.getLogger(__name__)
 
 
-def _try_orient_to_fit(input_path: str, printer_id: str) -> str | None:
-    """Rotate an oversized STL to try to make it fit the bed (free + local).
+# Every quarter turn that changes which of a part's extents lies along which
+# axis of the bed, gentlest first: turned where it stands (the face the
+# designer put down stays down), then laid on a side face, then both.  With
+# the part as modelled these are all six ways a box can sit on a bed, which
+# is what ``bed_fit._fits_on_another_face`` promises when it says a part fits.
+_FIT_TURNS_DEG: tuple[tuple[float, float, float], ...] = (
+    (0.0, 0.0, 90.0),
+    (90.0, 0.0, 0.0),
+    (0.0, 90.0, 0.0),
+    (90.0, 0.0, 90.0),
+    (0.0, 90.0, 90.0),
+)
 
-    Returns the path to a rotated temp copy that fits, or None if no tried
-    orientation fits.  Uses the PUBLIC orientation helper + the printer's
-    datasheet bed size only (no curated SME).  We try the two axis-aligned
-    re-orientations that change the bounding box (lay the part on its other
-    faces) — this rescues the common "modelled tall, fits lying down" /
-    "long-in-X fits long-in-Y" cases without disturbing a part already fine.
+
+def _try_orient_to_fit(
+    input_path: str, printer_id: str, *, recentre: bool = True,
+) -> tuple[str, tuple[float, float, float]] | None:
+    """Turn an oversized STL a quarter turn at a time until it fits the bed.
+
+    Returns ``(path, (rx, ry, rz))`` -- a turned temp copy that fits and the
+    turn in degrees -- or ``None`` if no quarter turn fits.  Free and local:
+    the public orientation helper and the printer's datasheet bed size.
+
+    A turn is judged by SIZE.  The helper turns a part about the origin, so
+    a part that fits once turned usually lands off the bed; with *recentre*
+    the copy is moved back onto it, and without (the caller forbade moving
+    the part) a turn counts only if it lands on the bed by itself.  Until
+    2026-09-30 only the two side-face turns were tried and none was moved
+    back, so a part that needed turning where it stood was refused and a
+    side-face turn passed only when it happened to land on the bed.
     """
     try:
         from kiln.auto_orient import apply_orientation
-        from kiln.printers.bed_fit import validate_mesh_for_printer
+        from kiln.printers.bed_fit import apply_translation_to_stl, validate_mesh_for_printer
     except Exception:  # noqa: BLE001
         return None
     import tempfile
 
     stem = os.path.splitext(os.path.basename(input_path))[0]
-    for rx, ry, rz in ((90.0, 0.0, 0.0), (0.0, 90.0, 0.0)):
+    tmp_dir = tempfile.mkdtemp(prefix="kiln_orient_")
+    oriented = os.path.join(tmp_dir, f"{stem}_oriented.stl")
+    for turn in _FIT_TURNS_DEG:
         try:
-            tmp_dir = tempfile.mkdtemp(prefix="kiln_orient_")
-            oriented = os.path.join(tmp_dir, f"{stem}_oriented.stl")
-            apply_orientation(input_path, rx, ry, rz, output_path=oriented)
-            if validate_mesh_for_printer(oriented, printer_id).get("ok"):
+            apply_orientation(input_path, *turn, output_path=oriented)
+            fit = validate_mesh_for_printer(oriented, printer_id)
+            if recentre and fit.get("error_code") == "OFF_BED_GEOMETRY" and fit.get("suggested_translate"):
+                apply_translation_to_stl(oriented, fit["suggested_translate"])
+                fit = validate_mesh_for_printer(oriented, printer_id)
+            if fit.get("ok") and not fit.get("error_code"):
                 _logger.info(
                     "Auto-oriented %s (rot %g/%g/%g) to fit the %s bed.",
-                    os.path.basename(input_path), rx, ry, rz, printer_id,
+                    os.path.basename(input_path), *turn, printer_id,
                 )
-                return oriented
+                return oriented, turn
         except Exception:  # noqa: BLE001
             _logger.debug("orient-to-fit candidate failed", exc_info=True)
+    import shutil
+
+    shutil.rmtree(tmp_dir, ignore_errors=True)
     return None
+
+
+_ROTATED_APPROVAL_NOTE = (
+    "rotated to fit the bed, so a yes given on the design mesh "
+    "does not carry; the stage on this result shows the plate as "
+    "it will print — approve from here"
+)
+
+
+def _oriented_fit(oriented: tuple[str, tuple[float, float, float]], printer_id: str) -> dict:
+    """The bed-fit block for a part the gate turned to fit: the turned copy's
+    own measurement, the turn, and why the design's approval does not carry."""
+    from kiln.printers.bed_fit import validate_mesh_for_printer
+
+    path, turn = oriented
+    ofit = validate_mesh_for_printer(path, printer_id)
+    ofit["auto_oriented"] = True
+    ofit["oriented_input_path"] = path
+    ofit["turned_deg"] = list(turn)
+    ofit["approval_carries"] = False
+    ofit["approval_note"] = _ROTATED_APPROVAL_NOTE
+    return ofit
+
+
+def _lay_step_down_to_fit(step_path: str, printer_id: str) -> tuple[str, dict] | None:
+    """Turn a STEP part that fits the bed only on another face.
+
+    Kiln cannot turn the STEP file itself, so it turns its own mesh of it
+    (:func:`kiln.step_import.ensure_mesh_path`, cached by content) with the
+    STL machinery and slices that.  Returns ``(path, bed_fit_block)``, or
+    ``None`` when this machine cannot convert the file or no turn fits --
+    the caller then hands the slicer the file as modelled, as before.
+    """
+    import shutil
+    import tempfile
+
+    # The mesh as modelled is only the turn's input; its copy goes when the
+    # turn is done, whichever way that went.
+    scratch = tempfile.mkdtemp(prefix="kiln_step_fit_")
+    try:
+        from kiln import step_import
+
+        mesh_path, _note = step_import.ensure_mesh_path(step_path, output_dir=scratch)
+        oriented = _try_orient_to_fit(mesh_path, printer_id)
+    except Exception:  # noqa: BLE001 -- no converter here, or a file it refuses
+        _logger.debug("STEP not converted for orient-to-fit", exc_info=True)
+        return None
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+    if oriented is None:
+        return None
+    ofit = _oriented_fit(oriented, printer_id)
+    ofit["sliced_mesh"] = "kiln_step_mesh"
+    ofit["note"] = (
+        "Kiln turned this STEP part to fit the bed, so what was sliced is Kiln's own mesh "
+        "of the file, not the slicer's reading of it."
+    )
+    return oriented[0], ofit
 
 
 def _material_temp_block(
@@ -142,6 +228,20 @@ def _gate_error_response(gate_err: dict) -> dict:
     return resp
 
 
+def _attach_bed_fit(response: dict, gate_info: dict | None) -> None:
+    """Put the bed-fit block on a slice door's success response.
+
+    One helper for every door that runs the bed-fit gate, because the gate
+    may hand the slicer a COPY -- centred, turned, or Kiln's mesh of a STEP
+    turned -- and a result that does not carry the block cannot say so.
+    ``slice_and_print`` and ``slice_and_estimate`` did not carry it until
+    2026-09-30.  A slice with no printer to check against has no block,
+    and neither does a gate that reported nothing.
+    """
+    if isinstance(gate_info, dict) and gate_info and gate_info.get("gate") != "skipped_no_printer":
+        response["bed_fit"] = gate_info
+
+
 def _apply_bed_fit_gate(
     input_path: str,
     effective_printer_id: str | None,
@@ -157,8 +257,10 @@ def _apply_bed_fit_gate(
     physically fits, we translate it to a bed-centered copy in a temp
     directory and return that path.  The original file is not modified.
 
-    When the mesh exceeds the build volume, we return an error dict
-    even with ``auto_center=True`` — translation can't fix that.
+    When the mesh exceeds the build volume as modelled, a quarter turn
+    that fits is tried first (an STL directly, a STEP as Kiln's mesh of it)
+    and the turned copy is the effective input.  When no turn fits we
+    return an error dict — translation can't fix that.
 
     Returns ``(effective_input_path, error_dict_or_None, bed_fit_info)``.
     The caller uses ``effective_input_path`` for slicing.  If
@@ -183,11 +285,16 @@ def _apply_bed_fit_gate(
         return input_path, temp_block, temp_block
 
     if not input_path.lower().endswith(".stl"):
-        # Only validate + translate STLs for now.  3MF/STEP/OBJ are out
-        # of scope for the translate path — we'd need format-specific
-        # rewriters.  Still run a bbox validation but can't auto-fix.
+        # Only STLs are moved in place: a 3MF or OBJ would need its own
+        # rewriter, so those are measured and never fixed.  A STEP the
+        # slicer places itself, with one exception -- a part that fits only
+        # lying on another face is turned as Kiln's mesh of it.
         fit = validate_mesh_for_printer(input_path, effective_printer_id)
-        fit["approval_carries"] = True  # nothing on this branch moves the mesh
+        fit["approval_carries"] = True  # nothing below moves the mesh but the turn
+        if fit.get("fits_on_another_face") and auto_center:
+            laid = _lay_step_down_to_fit(input_path, effective_printer_id)
+            if laid is not None:
+                return laid[0], None, laid[1]
         if not fit["ok"] and fit["error_code"] in ("OFF_BED_GEOMETRY", "EXCEEDS_BED"):
             _attach_fit_enrichment(fit, input_path, effective_printer_id, material_id)
             return input_path, fit, fit
@@ -206,18 +313,9 @@ def _apply_bed_fit_gate(
     if fit["error_code"] == "EXCEEDS_BED":
         # Auto-orient before giving up: a part too tall/wide as-modelled often
         # fits once rotated. (Free: public orientation helper + datasheet bed.)
-        oriented = _try_orient_to_fit(input_path, effective_printer_id)
+        oriented = _try_orient_to_fit(input_path, effective_printer_id, recentre=auto_center)
         if oriented is not None:
-            ofit = validate_mesh_for_printer(oriented, effective_printer_id)
-            ofit["auto_oriented"] = True
-            ofit["oriented_input_path"] = oriented
-            ofit["approval_carries"] = False
-            ofit["approval_note"] = (
-                "rotated to fit the bed, so a yes given on the design mesh "
-                "does not carry; the stage on this result shows the plate as "
-                "it will print — approve from here"
-            )
-            return oriented, None, ofit
+            return oriented[0], None, _oriented_fit(oriented, effective_printer_id)
         _attach_fit_enrichment(fit, input_path, effective_printer_id, material_id)
         return input_path, fit, fit
     if fit["error_code"] == "OFF_BED_GEOMETRY":
@@ -1724,6 +1822,10 @@ class _SlicerToolsPlugin:
                     sliced gcode with negative X/Y moves that drive the
                     nozzle into the printer frame.  Set False only if you've
                     verified the input is already correctly positioned.
+                    A part too big for the bed as modelled is also turned a
+                    quarter turn when that makes it fit — an STL directly,
+                    a STEP file as Kiln's mesh of it — and the response's
+                    ``bed_fit`` block says so.
                 printer_name: Registered printer this slice is FOR.  Omit for
                     the default printer.  Naming a second machine resolves
                     its profile, its bed and its safety limits — without it,
@@ -1848,8 +1950,7 @@ class _SlicerToolsPlugin:
 
                 # Surface the bed-fit result so callers can see if we
                 # auto-centered + the translation applied.
-                if gate_info.get("gate") != "skipped_no_printer":
-                    response["bed_fit"] = gate_info
+                _attach_bed_fit(response, gate_info)
 
                 # Cross-check slicer profile against printer safety limits.
                 # The limits belong to the machine this slice is FOR: checking
@@ -2103,8 +2204,7 @@ class _SlicerToolsPlugin:
                     response["profile_path"] = effective_profile
                 if parsed_overrides:
                     response["applied_overrides"] = parsed_overrides
-                if gate_info.get("gate") != "skipped_no_printer":
-                    response["bed_fit"] = gate_info
+                _attach_bed_fit(response, gate_info)
                 if cal_used is not None:
                     response["calibration_used"] = cal_used
 
@@ -2800,6 +2900,9 @@ class _SlicerToolsPlugin:
                     resp["warnings"] = ams_routing_warnings
                 if cal_used is not None:
                     resp["calibration_used"] = cal_used
+                # What the gate did to the mesh that printed (centred it,
+                # turned it, turned Kiln's mesh of a STEP), as slice_model says it.
+                _attach_bed_fit(resp, sinfo.get("bed_fit"))
                 _attach_placement(resp, place_info)
 
                 # Multicolor-flatten advisory — same wire as slice_model.
