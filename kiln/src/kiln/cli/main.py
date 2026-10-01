@@ -4429,6 +4429,8 @@ def slice(
                     click.echo(f"Placement: {placement_info['approval_note']}")
                 if getattr(result, "filament", None) is not None:
                     click.echo(f"Weighed as: {result.filament.note}")
+                if getattr(result, "nozzle", None):
+                    click.echo(f"Nozzle: {result.nozzle['note']}")
                 if copies > 1:
                     click.echo(f"Copies: {copies} (strategy: {copy_strategy}, spacing: {spacing}mm)")
                 if plan["printer_id"]:
@@ -9762,6 +9764,8 @@ def generate_and_print_cmd(
             click.echo(f"Material: {plan['material']}")
             if getattr(slice_result, "filament", None) is not None:
                 click.echo(f"Weighed as: {slice_result.filament.note}")
+            if getattr(slice_result, "nozzle", None):
+                click.echo(f"Nozzle: {slice_result.nozzle['note']}")
             if plan["support_style"]:
                 note = f" ({plan['support_reason']})" if plan["support_reason"] else ""
                 click.echo(f"Supports: {plan['support_style']}{note}")

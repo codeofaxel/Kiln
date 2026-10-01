@@ -3234,6 +3234,7 @@ class TestResliceWithOverrides:
         mock_resolve.assert_called_once_with(
             "prusa_mini",
             overrides={"brim_width": "8", "fill_density": "25%"},
+            printer_name=None,
         )
 
     @patch("kiln.server._check_auth", return_value=None)
@@ -3263,7 +3264,7 @@ class TestResliceWithOverrides:
         assert result["success"] is True
         assert "applied_overrides" not in result
         # With no overrides, resolve_slicer_profile is called with overrides=None
-        mock_resolve.assert_called_once_with("prusa_mini", overrides=None)
+        mock_resolve.assert_called_once_with("prusa_mini", overrides=None, printer_name=None)
 
     @patch("kiln.server._check_auth", return_value=None)
     def test_reslice_invalid_json_overrides(self, mock_auth, tmp_path):

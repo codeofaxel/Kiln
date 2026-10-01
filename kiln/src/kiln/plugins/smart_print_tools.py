@@ -239,6 +239,7 @@ class _SmartPrintToolsPlugin:
                     effective_profile = resolve_slicer_profile(
                         effective_pid,
                         overrides=merged_overrides if merged_overrides else None,
+                        printer_name=printer_name,
                     )
                 except Exception as exc:
                     _logger.debug(

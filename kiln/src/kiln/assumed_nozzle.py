@@ -44,6 +44,7 @@ _SOURCE_WORDS = {
     "record": "the nozzle on record for {printer}",
     "printer_setting": "{printer}'s own nozzle setting",
     "stock": "the stock size for {printer}",
+    "profile": "the slicer profile's own size",
     "default": "Kiln's default",
 }
 
@@ -54,7 +55,8 @@ class AssumedNozzle:
 
     :param diameter_mm: The size the check runs with.
     :param source: ``"stated"``, ``"record"``, ``"printer_setting"``,
-        ``"stock"`` or ``"default"``.
+        ``"stock"``, ``"profile"`` (a slicer profile's own size, for a slice)
+        or ``"default"``.
     :param printer_id: The printer the answer is about, when one was named.
     :param record_unreachable: The record could not be asked (offline,
         signed out), so a lower rung answered.
@@ -68,11 +70,11 @@ class AssumedNozzle:
     #: Nobody named the printer; it is the only one Kiln knows of.
     inferred_printer: bool = False
 
-    def sentence(self) -> str:
+    def sentence(self, verb: str = "Checked") -> str:
         where = _SOURCE_WORDS.get(self.source, self.source).format(printer=self.printer_id or "the printer")
         if self.inferred_printer:
             where += ", the only printer Kiln knows of"
-        said = f"Checked for a {self.diameter_mm:g} mm nozzle: {where}."
+        said = f"{verb} for a {self.diameter_mm:g} mm nozzle: {where}."
         if self.source == "default":
             said += " Name the printer, or pass the nozzle size, if yours differs."
         if self.record_unreachable:
@@ -118,20 +120,34 @@ def _printer_setting_mm(printer_id: str) -> float | None:
     return size
 
 
-def _stock_mm(printer_id: str) -> float | None:
-    """The model's stock size from its bundled slicer profile, or ``None``.
-    The profile's own "default" fallback is never taken for an answer: it
-    would pass a guess off as this model's size."""
+def _profile_id_of(printer_id: str) -> str | None:
+    """The bundled slicer profile *printer_id* slices with -- by its own name
+    or by its model -- or ``None``.  The "default" profile is never an
+    answer: it is the fallback for a printer nobody identified."""
     try:
         from kiln.printer_model_resolver import resolve_printer_model_for
-        from kiln.slicer_profiles import get_slicer_profile, list_slicer_profiles
+        from kiln.slicer_profiles import list_slicer_profiles
 
         known = set(list_slicer_profiles()) - {"default"}
         for key in (printer_id, resolve_printer_model_for(printer_id) or ""):
             key = key.lower().replace("-", "_").strip()
             if key in known:
-                raw = str(get_slicer_profile(key).settings.get("nozzle_diameter", ""))
-                return _valid(raw.replace(";", ",").split(",")[0])
+                return key
+    except Exception:  # noqa: BLE001
+        logger.debug("assumed nozzle: profile lookup failed", exc_info=True)
+    return None
+
+
+def _stock_mm(printer_id: str) -> float | None:
+    """The model's stock size from its bundled slicer profile, or ``None``."""
+    key = _profile_id_of(printer_id)
+    if key is None:
+        return None
+    try:
+        from kiln.slicer_profiles import get_slicer_profile
+
+        raw = str(get_slicer_profile(key).settings.get("nozzle_diameter", ""))
+        return _valid(raw.replace(";", ",").split(",")[0])
     except Exception:  # noqa: BLE001
         logger.debug("assumed nozzle: stock lookup failed", exc_info=True)
     return None
@@ -210,4 +226,36 @@ def assumed_nozzle(
     return AssumedNozzle(DEFAULT_MM, "default", pid, record_unreachable, inferred)
 
 
-__all__ = ["DEFAULT_MM", "AssumedNozzle", "assumed_nozzle"]
+def nozzle_for_profile(profile_id: str, printer_name: str | None = None) -> AssumedNozzle:
+    """The nozzle a slice with the bundled profile *profile_id* is for.
+
+    A slicing door names a profile, and not always a machine.  The machine
+    is *printer_name* when the door has one; else the one registered machine
+    that slices with this profile; else nobody, and the profile id itself is
+    asked (a nozzle recorded under the model's name, else its stock size).
+    A named machine counts only when it slices with this profile or its
+    model is unknown.  Several machines sharing the profile are never
+    picked between.  The
+    generic profile belongs to no model, so it is the only printer Kiln
+    knows of, as for any check that names none.  Never raises.
+    """
+    named = (printer_name or "").strip()
+    key = (profile_id or "").lower().replace("-", "_").strip()
+    # A named machine known to slice with ANOTHER profile is not the machine
+    # this slice is for: the door asked for a different model on purpose.
+    if named and _profile_id_of(named) in (None, key):
+        return assumed_nozzle(named)
+    if not key or key == "default":
+        return assumed_nozzle(None, or_only_printer=True)
+    machines = _registered_machines()
+    sharing = [name for name in machines if _profile_id_of(name) == key]
+    if len(sharing) == 1:
+        answer = assumed_nozzle(sharing[0])
+        return AssumedNozzle(
+            answer.diameter_mm, answer.source, answer.printer_id, answer.record_unreachable,
+            inferred_printer=len(machines) == 1,
+        )
+    return assumed_nozzle(key)
+
+
+__all__ = ["DEFAULT_MM", "AssumedNozzle", "assumed_nozzle", "nozzle_for_profile"]

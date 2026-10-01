@@ -20,9 +20,10 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import math
 import os
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -472,6 +473,176 @@ def _ensure_estimate_motion(settings: dict[str, str], profile_id: str) -> None:
             settings[key] = _limit(motion[source])
 
 
+#: The comment line a written profile carries its nozzle answer on.  A
+#: comment, so both slicers ignore it and every profile derived from this
+#: one (:func:`profile_with_overrides` copies its base line for line) still
+#: carries it to :func:`nozzle_fit_of`.
+_NOZZLE_FIT_MARK = "# kiln_nozzle_fit = "
+
+#: Two nozzle sizes closer than this are one size.
+_NOZZLE_SAME_MM = 0.005
+
+#: The layer heights a slice states, each held inside the nozzle's window.
+_LAYER_HEIGHT_KEYS: tuple[str, ...] = ("layer_height", "first_layer_height")
+
+#: PrusaSlicer's first-layer line width when a profile states none: this
+#: share of the first layer's HEIGHT, whatever the nozzle.
+_SLICER_FIRST_LAYER_WIDTH_OF_HEIGHT = 2.0
+
+
+def _numbers(raw: Any) -> list[float]:
+    """Every number in a per-extruder value (``0.4`` / ``0.4,0.4`` / ``0.4;0.4``)."""
+    out: list[float] = []
+    for part in str(raw or "").replace(";", ",").split(","):
+        try:
+            out.append(float(part))
+        except ValueError:
+            continue
+    return out
+
+
+def _layer_window_mm(nozzle_mm: float) -> tuple[float, float]:
+    """The thinnest and thickest layer *nozzle_mm* lays well, to 0.01 mm
+    and rounded inward.  The ratios are the adaptive planner's own."""
+    from kiln.adaptive_slicer import _MAX_LAYER_NOZZLE_RATIO, _MIN_LAYER_NOZZLE_RATIO
+
+    low = math.ceil(nozzle_mm * _MIN_LAYER_NOZZLE_RATIO * 100 - 1e-9) / 100
+    high = math.floor(nozzle_mm * _MAX_LAYER_NOZZLE_RATIO * 100 + 1e-9) / 100
+    return low, high
+
+
+def _fit_nozzle(
+    settings: dict[str, str],
+    profile_id: str,
+    *,
+    stated: Collection[str] = (),
+    printer_name: str | None = None,
+) -> dict[str, Any] | None:
+    """Slice for the nozzle that is fitted, in place, and say which.
+
+    A bundled profile is written for its model's stock nozzle.  A machine
+    with another size fitted was sliced at the stock size anyway: the
+    plastic was laid out for a hole the printer does not have.  The size
+    comes from :func:`kiln.assumed_nozzle.nozzle_for_profile` -- the nozzle
+    on record for the machine, else the machine's own setting -- and only
+    those two replace the profile's: a stock size or a default is the
+    profile's own number said twice.
+
+    What follows from the size, and nothing else:
+
+    * ``nozzle_diameter`` -- every slot, when the profile's slots agree.
+      Line widths are left on the slicer's automatic setting in every
+      bundled profile, so they follow it.
+    * the layer heights -- held inside the window the nozzle lays well
+      (:func:`_layer_window_mm`); a 0.2 mm layer through a 0.2 mm nozzle
+      is not a layer.
+    * the first layer's line width -- no bundled profile states one, and
+      the slicer's own is twice the first layer's height whatever the
+      nozzle: 0.4 mm through a 0.8 mm nozzle (measured 2026-10-01).  Where
+      that would be narrower than the nozzle it is set to the slicer's
+      automatic width, like every other line.
+    * the flow ceiling -- unchanged (:func:`_ensure_flow_ceiling`), so a
+      wider line slows down rather than asking the hotend for more.
+
+    Speeds, retraction and cooling stay the profile's.  A key in *stated*
+    is the caller speaking and is never replaced: a stated nozzle size is
+    the answer, and a stated layer height outside the window is kept and
+    named.  Returns what was done, for the reply; ``None`` for a profile
+    that states no nozzle.
+    """
+    sizes = _numbers(settings.get("nozzle_diameter"))
+    if not sizes:
+        return None
+    own = sizes[0]
+    uniform = max(sizes) - min(sizes) <= _NOZZLE_SAME_MM
+    from kiln.assumed_nozzle import AssumedNozzle, nozzle_for_profile
+
+    changed: dict[str, str] = {}
+    if "nozzle_diameter" in stated:
+        answer = AssumedNozzle(own, "stated", printer_name or None)
+    else:
+        answer = nozzle_for_profile(profile_id, printer_name)
+        fitted = answer.source in ("record", "printer_setting")
+        if fitted and uniform and abs(answer.diameter_mm - own) > _NOZZLE_SAME_MM:
+            raw = str(settings["nozzle_diameter"])
+            joiner = ";" if ";" in raw else ","
+            settings["nozzle_diameter"] = joiner.join([f"{answer.diameter_mm:g}"] * len(sizes))
+            changed["nozzle_diameter"] = f"{own:g} -> {answer.diameter_mm:g}"
+        elif not (fitted and uniform):
+            answer = AssumedNozzle(
+                own, "profile", answer.printer_id, answer.record_unreachable, answer.inferred_printer,
+            )
+
+    notes: list[str] = []
+    if uniform:
+        low, high = _layer_window_mm(answer.diameter_mm)
+        for key in _LAYER_HEIGHT_KEYS:
+            heights = _numbers(settings.get(key))
+            if len(heights) != 1 or str(settings.get(key, "")).strip().endswith("%"):
+                continue
+            height = heights[0]
+            held = min(max(height, low), high)
+            if abs(held - height) < 1e-9:
+                continue
+            if key in stated:
+                notes.append(
+                    f"{key} {height:g} mm was asked for and kept; this nozzle lays {low:g}-{high:g} mm well."
+                )
+                continue
+            settings[key] = f"{held:g}"
+            changed[key] = f"{height:g} -> {held:g}"
+            notes.append(f"{key} {height:g} -> {held:g} mm, inside the {low:g}-{high:g} mm this nozzle lays well.")
+
+        first = _numbers(settings.get("first_layer_height"))
+        if (
+            "first_layer_extrusion_width" not in settings
+            and len(first) == 1
+            and first[0] * _SLICER_FIRST_LAYER_WIDTH_OF_HEIGHT < answer.diameter_mm - _NOZZLE_SAME_MM
+        ):
+            settings["first_layer_extrusion_width"] = "0"
+            changed["first_layer_extrusion_width"] = "automatic"
+            notes.append("The first layer's lines are as wide as the rest, not narrower than the nozzle.")
+
+    said = answer.sentence("Sliced")
+    if "nozzle_diameter" in changed:
+        said += (
+            f" The profile is written for {own:g} mm: line widths follow the nozzle,"
+            " and speeds, retraction and cooling are the profile's."
+        )
+    return {
+        "diameter_mm": answer.diameter_mm,
+        "source": answer.source,
+        "printer_id": answer.printer_id,
+        "profile_mm": own,
+        "changed": changed,
+        "note": " ".join([said, *notes]),
+    }
+
+
+def _with_nozzle_fit(ini: str, fit: dict[str, Any] | None) -> str:
+    """*ini* carrying *fit* on its comment line."""
+    if not fit:
+        return ini
+    return f"{ini}{_NOZZLE_FIT_MARK}{json.dumps(fit, sort_keys=True)}\n"
+
+
+def nozzle_fit_of(profile_path: str | None) -> dict[str, Any] | None:
+    """What :func:`_fit_nozzle` did for the profile at *profile_path*, read
+    from the file -- or ``None``: a profile Kiln did not write, or one that
+    cannot be read.  Never raises."""
+    if not profile_path:
+        return None
+    try:
+        with open(profile_path, encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith(_NOZZLE_FIT_MARK):
+                    fit = json.loads(line[len(_NOZZLE_FIT_MARK):])
+                    return fit if isinstance(fit, dict) else None
+    except (OSError, UnicodeDecodeError, ValueError):
+        logger.debug("nozzle fit of %s could not be read", profile_path, exc_info=True)
+    return None
+
+
 def _apply_printer_invariants(settings: dict[str, str], profile_id: str) -> None:
     """The rules that need to know the printer, then every general one."""
     _ensure_flow_ceiling(settings, profile_id)
@@ -536,19 +707,25 @@ def resolve_slicer_profile(
     printer_id: str,
     *,
     overrides: dict[str, str] | None = None,
+    printer_name: str | None = None,
 ) -> str:
     """Write a temporary .ini profile file for *printer_id*.
 
     Generates a PrusaSlicer-compatible INI file from the bundled settings,
     optionally merged with *overrides* (e.g. to change layer height or
-    temperature for a specific job).
+    temperature for a specific job), and sliced for the nozzle that is
+    fitted rather than the model's stock one (:func:`_fit_nozzle`;
+    :func:`nozzle_fit_of` reads back what was done).
 
-    The temp file is cached per ``printer_id`` + ``overrides`` combination
+    The temp file is cached per ``printer_id`` + effective settings
     so that repeated calls don't create new files.
 
     Args:
         printer_id: Printer model identifier.
         overrides: Optional key-value pairs to override bundled settings.
+        printer_name: The machine the slice is for, when the door knows it.
+            Left out, it is the one registered machine that slices with
+            this profile, if there is exactly one.
 
     Returns:
         Absolute path to the generated ``.ini`` file.
@@ -557,18 +734,23 @@ def resolve_slicer_profile(
     merged = dict(profile.settings)
     if overrides:
         merged.update(overrides)
+    # Before the printer invariants: the estimate's motion limits are read
+    # for the nozzle the slice is for.
+    fit = _fit_nozzle(merged, profile.id, stated=overrides or (), printer_name=printer_name)
     # After the merge: an override can switch relative-E on, replace the
     # layer_gcode that was satisfying the rule, change the temperatures the
     # start floor quotes, change a speed a derived one is tied to, or state
     # a flow ceiling or machine limits of its own.
     _apply_printer_invariants(merged, profile.id)
 
-    # Build a cache key from the effective settings.
-    cache_key = f"{profile.id}:{_settings_hash(merged)}"
+    # Build a cache key from the effective settings and the nozzle answer:
+    # two machines can reach the same settings for different reasons, and
+    # the file says the reason.
+    cache_key = f"{profile.id}:{_settings_hash({**merged, _NOZZLE_FIT_MARK: json.dumps(fit, sort_keys=True)})}"
     if cache_key in _temp_cache and os.path.isfile(_temp_cache[cache_key]):
         return _temp_cache[cache_key]
 
-    ini_content = _settings_to_ini(merged, profile.display_name)
+    ini_content = _with_nozzle_fit(_settings_to_ini(merged, profile.display_name), fit)
 
     tmp_dir = os.path.join(tempfile.gettempdir(), "kiln_slicer_profiles")
     os.makedirs(tmp_dir, mode=0o700, exist_ok=True)
@@ -887,6 +1069,7 @@ def resolve_multiextruder_profile(
     num_extruders: int = 4,
     *,
     overrides: dict[str, str] | None = None,
+    printer_name: str | None = None,
 ) -> str:
     """Write a temporary .ini profile for *printer_id* with multi-extruder support.
 
@@ -912,6 +1095,8 @@ def resolve_multiextruder_profile(
         printer_id: Printer model identifier (e.g. ``"bambu_a1"``).
         num_extruders: Number of extruder slots (2–4 for AMS).
         overrides: Optional key-value pairs added after profile merging.
+        printer_name: The machine the slice is for, as for
+            :func:`resolve_slicer_profile`.
 
     Returns:
         Absolute path to the generated ``.ini`` file.
@@ -934,18 +1119,23 @@ def resolve_multiextruder_profile(
 
     if overrides:
         merged.update(overrides)
+    fit = _fit_nozzle(merged, profile.id, stated=overrides or (), printer_name=printer_name)
     # This builder used to set layer_gcode unconditionally, which was right
     # for the Bambu profiles it is used with and wrong for anything with
     # absolute E.  The shared invariants check before they write.
     _apply_printer_invariants(merged, profile.id)
 
-    cache_key = f"{profile.id}_mme{num_extruders}:{_settings_hash(merged)}"
+    fit_key = _settings_hash({**merged, _NOZZLE_FIT_MARK: json.dumps(fit, sort_keys=True)})
+    cache_key = f"{profile.id}_mme{num_extruders}:{fit_key}"
     if cache_key in _temp_cache and os.path.isfile(_temp_cache[cache_key]):
         return _temp_cache[cache_key]
 
-    ini_content = _settings_to_ini(
-        merged,
-        f"{profile.display_name} (AMS {num_extruders}-color)",
+    ini_content = _with_nozzle_fit(
+        _settings_to_ini(
+            merged,
+            f"{profile.display_name} (AMS {num_extruders}-color)",
+        ),
+        fit,
     )
 
     tmp_dir = os.path.join(tempfile.gettempdir(), "kiln_slicer_profiles")

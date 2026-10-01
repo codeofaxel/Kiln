@@ -13360,7 +13360,8 @@ def _resolve_slice_profile_context(
     if effective_profile is None and effective_printer_id:
         try:
             effective_profile = resolve_slicer_profile(
-                effective_printer_id, overrides=overrides or None
+                effective_printer_id, overrides=overrides or None,
+                printer_name=printer_name,
             )
         except Exception as exc:
             logger.debug("Profile resolution failed for %s: %s", effective_printer_id, exc)

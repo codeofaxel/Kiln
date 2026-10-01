@@ -1844,6 +1844,12 @@ class _SlicerToolsPlugin:
                     a second print on an occupied plate is a kiln-pro feature
                     (https://kiln3d.com/pricing).
 
+            A bundled profile is sliced for the nozzle fitted to the machine --
+            the nozzle on record for it, else the printer's own setting --
+            rather than the model's stock size.  The response's ``nozzle``
+            block names the size, where it came from and what was changed to
+            suit it; tell the user when it is not the stock size.
+
             Returns a JSON object with the output G-code path.  The output file
             can then be uploaded to a printer with ``upload_file`` and printed
             with ``start_print``.
@@ -2144,6 +2150,7 @@ class _SlicerToolsPlugin:
                         effective_profile = resolve_slicer_profile(
                             effective_printer_id,
                             overrides=parsed_overrides or None,
+                            printer_name=printer_name,
                         )
                     except Exception as exc:
                         _logger.debug(
@@ -2472,6 +2479,7 @@ class _SlicerToolsPlugin:
                             effective_profile = resolve_slicer_profile(
                                 effective_printer_id,
                                 overrides=parsed_overrides,
+                                printer_name=printer_name,
                             )
                         except Exception as _exc:
                             _logger.debug(
@@ -2639,6 +2647,7 @@ class _SlicerToolsPlugin:
                         try:
                             merged = resolve_slicer_profile(
                                 effective_printer_id, overrides=final_overrides,
+                                printer_name=printer_name,
                             )
                         except Exception:
                             _logger.debug("Profile override injection failed", exc_info=True)

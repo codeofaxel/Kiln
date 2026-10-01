@@ -873,7 +873,8 @@ class _GenerationAIToolsPlugin:
                     if _sg_patch:
                         try:
                             effective_profile = resolve_slicer_profile(
-                                effective_printer_id, overrides=_sg_patch
+                                effective_printer_id, overrides=_sg_patch,
+                                printer_name=printer_name,
                             )
                             start_handoff = _sg_reason.removeprefix("handoff:")
                         except Exception:
