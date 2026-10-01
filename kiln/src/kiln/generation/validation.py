@@ -2508,7 +2508,8 @@ def compare_meshes(
     triangle count change, center-of-mass shift, and a sampled
     Hausdorff-like distance (how far the meshes differ spatially).
 
-    Works with STL, OBJ, and GLB files.
+    Works with STL, OBJ, and GLB files.  A STEP file is converted first,
+    through the shared door, so two CAD revisions compare as they are.
 
     Args:
         file_a: Path to the first (reference) mesh.
@@ -2517,6 +2518,9 @@ def compare_meshes(
     Returns:
         Dict with comparison metrics.
     """
+    from kiln.step_import import ensure_mesh_path
+
+    file_a, file_b = ensure_mesh_path(file_a)[0], ensure_mesh_path(file_b)[0]
     a = analyze_mesh(file_a)
     b = analyze_mesh(file_b)
 
