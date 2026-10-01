@@ -129,31 +129,66 @@ class TestTheRecordLookup:
         monkeypatch.setattr(bridge, "_record_memo", {})
         monkeypatch.setattr(bridge, "_service_down_until", 0.0)
 
-    def test_a_recorded_nozzle_is_returned(self, monkeypatch):
+    @staticmethod
+    def _record_beside(monkeypatch, lookup):
+        """kiln-pro installed beside Kiln, its record door answering with
+        *lookup* -- which hands back a recorded nozzle or ``None``, and never
+        a catalogue default: that door reads the record and nothing else."""
+        import sys
+        import types
+
+        store = types.ModuleType("kiln_pro.nozzle_intelligence.store_resolver")
+        store.recorded_nozzle = lambda printer_id, *, tool_name: lookup(printer_id)
+        package = types.ModuleType("kiln_pro.nozzle_intelligence")
+        package.store_resolver = store
+        root = types.ModuleType("kiln_pro")
+        root.nozzle_intelligence = package
+        monkeypatch.setitem(sys.modules, "kiln_pro", root)
+        monkeypatch.setitem(sys.modules, "kiln_pro.nozzle_intelligence", package)
+        monkeypatch.setitem(sys.modules, "kiln_pro.nozzle_intelligence.store_resolver", store)
         monkeypatch.setattr(bridge, "available", lambda: True)
-        monkeypatch.setattr(
-            bridge, "consult_nozzle_summary",
-            lambda pid: {"diameter_mm": 0.6, "trusted_for_verdicts": True},
-        )
+
+    def test_a_recorded_nozzle_is_returned(self, monkeypatch):
+        import types
+
+        self._record_beside(monkeypatch, lambda pid: types.SimpleNamespace(diameter_mm=0.6))
         assert bridge.consult_recorded_nozzle("shop_a1") == {"diameter_mm": 0.6, "answered": True}
 
     def test_with_kiln_pro_beside_it_the_record_is_asked_every_time(self, monkeypatch):
         # A nozzle recorded a moment ago must be the next check's answer,
         # and a process answering for many accounts must remember none of them.
-        on_record = {"diameter_mm": 0.4, "trusted_for_verdicts": True}
-        monkeypatch.setattr(bridge, "available", lambda: True)
-        monkeypatch.setattr(bridge, "consult_nozzle_summary", lambda pid: dict(on_record))
+        import types
+
+        on_record = types.SimpleNamespace(diameter_mm=0.4)
+        self._record_beside(monkeypatch, lambda pid: on_record)
         assert bridge.consult_recorded_nozzle("shop_a1")["diameter_mm"] == 0.4
-        on_record["diameter_mm"] = 0.6
+        on_record.diameter_mm = 0.6
         assert bridge.consult_recorded_nozzle("shop_a1")["diameter_mm"] == 0.6
         assert bridge._record_memo == {}
 
-    def test_a_catalogue_default_is_nobodys_record(self, monkeypatch):
-        monkeypatch.setattr(bridge, "available", lambda: True)
-        monkeypatch.setattr(
-            bridge, "consult_nozzle_summary",
-            lambda pid: {"diameter_mm": 0.4, "trusted_for_verdicts": False},
-        )
+    def test_no_record_is_no_answer(self, monkeypatch):
+        self._record_beside(monkeypatch, lambda pid: None)
+        assert bridge.consult_recorded_nozzle("shop_a1") == {"diameter_mm": None, "answered": True}
+
+    def test_the_record_is_asked_for_and_nothing_else(self, monkeypatch):
+        """The lookup that also fetched a catalogue default is not called:
+        a default is nobody's record, and fetching one reads printer data a
+        tool that only resolves a nozzle never asked to read."""
+        import types
+
+        self._record_beside(monkeypatch, lambda pid: types.SimpleNamespace(diameter_mm=0.6))
+
+        def summary(_pid):
+            raise AssertionError("the summary lookup fetches a catalogue default")
+
+        monkeypatch.setattr(bridge, "consult_nozzle_summary", summary)
+        assert bridge.consult_recorded_nozzle("shop_a1")["diameter_mm"] == 0.6
+
+    def test_a_record_door_that_fails_is_no_answer(self, monkeypatch):
+        def broken(_pid):
+            raise RuntimeError("store unreadable")
+
+        self._record_beside(monkeypatch, broken)
         assert bridge.consult_recorded_nozzle("shop_a1") == {"diameter_mm": None, "answered": True}
 
     def test_without_kiln_pro_the_served_door_is_asked(self, monkeypatch):
