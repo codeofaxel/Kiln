@@ -270,7 +270,9 @@ def _served_recorded_nozzle(printer_id: str) -> dict[str, Any]:
     try:
         from kiln.server import _pro_api_call
 
-        answer = _pro_api_call(RECORD_TOOL, _timeout=_CONSULT_TIMEOUT_S, printer_id=printer_id)
+        answer = _pro_api_call(
+            RECORD_TOOL, _timeout=_CONSULT_TIMEOUT_S, _asked_by_user=False, printer_id=printer_id
+        )
     except Exception as exc:  # noqa: BLE001 -- the network is a degrade, never a check
         logger.debug("nozzle record not served", exc_info=True)
         _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
@@ -328,7 +330,7 @@ def _served_only_recorded_nozzle() -> dict[str, Any]:
     try:
         from kiln.server import _pro_api_call
 
-        answer = _pro_api_call("list_nozzle_states", _timeout=_CONSULT_TIMEOUT_S)
+        answer = _pro_api_call("list_nozzle_states", _timeout=_CONSULT_TIMEOUT_S, _asked_by_user=False)
     except Exception as exc:  # noqa: BLE001 -- the network is a degrade, never a check
         logger.debug("nozzle records not served", exc_info=True)
         _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
@@ -394,7 +396,7 @@ def _served_sliced_file(printer_id: str, file_nozzle_mm: float) -> dict[str, Any
         return None
     kwargs = with_local_reading(RECORD_TOOL, {"printer_id": printer_id, "file_nozzle_mm": file_nozzle_mm})
     try:
-        answer = _pro_api_call(RECORD_TOOL, _timeout=_CONSULT_TIMEOUT_S, **kwargs)
+        answer = _pro_api_call(RECORD_TOOL, _timeout=_CONSULT_TIMEOUT_S, _asked_by_user=False, **kwargs)
     except Exception as exc:  # noqa: BLE001 -- the network is a degrade, never a print
         logger.debug("nozzle record comparison not served", exc_info=True)
         miss = classify_transport_error(exc)
