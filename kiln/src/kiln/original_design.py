@@ -941,11 +941,21 @@ def audit_original_design(
     ):
         try:
             overlay = _po_pro_features.printability_overlay
-            enriched = overlay.enrich_printability_report(
-                printability.to_dict(),
-                material,
-                printer_model,
-            )
+            # For the nozzle the check above ran with, not the overlay's
+            # own baseline: its floors scale with the size.
+            checked_for = (getattr(printability, "nozzle", None) or {}).get("diameter_mm")
+            try:
+                enriched = overlay.enrich_printability_report(
+                    printability.to_dict(),
+                    material,
+                    printer_model,
+                    **({"nozzle_diameter_mm": checked_for} if checked_for else {}),
+                )
+            except TypeError:
+                # A kiln-pro from before the overlay took a nozzle size.
+                enriched = overlay.enrich_printability_report(
+                    printability.to_dict(), material, printer_model,
+                )
             enrichment_block = (
                 enriched.get("enrichment") if isinstance(enriched, dict) else None
             )

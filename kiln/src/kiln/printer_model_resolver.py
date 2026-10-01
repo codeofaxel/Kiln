@@ -136,10 +136,10 @@ def _read_printer_model_from_config() -> str | None:
             known = get_build_volume(model_str) is not None or owner_stated_build_volume(model_str) is not None
             if model_str != model_str.lower() or not known:
                 logger.warning(
-                    "printer_model=%r in %s doesn't match any known printer "
-                    "in printer_intelligence.json.  Safety checks will be "
-                    "skipped.  Keys are case-sensitive (bambu_a1, not "
-                    "bambu_A1).  Check the JSON file for valid values.",
+                    "printer_model=%r in %s doesn't match any known printer.  "
+                    "Safety checks will be skipped.  Set it again with "
+                    "`kiln set-model` or the `set_printer_model` tool, which "
+                    "write the spelling Kiln reads.",
                     model_str, _CONFIG_PATH,
                 )
         except Exception:

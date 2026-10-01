@@ -120,21 +120,37 @@ def _printer_setting_mm(printer_id: str) -> float | None:
     return size
 
 
+def _key(name: str | None) -> str:
+    return (name or "").lower().replace("-", "_").strip()
+
+
 def _profile_id_of(printer_id: str) -> str | None:
     """The bundled slicer profile *printer_id* slices with -- by its own name
     or by its model -- or ``None``.  The "default" profile is never an
     answer: it is the fallback for a printer nobody identified."""
     try:
-        from kiln.printer_model_resolver import resolve_printer_model_for
         from kiln.slicer_profiles import list_slicer_profiles
 
         known = set(list_slicer_profiles()) - {"default"}
-        for key in (printer_id, resolve_printer_model_for(printer_id) or ""):
-            key = key.lower().replace("-", "_").strip()
-            if key in known:
-                return key
+        if _key(printer_id) in known:
+            return _key(printer_id)
+        model = _model_key_of(printer_id)
+        return model if model in known else None
     except Exception:  # noqa: BLE001
         logger.debug("assumed nozzle: profile lookup failed", exc_info=True)
+    return None
+
+
+def _model_key_of(printer_name: str) -> str | None:
+    """The model the saved printer *printer_name* is set up as, as a key, or
+    ``None`` when it has none.  A catalogue model or one set up on this
+    machine alike: it is what a slice for that printer is asked for by."""
+    try:
+        from kiln.printer_model_resolver import resolve_printer_model_for
+
+        return _key(resolve_printer_model_for(printer_name)) or None
+    except Exception:  # noqa: BLE001
+        logger.debug("assumed nozzle: model lookup failed", exc_info=True)
     return None
 
 
@@ -227,28 +243,27 @@ def assumed_nozzle(
 
 
 def nozzle_for_profile(profile_id: str, printer_name: str | None = None) -> AssumedNozzle:
-    """The nozzle a slice with the bundled profile *profile_id* is for.
+    """The nozzle a slice for the model *profile_id* is for.
 
-    A slicing door names a profile, and not always a machine.  The machine
-    is *printer_name* when the door has one; else the one registered machine
-    that slices with this profile; else nobody, and the profile id itself is
-    asked (a nozzle recorded under the model's name, else its stock size).
-    A named machine counts only when it slices with this profile or its
-    model is unknown.  Several machines sharing the profile are never
-    picked between.  The
-    generic profile belongs to no model, so it is the only printer Kiln
-    knows of, as for any check that names none.  Never raises.
+    A slicing door names a model, and not always a machine.  The machine is
+    *printer_name* when the door has one; else the one registered machine
+    set up as this model; else nobody, and the model's own name is asked (a
+    nozzle recorded under it, else its stock size).  A named machine counts
+    only when it is this model or its model is unknown.  Several machines
+    of one model are never picked between.  The generic profile belongs to
+    no model, so it is the only printer Kiln knows of, as for any check
+    that names none.  Never raises.
     """
     named = (printer_name or "").strip()
-    key = (profile_id or "").lower().replace("-", "_").strip()
-    # A named machine known to slice with ANOTHER profile is not the machine
-    # this slice is for: the door asked for a different model on purpose.
-    if named and _profile_id_of(named) in (None, key):
+    key = _key(profile_id)
+    # A named machine set up as ANOTHER model is not the machine this slice
+    # is for: the door asked for a different model on purpose.
+    if named and (_key(named) == key or _model_key_of(named) in (None, key)):
         return assumed_nozzle(named)
     if not key or key == "default":
         return assumed_nozzle(None, or_only_printer=True)
     machines = _registered_machines()
-    sharing = [name for name in machines if _profile_id_of(name) == key]
+    sharing = [name for name in machines if _key(name) == key or _model_key_of(name) == key]
     if len(sharing) == 1:
         answer = assumed_nozzle(sharing[0])
         return AssumedNozzle(

@@ -4183,7 +4183,11 @@ def use(name: str) -> None:
     help="Read the model from a project saved in Bambu Studio, OrcaSlicer or PrusaSlicer.",
 )
 @click.option("--printer", "printer_name", help="The saved printer to set (default: the active one).")
-@click.option("--replace", is_flag=True, help="Change a printer that already has a different model.")
+@click.option(
+    "--replace",
+    is_flag=True,
+    help="Change a printer that already has a different model, or take a newer file's bed.",
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def set_model(
     model: str | None, slicer_file: str | None, printer_name: str | None, replace: bool, json_mode: bool,
@@ -4193,6 +4197,9 @@ def set_model(
     Name the MODEL ("Bambu Lab A1", "MK4"), or pass --from-file with a
     project saved from your slicer.  Kiln checks prints against that
     model's bed and temperature limits; with no model set, it cannot.
+
+    A printer outside Kiln's catalogue is set up from its slicer file: Kiln
+    saves the file's bed with its own generic limits.
     """
     from kiln.printer_setup import set_printer_model
 

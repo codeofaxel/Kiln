@@ -291,9 +291,9 @@ class BambuPrintSettings:
     ``filament_type`` and ``nozzle_diameter`` its slicer wrote (every Kiln
     slice carries both, see :mod:`kiln.slicer_filament`) -- and falls back
     to PLA on the A1 with its stock nozzle (220 / 65 / ``PLA`` / 0.4) only
-    for a body that says nothing.  A value the caller states always wins.  Whatever
-    the type's origin, it reaches the printer in Bambu's own vocabulary
-    (:func:`bambu_filament_type`).
+    for a body that says nothing.  A value the caller states always wins.
+    Whatever the type's origin, it reaches the printer in Bambu's own
+    vocabulary (:func:`bambu_filament_type`).
 
     For multi-color prints, set ``num_filaments`` > 1 and provide
     ``filament_colors`` / ``filament_types`` lists with that many entries.
@@ -822,9 +822,9 @@ def resolve_settings_from_gcode(settings: BambuPrintSettings, gcode_body: str) -
     The G-code is the artifact that knows what the slice was for: the type
     its slicer wrote (``; filament_type = PETG``, the resolved material of
     a Kiln slice), the nozzle it was sliced for, and the temperatures it
-    heats to.  A caller that stated a value keeps it.  Every type -- stated, read, or fallen back to -- is
-    then put into Bambu's vocabulary, so nothing outside it reaches the
-    machine.
+    heats to.  A caller that stated a value keeps it.  Every type --
+    stated, read, or fallen back to -- is then put into Bambu's vocabulary,
+    so nothing outside it reaches the machine.
     """
     hotend, bed = _print_temperatures(gcode_body)
     nozzle_diameter = settings.nozzle_diameter

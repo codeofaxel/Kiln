@@ -17,7 +17,10 @@ the shape each slicer writes.
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
+import struct
 import zipfile
 from pathlib import Path
 
@@ -34,6 +37,23 @@ from kiln.printer_setup import (
     read_slicer_setup,
     set_printer_model,
 )
+
+_PRUSASLICER = shutil.which("prusa-slicer") or shutil.which("PrusaSlicer") or next(
+    (p for p in ("/Applications/PrusaSlicer.app/Contents/MacOS/PrusaSlicer",) if os.access(p, os.X_OK)), None,
+)
+
+
+def _plate(path: Path) -> str:
+    """A 40 x 30 x 4 mm plate at the origin, as a binary STL."""
+    v = [(0, 0, 0), (40, 0, 0), (40, 30, 0), (0, 30, 0), (0, 0, 4), (40, 0, 4), (40, 30, 4), (0, 30, 4)]
+    faces = [
+        (0, 3, 2), (0, 2, 1), (4, 5, 6), (4, 6, 7), (0, 1, 5), (0, 5, 4),
+        (1, 2, 6), (1, 6, 5), (2, 3, 7), (2, 7, 6), (3, 0, 4), (3, 4, 7),
+    ]
+    body = b"".join(struct.pack("<12fH", 0.0, 0.0, 0.0, *v[a], *v[b], *v[c], 0) for a, b, c in faces)
+    path.write_bytes(b"\0" * 80 + struct.pack("<I", len(faces)) + body)
+    return str(path)
+
 
 # ---------------------------------------------------------------------------
 # Slicer files, in the shape each slicer writes
@@ -433,6 +453,64 @@ class TestAPrinterOutsideTheCatalogue:
         settings = ini_to_settings(resolve_slicer_profile(ACME))
         assert settings["bed_shape"] == "0x0,300x0,300x300,0x300"
         assert settings["max_print_height"] == "400"
+
+    def test_a_slice_for_it_is_for_the_nozzle_on_record_for_that_machine(self, config, tmp_path, monkeypatch):
+        """It slices with the generic profile, and is still asked for by its
+        own model: the machine set up as it answers for the nozzle."""
+        from kiln.slicer_orca import ini_to_settings
+        from kiln.slicer_profiles import nozzle_fit_of, resolve_slicer_profile
+
+        set_printer_model(slicer_file=_acme_project(tmp_path / "part.3mf"), printer_name="shed", config_path=config)
+
+        class _Registry:
+            def list_machines(self):
+                return ["garage", "shed"]
+
+        monkeypatch.setattr("kiln.registry.get_printer_registry", lambda: _Registry())
+        monkeypatch.setattr(
+            bridge, "consult_recorded_nozzle",
+            lambda pid: {"diameter_mm": 0.6 if pid == "shed" else None, "answered": True},
+        )
+        path = resolve_slicer_profile(ACME)
+        assert ini_to_settings(path)["nozzle_diameter"] == "0.6"
+        assert nozzle_fit_of(path)["printer_id"] == "shed"
+
+    def test_every_slicing_door_finds_it_by_its_own_key(self, config, tmp_path):
+        """The doors turn a printer's model into a profile id through one
+        shared mapping, and it answered ``None`` for a printer set up here:
+        the slice then ran on the slicer's own bed.  Found by slicing
+        through the real tool, not by any test of the profile resolver."""
+        from kiln.printer_profile_ids import map_printer_hint_to_profile_id
+
+        assert map_printer_hint_to_profile_id(ACME) is None
+        set_printer_model(slicer_file=_acme_project(tmp_path / "part.3mf"), printer_name="shed", config_path=config)
+        assert map_printer_hint_to_profile_id(ACME) == ACME
+        # A key nobody set up keeps the answer it always had.
+        assert map_printer_hint_to_profile_id("custom_ender3") == map_printer_hint_to_profile_id("ender3")
+
+    @pytest.mark.skipif(_PRUSASLICER is None, reason="PrusaSlicer not installed")
+    def test_the_slicing_tool_lays_a_part_out_on_its_bed(self, config, tmp_path):
+        """Through the registered tool, read from the G-code: a 40 mm plate
+        lands in the middle of the 300 mm bed, not the middle of the 200 mm
+        one the slicer assumes when nobody tells it."""
+        import asyncio
+
+        from kiln import server
+
+        set_printer_model(slicer_file=_acme_project(tmp_path / "part.3mf"), printer_name="shed", config_path=config)
+        out = asyncio.run(server.mcp.call_tool("slice_model", {
+            "input_path": _plate(tmp_path / "plate.stl"), "output_dir": str(tmp_path / "out"),
+            "printer_name": "shed", "slicer_path": _PRUSASLICER, "material": "PLA",
+        }))
+        reply = json.loads((out[0] if isinstance(out, tuple) else out)[0].text)
+        assert reply["success"] is True, reply
+        assert reply["printer_id"] == ACME and reply["nozzle"]["diameter_mm"] == 0.4
+
+        gcode = Path(reply["output_path"]).read_text(encoding="utf-8", errors="replace")
+        xs = [float(x) for x in re.findall(r"^G1 X(-?\d+\.?\d*) Y-?\d+\.?\d* E", gcode, re.MULTILINE)]
+        ys = [float(y) for y in re.findall(r"^G1 X-?\d+\.?\d* Y(-?\d+\.?\d*) E", gcode, re.MULTILINE)]
+        assert (min(xs) + max(xs)) / 2 == pytest.approx(150.0, abs=3.0)
+        assert (min(ys) + max(ys)) / 2 == pytest.approx(150.0, abs=3.0)
 
     def test_the_generic_profile_and_a_bundled_one_keep_their_own_bed(self, config, tmp_path):
         from kiln.slicer_orca import ini_to_settings

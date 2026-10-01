@@ -12265,25 +12265,34 @@ def set_printer_model(
       was set up for.  Ask a new user for one instead of asking them to
       look up a model key.
 
+    A printer that is NOT in Kiln's catalogue can still be set up, but only
+    from a slicer file: the file states its bed, which is the one fact Kiln
+    cannot do without.  Kiln then saves the printer on this machine with
+    that bed and its own generic limits (never a limit read from the file),
+    lays slices out on that bed and measures designs against it.  It has no
+    tuned profile for such a printer and will not move its head.  A name
+    alone for a printer outside the catalogue is refused (``UNKNOWN_MODEL``,
+    with the closest matches); ask for the slicer file.
+
     Args:
         printer_model: The model, in any spelling the catalogue knows.
         slicer_file: Path to a saved slicer project or exported settings.
         printer_name: The saved printer to set.  Omit for the active one.
         replace: Allow changing a printer that already has a different
-            model.  Off by default: the model decides the limits Kiln
-            checks against, so a wrong one is worse than none.
+            model, or taking a newer file's bed for a printer set up from
+            an earlier file.  Off by default: the model decides the limits
+            Kiln checks against, so a wrong one is worse than none.
 
-    Returns ``applied`` (whether anything changed), the ``printer`` and its
-    ``printer_model``, and a ``message`` to relay.  From a slicer file it
-    also returns ``file`` -- the printer, bed, nozzle size and material the
-    file states -- and ``notes`` where the file's bed or nozzle differs from
-    what Kiln holds.  The notes change nothing: relay them, and if the
-    file's nozzle is the one fitted, record it.
+    Returns ``applied`` (whether anything changed), the ``printer``, its
+    ``printer_model`` and ``in_catalogue``, and a ``message`` to relay.
+    From a slicer file it also returns ``file`` -- the printer, bed, nozzle
+    size and material the file states -- and ``notes`` where the file's bed
+    or nozzle differs from what Kiln holds.  The notes change nothing:
+    relay them, and if the file's nozzle is the one fitted, record it.
 
-    Nothing is written for a model the catalogue does not hold
-    (``UNKNOWN_MODEL``, with the closest matches), a model that does not
-    suit the printer's connection, or a printer that already has another
-    model unless ``replace`` is set.
+    Nothing is written for a model that does not suit the printer's
+    connection, or over another model unless ``replace`` is set.  Limits an
+    owner typed for a printer are never written over.
     """
     if err := _check_auth("admin"):
         return err

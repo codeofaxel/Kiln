@@ -757,8 +757,10 @@ def resolve_slicer_profile(
     if overrides:
         merged.update(overrides)
     # Before the printer invariants: the estimate's motion limits are read
-    # for the nozzle the slice is for.
-    fit = _fit_nozzle(merged, profile.id, stated=overrides or (), printer_name=printer_name)
+    # for the nozzle the slice is for.  A printer with no bundled profile is
+    # still asked for by the model the door named, not by the generic one's.
+    model = profile.id if profile.id != "default" else printer_id
+    fit = _fit_nozzle(merged, model, stated=overrides or (), printer_name=printer_name)
     # After the merge: an override can switch relative-E on, replace the
     # layer_gcode that was satisfying the rule, change the temperatures the
     # start floor quotes, change a speed a derived one is tied to, or state
@@ -1141,7 +1143,8 @@ def resolve_multiextruder_profile(
 
     if overrides:
         merged.update(overrides)
-    fit = _fit_nozzle(merged, profile.id, stated=overrides or (), printer_name=printer_name)
+    model = profile.id if profile.id != "default" else printer_id
+    fit = _fit_nozzle(merged, model, stated=overrides or (), printer_name=printer_name)
     # This builder used to set layer_gcode unconditionally, which was right
     # for the Bambu profiles it is used with and wrong for anything with
     # absolute E.  The shared invariants check before they write.

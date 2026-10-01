@@ -127,7 +127,8 @@ def _numbers(raw: str | None) -> list[float]:
     return out
 
 
-def _first_word(raw: str | None) -> str | None:
+def _first_item(raw: str | None) -> str | None:
+    """The first entry of a per-extruder value, or ``None`` when it is blank."""
     value = str(raw or "").replace(";", ",").split(",")[0].strip().strip('"')
     return value or None
 
@@ -162,17 +163,17 @@ def read_slicer_setup(file_path: str) -> SlicerSetup:
         raise SetupFileError(
             f"{os.path.basename(path)} holds no slicer settings.  Kiln reads a project saved from "
             "Bambu Studio, OrcaSlicer or PrusaSlicer (File > Save Project), or a printer settings "
-            "file exported from one of them -- not a bare model or sliced G-code."
+            "file exported from one of them; a bare model states none."
         )
     sizes = _numbers(settings.get("nozzle_diameter"))
     uniform = bool(sizes) and max(sizes) - min(sizes) <= _NOZZLE_SAME_MM
     return SlicerSetup(
         path=path,
-        printer=next((name for key in _PRINTER_NAME_KEYS if (name := _first_word(settings.get(key)))), None),
+        printer=next((name for key in _PRINTER_NAME_KEYS if (name := _first_item(settings.get(key)))), None),
         nozzle_mm=sizes[0] if uniform else None,
-        nozzle_material=_first_word(settings.get("nozzle_type")),
+        nozzle_material=_first_item(settings.get("nozzle_type")),
         bed_mm=_bed_of(settings),
-        material=_first_word(settings.get("filament_type")),
+        material=_first_item(settings.get("filament_type")),
     )
 
 
@@ -404,12 +405,18 @@ def set_printer_model(
 
     if key is None:
         nearest = f"  Closest in the catalogue: {', '.join(close)}." if close else ""
+        needs = (
+            "This file names the printer and not its bed; a project saved with the printer chosen states both, "
+            "and the bed is what Kiln needs to set it up."
+            if setup is not None else
+            "If none is, hand Kiln a project saved from your slicer with this printer chosen: its bed size "
+            "is what Kiln needs to set the printer up."
+        )
         return refused(
             "UNKNOWN_MODEL",
             f"{named!r} is not a printer in Kiln's catalogue, so nothing was changed: an unrecognised "
             f"model skips the bed and temperature checks just as a missing one does.{nearest}  "
-            "If one of those is the same machine, name it.  If none is, hand Kiln a project saved from "
-            "your slicer with this printer chosen: its bed size is what Kiln needs to set the printer up.",
+            f"If one of those is the same machine, name it.  {needs}",
         )
     if wanted and wanted not in saved:
         return refused(
