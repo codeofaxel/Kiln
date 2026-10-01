@@ -1272,7 +1272,10 @@ def _auto_wrap_bambu_3mf(
         # unexpected builder return must cost the warning and never the print.
         # The warning itself is covered against the real builder in
         # TestStartGcodeSubstitutionIsAudible.
-        return (threemf_path, getattr(wrap, "start_gcode_warning", None))
+        # What the start sequence is not, said together: another machine's
+        # or nozzle's warm-up, and a bed levelled somewhere this print is not.
+        notes = [getattr(wrap, "start_gcode_warning", None), getattr(wrap, "levelling_warning", None)]
+        return (threemf_path, " ".join(n for n in notes if n) or None)
     except Exception as exc:  # noqa: BLE001
         _logger.warning("Bambu auto-wrap failed: %s — leaving as raw gcode", exc)
         return (None, f"Bambu auto-wrap failed: {exc}")

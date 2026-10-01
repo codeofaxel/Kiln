@@ -4393,6 +4393,7 @@ class BambuAdapter(PrinterAdapter):
         resume_mode: bool = False,
         quiet_start: dict[str, Any] | None = None,
         lift_floor_mm: float | None = None,
+        bed_type: str | None = None,
     ) -> str:
         """Wrap PrusaSlicer gcode in a Bambu-compatible 3MF.
 
@@ -4431,11 +4432,16 @@ class BambuAdapter(PrinterAdapter):
             :func:`kiln.printers.bambu_3mf.build_bambu_3mf`.
         :param lift_floor_mm: Other parts on the plate: every Kiln-owned
             lift in the file rises to at least this height.
+        :param bed_type: The plate fitted -- ``textured_plate``, ``hot_plate``
+            (smooth PEI), ``cool_plate``, ``eng_plate`` or
+            ``supertack_plate``.  Omitted, the textured plate.  The start
+            sequence trims the nozzle height for the plate it is told.
         :returns: Path to the output 3MF file.
         :raises FileNotFoundError: If the gcode file doesn't exist.
-        :raises ValueError: If the gcode has no layer changes.
+        :raises ValueError: If the gcode has no layer changes, or the plate
+            is not one Kiln knows.
         """
-        from kiln.printers.bambu_3mf import BambuPrintSettings, build_bambu_3mf
+        from kiln.printers.bambu_3mf import TEXTURED_PLATE, BambuPrintSettings, build_bambu_3mf
 
         abs_path = os.path.abspath(gcode_path)
         if not os.path.isfile(abs_path):
@@ -4463,6 +4469,7 @@ class BambuAdapter(PrinterAdapter):
             num_filaments=num_filaments,
             filament_colors=filament_colors,
             filament_types=filament_types,
+            bed_type=bed_type or TEXTURED_PLATE,
         )
 
         result = build_bambu_3mf(

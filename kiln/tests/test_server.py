@@ -2988,6 +2988,7 @@ class TestWrapGcodeAs3mf:
             filament_types=None,
             stl_paths=None,
             resume_mode=False,
+            bed_type=None,
         )
 
     @patch("kiln.server._get_adapter")
@@ -3132,6 +3133,7 @@ class TestWrapGcodeAs3mf:
             filament_types=None,
             stl_paths=None,
             resume_mode=False,
+            bed_type=None,
         )
 
     @patch("kiln.server._get_adapter")
