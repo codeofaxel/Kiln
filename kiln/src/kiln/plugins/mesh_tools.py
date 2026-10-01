@@ -1809,18 +1809,21 @@ class _MeshToolsPlugin:
         ) -> dict:
             """Rough print time estimate from mesh geometry (STL/OBJ/GLB; a STEP file is converted first).
 
-            Uses model height, surface area, and layer count to approximate
-            print duration. This is a ballpark estimate -- actual time depends
-            on slicer settings, infill density, supports, and acceleration.
+            Divides the plastic the part needs by the rate a print head lays
+            it down, plus per-layer overhead.  It is a planning figure for a
+            printer it is not told about: ``range_seconds`` is how far a real
+            slice has sat from it, and the printer is most of that spread.
 
-            Unlike estimate_print_time (which uses slicer profiles), this
-            works directly on mesh files before slicing.
+            Unlike estimate_print_time (which slices the part with the
+            printer's profile, and is the real answer when a slicer is
+            installed), this works directly on mesh files before slicing.
 
             :param file_path: Path to mesh file.
             :param layer_height_mm: Layer height for slicing.
             :param print_speed_mm_s: Average print speed in mm/s.
             :param material: Material hint (affects per-layer overhead).
-            :returns: Dict with estimated time, layer count, and note.
+            :returns: Dict with estimated time, its range, layer count,
+                deposited plastic, assumptions, and note.
             """
             from kiln.server import _error_dict
 

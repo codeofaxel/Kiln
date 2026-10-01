@@ -22,6 +22,10 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 from kiln.cost_estimator import BUILTIN_MATERIALS, DEFAULT_MATERIAL
+
+# The units judgement lives beside the rescale engine it steers, under a
+# public name, so every door that takes a model in reads the one verdict.
+from kiln.generation.validation import unit_verdict as _unit_verdict
 from kiln.support_assessment import MATERIAL_ALIASES as _MATERIAL_ALIASES
 
 _logger = logging.getLogger(__name__)
@@ -413,32 +417,6 @@ _compute_printability_score = _compute_readiness_score
 # Auto-scale constants and helpers
 # ---------------------------------------------------------------------------
 
-#: A unit mix-up multiplies every coordinate by a FIXED conversion, so the
-#: repair is one of a short list of real factors — never a free choice of
-#: size.  Scaling a model to a "reasonable" target height instead is what
-#: this replaced: it lands near the right answer only for the one input
-#: whose true size happened to be that height, and is wrong by construction
-#: for every other, including the ones it correctly detects as mis-exported.
-_UNIT_CONVERSIONS: tuple[tuple[str, float], ...] = (
-    ("meters", 1000.0),
-    ("centimeters", 10.0),
-    ("inches", 25.4),
-    ("microns", 0.001),
-)
-
-#: The band a real printable object's largest dimension falls in.  The floor
-#: is one FDM feature — under a millimetre a 0.4mm nozzle has no object to
-#: lay down.  The ceiling is the largest build volume in Kiln's own catalog
-#: (Elegoo OrangeStorm Giga, 1000mm), so a part that fits SOME machine Kiln
-#: knows about is never mistaken for a unit error.
-_PRINTABLE_MIN_MM = 1.0
-_PRINTABLE_MAX_MM = 1000.0
-
-#: Below this, a model is still printable and is never touched, but the user
-#: is told what other units would have made it.  A COURTESY threshold, not a
-#: correction one: nothing is ever rescaled because of it.
-_UNIT_NOTICE_BELOW_MM = 10.0
-
 _SIMPLIFY_THRESHOLD = 100_000  # triangle count above which simplification is recommended
 
 
@@ -492,120 +470,6 @@ def _scaled_copy_path(stl_path: str) -> str:
     return out_path
 
 
-@dataclass(frozen=True)
-class _UnitVerdict:
-    """What a model's measured size says about the units it was written in.
-
-    Six outcomes, and only ONE of them changes the user's geometry:
-
-    ``plausible``
-        The size already reads as a printable object.  Nothing to do — this
-        is the answer for the overwhelming majority of files, including the
-        small-but-real parts (a 6mm pin, an 8mm gear) that the previous
-        target-height rule silently inflated.
-    ``small``
-        Printable, left alone, and near the bottom of the range, so the
-        other readings are offered in case the user expected one of them.
-        It replaces a warning that told a 2mm part it was "likely exported
-        in meters" — which meters cannot explain, since that would make it
-        2000mm, larger than any printer in the catalog.  Naming the one
-        unit arithmetically ruled out is worse than saying nothing.
-    ``corrected``
-        Exactly one real unit conversion turns this into a printable size,
-        so it is the only explanation on offer and we apply it.
-    ``ambiguous``
-        Several conversions would work and nothing distinguishes them.  A
-        0.5 reading is 500mm from meters, 5mm from centimeters and 12.7mm
-        from inches; picking one is a guess wearing a measurement's clothes.
-    ``oversize``
-        Bigger than any machine in the catalog, and a microns reading would
-        land it printable.  Unlike the sub-millimetre side, there are TWO
-        real explanations up here: a microns export, or a model genuinely
-        this big that the user means to cut up with split_mesh_to_fit —
-        a workflow Kiln ships tools for.  Shrinking would act on a guess
-        between them, so both readings are offered instead.
-    ``unexplained``
-        No conversion lands it anywhere printable, so "wrong units" is not
-        the story and inventing a scale would only hide the real problem.
-
-    The last three are reported, never acted on: a part that silently comes
-    out the wrong size is worse than one the user is asked about, because
-    the wrong size reaches the printer looking exactly like a right one.
-    """
-
-    status: str
-    max_dim_mm: float
-    unit: str = ""
-    factor: float = 0.0
-    candidates: tuple[tuple[str, float], ...] = ()
-
-    @property
-    def corrected(self) -> bool:
-        return self.status == "corrected"
-
-    def _readings(self) -> str:
-        return ", ".join(
-            f"{unit} → {self.max_dim_mm * factor:g}mm"
-            for unit, factor in self.candidates
-        )
-
-    def describe(self) -> str:
-        """One sentence a user can act on, naming real sizes, never a guess."""
-        if self.status == "corrected":
-            return (
-                f"Rescaled x{self.factor:g} "
-                f"({self.max_dim_mm:g}mm → {self.max_dim_mm * self.factor:g}mm) "
-                f"— the file was written in {self.unit}, the only unit that "
-                f"makes it a printable size."
-            )
-        if self.status == "small":
-            return (
-                f"This model is {self.max_dim_mm:g}mm at its largest — small, but a "
-                f"printable size, so nothing was changed.  If you expected it "
-                f"bigger, it may have been exported in {self._readings()}."
-            )
-        if self.status == "ambiguous":
-            return (
-                f"This model measures {self.max_dim_mm:g}mm at its largest, which "
-                f"is not a printable size, and more than one unit would explain "
-                f"it ({self._readings()}).  Nothing was rescaled — say which unit "
-                f"it was exported in, or use rescale_model with the factor you want."
-            )
-        if self.status == "oversize":
-            return (
-                f"This model measures {self.max_dim_mm:g}mm at its largest — bigger "
-                f"than any printer in Kiln's catalog ({_PRINTABLE_MAX_MM:g}mm).  If it "
-                f"was exported in {self.unit} it is really "
-                f"{self.max_dim_mm * self.factor:g}mm, and rescale_model "
-                f"x{self.factor:g} fixes that in one step; if it really is this "
-                f"big, split_mesh_to_fit can cut it into printable sections.  "
-                f"Nothing was rescaled — both readings are real, so this one "
-                f"is your call."
-            )
-        return (
-            f"This model measures {self.max_dim_mm:g}mm at its largest, which is "
-            f"not a printable size, and no unit conversion lands it in a "
-            f"printable range either.  Nothing was rescaled — check the export "
-            f"itself before scaling it."
-        )
-
-    def describe_unapplied(self) -> str:
-        """The ``corrected`` diagnosis, worded for when no rescale was written.
-
-        ``describe()`` says "Rescaled", which is a lie the moment the writer
-        cannot run — a non-STL container, or a write failure.  The diagnosis
-        still holds and the size is still unprintable, so it is restated as
-        an instruction rather than a receipt.
-        """
-        return (
-            f"This model measures {self.max_dim_mm:g}mm at its largest, which is "
-            f"not a printable size — the file looks like a {self.unit} export "
-            f"({self.max_dim_mm:g} → {self.max_dim_mm * self.factor:g}mm), the "
-            f"only unit that explains it.  It was not rescaled here; "
-            f"rescale_model x{self.factor:g} fixes it in one step."
-        )
-
-
 def _max_dim_mm(model_info: dict[str, Any]) -> float:
     """Largest bounding-box dimension in mm, or 0.0 when it is not known.
 
@@ -623,55 +487,6 @@ def _max_dim_mm(model_info: dict[str, Any]) -> float:
         )
     except (TypeError, ValueError):
         return 0.0
-
-
-def _unit_verdict(max_dim_mm: float) -> _UnitVerdict:
-    """Decide what *max_dim_mm* says about the file's units.
-
-    Pure: no file is read and no geometry is touched, so the judgement can
-    be tested on numbers alone and the side effect lives at one call site.
-
-    Deliberately no triangle-count guard.  The old rule required >1000
-    triangles before it would correct anything, on the reasoning that simple
-    parts are legitimately small — which was true, and was the wrong lever:
-    it left a 50mm cube exported in meters (12 triangles, reads as 0.05mm)
-    permanently broken while still inflating detailed small parts.  Asking
-    whether a real conversion explains the size answers both, and answers
-    them from the physics rather than from the mesh's complexity.
-    """
-    if max_dim_mm <= 0:
-        return _UnitVerdict("plausible", max_dim_mm)
-
-    candidates = tuple(
-        (unit, factor)
-        for unit, factor in _UNIT_CONVERSIONS
-        if _PRINTABLE_MIN_MM <= max_dim_mm * factor <= _PRINTABLE_MAX_MM
-    )
-
-    if _PRINTABLE_MIN_MM <= max_dim_mm <= _PRINTABLE_MAX_MM:
-        if max_dim_mm < _UNIT_NOTICE_BELOW_MM and candidates:
-            return _UnitVerdict("small", max_dim_mm, candidates=candidates)
-        return _UnitVerdict("plausible", max_dim_mm)
-
-    if max_dim_mm > _PRINTABLE_MAX_MM and candidates:
-        # Necessarily microns — it is the only shrinking conversion, and any
-        # enlarging one pushes an oversize reading further out of the band.
-        # Never auto-applied, unlike the single-candidate case below: under
-        # the 1mm floor no real object exists, so an enlargement acts on the
-        # only possible reading, but a model bigger than every machine can
-        # genuinely be one the user means to split (split_mesh_to_fit is a
-        # shipped workflow).  The old rule shrank everything over 500mm by
-        # 0.001; auto-shrinking everything over 1000mm would be the same
-        # mistake with a better threshold.
-        unit, factor = candidates[0]
-        return _UnitVerdict("oversize", max_dim_mm, unit, factor, candidates)
-
-    if len(candidates) == 1:
-        unit, factor = candidates[0]
-        return _UnitVerdict("corrected", max_dim_mm, unit, factor, candidates)
-    if candidates:
-        return _UnitVerdict("ambiguous", max_dim_mm, candidates=candidates)
-    return _UnitVerdict("unexplained", max_dim_mm)
 
 
 def _auto_scale_if_needed(

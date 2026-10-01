@@ -10,9 +10,12 @@ from __future__ import annotations
 import hashlib
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+
+from kiln.daily_stats import counts_outside_service, record_marketplace_use
 
 _logger = logging.getLogger(__name__)
 
@@ -132,6 +135,21 @@ class ModelDetail:
 # ---------------------------------------------------------------------------
 
 
+#: The adapter methods that count as USING a marketplace, and what each
+#: one is counted as.  Looking up one model's details or file list is not
+#: counted on its own: it only ever follows a search or leads to a download.
+_COUNTED_CALLS: dict[str, str] = {"search": "search", "download_file": "download"}
+
+
+def _count_as(kind: str) -> Callable[[Any, Any], None]:
+    """A recorder that counts one ``kind`` under the adapter's own name."""
+
+    def _record(adapter: Any, _result: Any) -> None:
+        record_marketplace_use(adapter.name, kind)
+
+    return _record
+
+
 class MarketplaceAdapter(ABC):
     """Abstract base class for marketplace backends.
 
@@ -139,7 +157,22 @@ class MarketplaceAdapter(ABC):
     and :meth:`get_files`.  :meth:`download_file` has a default
     implementation that raises :class:`MarketplaceError` for
     metadata-only adapters.
+
+    Every subclass's :meth:`search` and :meth:`download_file` are counted
+    in the daily usage stats under the adapter's own :attr:`name` (see
+    ``__init_subclass__``), so a marketplace added later is counted with
+    no further wiring.
     """
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        # Wrapped here rather than at each caller: a fan-out search, a
+        # single-marketplace tool and the CLI all reach an adapter their
+        # own way, and the one thing they share is these methods.
+        for method, kind in _COUNTED_CALLS.items():
+            original = cls.__dict__.get(method)
+            if callable(original) and not getattr(original, "__isabstractmethod__", False):
+                setattr(cls, method, counts_outside_service("marketplace", _count_as(kind))(original))
 
     @property
     @abstractmethod

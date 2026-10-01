@@ -272,7 +272,7 @@ Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&ut
 | **Creality** | Stable when Moonraker is reachable | SPARKX i7, K1/K1 Max/K1C/K1 SE, K2/K2 Pro/K2 Plus/K2 SE, Creality Hi, Ender-3 V4/V3 KE, Ender-5 Max, CR-10 SE via local Moonraker. Older Marlin Creality printers use `serial` or `octoprint`. |
 | **Bambu** | Stable | Bambu Lab X1C, X1E, P1S, P1P, P2S, A1, A1 Mini, A2L, H2S, H2D, H2D Pro, H2C, X2D (via LAN MQTT) |
 | **Prusa Link** | Stable | Prusa MK4, XL, Mini+ (local REST API — type: `prusalink`) |
-| **Elegoo** | Stable | Centauri Carbon, Saturn, Mars series (via LAN WebSocket/SDCP). Neptune 4 / OrangeStorm Giga use Moonraker. |
+| **Elegoo** | Stable | Centauri Carbon (via LAN WebSocket/SDCP). Neptune 4 / OrangeStorm Giga use Moonraker. |
 | **Duet / RepRapFirmware** | Beta — not yet verified against physical hardware | Duet 2 and Duet 3 controller boards, over the same HTTP interface Duet Web Control uses. Both RepRapFirmware 2 and 3 are supported. Vision Miner 22 IDEX v4 is the first catalogued machine. Type: `duet`. |
 | **Direct USB** | Stable | Any Marlin-based printer over USB (Ender 3, Prusa MK3, CR-10, etc.). No OctoPrint or Klipper needed — just a USB cable. Type: `serial`. |
 

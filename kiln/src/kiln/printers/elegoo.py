@@ -3,13 +3,10 @@
 Implements :class:`~kiln.printers.base.PrinterAdapter` by talking to Elegoo
 printers that use the **SDCP (Smart Device Control Protocol)** over WebSocket.
 
-This covers Elegoo printers with cbd-tech/ChituBox mainboards including:
-
-* **Centauri Carbon** (FDM, high-speed).  NOT the **Centauri Carbon 2**
-  family: per Elegoo's own SDK that generation speaks MQTT on port 1883
-  with a registration step, not SDCP, and Kiln has no adapter for it yet.
-* **Saturn 3 Ultra** / **Saturn 4 Ultra** (MSLA resin)
-* **Mars 5** / **Mars 5 Ultra** (MSLA resin)
+The printer this adapter is written and documented for is the **Centauri
+Carbon** (FDM, high-speed).  NOT the **Centauri Carbon 2** family: per
+Elegoo's own SDK that generation speaks MQTT on port 1883 with a
+registration step, not SDCP, and Kiln has no adapter for it yet.
 
 The adapter uses:
 
@@ -86,7 +83,7 @@ _STALE_STATE_MAX_AGE: float = STALE_STATE_WARN_AGE
 # updates temperatures without saying anything about what the printer is doing.
 _STATE_KEYS: tuple[str, ...] = ("CurrentStatus", "Status")
 
-# SDCP command codes (documented for Centauri Carbon / Saturn / Mars)
+# SDCP command codes
 _CMD_STATUS_REQUEST = 0
 _CMD_GET_ATTRIBUTES = 1
 _CMD_START_PRINT = 128
@@ -114,13 +111,13 @@ _ACK_SUCCESS = 0
 _ACK_FAILURE = 1
 _ACK_FILE_NOT_FOUND = 2
 
-# This adapter also talks to Elegoo models (Saturn, Mars) that have
-# no part-cooling fan concept at all, and SDCP has no machine-type enum to
-# gate on -- only the free-text Name/MachineName the printer reports at
-# connect time.  set_fan() refuses unless that name matches one of these
-# substrings (case-insensitive), so an unrecognized or undetermined machine
-# fails closed rather than risk sending a fan command to a machine without one.
-# The only FDM family this adapter documents today is Centauri Carbon.
+# SDCP is spoken by other Elegoo machines too, some with no part-cooling
+# fan at all, and it has no machine-type enum to gate on -- only the
+# free-text Name/MachineName the printer reports at connect time.
+# set_fan() refuses unless that name matches one of these substrings
+# (case-insensitive), so an unrecognized or undetermined machine fails
+# closed rather than risk sending a fan command to a machine without one.
+# The only family this adapter documents today is Centauri Carbon.
 _FDM_MACHINE_NAME_SUBSTRINGS: tuple[str, ...] = ("centauri",)
 
 # Aliases accepted for the single part-cooling fan -- mirrors
@@ -335,7 +332,7 @@ class ElegooAdapter(PrinterAdapter):
 
     Communicates with Elegoo printers over the SDCP (Smart Device Control
     Protocol) via WebSocket.  This covers Elegoo printers with cbd-tech
-    mainboards (Centauri Carbon, Saturn, Mars series).
+    mainboards (Centauri Carbon).
 
     Args:
         host: IP address or hostname of the Elegoo printer on the LAN.
@@ -611,7 +608,7 @@ class ElegooAdapter(PrinterAdapter):
                     "  Checklist:\n"
                     "  1) Printer is powered on and on the same network\n"
                     "  2) Port 3030 is not blocked by a firewall\n"
-                    "  3) Printer firmware supports SDCP (Centauri/Saturn/Mars)\n"
+                    "  3) Printer firmware supports SDCP (Centauri Carbon)\n"
                     "  Try: kiln verify",
                     cause=exc,
                 ) from exc
@@ -1053,7 +1050,7 @@ class ElegooAdapter(PrinterAdapter):
             Falls back to V2 if the endpoint is unreachable.
 
         **SDCP V2 — WebSocket command + pull (fallback)**
-            Used by older Elegoo printers (Saturn, Mars series).  Kiln
+            Used by older Elegoo SDCP firmware.  Kiln
             starts a temporary HTTP server and tells the printer to fetch
             the file via SDCP command 256.
 
@@ -1199,7 +1196,7 @@ class ElegooAdapter(PrinterAdapter):
     ) -> UploadResult:
         """Upload via SDCP V2 — start a local HTTP server, tell the printer to pull.
 
-        Legacy method for older Elegoo SDCP printers (Saturn, Mars series).
+        Legacy method for older Elegoo SDCP firmware.
         """
         local_ip = _get_local_ip(self._host)
         _UploadHTTPHandler._file_path = abs_path

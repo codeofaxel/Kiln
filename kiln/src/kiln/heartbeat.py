@@ -528,6 +528,17 @@ def _send_heartbeat() -> None:
                 "decoration_types": stats.get("decoration_types", {}),
                 "slicer_profiles": stats.get("slicer_profiles", {}),
                 "marketplace_sources": stats.get("marketplace_sources", {}),
+                # Which outside service did the work — {name: count_today}:
+                # the generation provider a model was sent to, and the
+                # marketplace a search was answered by (downloads ride in
+                # marketplace_sources above).  A provider called with the
+                # user's own key, or a marketplace searched from their own
+                # machine, makes no call to Kiln's servers, so this is the
+                # only place either is ever visible.  The service's own
+                # name only: never a prompt, a query, a model id, a URL
+                # or a key (daily_stats._SERVICE_NAME_RE).
+                "generation_providers": _top_n(stats.get("generation_providers", {}), 50),
+                "marketplace_searches": _top_n(stats.get("marketplace_searches", {}), 50),
                 # Tier-denial telemetry — {tool_name: count_today}.
                 # Every entry is a user who hit a paywall; if the same
                 # user upgraded on the web but their local session

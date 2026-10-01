@@ -2,7 +2,8 @@
 
 Tracks prints, generations, decorations, textures, slices, and
 marketplace downloads completed today.  Supports detailed breakdowns
-(e.g. texture name, decoration type, marketplace source).
+(e.g. texture name, decoration type), and which generation provider or
+model marketplace a call was sent to, by name.
 
 Read by the heartbeat module for Supabase reporting.  Never blocks,
 never errors visibly.
@@ -12,6 +13,7 @@ File: ``~/.kiln/daily_stats.json``
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import os
@@ -19,6 +21,7 @@ import re
 import sys
 import threading
 import time
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -118,8 +121,9 @@ _VALID_EVENTS = frozenset({
 # invisible.  Names, not code paths, so nothing here imports kiln-pro.
 #
 # NOT in this map, deliberately:
-# - Tools that self-record with a detail breakdown the dispatcher can't
-#   see (``decorate_surface``, ``generate_texture``, ``generate_model``,
+# - Tools that record in their own body, most of them with a detail
+#   breakdown the dispatcher can't see
+#   (``decorate_surface``, ``generate_texture``, ``generate_model``,
 #   ``generate_model_from_image``, ``download_and_upload`` here;
 #   ``apply_procedural_texture`` / ``apply_geometric_texture`` /
 #   ``apply_image_texture`` in kiln-pro record ``textures`` in-body with
@@ -248,6 +252,17 @@ def _empty_day() -> dict[str, Any]:
         "decoration_types": {},    # {"photo": 2, "qr": 1, "text": 5}
         "slicer_profiles": {},     # {"BambuLab A1 0.4": 2}
         "marketplace_sources": {}, # {"thingiverse": 3, "makerworld": 1}
+        # Which outside service did the work — {name: count}, keyed by
+        # the name each provider or marketplace gives ITSELF
+        # (``GenerationProvider.name`` / ``MarketplaceAdapter.name``).
+        # Recorded where the call is dispatched, in the base class every
+        # provider and marketplace inherits, so one added later is
+        # counted without anyone listing it here.  ``marketplace_sources``
+        # above is the download half of the same record; these two are
+        # the generation half and the search half.  Names only: never a
+        # prompt, a query, a model id, a URL or a key.
+        "generation_providers": {},  # {"meshy": 2, "openscad": 9}
+        "marketplace_searches": {},  # {"makerworld": 4, "thingiverse": 1}
         # Tier-denial counters: tool_name → number of TIER_REQUIRED
         # rejections today.  This is the key funnel-leak signal for
         # "user paid on the web but never synced their local agent" —
@@ -384,6 +399,7 @@ _ROLLOVER_MAPS = (
     "update_nudge",
     "texture_names", "decoration_types", "slicer_profiles",
     "marketplace_sources", "template_uses",
+    "generation_providers", "marketplace_searches",
     "surface_sessions", "surface_events",
     "agent_hosts", "agent_host_facts",
     "multi_material_seen",
@@ -565,7 +581,9 @@ def record_event(event_type: str, *, detail: str | None = None) -> None:
         For textures: the texture name (e.g. ``"tiger_stripe"``).
         For decorations: the content type (e.g. ``"qr"``).
         For slices: the slicer profile name.
-        For downloads: the marketplace name (e.g. ``"thingiverse"``).
+        Downloads take no detail: which marketplace a file came from is
+        recorded where the file is fetched (:func:`record_marketplace_use`),
+        so every door that downloads is covered and none counts twice.
 
     .. note::
 
@@ -601,7 +619,6 @@ def record_event(event_type: str, *, detail: str | None = None) -> None:
                     "textures": "texture_names",
                     "decorations": "decoration_types",
                     "slices": "slicer_profiles",
-                    "downloads": "marketplace_sources",
                 }
                 breakdown_key = _DETAIL_KEYS.get(event_type)
                 if breakdown_key:
@@ -994,6 +1011,112 @@ def record_template_use(template_id: str) -> None:
     _record_name_count("template_uses", template_id)
 
 
+# ---------------------------------------------------------------------------
+# Outside services: which generation provider or model marketplace did the work
+# ---------------------------------------------------------------------------
+
+#: A provider's or marketplace's own machine name ("meshy", "tripo3d",
+#: "makerworld").  Its own rule rather than the tool-name one, which
+#: demands a leading letter and three characters and so would silently
+#: drop a service whose name starts with a digit.  Still a bare token: no
+#: space, dot, slash or colon, so a prompt, a query, a URL or a model id
+#: cannot be spelled in a key whatever a caller passes.
+_SERVICE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,39}$")
+
+#: Distinct service names kept per map per day.  Real installs meet a
+#: handful; the cap only stops a runaway writer growing the file.
+_SERVICE_NAMES_MAX_DISTINCT = 50
+
+#: What a marketplace call was for -> the day-file map it counts in.
+#: Downloads keep the map they have always had, so the heartbeat, the
+#: rollover and the dashboard reader that already carry it need no twin.
+_MARKETPLACE_USE_MAPS: dict[str, str] = {
+    "search": "marketplace_searches",
+    "download": "marketplace_sources",
+}
+
+_service_calls = threading.local()
+
+
+def _service_name(raw: object) -> str:
+    """``raw`` trimmed and lowercased, so one service is one row.
+
+    Not the shape check: ``_record_name_count`` applies
+    ``_SERVICE_NAME_RE`` and drops whatever does not fit, including the
+    ``""`` returned here for a value that is not a string at all.
+    """
+    return raw.strip().lower() if isinstance(raw, str) else ""
+
+
+def record_generation_provider(name: object) -> None:
+    """Count one generation dispatched to provider ``name`` today.
+
+    Written by :class:`kiln.generation.base.GenerationProvider`, which
+    wraps every subclass's ``generate`` — the one call every door (the
+    MCP tools, the CLI, a pipeline) goes through to reach a provider.
+    ``name`` is the provider's own ``name``; nothing else about the call
+    is recorded.  Silent by contract.
+    """
+    _record_name_count(
+        "generation_providers", _service_name(name),
+        pattern=_SERVICE_NAME_RE, max_distinct=_SERVICE_NAMES_MAX_DISTINCT,
+    )
+
+
+def record_marketplace_use(name: object, kind: str) -> None:
+    """Count one ``kind`` ("search" or "download") answered by marketplace ``name``.
+
+    Written by :class:`kiln.marketplaces.base.MarketplaceAdapter`, which
+    wraps every subclass's ``search`` and ``download_file``, and by the
+    older Thingiverse client the single-marketplace tools still call
+    directly.  ``name`` is the marketplace's own ``name``; the query, the
+    model and the file are never recorded.  An unknown ``kind`` is
+    dropped.  Silent by contract.
+    """
+    bucket = _MARKETPLACE_USE_MAPS.get(kind)
+    if bucket is None:
+        return
+    _record_name_count(
+        bucket, _service_name(name),
+        pattern=_SERVICE_NAME_RE, max_distinct=_SERVICE_NAMES_MAX_DISTINCT,
+    )
+
+
+def counts_outside_service(scope: str, record: Callable[[Any, Any], None]) -> Callable:
+    """Decorate a method so a call that RETURNS runs ``record(self, result)``.
+
+    A call that raises records nothing: a refused key or an unreachable
+    service is not use of that service.  Only the OUTERMOST call per
+    thread and ``scope`` records, so a subclass calling ``super()``, or an
+    adapter delegating to a client that is itself counted, is one use and
+    not two.  ``record`` never breaks the call it rides on.
+    """
+
+    def decorate(fn: Callable) -> Callable:
+        if getattr(fn, "_kiln_service_counted", False):
+            return fn
+
+        @functools.wraps(fn)
+        def counted(self: Any, *args: Any, **kwargs: Any) -> Any:
+            depth = getattr(_service_calls, scope, 0)
+            setattr(_service_calls, scope, depth + 1)
+            try:
+                result = fn(self, *args, **kwargs)
+            finally:
+                setattr(_service_calls, scope, depth)
+            if depth == 0:
+                try:
+                    record(self, result)
+                except Exception as exc:
+                    _logger.debug("outside-service count (%s) failed: %s", scope, exc)
+            return result
+
+        counted._kiln_service_counted = True  # type: ignore[attr-defined]
+        return counted
+
+    return decorate
+
+
 def record_multi_material_seen(kind: str) -> None:
     """Count one sighting of a multi-material unit of ``kind`` on a printer.
 
@@ -1030,7 +1153,7 @@ _VIDEO_MODEL_UNSAFE = re.compile(r"[^a-z0-9]+")
 def video_model_token(raw: object) -> str:
     """A printer model as a video-outcome key token, or ``"unknown"``.
 
-    The config-declared model is free text ("Saturn 4 Ultra 16K"); the key
+    The config-declared model is free text ("Centauri Carbon 2 Combo"); the key
     needs a token.  Lowercased, every run of other characters folded to one
     underscore, capped at 48.  Nothing is mapped or guessed — a model the
     catalogue spells differently stays spelled the owner's way.
@@ -1316,6 +1439,9 @@ def get_daily_stats() -> dict[str, Any]:
         # reads {} in every heartbeat forever — exactly how tool_failures
         # shipped nothing on 1,000 production rows.
         "template_uses": data.get("template_uses", {}),
+        # Same contract again: recorded, rolled over, returned.
+        "generation_providers": data.get("generation_providers", {}),
+        "marketplace_searches": data.get("marketplace_searches", {}),
         # Per-surface session and event splits (see _empty_day).  Same
         # contract as every map above: recorded, rolled over, returned —
         # a map missing any leg of that chain ships {} forever.

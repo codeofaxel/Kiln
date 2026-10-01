@@ -1859,7 +1859,7 @@ class TestPrepareAiModelAutoScale:
 
     def test_a_correction_only_ever_uses_a_real_conversion(self) -> None:
         """Sweep: no input may produce a factor that is not a real unit."""
-        from kiln.plugins._validation_pipeline_internals import _UNIT_CONVERSIONS
+        from kiln.generation.validation import _UNIT_CONVERSIONS
         from kiln.plugins.validation_pipeline_tools import _unit_verdict
 
         real = {factor for _, factor in _UNIT_CONVERSIONS}
@@ -1972,6 +1972,62 @@ class TestPrepareAiModelAutoScale:
 
         assert result["scale_factor"] > 0
         assert any("120" in a for a in result["actions_taken"])
+
+
+class TestUnitVerdictPublicName:
+    """The verdict under the name other doors import, and the sentence for a
+    door that files a model without rewriting it."""
+
+    def test_the_pipeline_judges_with_the_public_verdict(self) -> None:
+        from kiln.generation.validation import unit_verdict
+        from kiln.plugins import _validation_pipeline_internals as internals
+        from kiln.plugins import validation_pipeline_tools as tools
+
+        assert internals._unit_verdict is unit_verdict
+        assert tools._unit_verdict is unit_verdict
+
+    def test_a_plausible_size_has_nothing_to_say(self) -> None:
+        from kiln.generation.validation import unit_verdict
+
+        assert unit_verdict(50.0).describe_unchanged() == ""
+        assert unit_verdict(0.0).describe_unchanged() == ""
+
+    def test_a_single_explanation_is_named_but_never_called_rescaled(self) -> None:
+        from kiln.generation.validation import unit_verdict
+
+        told = unit_verdict(0.02).describe_unchanged()
+
+        assert "meters" in told and "0.02 → 20mm" in told
+        assert "x1000" in told and "not rescaled here" in told
+        assert not told.startswith("Rescaled")
+
+    def test_only_a_size_under_the_floor_is_below_printable(self) -> None:
+        from kiln.generation.validation import unit_verdict
+
+        assert [unit_verdict(size).below_printable for size in (0.0005, 0.02, 0.5, 0.999)] == [True] * 4
+        assert [unit_verdict(size).below_printable for size in (0.0, 1.0, 2.0, 50.0, 1500.0, 4e9)] == [False] * 6
+
+    def test_a_reading_too_big_to_print_is_still_named_for_a_door_that_scales(self) -> None:
+        """2 units is 2000mm in meters: no printer makes that, so it is not a
+        candidate for a part printed as drawn — and it is exactly what a
+        full-size object scaled down to print was written in."""
+        from kiln.generation.validation import unit_verdict
+
+        two = unit_verdict(2.0)
+        assert two.beyond_printable == (("meters", 1000.0),)
+        assert ("meters", 1000.0) not in two.candidates
+        # 0.5 units is 500mm in meters: printable, so a candidate, not beyond.
+        assert unit_verdict(0.5).beyond_printable == ()
+        # 50 units: meters gives 50000mm and inches 1270mm; centimeters 500mm fits.
+        assert unit_verdict(50.0).beyond_printable == (("meters", 1000.0), ("inches", 25.4))
+        assert unit_verdict(0.0).beyond_printable == ()
+
+    def test_every_other_reading_keeps_its_own_sentence(self) -> None:
+        from kiln.generation.validation import unit_verdict
+
+        for size in (2.0, 0.5, 1500.0, 0.0005):
+            verdict = unit_verdict(size)
+            assert verdict.describe_unchanged() == verdict.describe()
 
 
 class TestPrepareAiModelHollowRecommendation:

@@ -20,6 +20,8 @@ from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from kiln.daily_stats import counts_outside_service, record_generation_provider
+
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
@@ -170,12 +172,37 @@ class MeshAnalysis:
 # ---------------------------------------------------------------------------
 
 
+def _count_generation(provider: Any, job: Any) -> None:
+    """Count one generation the provider ACCEPTED, under its own name.
+
+    A job that came back already failed (a compile error, a rejected
+    prompt) is not counted: the question this answers is which providers
+    people's models actually come from.
+    """
+    if getattr(job, "status", None) is GenerationStatus.FAILED:
+        return
+    record_generation_provider(provider.name)
+
+
 class GenerationProvider(ABC):
     """Abstract base for 3D model generation backends.
 
     Concrete providers must implement :meth:`generate`,
     :meth:`get_job_status`, and :meth:`download_result`.
+
+    Every subclass's :meth:`generate` is counted in the daily usage stats
+    under the provider's own :attr:`name` (see ``__init_subclass__``), so
+    a provider added later is counted with no further wiring.
     """
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        # Wrapped here rather than at each caller: the MCP tools, the CLI
+        # and the pipelines all reach a provider their own way, and the
+        # one thing they share is this method.
+        generate = cls.__dict__.get("generate")
+        if callable(generate) and not getattr(generate, "__isabstractmethod__", False):
+            cls.generate = counts_outside_service("generation", _count_generation)(generate)
 
     @property
     @abstractmethod

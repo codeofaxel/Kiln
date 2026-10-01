@@ -43,14 +43,54 @@ _FIT_TURNS_DEG: tuple[tuple[float, float, float], ...] = (
 )
 
 
+def _turn_cannot_fit(
+    bbox: dict[str, float] | None, turn: tuple[float, float, float], printer_id: str,
+) -> bool:
+    """True when arithmetic alone says *turn* leaves the part too big.
+
+    The box's corners are turned with the same matrix the mesh would be, so
+    a turn that cannot fit costs eight points instead of a rewrite of every
+    triangle -- on a 330,000-triangle part the search for the last turn in
+    the list took 7 s without this.  Anything unknown (no box, no bed size)
+    answers False, and the turn is tried for real.
+    """
+    try:
+        from kiln.auto_orient import _apply_rotation, _build_rotation_matrix
+        from kiln.printers.bed_fit import _FIT_EPSILON_MM, get_build_volume
+
+        volume = get_build_volume(printer_id)
+        if not bbox or not volume:
+            return False
+        matrix = _build_rotation_matrix(*turn)
+        corners = [
+            _apply_rotation((x, y, z), matrix)
+            for x in (bbox["x_min"], bbox["x_max"])
+            for y in (bbox["y_min"], bbox["y_max"])
+            for z in (bbox["z_min"], bbox["z_max"])
+        ]
+        return any(
+            max(c[axis] for c in corners) - min(c[axis] for c in corners) > float(side) + _FIT_EPSILON_MM
+            for axis, side in enumerate(volume)
+        )
+    except Exception:  # noqa: BLE001 -- when in doubt, try the turn
+        return False
+
+
 def _try_orient_to_fit(
-    input_path: str, printer_id: str, *, recentre: bool = True,
-) -> tuple[str, tuple[float, float, float]] | None:
+    input_path: str,
+    printer_id: str,
+    *,
+    recentre: bool = True,
+    bbox: dict[str, float] | None = None,
+) -> tuple[str, tuple[float, float, float], dict] | None:
     """Turn an oversized STL a quarter turn at a time until it fits the bed.
 
-    Returns ``(path, (rx, ry, rz))`` -- a turned temp copy that fits and the
-    turn in degrees -- or ``None`` if no quarter turn fits.  Free and local:
-    the public orientation helper and the printer's datasheet bed size.
+    Returns ``(path, (rx, ry, rz), fit)`` -- a turned temp copy that fits,
+    the turn in degrees and the copy's own bed-fit measurement -- or
+    ``None`` if no quarter turn fits.  Free and local: the public
+    orientation helper and the printer's datasheet bed size.
+    *bbox* is the part's box when the caller has measured it (only its
+    extents are read), and spares the turns that cannot fit.
 
     A turn is judged by SIZE.  The helper turns a part about the origin, so
     a part that fits once turned usually lands off the bed; with *recentre*
@@ -71,6 +111,8 @@ def _try_orient_to_fit(
     tmp_dir = tempfile.mkdtemp(prefix="kiln_orient_")
     oriented = os.path.join(tmp_dir, f"{stem}_oriented.stl")
     for turn in _FIT_TURNS_DEG:
+        if _turn_cannot_fit(bbox, turn, printer_id):
+            continue
         try:
             apply_orientation(input_path, *turn, output_path=oriented)
             fit = validate_mesh_for_printer(oriented, printer_id)
@@ -82,7 +124,7 @@ def _try_orient_to_fit(
                     "Auto-oriented %s (rot %g/%g/%g) to fit the %s bed.",
                     os.path.basename(input_path), *turn, printer_id,
                 )
-                return oriented, turn
+                return oriented, turn, fit
         except Exception:  # noqa: BLE001
             _logger.debug("orient-to-fit candidate failed", exc_info=True)
     import shutil
@@ -98,13 +140,10 @@ _ROTATED_APPROVAL_NOTE = (
 )
 
 
-def _oriented_fit(oriented: tuple[str, tuple[float, float, float]], printer_id: str) -> dict:
+def _oriented_fit(oriented: tuple[str, tuple[float, float, float], dict]) -> dict:
     """The bed-fit block for a part the gate turned to fit: the turned copy's
     own measurement, the turn, and why the design's approval does not carry."""
-    from kiln.printers.bed_fit import validate_mesh_for_printer
-
-    path, turn = oriented
-    ofit = validate_mesh_for_printer(path, printer_id)
+    path, turn, ofit = oriented
     ofit["auto_oriented"] = True
     ofit["oriented_input_path"] = path
     ofit["turned_deg"] = list(turn)
@@ -113,7 +152,9 @@ def _oriented_fit(oriented: tuple[str, tuple[float, float, float]], printer_id: 
     return ofit
 
 
-def _lay_step_down_to_fit(step_path: str, printer_id: str) -> tuple[str, dict] | None:
+def _lay_step_down_to_fit(
+    step_path: str, printer_id: str, bbox: dict[str, float] | None = None,
+) -> tuple[str, dict] | None:
     """Turn a STEP part that fits the bed only on another face.
 
     Kiln cannot turn the STEP file itself, so it turns its own mesh of it
@@ -132,7 +173,7 @@ def _lay_step_down_to_fit(step_path: str, printer_id: str) -> tuple[str, dict] |
         from kiln import step_import
 
         mesh_path, _note = step_import.ensure_mesh_path(step_path, output_dir=scratch)
-        oriented = _try_orient_to_fit(mesh_path, printer_id)
+        oriented = _try_orient_to_fit(mesh_path, printer_id, bbox=bbox)
     except Exception:  # noqa: BLE001 -- no converter here, or a file it refuses
         _logger.debug("STEP not converted for orient-to-fit", exc_info=True)
         return None
@@ -140,7 +181,7 @@ def _lay_step_down_to_fit(step_path: str, printer_id: str) -> tuple[str, dict] |
         shutil.rmtree(scratch, ignore_errors=True)
     if oriented is None:
         return None
-    ofit = _oriented_fit(oriented, printer_id)
+    ofit = _oriented_fit(oriented)
     ofit["sliced_mesh"] = "kiln_step_mesh"
     ofit["note"] = (
         "Kiln turned this STEP part to fit the bed, so what was sliced is Kiln's own mesh "
@@ -236,10 +277,14 @@ def _attach_bed_fit(response: dict, gate_info: dict | None) -> None:
     turned -- and a result that does not carry the block cannot say so.
     ``slice_and_print`` and ``slice_and_estimate`` did not carry it until
     2026-09-30.  A slice with no printer to check against has no block,
-    and neither does a gate that reported nothing.
+    and neither does a gate that reported nothing.  A sliced file that
+    prints past the edge of the bed is said in ``warnings`` as well.
     """
     if isinstance(gate_info, dict) and gate_info and gate_info.get("gate") != "skipped_no_printer":
         response["bed_fit"] = gate_info
+        if gate_info.get("prints_past_bed"):
+            # A new list: a door's own warnings may be shared with another block.
+            response["warnings"] = [*response.get("warnings", []), gate_info["prints_past_bed"]]
 
 
 def _apply_bed_fit_gate(
@@ -292,7 +337,7 @@ def _apply_bed_fit_gate(
         fit = validate_mesh_for_printer(input_path, effective_printer_id)
         fit["approval_carries"] = True  # nothing below moves the mesh but the turn
         if fit.get("fits_on_another_face") and auto_center:
-            laid = _lay_step_down_to_fit(input_path, effective_printer_id)
+            laid = _lay_step_down_to_fit(input_path, effective_printer_id, fit.get("bbox"))
             if laid is not None:
                 return laid[0], None, laid[1]
         if not fit["ok"] and fit["error_code"] in ("OFF_BED_GEOMETRY", "EXCEEDS_BED"):
@@ -313,9 +358,11 @@ def _apply_bed_fit_gate(
     if fit["error_code"] == "EXCEEDS_BED":
         # Auto-orient before giving up: a part too tall/wide as-modelled often
         # fits once rotated. (Free: public orientation helper + datasheet bed.)
-        oriented = _try_orient_to_fit(input_path, effective_printer_id, recentre=auto_center)
+        oriented = _try_orient_to_fit(
+            input_path, effective_printer_id, recentre=auto_center, bbox=fit.get("bbox"),
+        )
         if oriented is not None:
-            return oriented[0], None, _oriented_fit(oriented, effective_printer_id)
+            return oriented[0], None, _oriented_fit(oriented)
         _attach_fit_enrichment(fit, input_path, effective_printer_id, material_id)
         return input_path, fit, fit
     if fit["error_code"] == "OFF_BED_GEOMETRY":
@@ -1130,6 +1177,7 @@ def _report_the_sliced_footprint(info: dict[str, Any], gcode_path: str | None) -
             if k in printed
         }
         fit["bbox_source"] = "gcode"
+        _note_a_print_past_the_bed(fit, printed)
         if not isinstance(measured, dict):
             return
         from kiln.slicer_geometry import parse_slicer_features
@@ -1150,6 +1198,35 @@ def _report_the_sliced_footprint(info: dict[str, Any], gcode_path: str | None) -
             fit["part_footprint"] = {"x_min": px0, "y_min": py0, "x_max": px1, "y_max": py1}
     except Exception:  # noqa: BLE001 — a report never fails the slice
         _logger.debug("sliced footprint not reported", exc_info=True)
+
+
+def _note_a_print_past_the_bed(fit: dict[str, Any], printed: dict[str, Any]) -> None:
+    """Say so when the sliced file's own print moves leave the bed.
+
+    The gate measured the part, and the part fits -- but the slicer draws a
+    skirt, a brim or a tower around it, and a part within a few millimetres
+    of the bed's edge is sliced with that outside the bed.  The check before
+    a print refuses such a file (the same :func:`check_bed_fit` verdict, read
+    here rather than re-derived); until 2026-09-30 the slice result said
+    nothing, so the first a person heard of it was the refusal.  A part
+    turned to fit is exactly the part that sits this close to the edge.
+    """
+    from kiln.printers.bed_fit import check_bed_fit
+
+    volume = fit.get("build_volume")
+    if not volume or check_bed_fit(printed, tuple(volume), source="gcode")["ok"]:
+        return
+    past = max(
+        -float(printed["x_min"]), float(printed["x_max"]) - float(volume[0]),
+        -float(printed["y_min"]), float(printed["y_max"]) - float(volume[1]),
+    )
+    fit["prints_past_bed_mm"] = round(past, 1)
+    fit["prints_past_bed"] = (
+        f"The sliced file prints {past:.1f} mm past the edge of the bed, and the check before a print "
+        "refuses a file like this. The part itself fits, so it is what the slicer added around it "
+        "(a skirt, a brim or a tower): slice it again with a smaller one or none "
+        "(reslice_with_overrides, skirts=0)."
+    )
 
 
 def _auto_wrap_bambu_3mf(
