@@ -31,6 +31,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+from kiln import step_import
 from kiln.gcode import _MAX_SCAN_BYTES, GCODE_NUMBER, axis_value
 from kiln.gcode_metadata import read_member_text, sliced_gcode_member
 
@@ -217,10 +218,16 @@ def compute_mesh_bbox(mesh_path: str) -> dict[str, float] | None:
     caller of this function is asking — slicers honour a 3MF's placement
     literally, so raw vertex bounds would pass a file that slices to
     nothing.
+
+    A STEP file is measured by Kiln's own CAD reader (:func:`_step_bbox`),
+    and reported by the same rule: resting at the origin, because both
+    slicers lay a STEP file onto the bed themselves.
     """
     path = Path(mesh_path)
     if not path.is_file():
         return None
+    if step_import.is_step_file(str(path)):
+        return _step_bbox(str(path))
     ext = path.suffix.lower()
     try:
         if ext == ".stl":
@@ -256,6 +263,26 @@ _GCODE_MOVE_RE = re.compile(
     rf"^G[01]\s+(?:.*(?<![A-Za-z])X(?P<x>{GCODE_NUMBER}))?(?:.*(?<![A-Za-z])Y(?P<y>{GCODE_NUMBER}))?",
     re.MULTILINE,
 )
+
+
+def _step_bbox(step_path: str) -> dict[str, float] | None:
+    """A STEP file's exact size, resting at the origin -- or ``None`` when
+    this machine cannot read it (no CAD kernel, a file the kernel refuses).
+
+    Until 2026-09-30 a STEP fell through to the mesh library below, which
+    needs an add-on Kiln does not install, so every fit check on a STEP file
+    passed it unmeasured.  The size is the kernel's, read off the file's own
+    geometry and cached by content (:func:`kiln.step_import.read_exact_geometry`).
+    The position is not reported: the slicer drops a STEP file onto the bed
+    and centres it, so where the CAD file puts it says nothing about where
+    it prints.
+    """
+    exact = step_import.read_exact_geometry(step_path)
+    if not exact.available or not exact.size_mm:
+        logger.info("No size for %s: %s", os.path.basename(step_path), exact.reason)
+        return None
+    sx, sy, sz = (float(v) for v in exact.size_mm)
+    return {"x_min": 0.0, "x_max": sx, "y_min": 0.0, "y_max": sy, "z_min": 0.0, "z_max": sz}
 
 
 def compute_gcode_bbox(
@@ -584,10 +611,41 @@ def validate_mesh_for_printer(
 
     Used by slice_model / slice_and_print / reslice_with_overrides as
     a pre-slice gate.
+
+    A STEP file too big as modelled but small enough lying on another face
+    is not refused here: Kiln cannot turn a STEP file the way it turns an
+    STL to fit, so the slicer gets it as modelled and makes that call
+    itself -- PrusaSlicer refuses it, a slicer that orients parts may lay it
+    down.  The result says so in ``note``.
     """
     bbox = compute_mesh_bbox(mesh_path)
     volume = get_build_volume(printer_id) if printer_id else None
-    return check_bed_fit(bbox, volume, source="mesh")
+    fit = check_bed_fit(bbox, volume, source="mesh")
+    if (
+        fit["error_code"] == "EXCEEDS_BED"
+        and step_import.is_step_file(mesh_path)
+        and _fits_on_another_face(bbox, volume)
+    ):
+        fit.update(ok=True, error_code=None, error_message=None)
+        fit["note"] = (
+            "Too big for the bed as modelled, small enough lying on another face. "
+            "The slicer gets the file as modelled; turn the part in its CAD file, "
+            "or import it (import_step_file) so Kiln can lay it down."
+        )
+    return fit
+
+
+def _fits_on_another_face(bbox: dict[str, float], build_volume: tuple[float, float, float]) -> bool:
+    """Whether some axis-aligned orientation of *bbox* fits *build_volume*.
+
+    The part's extents and the bed's sides, each sorted, compared pairwise:
+    a part fits in some quarter-turn orientation exactly when its smallest
+    extent fits the smallest side, its middle the middle and its largest
+    the largest.
+    """
+    extents = sorted(bbox[f"{a}_max"] - bbox[f"{a}_min"] for a in "xyz")
+    sides = sorted(float(v) for v in build_volume)
+    return all(e <= s + _FIT_EPSILON_MM for e, s in zip(extents, sides))
 
 
 def validate_gcode_for_printer(
