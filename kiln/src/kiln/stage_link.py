@@ -20,6 +20,19 @@ DESIGN NOTES
   have shipped must still ship if the network is down, the user is signed
   out, or the API is having a bad day.  Every failure returns ``None``.
 
+* **The wait is the door's, not the caller's.**  The upload runs on its own
+  thread and a caller waits :data:`_INLINE_WAIT_S` for it at most, counted
+  from when the upload STARTED — so every caller in one tool call shares
+  one wait and one upload, however many of them ask.  An upload that
+  outlasts the wait keeps going and its link is in the cache for the next
+  result that names the same bytes.  (2026-09-30: a make that built in four
+  seconds and rendered in ten never reached its caller.  Two doors inside
+  the same tool call each uploaded the mesh and each sat out the full
+  transfer timeout while the servers were slow — forty-seven seconds of
+  waiting for a link, past the minute an MCP client allows a call, so the
+  mesh and its pictures were thrown away with it.  The bound had been put
+  on one caller of this door rather than on the door.)
+
 * **Content-addressed cache.**  A single tool call can render the same mesh
   from sixteen camera angles.  Keying on the file's own bytes means that
   costs one upload, not sixteen, and re-rendering an unchanged design costs
@@ -36,6 +49,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -50,9 +64,30 @@ _OPT_OUT_ENV = "KILN_NO_STAGE_LINKS"
 #: than a doomed multi-minute upload.
 _MAX_UPLOAD_BYTES = 64 * 1024 * 1024
 
-#: Generous enough for a large mesh on a slow line, short enough that a dead
-#: API never becomes a hung tool call.
-_TIMEOUT_S = 20.0
+#: The upload's own ceiling, per socket operation.  Generous, because it runs
+#: on its own thread and holds up nobody: a large mesh on a slow line gets
+#: the time it needs to arrive.  What a CALLER waits is :data:`_INLINE_WAIT_S`.
+_TIMEOUT_S = 60.0
+
+#: How long a caller waits for the link before answering without it, counted
+#: from the start of the upload it is waiting on.  A small part's link is
+#: back well inside this; a large one's lands in the cache afterwards.
+_INLINE_WAIT_S = 8.0
+
+#: After a wait has run out, the servers are known to be slow: for
+#: :data:`_SLOW_MEMORY_S` a NEW upload is waited on only this long, so a tool
+#: call that makes several meshes pays the full wait once rather than once
+#: per mesh.  The uploads still run, and an upload that comes back quickly
+#: ends the memory early.  Time-bounded on purpose — a bad minute must not
+#: switch links off for the rest of the process.
+_SLOW_WAIT_S = 1.0
+_SLOW_MEMORY_S = 90.0
+
+#: Uploads allowed to be running at once.  Past this a new mesh gets no
+#: upload (reason ``busy``) rather than another thread holding megabytes:
+#: someone iterating a large design while the servers crawl would otherwise
+#: stack one transfer per revision.
+_MAX_IN_FLIGHT = 3
 
 #: Extensions the stage can open.  Checked before reading the file so an
 #: unrelated artifact never gets uploaded looking for a link.
@@ -70,6 +105,34 @@ _CACHE_MAX = 64
 #: A link is only reused while it has this much life left, so a caller never
 #: hands a user a URL that dies while they are looking at it.
 _REUSE_FLOOR_S = 120.0
+
+
+class _Upload:
+    """One upload of one mesh, shared by every caller that wants its link."""
+
+    __slots__ = ("started", "allowance", "done", "link", "reason", "evidence", "recorded", "said")
+
+    def __init__(self, allowance: float) -> None:
+        self.started = time.monotonic()
+        self.allowance = allowance
+        self.done = threading.Event()
+        self.link: dict[str, Any] | None = None
+        self.reason = ""
+        #: Some caller wants the outcome on the preview record ...
+        self.evidence = False
+        #: ... and it has been written, once, by whoever got there first.
+        self.recorded = False
+        #: Held while the outcome is set or read, so "still uploading" is
+        #: never recorded after the link it would contradict.
+        self.said = threading.Lock()
+
+
+#: cache key -> the upload running for it.  Guarded by ``_inflight_lock``.
+_inflight: dict[str, _Upload] = {}
+_inflight_lock = threading.Lock()
+
+#: ``time.monotonic()`` until which the servers count as slow.
+_slow_until = 0.0
 
 
 def _api_base() -> str:
@@ -242,6 +305,11 @@ _LOCAL_REFUSALS: dict[str, str] = {
     "too_large": "the part file is over the size a browser link accepts",
     "empty": "the part file is empty",
     "no_httpx": "this install is missing the httpx library, so it can't issue a browser link",
+    "pending": "the browser link is still uploading — it rides the next result for this file",
+    "busy": (
+        "earlier browser links are still uploading, so this one was not started — "
+        "it is issued the next time this file is shown"
+    ),
 }
 
 #: Recorded reasons that map onto one of the four served causes.
@@ -350,9 +418,11 @@ def stage_link_for(
     something that lives longer asks for more, and gets a fresh upload —
     cheap, since the upload is content-addressed — when the cached one
     would die first.
-    """
-    global _REFUSED_BEARER
 
+    Waits :data:`_INLINE_WAIT_S` at most (see the module's design notes).
+    ``None`` with ``pending`` on record means the upload is still running
+    and the link will be in the cache when it lands.
+    """
     path = Path(mesh_path)
     if (os.environ.get(_OPT_OUT_ENV) or "").strip().lower() in {"1", "true", "yes"}:
         _refused(path, "opted_out", evidence)
@@ -435,14 +505,102 @@ def stage_link_for(
         return None
 
     try:
-        import httpx
+        import httpx  # noqa: F401 — only whether it is there; the upload thread uses it
     except ImportError:
         _refused(path, "no_httpx", evidence)
         return None
 
+    global _slow_until
+
+    with _inflight_lock:
+        upload = _inflight.get(cache_key)
+        if upload is None and len(_inflight) < _MAX_IN_FLIGHT:
+            slow = time.monotonic() < _slow_until
+            upload = _Upload(_SLOW_WAIT_S if slow else _INLINE_WAIT_S)
+            _inflight[cache_key] = upload
+            threading.Thread(
+                target=_run_upload,
+                args=(upload, cache_key, path, token, printer_id, slice_tag),
+                name="kiln-stage-link",
+                daemon=True,
+            ).start()
+        if upload is not None and evidence:
+            upload.evidence = True
+    if upload is None:
+        _refused(path, "busy", evidence)
+        return None
+
+    # One wait per upload, shared: a second caller in the same tool call is
+    # owed only what is left of it, and one that arrives after it ran out
+    # is answered at once.
+    left = upload.allowance - (time.monotonic() - upload.started)
+    if left > 0:
+        upload.done.wait(left)
+    with upload.said:
+        if upload.done.is_set():
+            if evidence and not upload.recorded:
+                _record_outcome(path, upload.link, upload.reason)
+                upload.recorded = True
+            return dict(upload.link) if upload.link else None
+        _refused(path, "pending", evidence)
+    with _inflight_lock:
+        _slow_until = time.monotonic() + _SLOW_MEMORY_S
+    return None
+
+
+def _record_outcome(path: Path, link: dict[str, Any] | None, reason: str) -> None:
+    """Put an upload's outcome on the preview record: the link, or why not."""
+    if link:
+        _issued(path, link["viewer_url"], link["expires_at"])
+    else:
+        _refused(path, reason)
+
+
+def _run_upload(
+    upload: _Upload, cache_key: str, path: Path, token: str,
+    printer_id: str | None, slice_tag: str,
+) -> None:
+    """The thread behind one :class:`_Upload`.  Never raises."""
+    global _slow_until
+
+    link: dict[str, Any] | None = None
+    reason = "unanswered"
+    try:
+        link, reason = _upload(path, token, printer_id, slice_tag)
+    except Exception:  # noqa: BLE001 — a link is furniture, never a crash
+        logger.debug("stage link upload failed", exc_info=True)
+    quick = time.monotonic() - upload.started < _INLINE_WAIT_S
+    with _inflight_lock:
+        if link:
+            # Cached BEFORE the upload leaves the in-flight table, so a
+            # caller arriving now finds one or the other, never neither.
+            _cache_put(cache_key, link["viewer_url"], link["expires_at"])
+            if quick:
+                _slow_until = 0.0
+        _inflight.pop(cache_key, None)
+    with upload.said:
+        upload.link, upload.reason = link, reason
+        if upload.evidence:
+            _record_outcome(path, link, reason)
+            upload.recorded = True
+        upload.done.set()
+
+
+def _upload(
+    path: Path, token: str, printer_id: str | None, slice_tag: str,
+) -> tuple[dict[str, Any] | None, str]:
+    """Hand the bytes over; ``(link, "")`` or ``(None, reason)``.
+
+    The blocking half of :func:`stage_link_for`.  Writes nothing to the
+    cache or the preview record — its caller owns both.
+    """
+    global _REFUSED_BEARER
+
+    import httpx
+
     # A real upload, so the sidecar is worth building now: one parse of the
-    # slice, keyed above so the next call for the same mesh and slice never
-    # pays it again.
+    # slice, keyed by the caller so the next call for the same mesh and
+    # slice never pays it again.
     sidecar = _slicer_sidecar(path) if slice_tag else None
 
     try:
@@ -468,8 +626,7 @@ def stage_link_for(
         # here -- a preview never opens a second socket to find out.
         from kiln.served_answer import classify_transport_error
 
-        _refused(path, classify_transport_error(exc, probe=False).cause, evidence)
-        return None
+        return None, classify_transport_error(exc, probe=False).cause
 
     if resp.status_code in (401, 403):
         # An auth refusal is a property of the BEARER, not of this mesh —
@@ -477,21 +634,17 @@ def stage_link_for(
         # paying for the same refusal again.
         _REFUSED_BEARER = token
         logger.debug("stage link refused: HTTP %s (bearer remembered)", resp.status_code)
-        _refused(path, f"http_{resp.status_code}", evidence)
-        return None
+        return None, f"http_{resp.status_code}"
     if resp.status_code != 200:
         logger.debug("stage link refused: HTTP %s", resp.status_code)
-        _refused(path, f"http_{resp.status_code}", evidence)
-        return None
+        return None, f"http_{resp.status_code}"
     try:
         body = resp.json()
     except Exception:  # noqa: BLE001
-        _refused(path, "bad_response", evidence)
-        return None
+        return None, "bad_response"
     url = (body or {}).get("viewer_url")
     if not isinstance(url, str) or not url:
-        _refused(path, "bad_response", evidence)
-        return None
+        return None, "bad_response"
 
     expires_at = body.get("viewer_expires_at")
     if not isinstance(expires_at, (int, float)):
@@ -499,10 +652,7 @@ def stage_link_for(
         expires_at = time.time() + (
             expires_in if isinstance(expires_in, (int, float)) else 1800
         )
-    _cache_put(cache_key, url, float(expires_at))
-    if evidence:
-        _issued(path, url, float(expires_at))
-    return {"viewer_url": url, "expires_at": float(expires_at), "cached": False}
+    return {"viewer_url": url, "expires_at": float(expires_at), "cached": False}, ""
 
 
 # ---------------------------------------------------------------------------
