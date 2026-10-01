@@ -269,7 +269,7 @@ _SPEED_PERCENT_BASE: dict[str, str] = {
 }
 
 #: Gap fill and small perimeters (holes and bosses, radius 6.5 mm or less)
-#: print at this share of the outer-wall speed: both are short, tight moves
+#: print at this share of the slower wall speed: both are short, tight moves
 #: the slicer's own help says to keep slow.
 _SHORT_MOVE_SHARE_OF_EXTERNAL = 0.5
 
@@ -322,7 +322,7 @@ def _ensure_speed_coverage(settings: dict[str, str]) -> None:
 
     * solid infill -- the slower of the perimeter and sparse-infill speeds;
     * the top surface -- the outer-wall speed, no faster than solid infill;
-    * gap fill and small perimeters -- half the outer-wall speed.
+    * gap fill and small perimeters -- half the slower of the two wall speeds.
 
     Printer makers' own presets hold the same relationships, and in most of
     them each of these features runs at the derived speed or faster, so a
@@ -346,7 +346,10 @@ def _ensure_speed_coverage(settings: dict[str, str]) -> None:
 
     if external:
         top = min(external, solid) if solid else external
-        short_move = external * _SHORT_MOVE_SHARE_OF_EXTERNAL
+        # The slower wall: a material or a caller that slows the inner walls
+        # and leaves the outer one alone must not be outrun by a hole.
+        slower_wall = min(external, perimeter) if perimeter else external
+        short_move = slower_wall * _SHORT_MOVE_SHARE_OF_EXTERNAL
         settings.setdefault("top_solid_infill_speed", _speed_value(top))
         settings.setdefault("gap_fill_speed", _speed_value(short_move))
         settings.setdefault("small_perimeter_speed", _speed_value(short_move))

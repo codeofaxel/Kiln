@@ -507,6 +507,47 @@ _PRINTER_SPEED_OVERRIDES: dict[str, dict[str, str]] = {
     },
 }
 
+
+def _speed_fill_for_slice(
+    printer_id: str | None,
+    target_type: str | None,
+    *,
+    caller_profile: bool,
+) -> dict[str, str]:
+    """Speeds a print door may fill in, for a printer Kiln has no profile for.
+
+    A printer with its own bundled profile prints that profile's speeds --
+    stated, and derived for whatever it leaves out
+    (:func:`kiln.slicer_profiles._ensure_speed_coverage`) -- at every door,
+    which are the speeds every estimate is made with.  Until 2026-09-30 the
+    two print doors (``slice_and_print``, ``run_reslice_and_print``) laid a
+    second table over the profile: speeds and accelerations derived from
+    ``printer_intelligence._SPEED_CAPABILITIES``, then this module's per-type
+    table.  So the time Kiln quoted was for a different file than the one it
+    printed, and the capability table's prefix match handed the Ender-3 V3,
+    V3 KE, V3 Plus and V4 the original Ender 3's speeds (45 mm/s against
+    their profiles' 130).  A caller's own profile is theirs, too.
+
+    What is left for these tables is what they are good at: a machine Kiln
+    has no profile for, where a known printer TYPE beats the generic
+    profile's 45 mm/s.  Callers merge the fill under every key the caller or
+    the door already set -- never over them.
+    """
+    if caller_profile:
+        return {}
+    fill: dict[str, str] = {}
+    if printer_id:
+        from kiln.slicer_profiles import get_slicer_profile
+
+        if get_slicer_profile(printer_id).id != "default":
+            return {}
+        from kiln.printer_intelligence import get_slicer_speed_overrides
+
+        fill.update(get_slicer_speed_overrides(printer_id))
+    for key, value in _PRINTER_SPEED_OVERRIDES.get(target_type or "", {}).items():
+        fill.setdefault(key, value)
+    return fill
+
 _CONFIRM_UPLOAD: bool = os.environ.get("KILN_CONFIRM_UPLOAD", "").lower() in ("1", "true", "yes")
 _CONFIRM_MODE: bool = os.environ.get("KILN_CONFIRM_MODE", "").lower() in ("1", "true", "yes")
 _THINGIVERSE_TOKEN: str = os.environ.get("KILN_THINGIVERSE_TOKEN", "")
@@ -16959,32 +17000,19 @@ def run_reslice_and_print(
         if _arg_err is not None:
             return _arg_err
 
-        # Prefer per-model speeds for the machine this print is FOR — an
-        # unnamed printer_id used to mean "no model speeds", and the type
-        # fallback below then spoke for whichever printer was the default.
-        _speed_pid = _resolve_printer_profile_id(printer_id, printer_name)
-        if _speed_pid:
-            try:
-                from kiln.printer_intelligence import get_slicer_speed_overrides
-
-                model_speeds = get_slicer_speed_overrides(_speed_pid)
-                if model_speeds:
-                    if parsed_overrides is None:
-                        parsed_overrides = {}
-                    for k, v in model_speeds.items():
-                        if k not in parsed_overrides:
-                            parsed_overrides[k] = v
-            except (ImportError, Exception):
-                pass  # fall through to per-type defaults below
-
-        # Inject printer-aware speed overrides (don't override explicit user settings)
-        _target_type = _resolve_target_printer_type(printer_name)
-        if _target_type in _PRINTER_SPEED_OVERRIDES:
+        # The machine this print is FOR prints its own profile's speeds, the
+        # ones its estimate was made with; the tables fill in only for a
+        # machine Kiln has no profile for (_speed_fill_for_slice).
+        speed_fill = _speed_fill_for_slice(
+            _resolve_printer_profile_id(printer_id, printer_name),
+            _resolve_target_printer_type(printer_name),
+            caller_profile=bool(profile_path),
+        )
+        if speed_fill:
             if parsed_overrides is None:
                 parsed_overrides = {}
-            for k, v in _PRINTER_SPEED_OVERRIDES[_target_type].items():
-                if k not in parsed_overrides:
-                    parsed_overrides[k] = v
+            for k, v in speed_fill.items():
+                parsed_overrides.setdefault(k, v)
 
         result = _pipeline_reslice_and_print(
             model_path=model_path,

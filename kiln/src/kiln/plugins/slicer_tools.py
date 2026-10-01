@@ -2506,26 +2506,20 @@ class _SlicerToolsPlugin:
                     adhesion_overrides["start_gcode"] = ""
                     adhesion_overrides["end_gcode"] = ""
 
-                # Prefer per-model speeds when printer_id is available
-                if effective_printer_id:
-                    try:
-                        from kiln.printer_intelligence import get_slicer_speed_overrides
-
-                        model_speeds = get_slicer_speed_overrides(effective_printer_id)
-                        if model_speeds:
-                            for k, v in model_speeds.items():
-                                if k not in adhesion_overrides:
-                                    adhesion_overrides[k] = v
-                    except (ImportError, Exception):
-                        pass  # fall through to per-type defaults below
-
-                # Inject printer-aware speed overrides — again for the target:
-                # a Bambu's 250mm/s infill is not a speed to hand an Ender 3
-                # just because a Bambu happens to be the default printer.
-                if target_type in _srv._PRINTER_SPEED_OVERRIDES:
-                    for k, v in _srv._PRINTER_SPEED_OVERRIDES[target_type].items():
-                        if k not in adhesion_overrides:  # don't override explicit user settings
-                            adhesion_overrides[k] = v
+                # The machine this print is FOR prints its own profile's
+                # speeds -- the ones its estimate was made with.  The tables
+                # fill in only for a machine Kiln has no profile for, read for
+                # the TARGET (a Bambu's 250 mm/s infill is not a speed to hand
+                # an Ender 3 because a Bambu is the default printer), and
+                # never over a key the caller or this door already set.
+                # adhesion_overrides is merged OVER parsed_overrides below, so
+                # both are checked: a fill landing here used to replace the
+                # caller's own speeds.
+                for k, v in _srv._speed_fill_for_slice(
+                    effective_printer_id, target_type, caller_profile=profile is not None,
+                ).items():
+                    if k not in parsed_overrides and k not in adhesion_overrides:
+                        adhesion_overrides[k] = v
 
                 # --- Printer's own start routine (kiln-pro handoff) ---
                 # When the registered machine's Klipper config defines a

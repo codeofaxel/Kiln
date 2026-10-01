@@ -236,8 +236,8 @@ class TestEveryProfileStatesItsPace:
             solid = speed_mm_s(s, "solid_infill_speed")
             assert solid is not None and solid <= min(perimeter, infill), pid
             assert speed_mm_s(s, "top_solid_infill_speed") <= min(external, solid), pid
-            assert speed_mm_s(s, "gap_fill_speed") <= external, pid
-            assert speed_mm_s(s, "small_perimeter_speed") <= external, pid
+            assert speed_mm_s(s, "gap_fill_speed") <= min(external, perimeter), pid
+            assert speed_mm_s(s, "small_perimeter_speed") <= min(external, perimeter), pid
 
     def test_no_routine_speed_sits_below_the_profiles_pace_floor(self) -> None:
         """The floor the slicer-backed check applies to the G-code, applied
@@ -280,6 +280,24 @@ class TestEveryDoorDerivesThem:
         assert s["top_solid_infill_speed"] == "40"
         assert s["gap_fill_speed"] == "20"
         assert s["small_perimeter_speed"] == "75"
+
+    def test_slowed_walls_are_never_outrun_by_a_derived_speed(self) -> None:
+        """A material or a caller that slows the inner walls and leaves the
+        outer one alone must not get holes and gap fill at half the outer
+        wall's pace -- 75 mm/s for TPU on an A1, measured on the first cut of
+        this rule, against the slicer's old 15."""
+        from unittest.mock import patch
+
+        from kiln.server import build_material_overrides
+
+        with patch("kiln.server._check_auth", return_value=None):
+            tpu = build_material_overrides("tpu")["overrides"]
+        s = _ini(resolve_slicer_profile("bambu_a1", overrides=tpu))
+        wall = float(tpu["perimeter_speed"])
+        assert float(s["solid_infill_speed"]) <= wall
+        assert float(s["top_solid_infill_speed"]) <= wall
+        assert float(s["gap_fill_speed"]) <= wall / 2
+        assert float(s["small_perimeter_speed"]) <= wall / 2
 
     def test_a_percentage_anchor_is_read_against_its_documented_base(self) -> None:
         # PrusaSlicer reads the outer wall's "50%" against the perimeter speed.

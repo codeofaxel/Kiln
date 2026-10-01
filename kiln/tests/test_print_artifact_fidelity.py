@@ -903,7 +903,7 @@ class TestCalibrationSurvivesAdhesion:
                         side_effect=_fake_calibration,
                     ), \
                     patch(
-                        "kiln.printer_intelligence.get_slicer_speed_overrides",
+                        "kiln.server._speed_fill_for_slice",
                         return_value={"perimeter_speed": "55"},
                     ), \
                     patch("kiln.slicer.slice_file", side_effect=_spy):
