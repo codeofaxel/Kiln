@@ -16003,9 +16003,11 @@ def validate_openscad_code(scad_code: str = "", code: str = "") -> dict:
 @mcp.tool()
 def predict_print_failure(
     file_path: str,
-    min_wall_mm: float = 0.8,
+    min_wall_mm: float | None = None,
     max_bridge_mm: float = 15.0,
     max_overhang_deg: float = 55.0,
+    printer_id: str | None = None,
+    nozzle_mm: float | None = None,
 ) -> dict:
     """Predict common 3D printing failure modes from mesh geometry.
 
@@ -16014,23 +16016,40 @@ def predict_print_failure(
     non-manifold issues.  Returns a risk score (0-100) and
     per-failure details with fix suggestions.
 
+    The thin-wall floor follows the nozzle: two lines of it, so 0.8 mm for
+    a 0.4 mm nozzle and 1.2 mm for a 0.6.  The answer says which nozzle it
+    was judged for and where that size came from.
+
     :param file_path: Path to mesh file (.stl, .obj, .glb, or .3mf).
-    :param min_wall_mm: Minimum printable wall thickness (default 0.8).
+    :param min_wall_mm: Minimum printable wall thickness.  Leave it out to
+        use two lines of the nozzle.
     :param max_bridge_mm: Maximum unsupported bridge length (default 15).
     :param max_overhang_deg: Maximum overhang angle before failure (default 55).
-    :returns: Dict with verdict, risk score, and failure list.
+    :param printer_id: The printer the part is for.  Left out, the only
+        printer Kiln knows of stands in.
+    :param nozzle_mm: The nozzle fitted, when you know it.  Left out, the
+        nozzle on record for the printer, then the printer's own setting,
+        then its stock size.
+    :returns: Dict with verdict, risk score, failure list, the wall floor
+        used and the nozzle it was judged for.
     """
     try:
+        from kiln.assumed_nozzle import assumed_nozzle
         from kiln.generation.validation import predict_print_failures
 
+        nozzle = assumed_nozzle(printer_id or None, stated=nozzle_mm, or_only_printer=True)
+        result = predict_print_failures(
+            file_path,
+            min_wall_mm=min_wall_mm,
+            max_bridge_mm=max_bridge_mm,
+            max_overhang_deg=max_overhang_deg,
+            nozzle_mm=nozzle.diameter_mm,
+        )
         return {
             "success": True,
-            **predict_print_failures(
-                file_path,
-                min_wall_mm=min_wall_mm,
-                max_bridge_mm=max_bridge_mm,
-                max_overhang_deg=max_overhang_deg,
-            ),
+            **result,
+            "nozzle": nozzle.to_dict(),
+            "message": nozzle.sentence(),
         }
     except Exception as exc:
         return _error_dict(f"Failure prediction failed: {exc}")

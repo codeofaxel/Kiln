@@ -2650,12 +2650,17 @@ def _load_triangles(
 # ---------------------------------------------------------------------------
 
 
+#: A wall narrower than this many lines of the nozzle is called thin.
+_THIN_WALL_NOZZLE_LINES = 2.0
+
+
 def predict_print_failures(
     file_path: str,
     *,
-    min_wall_mm: float = 0.8,
+    min_wall_mm: float | None = None,
     max_bridge_mm: float = 15.0,
     max_overhang_deg: float = 55.0,
+    nozzle_mm: float | None = None,
 ) -> dict[str, Any]:
     """Predict common 3D printing failure modes from mesh geometry.
 
@@ -2669,13 +2674,25 @@ def predict_print_failures(
 
     Args:
         file_path: Path to mesh file.
-        min_wall_mm: Minimum printable wall thickness.
+        min_wall_mm: Minimum printable wall thickness.  Left out, it is
+            two lines of the nozzle.
         max_bridge_mm: Maximum unsupported bridge length.
         max_overhang_deg: Maximum overhang angle before failure.
+        nozzle_mm: The nozzle the part will be printed with.  Left out,
+            :data:`kiln.assumed_nozzle.DEFAULT_MM`; the tool door resolves
+            the fitted one and passes it.
 
     Returns:
-        Dict with failure predictions and risk scores.
+        Dict with failure predictions and risk scores, the wall floor that
+        was used (``min_wall_mm``) and where it came from
+        (``min_wall_basis``: ``"stated"`` or ``"nozzle"``).
     """
+    from kiln.assumed_nozzle import DEFAULT_MM
+
+    nozzle_mm = float(nozzle_mm) if nozzle_mm else DEFAULT_MM
+    min_wall_basis = "stated" if min_wall_mm is not None else "nozzle"
+    if min_wall_mm is None:
+        min_wall_mm = round(_THIN_WALL_NOZZLE_LINES * nozzle_mm, 3)
     path = Path(file_path)
     errors: list[str] = []
     tris = _load_triangles(path, errors)
@@ -2839,11 +2856,12 @@ def predict_print_failures(
     if min_dim < 1.0:
         failures.append({
             "type": "small_features",
-            "severity": "high" if min_dim < 0.4 else "medium",
+            # Narrower than one line of the nozzle cannot be laid at all.
+            "severity": "high" if min_dim < nozzle_mm else "medium",
             "detail": f"Minimum dimension {min_dim:.2f}mm may not resolve",
             "suggestion": "Scale up or increase feature size for reliable printing",
         })
-        risk_score += 15 if min_dim < 0.4 else 5
+        risk_score += 15 if min_dim < nozzle_mm else 5
 
     # 6. Non-manifold / disconnected components
     if not analysis.is_manifold:
@@ -2884,6 +2902,8 @@ def predict_print_failures(
         "dimensions_mm": dims,
         "triangle_count": len(tris),
         "mesh_check_score": analysis.mesh_check_score,
+        "min_wall_mm": min_wall_mm,
+        "min_wall_basis": min_wall_basis,
     }
 
 
