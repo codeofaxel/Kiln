@@ -459,3 +459,60 @@ class TestTheLayerPlanFollowsTheNozzle:
         plan = quick_adaptive_plan(material="PLA", model_height_mm=20.0, printer="bambu_a1")
         assert plan["success"] is True
         assert plan["nozzle"]["source"] == "record" and plan["nozzle"]["printer_id"] == "bambu_a1"
+
+
+# ---------------------------------------------------------------------------
+# Estimates: how much plastic a wall takes depends on how wide it is laid
+# ---------------------------------------------------------------------------
+
+
+def _call(name: str, **arguments):
+    import asyncio
+    import json
+
+    from kiln import server
+
+    out = asyncio.run(server.mcp.call_tool(name, arguments))
+    content = out[0] if isinstance(out, tuple) else out
+    return json.loads(content[0].text)
+
+
+class TestTheEstimatesFollowTheNozzle:
+    """Each estimate tool, through the registered tool: the only printer's
+    nozzle moves the figure exactly as stating the size does, and the reply
+    says which size it used."""
+
+    @pytest.mark.parametrize(
+        ("tool", "weight"),
+        [
+            ("estimate_material_cost", lambda out: out["weight_g"]),
+            ("estimate_print_cost_from_mesh", lambda out: out["cost_breakdown"]["filament"]),
+        ],
+    )
+    def test_a_mesh_estimate(self, fin, monkeypatch, tool, weight):
+        _registered(monkeypatch)
+        _only_record(monkeypatch, None, None)
+        stock = _call(tool, file_path=fin)
+        told = _call(tool, file_path=fin, nozzle_mm=0.6)
+        _only_record(monkeypatch, "bambu_a1", 0.6)
+        wide = _call(tool, file_path=fin)
+
+        assert stock["nozzle"]["source"] == "default" and stock["nozzle"]["diameter_mm"] == 0.4
+        assert told["nozzle"]["source"] == "stated"
+        assert wide["nozzle"]["source"] == "record" and wide["nozzle"]["printer_id"] == "bambu_a1"
+        assert weight(told) != weight(stock)
+        assert weight(wide) == weight(told)
+
+    def test_an_estimate_from_dimensions(self, monkeypatch):
+        _registered(monkeypatch)
+        _only_record(monkeypatch, None, None)
+        size = {"width_mm": 60.0, "depth_mm": 40.0, "height_mm": 20.0}
+        stock = _call("estimate_before_design", **size)
+        told = _call("estimate_before_design", **size, nozzle_mm=0.6)
+        _only_record(monkeypatch, "bambu_a1", 0.6)
+        wide = _call("estimate_before_design", **size)
+
+        assert stock["nozzle"]["source"] == "default"
+        assert wide["nozzle"]["source"] == "record" and wide["nozzle"]["diameter_mm"] == 0.6
+        assert told["estimate"] != stock["estimate"]
+        assert wide["estimate"] == told["estimate"]

@@ -1267,7 +1267,7 @@ class _DesignToolsPlugin:
             infill_percent: float = 20.0,
             wall_layers: int = 3,
             layer_height_mm: float = 0.2,
-            nozzle_mm: float = 0.4,
+            nozzle_mm: float | None = None,
             include_supports: bool = False,
             support_density: float = 15.0,
             adhesion_type: str = "none",
@@ -1289,16 +1289,20 @@ class _DesignToolsPlugin:
                 infill_percent: Interior fill percentage 0-100 (default 20).
                 wall_layers: Number of perimeter shells (default 3).
                 layer_height_mm: Layer height in mm (default 0.2).
-                nozzle_mm: Nozzle diameter in mm (default 0.4).
+                nozzle_mm: Nozzle diameter in mm.  Leave unset for the only
+                    printer Kiln knows of, else 0.4; ``nozzle`` in the reply
+                    says which.
                 include_supports: Estimate support material cost (default False).
                 support_density: Support infill percentage (default 15).
                 adhesion_type: Bed adhesion type: "none", "brim", or "raft".
                 electricity_rate: Electricity cost in $/kWh (default 0.12).
                 printer_wattage: Printer power consumption in watts (default 200).
             """
+            from kiln.assumed_nozzle import assumed_nozzle
             from kiln.cost_estimator import CostEstimator
 
             try:
+                nozzle = assumed_nozzle(None, stated=nozzle_mm, or_only_printer=True)
                 estimator = CostEstimator()
                 estimate = estimator.estimate_from_mesh(
                     file_path,
@@ -1306,7 +1310,7 @@ class _DesignToolsPlugin:
                     infill_percent=infill_percent,
                     wall_layers=wall_layers,
                     layer_height_mm=layer_height_mm,
-                    nozzle_mm=nozzle_mm,
+                    nozzle_mm=nozzle.diameter_mm,
                     include_supports=include_supports,
                     support_density=support_density,
                     adhesion_type=adhesion_type,
@@ -1315,6 +1319,7 @@ class _DesignToolsPlugin:
                 )
                 result = estimate.to_dict()
                 result["success"] = True
+                result["nozzle"] = nozzle.to_dict()
                 return result
             except FileNotFoundError as exc:
                 _logger.error("Cost estimation file not found: %s", exc)
