@@ -394,3 +394,109 @@ class TestThePreflightNamesTheNozzleSize:
     def test_no_file_means_nothing_to_compare(self):
         _, checks = self._preflight(_setting(0.6), None)
         assert "nozzle_size" not in checks
+
+
+# ---------------------------------------------------------------------------
+# The record of what was fitted: asked of kiln-pro, never a condition of a start
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def _no_local_pro(monkeypatch):
+    """A Kiln install with no kiln-pro beside it, and a clean bridge."""
+    import sys
+
+    import kiln._pro_nozzle_bridge as bridge
+
+    # The parent alone is not enough: a submodule already imported would
+    # still resolve.
+    for name in [m for m in sys.modules if m == "kiln_pro" or m.startswith("kiln_pro.")]:
+        monkeypatch.setitem(sys.modules, name, None)
+    monkeypatch.setitem(sys.modules, "kiln_pro", None)
+    monkeypatch.setattr(bridge, "_service_down_until", 0.0)
+    monkeypatch.setattr(bridge, "_service_down_miss", None)
+    monkeypatch.setattr(bridge, "_last_record_miss", {})
+    return bridge
+
+
+class TestTheRecordComparisonIsAsked:
+    def test_the_served_door_is_asked_with_the_files_size(self, _no_local_pro, monkeypatch):
+        asked: dict = {}
+
+        def served(tool_name, _timeout=30.0, **kwargs):
+            asked.update(tool=tool_name, **kwargs)
+            return {"success": True, "sliced_file": {"verdict": "printer_out_of_step", "summary": "said"}}
+
+        monkeypatch.setattr("kiln.server._pro_api_call", served)
+        block = _no_local_pro.consult_sliced_file("shop_a1", 0.6)
+        assert block == {"verdict": "printer_out_of_step", "summary": "said"}
+        assert asked["tool"] == "get_nozzle_state"
+        assert asked["printer_id"] == "shop_a1" and asked["file_nozzle_mm"] == pytest.approx(0.6)
+        assert _no_local_pro.sliced_file_unchecked("shop_a1") is None
+
+    def test_no_answer_is_none_and_says_why(self, _no_local_pro, monkeypatch):
+        def served(tool_name, _timeout=30.0, **kwargs):
+            raise OSError("network is unreachable")
+
+        monkeypatch.setattr("kiln.server._pro_api_call", served)
+        assert _no_local_pro.consult_sliced_file("shop_a1", 0.6) is None
+        gap = _no_local_pro.sliced_file_unchecked("shop_a1")
+        assert gap["word"] == "unchecked" and gap["line"] and gap["why"]
+
+    def test_an_answer_with_no_comparison_in_it_is_a_miss(self, _no_local_pro, monkeypatch):
+        monkeypatch.setattr(
+            "kiln.server._pro_api_call",
+            lambda tool_name, _timeout=30.0, **kwargs: {"success": True, "found": True},
+        )
+        assert _no_local_pro.consult_sliced_file("shop_a1", 0.6) is None
+        assert _no_local_pro.sliced_file_unchecked("shop_a1")["word"] == "unchecked"
+
+    def test_nothing_to_ask_about_asks_nothing(self, _no_local_pro, monkeypatch):
+        monkeypatch.setattr(
+            "kiln.server._pro_api_call",
+            lambda *a, **k: pytest.fail("no file size, no printer: nothing to ask"),
+        )
+        assert _no_local_pro.consult_sliced_file("", 0.6) is None
+        assert _no_local_pro.consult_sliced_file("shop_a1", 0) is None
+
+
+class TestThePreflightCarriesTheRecord:
+    def _preflight(self, tmp_path, *, on_record, gap=None):
+        from kiln.server import preflight_check
+
+        with (
+            patch("kiln.server._get_adapter") as get_adapter,
+            patch("kiln.server._get_temp_limits", return_value=(280.0, 120.0)),
+            patch("kiln.server._lifecycle_printer_name", return_value="shop_a1"),
+            patch("kiln._pro_nozzle_bridge.consult_sliced_file", return_value=on_record) as asked,
+            patch("kiln._pro_nozzle_bridge.sliced_file_unchecked", return_value=gap),
+        ):
+            get_adapter.return_value.get_state.return_value = _idle_state()
+            get_adapter.return_value.read_nozzle_setting.return_value = _setting(0.4)
+            result = preflight_check(file_path=_gcode_file(tmp_path, "0.4"))
+        return result, {c["name"]: c for c in result["checks"]}, asked
+
+    def test_a_record_out_of_step_is_said_and_never_fails_the_preflight(self, tmp_path):
+        result, checks, asked = self._preflight(
+            tmp_path, on_record={"verdict": "record_out_of_step", "summary": "the record is the one out of step"},
+        )
+        row = checks["nozzle_record"]
+        assert row["passed"] is True and row["advisory"] is True
+        assert row["message"] == "the record is the one out of step"
+        assert checks["nozzle_size"]["passed"] is True
+        asked.assert_called_once_with("shop_a1", pytest.approx(0.4))
+
+    def test_agreement_is_a_plain_pass(self, tmp_path):
+        _, checks, _ = self._preflight(tmp_path, on_record={"verdict": "agrees", "summary": "all three agree"})
+        assert checks["nozzle_record"]["passed"] is True and "advisory" not in checks["nozzle_record"]
+
+    def test_a_record_nobody_could_ask_is_listed_as_not_checked(self, tmp_path):
+        _, checks, _ = self._preflight(
+            tmp_path, on_record=None, gap={"word": "unchecked", "line": "could not ask", "why": "offline"},
+        )
+        row = checks["nozzle_record"]
+        assert row["passed"] is True and row["checked"] is False and row["message"] == "could not ask"
+
+    def test_with_kiln_pro_beside_it_and_nothing_to_say_there_is_no_row(self, tmp_path):
+        _, checks, _ = self._preflight(tmp_path, on_record=None, gap=None)
+        assert "nozzle_record" not in checks

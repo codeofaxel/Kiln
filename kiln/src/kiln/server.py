@@ -11237,6 +11237,39 @@ def preflight_check(
                 checks.append(_size_row)
                 if _size.refuses:
                     errors.append(_size_row["message"])
+                # The record of what was fitted is a third statement of the
+                # nozzle.  It never fails the pre-flight: a record can be
+                # out of date.  When it could not be asked, the list says so.
+                if _size.file_mm is not None and pf_target:
+                    from kiln import _pro_nozzle_bridge
+
+                    _on_record = _pro_nozzle_bridge.consult_sliced_file(pf_target, _size.file_mm)
+                    if _on_record is not None:
+                        _record_row: dict[str, Any] = {
+                            "name": "nozzle_record",
+                            "passed": True,
+                            "message": _on_record.get("summary", ""),
+                            "status": _on_record.get("verdict"),
+                        }
+                        if _on_record.get("verdict") == "not_compared":
+                            _record_row["checked"] = False
+                        elif _on_record.get("verdict") != "agrees":
+                            _record_row["advisory"] = True
+                        checks.append(_record_row)
+                    else:
+                        _record_gap = _pro_nozzle_bridge.sliced_file_unchecked(pf_target)
+                        if _record_gap is not None:
+                            checks.append(
+                                {
+                                    "name": "nozzle_record",
+                                    "passed": True,
+                                    "checked": False,
+                                    "message": _record_gap["line"],
+                                    "advisory": True,
+                                    "word": "unchecked",
+                                    "why": _record_gap["why"],
+                                }
+                            )
             except Exception as exc:
                 logger.debug("Nozzle size check skipped: %s", exc)
 

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-01T04:39:33.810877+00:00",
+  "generated": "2026-10-01T06:08:11.015462+00:00",
   "tool_count": 427,
   "categories": {
     "product_generators": {
@@ -16261,6 +16261,18 @@
             ],
             "default": null,
             "title": "Printer Reading"
+          },
+          "file_nozzle_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Nozzle Mm"
           }
         },
         "required": [
