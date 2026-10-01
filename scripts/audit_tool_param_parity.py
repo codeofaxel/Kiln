@@ -65,9 +65,6 @@ PARAM_PARITY_EXEMPT: dict[tuple[str, str], str] = {
         "tool resolves printer_id to plate_width/plate_depth itself "
         "(_resolve_tool_build_volume) — the engine's printer_id is an "
         "alternative route to the same dimensions",
-    ("check_print_readiness", "printer_id"):
-        "tool resolves printer_id to printer_bed_mm itself — the engine's "
-        "printer_id is an alternative route to the same dimensions",
     ("multi_copy_print", "printer_id"):
         "tool resolves the printer profile to bed_width_mm/bed_depth_mm "
         "itself — the engine's printer_id is an alternative route",
