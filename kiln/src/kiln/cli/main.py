@@ -9796,7 +9796,10 @@ def generate_and_print_cmd(
             loaded_determined_by=plan.get("loaded_determined_by") or "observed",
         )
         if not json_mode:
-            click.echo(f"Sliced: {slice_result.output_path}")
+            # The slice's own message, as kiln slice prints it: it says when
+            # a skirt past the bed's edge was dropped.
+            click.echo(slice_result.message or "Sliced.")
+            click.echo(f"Output: {slice_result.output_path}")
             click.echo(f"Material: {plan['material']}")
             if getattr(slice_result, "filament", None) is not None:
                 click.echo(f"Weighed as: {slice_result.filament.note}")

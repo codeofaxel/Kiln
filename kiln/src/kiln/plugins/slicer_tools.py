@@ -578,10 +578,11 @@ def _parse_placement(placement: Any) -> tuple[str, Any, str | None]:
     return "auto", None, f'placement {placement!r} is not a spot ([x, y] in mm), "keep", or a region ({accepted})'
 
 
-def _profile_numbers(profile_path: str | None) -> dict[str, float]:
-    """``layer_height`` / ``skirts`` / ``skirt_distance`` / ``brim_width`` from a
-    slicer profile, when they are trivially readable; ``{}`` otherwise."""
-    out: dict[str, float] = {}
+def _profile_settings(profile_path: str | None, keys: tuple[str, ...]) -> dict[str, str]:
+    """*keys* as a slicer profile states them, as text, when they are
+    trivially readable; ``{}`` otherwise.  An ``.ini`` line or a ``.json``
+    entry (its first value when it is a list)."""
+    out: dict[str, str] = {}
     if not profile_path:
         return out
     try:
@@ -593,19 +594,33 @@ def _profile_numbers(profile_path: str | None) -> dict[str, float]:
             data = json.loads(text)
         except ValueError:
             return out
-        for key in _PROFILE_NUMBER_KEYS:
+        for key in keys:
             value = data.get(key) if isinstance(data, dict) else None
             if isinstance(value, list) and value:
                 value = value[0]
-            try:
-                out[key] = float(value)
-            except (TypeError, ValueError):
-                continue
+            if value is not None:
+                out[key] = str(value).strip()
         return out
-    for key in _PROFILE_NUMBER_KEYS:
-        m = re.search(rf"^\s*{key}\s*=\s*([-+]?\d+(?:\.\d+)?)", text, re.MULTILINE)
+    for key in keys:
+        m = re.search(rf"^\s*{re.escape(key)}\s*=\s*(.*?)\s*$", text, re.MULTILINE)
         if m:
-            out[key] = float(m.group(1))
+            out[key] = m.group(1)
+    return out
+
+
+def _leading_number(text: str | None) -> float | None:
+    m = re.match(r"\s*([-+]?\d+(?:\.\d+)?)", text or "")
+    return float(m.group(1)) if m else None
+
+
+def _profile_numbers(profile_path: str | None) -> dict[str, float]:
+    """``layer_height`` / ``skirts`` / ``skirt_distance`` / ``brim_width`` from a
+    slicer profile, when they are trivially readable; ``{}`` otherwise."""
+    out: dict[str, float] = {}
+    for key, text in _profile_settings(profile_path, _PROFILE_NUMBER_KEYS).items():
+        number = _leading_number(text)
+        if number is not None:
+            out[key] = number
     return out
 
 
@@ -1118,6 +1133,13 @@ def _placed_slice(
     the wrap writes into the file, or ``None``) and ``lift_floor_mm`` (the
     height every lift in the file rises to).  Raises whatever the slicer
     raises; each door words that.
+
+    Whenever the target printer's bed is known, a sliced file whose skirt
+    or brim prints past its edge is settled here, before the second
+    verdict: the skirt is dropped and the part sliced once more, or the
+    slice is refused (:func:`_keep_the_print_on_the_bed`).  That is
+    independent of *auto_center*: the bed-fit gate measures the part, and
+    this measures what the slicer drew around it.
     """
     if plate_gate:
         placed, err, place_info = _apply_plate_placement(
@@ -1139,17 +1161,33 @@ def _placed_slice(
         if gate_err is not None:
             return None, _gate_error_response(gate_err), info
     info["effective_input"] = effective_input
-    if slicer is None:
-        from kiln.slicer import slice_file
+    from kiln.slicer import slice_file
 
+    if slicer is None:
         result = slice_file(effective_input, profile=profile_path, **slice_kwargs)
     else:
         result = slicer(effective_input, profile=profile_path, **slice_kwargs)
+    # A skirt past the bed's edge is sliced away by the same slicer, before
+    # the second verdict, so the verdict is about the file handed on.
+    run_again = slicer or slice_file
+    result, edge_err, edge_note = _keep_the_print_on_the_bed(
+        result, printer_id=effective_printer_id, profile_path=profile_path,
+        reslice=lambda profile: run_again(effective_input, profile=profile, **slice_kwargs),
+    )
+    if edge_err is not None:
+        return None, edge_err, info
     verify_err, place_info = _verify_plate_placement(result.output_path, place_info)
     info["placement"] = place_info
     if verify_err is not None:
         return None, verify_err, info
     _report_the_sliced_footprint(info, result.output_path)
+    if edge_note:
+        # In the bed-fit block where a door carries one, and on the slice's
+        # own message, which every door shows -- the CLI and the pipelines
+        # carry no block.
+        if isinstance(info.get("bed_fit"), dict):
+            info["bed_fit"]["skirt_dropped"] = edge_note
+        result.message = f"{result.message.rstrip('.')}. {edge_note}" if result.message else edge_note
     # The quiet start's plan and the lift floor, for whichever door wraps
     # the file next: the plan when the verdict carries one this account may
     # use, the floor whenever there is one (it is a safety number, and the
@@ -1192,7 +1230,7 @@ def _report_the_sliced_footprint(info: dict[str, Any], gcode_path: str | None) -
             if k in printed
         }
         fit["bbox_source"] = "gcode"
-        _note_a_print_past_the_bed(fit, printed)
+        _note_a_print_past_the_bed(fit, gcode_path)
         if not isinstance(measured, dict):
             return
         from kiln.slicer_geometry import parse_slicer_features
@@ -1215,33 +1253,146 @@ def _report_the_sliced_footprint(info: dict[str, Any], gcode_path: str | None) -
         _logger.debug("sliced footprint not reported", exc_info=True)
 
 
-def _note_a_print_past_the_bed(fit: dict[str, Any], printed: dict[str, Any]) -> None:
+def _note_a_print_past_the_bed(fit: dict[str, Any], gcode_path: str) -> None:
     """Say so when the sliced file's own print moves leave the bed.
 
-    The gate measured the part, and the part fits -- but the slicer draws a
-    skirt, a brim or a tower around it, and a part within a few millimetres
-    of the bed's edge is sliced with that outside the bed.  The check before
-    a print refuses such a file (the same :func:`check_bed_fit` verdict, read
-    here rather than re-derived); until 2026-09-30 the slice result said
-    nothing, so the first a person heard of it was the refusal.  A part
-    turned to fit is exactly the part that sits this close to the edge.
+    The check before a print refuses such a file (the same
+    :func:`~kiln.printers.bed_fit.check_bed_fit` verdict, read here rather
+    than re-derived); until 2026-09-30 the slice result said nothing, so the
+    first a person heard of it was the refusal.  The remedy follows the
+    cause (:func:`~kiln.printers.bed_fit.past_the_bed_sentence`): through the
+    shared step, a skirt or brim past the edge is already settled
+    (:func:`_keep_the_print_on_the_bed`), so what is left to say here is a
+    part that itself prints past the edge, or a file that labels no
+    features and so cannot tell the part from what surrounds it.
     """
-    from kiln.printers.bed_fit import check_bed_fit
+    from kiln.printers.bed_fit import past_the_bed_sentence, print_past_the_bed
 
-    volume = fit.get("build_volume")
-    if not volume or check_bed_fit(printed, tuple(volume), source="gcode")["ok"]:
+    edge = print_past_the_bed(gcode_path, fit.get("build_volume"))
+    if not edge or edge["on_bed"]:
         return
-    past = max(
-        -float(printed["x_min"]), float(printed["x_max"]) - float(volume[0]),
-        -float(printed["y_min"]), float(printed["y_max"]) - float(volume[1]),
+    fit["prints_past_bed_mm"] = edge["past_mm"]
+    fit["prints_past_bed"] = f"{past_the_bed_sentence(edge)} The check before a print refuses a file like this."
+
+
+def _keep_the_print_on_the_bed(
+    result: Any,
+    *,
+    printer_id: str | None,
+    profile_path: str | None,
+    reslice: Any,
+) -> tuple[Any, dict | None, str | None]:
+    """Settle a skirt or brim that prints past the edge of the bed.
+
+    A part within a few millimetres of the edge -- a part turned to fit is
+    exactly that part -- fits while what the slicer draws around it does
+    not, and the check before a print refuses the file: extrusion off the
+    plate is never sent (incident #0).  Until 2026-10-01 the slice said so
+    and handed the file on anyway.
+
+    Which one is past the edge is decided from what this slice asked the
+    slicer for, never from the file's labels: PrusaSlicer writes skirt and
+    brim as one feature.  A brim it asked for that is wider than the room
+    beside the part is refused, naming its width and that room -- a brim
+    holds the part down, and Kiln never narrows or drops one on its own.
+    Otherwise the skirt is the culprit and the one thing Kiln drops: the
+    part is sliced ONCE more with ``skirts=0`` (*reslice* takes the profile
+    path), and the note says so.  A file still past the edge after that,
+    or with no skirt to drop, is refused with what is still there.
+
+    Returns ``(result, refusal, note)`` -- the slice to hand on (the second
+    one when the skirt was dropped), the refusal or ``None``, and the
+    sentence that says the skirt was dropped.  A file on the bed, a bed Kiln
+    does not know, a file it cannot measure, and a part that itself prints
+    past the edge (the bed-fit block's note says so) pass through untouched.
+    """
+    from kiln.printers.bed_fit import _FIT_EPSILON_MM, get_build_volume, print_past_the_bed
+
+    volume = get_build_volume(printer_id) if printer_id else None
+    edge = print_past_the_bed(getattr(result, "output_path", None), volume)
+    if not edge or edge["on_bed"] or edge["part_fits"] is not True:
+        return result, None, None
+    asked = _profile_settings(profile_path, ("brim_width", "brim_type", "skirts"))
+    brim = 0.0 if asked.get("brim_type", "").lower() == "no_brim" else max(
+        0.0, _leading_number(asked.get("brim_width")) or 0.0,
     )
-    fit["prints_past_bed_mm"] = round(past, 1)
-    fit["prints_past_bed"] = (
-        f"The sliced file prints {past:.1f} mm past the edge of the bed, and the check before a print "
-        "refuses a file like this. The part itself fits, so it is what the slicer added around it "
-        "(a skirt, a brim or a tower): slice it again with a smaller one or none "
-        "(reslice_with_overrides, skirts=0)."
+    if brim > edge["room_mm"] + _FIT_EPSILON_MM:
+        return result, _brim_past_the_bed(brim, edge, volume), None
+    skirts = _leading_number(asked.get("skirts"))
+    if skirts is not None and skirts <= 0:
+        return result, _still_past_the_bed(edge, resliced=False), None
+
+    from kiln.slicer_profiles import profile_with_overrides
+
+    again = reslice(profile_with_overrides(profile_path, {"skirts": "0"}))
+    after = print_past_the_bed(getattr(again, "output_path", None), volume)
+    if after is None:
+        from kiln.server import _error_dict
+
+        return again, _error_dict(
+            "Kiln sliced the part again without a skirt, which printed past the edge of the bed, and could not "
+            "measure the new file, so it won't hand it on.",
+            code="PRINTS_PAST_BED",
+        ), None
+    if not after["on_bed"]:
+        return again, _still_past_the_bed(after, resliced=True), None
+    kept = f" and kept the {brim:g} mm brim" if brim else ""
+    return again, None, (
+        f"The skirt would have printed {edge['past_mm']:.1f} mm past the edge of the bed, so Kiln sliced "
+        f"the part again without one{kept}."
     )
+
+
+def _brim_past_the_bed(brim: float, edge: dict[str, Any], volume: Any) -> dict:
+    """The refusal for a brim wider than the room beside the part, with the
+    choices that would really print it: a narrower brim, asked for, and --
+    where the bed has room for this brim anywhere -- another placement."""
+    from kiln.printers.bed_fit import _FIT_EPSILON_MM
+    from kiln.server import _error_dict
+
+    room = max(0.0, float(edge["room_mm"]))
+    narrower = math.floor(room)
+    part = edge["part"]
+    width, depth = part["x_max"] - part["x_min"], part["y_max"] - part["y_min"]
+    bed_x, bed_y = float(volume[0]), float(volume[1])
+
+    def _all_round(w: float, d: float) -> float:
+        return min((bed_x - w) / 2.0, (bed_y - d) / 2.0)
+
+    ask = (
+        f"a brim of {narrower:g} mm or less (brim_width={narrower:g}, through reslice_with_overrides)"
+        if narrower >= 1 else "no brim (brim_width=0, through reslice_with_overrides)"
+    )
+    if _all_round(width, depth) + _FIT_EPSILON_MM >= brim:
+        elsewhere = f", or move the part toward the middle of the bed, where a {brim:g} mm brim has room all round."
+    elif _all_round(depth, width) + _FIT_EPSILON_MM >= brim:
+        elsewhere = (
+            f", or turn it a quarter turn on the bed (rotate_model, rotation_z=90), which leaves a "
+            f"{brim:g} mm brim room all round."
+        )
+    else:
+        elsewhere = f". No spot on this {bed_x:g} x {bed_y:g} mm bed leaves {brim:g} mm all round a part this size."
+    resp = _error_dict(
+        f"Kiln won't hand this slice on: the {brim:g} mm brim it asks for would print past the edge of the bed. "
+        f"The part is printed {room:.1f} mm from the nearest edge, a brim needs its full width on every side, "
+        f"and Kiln does not narrow a brim on its own. Ask for {ask}{elsewhere}",
+        code="BRIM_PAST_BED",
+    )
+    resp["past_the_bed"] = {"brim_width_mm": brim, "room_mm": round(room, 1), "past_mm": edge["past_mm"]}
+    return resp
+
+
+def _still_past_the_bed(edge: dict[str, Any], *, resliced: bool) -> dict:
+    """The refusal for a file that still prints past the edge with no skirt
+    left to drop, in the words of what is still there."""
+    from kiln.printers.bed_fit import past_the_bed_sentence
+    from kiln.server import _error_dict
+
+    sentence = past_the_bed_sentence(edge)
+    lead = "Kiln sliced it again without a skirt and won't hand it on: " if resliced else "Kiln won't hand this slice on: "
+    resp = _error_dict(lead + sentence[0].lower() + sentence[1:], code="PRINTS_PAST_BED")
+    resp["past_the_bed"] = {"past_mm": edge["past_mm"], "part_fits": edge["part_fits"], "added": list(edge["added"])}
+    return resp
 
 
 def _auto_wrap_bambu_3mf(
@@ -1947,7 +2098,10 @@ class _SlicerToolsPlugin:
 
             Returns a JSON object with the output G-code path.  The output file
             can then be uploaded to a printer with ``upload_file`` and printed
-            with ``start_print``.
+            with ``start_print``.  A skirt that would print past the edge of
+            the bed is dropped and the part sliced again (``bed_fit``'s
+            ``skirt_dropped`` says so); a brim that would is refused
+            (``BRIM_PAST_BED``) with the width that fits.
             """
             if err := _srv._check_auth("slicer"):
                 return err
@@ -2142,7 +2296,9 @@ class _SlicerToolsPlugin:
 
             Use this tool when a print failed due to adhesion, wobble, or quality issues
             and you need to reslice with adjusted settings. Pair with rotate_model to
-            also change part orientation before reslicing.
+            also change part orientation before reslicing.  A brim too wide for the
+            room beside the part is refused (``BRIM_PAST_BED``) with the width that
+            fits; a skirt past the edge of the bed is dropped and said in ``bed_fit``.
 
             Requires PrusaSlicer or OrcaSlicer installed locally.
             Use kiln find-slicer or the find_slicer MCP tool to verify.
@@ -2457,7 +2613,9 @@ class _SlicerToolsPlugin:
             based on model geometry, material warp tendency, and printer type.
             This adhesion intelligence only activates when no custom profile is
             supplied; when it could not read the model, ``printability_note``
-            says why.
+            says why.  A skirt that would print past the edge of the bed is
+            dropped and the part sliced again; a brim that would is refused
+            with the width that fits.
 
             Pre-print validation gate: mesh inputs (.stl/.obj/.3mf/.step/.glb)
             run through Kiln's full validation pipeline before slicing —

@@ -7123,14 +7123,19 @@ def upload_file(file_path: str, printer_name: str | None = None) -> dict:
                             "bbox": bed_fit_result.get("bbox"),
                         },
                     )
+                    # A part that fits is not moved by centring it: the
+                    # message already names what prints past the edge.
+                    remedy = "" if bed_fit_result.get("part_fits_the_bed") else (
+                        " This would have driven the nozzle into the printer frame. "
+                        "Re-slice with auto_center=True or call center_model_on_bed first."
+                    )
                     return {
                         "success": False,
                         "error": {
                             "code": code,
                             "message": (
-                                f"Upload blocked: {bed_fit_result.get('error_message', 'off-bed geometry')}. "
-                                f"This would have driven the nozzle into the printer frame. "
-                                f"Re-slice with auto_center=True or call center_model_on_bed first."
+                                f"Upload blocked: {str(bed_fit_result.get('error_message') or 'off-bed geometry').rstrip('.')}."
+                                f"{remedy}"
                             ),
                         },
                         "bed_fit": bed_fit_result,
