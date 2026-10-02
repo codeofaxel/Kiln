@@ -815,7 +815,12 @@ def _standing_window_after_gate(json_mode: bool) -> dict[str, Any] | None:
         if w is None:
             return None
         block = consent_window_note.block_for_window(w, close_hint=f"run `kiln consent revoke {w.id}`")
-        if not json_mode:
+        if not json_mode and w.always:
+            click.echo(
+                f"Always allow is on for {consent_windows.describe_scope(w.scope)}: starting without asking. "
+                f"Turn it off with: kiln consent revoke {w.id}"
+            )
+        elif not json_mode:
             facts = consent_windows.describe(w)
             click.echo(
                 f"Standing window {w.id} covers {facts['scope']} until {facts['until_clock']} "
@@ -10953,12 +10958,12 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
     try:
         from kiln import consent_windows as _cw
 
-        _live = [_cw.describe(w) for w in _cw.live_windows()]
+        _live = [_cw.describe(w) for w in _cw.standing_now()]
         checks.append({
             "name": "standing_consent_windows",
             "ok": True,
             "detail": (
-                "; ".join(f"{w['id']} {w['scope']} until {w['until']} via {w['opened_via']}" for w in _live)
+                "; ".join(f"{w['id']} {w['summary']} via {w['opened_via']}" for w in _live)
                 + " — prints there start without asking; close with `kiln consent revoke <id>`"
                 if _live
                 else "none open: every print asks you"

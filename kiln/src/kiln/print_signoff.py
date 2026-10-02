@@ -270,12 +270,24 @@ def record_refusal(record: dict[str, Any] | None, printer_name: str | None) -> s
         )
     window_id = str(record.get("window_id") or "")
     if window_id:
+        always = False
         try:
-            from kiln.consent_windows import is_live
+            from kiln.consent_windows import get_window, is_live
 
-            live = is_live(window_id)
+            # Always allow is for a machine: the question is asked again
+            # for the printer this job is about to be sent to.
+            live = is_live(window_id, printer_name=printer_name)
+            window = get_window(window_id)
+            always = bool(window is not None and window.always)
         except Exception:  # noqa: BLE001 — an unreadable store is no window
             live = False
+        if not live and always:
+            return (
+                f"not started on {printer_name}: this job was queued while always allow was on, "
+                "and it no longer covers this printer — it was turned off, or a different printer "
+                "is now set up under that name. A person can approve the print, or turn always "
+                "allow on again at a terminal (`kiln consent window --always --printer NAME`)."
+            )
         if not live:
             return (
                 f"not started on {printer_name}: standing window {window_id} that this job "

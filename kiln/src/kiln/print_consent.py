@@ -48,9 +48,10 @@ Where a yes can come from, graded by who is holding the pen:
   never as the person.
 * **Grade B** — a person at a terminal typed yes (``user_terminal``), or
   a person at a terminal opened a standing window (``standing_window``,
-  see :mod:`kiln.consent_windows`).  A terminal is a fact about the
-  process, not about a person, so on the hosted multi-tenant server
-  grade B is not accepted.
+  see :mod:`kiln.consent_windows`) or turned on always allow for one
+  printer (``always_allow``, the same record with no end).  A terminal
+  is a fact about the process, not about a person, so on the hosted
+  multi-tenant server grade B is not accepted.
 
 A yes is for ONE print, on the printer it was aimed at.  A person may
 name a wider scope — a list of printers, or the fleet — and ``matches()``
@@ -103,6 +104,11 @@ SOURCE_TERMINAL = "user_terminal"
 SOURCE_DERIVED = "derived"
 #: A person at a terminal opened a standing window covering this printer.
 SOURCE_WINDOW = "standing_window"
+#: A person at a terminal turned on always allow for this printer: a
+#: standing window with no end, for one machine
+#: (:func:`kiln.consent_windows.open_always`).  Its own word, so every
+#: start that rests on it reads apart from one inside a timed window.
+SOURCE_ALWAYS = "always_allow"
 #: A person typed the code Kiln showed on this machine's screen
 #: (:mod:`kiln.screen_code`): the agent relayed the words, the code proved
 #: someone at the screen chose to type them.  The terminal's rung.
@@ -131,7 +137,7 @@ def grade_of(source: str) -> str | None:
     own (a derived plate rides its input's; a bypass is not a yes)."""
     if source in (SOURCE_ELICITED, *HOSTED_SOURCES):
         return GRADE_A
-    if source in (SOURCE_TERMINAL, SOURCE_WINDOW, SOURCE_CODE):
+    if source in (SOURCE_TERMINAL, SOURCE_WINDOW, SOURCE_ALWAYS, SOURCE_CODE):
         return GRADE_B
     return None
 
@@ -189,8 +195,11 @@ FIELD_ANSWER = "answer"
 FIELD_FOR_HOW_LONG = "for_how_long"
 FIELD_WHERE = "where"
 
-#: The longest a standing window lasts, through EITHER door.  Longer than
-#: a day is "auto-print on", which is what the standing opt-in is for.
+#: The longest a standing window lasts, through EVERY door that takes a
+#: length.  Longer than a day is not a longer window: it is always allow,
+#: which has no length, covers one printer, and is turned on only at a
+#: terminal (:func:`kiln.consent_windows.open_always`) — or one of the
+#: two auto-print switches, which cover their own flows.
 MAX_WINDOW_SECONDS = 24 * 3600.0
 
 _TWO_HOURS = 2 * 3600.0
@@ -762,6 +771,20 @@ def consent_for(
         window = None
     if window is None:
         return None
+    if window.always:
+        # Always allow is for a machine, and ``covering`` has just matched
+        # the machine this print is aimed at.  The consent is therefore
+        # for the printer the call named, not for a list of names: the
+        # entry's own name may be another label for the same machine.
+        return PrintConsent(
+            tool="kiln consent window --always",
+            file_name=file_name,
+            printer_name=printer_name,
+            granted_at=window.set_at,
+            source=SOURCE_ALWAYS,
+            identity=window.set_by,
+            window_id=window.id,
+        )
     return PrintConsent(
         tool="kiln consent window",
         file_name=file_name,

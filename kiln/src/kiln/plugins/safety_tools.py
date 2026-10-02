@@ -172,7 +172,7 @@ class _SafetyToolsPlugin:
                 try:
                     from kiln import consent_windows
 
-                    standing_windows = [consent_windows.describe(w) for w in consent_windows.live_windows()]
+                    standing_windows = [consent_windows.describe(w) for w in consent_windows.standing_now()]
                 except Exception as exc:
                     _logger.debug("Standing windows not read for safety status: %s", exc)
 
@@ -195,7 +195,11 @@ class _SafetyToolsPlugin:
                         f"{len(recent_blocked)} blocked action(s) in last hour. "
                         + (
                             "Standing consent window(s) open: "
-                            + "; ".join(f"{w['id']} {w['scope']} until {w['until_clock']}" for w in standing_windows)
+                            + "; ".join(
+                                f"{w['id']} {w['summary']}" if w["always"]
+                                else f"{w['id']} {w['scope']} until {w['until_clock']}"
+                                for w in standing_windows
+                            )
                             + " — prints there start without asking; revoke_consent_window closes one."
                             if standing_windows
                             else "No standing consent window: every print asks the person."
@@ -620,6 +624,12 @@ class _SafetyToolsPlugin:
             opens or extends one.  Closing one is always allowed: see
             ``revoke_consent_window``.
 
+            An entry with ``always: true`` is always allow: the person turned
+            it on at a terminal for one printer, it has no end (``until`` is
+            null), and prints there start without asking until it is turned
+            off.  ``turned_off`` lists any that Kiln turned off itself in the
+            last day because a different printer was set up under the name.
+
             Args:
                 printer_name: Show only the window covering this printer.
                     Omit for every open window.
@@ -636,13 +646,24 @@ class _SafetyToolsPlugin:
                         "account approves each print."
                     ),
                 }
-            live = consent_windows.live_windows()
+            live = consent_windows.standing_now()
+            closed = consent_windows.turned_off_recently()
             if printer_name:
-                live = [w for w in live if w.covers(printer_name)]
+                always = consent_windows.always_for(printer_name)
+                always_id = always.id if always is not None else ""
+                live = [w for w in live if (w.id == always_id if w.always else w.covers(printer_name))]
+                gone = consent_windows.turned_itself_off(printer_name)
+                closed = [gone] if gone is not None else []
             rows = [consent_windows.describe(w) for w in live]
+            from kiln.consent_window_note import turned_off_line
+
             return {
                 "success": True,
                 "windows": rows,
+                "turned_off": [
+                    {**consent_windows.describe(w), "note": turned_off_line(consent_windows.describe_scope(w.scope))}
+                    for w in closed
+                ],
                 "note": (
                     "Prints inside a window start without asking; each is still previewed "
                     "first. To close one early, call revoke_consent_window. Only the person "
@@ -671,6 +692,10 @@ class _SafetyToolsPlugin:
             a terminal: when they say to close it, call this.  Closing is
             the safe direction, so it needs no confirmation and no window
             can refuse it.  Jobs queued under the window will not start.
+
+            This is also how always allow is turned off: when the person
+            says "ask me first", call this with the printer's name (or the
+            id on the print result) and show them the ``note`` as written.
 
             Args:
                 window_id: The window to close (from ``consent_window_status``
@@ -706,10 +731,24 @@ class _SafetyToolsPlugin:
             return {
                 "success": True,
                 "revoked": [consent_windows.describe(w) for w in closed],
-                "note": (
-                    "Closed. Prints ask the person again." if closed else "No open window to close."
-                ),
+                "note": _closed_note(closed),
             }
+
+
+def _closed_note(closed: list[Any]) -> str:
+    """What the person is told a revoke did.  Always allow gets its own
+    sentence, said per printer; a timed window the one it always had."""
+    if not closed:
+        return "No open window to close."
+    from kiln.consent_windows import describe_scope
+
+    always = [
+        f"Always allow is off for {describe_scope(w.scope)}. Kiln will ask before each print."
+        for w in closed if w.always
+    ]
+    if len(always) == len(closed):
+        return " ".join(always)
+    return " ".join([*always, "Closed. Prints ask the person again."])
 
 
 plugin = _SafetyToolsPlugin()

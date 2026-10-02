@@ -86,6 +86,7 @@ from kiln.print_consent import (
     NOT_ASKED_CODE_SHOWN,
     NOT_ASKED_HOST_CANNOT,
     NOT_ASKED_PENDING_TAG,
+    SOURCE_ALWAYS,
     SOURCE_CI_BYPASS,
     SOURCE_CODE,
     SOURCE_DERIVED,
@@ -954,7 +955,11 @@ def _build_instructions() -> str:
         "previewed but not asked about, and every print result carries a "
         "`standing_window` block naming it. When the person says to close it, call "
         "`revoke_consent_window`; `consent_window_status` shows what is open. "
-        "Nothing you can call opens or extends one. If this app cannot show the "
+        "Nothing you can call opens or extends one. The person can also turn on "
+        "always allow for one printer, at a terminal only (`kiln consent window "
+        "--always --printer NAME`): prints there start without asking until it is "
+        "turned off, each result says so in a line to show them as written, and when "
+        "they say \"ask me first\" you call `revoke_consent_window`. If this app cannot show the "
         "dialog, Kiln shows a short code in a notification on the person's screen: ask them "
         "to type it here, pass their exact words to `give_print_code`, then start again. "
         "Nothing you can call reveals the code. With no screen either, the yes comes from "
@@ -2609,6 +2614,9 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
             "built": describe_file_for_approval(
                 file_name=file_value, local_path=_local_copy_of(file_value),
             ),
+            # Why they are being asked at all, when always allow was on
+            # for this printer and turned itself off.
+            "always allow": _always_allow_dialog_row(aimed),
         },
         window_printer=person_printer if offer_window else None,
         fleet_offered=offer_fleet,
@@ -3250,6 +3258,21 @@ def _consent_from_code_answer(
     )
 
 
+def _always_allow_status(printer_name: str | None) -> dict[str, Any] | None:
+    """Always allow as a printer's status carries it: the entry that is on
+    for this machine, or the one that turned itself off in the last day,
+    or ``None``.  The same block a print result carries, without the
+    words about a start."""
+    from kiln import consent_window_note, consent_windows
+
+    aimed = printer_name or _resolve_effective_printer_name(None)
+    entry = consent_windows.always_for(aimed)
+    if entry is not None:
+        return consent_window_note.block_for_window(entry)
+    closed = consent_windows.turned_itself_off(aimed)
+    return consent_window_note.turned_off_block(closed) if closed is not None else None
+
+
 def _hosted_now() -> bool:
     """Whether this process is the hosted multi-tenant server.  Never raises."""
     with contextlib.suppress(Exception):
@@ -3442,6 +3465,14 @@ def _no_yes_message(tool_name: str, file_name: str, aimed: str) -> str:
             "yes or a standing window is nobody's here, and an agent cannot supply either door "
             "itself. Tell the person that plainly."
         )
+    return _always_allow_went_off(aimed) + _no_yes_at_home(tool_name, name, aimed)
+
+
+def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
+    """:func:`_no_yes_message` off the hosted server.  Wherever a terminal
+    is already named, so is the one thing only a terminal can do: turn on
+    always allow for this printer."""
+    always = f"`kiln consent window --always --printer {aimed}` stops Kiln asking on {aimed} until they turn it off"
     why = why_not_asked()
     pending = ""
     if NOT_ASKED_PENDING_TAG in why:
@@ -3478,7 +3509,7 @@ def _no_yes_message(tool_name: str, file_name: str, aimed: str) -> str:
             "Then pass their exact words to give_print_code and start again. Nothing you can call "
             "reveals the code, and a wrong guess counts." + account + " If no notification appeared, "
             f"their yes can be given at a terminal: `kiln print {name}` or `kiln consent window --for "
-            f"2h --printer {aimed}`."
+            f"2h --printer {aimed}`; {always}."
         )
     if why.startswith(NOT_ASKED_CODE_COOLDOWN):
         secs = why.split(":", 1)[1] if ":" in why else "60"
@@ -3499,7 +3530,7 @@ def _no_yes_message(tool_name: str, file_name: str, aimed: str) -> str:
         terminal = (
             f"`kiln print {name}` (or `kiln queue submit {name}`) asks them about this one print, and "
             f"`kiln consent window --for 2h --printer {aimed}` opens a standing window for a "
-            "while. Kiln cannot open a window from here, and an agent cannot supply "
+            f"while, and {always}. Kiln cannot open a window from here, and an agent cannot supply "
         )
         if monitor:
             return f"{lead} They can {monitor} Or their yes can be given at a terminal: {terminal}any of these yeses."
@@ -3510,7 +3541,7 @@ def _no_yes_message(tool_name: str, file_name: str, aimed: str) -> str:
         "approves it, and can choose there to open a standing window for this printer), "
         f"from a person at a terminal (`kiln print {name}` or `kiln queue submit {name}` "
         "asks them), or from a standing window a person opened at a terminal (`kiln "
-        f"consent window --for 2h --printer {aimed}`); an agent cannot supply any of the "
+        f"consent window --for 2h --printer {aimed}`; {always}); an agent cannot supply any of the "
         "three."
     )
     if monitor:
@@ -3651,8 +3682,58 @@ def _preview_gate_error(
     if granted.window_id:
         details["window_id"] = granted.window_id
         details["window_until"] = granted.expires_at
+    if granted.source == SOURCE_ALWAYS:
+        details["always_allow"] = _always_allow_for_audit(granted.window_id)
     _audit(tool_name, "preview_gate_satisfied", details=details)
     return None
+
+
+def _always_allow_for_audit(window_id: str) -> dict[str, Any]:
+    """Who turned always allow on, when, and through which door — what
+    every start that rests on it carries on its audit line.  Read from
+    the entry itself; an entry that cannot be read says so rather than
+    leaving the line without the fact."""
+    try:
+        from kiln import consent_windows
+
+        w = consent_windows.get_window(window_id)
+        if w is None:
+            return {"window_id": window_id, "unreadable": True}
+        return {
+            "turned_on_by": w.set_by,
+            "turned_on_at": w.set_at,
+            "turned_on_via": consent_windows.describe(w)["opened_via"],
+            "printer": consent_windows.describe_scope(w.scope),
+            "machine": w.machine,
+        }
+    except Exception:  # noqa: BLE001 — the audit line is written either way
+        return {"window_id": window_id, "unreadable": True}
+
+
+def _always_allow_dialog_row(aimed: str) -> str | None:
+    """The row the approval dialog carries for the day after always allow
+    turned itself off on this printer; ``None`` otherwise."""
+    with contextlib.suppress(Exception):
+        from kiln import consent_windows
+
+        if consent_windows.turned_itself_off(aimed) is not None:
+            return "off. A different printer is now set up under this name, so Kiln is asking again"
+    return None
+
+
+def _always_allow_went_off(aimed: str) -> str:
+    """One sentence, with a trailing space, when always allow for *aimed*
+    turned itself off in the last day; ``""`` otherwise.  The refusal
+    leads with it so the person hears why prints on this printer ask
+    again."""
+    with contextlib.suppress(Exception):
+        from kiln import consent_window_note, consent_windows
+
+        closed = consent_windows.turned_itself_off(aimed)
+        if closed is not None:
+            line = consent_window_note.turned_off_line(consent_windows.describe_scope(closed.scope))
+            return f"Tell the person first: {line} "
+    return ""
 
 
 # Slicer settings that change how the object is MADE but not what it is.
@@ -6086,6 +6167,16 @@ def printer_status(
                 }
         except Exception:  # noqa: BLE001 — never break a status read
             logger.debug("engagement note unavailable", exc_info=True)
+        # Always allow, shown where someone already looks: on this printer
+        # prints start without asking.  Present only when it is on, or for
+        # the day after it turned itself off; both detail levels, because
+        # it is a fact about the machine's standing permission.
+        try:
+            always_block = _always_allow_status(printer_name)
+            if always_block:
+                response["always_allow"] = always_block
+        except Exception:  # noqa: BLE001 — never break a status read
+            logger.debug("always-allow note unavailable", exc_info=True)
 
         from kiln.safety_gap_warning import attach_safety_warning
         return attach_safety_warning(response)

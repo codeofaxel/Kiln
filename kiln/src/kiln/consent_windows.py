@@ -28,7 +28,8 @@ What a window is:
   the terminal command's.
 * **Timed.**  It has an ``until``.  A person can extend it; nothing
   else can.  It can be revoked at any time, from anywhere: closing is the
-  safe direction, so the agent is given a tool for it.
+  safe direction, so the agent is given a tool for it.  The one entry
+  with no ``until`` is *always allow* (below).
 * **Signed.**  It records who opened it — locally that is the OS user,
   and the record says ``os_user:`` so nobody mistakes it for an account
   — through which door (``source``), and when, and every extension.
@@ -46,7 +47,19 @@ What a window is:
   registered the hosted server keeps no windows and offers none.
 * **Capped.**  Twenty-four hours at most, at every door
   (:func:`kiln.print_consent.check_window_length`); a person who wants
-  longer opens another when it runs out.
+  longer opens another when it runs out — or turns on always allow.
+* **Always allow.**  The same record with no end, for ONE printer
+  (:func:`open_always`).  Three things keep it from being the cap with a
+  hole in it.  Only a terminal opens one, and the person types the
+  printer's name to do it: the dialog and the typed code are answers an
+  assistant relays, so neither can write one, and an entry in the file
+  that claims either door reads as closed.  It is for a machine, not a
+  label: it records the machine's identity (serial, else address) and
+  covers a start only while the name it was turned on for still reaches
+  that machine and the start is aimed at that machine.  And it turns
+  itself off when a different machine appears under the name, recording
+  why (:data:`REASON_MACHINE_CHANGED`), so the refusal that follows can
+  say so.  Turning it off is the ordinary revoke, from anywhere.
 
 Two readers: the gate (through :func:`kiln.print_consent.consent_for`)
 when a start arrives with a preview and no other yes, and the scheduler
@@ -83,6 +96,8 @@ from kiln.print_consent import (
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "ALWAYS_DOORS",
+    "REASON_MACHINE_CHANGED",
     "SCOPE_FLEET",
     "SOURCE_DOORS",
     "SOURCE_WEB",
@@ -91,6 +106,7 @@ __all__ = [
     "Window",
     "WindowStore",
     "all_windows",
+    "always_for",
     "covering",
     "describe",
     "describe_scope",
@@ -99,7 +115,9 @@ __all__ = [
     "is_live",
     "live_windows",
     "local_identity",
+    "machine_under",
     "normalize_scope",
+    "open_always",
     "open_window",
     "open_window_from_dialog",
     "parse_duration",
@@ -109,6 +127,10 @@ __all__ = [
     "revoke_covering",
     "revoke_window",
     "scope_covers",
+    "standing_now",
+    "summary_line",
+    "turned_itself_off",
+    "turned_off_recently",
     "window_store",
 ]
 
@@ -131,6 +153,24 @@ _OPENED_VIA = {
     SOURCE_WEB: "web",
     SOURCE_CODE: "screen_code",
 }
+
+#: The doors an entry with no end may come through: the ones only a
+#: person holds.  An entry in the file with no end and any other door is
+#: read as closed.
+ALWAYS_DOORS = (SOURCE_TERMINAL,)
+
+#: Why Kiln closed an always-allow entry itself: the name it was turned on
+#: for now reaches a different machine.
+REASON_MACHINE_CHANGED = "machine_changed"
+#: An always-allow entry closed because the person turned it on again for
+#: the same machine; the newer entry is the one in force.
+REASON_REPLACED = "replaced"
+
+#: How long a refusal and the status surfaces go on saying that always
+#: allow turned itself off.  Long enough to be heard by someone who was
+#: away when it happened; after that the printer simply asks, like any
+#: other.
+TURNED_OFF_SAID_FOR_SECONDS = 24 * 3600.0
 
 Scope = tuple[str, ...] | str
 
@@ -233,7 +273,8 @@ class Window:
     id: str
     set_by: str
     set_at: float
-    until: float
+    #: When it runs out.  ``None`` only on an always-allow entry.
+    until: float | None
     scope: Scope
     revoked_at: float | None = None
     extensions: list[dict[str, Any]] = field(default_factory=list)
@@ -241,16 +282,30 @@ class Window:
     #: written before the dialog door existed came through one) or the
     #: host's dialog.
     source: str = SOURCE_TERMINAL
+    #: Always allow: no end, one printer, a person-only door.  Set by
+    #: :func:`open_always`; read back from the file only when the record
+    #: is all of those things (:meth:`from_dict`).
+    always: bool = False
+    #: The machine an always-allow entry was turned on for — serial, else
+    #: address (:func:`machine_under`).
+    machine: str = ""
+    #: Why it was closed, when Kiln or a newer entry closed it rather than
+    #: a person.
+    revoked_reason: str = ""
 
     def live(self, now: float | None = None) -> bool:
+        if self.revoked_at is not None:
+            return False
+        if self.always:
+            return True
         now = _now() if now is None else now
-        return self.revoked_at is None and self.until > now
+        return self.until is not None and self.until > now
 
     def covers(self, printer_name: str | None) -> bool:
         return scope_covers(self.scope, printer_name)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        row: dict[str, Any] = {
             "id": self.id,
             "set_by": self.set_by,
             "set_at": self.set_at,
@@ -260,6 +315,12 @@ class Window:
             "extensions": list(self.extensions),
             "source": self.source,
         }
+        if self.always:
+            row["always"] = True
+            row["machine"] = self.machine
+        if self.revoked_reason:
+            row["revoked_reason"] = self.revoked_reason
+        return row
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> Window | None:
@@ -270,15 +331,32 @@ class Window:
                 # show it and revoke can remove it; never matched.
                 scope = ()
             source = str(raw.get("source") or SOURCE_TERMINAL)
+            machine = str(raw.get("machine") or "").strip()
+            # No end is honoured only as the whole of what open_always
+            # writes: marked, with no ``until``, through a person-only
+            # door, for one printer, with the machine on record.  Anything
+            # short of that is an ordinary record whose ``until`` is
+            # missing, which has run out.
+            always = (
+                raw.get("always") is True
+                and raw.get("until") is None
+                and source in ALWAYS_DOORS
+                and isinstance(scope, tuple)
+                and len(scope) == 1
+                and bool(machine)
+            )
             return cls(
                 id=str(raw.get("id") or ""),
                 set_by=str(raw.get("set_by") or ""),
                 set_at=float(raw.get("set_at") or 0.0),
-                until=float(raw.get("until") or 0.0),
+                until=None if always else float(raw.get("until") or 0.0),
                 scope=scope,
                 revoked_at=float(raw["revoked_at"]) if raw.get("revoked_at") is not None else None,
                 extensions=[e for e in (raw.get("extensions") or []) if isinstance(e, dict)],
                 source=source if source in SOURCE_DOORS else SOURCE_TERMINAL,
+                always=always,
+                machine=machine if always else "",
+                revoked_reason=str(raw.get("revoked_reason") or ""),
             )
         except Exception:  # noqa: BLE001 — an unreadable record covers nothing
             return None
@@ -445,6 +523,89 @@ def open_window(*, seconds: float, scope: Any) -> Window:
     return _open_window(seconds=seconds, scope=scope, source=SOURCE_TERMINAL)
 
 
+def machine_under(printer_name: str | None) -> str:
+    """The machine this process reaches under *printer_name* — serial, else
+    address — or ``""`` when the name is not set up here or the machine
+    reports neither.
+
+    Names are labels: a different printer can be set up under a name that
+    was already in use.  This is the one question always allow asks of a
+    name, and it is asked of the same resolver every start uses to find
+    its adapter (the live registry, else the saved configuration), so the
+    answer is about the machine a print would actually reach.  ``""`` is
+    never a match for anything.  Never raises.
+    """
+    name = str(printer_name or "").strip()
+    if not name:
+        return ""
+    try:
+        import kiln.server as _srv
+        from kiln.printers.engagement import machine_id
+
+        return str(machine_id(_srv._resolve_adapter(name)) or "")
+    except Exception:  # noqa: BLE001 — a name that cannot be resolved is no machine
+        return ""
+
+
+def _audit(action: str, details: dict[str, Any]) -> None:
+    """The audit table every door writes to.  Bookkeeping: never raises."""
+    try:
+        from kiln.persistence import get_db
+
+        get_db().log_audit(
+            tool_name="kiln consent window", safety_level="confirm", action=action, details=details,
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug("audit write failed for %s", action, exc_info=True)
+
+
+def open_always(*, printer_name: str, typed_name: str) -> Window:
+    """The terminal door for always allow: a standing yes with no end, on
+    the ONE printer named.
+
+    *typed_name* is what the person typed when asked for the printer's
+    name; it has to be that name.  Raises :class:`NotAPerson` off a
+    terminal (and on the hosted server), ``ValueError`` when the name
+    typed is another one, when no printer is named, or when Kiln cannot
+    tell which machine the name is — a permission for a machine has to be
+    able to notice a different one.  An entry already on for the same
+    machine is closed in favour of this one, so there is one per machine
+    and it says who last turned it on.
+    """
+    _require_person()
+    name = str(printer_name or "").strip()
+    if not name:
+        raise ValueError("always allow is for one printer; name it")
+    if _norm(typed_name) != _norm(name):
+        raise ValueError(f"that is not this printer's name ({name}); always allow was not turned on")
+    machine = machine_under(name)
+    if not machine:
+        raise ValueError(
+            f"Kiln cannot tell which machine {name} is (no printer by that name is set up here, "
+            "or it reports neither a serial number nor an address), so it could not notice a "
+            "different one; always allow was not turned on"
+        )
+    now = _now()
+    window = Window(
+        id=f"w_{secrets.token_hex(6)}", set_by=local_identity(), set_at=now, until=None,
+        scope=(name,), source=SOURCE_TERMINAL, always=True, machine=machine,
+    )
+    with _lock:
+        windows = _read()
+        for i, w in enumerate(windows):
+            if w.always and w.revoked_at is None and w.machine == machine:
+                windows[i] = _closed(w, now, REASON_REPLACED)
+        windows.append(window)
+        _write(windows)
+    logger.info("always allow %s turned on by %s for %s (%s)", window.id, window.set_by, name, machine)
+    _audit(
+        "always_allow_turned_on",
+        {"window_id": window.id, "printer": name, "machine": machine, "by": window.set_by,
+         "at": window.set_at, "source": window.source},
+    )
+    return window
+
+
 def open_window_from_dialog(
     answer: DialogAnswer, *, printer_name: str, source: str = SOURCE_ELICITED,
 ) -> Window:
@@ -499,6 +660,11 @@ def extend_window(window_id: str, *, seconds: float) -> Window:
                 continue
             if w.revoked_at is not None:
                 raise ValueError(f"window {window_id} was revoked; open a new one")
+            if w.always:
+                raise ValueError(
+                    f"{window_id} is always allow for {describe_scope(w.scope)}: it has no end to move. "
+                    f"Turn it off with `kiln consent revoke {window_id}`."
+                )
             longer = Window(
                 id=w.id, set_by=w.set_by, set_at=w.set_at, until=now + float(seconds), scope=w.scope,
                 revoked_at=None,
@@ -511,10 +677,22 @@ def extend_window(window_id: str, *, seconds: float) -> Window:
     raise KeyError(f"no window {window_id}")
 
 
-def revoke_window(window_id: str) -> Window:
+def _closed(w: Window, now: float, reason: str = "") -> Window:
+    """*w* as a closed record.  One already closed keeps its time and reason."""
+    if w.revoked_at is not None:
+        return w
+    return Window(
+        id=w.id, set_by=w.set_by, set_at=w.set_at, until=w.until, scope=w.scope,
+        revoked_at=now, extensions=w.extensions, source=w.source,
+        always=w.always, machine=w.machine, revoked_reason=reason,
+    )
+
+
+def revoke_window(window_id: str, *, reason: str = "") -> Window:
     """Close a window now.  Anyone may close one: revoking is the safe
     direction, and a revoke nobody can perform is a window nobody can stop.
-    On the hosted server the account's store closes it."""
+    On the hosted server the account's store closes it.  *reason* is kept
+    on the record when something other than a person closed it."""
     if _hosted():
         store = window_store()
         if store is None:
@@ -526,12 +704,7 @@ def revoke_window(window_id: str) -> Window:
         for i, w in enumerate(windows):
             if w.id != window_id:
                 continue
-            closed = Window(
-                id=w.id, set_by=w.set_by, set_at=w.set_at, until=w.until, scope=w.scope,
-                revoked_at=w.revoked_at if w.revoked_at is not None else now,
-                extensions=w.extensions,
-                source=w.source,
-            )
+            closed = _closed(w, now, reason)
             windows[i] = closed
             _write(windows)
             return closed
@@ -547,11 +720,18 @@ def revoke_all() -> list[Window]:
 
 def revoke_covering(printer_name: str | None) -> list[Window]:
     """Close every live window that covers *printer_name* — a fleet window
-    included, since it covers this printer too.  The list closed, possibly
-    empty.  Safe direction, so no guard."""
+    included, since it covers this printer too, and always allow for the
+    machine this name reaches, whichever of its names it was turned on
+    under.  The list closed, possibly empty.  Safe direction, so no
+    guard."""
     closed: list[Window] = []
+    machine = ""
     for w in live_windows():
-        if w.covers(printer_name):
+        covers = w.covers(printer_name)
+        if not covers and w.always:
+            machine = machine or machine_under(printer_name)
+            covers = bool(machine) and machine == w.machine
+        if covers:
             closed.append(revoke_window(w.id))
     return closed
 
@@ -581,9 +761,120 @@ def get_window(window_id: str) -> Window | None:
     return next((w for w in all_windows() if w.id == window_id), None)
 
 
-def is_live(window_id: str, now: float | None = None) -> bool:
+def is_live(window_id: str, now: float | None = None, *, printer_name: str | None = None) -> bool:
+    """Whether a start may still rest on this window — the scheduler's
+    question about a job queued under one.  For always allow that is the
+    gate's question again: the machine, for the printer the job is about
+    to be sent to (*printer_name*; the entry's own printer when not
+    given)."""
     w = get_window(window_id)
-    return bool(w and w.live(now))
+    if w is None or not w.live(now):
+        return False
+    if w.always:
+        return _always_stands(w, printer_name or w.scope[0])
+    return True
+
+
+def _always_stands(w: Window, printer_name: str | None) -> bool:
+    """Whether always allow covers a start aimed at *printer_name*, now.
+
+    Two machines are asked for, through the resolver a start uses: the one
+    under the name the entry was turned on for, and the one the start is
+    aimed at.  Both have to be the machine on the entry.  A different
+    machine under the entry's name closes the entry, with the reason on
+    record; a machine Kiln cannot identify is covered by nothing, and the
+    person is asked the ordinary way.
+    """
+    name = w.scope[0] if isinstance(w.scope, tuple) and w.scope else ""
+    under_name = machine_under(name)
+    if under_name and under_name != w.machine:
+        _turn_off(w, under_name)
+        return False
+    if not under_name:
+        return False
+    aimed = under_name if _norm(printer_name) == _norm(name) else machine_under(printer_name)
+    return aimed == w.machine
+
+
+def _turn_off(w: Window, found_machine: str) -> None:
+    """Close an always-allow entry whose name now reaches another machine."""
+    try:
+        revoke_window(w.id, reason=REASON_MACHINE_CHANGED)
+    except Exception:  # noqa: BLE001 — unwritable now; the next read finds the same machine and tries again
+        logger.warning("always allow %s could not be closed after its machine changed", w.id, exc_info=True)
+        return
+    logger.warning(
+        "always allow %s for %s turned itself off: the name now reaches %s, not %s",
+        w.id, describe_scope(w.scope), found_machine, w.machine,
+    )
+    _audit(
+        "always_allow_turned_off",
+        {"window_id": w.id, "printer": describe_scope(w.scope), "reason": REASON_MACHINE_CHANGED,
+         "machine": w.machine, "found": found_machine, "turned_on_by": w.set_by, "turned_on_at": w.set_at},
+    )
+
+
+def always_for(printer_name: str | None) -> Window | None:
+    """The always-allow entry covering a start aimed at *printer_name*, or
+    ``None``.  Local only: the hosted server keeps none."""
+    if _hosted():
+        return None
+    for w in live_windows():
+        if w.always and _always_stands(w, printer_name):
+            return w
+    return None
+
+
+def standing_now(now: float | None = None) -> list[Window]:
+    """Every window a start could rest on right now — what a status
+    surface lists.  The live timed windows, and always allow after its
+    name has been checked against its machine, which closes an entry
+    whose name now reaches a different one: status must not show as on
+    what the next print would find off."""
+    standing: list[Window] = []
+    for w in live_windows(now):
+        if w.always and not _hosted():
+            under_name = machine_under(w.scope[0])
+            if under_name and under_name != w.machine:
+                _turn_off(w, under_name)
+                continue
+        standing.append(w)
+    return standing
+
+
+def turned_off_recently(now: float | None = None) -> list[Window]:
+    """Always-allow entries Kiln closed itself within
+    :data:`TURNED_OFF_SAID_FOR_SECONDS`, newest first — less any whose
+    printer has had always allow turned on again since.  What the refusal
+    and the status surfaces read to say why prints there ask again."""
+    if _hosted():
+        return []
+    now = _now() if now is None else now
+    entries = [w for w in all_windows() if w.always]
+    recent: list[Window] = []
+    for w in entries:
+        if w.revoked_reason != REASON_MACHINE_CHANGED or w.revoked_at is None:
+            continue
+        if now - w.revoked_at > TURNED_OFF_SAID_FOR_SECONDS:
+            continue
+        if any(o.set_at > w.set_at and _norm(o.scope[0]) == _norm(w.scope[0]) for o in entries):
+            continue
+        recent.append(w)
+    return sorted(recent, key=lambda w: w.revoked_at or 0.0, reverse=True)
+
+
+def turned_itself_off(printer_name: str | None, now: float | None = None) -> Window | None:
+    """The entry from :func:`turned_off_recently` for *printer_name* — by
+    that name, or by another name for the machine now under it — or
+    ``None``."""
+    aimed = ""
+    for w in turned_off_recently(now):
+        if _norm(printer_name) == _norm(w.scope[0]):
+            return w
+        aimed = aimed or machine_under(printer_name)
+        if aimed and aimed == machine_under(w.scope[0]):
+            return w
+    return None
 
 
 def covering(printer_name: str | None, now: float | None = None) -> Window | None:
@@ -599,9 +890,18 @@ def covering(printer_name: str | None, now: float | None = None) -> Window | Non
         except Exception:  # noqa: BLE001 — a store that fails has no window
             logger.debug("hosted window store could not answer", exc_info=True)
             return None
-        return w if isinstance(w, Window) and w.live(now) and w.covers(printer_name) else None
-    for w in live_windows(now):
-        if w.covers(printer_name):
+        # The account's store keeps timed windows only; an entry with no
+        # end is never taken from it.
+        timed = isinstance(w, Window) and not w.always
+        return w if timed and w.live(now) and w.covers(printer_name) else None
+    live = live_windows(now)
+    # Always allow first: where both cover a start, the standing fact with
+    # no end is the one the result and the audit line should name.
+    for w in live:
+        if w.always and _always_stands(w, printer_name):
+            return w
+    for w in live:
+        if not w.always and w.covers(printer_name):
             return w
     return None
 
@@ -611,19 +911,41 @@ def describe(w: Window, now: float | None = None) -> dict[str, Any]:
     the status tool and the line on a print result all share, so the
     same window is described the same way at every door."""
     now = _now() if now is None else now
-    return {
+    facts: dict[str, Any] = {
         "id": w.id,
         "scope": describe_scope(w.scope),
         "set_by": w.set_by,
         "opened_via": _OPENED_VIA.get(w.source, "terminal"),
         "set_at": time.strftime("%Y-%m-%d %H:%M", time.localtime(w.set_at)),
-        "until": time.strftime("%Y-%m-%d %H:%M", time.localtime(w.until)),
-        "until_clock": time.strftime("%H:%M", time.localtime(w.until)),
-        "remaining_minutes": max(0, int((w.until - now) // 60)),
+        "always": w.always,
         "live": w.live(now),
         "revoked": w.revoked_at is not None,
         "extensions": len(w.extensions),
     }
+    if w.always or w.until is None:
+        # No end: the three time fields are present and empty, so a reader
+        # that formats them has to notice rather than print a wrong date.
+        facts.update({"until": None, "until_clock": None, "remaining_minutes": None})
+    else:
+        facts.update({
+            "until": time.strftime("%Y-%m-%d %H:%M", time.localtime(w.until)),
+            "until_clock": time.strftime("%H:%M", time.localtime(w.until)),
+            "remaining_minutes": max(0, int((w.until - now) // 60)),
+        })
+    if w.revoked_reason:
+        facts["revoked_reason"] = w.revoked_reason
+    facts["summary"] = summary_line(facts)
+    return facts
+
+
+def summary_line(facts: dict[str, Any]) -> str:
+    """One window in a few words, for every status line that lists them:
+    ``garage until 2026-10-02 14:00`` or ``always allow on garage (since
+    2026-10-02 09:14)``.  Takes :func:`describe`'s facts, so a surface
+    that lists windows cannot format an entry with no end as a date."""
+    if facts.get("always"):
+        return f"always allow on {facts['scope']} (since {facts['set_at']})"
+    return f"{facts['scope']} until {facts['until']}"
 
 
 def _reset_for_tests() -> None:
