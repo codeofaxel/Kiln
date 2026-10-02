@@ -377,6 +377,62 @@ def _min_human_answer_s() -> float:
     return float(MIN_HUMAN_ANSWER_S)
 
 
+#: What :func:`ask_user_yes_or_no` answers with.
+ASKED_YES = "yes"
+ASKED_NO = "no"
+ASKED_UNAVAILABLE = "unavailable"
+
+
+async def ask_user_yes_or_no(ctx: Any, message: str, *, title: str, yes: str, no: str) -> str:
+    """Put one yes-or-no question to the person through the host's dialog.
+
+    The same channel :func:`ask_user_to_confirm` uses -- the server asks
+    the CLIENT, and only the client's response answers -- for a question
+    that is not about starting a print.  *title* is the dialog's name and
+    *yes* / *no* the two answers as the person reads them.  Returns
+    :data:`ASKED_YES` only for an accepted answer that picked yes and
+    took long enough to have been read; a decline, a cancel or a picked
+    no is :data:`ASKED_NO`; a question that could not be put, an answer
+    not on the form, or a yes faster than a person reads is
+    :data:`ASKED_UNAVAILABLE` -- never a yes.  The default answer is no,
+    so a reflexive accept confirms nothing.
+    """
+    try:
+        from pydantic import BaseModel, Field, create_model
+
+        form = create_model(
+            title, __base__=BaseModel,
+            answer=(str, Field(
+                default=ASKED_NO, description="Your answer.",
+                json_schema_extra={"enum": [ASKED_YES, ASKED_NO], "enumNames": [yes, no]},
+            )),
+        )
+        form.__doc__ = "Kiln is asking you, not your assistant."
+    except Exception as exc:  # noqa: BLE001 -- no pydantic, no elicitation
+        _logger.debug("Could not build the yes/no form: %s", exc)
+        return ASKED_UNAVAILABLE
+    started = time.monotonic()
+    try:
+        result = await ctx.elicit(message=message, schema=form)
+    except Exception as exc:  # noqa: BLE001 -- a host that cannot answer is not an error
+        _logger.debug("Could not put the question to the person: %s", exc)
+        return ASKED_UNAVAILABLE
+    action = str(getattr(result, "action", "") or "").lower()
+    if action in ("decline", "cancel"):
+        return ASKED_NO
+    if action != "accept":
+        return ASKED_UNAVAILABLE
+    data = getattr(result, "data", None)
+    if data is None:
+        data = getattr(result, "content", None)
+    picked = data.get("answer") if isinstance(data, dict) else getattr(data, "answer", None)
+    if picked == ASKED_NO:
+        return ASKED_NO
+    if picked != ASKED_YES or time.monotonic() - started < _min_human_answer_s():
+        return ASKED_UNAVAILABLE
+    return ASKED_YES
+
+
 async def ask_user_to_confirm(
     ctx: Any, message: str, *, offer_window: bool = True, offer_fleet: bool = False,
 ):

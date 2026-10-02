@@ -441,7 +441,13 @@ class _GenerationAIToolsPlugin:
             provider: str = "meshy",
             output_path: str | None = None,
         ) -> dict:
-            """Download a completed generated model and optionally validate it.
+            """Download a completed generated model, check it, and open it on the stage.
+
+            The result says where the model came from (``came_from``: the
+            provider and the prompt) and, when the provider was asked for a
+            shape and not a size, that its numbers are not millimetres
+            (``size_check``).  A note beside the file keeps where it came
+            from, so the stage and design history can say so later.
 
             Args:
                 job_id: Job ID of a completed generation job.
@@ -449,12 +455,13 @@ class _GenerationAIToolsPlugin:
                 output_path: Directory to save the file.  Defaults to
                     the system temp directory.
             """
+            from kiln.arrival import announce, measure
             from kiln.generation import (
                 GenerationAuthError,
                 GenerationError,
                 GenerationResult,
-                validate_mesh,
             )
+            from kiln.preview_evidence import stage_file_for
 
             if err := _srv._check_auth("generate"):
                 return err
@@ -494,22 +501,9 @@ class _GenerationAIToolsPlugin:
                         _logger.warning("%s→STL conversion failed, keeping original: %s", source_format.upper(), exc)
 
                 # Validate the mesh if it's a supported format.
-                validation = None
-                dimensions = None
+                validation = dimensions = size = None
                 if result.format in ("stl", "obj", "glb"):
-                    val = validate_mesh(result.local_path)
-                    validation = val.to_dict()
-                    if val.bounding_box:
-                        bb = val.bounding_box
-                        w = bb.get("x_max", 0) - bb.get("x_min", 0)
-                        d = bb.get("y_max", 0) - bb.get("y_min", 0)
-                        h = bb.get("z_max", 0) - bb.get("z_min", 0)
-                        dimensions = {
-                            "width_mm": round(w, 2),
-                            "depth_mm": round(d, 2),
-                            "height_mm": round(h, 2),
-                            "summary": f"{w:.1f} x {d:.1f} x {h:.1f} mm",
-                        }
+                    validation, dimensions, size = measure(result.local_path)
 
                 response = {
                     "success": True,
@@ -529,6 +523,14 @@ class _GenerationAIToolsPlugin:
                     ),
                     "message": f"Model downloaded to {result.local_path}.",
                 }
+                # The stage opens on what arrived, and the result says where
+                # it came from (the note the provider's download left).
+                staged = stage_file_for(result.local_path)[0]
+                if staged:
+                    response["stage_mesh_path"] = staged
+                announce(response, result.local_path, size=size)
+                if "came_from" in response:
+                    response["message"] = f"{response['came_from']} Saved to {result.local_path}."
                 # Autofire bundle: this is the SYNC mesh-producing step
                 # in the AI-generation flow (``generate_model`` submits
                 # an async job; this tool downloads + converts the

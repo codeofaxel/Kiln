@@ -314,7 +314,10 @@ class TestARefusalLooksInsteadOfAssuming:
         block = start_refusal(machine)
         message = block["error"]["message"]
         assert "5 hours ago" in message and "no camera Kiln can read" in message
-        assert "`kiln plate clear`" in message and "look_at_plate" not in message
+        # The person's own doors are named -- the terminal, and their words
+        # in a chat -- and no look is offered through a camera that is not there.
+        assert "`kiln plate clear`" in message and "look_at_plate(person_says=" in message
+        assert 'seen="clear"' not in message and "Look at the picture" not in message
         assert block["snapshot_path"] is None and block["look"]["settle_with"] is None
         assert block["look"]["possible"] is False
 
@@ -324,7 +327,8 @@ class TestARefusalLooksInsteadOfAssuming:
             block = start_refusal(machine)
             message = block["error"]["message"]
             assert "This printer's own camera could settle it, but" in message and why in message
-            assert "`kiln plate clear`" in message and "look_at_plate" not in message
+            assert "`kiln plate clear`" in message and "look_at_plate(person_says=" in message
+            assert 'seen="clear"' not in message and "Look at the picture" not in message
             assert block["snapshot_path"] is None and block["look"]["possible"] is True
 
     def test_a_registered_camera_is_named_as_the_persons(self, monkeypatch):

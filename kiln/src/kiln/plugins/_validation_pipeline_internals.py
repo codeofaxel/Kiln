@@ -156,11 +156,12 @@ def _sanitize_summary_detail(detail: str) -> str:
     if len(detail) <= 80:
         return detail
 
-    # Try to truncate at the first sentence boundary
-    for sep in (".", "!", "?"):
-        idx = detail.find(sep)
-        if 0 < idx <= 80:
-            return detail[: idx + 1]
+    # Try to truncate at the first sentence boundary: a stop followed by a
+    # space or the end.  Any "." would cut "0.5mm" to "0." and the summary
+    # would say a part measures nothing.
+    end = re.search(r"[.!?](?=\s|$)", detail)
+    if end and 0 < end.start() <= 80:
+        return detail[: end.start() + 1]
 
     return detail[:80] + "..."
 
@@ -194,6 +195,10 @@ def _inline_stl_analysis(file_path: str) -> dict[str, Any]:
             dims = bbox.pop("dimensions_mm")
             result["bounding_box"] = bbox
             result["dimensions_mm"] = dims
+            result["largest_dimension_mm"] = max(
+                max(v[axis] for v in vertices) - min(v[axis] for v in vertices)
+                for axis in range(3)
+            )
             vol = dims["x"] * dims["y"] * dims["z"]
             result["bounding_box_volume_cm3"] = round(vol / 1000.0, 2)
 
@@ -250,6 +255,7 @@ def _inline_stl_binary_fallback(path: Path) -> dict[str, Any]:
             "z_min": round(z_min, 2), "z_max": round(z_max, 2),
         }
         result["dimensions_mm"] = dims
+        result["largest_dimension_mm"] = max(x_max - x_min, y_max - y_min, z_max - z_min)
         vol = dims["x"] * dims["y"] * dims["z"]
         result["bounding_box_volume_cm3"] = round(vol / 1000.0, 2)
 
@@ -470,12 +476,36 @@ def _scaled_copy_path(stl_path: str) -> str:
     return out_path
 
 
+def _box_largest(box: Any) -> float:
+    """The longest side of an exact ``{x_min, x_max, ...}`` box, or 0.0."""
+    if not isinstance(box, dict):
+        return 0.0
+    try:
+        return max(
+            float(box["x_max"]) - float(box["x_min"]),
+            float(box["y_max"]) - float(box["y_min"]),
+            float(box["z_max"]) - float(box["z_min"]),
+        )
+    except (KeyError, TypeError, ValueError):
+        return 0.0
+
+
 def _max_dim_mm(model_info: dict[str, Any]) -> float:
     """Largest bounding-box dimension in mm, or 0.0 when it is not known.
+
+    The measured ``largest_dimension_mm`` comes first: ``dimensions_mm`` is
+    rounded to two decimals for reading, and the units judgement needs the
+    size itself.  Read from the rounded dimensions, a 4 mm part written in
+    metres (0.004) measured 0.0 and was called print-ready without a word
+    about units, and a 50 mm part written in inches (1.9685) was offered back
+    as 50.038 mm.
 
     ``or`` rather than ``dict.get``'s default throughout: a present-but-zero
     ``x`` must fall through to ``width_mm``, which a default never does.
     """
+    measured = model_info.get("largest_dimension_mm")
+    if isinstance(measured, (int, float)) and measured > 0:
+        return float(measured)
     dims = model_info.get("dimensions_mm") or model_info.get("bounding_box") or {}
     if not isinstance(dims, dict):
         return 0.0
@@ -706,6 +736,9 @@ def _step_mesh_analysis(
         if dims:
             report.model_info["bounding_box"] = dims
             report.model_info["dimensions_mm"] = dims
+        largest = _box_largest(mesh_info.get("bounding_box"))
+        if largest > 0:
+            report.model_info["largest_dimension_mm"] = largest
         if vol_cm3:
             report.model_info["bounding_box_volume_cm3"] = vol_cm3
 
@@ -737,6 +770,8 @@ def _step_mesh_analysis(
                     report.model_info["bounding_box"] = fallback["bounding_box"]
                 if "dimensions_mm" in fallback:
                     report.model_info["dimensions_mm"] = fallback["dimensions_mm"]
+                if "largest_dimension_mm" in fallback:
+                    report.model_info["largest_dimension_mm"] = fallback["largest_dimension_mm"]
                 if "bounding_box_volume_cm3" in fallback:
                     report.model_info["bounding_box_volume_cm3"] = fallback["bounding_box_volume_cm3"]
 
@@ -791,12 +826,17 @@ def _step_auto_scale(
     # one Kiln can rewrite.  The correction below is binary-STL only because
     # that is what the inline scaler writes; saying nothing about a 3MF whose
     # size is nonsense would be the format deciding whether the user is told.
+    #
+    # Each of these says the file, as it stands, is not a size any printer
+    # makes — too small for a nozzle, or bigger than every machine Kiln knows
+    # — so the check is an error and the part is not ready.  As a warning it
+    # sat beside "Print-ready" in the same report.
     if verdict.status in ("ambiguous", "oversize", "unexplained"):
         report.checks.append(_CheckResult(
             name="unit_check",
             passed=False,
             details=verdict.describe(),
-            severity="warning",
+            severity="error",
         ))
         report.recommendations.insert(0, verdict.describe())
         return input_path, False
@@ -839,6 +879,9 @@ def _step_auto_scale(
                 if new_dims:
                     report.model_info["dimensions_mm"] = new_dims
                     report.model_info["bounding_box"] = new_dims
+                new_largest = _box_largest(new_info.get("bounding_box"))
+                if new_largest > 0:
+                    report.model_info["largest_dimension_mm"] = new_largest
                 new_vol = new_info.get("volume_mm3", 0)
                 if new_vol:
                     report.model_info["bounding_box_volume_cm3"] = round(new_vol / 1000.0, 2)
@@ -859,6 +902,9 @@ def _step_auto_scale(
                     report.model_info["bounding_box_volume_cm3"] = round(
                         old_vol * (scale_factor ** 3), 2
                     )
+                old_largest = report.model_info.get("largest_dimension_mm")
+                if isinstance(old_largest, (int, float)) and old_largest > 0:
+                    report.model_info["largest_dimension_mm"] = old_largest * scale_factor
 
             # Update working path for downstream steps
             input_path = scaled_path
@@ -873,7 +919,7 @@ def _step_auto_scale(
             name="unit_check",
             passed=False,
             details=verdict.describe_unapplied(),
-            severity="warning",
+            severity="error",
         ))
         report.recommendations.insert(0, verdict.describe_unapplied())
 
