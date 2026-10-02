@@ -304,16 +304,32 @@ class MyMiniFactoryAdapter(MarketplaceAdapter):
     # -- parsing helpers ---------------------------------------------------
 
     @staticmethod
-    def _parse_summary(data: dict[str, Any]) -> ModelSummary:
-        designer = data.get("designer", {}) or {}
-        licenses = data.get("licenses", [])
-        license_str = ""
+    def _license_of(data: dict[str, Any]) -> str:
+        """The listing's license, in MyMiniFactory's own words.
+
+        The live API states it in ``license`` ("Download - Share - Maintain
+        License - Credit - Remix - Noncommercial") and lists permission
+        flags in ``licenses`` (``{"type": "commercial-use", "value": false}``),
+        whose values are booleans.  Reading the first flag's value turned
+        every license into the word "True" (measured 2026-10-01 on a live
+        listing).  A string in ``licenses`` is still read; a flag never is.
+        """
+        phrase = data.get("license")
+        if isinstance(phrase, str) and phrase.strip():
+            return phrase.strip()
+        licenses = data.get("licenses")
         if isinstance(licenses, list) and licenses:
             first = licenses[0]
             if isinstance(first, dict):
-                license_str = first.get("value", first.get("label", ""))
-            elif isinstance(first, str):
-                license_str = first
+                first = first.get("value", first.get("label", ""))
+            if isinstance(first, str):
+                return first
+        return ""
+
+    @staticmethod
+    def _parse_summary(data: dict[str, Any]) -> ModelSummary:
+        designer = data.get("designer", {}) or {}
+        license_str = MyMiniFactoryAdapter._license_of(data)
 
         return ModelSummary(
             id=str(data.get("id", "")),
@@ -332,14 +348,7 @@ class MyMiniFactoryAdapter(MarketplaceAdapter):
     @staticmethod
     def _parse_detail(data: dict[str, Any]) -> ModelDetail:
         designer = data.get("designer", {}) or {}
-        licenses = data.get("licenses", [])
-        license_str = ""
-        if isinstance(licenses, list) and licenses:
-            first = licenses[0]
-            if isinstance(first, dict):
-                license_str = first.get("value", first.get("label", ""))
-            elif isinstance(first, str):
-                license_str = first
+        license_str = MyMiniFactoryAdapter._license_of(data)
 
         tags_raw = data.get("tags", [])
         tags = []

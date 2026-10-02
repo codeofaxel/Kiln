@@ -86,6 +86,7 @@ from kiln.print_consent import (
     NOT_ASKED_CODE_SHOWN,
     NOT_ASKED_HOST_CANNOT,
     NOT_ASKED_PENDING_TAG,
+    SOURCE_ALWAYS,
     SOURCE_CI_BYPASS,
     SOURCE_CODE,
     SOURCE_DERIVED,
@@ -93,13 +94,18 @@ from kiln.print_consent import (
     SOURCE_HOSTED_APPROVAL,
     SOURCE_HOSTED_DELEGATION,
     PrintConsent,
+    alerted_devices,
     consent_for,
     describe_file_for_approval,
     describe_print_request,
+    note_alerted_devices,
     note_not_asked,
+    note_unasked_look,
     note_window_outcome,
     reset_consent,
     set_consent,
+    unasked_look,
+    unasked_look_noted,
     why_not_asked,
 )
 from kiln.tool_args import parse_json_array, parse_json_object
@@ -821,7 +827,8 @@ def _build_instructions() -> str:
         "START HERE: before anything else, call `get_started()` and "
         "`get_skill_manifest()`. These return the full capability map, "
         "agent rules, common workflows, and current tool count — "
-        "everything else is downstream. "
+        "everything else is downstream. If the person is writing to you from a "
+        "chat app, say which: `get_started(chat_app=\"telegram\")`. "
         f"This server has {_count_phrase}; use `ToolSearch(keyword)` to "
         "load schemas on demand instead of guessing names.",
         "Kiln — AI agent infrastructure for 3D printing. "
@@ -954,9 +961,19 @@ def _build_instructions() -> str:
         "previewed but not asked about, and every print result carries a "
         "`standing_window` block naming it. When the person says to close it, call "
         "`revoke_consent_window`; `consent_window_status` shows what is open. "
-        "Nothing you can call opens or extends one. If this app cannot show the "
-        "dialog, Kiln shows a short code in a notification on the person's screen: ask them "
-        "to type it here, pass their exact words to `give_print_code`, then start again. "
+        "Nothing you can call opens or extends one. The person can also turn on "
+        "always allow for one printer, themselves: at a terminal (`kiln consent window "
+        "--always --printer NAME`) or on their Kiln account page with their "
+        "authenticator. Prints there start without asking until it is "
+        "turned off, each result says so in a line to show them as written, and when "
+        "they say \"ask me first\" you call `revoke_consent_window`. A start held with "
+        "`ALWAYS_ALLOW_LOOK_FIRST` hands you a picture of the bed: judge it with "
+        "`look_at_plate`, then start again. If this app cannot show the "
+        "dialog, calling the start tool is how their go-ahead is asked for: its reply is "
+        "the normal first step, never a failed print, and says how they say go — a tap on "
+        "Approve in Kiln on their phone, or a short code Kiln shows in a notification on the "
+        "computer's screen, which they type here and you pass, exactly, to `give_print_code` "
+        "before starting again. Describe those in the order the reply does. "
         "Nothing you can call reveals the code. With no screen either, the yes comes from "
         "the person at a terminal (`kiln print`, or `kiln consent window --for 2h --printer NAME`)."
     )
@@ -1435,6 +1452,9 @@ def _install_mcp_request_context_capture() -> None:
             # the tools because sync tools run on this event loop and could
             # not await the answer.  Raises if they say no, before dispatch.
             consent_token = await _obtain_print_consent(name, arguments, context)
+            # A person's word that the bed is clear, typed in a chat: where
+            # this app can draw a dialog, the person is asked directly.
+            await _ask_the_person_about_the_bed(name, arguments, context)
             # ``null`` for a non-Optional field and a bare string for a list
             # field are coerced here, once, for every tool — see
             # kiln.tool_args.  Everything else pydantic still judges.
@@ -2545,6 +2565,7 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
     if _is_resume_mode_3mf(file_value) or arguments.get("resume_from_paused"):
         return None  # already running, already approved
     note_window_outcome(None)  # nothing from an earlier call rides this result
+    note_alerted_devices(None)
     printer_name = arguments.get("printer_name")
     # The one machine this print is aimed at — the name a window is
     # matched on, and the name a window opened here is written for.
@@ -2552,6 +2573,16 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
         aimed = printer_name or _resolve_effective_printer_name(None)
     except Exception:  # noqa: BLE001
         aimed = printer_name or "default"
+    # A start that would rest on always allow has nobody looking at the
+    # printer, so the plate is looked at: once, here, off the event loop
+    # (a frame is a camera fetch).  The reading below, the gate and the
+    # line on the result all use this one look.
+    note_unasked_look(None, None)
+    with contextlib.suppress(Exception):
+        from kiln import consent_windows
+
+        if consent_windows.always_for(aimed) is not None:
+            note_unasked_look(aimed, await asyncio.to_thread(consent_windows.look_at_bed, aimed))
     try:
         standing = consent_for(file_name=file_value, printer_name=printer_name, aimed_at=aimed)
     except Exception:  # noqa: BLE001 — an unreadable store is no window
@@ -2609,6 +2640,9 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
             "built": describe_file_for_approval(
                 file_name=file_value, local_path=_local_copy_of(file_value),
             ),
+            # Why they are being asked at all, when always allow was on
+            # for this printer and turned itself off.
+            "always allow": _always_allow_dialog_row(aimed),
         },
         window_printer=person_printer if offer_window else None,
         fleet_offered=offer_fleet,
@@ -2636,6 +2670,59 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
     return await _offer_screen_code(
         tool_name, file_value, aimed, ctx, hook_path=None, fallback=f"unavailable:{answer.detail}",
     )
+
+
+def bed_question(printer: str) -> str:
+    """What the person is asked when their assistant passes on that they
+    said the bed is clear."""
+    return (
+        f"Is the bed on {printer} empty right now?\n\n"
+        "Your assistant says you told it the bed is clear. Kiln could not tell from the camera, "
+        "so it goes on your answer. Say yes only if nothing is on the bed."
+    )
+
+
+async def _ask_the_person_about_the_bed(tool_name: str, arguments: dict | None, ctx: Any) -> None:
+    """``look_at_plate(person_says=...)`` carries a person's word that the
+    bed is empty, typed in a chat and passed on by the assistant.
+
+    Where the connected app can draw a dialog, that word is not taken on
+    relay: the person is asked, in a dialog the assistant does not hold,
+    and their answer is what the tool records (as theirs) or refuses on.
+    Where no dialog can be drawn -- a chat app, a host whose own hooks
+    answer its dialogs, the question failing -- nothing is noted, and the
+    tool records the words as passed on, which is what they are.  Asked
+    only for words that say the bed is clear, about a plate the record
+    says holds a part: anything else the tool refuses without troubling
+    anyone.  Never raises.
+    """
+    from kiln import plate_state
+    from kiln.mcp_compat import ASKED_NO, ASKED_YES, ask_user_yes_or_no
+
+    plate_state.note_plate_word_answer("")
+    args = arguments if isinstance(arguments, dict) else {}
+    if tool_name != "look_at_plate" or ctx is None or not plate_state.says_plate_is_clear(args.get("person_says")):
+        return
+    try:
+        if _hosted_now():
+            return
+        adapter, target_name = _resolve_control_target(args.get("printer_name") or None)
+        if not plate_state.read(adapter).occupied:
+            return
+        if not host_can_ask_the_user(mcp, ctx) or screen_code.host_dialog_hook(_host_client_name(ctx)):
+            return
+        answer = await ask_user_yes_or_no(
+            ctx, bed_question(_printer_label_for_a_person(target_name)),
+            title="IsTheBedClear", yes="Yes, the bed is empty", no="No, or I'm not sure",
+        )
+    except Exception:  # noqa: BLE001 -- a question that could not be put is not an answer
+        logger.debug("the person could not be asked about the bed", exc_info=True)
+        return
+    if answer == ASKED_YES:
+        plate_state.note_plate_word_answer(plate_state.WORD_CONFIRMED)
+    elif answer == ASKED_NO:
+        plate_state.note_plate_word_answer(plate_state.WORD_DECLINED)
+    _audit("look_at_plate", "bed_question_answered", details={"printer": target_name, "answer": answer})
 
 
 def _host_client_name(ctx: Any) -> str:
@@ -3087,7 +3174,53 @@ async def _ask_the_account(
                 "card": list(ask.card_sent),
             },
         )
+    # What the server said about alerts, for this call's refusal and for
+    # the offer made once a code has been typed (:func:`_phone_offer`).
+    note_alerted_devices(ask.alert_devices)
+    _phone_alerts["devices"] = ask.alert_devices
     return NOT_ASKED_PENDING_TAG + ask.id
+
+
+#: What this process last heard about the account's alerts
+#: (``devices``: the server's count, or ``None`` when it never said), and
+#: whether the phone was already offered (``offered``).  Process-wide on
+#: purpose: off the hosted server one process serves one person, and the
+#: hosted server never reaches the code path that reads it.
+_phone_alerts: dict[str, Any] = {"devices": None, "offered": False}
+
+#: Said beside the phone wherever the phone is named, and nowhere else.
+_PHONE_PLAN_LINE = (
+    'Tell them too: "On the same Wi-Fi as your printer this works on every plan; approving from '
+    'anywhere else is part of Kiln Pro (kiln3d.com/pricing)."'
+)
+
+
+def _phone_offer() -> str:
+    """One line for the agent to pass on after a print approved with the
+    screen's code has started: how the person approves from their phone
+    next time.  Made once per process, and only to someone it would help —
+    a machine nobody has signed in, or an account with no device alerted.
+    An account whose alerts are unknown is offered nothing: unknown is not
+    "none".  ``""`` otherwise.  Never raises."""
+    if _phone_alerts["offered"] or _hosted_now():
+        return ""
+    try:
+        from kiln.bridge_client import account_signed_out
+
+        signed_out = account_signed_out()
+    except Exception:  # noqa: BLE001 — cannot tell is no offer
+        return ""
+    if signed_out:
+        how = "run `kiln signin` on the computer Kiln runs on, then open app.kiln3d.com/monitor on their phone"
+    elif _phone_alerts["devices"] == 0:
+        how = "open app.kiln3d.com/monitor on their phone"
+    else:
+        return ""
+    _phone_alerts["offered"] = True
+    return (
+        "Once the print has started, offer this once, in one line: next time they can approve from "
+        f"their phone instead of typing a code — {how}; the page shows how to turn on alerts."
+    )
 
 
 def _withdraw_blocking(file_value: str, aimed: str):
@@ -3183,6 +3316,15 @@ async def _consent_from_account(
                 f"{tool_name} was not started: the print was declined in Kiln (kiln3d.com/monitor). "
                 "Nothing was sent to the printer."
             )
+    if answer.allowed and answer.kind == bridge_client.KIND_MACHINE_ALWAYS and answer.id:
+        return await _consent_from_account_always(tool_name, file_value, printer_name, aimed, file_sha256, answer)
+    # The account holds no always allow for this print.  A copy still on
+    # here is out of date: bring it in line, so status stops saying "on".
+    with contextlib.suppress(Exception):
+        from kiln import consent_windows
+
+        if any(w.account_grant for w in consent_windows.live_windows()):
+            await asyncio.to_thread(consent_windows.sync_account_always)
     source = _ACCOUNT_SOURCES.get(answer.kind)
     if not answer.allowed or source is None or not answer.id:
         return None
@@ -3218,6 +3360,80 @@ async def _consent_from_account(
     )
 
 
+async def _consent_from_account_always(
+    tool_name: str, file_value: str, printer_name: str | None, aimed: str, file_sha256: str, answer: Any,
+):
+    """The account holds always allow for this machine on this printer
+    (turned on from the account page).  Recorded as the yes for the call
+    being served only after this machine has done its own part, which is
+    the same part the terminal door's entry gets:
+
+    * the local copy of the account's record names the machine first found
+      under the printer's name, and a different one closes it — here and
+      on the account — instead of starting anything;
+    * the plate is looked at, once, and a camera that shows nothing usable
+      means the person is asked the ordinary way;
+    * the start is reported to the account, and only a report it accepted
+      records the yes.  A frame nobody has judged yet reports nothing: the
+      gate holds that start, and the call that follows the look reports it.
+
+    Returns the reset token, or ``None`` for no yes."""
+    from kiln import bridge_client, consent_windows
+    from kiln.plate_state import LOOK_BLIND, LOOK_NEEDED
+
+    grantor = answer.grantor
+    identity = grantor if grantor.startswith("account:") or not grantor else f"account:{grantor}"
+    try:
+        entry = await asyncio.to_thread(
+            consent_windows.mirror_account_always,
+            grant_id=answer.id, printer_name=aimed, set_by=identity, set_at=answer.issued_at,
+        )
+        if entry is None or not entry.live():
+            return None
+        if not await asyncio.to_thread(consent_windows.is_live, entry.id, printer_name=aimed):
+            return None
+        look = unasked_look_noted(aimed)
+        if not entry.bed_check:
+            # The copy's first start: decide what it says about the bed, then
+            # look with that decided (a look taken before it was is not used).
+            entry = await asyncio.to_thread(consent_windows.settle_copy_bed_check, entry.id, aimed) or entry
+            look = None
+        if look is None:
+            look = await asyncio.to_thread(consent_windows.look_at_bed, aimed)
+            note_unasked_look(aimed, look)
+    except Exception:  # noqa: BLE001 — a copy that could not be made or judged is no yes
+        logger.debug("consent: the account's always allow could not be used", exc_info=True)
+        return None
+    if look.verdict == LOOK_BLIND:
+        return None
+    if look.verdict != LOOK_NEEDED:
+        try:
+            started = await asyncio.to_thread(
+                bridge_client.record_start,
+                authority_id=answer.id, kind=answer.kind, file_sha256=file_sha256, printer_name=aimed,
+            )
+        except Exception:  # noqa: BLE001
+            started = False
+        if not started:
+            logger.debug("consent: the account's always allow %s was not accepted for this start", answer.id)
+            return None
+    bridge_client.forget_ask(file_sha256, aimed)
+    _audit(
+        tool_name, "consent_granted",
+        details={
+            "file": file_value, "by": "account", "source": SOURCE_ALWAYS, "identity": identity,
+            "authority": answer.id, "kind": answer.kind, "via": answer.via,
+            "printer": aimed, "file_sha256": file_sha256, "window_id": entry.id,
+        },
+    )
+    return set_consent(
+        PrintConsent(
+            tool=tool_name, file_name=file_value, printer_name=printer_name, source=SOURCE_ALWAYS,
+            identity=entry.set_by, window_id=entry.id, granted_at=entry.set_at,
+        )
+    )
+
+
 def _consent_from_code_answer(
     tool_name: str, file_value: str, printer_name: str | None, answered: Any, *, aimed: str,
 ):
@@ -3248,6 +3464,21 @@ def _consent_from_code_answer(
     return set_consent(
         PrintConsent(tool=tool_name, file_name=file_value, printer_name=printer_name, source=SOURCE_CODE, identity=identity)
     )
+
+
+def _always_allow_status(printer_name: str | None) -> dict[str, Any] | None:
+    """Always allow as a printer's status carries it: the entry that is on
+    for this machine, or the one that turned itself off in the last day,
+    or ``None``.  The same block a print result carries, without the
+    words about a start."""
+    from kiln import consent_window_note, consent_windows
+
+    aimed = printer_name or _resolve_effective_printer_name(None)
+    entry = consent_windows.always_for(aimed)
+    if entry is not None:
+        return consent_window_note.block_for_window(entry)
+    closed = consent_windows.turned_itself_off(aimed)
+    return consent_window_note.turned_off_block(closed) if closed is not None else None
 
 
 def _hosted_now() -> bool:
@@ -3442,20 +3673,76 @@ def _no_yes_message(tool_name: str, file_name: str, aimed: str) -> str:
             "yes or a standing window is nobody's here, and an agent cannot supply either door "
             "itself. Tell the person that plainly."
         )
+    return _always_allow_went_off(aimed) + _no_yes_at_home(tool_name, name, aimed)
+
+
+def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
+    """:func:`_no_yes_message` off the hosted server: the print is ready,
+    nobody has said go yet, and the ways the person says it.
+
+    Worded as the first step it is, not as a failure: a person who asks to
+    print and has not been asked yet should hear "ready — here is how you
+    say go", so the agent is told in as many words not to report a failed
+    or refused print.
+
+    The ORDER the doors are described in follows where the person is, as
+    far as Kiln can tell (:func:`kiln.agent_host.person_is_in_a_chat_app`):
+    someone writing from a chat app is told the tap on their phone first and
+    the code on the computer's screen second; anyone else the code first.
+    Only the order of the words: which doors exist, and which one is tried
+    first, is :func:`_obtain_print_consent`'s and does not change here.  The
+    phone leads only when an ask is really waiting on the account, an alert
+    is claimed only when the server said one went out, and beside the phone
+    one sentence says where it works.  The terminal stays last for the
+    print in hand, and always allow — which is about every later print —
+    comes after it.
+    """
+    from kiln import agent_host
+
     why = why_not_asked()
     pending = ""
     if NOT_ASKED_PENDING_TAG in why:
         why, pending = why.rsplit(NOT_ASKED_PENDING_TAG, 1)
-    monitor = (
-        "approve it in Kiln on their phone or any signed-in browser at kiln3d.com/monitor, "
-        "then start again."
-    ) if pending else ""
-    signin = ""
-    if why and not pending:
-        from kiln.bridge_client import account_signed_out
+    ready = (
+        f"{tool_name} has not started yet: {name} was shown, and nobody said go yet. This is the normal "
+        "first step, not a failure: do not tell the person the print failed or was refused. Tell them "
+        f"{name} is ready for {aimed}, and how they say go."
+    )
+    monitor = ""
+    if pending:
+        alert = (
+            " (an alert went to each device they turned approval alerts on for; tapping it opens the print)"
+            if (alerted_devices() or 0) > 0
+            else ""
+        )
+        monitor = (
+            "tap Approve in Kiln on their phone or any signed-in browser at kiln3d.com/monitor"
+            f"{alert}, then start again. {_PHONE_PLAN_LINE}"
+        )
+    signed_out = False
+    if not pending:
+        try:
+            from kiln.bridge_client import account_signed_out
 
-        if account_signed_out():
-            signin = "`kiln signin` on this machine lets them approve from their phone next time."
+            signed_out = account_signed_out()
+        except Exception:  # noqa: BLE001 — cannot tell: name only the door that needs no account
+            signed_out = True
+    signin = (
+        "`kiln signin` on this machine lets them approve from their phone next time."
+        if why and signed_out
+        else ""
+    )
+    # The account page's switch reaches this machine only once it is signed in.
+    web = (
+        ""
+        if signed_out
+        else "in Kiln's web app on their phone or browser, at app.kiln3d.com/settings/agent (Always allow), or "
+    )
+    always = (
+        f" To stop being asked on {aimed}, they turn on always allow for it themselves: {web}with "
+        f"`kiln consent window --always --printer {aimed}` in a terminal on the computer Kiln runs on. "
+        'You cannot turn it on; when they say "ask me first", you turn it off.'
+    )
     if why.startswith(NOT_ASKED_CODE_SHOWN):
         hook = ""
         if ":hook=" in why:
@@ -3463,23 +3750,28 @@ def _no_yes_message(tool_name: str, file_name: str, aimed: str) -> str:
                 " This host's own hooks answer its dialogs (" + why.split(":hook=", 1)[1]
                 + "), so the dialog was not used."
             )
-        account = f" Or they can {monitor}" if monitor else (f" {signin}" if signin else "")
         switch = ""
         if screen_code.last_kiln_status() == screen_code.KILN_OFF:
             switch = (
                 " Notifications from Kiln are turned off on this Mac, so the code went out another "
                 "way and may not show: they can turn them on in System Settings, Notifications, Kiln."
             )
-        return (
-            f"{tool_name} refuses to proceed: {name} was shown, but nobody said go. A code was just "
-            "shown in a notification on the screen of the machine Kiln runs on." + hook + switch + " Tell the "
-            f"person: type the code here to print {name} on {aimed} — the code alone approves this "
-            f"print; the code followed by 2h or today also keeps printing on {aimed} without asking. "
-            "Then pass their exact words to give_print_code and start again. Nothing you can call "
-            "reveals the code, and a wrong guess counts." + account + " If no notification appeared, "
-            f"their yes can be given at a terminal: `kiln print {name}` or `kiln consent window --for "
+        code = (
+            "code was just shown in a notification on the screen of the computer Kiln runs on." + hook + switch
+            + f" They type the code here to print {name} on {aimed} — the code alone approves this print; "
+            f"the code followed by 2h or today also keeps printing on {aimed} without asking — and you pass "
+            "their exact words to give_print_code, then start again. Nothing you can call reveals the "
+            "code, and a wrong guess counts."
+        )
+        terminal = (
+            (" If neither reaches them, " if monitor else " If no notification appeared, ")
+            + f"their yes can be given at a terminal: `kiln print {name}` or `kiln consent window --for "
             f"2h --printer {aimed}`."
         )
+        if monitor and agent_host.person_is_in_a_chat_app():
+            return f"{ready} First, they can {monitor} Or, at the computer: a {code}{terminal}{always}"
+        account = f" Or they can {monitor}" if monitor else (f" {signin}" if signin else "")
+        return f"{ready} A {code}{account}{terminal}{always}"
     if why.startswith(NOT_ASKED_CODE_COOLDOWN):
         secs = why.split(":", 1)[1] if ":" in why else "60"
         lead = (
@@ -3492,8 +3784,7 @@ def _no_yes_message(tool_name: str, file_name: str, aimed: str) -> str:
         return f"{lead}; or their yes can be given at a terminal (`kiln print {name}`)."
     if why == NOT_ASKED_HOST_CANNOT:
         lead = (
-            f"{tool_name} refuses to proceed: {name} was shown, but nobody said go, and "
-            "this host cannot show an approval dialog, so no dialog is coming — tell the "
+            f"{ready} This host cannot show an approval dialog, so no dialog is coming — tell the "
             "person that plainly."
         )
         terminal = (
@@ -3502,9 +3793,14 @@ def _no_yes_message(tool_name: str, file_name: str, aimed: str) -> str:
             "while. Kiln cannot open a window from here, and an agent cannot supply "
         )
         if monitor:
-            return f"{lead} They can {monitor} Or their yes can be given at a terminal: {terminal}any of these yeses."
-        return f"{lead}{(' ' + signin) if signin else ''} Their yes has to be given at a terminal: {terminal}either yes."
-    lead = f"{tool_name} refuses to proceed: {name} was shown, but nobody said go"
+            return (
+                f"{lead} They can {monitor} Or their yes can be given at a terminal: {terminal}any of "
+                f"these yeses.{always}"
+            )
+        return (
+            f"{lead}{(' ' + signin) if signin else ''} Their yes has to be given at a terminal: "
+            f"{terminal}either yes.{always}"
+        )
     doors = (
         "comes from the host's approval dialog (a host that asks shows one; the person "
         "approves it, and can choose there to open a standing window for this printer), "
@@ -3514,10 +3810,10 @@ def _no_yes_message(tool_name: str, file_name: str, aimed: str) -> str:
         "three."
     )
     if monitor:
-        return f"{lead}. They can {monitor} Otherwise a yes {doors}"
+        return f"{ready} They can {monitor} Otherwise a yes {doors}{always}"
     if signin:
-        return f"{lead}. {signin} For this print, a yes {doors}"
-    return f"{lead} — a yes {doors}"
+        return f"{ready} {signin} For this print, a yes {doors}{always}"
+    return f"{ready} A yes {doors}{always}"
 
 
 def _preview_gate_error(
@@ -3582,6 +3878,29 @@ def _preview_gate_error(
             # that carries the yes.
             return _error_dict(_no_yes_message(tool_name, file_name, aimed), code="PREVIEW_NOT_CONFIRMED")
         return _error_dict(print_signoff.not_confirmed_message(tool_name), code="PREVIEW_NOT_CONFIRMED")
+
+    # LOOKED.  Always allow means nobody was asked, so where the machine
+    # has a camera the plate has to have been seen clear in a fresh frame.
+    # A frame nobody has judged yet holds the start and is handed over;
+    # asked before the token is touched, so the token is still good for
+    # the call that follows the look.  The yes was read on the look taken
+    # when the call arrived; a door that works for a while first (slicing)
+    # gets a fresh one here, and if that one shows nothing the print does
+    # not start on a bed nobody could see: the person is asked instead.
+    bed_look = None
+    if granted.source == SOURCE_ALWAYS:
+        from kiln.plate_state import LOOK_BLIND, LOOK_NEEDED
+
+        bed_look = unasked_look(aimed)
+        if bed_look.verdict == LOOK_BLIND:
+            print_signoff.clear()
+            note_unasked_look(aimed, bed_look)
+            _audit(tool_name, "always_allow_could_not_see", details={"file": file_name, "printer": aimed, "why": bed_look.why})
+            return _error_dict(_no_yes_message(tool_name, file_name, aimed), code="PREVIEW_NOT_CONFIRMED")
+        if bed_look.verdict == LOOK_NEEDED:
+            print_signoff.clear()
+            _audit(tool_name, "always_allow_look_first", details={"file": file_name, "printer": aimed, "frame": bed_look.frame})
+            return _look_first_error(tool_name, aimed, bed_look)
 
     # SAW.  The token half lives in kiln.print_signoff so every door asks
     # the same question of the same code.  We can't hash a file on the
@@ -3651,8 +3970,100 @@ def _preview_gate_error(
     if granted.window_id:
         details["window_id"] = granted.window_id
         details["window_until"] = granted.expires_at
+    if granted.source == SOURCE_ALWAYS:
+        details["always_allow"] = _always_allow_for_audit(granted.window_id)
+        # What the plate was known to be when nobody was asked: the frame
+        # it was seen clear in and who judged it, or why it was not checked.
+        if bed_look is not None:
+            details["bed_look"] = bed_look.evidence()
     _audit(tool_name, "preview_gate_satisfied", details=details)
     return None
+
+
+def _look_first_error(tool_name: str, aimed: str, look: Any) -> dict:
+    """The refusal that hands over the plate: always allow is on, nobody
+    is being asked, and the frame has not been judged yet."""
+    return _error_dict(
+        f"{tool_name} has not started: always allow is on for {aimed}, so nobody is being asked, and "
+        "before a print starts that way the bed is looked at through the camera. Here is the bed now: "
+        f"{look.frame} (or call look_at_plate to see it). Look at the picture, then call look_at_plate "
+        'with seen="clear" if the bed is empty, or seen="occupied" if anything is on it or you cannot '
+        "tell, and start again. The picture is kept with this print's record.",
+        code="ALWAYS_ALLOW_LOOK_FIRST",
+        extra={
+            "snapshot_path": look.frame,
+            "look": {"camera": look.camera, "settle_with": "look_at_plate", "good_for_minutes": 10},
+        },
+    )
+
+
+def _always_allow_for_audit(window_id: str) -> dict[str, Any]:
+    """Who turned always allow on, when, and through which door — what
+    every start that rests on it carries on its audit line.  Read from
+    the entry itself; an entry that cannot be read says so rather than
+    leaving the line without the fact."""
+    try:
+        from kiln import consent_windows
+
+        w = consent_windows.get_window(window_id)
+        if w is None:
+            return {"window_id": window_id, "unreadable": True}
+        return {
+            "turned_on_by": w.set_by,
+            "turned_on_at": w.set_at,
+            "turned_on_via": consent_windows.describe(w)["opened_via"],
+            "printer": consent_windows.describe_scope(w.scope),
+            "machine": w.machine,
+            **({"account_grant": w.account_grant} if w.account_grant else {}),
+        }
+    except Exception:  # noqa: BLE001 — the audit line is written either way
+        return {"window_id": window_id, "unreadable": True}
+
+
+def _always_allow_dialog_row(aimed: str) -> str | None:
+    """The row the approval dialog carries for the day after always allow
+    turned itself off on this printer; ``None`` otherwise."""
+    with contextlib.suppress(Exception):
+        from kiln import consent_windows
+
+        if consent_windows.turned_itself_off(aimed) is not None:
+            return "off. A different printer is now set up under this name, so Kiln is asking again"
+        from kiln.plate_state import LOOK_BLIND
+
+        look = unasked_look_noted(aimed)
+        if look is not None and look.verdict == LOOK_BLIND:
+            return f"on, but Kiln could not see the bed through the camera ({look.why}), so it is asking you"
+    return None
+
+
+def _always_allow_went_off(aimed: str) -> str:
+    """One sentence, with a trailing space, on why a printer that had
+    always allow is asking: it turned itself off in the last day, or it
+    is on and the camera could not see the bed for this print.  ``""``
+    otherwise.  The refusal leads with it."""
+    with contextlib.suppress(Exception):
+        from kiln import consent_window_note, consent_windows
+
+        closed = consent_windows.turned_itself_off(aimed)
+        if closed is not None:
+            line = consent_window_note.turned_off_line(consent_windows.describe_scope(closed.scope))
+            return f"Tell the person first: {line} "
+        blind = _always_allow_could_not_see(aimed)
+        if blind:
+            return f"Tell the person first: {blind} "
+    return ""
+
+
+def _always_allow_could_not_see(aimed: str) -> str:
+    """The sentence for a print that always allow would have started, had
+    the camera shown the bed; ``""`` when that is not this call."""
+    from kiln import consent_window_note
+    from kiln.plate_state import LOOK_BLIND
+
+    look = unasked_look_noted(aimed)
+    if look is None or look.verdict != LOOK_BLIND:
+        return ""
+    return consent_window_note.could_not_see_line(aimed, look.why)
 
 
 # Slicer settings that change how the object is MADE but not what it is.
@@ -6095,6 +6506,16 @@ def printer_status(
                 }
         except Exception:  # noqa: BLE001 — never break a status read
             logger.debug("engagement note unavailable", exc_info=True)
+        # Always allow, shown where someone already looks: on this printer
+        # prints start without asking.  Present only when it is on, or for
+        # the day after it turned itself off; both detail levels, because
+        # it is a fact about the machine's standing permission.
+        try:
+            always_block = _always_allow_status(printer_name)
+            if always_block:
+                response["always_allow"] = always_block
+        except Exception:  # noqa: BLE001 — never break a status read
+            logger.debug("always-allow note unavailable", exc_info=True)
 
         from kiln.safety_gap_warning import attach_safety_warning
         return attach_safety_warning(response)
@@ -9411,9 +9832,15 @@ def _pause_print_on(
 def pause_print(keep_temps: bool = True, printer_name: str | None = None) -> dict:
     """Pause the currently running print job.
 
-    Pausing lifts the nozzle and parks the head.
+    What happens next is decided by the printer's own firmware, not by
+    Kiln, and it differs a lot between machines.  Some lift the nozzle
+    and park the head; others leave it resting on the part.  Many lower
+    or switch off the nozzle heater while paused, and some switch the
+    heaters and motors off after a timeout, after which the print may
+    not be able to resume.  Do not tell the person the head will park or
+    that temperatures will hold; check ``printer_status`` instead.
 
-    Heater behaviour during pause varies by firmware:
+    One measured case:
 
       - Bambu A1 / A1 mini: the firmware sets a ~90°C hotend standby
         target IMMEDIATELY on pause, regardless of slicer settings (the
@@ -9426,10 +9853,6 @@ def pause_print(keep_temps: bool = True, printer_name: str | None = None) -> dic
         measurement says the damage starts at once.  A resume onto a
         cooled nozzle can't extrude until it re-heats — and bed adhesion
         can fail in the meantime.
-      - Bambu X1/P1 series: typically holds both targets, but a long
-        idle can still trigger cooldown.
-      - OctoPrint / Moonraker / Klipper: depends on firmware config;
-        most hold targets across pause.
 
     To fight this, ``pause_print`` spawns a best-effort daemon thread
     that re-asserts the pre-pause hotend + bed targets immediately, and
@@ -9437,7 +9860,9 @@ def pause_print(keep_temps: bool = True, printer_name: str | None = None) -> dic
     (resume, cancel, error, or manual button press).  This is enabled by
     default.  The immediate assert is the part that matters on an A1:
     without it, a pause shorter than the interval got no protection at
-    all, which is most pauses a person actually takes.
+    all, which is most pauses a person actually takes.  It can only help
+    on a printer Kiln can set temperatures on: Prusa Link offers no way
+    to, so on a Prusa the keep-alive does nothing.
 
     Args:
         keep_temps: When ``True`` (default), capture the pre-pause tool

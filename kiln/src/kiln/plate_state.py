@@ -67,6 +67,7 @@ import os
 import re
 import tempfile
 import zipfile
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -95,6 +96,32 @@ CAMERA_JUDGES = ("agent", "human")
 #: an old record is weaker evidence, not a different record, and only a look
 #: or a person's word clears it (:func:`offer_look`).
 LIKELY_GONE_AFTER_HOURS = 24.0
+
+#: A person's own word that the plate is empty, and how it reached Kiln.
+#: ``human``: said where the assistant does not hold the pen -- at this
+#: computer's terminal, or in a dialog the person's app drew.
+#: ``human_relayed``: typed in a chat and passed on by the assistant
+#: (``look_at_plate(person_says=...)``), kept with the words typed.  Both
+#: read as clear; the record says which, so nobody mistakes one for the
+#: other afterwards.
+SAID_DIRECTLY = "human"
+SAID_IN_CHAT = "human_relayed"
+PERSON_SOURCES = (SAID_DIRECTLY, SAID_IN_CHAT)
+
+#: What the person answered when their app asked them about the plate
+#: directly, for the call being served: set by the tool-call wrapper, read
+#: by ``look_at_plate``.  Empty when nobody could be asked.
+WORD_CONFIRMED = "confirmed"
+WORD_DECLINED = "declined"
+
+#: How long a frame of the plate stays good as the picture a start rests
+#: on.  A look taken for a print that starts minutes later is about this
+#: plate; one from this morning is about a plate that may have changed.
+LOOK_GOOD_FOR_SECONDS = 10 * 60.0
+#: Judged frames are kept, on this computer only, so a person can see what
+#: a "clear" rested on.  This many, newest first; older ones are removed.
+KEPT_LOOKS = 50
+_LOOKS_DIR = "plate_looks"
 
 #: The block the 3D stage draws an occupied plate from, and the shape the
 #: placement verdict's ``occupancy`` carries (:mod:`kiln._pro_placement_bridge`).
@@ -217,6 +244,17 @@ def _now_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
+def _seconds_since(stamp: str) -> float | None:
+    """Seconds since an ISO *stamp*; ``None`` when it cannot be read."""
+    try:
+        when = datetime.fromisoformat(stamp)
+    except (TypeError, ValueError):
+        return None
+    if when.tzinfo is None:
+        when = when.astimezone()
+    return (datetime.now().astimezone() - when).total_seconds()
+
+
 # ---------------------------------------------------------------------------
 # The record
 # ---------------------------------------------------------------------------
@@ -277,6 +315,10 @@ class PlateState:
     note: str = ""
     details: dict[str, Any] = field(default_factory=dict)
     jobs: tuple[PlateJob, ...] = ()
+    #: The frame a camera-sourced record was judged from, when one had
+    #: just been handed over: ``{"frame": path, "frame_at": iso}``.  Empty
+    #: for a record nobody looked at a picture for.
+    look: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.jobs and self.job is not None:
@@ -309,6 +351,35 @@ class PlateState:
         if not self.from_camera:
             return None
         return self.source[len(CAMERA_SOURCE_PREFIX):] or None
+
+    def fresh_look(self) -> dict[str, Any] | None:
+        """The look this record rests on, when it is one a start may rest
+        on: the plate was SEEN clear, in a frame Kiln still holds, taken
+        within :data:`LOOK_GOOD_FOR_SECONDS`.  ``None`` for anything less
+        -- a clear nobody looked for, a look with no frame, an old one."""
+        if not (self.clear and self.from_camera):
+            return None
+        frame, taken = self.look.get("frame"), self.look.get("frame_at")
+        if not (isinstance(frame, str) and frame and isinstance(taken, str) and os.path.isfile(frame)):
+            return None
+        age = _seconds_since(taken)
+        if age is None or age > LOOK_GOOD_FOR_SECONDS:
+            return None
+        return {"frame": frame, "frame_at": taken, "judged_by": self.looked_by}
+
+    def fresh_say_so(self) -> dict[str, Any] | None:
+        """A person's own word that the plate is empty, given within
+        :data:`LOOK_GOOD_FOR_SECONDS`; ``None`` otherwise.  What settles a
+        plate the camera showed and eyes could not judge: the person at
+        the machine outranks a picture, for as long as their word is
+        about the plate as it is now."""
+        if not (self.clear and self.source in PERSON_SOURCES and self.since):
+            return None
+        age = _seconds_since(self.since)
+        if age is None or age > LOOK_GOOD_FOR_SECONDS:
+            return None
+        who = "person" if self.source == SAID_DIRECTLY else "person_via_assistant"
+        return {"frame": None, "frame_at": self.since, "judged_by": who}
 
     def since_clock(self) -> str:
         """``18:12`` for today, ``Sep 15 18:12`` otherwise, the raw stamp when unparsable."""
@@ -366,8 +437,10 @@ class PlateState:
                 height = "height unknown"
             return f"{what} since {self.since_clock()}, {height}"
         if self.status == "clear":
-            if self.source == "human":
+            if self.source == SAID_DIRECTLY:
                 who = "a person said so"
+            elif self.source == SAID_IN_CHAT:
+                who = "a person said so, passed on by their assistant"
             elif self.from_camera:
                 who = f"seen empty through the camera by {'a person' if self.looked_by == 'human' else 'an agent'}"
             else:
@@ -462,6 +535,9 @@ class PlateState:
             # without knowing this module's spelling.
             "from_camera": self.from_camera,
             "looked_by": self.looked_by,
+            # The picture a camera-sourced record was judged from, kept on
+            # this computer; ``None`` when no picture stands behind it.
+            "look": dict(self.look) or None,
         }
 
     @classmethod
@@ -485,6 +561,7 @@ class PlateState:
             job=jobs[-1] if jobs else None,
             jobs=tuple(jobs),
             note=str(data.get("note") or ""),
+            look=dict(data["look"]) if isinstance(data.get("look"), dict) else {},
         )
 
 
@@ -671,6 +748,7 @@ def plate_occupancy(adapter: Any) -> PlateState:
 def _write_state(
     adapter: Any, *, status: str, source: str, job: PlateJob | None, note: str,
     jobs: tuple[PlateJob, ...] | list[PlateJob] | None = None,
+    look: dict[str, Any] | None = None,
 ) -> None:
     machine = machine_id(adapter)
     if not machine:
@@ -678,7 +756,7 @@ def _write_state(
     all_jobs = list(jobs) if jobs else ([job] if job is not None else [])
     try:
         store = _read_store() or {"machines": {}}
-        store.setdefault("machines", {})[machine] = {
+        row: dict[str, Any] = {
             "status": status,
             "source": source,
             "since": _now_iso(),
@@ -686,6 +764,14 @@ def _write_state(
             "jobs": [j.to_dict() for j in all_jobs],
             "note": note,
         }
+        if look:
+            row["look"] = look
+        store.setdefault("machines", {})[machine] = row
+        # Any record written is about the plate as it is now; a frame
+        # handed over before it belongs to no later look.
+        frames = store.get("frames")
+        if isinstance(frames, dict):
+            frames.pop(machine, None)
         _write_store(store)
     except Exception:  # noqa: BLE001 -- bookkeeping never breaks the motion it describes
         logger.debug("plate-state write failed", exc_info=True)
@@ -716,6 +802,51 @@ def mark_occupied(
         _write_state(adapter, status="occupied", source=source, job=jobs[-1] if jobs else None, jobs=jobs, note=note)
     except Exception:  # noqa: BLE001
         logger.debug("mark_occupied failed", exc_info=True)
+
+
+_plate_word_answer: ContextVar[str] = ContextVar("kiln_plate_word_answer", default="")
+
+
+def note_plate_word_answer(answer: str) -> None:
+    """Record, for the call being served, what the person answered when
+    their app asked them about the plate; ``""`` forgets it."""
+    _plate_word_answer.set(str(answer or ""))
+
+
+def plate_word_answer() -> str:
+    """:data:`WORD_CONFIRMED`, :data:`WORD_DECLINED`, or ``""`` when nobody
+    could be asked on this call."""
+    return _plate_word_answer.get()
+
+
+#: Words that turn "clear" into something else.  A person who is not sure
+#: has not said the plate is empty -- and neither has one who says they
+#: WILL empty it ("I'll clear it later", "once it's clear") or asks for it
+#: to be emptied ("clear the bed for me"): "clear" and "empty" are verbs
+#: too, and only the statement that it IS so counts.
+_NOT_A_CLEAR = re.compile(
+    r"\?|\b(not|isn'?t|ain'?t|wasn'?t|never|unsure|maybe|probably|think|guess|should|might|almost|"
+    r"don'?t|doesn'?t|can'?t|cannot|if|"
+    r"will|won'?t|(i|we|it|that|you)'?ll|gonna|later|tomorrow|soon|once|when|until|unless|before|after|"
+    r"need|needs|must|please|let|wait|(can|could|would) (you|u|we|i)|"
+    r"(to|and|then) (clear|empty)|(clear|empty) (the|my|it|off|out|this|that))\b"
+)
+_A_CLEAR = re.compile(r"\b(clear|cleared|empty|emptied|nothing on)\b")
+
+
+def says_plate_is_clear(words: str | None) -> bool:
+    """Whether a person's typed words say, flatly, that the plate is empty.
+
+    Read narrowly on purpose: "bed clear", "printbed clear", "the plate is
+    empty", "nothing on it".  A question, a hedge ("should be clear", "I
+    think so") or a negation is not a statement that it is empty, and
+    neither is a bare "yes" -- the words have to carry it themselves,
+    because they are what is kept on the record.
+    """
+    text = " ".join(str(words or "").lower().split())
+    if not text or len(text) > 200:
+        return False
+    return bool(_A_CLEAR.search(text)) and not _NOT_A_CLEAR.search(text)
 
 
 def mark_clear(adapter: Any, source: str, *, note: str = "") -> None:
@@ -792,6 +923,132 @@ def camera_of(adapter: Any) -> str | None:
     return source if source in ("user_supplied", "printer") else None
 
 
+#: How Kiln came to know a machine has a camera.
+CAMERA_SEEN = "seen"                # it gave Kiln a picture
+CAMERA_PERSON_SAID = "person_said"  # the person said so, at their own terminal
+_CAMERA_SOURCES = ("printer", "user_supplied")
+
+
+def remember_camera(adapter: Any, source: str | None, how: str = CAMERA_SEEN) -> None:
+    """Keep, for this machine, that a camera exists and whose it is.
+
+    *source* is the adapter's own word for where the picture came from:
+    ``"printer"`` (through the printer's own connection) or
+    ``"user_supplied"`` (a camera the person registered beside it).  The
+    two are kept apart, so a camera on a tripod is never remembered as the
+    printer's own.  A camera once seen is never unlearned by a failed
+    look: a camera that does not answer today is a camera that is not
+    answering, not a printer that never had one.  Written once per source;
+    a look that only confirms what is known writes nothing.  Never raises.
+    """
+    machine = machine_id(adapter)
+    if not machine or source not in _CAMERA_SOURCES:
+        return
+    try:
+        store = _read_store() or {"machines": {}}
+        known = store.setdefault("cameras", {}).setdefault(machine, {})
+        had = known.get(source) if isinstance(known.get(source), dict) else None
+        if had is not None and (had.get("how") == CAMERA_SEEN or how != CAMERA_SEEN):
+            return  # nothing new: already seen, or already said and only said again
+        known[source] = {"how": how, "first_at": (had or {}).get("first_at") or _now_iso()}
+        _write_store(store)
+    except Exception:  # noqa: BLE001 -- forgetting costs one question later; it never breaks a look
+        logger.debug("camera not remembered", exc_info=True)
+
+
+def cameras_on_record(adapter: Any) -> dict[str, dict[str, Any]]:
+    """What :func:`remember_camera` has kept for this machine, by source.
+    Empty when nothing is known.  Never raises."""
+    machine = machine_id(adapter)
+    if not machine:
+        return {}
+    try:
+        known = (_read_store().get("cameras") or {}).get(machine)
+        return {k: dict(v) for k, v in known.items() if k in _CAMERA_SOURCES and isinstance(v, dict)} if isinstance(known, dict) else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def knows_a_camera(adapter: Any) -> str | None:
+    """Which camera Kiln knows this machine has -- whether or not it is
+    answering right now -- or ``None`` when it knows of none.
+
+    ``"user_supplied"``: a camera the person registered, for as long as it
+    is registered.  Taking it away takes the knowledge with it; having
+    once seen through it says nothing about the printer itself.
+    ``"printer"``: the machine's own, known one of four ways -- its
+    backend says every machine it drives leaves the factory with one
+    (``camera_fitted_at_factory``), Kiln has had a picture through the
+    printer's own connection before, the person said it has one, or
+    Kiln's catalogue says its model ships with one (the word kept on this
+    computer; nothing is asked here, see :mod:`kiln._pro_camera_bridge`).
+    ``None`` also for a backend that cannot read a camera at all.
+    """
+    source = camera_of(adapter)
+    if source != "printer":
+        return source  # a registered camera, or no way to read one
+    try:
+        if adapter.camera_fitted_at_factory is True:
+            return "printer"
+    except Exception:  # noqa: BLE001 -- an adapter that cannot say has not said yes
+        pass
+    if "printer" in cameras_on_record(adapter):
+        return "printer"
+    try:
+        from kiln import _pro_camera_bridge
+        from kiln.camera_words import FITTED
+
+        if _pro_camera_bridge.kept_word(adapter.camera_catalogue_model()) == FITTED:
+            return "printer"
+    except Exception:  # noqa: BLE001 -- no word kept is no knowledge
+        pass
+    return None
+
+
+def keep_catalogue_word(model: str, word: str) -> None:
+    """Keep the catalogue's word about a printer MODEL on this computer,
+    with when it was told (:mod:`kiln._pro_camera_bridge` is the one
+    writer).  About a model, not a machine, so it is keyed by the model
+    as the person spelled it.  Never raises."""
+    key = str(model or "").strip().lower()
+    if not key or not word:
+        return
+    try:
+        store = _read_store() or {"machines": {}}
+        store.setdefault("camera_words", {})[key] = {"word": str(word), "at": _now_iso()}
+        _write_store(store)
+    except Exception:  # noqa: BLE001 -- not kept costs one more ask later
+        logger.debug("catalogue camera word not kept", exc_info=True)
+
+
+def catalogue_word_on_record(model: str) -> tuple[str, float] | None:
+    """``(word, seconds since it was told)`` for *model*, or ``None`` when
+    this computer has never been told.  Never raises."""
+    key = str(model or "").strip().lower()
+    if not key:
+        return None
+    try:
+        row = (_read_store().get("camera_words") or {}).get(key)
+        if not isinstance(row, dict) or not isinstance(row.get("word"), str):
+            return None
+        age = _seconds_since(str(row.get("at") or ""))
+        return row["word"], (float("inf") if age is None else max(0.0, age))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _note_still(adapter: Any) -> None:
+    """Count, for Kiln's own learning, that this printer model gave a still
+    picture and through whose camera -- so a model the catalogue has
+    wrong, or does not know, shows up.  Once a day; never raises."""
+    try:
+        from kiln.streaming import note_still
+
+        note_still(adapter)
+    except Exception:  # noqa: BLE001 -- counting never breaks a look
+        logger.debug("still not counted", exc_info=True)
+
+
 def look(adapter: Any) -> PlateLook:
     """Fetch a frame of this machine's plate for someone to look at.
 
@@ -799,7 +1056,8 @@ def look(adapter: Any) -> PlateLook:
     worth looking at, hand it over.  The judging is done by eyes -- the
     agent's or the person's -- and their answer comes back through
     :func:`mark_from_camera`.  Never raises, never moves a head, never
-    writes the record.
+    writes the plate's record.  (A camera that answers with a real picture
+    is remembered as one this machine has: :func:`remember_camera`.)
     """
     camera = camera_of(adapter)
     if camera is None:
@@ -819,6 +1077,11 @@ def look(adapter: Any) -> PlateLook:
         # whether a part is on the bed, and the screen skips that check
         # when it is not told the size.
         verdict = analyze_snapshot(frame, width=size[0] if size else None, height=size[1] if size else None)
+        if verdict.valid:
+            # A real picture came back, usable or not (a capped lens is
+            # still a camera): this machine has one.
+            remember_camera(adapter, camera)
+            _note_still(adapter)
         if not verdict.valid or not verdict.usable_quality:
             # The camera is there and answering, but the frame cannot settle
             # anything -- lens capped, light off, too small to read.  Saying
@@ -858,15 +1121,21 @@ def mark_from_camera(
         return None
     source = f"{CAMERA_SOURCE_PREFIX}{judged_by}"
     try:
+        # The picture this verdict is about: the frame last handed over for
+        # this machine, kept so a person can see what the verdict rested on.
+        judged = _keep_judged_frame(adapter)
         if seen == "occupied":
             previous = read(adapter)
             # A look cannot say WHICH part is there or how tall it is.  When
             # the record already names parts, they are kept -- the look
             # confirms them, it does not replace them with a blank.
             jobs = list(previous.jobs) if previous.occupied and job is None else ([job] if job is not None else [])
-            _write_state(adapter, status="occupied", source=source, job=jobs[-1] if jobs else None, jobs=jobs, note=note)
+            _write_state(
+                adapter, status="occupied", source=source, job=jobs[-1] if jobs else None, jobs=jobs, note=note,
+                look=judged,
+            )
             return "occupied"
-        _write_state(adapter, status="clear", source=source, job=None, note=note)
+        _write_state(adapter, status="clear", source=source, job=None, note=note, look=judged)
         return "clear"
     except Exception:  # noqa: BLE001 -- bookkeeping never breaks the door that called it
         logger.debug("mark_from_camera failed", exc_info=True)
@@ -891,7 +1160,10 @@ def camera_could_settle(adapter: Any) -> str | None:
 
 #: What a person says when they have looked themselves -- the fallback every
 #: offer ends on, and the default for a door that names no verb of its own.
-SAY_SO = "`kiln plate clear`, or plate_clear=true on park_head"
+SAY_SO = (
+    "`kiln plate clear`, or plate_clear=true on park_head; or, in a chat, the person's own words that it "
+    "is clear, passed exactly as typed to look_at_plate(person_says=...)"
+)
 
 
 @dataclass(frozen=True)
@@ -939,6 +1211,132 @@ def save_frame(found: PlateLook) -> str | None:
         return None
 
 
+def hand_over_frame(adapter: Any, found: PlateLook) -> str | None:
+    """Save a look's frame for eyes to judge, and remember that THIS frame
+    is the one now in front of them -- so the verdict that follows
+    (:func:`mark_from_camera`) is recorded against the picture it was
+    about.  The path, or ``None`` when there is no frame to hand over."""
+    path = save_frame(found)
+    machine = machine_id(adapter)
+    if not path or not machine:
+        return path
+    try:
+        store = _read_store() or {"machines": {}}
+        store.setdefault("frames", {})[machine] = {"path": path, "at": _now_iso()}
+        _write_store(store)
+    except Exception:  # noqa: BLE001 -- the frame is still handed over; only the link to a verdict is lost
+        logger.debug("plate look: handed-over frame not remembered", exc_info=True)
+    return path
+
+
+def _keep_judged_frame(adapter: Any) -> dict[str, Any] | None:
+    """The frame last handed over for this machine, moved to where it is
+    kept: ``{"frame": path, "frame_at": iso}``.  ``None`` when no frame
+    was handed over within :data:`LOOK_GOOD_FOR_SECONDS` -- a verdict with
+    no recent picture behind it is recorded as before, with no look."""
+    machine = machine_id(adapter)
+    if not machine:
+        return None
+    try:
+        handed = (_read_store().get("frames") or {}).get(machine)
+        if not isinstance(handed, dict):
+            return None
+        path, taken = handed.get("path"), handed.get("at")
+        if not (isinstance(path, str) and isinstance(taken, str) and os.path.isfile(path)):
+            return None
+        age = _seconds_since(taken)
+        if age is None or age > LOOK_GOOD_FOR_SECONDS:
+            return None
+        import shutil
+
+        kept_dir = _kiln_dir() / _LOOKS_DIR
+        kept_dir.mkdir(parents=True, exist_ok=True)
+        kept = kept_dir / os.path.basename(path)
+        shutil.copyfile(path, kept)
+        os.chmod(kept, 0o600)
+        for old in sorted(kept_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)[KEPT_LOOKS:]:
+            with contextlib.suppress(OSError):
+                old.unlink()
+        return {"frame": str(kept), "frame_at": taken}
+    except Exception:  # noqa: BLE001 -- the verdict is still recorded, without a picture
+        logger.debug("plate look: judged frame not kept", exc_info=True)
+        return None
+
+
+#: What a look can vouch for, for a start nobody is being asked about.
+LOOK_NO_CAMERA = "no_camera"   # nothing to look through; the plate is not checked
+LOOK_CLEAR = "clear"           # seen clear, in a fresh frame Kiln holds
+LOOK_OCCUPIED = "occupied"     # the record says a part is there; the start gate refuses
+LOOK_NEEDED = "needed"         # a frame is ready; eyes have not judged it yet
+LOOK_BLIND = "blind"           # there is a camera, and it gave nothing usable
+
+
+@dataclass(frozen=True)
+class UnaskedStartLook:
+    """The plate, for a print about to start with no person asked."""
+
+    verdict: str
+    camera: str | None = None
+    frame: str | None = None
+    frame_at: str | None = None
+    judged_by: str | None = None
+    why: str = ""
+
+    def evidence(self) -> dict[str, Any]:
+        """What the start rested on, for its audit line and its result."""
+        if self.verdict == LOOK_CLEAR:
+            # ``frame`` is None when a person's word, not a picture, is
+            # what the start rested on; ``judged_by`` says which.
+            return {
+                "checked": True, "camera": self.camera, "frame": self.frame,
+                "frame_at": self.frame_at, "judged_by": self.judged_by,
+            }
+        return {"checked": False, "camera": self.camera, "why": self.why or self.verdict}
+
+
+def look_for_unasked_start(adapter: Any) -> UnaskedStartLook:
+    """What stands between a standing permission and the motors, when
+    nobody is being asked: a look at the plate.
+
+    A person saying yes to a print can see their own printer.  A print
+    started under a standing permission has nobody looking, so where the
+    machine has a camera Kiln can read, the plate has to have been SEEN
+    clear -- in a frame taken within :data:`LOOK_GOOD_FOR_SECONDS` and
+    still on this computer.  The record alone is not enough: ``clear``
+    from this morning says nothing about a print sent since from the
+    maker's own app.
+
+    Five answers.  No camera: nothing to check with, said as such.  A
+    fresh look on record: clear, with its frame -- or a person's own word
+    that the plate is empty, given as recently, which is how a picture
+    eyes could not judge gets settled.  A record that says a part is
+    there: the start gate's own refusal handles it.  Otherwise a
+    frame is fetched now: usable, it is handed over to be judged
+    (:func:`hand_over_frame`); not usable, the camera is blind and the
+    reason is given.  Never raises, never moves a head, never writes the
+    plate record.
+    """
+    try:
+        camera = camera_of(adapter)
+        if camera is None:
+            return UnaskedStartLook(LOOK_NO_CAMERA, why="this printer has no camera Kiln can use")
+        state = read(adapter)
+        if state.occupied:
+            return UnaskedStartLook(LOOK_OCCUPIED, camera)
+        fresh = state.fresh_look() or state.fresh_say_so()
+        if fresh is not None:
+            return UnaskedStartLook(LOOK_CLEAR, camera, **fresh)
+        found = look(adapter)
+        path = hand_over_frame(adapter, found)
+        if not found.available or not path:
+            why = (found.why or "it gave no picture").rstrip(". ")
+            return UnaskedStartLook(LOOK_BLIND, camera, why=why)
+        return UnaskedStartLook(LOOK_NEEDED, camera, frame=path, frame_at=_now_iso())
+    except Exception as exc:  # noqa: BLE001 -- a look that failed has seen nothing
+        logger.debug("look for an unasked start failed", exc_info=True)
+        return UnaskedStartLook(LOOK_BLIND, None, why=f"Kiln could not look ({str(exc)[:120]})")
+
+
 def offer_look(adapter: Any, state: PlateState | None = None, *, say_so: str = SAY_SO) -> LookOffer:
     """Look instead of assume: what every refusal about a recorded part offers.
 
@@ -978,7 +1376,7 @@ def offer_look(adapter: Any, state: PlateState | None = None, *, say_so: str = S
                 if likely_gone else ". "
             )
         found = look(adapter)
-        path = save_frame(found)
+        path = hand_over_frame(adapter, found)
         if found.camera is None:
             sentence = (
                 f"{age}This printer has no camera Kiln can read, so look at the plate yourself, "

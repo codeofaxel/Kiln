@@ -175,7 +175,7 @@ kiln agent --model openai/gpt-4o
 kiln agent --model meta-llama/llama-3.1-70b-instruct --tier essential
 ```
 
-Tool tiers auto-match model capability: **essential** (15 tools) for smaller models, **standard** (60 tools) for mid-range, **full** (135 tools) for stronger models. All <!-- KILN_MCP_TOOL_COUNT:OLD --> 932 tools are available over MCP via `kiln serve`.
+Tool tiers auto-match model capability: **essential** (15 tools) for smaller models, **standard** (60 tools) for mid-range, **full** (135 tools) for stronger models. All <!-- KILN_MCP_TOOL_COUNT:OLD --> 935 tools are available over MCP via `kiln serve`.
 </details>
 
 <details>
@@ -251,7 +251,7 @@ Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&ut
 
 - **One control plane, any printer** — OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, Serial. Manage a mixed fleet from one place.
 - **No printer? No problem** — Outsource jobs to Craftcloud's 150+ manufacturing services through the hosted proxy, or use direct mode with your own provider credentials.
-- **AI-native** — <!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 939 MCP capabilities and <!-- KILN_CLI_COUNT:OLD --> 253 CLI commands built for AI agents. Not a web UI with an API bolted on.
+- **AI-native** — <!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 942 MCP capabilities and <!-- KILN_CLI_COUNT:OLD --> 253 CLI commands built for AI agents. Not a web UI with an API bolted on.
 - **Describe it, print it** — Natural-language to physical object pipeline: text or sketch → AI generation → validation → slice → print.
 - **Decorate anything** — QR codes, photos, logos, text, SVGs, and procedural textures (tiger stripe, marble, camo, wood grain, honeycomb) embossed or debossed onto any model with one command.
 - **Manuals included** — Multi-part prints can generate printable PDF assembly manuals with Bill of Materials, isometric step renders, mating arrows, and pause-and-check verification gates. (Business)
@@ -380,7 +380,7 @@ Patent pending across semantic mesh merge, outcome-correlated branching, and sig
 
 ## Tools
 
-The Kiln MCP server (`kiln serve`) exposes **<!-- KILN_MCP_TOOL_COUNT:OLD --> 932 tools** to agents, plus prompts and resources for **<!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 939 total MCP capabilities**. Rather than list them all here, agents browse the live catalog with `get_skill_manifest` and ToolSearch-style discovery. A representative slice, in the order a print actually happens:
+The Kiln MCP server (`kiln serve`) exposes **<!-- KILN_MCP_TOOL_COUNT:OLD --> 935 tools** to agents, plus prompts and resources for **<!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 942 total MCP capabilities**. Rather than list them all here, agents browse the live catalog with `get_skill_manifest` and ToolSearch-style discovery. A representative slice, in the order a print actually happens:
 
 - **design_session**
   - Talk to Kiln about what you're making and get back a design that matches what you asked for
@@ -501,7 +501,7 @@ Kiln is safety-first infrastructure for controlling physical machines:
 - **Pre-flight checks** validate printer state, temperatures, and files before every print
 - **G-code validation** blocks dangerous commands (firmware reset, unsafe temperatures)
 - **Temperature limits** enforce safe maximums (300 °C hotend, 130 °C bed)
-- **A person says go** before every print — in your AI app's approval dialog, by typing a code Kiln shows on your screen, or at the terminal — unless you switched on auto-print yourself; stopping, pausing and watching a print never need that yes
+- **A person says go** before every print — in your AI app's approval dialog, by typing a code Kiln shows on your screen, or at the terminal — unless you chose not to be asked: for a while (a day at most), always on a printer you named yourself (at your own terminal, or on your Kiln account page with two-factor), or by switching on auto-print yourself; stopping, pausing and watching a print never need that yes
 - **Confirmation required** for destructive operations (cancel, raw G-code)
 - **Optional authentication** with scope-based API keys for multi-user setups
 - **Structured errors** ensure agents always know when something fails

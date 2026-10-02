@@ -918,7 +918,8 @@ def test_the_window_store_is_read_by_the_gate_and_the_scheduler_only():
                     name = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
                     if name == "covering":
                         readers.append(f"{path.name}::{fn.name}")
-    assert sorted(readers) == ["consent_window_note.py::note_for", "print_consent.py::consent_for"], readers
+    # Which functions read it; one that asks twice is still one reader.
+    assert sorted(set(readers)) == ["consent_window_note.py::note_for", "print_consent.py::consent_for"], readers
 
 
 def test_a_flag_is_not_consent():

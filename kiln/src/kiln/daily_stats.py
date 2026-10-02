@@ -357,8 +357,10 @@ def _empty_day() -> dict[str, Any]:
         "template_uses": {},       # {"shelf_bracket": 3, "stackable_bin": 1}
         # Whether live video from a printer's camera worked, as classes:
         # {"<model>|<channel>|<source>|<event>": count}.  Written by the
-        # relay (kiln.streaming) and the camera check (kiln.camera_check),
-        # the only two places that know; see record_video_outcome.
+        # relay (kiln.streaming), the camera check (kiln.camera_check), and
+        # -- for a still picture of the bed, or an owner saying their
+        # printer has a camera -- kiln.streaming.note_still /
+        # note_owner_said_camera; see record_video_outcome.
         "video_outcomes": {},
         "motion_refusals": {},
         # What a served motion plan did on a real machine, as classes:
@@ -570,6 +572,27 @@ def record_agent_host(label: str, facts: list[str]) -> None:
             _write(data)
     except Exception as exc:
         _logger.debug("record_agent_host failed: %s", exc)
+
+
+def record_agent_host_fact(fact: str) -> None:
+    """Count one more fact beside a host already counted today — a
+    ``"<label> <fact>"`` key learned after the handshake (the chat app an
+    agent reported).  The host's own count is not touched.  Once-per-process
+    is the caller's rule (``kiln.agent_host.note_chat_app``).  Never raises.
+    """
+    if not isinstance(fact, str) or not fact:
+        return
+    try:
+        with _lock:
+            data = _read()
+            host_facts = data.get("agent_host_facts")
+            if not isinstance(host_facts, dict):
+                host_facts = {}
+            host_facts[fact] = int(host_facts.get(fact, 0)) + 1
+            data["agent_host_facts"] = host_facts
+            _write(data)
+    except Exception as exc:
+        _logger.debug("record_agent_host_fact failed: %s", exc)
 
 
 def record_event(event_type: str, *, detail: str | None = None) -> None:
@@ -1169,9 +1192,11 @@ def record_video_outcome(model: object, channel: str, source: str, event: str) -
 
     ``channel``, ``source`` and ``event`` come from the closed vocabularies
     in :mod:`kiln.streaming`; the relay and the planning helper every door
-    calls are the only writers, once per session (see
-    ``kiln.streaming.MJPEGProxy``).  A key that is not four well-formed
-    tokens is dropped.  Silent by contract.
+    calls write once per session (see ``kiln.streaming.MJPEGProxy``), and
+    the two camera facts that are not live video -- a still picture came
+    back, an owner said the printer has a camera -- once a day
+    (``kiln.streaming.note_still`` / ``note_owner_said_camera``).  A key
+    that is not four well-formed tokens is dropped.  Silent by contract.
     """
     key = f"{video_model_token(model)}|{channel}|{source}|{event}"
     _record_name_count(

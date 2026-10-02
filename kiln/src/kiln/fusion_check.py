@@ -154,11 +154,11 @@ def check_fusion(
         not run; never a fake pass, never an exception.
     """
     try:
-        import trimesh
+        from kiln.mesh_frame import load_mesh
     except Exception:  # noqa: BLE001 — optional dep
         return {"checked": False, "reason": "trimesh not available"}
     try:
-        mesh = trimesh.load(mesh_path, force="mesh")
+        mesh = load_mesh(mesh_path, force="mesh")
         if getattr(mesh, "is_empty", False) or len(getattr(mesh, "faces", [])) == 0:
             return {"checked": False, "reason": "mesh has no geometry"}
         bodies = mesh.split(only_watertight=False)

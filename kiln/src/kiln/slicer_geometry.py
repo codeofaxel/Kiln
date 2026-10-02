@@ -1493,10 +1493,11 @@ def mesh_geometry(
         import numpy as np
         import trimesh
 
+        from kiln.mesh_frame import load_mesh
         from kiln.mesh_payload import _load_3mf_stdlib, _scene_to_single_mesh
 
         path = Path(mesh_path)
-        loaded = _load_3mf_stdlib(path) if path.suffix.lower() == ".3mf" else trimesh.load(str(path))
+        loaded = _load_3mf_stdlib(path) if path.suffix.lower() == ".3mf" else load_mesh(str(path))
         mesh = _scene_to_single_mesh(loaded, path) if isinstance(loaded, trimesh.Scene) else loaded
         if not isinstance(mesh, trimesh.Trimesh) or len(mesh.faces) == 0:
             return None

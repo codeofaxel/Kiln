@@ -5783,6 +5783,22 @@ class PrinterAdapter(ABC):
             getattr(self.capabilities, "can_snapshot", False)
         )
 
+    #: Whether every machine this backend drives leaves the factory with a
+    #: camera of its own.  ``True`` only where that is so; ``None`` where
+    #: the backend cannot say, because the camera -- if there is one -- is
+    #: whatever its owner plugged into the print server.  ``can_snapshot``
+    #: says a picture can be ASKED for; this says a camera is THERE.
+    camera_fitted_at_factory: bool | None = None
+
+    def camera_catalogue_model(self) -> str:
+        """The model Kiln's catalogue may be asked about for THIS machine's
+        camera: the declared model.  A backend overrides it where one
+        declared model can stand for machines that differ in their cameras,
+        and returns ``""`` for a machine it cannot place -- so the answer
+        about one machine is never given to the other.
+        """
+        return self.declared_printer_model()
+
     @property
     def snapshot_source(self) -> str | None:
         """``"user_supplied"``, ``"printer"``, or ``None`` when there is no camera."""
