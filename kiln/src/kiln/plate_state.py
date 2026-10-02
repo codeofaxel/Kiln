@@ -976,10 +976,12 @@ def knows_a_camera(adapter: Any) -> str | None:
     ``"user_supplied"``: a camera the person registered, for as long as it
     is registered.  Taking it away takes the knowledge with it; having
     once seen through it says nothing about the printer itself.
-    ``"printer"``: the machine's own, known one of three ways -- its
+    ``"printer"``: the machine's own, known one of four ways -- its
     backend says every machine it drives leaves the factory with one
     (``camera_fitted_at_factory``), Kiln has had a picture through the
-    printer's own connection before, or the person said it has one.
+    printer's own connection before, the person said it has one, or
+    Kiln's catalogue says its model ships with one (the word kept on this
+    computer; nothing is asked here, see :mod:`kiln._pro_camera_bridge`).
     ``None`` also for a backend that cannot read a camera at all.
     """
     source = camera_of(adapter)
@@ -990,7 +992,61 @@ def knows_a_camera(adapter: Any) -> str | None:
             return "printer"
     except Exception:  # noqa: BLE001 -- an adapter that cannot say has not said yes
         pass
-    return "printer" if "printer" in cameras_on_record(adapter) else None
+    if "printer" in cameras_on_record(adapter):
+        return "printer"
+    try:
+        from kiln import _pro_camera_bridge
+        from kiln.camera_words import FITTED
+
+        if _pro_camera_bridge.kept_word(adapter.camera_catalogue_model()) == FITTED:
+            return "printer"
+    except Exception:  # noqa: BLE001 -- no word kept is no knowledge
+        pass
+    return None
+
+
+def keep_catalogue_word(model: str, word: str) -> None:
+    """Keep the catalogue's word about a printer MODEL on this computer,
+    with when it was told (:mod:`kiln._pro_camera_bridge` is the one
+    writer).  About a model, not a machine, so it is keyed by the model
+    as the person spelled it.  Never raises."""
+    key = str(model or "").strip().lower()
+    if not key or not word:
+        return
+    try:
+        store = _read_store() or {"machines": {}}
+        store.setdefault("camera_words", {})[key] = {"word": str(word), "at": _now_iso()}
+        _write_store(store)
+    except Exception:  # noqa: BLE001 -- not kept costs one more ask later
+        logger.debug("catalogue camera word not kept", exc_info=True)
+
+
+def catalogue_word_on_record(model: str) -> tuple[str, float] | None:
+    """``(word, seconds since it was told)`` for *model*, or ``None`` when
+    this computer has never been told.  Never raises."""
+    key = str(model or "").strip().lower()
+    if not key:
+        return None
+    try:
+        row = (_read_store().get("camera_words") or {}).get(key)
+        if not isinstance(row, dict) or not isinstance(row.get("word"), str):
+            return None
+        age = _seconds_since(str(row.get("at") or ""))
+        return row["word"], (float("inf") if age is None else max(0.0, age))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _note_still(adapter: Any) -> None:
+    """Count, for Kiln's own learning, that this printer model gave a still
+    picture and through whose camera -- so a model the catalogue has
+    wrong, or does not know, shows up.  Once a day; never raises."""
+    try:
+        from kiln.streaming import note_still
+
+        note_still(adapter)
+    except Exception:  # noqa: BLE001 -- counting never breaks a look
+        logger.debug("still not counted", exc_info=True)
 
 
 def look(adapter: Any) -> PlateLook:
@@ -1025,6 +1081,7 @@ def look(adapter: Any) -> PlateLook:
             # A real picture came back, usable or not (a capped lens is
             # still a camera): this machine has one.
             remember_camera(adapter, camera)
+            _note_still(adapter)
         if not verdict.valid or not verdict.usable_quality:
             # The camera is there and answering, but the frame cannot settle
             # anything -- lens capped, light off, too small to read.  Saying

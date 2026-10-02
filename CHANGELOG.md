@@ -7,6 +7,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Check that a hinge opens before you print it.**
+
 - **Texture just one part of a model, and painted models keep their colours.** Different textures on different parts is Pro+. See https://kiln3d.com/pricing.
 
 - **Paint a model by saying which part.** Ask Kiln to make the inside red and the handle blue and it knows which surfaces you mean; when a word could mean more than one, it asks.

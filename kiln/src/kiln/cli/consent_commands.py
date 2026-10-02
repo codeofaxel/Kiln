@@ -171,6 +171,11 @@ def _has_camera(name: str) -> bool:
     known = consent_windows.bed_camera(name)
     if known != consent_windows.CAMERA_UNSURE:
         return known == consent_windows.CAMERA_YES
+    if consent_windows.signing_in_would_tell(name):
+        click.echo(
+            "Kiln's catalogue knows which printers ship with a camera. Sign in (free) with "
+            "`kiln signin` and Kiln can look yours up instead of asking."
+        )
     if not click.confirm(
         f"Kiln could not get a picture from {name} just now. Does {name} have a camera?", default=False,
     ):
