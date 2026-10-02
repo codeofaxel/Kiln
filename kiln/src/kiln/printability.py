@@ -1708,6 +1708,14 @@ _THIN_FEATURE_LINK_MAX_MM: float = 25.0
 _THIN_FEATURE_CAP: int = 50
 
 
+def _union_root(parent: np.ndarray, k: int) -> int:
+    """The root of *k* in a union-find forest, halving the path as it goes."""
+    while parent[k] != k:
+        parent[k] = parent[parent[k]]
+        k = parent[k]
+    return k
+
+
 def _thin_wall_features(
     points: np.ndarray,
     thickness: np.ndarray,
@@ -1737,22 +1745,15 @@ def _thin_wall_features(
         # Single-linkage clustering within the band (union-find over the
         # pairs closer than ``link_mm``).
         parent = np.arange(band.size)
-
-        def root(k: int) -> int:
-            while parent[k] != k:
-                parent[k] = parent[parent[k]]
-                k = parent[k]
-            return k
-
         pts = points[band]
         near = np.linalg.norm(pts[:, None, :] - pts[None, :, :], axis=2) < link_mm
         for a, b in zip(*np.nonzero(np.triu(near, k=1)), strict=True):
-            ra, rb = root(int(a)), root(int(b))
+            ra, rb = _union_root(parent, int(a)), _union_root(parent, int(b))
             if ra != rb:
                 parent[rb] = ra
         groups: dict[int, list[int]] = {}
         for k in range(band.size):
-            groups.setdefault(root(k), []).append(int(band[k]))
+            groups.setdefault(_union_root(parent, k), []).append(int(band[k]))
         for members in groups.values():
             idx = np.asarray(members)
             best = idx[np.argmin(thickness[idx])]
