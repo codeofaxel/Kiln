@@ -1538,3 +1538,303 @@ class TestThePersonSaysTheBedIsClear:
     def test_the_refusal_over_a_part_names_the_chat_door(self, held, tmp_path):
         message = _start(tmp_path)["error"]["message"]
         assert "look_at_plate(person_says=" in message
+
+
+# ---------------------------------------------------------------------------
+# Always allow turned on from the account page
+# ---------------------------------------------------------------------------
+
+API = "https://api.account.test"
+MAY_I = f"{API}/api/print-authority/may-i-print"
+RECORD = f"{API}/api/print-authority/record-start"
+DELEGATIONS = f"{API}/api/print-authority/delegations"
+PENDING = f"{API}/api/print-authority/pending"
+THIS_COMPUTER = "ab" * 16
+GRANT = "dlg_always_1"
+ISSUED = 1_790_000_000.0
+
+
+class TestFromTheAccountPage:
+    """The person turned always allow on from their account page, with
+    their authenticator (the account's side is kiln-pro's).  This computer
+    asks the account at every start, keeps a local copy of the account's
+    record, and does everything the terminal door's entry gets: the
+    machine check, the look at the bed, the line on the result, the status
+    surfaces, and one-step off.  The account is faked with ``responses``:
+    these tests pin what this computer sends and what it does with the
+    answers."""
+
+    @pytest.fixture(autouse=True)
+    def account(self, monkeypatch, tmp_path):
+        """This computer is signed in, and the file about to print is one
+        Kiln uploaded, so its bytes can be named to the account."""
+        import base64
+
+        import responses as responses_lib
+
+        import kiln.device
+        from kiln import auth_session, bridge_client
+
+        monkeypatch.setenv("KILN_API_URL", API)
+        monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path / "auth"))
+        monkeypatch.delenv("KILN_LICENSE_KEY", raising=False)
+        monkeypatch.setattr(auth_session, "_last_network_failure_monotonic", None)
+        monkeypatch.setattr(kiln.device, "get_device_fingerprint", lambda: THIS_COMPUTER)
+        monkeypatch.setitem(server._UPLOADED_FROM, "part.gcode", _gcode(tmp_path))
+        bridge_client._reset_asks_for_tests()
+        seg = lambda d: base64.urlsafe_b64encode(json.dumps(d).encode()).rstrip(b"=").decode()  # noqa: E731
+        home = tmp_path / "auth" / ".kiln"
+        home.mkdir(parents=True)
+        (home / "auth_tokens.json").write_text(json.dumps({
+            "access_token": f"{seg({'alg': 'none'})}.{seg({'exp': time.time() + 3600})}.sig",
+            "refresh_token": "rt", "email": "p@example.com", "auth_uid": "uid-1",
+        }))
+        with responses_lib.RequestsMock(assert_all_requests_are_fired=False) as mock:
+            yield mock
+        bridge_client._reset_asks_for_tests()
+
+    @staticmethod
+    def _says_always(mock, *, allowed: bool = True, grant: str = GRANT) -> None:
+        import responses as responses_lib
+
+        mock.replace(responses_lib.GET, MAY_I, json={
+            "success": True, "allowed": allowed, "pending": None,
+            "authority": {
+                "kind": "machine_always", "id": grant, "grantor": "account:uid-1",
+                "issued_at_epoch": ISSUED, "via": "web_button_with_stepup", "expires_at": None,
+            } if allowed else None,
+        }) if any(m.url == MAY_I for m in mock.registered()) else mock.add(responses_lib.GET, MAY_I, json={
+            "success": True, "allowed": allowed, "pending": None,
+            "authority": {
+                "kind": "machine_always", "id": grant, "grantor": "account:uid-1",
+                "issued_at_epoch": ISSUED, "via": "web_button_with_stepup", "expires_at": None,
+            } if allowed else None,
+        })
+
+    @staticmethod
+    def _accepts_starts(mock) -> None:
+        import responses as responses_lib
+
+        mock.add(responses_lib.POST, RECORD, json={"success": True, "event": {"id": "evt_1"}})
+
+    @staticmethod
+    def _sent(mock, url: str, method: str | None = None) -> list:
+        return [
+            c for c in mock.calls
+            if c.request.url.split("?", 1)[0] == url and (method is None or c.request.method == method)
+        ]
+
+    def test_this_computer_names_itself_on_every_call_to_the_account(self, account, garage, tmp_path):
+        """A permission granted to "this computer" can only be found by a
+        request that says which computer it is.  A/B: with the header
+        removed from ``_account_call`` this fails — and so does every
+        window the account opens for this machine, which the server
+        cannot then match to it."""
+        self._says_always(account)
+        self._accepts_starts(account)
+        assert _start(tmp_path)["success"] is True
+        asked = [c.request for c in account.calls if "/api/print-authority/" in c.request.url]
+        assert {r.url.split("?", 1)[0] for r in asked} >= {MAY_I, RECORD}
+        for request in asked:
+            assert request.headers.get("X-Kiln-Heartbeat-Device") == THIS_COMPUTER, request.url
+
+    def test_a_print_starts_without_asking_and_says_so(self, account, garage, tmp_path, audits):
+        self._says_always(account)
+        self._accepts_starts(account)
+        out = _start(tmp_path)
+        assert out["success"] is True and garage.started == ["part.gcode"]
+        # The account was told this start rested on always allow.
+        [reported] = self._sent(account, RECORD)
+        body = json.loads(reported.request.body)
+        assert body["authority_id"] == GRANT and body["kind"] == "machine_always" and body["printer_name"] == "garage"
+        # This computer keeps a copy of the account's record, with the machine it found.
+        [copy] = _always_entries()
+        assert copy.account_grant == GRANT and copy.source == consent_windows.SOURCE_WEB
+        assert copy.machine == "fake:serial:serial-a" and copy.set_by == "account:uid-1" and copy.set_at == ISSUED
+        # The result says so, and whose permission it was.
+        block = out[consent_window_note.RESULT_KEY]
+        assert block["note"] == ON_LINE and block["opened_via"] == "web" and block["opened_by"] == "account:uid-1"
+        # And so does the audit line.
+        [details] = [d for _, action, d in audits if action == "preview_gate_satisfied"]
+        assert details["consent"] == SOURCE_ALWAYS
+        assert details["always_allow"]["turned_on_via"] == "web"
+        assert details["always_allow"]["account_grant"] == GRANT
+
+    def test_the_copy_alone_starts_nothing(self, account, garage, tmp_path, no_rate_limit):
+        """The account is asked every time.  When it cannot be reached, a
+        copy left from an earlier print is not a yes.  A/B: with copies
+        left in for a start (``for_a_start``) this fails — the print
+        starts on a stale copy with the account never asked."""
+        self._says_always(account)
+        self._accepts_starts(account)
+        from kiln import plate_state
+
+        assert _start(tmp_path)["success"] is True
+        plate_state.mark_clear(garage, "human")  # the first print is off the bed: nothing else is in the way
+        account.reset()  # the account stops answering
+        out = _start(tmp_path)
+        assert out["error"]["code"] == "PREVIEW_NOT_CONFIRMED", out
+        assert garage.started == ["part.gcode"]
+        assert len(_always_entries()) == 1  # still on record; just not a yes by itself
+
+    def test_a_start_the_account_does_not_accept_does_not_happen(self, account, garage, tmp_path):
+        import responses as responses_lib
+
+        self._says_always(account)
+        account.add(responses_lib.POST, RECORD, status=403, json={"success": False, "error": "authority_mismatch"})
+        out = _start(tmp_path)
+        assert out["error"]["code"] == "PREVIEW_NOT_CONFIRMED" and garage.started == []
+
+    def test_a_different_machine_turns_it_off_here_and_on_the_account(self, account, garage, tmp_path, no_rate_limit):
+        import responses as responses_lib
+
+        self._says_always(account)
+        self._accepts_starts(account)
+        assert _start(tmp_path)["success"] is True
+        account.add(responses_lib.POST, f"{DELEGATIONS}/{GRANT}/revoke", json={"success": True})
+        replacement = _Printer("SERIAL-B")
+        server._get_registry().register("garage", replacement)
+        out = _start(tmp_path)
+        assert out["error"]["code"] == "PREVIEW_NOT_CONFIRMED" and replacement.started == []
+        assert SWAPPED_LINE in out["error"]["message"]
+        [told] = self._sent(account, f"{DELEGATIONS}/{GRANT}/revoke")
+        assert json.loads(told.request.body) == {"reason": "machine_changed"}
+        [closed] = [w for w in consent_windows.all_windows() if w.account_grant == GRANT]
+        assert closed.revoked_reason == consent_windows.REASON_MACHINE_CHANGED and closed.account_owed is False
+
+    def test_the_account_door_checks_the_machine_itself(self, account, garage):
+        """The asker happens to look at the machine before it reads the
+        account; the account's door does not lean on that.  Called on its
+        own, with a different printer under the name, it gives no yes and
+        closes the copy.  A/B: with the machine check removed from
+        ``_consent_from_account_always`` this fails."""
+        from kiln import bridge_client
+
+        consent_windows.mirror_account_always(
+            grant_id=GRANT, printer_name="garage", set_by="account:uid-1", set_at=ISSUED,
+        )
+        server._get_registry().register("garage", _Printer("SERIAL-B"))
+        self._accepts_starts(account)
+        answer = bridge_client.AccountAnswer(
+            allowed=True, kind=bridge_client.KIND_MACHINE_ALWAYS, id=GRANT, grantor="account:uid-1", issued_at=ISSUED,
+        )
+
+        async def _through_the_door():
+            token = await server._consent_from_account_always(
+                "start_print", "part.gcode", "garage", "garage", "ab" * 32, answer,
+            )
+            if token is not None:
+                print_consent.reset_consent(token)
+            return token
+
+        assert asyncio.run(_through_the_door()) is None
+        assert _always_entries() == [] and self._sent(account, RECORD) == []
+
+    def test_the_bed_is_looked_at_and_the_start_is_reported_once(self, account, at_terminal, tmp_path, no_rate_limit):
+        printer = _CameraPrinter("SERIAL-A")
+        server._get_registry().register("garage", printer)
+        self._says_always(account)
+        self._accepts_starts(account)
+        token = _previewed(_gcode(tmp_path))
+        held = _call("start_print", file_name="part.gcode", printer_name="garage", preview_token=token)
+        assert held["error"]["code"] == "ALWAYS_ALLOW_LOOK_FIRST", held
+        assert self._sent(account, RECORD) == [], "a start that is waiting on a look is not reported"
+        _call("look_at_plate", printer_name="garage", seen="clear")
+        out = _call("start_print", file_name="part.gcode", printer_name="garage", preview_token=token)
+        assert out["success"] is True and printer.started == ["part.gcode"]
+        assert len(self._sent(account, RECORD)) == 1
+        assert out[consent_window_note.RESULT_KEY]["bed_check"]["checked"] is True
+
+    def test_a_camera_that_cannot_see_means_the_person_is_asked(self, account, tmp_path):
+        printer = _CameraPrinter("SERIAL-A", frame=b"")
+        server._get_registry().register("garage", printer)
+        self._says_always(account)
+        self._accepts_starts(account)
+        out = _start(tmp_path)
+        assert out["error"]["code"] == "PREVIEW_NOT_CONFIRMED" and printer.started == []
+        assert "could not see the bed through the camera" in out["error"]["message"]
+        assert self._sent(account, RECORD) == []
+
+    def test_the_assistant_turns_it_off_here_and_on_the_account(self, account, garage, tmp_path, no_rate_limit):
+        import responses as responses_lib
+
+        self._says_always(account)
+        self._accepts_starts(account)
+        assert _start(tmp_path)["success"] is True
+        account.add(responses_lib.POST, f"{DELEGATIONS}/{GRANT}/revoke", json={"success": True})
+        out = _call("revoke_consent_window", printer_name="garage")
+        assert out["note"] == OFF_LINE and consent_windows.live_windows() == []
+        [told] = self._sent(account, f"{DELEGATIONS}/{GRANT}/revoke")
+        assert json.loads(told.request.body) == {"reason": "turned_off_at_home"}
+
+    def test_turned_off_while_the_account_is_unreachable_it_is_told_later(self, account, garage, tmp_path, no_rate_limit):
+        """Off here is off: the copy is closed at once.  The account hears
+        the next time it can be reached — and until it does, its yes is
+        still not used, because the closed copy answers first."""
+        import responses as responses_lib
+
+        self._says_always(account)
+        self._accepts_starts(account)
+        assert _start(tmp_path)["success"] is True
+        assert _call("revoke_consent_window", printer_name="garage")["note"] == OFF_LINE  # no revoke route mocked
+        [closed] = [w for w in consent_windows.all_windows() if w.account_grant == GRANT]
+        assert closed.revoked_at is not None and closed.account_owed is True
+        # The account still says yes; this computer does not use it.
+        out = _start(tmp_path)
+        assert out["error"]["code"] == "PREVIEW_NOT_CONFIRMED" and garage.started == ["part.gcode"]
+        # Reachable again: told, and no longer owed.
+        account.add(responses_lib.POST, f"{DELEGATIONS}/{GRANT}/revoke", json={"success": True})
+        account.add(responses_lib.GET, DELEGATIONS, json={"success": True, "delegations": []})
+        consent_windows.sync_account_always()
+        [settled] = [w for w in consent_windows.all_windows() if w.account_grant == GRANT]
+        assert settled.account_owed is False
+        assert len(self._sent(account, f"{DELEGATIONS}/{GRANT}/revoke")) >= 1
+
+    def test_status_shows_it_before_any_print_and_drops_it_when_the_account_does(self, account, garage):
+        import responses as responses_lib
+
+        row = {
+            "id": GRANT, "always": True, "live": True, "grantee": f"machine:{THIS_COMPUTER}",
+            "printers": ["garage"], "grantor": "account:uid-1", "issued_at_epoch": ISSUED,
+        }
+        someone_elses = {**row, "id": "dlg_other", "grantee": "machine:" + "cd" * 16}
+        timed = {**row, "id": "dlg_timed", "always": False}
+        account.add(responses_lib.GET, DELEGATIONS, json={"success": True, "delegations": [row, someone_elses, timed]})
+        [shown] = _call("consent_window_status")["windows"]
+        assert shown["always"] is True and shown["opened_via"] == "web" and shown["scope"] == "garage"
+        assert [w.account_grant for w in _always_entries()] == [GRANT]
+        # Turned off on the account page: the copy here follows.
+        account.replace(responses_lib.GET, DELEGATIONS, json={"success": True, "delegations": []})
+        assert _call("consent_window_status")["windows"] == []
+        [closed] = [w for w in consent_windows.all_windows() if w.account_grant == GRANT]
+        assert closed.revoked_reason == consent_windows.REASON_OFF_ON_ACCOUNT and closed.account_owed is False
+
+    def test_an_account_that_cannot_be_read_changes_nothing(self, account, garage):
+        """Unreachable is not "the account turned it off"."""
+        consent_windows.mirror_account_always(
+            grant_id=GRANT, printer_name="garage", set_by="account:uid-1", set_at=ISSUED,
+        )
+        consent_windows.sync_account_always()  # no routes mocked: every call fails
+        assert [w.account_grant for w in _always_entries()] == [GRANT]
+
+    def test_a_queued_job_asks_the_account_again_when_it_is_sent(self, account, garage, tmp_path):
+        from kiln.events import EventBus
+        from kiln.queue import PrintQueue
+        from kiln.scheduler import JobScheduler
+
+        copy = consent_windows.mirror_account_always(
+            grant_id=GRANT, printer_name="garage", set_by="account:uid-1", set_at=ISSUED,
+        )
+        queue = PrintQueue(db_path=str(tmp_path / "q.db"))
+        scheduler = JobScheduler(queue, server._get_registry(), EventBus(), poll_interval=0.01)
+        record = {"source": SOURCE_ALWAYS, "door": "stage", "printer_name": "garage", "window_id": copy.id}
+        # The account no longer confirms it: the job does not go.
+        refused = queue.submit("part.gcode", "garage", "test", metadata={"preview_signoff": dict(record)})
+        self._says_always(account, allowed=False)
+        assert scheduler.tick()["dispatched"] == [] and garage.started == []
+        assert "account" in (queue.get_job(refused).error or "")
+        # It does: the job goes.
+        sent = queue.submit("part.gcode", "garage", "test", metadata={"preview_signoff": dict(record)})
+        self._says_always(account)
+        assert [d["job_id"] for d in scheduler.tick()["dispatched"]] == [sent]
+        assert garage.started == ["part.gcode"]

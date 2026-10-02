@@ -959,8 +959,9 @@ def _build_instructions() -> str:
         "`standing_window` block naming it. When the person says to close it, call "
         "`revoke_consent_window`; `consent_window_status` shows what is open. "
         "Nothing you can call opens or extends one. The person can also turn on "
-        "always allow for one printer, at a terminal only (`kiln consent window "
-        "--always --printer NAME`): prints there start without asking until it is "
+        "always allow for one printer, themselves: at a terminal (`kiln consent window "
+        "--always --printer NAME`) or on their Kiln account page with their "
+        "authenticator. Prints there start without asking until it is "
         "turned off, each result says so in a line to show them as written, and when "
         "they say \"ask me first\" you call `revoke_consent_window`. A start held with "
         "`ALWAYS_ALLOW_LOOK_FIRST` hands you a picture of the bed: judge it with "
@@ -3262,6 +3263,15 @@ async def _consent_from_account(
                 f"{tool_name} was not started: the print was declined in Kiln (kiln3d.com/monitor). "
                 "Nothing was sent to the printer."
             )
+    if answer.allowed and answer.kind == bridge_client.KIND_MACHINE_ALWAYS and answer.id:
+        return await _consent_from_account_always(tool_name, file_value, printer_name, aimed, file_sha256, answer)
+    # The account holds no always allow for this print.  A copy still on
+    # here is out of date: bring it in line, so status stops saying "on".
+    with contextlib.suppress(Exception):
+        from kiln import consent_windows
+
+        if any(w.account_grant for w in consent_windows.live_windows()):
+            await asyncio.to_thread(consent_windows.sync_account_always)
     source = _ACCOUNT_SOURCES.get(answer.kind)
     if not answer.allowed or source is None or not answer.id:
         return None
@@ -3293,6 +3303,75 @@ async def _consent_from_account(
             tool=tool_name, file_name=file_value, printer_name=printer_name, source=source,
             identity=identity, window_id=answer.id if window else "",
             expires_at=answer.expires_at if window else None,
+        )
+    )
+
+
+async def _consent_from_account_always(
+    tool_name: str, file_value: str, printer_name: str | None, aimed: str, file_sha256: str, answer: Any,
+):
+    """The account holds always allow for this machine on this printer
+    (turned on from the account page).  Recorded as the yes for the call
+    being served only after this machine has done its own part, which is
+    the same part the terminal door's entry gets:
+
+    * the local copy of the account's record names the machine first found
+      under the printer's name, and a different one closes it — here and
+      on the account — instead of starting anything;
+    * the plate is looked at, once, and a camera that shows nothing usable
+      means the person is asked the ordinary way;
+    * the start is reported to the account, and only a report it accepted
+      records the yes.  A frame nobody has judged yet reports nothing: the
+      gate holds that start, and the call that follows the look reports it.
+
+    Returns the reset token, or ``None`` for no yes."""
+    from kiln import bridge_client, consent_windows
+    from kiln.plate_state import LOOK_BLIND, LOOK_NEEDED
+
+    grantor = answer.grantor
+    identity = grantor if grantor.startswith("account:") or not grantor else f"account:{grantor}"
+    try:
+        entry = await asyncio.to_thread(
+            consent_windows.mirror_account_always,
+            grant_id=answer.id, printer_name=aimed, set_by=identity, set_at=answer.issued_at,
+        )
+        if entry is None or not entry.live():
+            return None
+        if not await asyncio.to_thread(consent_windows.is_live, entry.id, printer_name=aimed):
+            return None
+        look = unasked_look_noted(aimed)
+        if look is None:
+            look = await asyncio.to_thread(consent_windows.look_at_bed, aimed)
+            note_unasked_look(aimed, look)
+    except Exception:  # noqa: BLE001 — a copy that could not be made or judged is no yes
+        logger.debug("consent: the account's always allow could not be used", exc_info=True)
+        return None
+    if look.verdict == LOOK_BLIND:
+        return None
+    if look.verdict != LOOK_NEEDED:
+        try:
+            started = await asyncio.to_thread(
+                bridge_client.record_start,
+                authority_id=answer.id, kind=answer.kind, file_sha256=file_sha256, printer_name=aimed,
+            )
+        except Exception:  # noqa: BLE001
+            started = False
+        if not started:
+            logger.debug("consent: the account's always allow %s was not accepted for this start", answer.id)
+            return None
+    bridge_client.forget_ask(file_sha256, aimed)
+    _audit(
+        tool_name, "consent_granted",
+        details={
+            "file": file_value, "by": "account", "source": SOURCE_ALWAYS, "identity": identity,
+            "authority": answer.id, "kind": answer.kind, "via": answer.via,
+            "printer": aimed, "file_sha256": file_sha256, "window_id": entry.id,
+        },
+    )
+    return set_consent(
+        PrintConsent(
+            tool=tool_name, file_name=file_value, printer_name=printer_name, source=SOURCE_ALWAYS,
+            identity=entry.set_by, window_id=entry.id, granted_at=entry.set_at,
         )
     )
 
@@ -3812,6 +3891,7 @@ def _always_allow_for_audit(window_id: str) -> dict[str, Any]:
             "turned_on_via": consent_windows.describe(w)["opened_via"],
             "printer": consent_windows.describe_scope(w.scope),
             "machine": w.machine,
+            **({"account_grant": w.account_grant} if w.account_grant else {}),
         }
     except Exception:  # noqa: BLE001 — the audit line is written either way
         return {"window_id": window_id, "unreadable": True}

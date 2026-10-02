@@ -156,8 +156,9 @@ def turned_off_block(window: Any) -> dict[str, Any]:
         "turned_off": "machine_changed",
         "note": turned_off_line(facts["scope"]),
         "for_the_assistant": (
-            "Show the person that line as written. Only they can turn always allow on again, at a "
-            f"terminal: `kiln consent window --always --printer {facts['scope']}`."
+            "Show the person that line as written. Only they can turn always allow on again: at a "
+            f"terminal (`kiln consent window --always --printer {facts['scope']}`) or on their Kiln "
+            "account page."
         ),
     }
 
@@ -187,7 +188,7 @@ def block_for_window(window: Any, *, close_hint: str | None = None, outcome: str
             "for_the_assistant": (
                 "Show the person that line as written. When they say \"ask me first\", or ask to "
                 f"turn always allow off, {close} — turning it off is always allowed; turning it "
-                "on is theirs alone, at a terminal."
+                "on is theirs alone, at a terminal or on their Kiln account page."
             ),
         }
     return {

@@ -289,6 +289,17 @@ def record_refusal(record: dict[str, Any] | None, printer_name: str | None) -> s
             always = bool(window is not None and window.always)
         except Exception:  # noqa: BLE001 — an unreadable store is no window
             live = False
+        if live and always and window.account_grant:
+            # A copy of the account's always allow is the account's yes:
+            # it is asked again now, as it is at every start.
+            from kiln.consent_windows import account_confirms
+
+            if not account_confirms(window, printer_name):
+                return (
+                    f"not started on {printer_name}: this job was queued under always allow turned on "
+                    "from the account page, and the account did not confirm it just now — it was "
+                    "turned off there, or Kiln could not reach it. A person can approve the print."
+                )
         if live and always:
             # Nobody is asked when a queued job is sent, so the plate is
             # looked at here as it is at every other door: seen clear in a

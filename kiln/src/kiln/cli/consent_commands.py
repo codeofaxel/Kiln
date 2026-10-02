@@ -280,8 +280,10 @@ def window(
 @click.option("--json", "json_mode", is_flag=True, help="Machine-readable output.")
 def status(json_mode: bool) -> None:
     """Which standing windows are open, for what, and until when."""
-    # Checked against the machine first, so status never lists always
-    # allow that the next print would find closed.
+    # Brought in line with the signed-in account first (always allow can
+    # be turned on or off on the account page), then checked against the
+    # machine, so status never lists what the next print would find closed.
+    consent_windows.sync_account_always()
     live = consent_windows.standing_now()
     closed = consent_windows.turned_off_recently()
     if json_mode:

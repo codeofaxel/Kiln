@@ -248,9 +248,9 @@ class _SafetyToolsPlugin:
                         "printer has a camera the bed is looked at first."
                     ),
                     "how_to_change": (
-                        "Only the person turns it on, at a terminal: "
-                        "kiln consent window --always --printer NAME. Anyone can turn it off: "
-                        "revoke_consent_window, or kiln consent revoke."
+                        "Only the person turns it on: at a terminal (kiln consent window --always "
+                        "--printer NAME) or on their Kiln account page with their authenticator. "
+                        "Anyone can turn it off: revoke_consent_window, or kiln consent revoke."
                     ),
                 },
                 "auto_print_marketplace": {
@@ -651,7 +651,8 @@ class _SafetyToolsPlugin:
             ``revoke_consent_window``.
 
             An entry with ``always: true`` is always allow: the person turned
-            it on at a terminal for one printer, it has no end (``until`` is
+            it on for one printer — at a terminal, or on their Kiln account
+            page (``opened_via`` says which) — it has no end (``until`` is
             null), and prints there start without asking until it is turned
             off.  ``turned_off`` lists any that Kiln turned off itself in the
             last day because a different printer was set up under the name.
@@ -672,6 +673,8 @@ class _SafetyToolsPlugin:
                         "account approves each print."
                     ),
                 }
+            # Always allow can be turned on or off on the account page.
+            consent_windows.sync_account_always()
             live = consent_windows.standing_now()
             closed = consent_windows.turned_off_recently()
             if printer_name:

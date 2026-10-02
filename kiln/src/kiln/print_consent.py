@@ -805,7 +805,7 @@ def consent_for(
     try:
         from kiln import consent_windows
 
-        window = consent_windows.covering(aimed_at or printer_name)
+        window = consent_windows.covering(aimed_at or printer_name, for_a_start=True)
     except Exception:  # noqa: BLE001 — an unreadable store is no window
         window = None
     if window is None:
