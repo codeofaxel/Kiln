@@ -1342,6 +1342,52 @@ def record_start(*, authority_id: str, kind: str, file_sha256: str, printer_name
     return True
 
 
+def alert_hardware(
+    *, moment: dict[str, Any], printer_name: str, printer_model: str = "", job_name: str = "",
+) -> tuple[str, int | None]:
+    """``POST /api/print-authority/hardware-alert``: tell the signed-in
+    person's devices about one moment of a print's hardware plan (a stop
+    coming up, the stop itself, a stop gone past, the finished print).
+
+    Sends ``stage``, ``insert``, ``before_layer``, ``z_mm``,
+    ``minutes_to_stop``, ``stop``, ``of``, ``printer_name``,
+    ``printer_model`` and ``job_name``; reads ``alert_devices``.  The server
+    words the alert and decides whether this account gets one.  Returns
+    ``("sent", devices)``, ``("refused", None)`` when the server said no,
+    ``("signed_out", None)`` with no sign-in to send under, or
+    ``("unanswered", None)``.  Never raises.
+    """
+    bearer = account_bearer()
+    if not bearer:
+        return "signed_out", None
+    stage = str(moment.get("stage") or "")
+    insert = moment.get("insert")
+    if stage == "after_print":
+        insert = " and ".join(
+            str(step.get("spoken") or step.get("item") or "") for step in moment.get("after_print") or ()
+        )
+    body = {
+        "stage": stage,
+        "insert": _fits(_card_text(insert), 200),
+        "before_layer": moment.get("before_layer"),
+        "z_mm": moment.get("z_mm"),
+        "minutes_to_stop": moment.get("minutes_to_stop"),
+        "stop": moment.get("stop"),
+        "of": moment.get("of"),
+        "printer_name": _fits(_card_text(printer_name), 80),
+        "printer_model": _fits(_card_text(printer_model), 80),
+        "job_name": _fits(_card_text(job_name), 120),
+    }
+    answered = _account_call("POST", "/hardware-alert", bearer, json=body)
+    if answered is None:
+        return "unanswered", None
+    status, data = answered
+    if not (200 <= status < 300):
+        logger.debug("account: hardware-alert answered %s (%s)", status, data.get("error"))
+        return ("refused" if 400 <= status < 500 else "unanswered"), None
+    return "sent", _device_count(data.get("alert_devices"))
+
+
 def run_bridge() -> None:
     """Blocking entry point: ``python -m kiln.bridge_client``."""
     logging.basicConfig(level=logging.INFO)

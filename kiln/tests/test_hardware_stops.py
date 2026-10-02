@@ -170,10 +170,10 @@ class TestDuringThePrint:
         assert note["before_layer"] == 29
 
     def test_a_close_stop_is_said_once(self, machine):
-        first = _at(machine, PrinterStatus.PRINTING, 25, completion=50.0, left_s=20 * 60, announce=True)
+        first = _at(machine, PrinterStatus.PRINTING, 25, completion=50.0, left_s=20 * 60, announce="chat")
         assert first["stage"] == "coming_up" and first["new"] is True
         assert "In about 4 minutes the printer stops before layer 29 so you can put in 2x M3 nut" in first["say"]
-        again = _at(machine, PrinterStatus.PRINTING, 26, completion=52.0, left_s=19 * 60, announce=True)
+        again = _at(machine, PrinterStatus.PRINTING, 26, completion=52.0, left_s=19 * 60, announce="chat")
         assert again["stage"] == "coming_up" and again["new"] is False
 
     def test_a_status_read_shows_a_moment_without_using_it_up(self, machine):
@@ -181,7 +181,7 @@ class TestDuringThePrint:
         wait the person was relying on never passed it on."""
         assert _at(machine, PrinterStatus.PRINTING, 25)["new"] is True  # a status read
         assert _at(machine, PrinterStatus.PRINTING, 25)["new"] is True  # and another
-        assert _at(machine, PrinterStatus.PRINTING, 26, announce=True)["new"] is True  # the wait hands it over
+        assert _at(machine, PrinterStatus.PRINTING, 26, announce="chat")["new"] is True  # the wait hands it over
         assert _at(machine, PrinterStatus.PRINTING, 26)["new"] is False
 
     def test_without_a_time_it_warns_by_layers(self, machine):
@@ -200,7 +200,7 @@ class TestDuringThePrint:
         assert note["steps"] == PLAN["stops"][0]["steps"]
         assert "hardware_confirmed=true" in note["resume"] and "on its own" in note["resume"]
         assert note["safety"] == PLAN["safety"]
-        assert _at(machine, PrinterStatus.PAUSED, 29, announce=True)["new"] is True
+        assert _at(machine, PrinterStatus.PAUSED, 29, announce="chat")["new"] is True
         assert _at(machine, PrinterStatus.PAUSED, 29)["new"] is False
 
     def test_a_printer_counting_from_zero_is_still_at_the_stop(self, machine):
@@ -217,7 +217,7 @@ class TestDuringThePrint:
         assert note["stage"] == "missed" and note["new"] is True
         assert "went past layer 29 without stopping" in note["say"] and "(M400 U1)" in note["say"]
         assert _see(machine, now=35, layer=30)["stage"] == "missed"  # a status read does not use it up
-        assert _see(machine, now=38, layer=31, announce=True)["stage"] == "missed"  # the wait hands it over
+        assert _see(machine, now=38, layer=31, announce="chat")["stage"] == "missed"  # the wait hands it over
         assert _see(machine, now=40, layer=31)["stage"] == "planned"  # said once; stop 2 is next
 
     def test_a_stop_gone_past_between_far_apart_readings_is_unseen(self, machine):
@@ -239,7 +239,7 @@ class TestDuringThePrint:
         assert _at(machine, PrinterStatus.PAUSED, 29) is None
 
     def test_the_finished_print_names_what_goes_in_afterwards(self, machine):
-        done = _at(machine, PrinterStatus.IDLE, ended=JobResult.COMPLETED, now=1000.0, announce=True)
+        done = _at(machine, PrinterStatus.IDLE, ended=JobResult.COMPLETED, now=1000.0, announce="chat")
         assert done["stage"] == "after_print" and done["new"] is True
         assert done["say"] == ("The print has finished. Now press in the 4 M3 heat-set inserts, one in each of S7, "
                                "S8, S9 and S10. After the print, once the part is cool and any supports are off.")
@@ -295,6 +295,113 @@ class TestResume:
         plain = _Machine()
         plain.status = PrinterStatus.PAUSED
         assert plain.resume_print().success is True
+
+
+# --- the phone ---------------------------------------------------------------
+
+
+class _Sent(list):
+    """Every alert the phone channel sent, and what the server answers next."""
+
+    answer: tuple = ("sent", 1)
+
+
+@pytest.fixture()
+def phone(monkeypatch):
+    import kiln.bridge_client as bc
+
+    sent = _Sent()
+
+    def fake(*, moment, printer_name, printer_model="", job_name=""):
+        sent.append({"stage": moment["stage"], "moment": moment, "printer": printer_name, "job": job_name})
+        return sent.answer
+
+    monkeypatch.setattr(bc, "alert_hardware", fake)
+    monkeypatch.setattr(hs, "_spawn", lambda target, *args: target(*args))  # send on the polling thread
+    return sent
+
+
+class TestThePhone:
+    def test_each_channel_hears_a_moment_once(self, machine):
+        assert _at(machine, PrinterStatus.PRINTING, 25, announce="chat")["new"] is True
+        assert _at(machine, PrinterStatus.PRINTING, 25, announce="phone")["new"] is True
+        assert _at(machine, PrinterStatus.PRINTING, 26, announce="chat")["new"] is False
+        assert _at(machine, PrinterStatus.PRINTING, 26, announce="phone")["new"] is False
+
+    def test_each_moment_reaches_the_phone_once(self, machine, phone):
+        def reading(status, layer=None, **fields):
+            machine.status, machine.layer = status, layer
+            for key, value in fields.items():
+                setattr(machine, key, value)
+            hs.alert_phone(machine, machine.get_state(), machine.get_job())
+
+        reading(PrinterStatus.PRINTING, 10)  # a stop ahead: nothing to say yet
+        _at(machine, PrinterStatus.PRINTING, 25, announce="chat")  # the chat told it first
+        reading(PrinterStatus.PRINTING, 25)
+        reading(PrinterStatus.PRINTING, 26)
+        reading(PrinterStatus.PAUSED, 29)
+        reading(PrinterStatus.PAUSED, 29)
+        reading(PrinterStatus.IDLE, ended=JobResult.COMPLETED)
+        assert [a["stage"] for a in phone] == ["coming_up", "now", "after_print"]
+        assert phone[1]["moment"]["insert"] == "2x M3 nut in S1, S2"
+        assert phone[0]["printer"] and phone[0]["job"] == "bracket hardware stops"
+
+    def test_an_account_that_says_no_is_asked_once_per_print(self, machine, phone):
+        phone.answer = ("refused", None)
+        machine.status, machine.layer = PrinterStatus.PRINTING, 25
+        hs.alert_phone(machine, machine.get_state(), machine.get_job())
+        machine.status, machine.layer = PrinterStatus.PAUSED, 29
+        hs.alert_phone(machine, machine.get_state(), machine.get_job())
+        assert [a["stage"] for a in phone] == ["coming_up"]
+
+    def test_the_watchdog_passes_on_the_reading_that_retires_it(self, machine, monkeypatch):
+        """The reading that sees the print end retires the watchdog inside
+        get_state; that same reading is the one that says what goes in after."""
+        from kiln.print_watchdog import PrintWatchdog
+
+        seen = []
+        monkeypatch.setattr(hs, "alert_phone", lambda adapter, state, job: seen.append(state.state))
+        watchdog = PrintWatchdog(adapter=machine, poll_interval_sec=60)
+        reads = machine.get_state
+
+        def retiring_read():
+            watchdog._stop_event.set()  # what the ending edge does inside the read
+            return reads()
+
+        machine.status, machine.ended = PrinterStatus.IDLE, JobResult.COMPLETED
+        monkeypatch.setattr(machine, "get_state", retiring_read)
+        watchdog.step()
+        assert seen == [PrinterStatus.IDLE]
+
+    def test_the_server_is_sent_the_moment_and_answers_for_the_account(self, monkeypatch):
+        import kiln.bridge_client as bc
+
+        calls = []
+        monkeypatch.setattr(bc, "account_bearer", lambda: "session-token")
+        monkeypatch.setattr(bc, "_account_call", lambda method, path, bearer, **kw: (
+            calls.append((method, path, kw["json"])) or (200, {"alert_devices": 2})))
+        moment = {"stage": "now", "insert": "the M3 nut (S2)", "before_layer": 36, "z_mm": 7.2, "stop": 1, "of": 1}
+        assert bc.alert_hardware(moment=moment, printer_name="a1", printer_model="bambu_a1",
+                                 job_name="bracket") == ("sent", 2)
+        method, path, body = calls[0]
+        assert (method, path) == ("POST", "/hardware-alert")
+        assert (body["stage"], body["insert"], body["before_layer"], body["printer_model"]) == (
+            "now", "the M3 nut (S2)", 36, "bambu_a1")
+
+        monkeypatch.setattr(bc, "_account_call", lambda *a, **k: (403, {"error": "tier_required"}))
+        assert bc.alert_hardware(moment=moment, printer_name="a1") == ("refused", None)
+        monkeypatch.setattr(bc, "account_bearer", lambda: "")
+        assert bc.alert_hardware(moment=moment, printer_name="a1") == ("signed_out", None)
+
+    def test_after_the_print_the_phone_names_the_pieces(self, monkeypatch):
+        import kiln.bridge_client as bc
+
+        calls = []
+        monkeypatch.setattr(bc, "account_bearer", lambda: "session-token")
+        monkeypatch.setattr(bc, "_account_call", lambda method, path, bearer, **kw: (
+            calls.append(kw["json"]) or (200, {"alert_devices": 1})))
+        bc.alert_hardware(moment={"stage": "after_print", "after_print": PLAN["after_print"]}, printer_name="a1")
+        assert calls[0]["insert"] == "the 4 M3 heat-set inserts"
 
 
 # --- the doors ---------------------------------------------------------------

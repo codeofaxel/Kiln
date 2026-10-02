@@ -4864,7 +4864,7 @@ def wait(ctx: click.Context, interval: float, max_timeout: float, json_mode: boo
             state = adapter.get_state()
             job = adapter.get_job()
 
-            hardware = _observe_hardware(adapter, state, job, announce=True)
+            hardware = _observe_hardware(adapter, state, job, announce="chat")
             if hardware and hardware["stage"] == "now":
                 if json_mode:
                     click.echo(format_response("success", data={"final_state": "paused", "hardware": hardware},
@@ -5290,7 +5290,7 @@ def monitor(ctx: click.Context, interval: float,
                     try:
                         from kiln.hardware_stops import observe as _observe_hardware
 
-                        _hw = _observe_hardware(adapter, adapter.get_state(), adapter.get_job(), announce=True)
+                        _hw = _observe_hardware(adapter, adapter.get_state(), adapter.get_job(), announce="chat")
                     except Exception as _hw_exc:  # noqa: BLE001 -- never break a monitor tick
                         logger.debug("hardware plan read skipped: %s", _hw_exc)
                         _hw = None

@@ -23,6 +23,11 @@ starts, the start gate reads that line back (:func:`stage`,
 * ``after_print``  -- the print is done: what goes in afterwards (a heat-set
   insert is pressed in after the print, never during it).
 
+Each moment reaches the person on two channels, each once: the chat (the
+watcher and the wait tool hand it over) and, through the signed-in account,
+a phone alert sent from the print watchdog's own readings
+(:func:`alert_phone`) -- which is what reaches someone who walked away.
+
 And :func:`stop_awaiting_hands` keeps a resume at a stop from going ahead
 until the person says every piece is in: Kiln never resumes a hardware stop on
 its own.
@@ -393,19 +398,25 @@ def _label(file_name: Any) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+#: The ways a moment reaches the person.  Each hands a moment over once, on
+#: its own: a phone alert does not use up the chat's telling, nor the reverse.
+CHANNELS = ("chat", "phone")
+
+
 def observe(
-    adapter: Any, state: Any, job: Any, *, now: float | None = None, announce: bool = False,
+    adapter: Any, state: Any, job: Any, *, now: float | None = None, announce: str | None = None,
 ) -> dict[str, Any] | None:
     """What the hardware plan says about the print right now, or ``None``.
 
     The one helper every door that reads the printer calls -- status, watch,
     wait, the resume gate -- so each says the same thing, and records what it
     sees (a stop reached, a stop passed) as it goes.  ``new`` on the answer is
-    ``True`` until a door that hands moments to the person -- the watcher and
-    the wait tool, which pass *announce* -- has handed this one over; a status
-    read shows a moment without using it up.  ``None`` when no plan is on
-    record for this machine, or the machine is running a different job.
-    Never raises.
+    ``True`` until a door that hands moments to the person has handed this one
+    over on its channel (*announce*: ``"chat"`` for the watcher and the wait
+    tool, ``"phone"`` for :func:`alert_phone`); a status read shows a moment
+    without using it up, and reports whether the chat has said it yet.
+    ``None`` when no plan is on record for this machine, or the machine is
+    running a different job.  Never raises.
     """
     try:
         if not _store_path().is_file():
@@ -446,14 +457,17 @@ def _observe(
     def mark_of(stop: dict[str, Any]) -> dict[str, Any]:
         return marks.setdefault(str(stop["n"]), {})
 
+    channel = announce or "chat"
+
     def hand_over(mark: dict[str, Any], moment: str) -> bool:
-        """``new`` for a moment, and spend it when this door hands it over."""
+        """``new`` for a moment on this channel, and spend it when this door hands it over."""
         nonlocal changed
-        given = mark.setdefault("announced", [])
-        if moment in given:
+        given = mark.setdefault("announced", {})
+        said = given.setdefault(channel, [])
+        if moment in said:
             return False
         if announce:
-            given.append(moment)
+            said.append(moment)
             changed = True
         return True
 
@@ -479,10 +493,10 @@ def _observe(
         new = hand_over(mark, "now")
         return _now(plan, ahead, certain=layer is not None, new=new, since=mark["paused_at"], now=now), changed
 
-    # -- a stop gone past, until a waiting door has said so -------------------
+    # -- a stop gone past, until a waiting door on this channel has said so ----
     for stop in plan["stops"]:
         mark = marks.get(str(stop["n"])) or {}
-        if mark.get("passed_how") and "went_past" not in (mark.get("announced") or ()):
+        if mark.get("passed_how") and "went_past" not in (mark.get("announced") or {}).get(channel, ()):
             hand_over(mark_of(stop), "went_past")
             return _went_past(plan, stop, mark["passed_how"]), changed
 
@@ -702,6 +716,59 @@ def _rounded(value: float | None) -> float | None:
 # ---------------------------------------------------------------------------
 
 
+#: The moments worth a buzz on the person's phone.
+PHONE_MOMENTS = ("coming_up", "now", "missed", "passed_unseen", "after_print")
+
+#: Prints whose account said no to phone alerts, by machine: asked once per print.
+_phone_declined: dict[str, str | None] = {}
+
+
+def alert_phone(adapter: Any, state: Any, job: Any) -> None:
+    """Hand each new moment of the print's hardware plan to the person's phone.
+
+    Called by the print watchdog on every reading -- including the one that
+    sees the print end -- so a moment reaches the person when no chat is
+    open.  The send runs on its own thread and goes through the signed-in
+    account (:func:`kiln.bridge_client.alert_hardware`); whether this account
+    gets phone alerts at all is the server's to say, and a no is asked once
+    per print.  A courtesy: it never raises and never touches the printer.
+    """
+    try:
+        key = machine_key(adapter)
+        label = _label(getattr(job, "file_name", None))
+        if key in _phone_declined and _phone_declined[key] == label:
+            return
+        note = observe(adapter, state, job, announce="phone")
+        if not note or not note.get("new") or note.get("stage") not in PHONE_MOMENTS:
+            return
+        from kiln.printers.base import outcome_printer_name
+        from kiln.plate_state import pretty_job_name
+
+        model = ""
+        with contextlib.suppress(Exception):
+            model = str(adapter.declared_printer_model() or "")
+        _spawn(_send_to_phone, key, label, note, outcome_printer_name(adapter), model,
+               pretty_job_name(getattr(job, "file_name", None)))
+    except Exception:  # noqa: BLE001 -- a buzz is a courtesy
+        logger.debug("hardware stop phone alert skipped", exc_info=True)
+
+
+def _spawn(target: Any, *args: Any) -> None:
+    """Run *target* on its own thread: a send never holds up the poll that found the moment."""
+    threading.Thread(target=target, args=args, name="hardware-stop-phone", daemon=True).start()
+
+
+def _send_to_phone(key: str, label: str | None, note: dict[str, Any], printer: str, model: str, job: str) -> None:
+    try:
+        from kiln.bridge_client import alert_hardware
+
+        outcome, _devices = alert_hardware(moment=note, printer_name=printer, printer_model=model, job_name=job)
+        if outcome == "refused":
+            _phone_declined[key] = label
+    except Exception:  # noqa: BLE001
+        logger.debug("hardware stop phone alert failed", exc_info=True)
+
+
 def stop_awaiting_hands(adapter: Any) -> dict[str, Any] | None:
     """The ``now`` note when *adapter*'s printer is paused at a planned stop.
 
@@ -758,3 +825,4 @@ def forget_process_state() -> None:
         _staged.clear()
         _last_seen.clear()
         _watched.clear()
+        _phone_declined.clear()
