@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-02T05:00:12.787250+00:00",
-  "tool_count": 429,
+  "generated": "2026-10-02T08:44:02.155433+00:00",
+  "tool_count": 432,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -3034,6 +3034,50 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
+      }
+    },
+    {
+      "name": "find_closest_filaments",
+      "description": "Which filaments could I buy for this colour? Up to three per colour, from different makers.",
+      "tier": "free",
+      "access": "free",
+      "category": "decoration",
+      "parameters": {
+        "properties": {
+          "colours": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Colours"
+          },
+          "material": {
+            "default": "",
+            "title": "Material",
+            "type": "string"
+          },
+          "brand": {
+            "default": "",
+            "title": "Brand",
+            "type": "string"
+          }
+        },
+        "required": [
+          "colours"
+        ],
+        "title": "find_closest_filamentsArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -13758,6 +13802,60 @@
       }
     },
     {
+      "name": "fleet_colour_match",
+      "description": "Which of my printers already has each of these colours loaded, and what to buy for the rest (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "colours": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Colours"
+          },
+          "printer_names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Names"
+          },
+          "material": {
+            "default": "",
+            "title": "Material",
+            "type": "string"
+          }
+        },
+        "required": [
+          "colours"
+        ],
+        "title": "fleet_colour_matchArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
+      }
+    },
+    {
       "name": "fleet_nozzle_agreement",
       "description": "Which registered machines disagree with Kiln's nozzle record, and which matter first (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
@@ -17743,6 +17841,65 @@
           "printer_id"
         ],
         "title": "record_extrusion_eventArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
+      }
+    },
+    {
+      "name": "record_filament_colour",
+      "description": "Tell Kiln what colour a filament really printed, so its colour suggestions show your result.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "access": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "brand": {
+            "title": "Brand",
+            "type": "string"
+          },
+          "line": {
+            "title": "Line",
+            "type": "string"
+          },
+          "material": {
+            "title": "Material",
+            "type": "string"
+          },
+          "colour": {
+            "title": "Colour",
+            "type": "string"
+          },
+          "observed_hex": {
+            "title": "Observed Hex",
+            "type": "string"
+          },
+          "observed_by": {
+            "title": "Observed By",
+            "type": "string"
+          },
+          "printer_id": {
+            "default": "",
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "brand",
+          "line",
+          "material",
+          "colour",
+          "observed_hex",
+          "observed_by"
+        ],
+        "title": "record_filament_colourArguments",
         "type": "object"
       },
       "offline": {
