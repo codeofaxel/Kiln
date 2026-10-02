@@ -247,10 +247,18 @@ def consult_recorded_nozzle(printer_id: str) -> dict[str, Any]:
         # Asked of the store each time, never remembered: the read is local,
         # the record can change between two checks, and a process that
         # answers for more than one account must not hand one caller's
-        # nozzle to the next.
-        summary = consult_nozzle_summary(pid)
-        found = summary is not None and summary.get("trusted_for_verdicts")
-        return {"diameter_mm": summary.get("diameter_mm") if found else None, "answered": True}
+        # nozzle to the next.  Only the record is asked for: a catalogue
+        # default is nobody's record, so nothing here looks one up.
+        try:
+            from kiln_pro.nozzle_intelligence.store_resolver import recorded_nozzle
+        except ImportError:  # a kiln-pro from before this door existed
+            return {"diameter_mm": None, "answered": True}
+        try:
+            state = recorded_nozzle(pid, tool_name=RECORD_TOOL)
+        except Exception:  # noqa: BLE001 -- one rung of a check, never the check
+            logger.debug("recorded nozzle lookup failed", exc_info=True)
+            return {"diameter_mm": None, "answered": True}
+        return {"diameter_mm": state.diameter_mm if state is not None else None, "answered": True}
     now = time.monotonic()
     memo = _record_memo.get(pid)
     if memo is not None and now - memo[0] < RECORD_MEMO_S:
