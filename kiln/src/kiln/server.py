@@ -16799,6 +16799,7 @@ def compose_multicolor_3mf(
     plate_width: float = 256.0,
     plate_depth: float = 256.0,
     printer_id: str = "",
+    material: str = "",
 ) -> dict:
     """Compose a multi-color / multi-material .3mf from multiple STL files.
 
@@ -16844,6 +16845,9 @@ def compose_multicolor_3mf(
         plate_width: Print plate X dimension in mm (default 256 for legacy
             callers without a printer id).
         plate_depth: Print plate Y dimension in mm (default 256).
+        material: Optional material the parts will be printed in (e.g.
+            ``"PETG"``).  A spool on record in a clearly different
+            material is then not named as one to load.
         printer_id: Optional supported printer model id.  When it resolves,
             its build volume overrides ``plate_width`` / ``plate_depth``.
             The composer centres an off-plate group on THIS plate, so name
@@ -16907,6 +16911,7 @@ def compose_multicolor_3mf(
 
         attach_colour_availability(
             result, [p.get("color") for p in parts], printer_name=printer_id or None,
+            material=material or None,
         )
     return result
 

@@ -1553,6 +1553,7 @@ class _ColorToolsPlugin:
             num_colors: int = 4,
             color_palette: list[str] | None = None,
             printer_id: str = "",
+            material: str = "",
         ) -> dict:
             """Split a 3D model into horizontal color zones by Z-height.
 
@@ -1579,6 +1580,9 @@ class _ColorToolsPlugin:
             :param num_colors: Number of color zones (default 4).
             :param color_palette: List of hex colors (e.g.
                 ``["#FF0000", "#00FF00"]``).  Defaults to white/red/black/grey.
+            :param material: Optional material the part will be printed in
+                (e.g. ``"PETG"``).  A spool on record in a clearly
+                different material is then not named as one to load.
             :param printer_id: Optional supported printer model id.  Names
                 the bed the composed 3MF is placed on, so a model sitting
                 off the plate is centred on the machine's real bed rather
@@ -1636,6 +1640,7 @@ class _ColorToolsPlugin:
             )
             attach_colour_availability(
                 response, palette[:num_colors], printer_name=printer_id or None,
+                material=material or None,
             )
             try:
                 from kiln_pro.plugins.git_render_tools import (
@@ -1655,6 +1660,7 @@ class _ColorToolsPlugin:
             method: str = "z_height",
             color_palette: list[str] | None = None,
             printer_id: str = "",
+            material: str = "",
         ) -> dict:
             """Split a 3D model into color zones by geometric region.
 
@@ -1691,6 +1697,9 @@ class _ColorToolsPlugin:
                 ``"normal"``, or ``"random"``.
             :param color_palette: List of hex colors.  Defaults to
                 white/red/black/grey.
+            :param material: Optional material the part will be printed in
+                (e.g. ``"PETG"``).  A spool on record in a clearly
+                different material is then not named as one to load.
             :param printer_id: Optional supported printer model id.  Names
                 the bed the composed 3MF is placed on, so a model sitting
                 off the plate is centred on the machine's real bed rather
@@ -1773,6 +1782,7 @@ class _ColorToolsPlugin:
             )
             attach_colour_availability(
                 response, palette[:num_colors], printer_name=printer_id or None,
+                material=material or None,
             )
             try:
                 from kiln_pro.plugins.git_render_tools import (
@@ -1794,6 +1804,7 @@ class _ColorToolsPlugin:
             step_colors: dict | None = None,
             output_path: str = "",
             printer_id: str = "",
+            material: str = "",
         ) -> dict:
             """Paint exactly the faces a decoration carve created (Pro-free).
 
@@ -1849,6 +1860,9 @@ class _ColorToolsPlugin:
                 ``target``; ``color`` is ignored.
             :param output_path: Where to write the painted 3MF.  Default:
                 beside the model as ``<name>_painted.3mf``.
+            :param material: Optional material the part will be printed in
+                (e.g. ``"PETG"``).  A spool on record in a clearly
+                different material is then not named as one to load.
             :param printer_id: Optional supported printer model id for
                 bed placement of the composed 3MF.
             :returns: Dict with ``output_path``, ``painted_triangles``,
@@ -2065,6 +2079,7 @@ class _ColorToolsPlugin:
             attach_colour_availability(
                 response, sorted({c for c in colors if c}),
                 printer_name=printer_id or None,
+                material=material or None,
             )
             if "floor_indices" in record and target == "all":
                 response["hint"] = (

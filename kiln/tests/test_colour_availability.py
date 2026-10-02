@@ -181,6 +181,17 @@ class TestWhatAColouringSays:
         )
         _assert_no_buying_talk(result)
 
+    def test_the_prints_material_rules_out_a_spool_of_another_plastic(self, printer, shelf, tmp_path):
+        """A red PLA spool is not "one to load" for a PETG print; with the
+        material unsaid, the colouring cannot know and names it."""
+        shelf("PLA", "red", brand="Polymaker")
+        tool = _tools()["auto_color_by_height"]
+        unsaid = tool(input_path=_stl(tmp_path), num_colors=1, color_palette=[_RED])
+        assert unsaid["colour_availability"]["colours"][0]["state"] == "owned"
+        petg = tool(input_path=_stl(tmp_path), num_colors=1, color_palette=[_RED], material="PETG")
+        assert petg["colour_availability"]["colours"] == [{"colour": _RED, "state": "missing"}]
+        assert "Polymaker" not in petg["colour_availability"]["say"]
+
     def test_a_shade_with_no_name_is_said_in_plain_words_and_once(self, printer, tmp_path):
         """A textured model's shades are codes nobody named.  The sentence
         says them as the print gate's own messages do, and two shades that

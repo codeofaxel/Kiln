@@ -2368,6 +2368,39 @@ def _wrap_cancel_gives_back(cls: type) -> None:
     cls.cancel_print = _cancel_and_give_back
 
 
+def _wrap_emergency_reads_nothing(cls: type) -> None:
+    """Wrap *cls*'s own ``emergency_stop`` so no spool bookkeeping sits in front of it.
+
+    On a backend whose emergency stop is its cancel, the cancel wrap above
+    would read the print's progress first.  Inside this wrap it reads
+    nothing (:class:`kiln.spool_usage.urgent_stop`): the stop goes out as it
+    always did and the spools keep their whole charge.
+    """
+    original = cls.__dict__.get("emergency_stop")
+    if (
+        original is None
+        or not callable(original)
+        or getattr(original, "_kiln_spool_urgent", False)
+        or getattr(original, "__isabstractmethod__", False)
+    ):
+        return
+    import functools
+
+    @functools.wraps(original)
+    def _emergency_stop(self, *args, **kwargs):
+        try:
+            from kiln.spool_usage import urgent_stop
+
+            guard = urgent_stop()
+        except Exception:  # noqa: BLE001 — bookkeeping never touches a stop
+            return original(self, *args, **kwargs)
+        with guard:
+            return original(self, *args, **kwargs)
+
+    _emergency_stop._kiln_spool_urgent = True  # type: ignore[attr-defined]
+    cls.emergency_stop = _emergency_stop
+
+
 # ---------------------------------------------------------------------------
 # A camera the user supplies — frame plumbing only
 # ---------------------------------------------------------------------------
@@ -2848,6 +2881,7 @@ class PrinterAdapter(ABC):
         # gate wraps it and a refused cancel never reaches it.
         # ------------------------------------------------------------------
         _wrap_cancel_gives_back(cls)
+        _wrap_emergency_reads_nothing(cls)
 
         # ------------------------------------------------------------------
         # Single-printer engagement: every printer-directed command asks

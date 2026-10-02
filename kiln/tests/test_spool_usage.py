@@ -320,6 +320,58 @@ class TestACancelGivesBackWhatWasNotPrinted:
         machine.cancel_print()
         assert _left(red) == 2.5
 
+    def test_a_printer_slow_to_say_its_progress_never_holds_the_stop(self, machine, tmp_path, monkeypatch):
+        """The stop goes out within the progress read's limit, and the charge stays whole."""
+        import threading
+        import time
+
+        red = _add("PLA", "red")
+        _start(machine, _sliced(tmp_path))
+        release = threading.Event()
+
+        def _hangs():
+            release.wait(10.0)
+            return JobProgress(file_name="part.gcode", completion=40.0)
+
+        monkeypatch.setattr(machine, "get_job", _hangs)
+        monkeypatch.setattr(spool_usage, "_PROGRESS_WAIT_S", 0.2)
+        began = time.monotonic()
+        try:
+            assert machine.cancel_print().success
+            waited = time.monotonic() - began
+        finally:
+            release.set()
+        assert waited < 2.0, f"the stop waited {waited:.1f}s on a progress read"
+        assert machine._mqtt_client.publish.called
+        assert _left(red) == 987.5
+
+    def test_an_emergency_stop_that_is_the_cancel_reads_nothing_first(self, machine, tmp_path, monkeypatch):
+        """A backend whose emergency stop is its cancel: no job read in
+        front of the stop, and the spools keep the whole charge."""
+        red = _add("PLA", "red")
+        _start(machine, _sliced(tmp_path))
+        asked: list[int] = []
+        monkeypatch.setattr(
+            machine, "get_job",
+            lambda: asked.append(1) or JobProgress(file_name="part.gcode", completion=40.0),
+        )
+        with spool_usage.urgent_stop():
+            assert machine.cancel_print().success
+        assert asked == []
+        assert _left(red) == 987.5
+        # Outside it, the same cancel reads the progress as before.
+        _start(machine, _sliced(tmp_path))
+        assert machine.cancel_print().success
+        assert asked == [1]
+
+    def test_every_backends_emergency_stop_is_marked_urgent(self):
+        for name, cls in _all_adapter_classes().items():
+            layers, fn = [], cls.emergency_stop
+            while fn is not None:
+                layers.append(fn)
+                fn = getattr(fn, "__wrapped__", None)
+            assert any(getattr(layer, "_kiln_spool_urgent", False) for layer in layers), name
+
     def test_a_cancel_asks_the_printer_nothing_when_nothing_was_charged(self, machine, monkeypatch):
         asked: list[int] = []
         monkeypatch.setattr(machine, "get_job", lambda: asked.append(1) or JobProgress(completion=40.0))

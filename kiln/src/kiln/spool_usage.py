@@ -62,6 +62,7 @@ __all__ = [
     "charge_print",
     "resume_print",
     "settle",
+    "urgent_stop",
 ]
 
 #: The states of a remembered charge (``spool_charges.state``).
@@ -73,6 +74,14 @@ _CLOSED = "closed"  # nothing more to give back: progress unknown at the cancel,
 #: cancel sent within a moment of the start).  It waits after the stop has
 #: been sent, never in front of it.
 _WORK_TIMEOUT_S: float = 5.0
+
+#: The most a cancel waits for the printer to say how far the print has
+#: got.  A stop matters more than a spool figure: past this the stop is
+#: sent and the charge stays whole.
+_PROGRESS_WAIT_S: float = 1.0
+
+#: Set on a thread for the length of an emergency stop (:class:`urgent_stop`).
+_urgent = threading.local()
 
 #: One spool write sequence at a time in this process: a count, a
 #: give-back and a resume read a figure, move it and remember what moved.
@@ -458,7 +467,9 @@ def before_cancel(adapter: Any) -> CancelReading | None:
     for this printer, which is every cancel of a print Kiln did not start
     and every install with no spool list.  Otherwise one job read, taken
     before the stop because afterwards the printer no longer says where it
-    was.  Never raises.
+    was, and given at most :data:`_PROGRESS_WAIT_S`: a slow printer never
+    holds the stop.  Inside :class:`urgent_stop` nothing is read at all.
+    Never raises.
     """
     try:
         if _hosted():
@@ -470,12 +481,31 @@ def before_cancel(adapter: Any) -> CancelReading | None:
             row = _db().get_spool_charge(printer)
             if row is None or row.get("state") != _OPEN:
                 return None
-        completion: float | None = None
-        label: str | None = None
+        if getattr(_urgent, "on", False):
+            # An emergency stop that is this backend's cancel: nothing is
+            # read in front of it.  The charge is closed whole afterwards.
+            return CancelReading(printer, None, None)
+        completion, label = _progress_within(adapter, _PROGRESS_WAIT_S)
+        return CancelReading(printer, completion, label)
+    except Exception:  # noqa: BLE001 -- bookkeeping never touches a stop
+        logger.debug("spool charge not looked up before a cancel", exc_info=True)
+        return None
+
+
+def _progress_within(adapter: Any, seconds: float) -> tuple[float | None, str | None]:
+    """How far the print has got and what it is, or ``(None, None)``.
+
+    The job read runs on a thread of its own and is given *seconds*: a
+    printer that is slow to answer never holds a stop for longer.  A read
+    that comes back late is dropped and the charge stays whole.
+    """
+    box: dict[str, Any] = {}
+
+    def read() -> None:
         try:
             job = adapter.get_job()
             label = getattr(job, "file_name", None)
-            label = label if isinstance(label, str) else None
+            box["label"] = label if isinstance(label, str) else None
             done = getattr(job, "completion", None)
             if (
                 getattr(job, "is_active", True) is True
@@ -483,13 +513,33 @@ def before_cancel(adapter: Any) -> CancelReading | None:
                 and not isinstance(done, bool)
                 and 0 <= done <= 100
             ):
-                completion = float(done)
+                box["completion"] = float(done)
         except Exception:  # noqa: BLE001 -- progress not known; the charge stays
             logger.debug("progress not read before a cancel", exc_info=True)
-        return CancelReading(printer, completion, label)
-    except Exception:  # noqa: BLE001 -- bookkeeping never touches a stop
-        logger.debug("spool charge not looked up before a cancel", exc_info=True)
-        return None
+        finally:
+            box["done"] = True
+
+    reader = threading.Thread(target=read, name="kiln-spool-progress", daemon=True)
+    reader.start()
+    reader.join(seconds)
+    if not box.get("done"):
+        return None, None
+    return box.get("completion"), box.get("label")
+
+
+class urgent_stop:
+    """While open on this thread, a cancel reads nothing before it stops.
+
+    For a backend whose emergency stop IS its cancel: the stop is sent with
+    no job read in front of it, and the spools keep the whole charge.
+    """
+
+    def __enter__(self) -> None:
+        self._was = getattr(_urgent, "on", False)
+        _urgent.on = True
+
+    def __exit__(self, *_exc: Any) -> None:
+        _urgent.on = self._was
 
 
 def after_cancel(reading: CancelReading | None) -> float:
