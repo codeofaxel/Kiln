@@ -161,10 +161,22 @@ def always_allow_screen(cameras: dict[str, bool]) -> str:
 
 
 def _has_camera(name: str) -> bool:
-    """Whether Kiln can look at this printer's bed -- found out by taking
-    a picture now, because printer software that can serve a camera says
-    so whether or not one is plugged in.  Never raises."""
-    return consent_windows.bed_can_be_seen(name)
+    """Whether this printer has a camera Kiln can look at the bed through.
+
+    Kiln answers from what it knows first: a printer that ships with a
+    camera, one Kiln has had a picture from before, one the person
+    registered a camera beside.  Only when it knows of none and can get no
+    picture now does it ask the person -- once; a yes is remembered for
+    that machine."""
+    known = consent_windows.bed_camera(name)
+    if known != consent_windows.CAMERA_UNSURE:
+        return known == consent_windows.CAMERA_YES
+    if not click.confirm(
+        f"Kiln could not get a picture from {name} just now. Does {name} have a camera?", default=False,
+    ):
+        return False
+    consent_windows.person_says_camera(name)
+    return True
 
 
 def _turn_on_always(
@@ -303,7 +315,7 @@ def status(json_mode: bool) -> None:
         if row["always"]:
             click.echo(
                 f"{w.id}  Always allow is on for {row['scope']}: prints start without asking"
-                + (", and the bed is not checked first (no camera)" if w.bed_check == consent_windows.BED_NO_CAMERA else "")
+                + (", and the bed is not checked first (no camera)" if consent_windows.bed_goes_unchecked(w) else "")
                 + f".  Turned on {row['set_at']} by {w.set_by} via {row['opened_via']}"
             )
             continue

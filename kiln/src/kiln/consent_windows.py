@@ -73,6 +73,20 @@ What a window is:
   and falls back to asking the person when the camera gives nothing
   usable.  :mod:`kiln.print_consent` and the gate hold that rule.
 
+  Whether a machine HAS a camera is something Kiln knows, not something
+  it guesses from one picture.  It knows from the backend (one whose
+  every machine ships with a camera says so), from having had a picture
+  through the printer's own connection before, from a camera the person
+  registered beside the printer, and -- only when none of those says, and
+  no picture can be had -- from asking the person, once, at the terminal
+  (:func:`bed_camera`, :func:`kiln.plate_state.knows_a_camera`).  The
+  entry records what the person was told (``bed_check``).  A start goes
+  ahead unlooked only under an entry turned on for a printer with no
+  camera, and only while Kiln still knows of none; under every other
+  entry, nothing seen means the person is asked -- a camera that is not
+  answering, or has been taken away, never turns "Kiln looks first" into
+  "Kiln does not look".
+
 Two readers: the gate (through :func:`kiln.print_consent.consent_for`)
 when a start arrives with a preview and no other yes, and the scheduler
 when it dispatches a job that was queued under a window — a window that
@@ -112,6 +126,9 @@ __all__ = [
     "ALWAYS_DOORS",
     "BED_CAMERA",
     "BED_NO_CAMERA",
+    "CAMERA_NO",
+    "CAMERA_UNSURE",
+    "CAMERA_YES",
     "REASON_MACHINE_CHANGED",
     "REASON_OFF_ON_ACCOUNT",
     "SCOPE_FLEET",
@@ -124,7 +141,8 @@ __all__ = [
     "account_confirms",
     "all_windows",
     "always_for",
-    "bed_can_be_seen",
+    "bed_camera",
+    "bed_goes_unchecked",
     "covering",
     "describe",
     "describe_scope",
@@ -141,6 +159,7 @@ __all__ = [
     "open_always_for_several",
     "open_window",
     "open_window_from_dialog",
+    "person_says_camera",
     "parse_duration",
     "person_at_terminal",
     "register_window_store",
@@ -621,38 +640,112 @@ def look_at_bed(printer_name: str | None) -> Any:
     except Exception:  # noqa: BLE001 -- no machine, no look
         return plate_state.UnaskedStartLook(plate_state.LOOK_BLIND, why="Kiln could not reach this printer")
     look = plate_state.look_for_unasked_start(adapter)
-    if look.verdict != plate_state.LOOK_BLIND:
+    if look.verdict not in (plate_state.LOOK_BLIND, plate_state.LOOK_NO_CAMERA):
         return look
-    # No picture.  Printer software that can serve a camera says so whether
-    # or not one is plugged in, so "it gave nothing" is two different
-    # machines: one whose camera has stopped showing the bed (the person
-    # is asked), and one that never had a camera to begin with.  Which it
-    # is was settled when always allow was turned on: the person was told,
-    # on the screen they typed the name into, that Kiln cannot check this
-    # printer's bed, and the entry says so.  Only then is no picture read
-    # as no camera.
-    with contextlib.suppress(Exception):
+    # Nothing was seen.  Whether that stops the print or not is decided by
+    # what the person was told when always allow was turned on, which the
+    # entry records -- never by how the printer looks to Kiln today.
+    #
+    # An entry turned on for a printer with NO camera (the screen said Kiln
+    # cannot check its bed) starts prints unlooked, for as long as Kiln
+    # still knows of no camera on that machine.  One it has since had a
+    # picture from, been told of, or that is registered beside it is a
+    # camera: the day it does not answer, the person is asked.
+    #
+    # Every other entry was turned on with the person told that Kiln looks.
+    # Under those, nothing seen means the person is asked -- whether the
+    # camera did not answer, or is no longer set up at all.  A camera that
+    # has gone away does not turn "Kiln looks first" into "Kiln does not
+    # look".  An entry that cannot be read is treated the same way.
+    try:
         entry = always_for(printer_name)
-        if entry is not None and entry.bed_check == BED_NO_CAMERA:
-            return plate_state.UnaskedStartLook(
-                plate_state.LOOK_NO_CAMERA, None,
-                why="this printer gave no picture when always allow was turned on, and gives none now",
-            )
+        told_no_camera = entry is not None and entry.bed_check == BED_NO_CAMERA
+        unknown_here = entry is None
+        knows = plate_state.knows_a_camera(adapter) is not None
+    except Exception:  # noqa: BLE001 -- unreadable: the person is asked
+        told_no_camera, unknown_here, knows = False, False, True
+    if unknown_here:
+        return look  # not a start under always allow: the look stands as taken
+    if told_no_camera and not knows:
+        return plate_state.UnaskedStartLook(
+            plate_state.LOOK_NO_CAMERA, None,
+            why="Kiln knows of no camera on this printer, and it gives no picture now",
+        )
+    if look.verdict == plate_state.LOOK_NO_CAMERA:
+        return plate_state.UnaskedStartLook(
+            plate_state.LOOK_BLIND, None,
+            why="the camera Kiln looked through is no longer set up for this printer",
+        )
     return look
 
 
-def bed_can_be_seen(printer_name: str | None) -> bool:
-    """Whether Kiln can get a usable picture of this printer's bed right
-    now -- asked by fetching one, because what a printer says it can do and
-    what is plugged into it are different facts.  Never raises."""
+#: What Kiln can say about a printer's camera before always allow is
+#: turned on (:func:`bed_camera`).
+CAMERA_YES = "yes"
+CAMERA_NO = "no"
+CAMERA_UNSURE = "unsure"
+
+
+def bed_camera(printer_name: str | None) -> str:
+    """Whether this printer has a camera Kiln can look at the bed through.
+
+    :data:`CAMERA_YES` when Kiln knows of one
+    (:func:`kiln.plate_state.knows_a_camera`: fitted at the factory, seen
+    before, said by the person, or registered beside the printer) -- whether
+    or not it answers right now -- or when a picture comes back now.
+    :data:`CAMERA_NO` when the printer's connection cannot carry a picture
+    and no camera is registered, or the printer cannot be reached at all.
+    :data:`CAMERA_UNSURE` for what is left: a connection that could carry a
+    picture, no camera Kiln knows of, and none answering.  Printer software
+    that can serve a camera says so whether or not one is plugged in, so
+    that case is not "no camera"; it is a question for the person.  Never
+    raises.
+    """
     from kiln import plate_state
 
     try:
         import kiln.server as _srv
 
-        return bool(plate_state.look(_srv._resolve_adapter(str(printer_name or "").strip())).available)
+        adapter = _srv._resolve_adapter(str(printer_name or "").strip())
     except Exception:  # noqa: BLE001 -- a printer that cannot be reached shows nothing
+        return CAMERA_NO
+    if plate_state.knows_a_camera(adapter) is not None:
+        return CAMERA_YES
+    if plate_state.camera_of(adapter) is None:
+        return CAMERA_NO
+    plate_state.look(adapter)  # a real picture is remembered by the look itself
+    return CAMERA_YES if plate_state.knows_a_camera(adapter) is not None else CAMERA_UNSURE
+
+
+def person_says_camera(printer_name: str | None) -> None:
+    """The person, at their terminal, says this printer has a camera Kiln
+    could not reach just now.  Remembered for the machine, so Kiln neither
+    asks again nor ever records it as having none.  A person's door only
+    (:class:`NotAPerson` anywhere else): what is remembered here decides
+    whether a print may start on a bed nobody saw."""
+    _require_person()
+    import kiln.server as _srv
+    from kiln import plate_state
+
+    adapter = _srv._resolve_adapter(str(printer_name or "").strip())
+    plate_state.remember_camera(adapter, "printer", plate_state.CAMERA_PERSON_SAID)
+    _audit("camera_said_by_person", {"printer": str(printer_name or ""), "by": local_identity(), "at": _now()})
+
+
+def bed_goes_unchecked(w: Window) -> bool:
+    """Whether prints under this always-allow entry start with the bed not
+    looked at: it was turned on for a printer with no camera, and Kiln
+    still knows of none.  For the status surfaces.  Never raises."""
+    if not (w.always and w.bed_check == BED_NO_CAMERA and w.scope):
         return False
+    from kiln import plate_state
+
+    try:
+        import kiln.server as _srv
+
+        return plate_state.knows_a_camera(_srv._resolve_adapter(w.scope[0])) is None
+    except Exception:  # noqa: BLE001 -- a printer that cannot be reached is not looked at either
+        return True
 
 
 def _audit(action: str, details: dict[str, Any]) -> None:
@@ -683,9 +776,11 @@ def _machine_for_always(name: str) -> str:
 def _bed_check_for(name: str, told_no_camera: bool) -> str:
     """What an entry records about the bed.  :data:`BED_NO_CAMERA` takes
     both halves: the door says the person read that Kiln cannot check this
-    printer's bed, and a picture really cannot be had.  Anything else is
-    :data:`BED_CAMERA`, the one that asks when it cannot see."""
-    return BED_NO_CAMERA if told_no_camera and not bed_can_be_seen(name) else BED_CAMERA
+    printer's bed, and Kiln itself knows of no camera on it and can get no
+    picture (:func:`bed_camera`).  Anything else is :data:`BED_CAMERA`, the
+    one that asks when it cannot see -- so a camera Kiln knows of is never
+    recorded as absent because it was not answering that day."""
+    return BED_NO_CAMERA if told_no_camera and bed_camera(name) != CAMERA_YES else BED_CAMERA
 
 
 def _write_always(machines: dict[str, str], bed_checks: dict[str, str]) -> list[Window]:
@@ -966,6 +1061,13 @@ def mirror_account_always(*, grant_id: str, printer_name: str, set_by: str, set_
     entry = Window(
         id=f"w_{secrets.token_hex(6)}", set_by=str(set_by or "account"), set_at=float(set_at or _now()),
         until=None, scope=(name,), source=SOURCE_WEB, always=True, machine=machine, account_grant=grant,
+        # The account page told the person that without a camera Kiln cannot
+        # check the bed.  Here is where it is known which this printer is:
+        # no camera only when its connection cannot carry a picture and none
+        # is registered beside it.  Where Kiln is unsure there is nobody at
+        # this door to ask, so the copy is one that looks, and asks when it
+        # cannot see.
+        bed_check=BED_NO_CAMERA if bed_camera(name) == CAMERA_NO else BED_CAMERA,
     )
     with _lock:
         windows = _read()
