@@ -18435,7 +18435,13 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
 
     manifest_path = Path(__file__).parent / "pro_tool_manifest.json"
     if not manifest_path.exists():
-        logger.debug("No pro tool manifest at %s — no stubs registered", manifest_path)
+        # Every release carries this file, so its absence is a broken
+        # package, not a configuration: said where an operator will see it.
+        logger.warning(
+            "No pro tool manifest at %s — Kiln's served tools are not "
+            "registered on this install. Reinstall or upgrade kiln3d.",
+            manifest_path,
+        )
         return
 
     try:

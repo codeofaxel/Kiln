@@ -16,6 +16,23 @@ and asserts presence + minimum counts for each critical group.  A
 miss exits ``2`` with a clear per-file message; pass prints a
 summary table and exits ``0``.
 
+The groups below are a hand-written list, and a list only sees what
+somebody thought to write on it.  ``pro_tool_manifest.json`` sat beside
+``server.py``, was read by it at every start, and was in no release from
+1.1.3 to 1.4.1.1 because it was on neither list -- not ``package-data``
+and not this one -- so every pip install registered no served tools and
+said so at DEBUG.  The DERIVED half of this gate does not need the list:
+
+* every file the package source tracks must be in the wheel, unless
+  ``SOURCE_EXCLUSIONS`` says why not (an exclusion that matches nothing
+  fails, so the list cannot outlive what it describes); and
+* every file the code reads beside itself -- ``Path(__file__).parent /
+  "..."``, ``os.path.join(os.path.dirname(__file__), ...)``,
+  ``importlib.resources.files("kiln") / ...`` -- must be in the wheel,
+  named with the line that reads it.  No exclusion applies to these.
+
+A new file is required by default.  Nobody has to remember this gate.
+
 Run before every release.  Same family as ``audit_rls.py`` (security
 gate) and ``check_doc_counts.py`` (stats gate) in kiln-pro.
 
@@ -43,6 +60,8 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import ast
+import fnmatch
 import json
 import shutil
 import subprocess
@@ -174,38 +193,329 @@ TOP_LEVEL_CATALOGS: list[tuple[str, str]] = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# The derived inventory
+# ---------------------------------------------------------------------------
+
+# Tracked files that deliberately stay out of the wheel, as
+# ``(fnmatch pattern over the wheel path, why)``.  ``*`` crosses directory
+# separators here.  Everything else the source tree tracks must ship.  A
+# pattern that matches no tracked file is reported as stale.
+SOURCE_EXCLUSIONS: list[tuple[str, str]] = [
+    (
+        "kiln/data/scad_libraries/*/.github/*",
+        "the upstream library's own repository automation; nothing reads it",
+    ),
+    (
+        "kiln/data/scad_libraries/*/.gitignore",
+        "the upstream library's own repository settings",
+    ),
+    (
+        "kiln/data/scad_libraries/BOSL2/.openscad_*_rc",
+        "settings for the upstream library's documentation generator",
+    ),
+    (
+        "kiln/data/scad_libraries/BOSL2/*.md",
+        "the upstream library's contributor documentation; its LICENSE ships",
+    ),
+    (
+        "kiln/data/scad_libraries/BOSL2/resources/*",
+        "assets for the upstream library's documentation site",
+    ),
+    (
+        "kiln/data/scad_libraries/MCAD/TODO",
+        "the upstream library's own work list",
+    ),
+    (
+        "kiln/data/scad_libraries/MCAD/bitmap/README",
+        "usage notes for the upstream bitmap examples; the .scad files ship",
+    ),
+]
+
+# Never part of a package, tracked or not.  Only consulted when the tree is
+# walked because git could not list it.
+_WALK_JUNK_DIRS = {"__pycache__", ".git", ".mypy_cache", ".pytest_cache", ".ruff_cache"}
+_WALK_JUNK_SUFFIXES = {".pyc", ".pyo"}
+_WALK_JUNK_NAMES = {".DS_Store"}
+
+
+def _source_files(src_root: Path, package: str = "kiln") -> list[str]:
+    """Every file the package source holds, as wheel paths (``kiln/...``).
+
+    Git's list when the tree is a checkout -- what is tracked is what a
+    release is cut from, and it leaves out caches without a rule here.  A
+    tree git cannot list (an unpacked sdist, a test fixture) is walked.
+    """
+    try:
+        listed = subprocess.run(
+            ["git", "ls-files", "-z", "--", package],
+            cwd=str(src_root), capture_output=True, text=True, check=False,
+        )
+        tracked = [n for n in listed.stdout.split("\0") if n] if listed.returncode == 0 else []
+    except OSError:
+        tracked = []
+    if tracked:
+        return sorted(n for n in tracked if (src_root / n).is_file())
+
+    found: list[str] = []
+    for path in (src_root / package).rglob("*"):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(src_root)
+        if _WALK_JUNK_DIRS.intersection(rel.parts):
+            continue
+        if path.suffix in _WALK_JUNK_SUFFIXES or path.name in _WALK_JUNK_NAMES:
+            continue
+        found.append(rel.as_posix())
+    return sorted(found)
+
+
+_PATH_CTORS = {"Path", "PurePath", "PosixPath", "_Path"}
+_SAME_PATH_METHODS = {"resolve", "absolute", "expanduser"}
+_SAME_PATH_FUNCS = {"abspath", "realpath", "normpath", "fspath", "str"}
+
+
+class _FileAnchoredPaths:
+    """The paths one module builds from where it sits on disk.
+
+    Follows ``__file__`` (its own, or an imported package module's) through
+    ``Path(...)``, ``.resolve()``, ``.parent``, ``.parents[n]``, ``/ "name"``,
+    ``os.path.dirname`` / ``os.path.join``, and ``resources.files("pkg")``,
+    and through names assigned such a path anywhere in the file.  A step it
+    cannot follow -- a name built at run time -- ends the path there; the
+    tracked-file half of the gate covers whatever that reaches.
+    """
+
+    def __init__(self, module_path: Path, src_root: Path) -> None:
+        self.module_path = module_path
+        self.src_root = src_root
+        self.names: dict[str, Path] = {}
+        self.modules: dict[str, Path] = {}
+
+    def _module_file(self, dotted: str) -> Path | None:
+        base = self.src_root.joinpath(*dotted.split("."))
+        if (base / "__init__.py").is_file():
+            return base / "__init__.py"
+        if base.with_suffix(".py").is_file():
+            return base.with_suffix(".py")
+        return None
+
+    def learn_imports(self, tree: ast.AST) -> None:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    target = self._module_file(alias.name)
+                    if target is not None and alias.asname:
+                        self.modules[alias.asname] = target
+            elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+                for alias in node.names:
+                    target = self._module_file(f"{node.module}.{alias.name}")
+                    if target is not None:
+                        self.modules[alias.asname or alias.name] = target
+
+    def learn_names(self, tree: ast.AST) -> None:
+        # Assignments are read to a fixed point so a name built from an
+        # earlier name resolves whatever order ast.walk visits them in.
+        for _ in range(4):
+            before = len(self.names)
+            for node in ast.walk(tree):
+                value = getattr(node, "value", None)
+                if isinstance(node, ast.Assign):
+                    targets = node.targets
+                elif isinstance(node, ast.AnnAssign):
+                    targets = [node.target]
+                else:
+                    continue
+                resolved = self.resolve(value) if value is not None else None
+                if resolved is None:
+                    continue
+                for target in targets:
+                    if isinstance(target, ast.Name):
+                        self.names.setdefault(target.id, resolved)
+            if len(self.names) == before:
+                break
+
+    def resolve(self, node: ast.AST | None) -> Path | None:
+        if isinstance(node, ast.Name):
+            if node.id == "__file__":
+                return self.module_path
+            return self.names.get(node.id)
+        if isinstance(node, ast.Attribute):
+            if node.attr == "__file__" and isinstance(node.value, ast.Name):
+                return self.modules.get(node.value.id)
+            if node.attr == "parent":
+                base = self.resolve(node.value)
+                return base.parent if base is not None else None
+            return None
+        if isinstance(node, ast.Subscript):
+            target = node.value
+            if (
+                isinstance(target, ast.Attribute)
+                and target.attr == "parents"
+                and isinstance(node.slice, ast.Constant)
+                and isinstance(node.slice.value, int)
+            ):
+                base = self.resolve(target.value)
+                if base is not None and 0 <= node.slice.value < len(base.parents):
+                    return base.parents[node.slice.value]
+            return None
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            base = self.resolve(node.left)
+            if base is not None and isinstance(node.right, ast.Constant) and isinstance(node.right.value, str):
+                return base / node.right.value
+            return None
+        if isinstance(node, ast.Call):
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+            args = node.args
+            if name in _SAME_PATH_METHODS and isinstance(func, ast.Attribute) and not args:
+                return self.resolve(func.value)
+            if name in _PATH_CTORS or name in _SAME_PATH_FUNCS:
+                return self.resolve(args[0]) if len(args) == 1 else None
+            if name == "dirname" and len(args) == 1:
+                base = self.resolve(args[0])
+                return base.parent if base is not None else None
+            if name in ("join", "joinpath") and args:
+                if name == "joinpath" and isinstance(func, ast.Attribute):
+                    base, parts = self.resolve(func.value), args
+                else:
+                    base, parts = self.resolve(args[0]), args[1:]
+                if base is None:
+                    return None
+                for part in parts:
+                    if not (isinstance(part, ast.Constant) and isinstance(part.value, str)):
+                        return None
+                    base = base / part.value
+                return base
+            if name == "files" and len(args) == 1 and isinstance(args[0], ast.Constant):
+                target = self._module_file(str(args[0].value))
+                return target.parent if target is not None else None
+        return None
+
+
+def _code_read_files(src_root: Path, package: str = "kiln") -> dict[str, list[str]]:
+    """Files the code reads beside itself: ``{wheel path: ["module.py:line"]}``.
+
+    Only paths that exist as non-Python files inside the package count.  A
+    path the code probes that the tree does not hold (an optional file) is
+    not a packaging question; a directory is covered file by file by the
+    tracked-file half.
+    """
+    package_root = (src_root / package).resolve()
+    vendored = package_root / "data"
+    reads: dict[str, list[str]] = {}
+    for module_path in sorted(package_root.rglob("*.py")):
+        if vendored in module_path.parents or "__pycache__" in module_path.parts:
+            continue
+        try:
+            tree = ast.parse(module_path.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        scope = _FileAnchoredPaths(module_path, src_root.resolve())
+        scope.learn_imports(tree)
+        scope.learn_names(tree)
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.BinOp, ast.Call)):
+                continue
+            target = scope.resolve(node)
+            if target is None or target.suffix == ".py":
+                continue
+            try:
+                inside = target.resolve().relative_to(package_root)
+            except (OSError, ValueError):
+                continue
+            if not (package_root / inside).is_file():
+                continue
+            where = f"{module_path.relative_to(src_root.resolve()).as_posix()}:{node.lineno}"
+            readers = reads.setdefault(f"{package}/{inside.as_posix()}", [])
+            if where not in readers:
+                readers.append(where)
+    return reads
+
+
+@dataclass
+class DerivedResult:
+    """What the source tree says the wheel must hold, against what it holds."""
+
+    source_files: int = 0
+    code_reads: int = 0
+    excluded: int = 0
+    # (wheel path, why it is required)
+    missing: list[tuple[str, str]] = field(default_factory=list)
+    # (pattern, why) for exclusions that no longer match any tracked file
+    stale_exclusions: list[tuple[str, str]] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        return not self.missing and not self.stale_exclusions
+
+
+def _audit_derived(
+    wheel_names: set[str],
+    package_dir: Path,
+    exclusions: list[tuple[str, str]] | None = None,
+) -> DerivedResult:
+    """Compare the wheel with what ``package_dir``'s source says it needs."""
+    exclusions = SOURCE_EXCLUSIONS if exclusions is None else exclusions
+    src_root = package_dir / "src"
+    source = _source_files(src_root)
+    reads = _code_read_files(src_root)
+
+    result = DerivedResult(source_files=len(source), code_reads=len(reads))
+    used: set[str] = set()
+    for name in source:
+        if name in reads:
+            continue  # judged below, where no exclusion applies
+        pattern = next((p for p, _ in exclusions if fnmatch.fnmatchcase(name, p)), None)
+        if pattern is not None:
+            used.add(pattern)
+            result.excluded += 1
+            continue
+        if name not in wheel_names:
+            result.missing.append((name, "in the source tree, on no exclusion"))
+    for name, readers in sorted(reads.items()):
+        if name not in wheel_names:
+            result.missing.append((name, f"read by {', '.join(readers[:3])}"))
+    result.missing.sort()
+    result.stale_exclusions = [(p, why) for p, why in exclusions if p not in used]
+    return result
+
+
 def _build_wheel(package_dir: Path, outdir: Path) -> Path:
     """Build the wheel and return its path.
 
     Uses ``python -m build --wheel`` (matches what the release workflow
     does) so the audit exercises the same build path that ships to
-    PyPI.  Re-running from a clean ``outdir`` keeps the audit
-    deterministic — no stale wheels from a previous run.
+    PyPI, and falls back to ``pip wheel`` where ``build`` is not
+    installed -- the same backend either way.  Re-running from a clean
+    ``outdir`` keeps the audit deterministic — no stale wheels from a
+    previous run.
     """
-    cmd = [sys.executable, "-m", "build", "--wheel", "--outdir", str(outdir)]
-    try:
-        subprocess.run(
-            cmd,
-            cwd=str(package_dir),
-            check=True,
-            capture_output=True,
-            text=True,
+    attempts = [
+        [sys.executable, "-m", "build", "--wheel", "--outdir", str(outdir)],
+        [sys.executable, "-m", "pip", "wheel", "--no-deps", "--quiet",
+         "--wheel-dir", str(outdir), "."],
+    ]
+    failures: list[str] = []
+    for cmd in attempts:
+        done = subprocess.run(
+            cmd, cwd=str(package_dir), check=False, capture_output=True, text=True,
         )
-    except FileNotFoundError as e:
-        sys.stderr.write(
-            f"audit_wheel_inventory: {e}.  Install with `pip install build`.\n"
+        if done.returncode == 0:
+            break
+        failures.append(
+            f"  command: {' '.join(cmd)}\n"
+            f"  exit: {done.returncode}\n"
+            f"{(done.stdout + done.stderr)[-1500:]}"
         )
-        raise SystemExit(1)
-    except subprocess.CalledProcessError as e:
+        if "No module named" not in done.stderr:
+            break  # the tool ran and the build itself failed; say so
+    else:
+        done = None
+    if done is None or done.returncode != 0:
         sys.stderr.write(
             "audit_wheel_inventory: wheel build failed.\n"
-            f"  command: {' '.join(cmd)}\n"
-            f"  cwd: {package_dir}\n"
-            f"  exit: {e.returncode}\n"
-            "--- stdout ---\n"
-            f"{e.stdout}"
-            "--- stderr ---\n"
-            f"{e.stderr}"
+            f"  cwd: {package_dir}\n" + "\n".join(failures) + "\n"
         )
         raise SystemExit(1)
 
@@ -348,6 +658,34 @@ def _render_human(
     return "\n".join(lines)
 
 
+def _render_derived(derived: DerivedResult) -> str:
+    """The derived half, with the one edit that fixes each finding."""
+    lines = [
+        f"Derived from the source tree: {derived.source_files} files, "
+        f"{derived.code_reads} read by code beside itself, "
+        f"{derived.excluded} excluded with a reason.",
+    ]
+    if derived.missing:
+        lines.append("")
+        lines.append("NOT IN THE WHEEL — release MUST be blocked:")
+        for name, why in derived.missing:
+            lines.append(f"  - {name}  ({why})")
+        lines.append(
+            "  Add each to [tool.setuptools.package-data] in kiln/pyproject.toml "
+            "(paths there are relative to kiln/).  A file that should stay out "
+            "goes in SOURCE_EXCLUSIONS in this script, with why -- unless code "
+            "reads it, in which case it ships."
+        )
+    if derived.stale_exclusions:
+        lines.append("")
+        lines.append("EXCLUSIONS THAT MATCH NOTHING — delete them:")
+        for pattern, why in derived.stale_exclusions:
+            lines.append(f"  - {pattern}  ({why})")
+    if derived.ok:
+        lines.append("Every one of them that should ship is in the wheel.")
+    return "\n".join(lines)
+
+
 def _to_dict(r: GroupResult) -> dict[str, Any]:
     return {
         "name": r.name,
@@ -433,6 +771,8 @@ def main(argv: list[str] | None = None) -> int:
             assert outdir is not None  # narrowing for type checker
             wheel_path = _build_wheel(args.package_dir.resolve(), outdir)
         group_results, catalog_results, total_entries = _audit_wheel(wheel_path)
+        with zipfile.ZipFile(wheel_path) as zf:
+            derived = _audit_derived(set(zf.namelist()), args.package_dir.resolve())
 
         missing = [r for r in group_results + catalog_results if r.severity == "missing"]
 
@@ -443,9 +783,16 @@ def main(argv: list[str] | None = None) -> int:
                     "total_entries": total_entries,
                     "groups": [_to_dict(r) for r in group_results],
                     "catalogs": [_to_dict(r) for r in catalog_results],
+                    "derived": {
+                        "source_files": derived.source_files,
+                        "code_reads": derived.code_reads,
+                        "excluded": derived.excluded,
+                        "missing": [{"path": n, "why": why} for n, why in derived.missing],
+                        "stale_exclusions": [p for p, _ in derived.stale_exclusions],
+                    },
                     "summary": {
                         "total_checks": len(group_results) + len(catalog_results),
-                        "missing": len(missing),
+                        "missing": len(missing) + len(derived.missing),
                         "ok": (len(group_results) + len(catalog_results)) - len(missing),
                     },
                 },
@@ -463,8 +810,10 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"  - {r.glob}  ({r.why})")
                     if r.expected > 1:
                         print(f"      expected >= {r.expected}, found {r.found}")
+            print()
+            print(_render_derived(derived))
 
-        return 2 if missing else 0
+        return 2 if missing or not derived.ok else 0
     finally:
         if cleanup_outdir:
             # Best-effort cleanup; never let teardown failure mask the
