@@ -630,7 +630,7 @@ def look_at_bed(printer_name: str | None) -> Any:
     is being asked about (:func:`kiln.plate_state.look_for_unasked_start`)
     -- through the resolver a start uses, so it is the plate a print
     would land on.  A name that cannot be resolved has no camera Kiln can
-    reach and nothing seen: blind.  Never raises."""
+    reach and nothing seen: blind.  Raises nothing of its own."""
     from kiln import plate_state
 
     try:
@@ -657,11 +657,15 @@ def look_at_bed(printer_name: str | None) -> Any:
     # camera did not answer, or is no longer set up at all.  A camera that
     # has gone away does not turn "Kiln looks first" into "Kiln does not
     # look".  An entry that cannot be read is treated the same way.
+    from kiln.errors import HostedUnavailableError
+
     try:
         entry = always_for(printer_name)
         told_no_camera = entry is not None and entry.bed_check == BED_NO_CAMERA
         unknown_here = entry is None
         knows = plate_state.knows_a_camera(adapter) is not None
+    except HostedUnavailableError:
+        raise  # a refusal to serve this store is not a fault to work around
     except Exception:  # noqa: BLE001 -- unreadable: the person is asked
         told_no_camera, unknown_here, knows = False, False, True
     if unknown_here:
