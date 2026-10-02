@@ -211,10 +211,12 @@ def block_for_window(window: Any, *, close_hint: str | None = None, outcome: str
 _QUEUE_DOORS = frozenset({"submit_job", "fleet_submit_job"})
 
 
-def _outcome_of(name: str, args: dict, result: dict) -> str:
+def outcome_of(name: str, args: dict, result: dict) -> str:
     """What this call did, as far as its own result says: :data:`STARTED`,
     :data:`QUEUED`, or ``""`` for a call that failed, was a dry run, or
-    says nothing either way — the line then claims no start."""
+    says nothing either way — the line then claims no start.  Public, so
+    a door the MCP result hook does not run on (a REST door) words its
+    block the same way: ``for_outcome(block, outcome_of(...), printer)``."""
     if result.get("success") is not True or args.get("dry_run"):
         return ""
     # A start result can read as accepted while the adapter itself turned
@@ -258,7 +260,7 @@ def _attach(inner: Any, ctx: Any, name: str | None, arguments: dict | None) -> N
             sc = dict(sc)
         if not sc:
             return
-        sc[RESULT_KEY] = for_outcome(block, _outcome_of(name, args, sc), aimed)
+        sc[RESULT_KEY] = for_outcome(block, outcome_of(name, args, sc), aimed)
         set_result_structured_content(inner, sc)
     except Exception:  # noqa: BLE001 -- a note must never break a result
         logger.debug("standing window note not attached", exc_info=True)
