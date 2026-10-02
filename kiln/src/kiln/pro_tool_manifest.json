@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-02T05:00:12.787250+00:00",
-  "tool_count": 429,
+  "generated": "2026-10-02T07:51:44.066907+00:00",
+  "tool_count": 430,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -16718,6 +16718,40 @@
         "headline": "Start this print with the settings your history earned.",
         "outcome_preview": "Kiln Pro would read this printer's recorded outcomes and return tuned settings, a success-likelihood read, and the risks to fix first.",
         "free_included": "Slicing and printing with standard settings stay available."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
+      }
+    },
+    {
+      "name": "get_printer_melt_rate",
+      "description": "How much plastic per second a printer's own slicer lets one material melt: the figure Kiln slices it at.",
+      "tier": "free",
+      "access": "free",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_model": {
+            "title": "Printer Model",
+            "type": "string"
+          },
+          "material": {
+            "title": "Material",
+            "type": "string"
+          },
+          "nozzle_mm": {
+            "default": 0.4,
+            "title": "Nozzle Mm",
+            "type": "number"
+          }
+        },
+        "required": [
+          "printer_model",
+          "material"
+        ],
+        "title": "get_printer_melt_rateArguments",
+        "type": "object"
       },
       "offline": {
         "schema_version": 1,

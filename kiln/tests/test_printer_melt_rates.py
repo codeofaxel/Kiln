@@ -207,3 +207,24 @@ def test_a_slice_on_this_computer_writes_the_printers_figure(served, tmp_path):
     assert _handed(seen)["filament_max_volumetric_speed"] == "3.2"
     assert "the figure the printer's maker gives TPU on the Bambu Lab A1" in result.to_dict()["filament"]["settings"]["note"]
     assert calls[-1]["nozzle_mm"] == 0.4
+
+
+def test_a_background_lookup_is_not_counted_as_an_account_wall(monkeypatch):
+    """The account-wall counter records a person who reached for something and
+    was told to sign in.  A slice asking for its printer's figure is not that
+    person; the same call made directly still is."""
+    from types import SimpleNamespace
+
+    import kiln.auth_session
+    import kiln.daily_stats
+    import kiln.server
+
+    walls: list[str] = []
+    monkeypatch.delenv("KILN_LICENSE_KEY", raising=False)
+    monkeypatch.setattr(kiln.auth_session, "resolve_api_bearer", lambda *a, **k: SimpleNamespace(token=None, state="unpaired"))
+    monkeypatch.setattr(kiln.daily_stats, "record_account_wall", walls.append)
+    args = {"printer_model": "bambu_a1", "material": "tpu", "nozzle_mm": 0.4}
+    assert kiln.server._pro_api_call("get_printer_melt_rate", _background=True, **args).get("success") is not True
+    assert walls == []
+    kiln.server._pro_api_call("get_printer_melt_rate", **args)
+    assert walls == ["get_printer_melt_rate"]
