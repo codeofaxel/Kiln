@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-02T04:52:06.839475+00:00",
-  "tool_count": 427,
+  "generated": "2026-10-02T05:00:12.787250+00:00",
+  "tool_count": 429,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -11287,6 +11287,161 @@
       }
     },
     {
+      "name": "check_heat_set_insert_design",
+      "description": "Check a heat-set insert pocket that is already drawn.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Sizing for the insert you bought \u00b7 Business: Sizing for the insert you bought \u00b7 Enterprise: Sizing for the insert you bought.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "cad_hole_mm": {
+            "title": "Cad Hole Mm",
+            "type": "number"
+          },
+          "thread": {
+            "default": "",
+            "title": "Thread",
+            "type": "string"
+          },
+          "insert": {
+            "default": "",
+            "title": "Insert",
+            "type": "string"
+          },
+          "measured_od_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Measured Od Mm"
+          },
+          "pocket_depth_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Pocket Depth Mm"
+          },
+          "wall_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Wall Mm"
+          },
+          "floor_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Floor Mm"
+          },
+          "through_hole": {
+            "default": false,
+            "title": "Through Hole",
+            "type": "boolean"
+          },
+          "orientation": {
+            "default": "vertical",
+            "title": "Orientation",
+            "type": "string"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          },
+          "measured_hole_shrink_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Measured Hole Shrink Mm"
+          },
+          "infill_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Infill Pct"
+          },
+          "load_n": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Load N"
+          },
+          "insert_count": {
+            "default": 1,
+            "title": "Insert Count",
+            "type": "integer"
+          },
+          "environment": {
+            "default": "",
+            "title": "Environment",
+            "type": "string"
+          },
+          "application_class": {
+            "default": "consumer_product",
+            "title": "Application Class",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cad_hole_mm"
+        ],
+        "title": "check_heat_set_insert_designArguments",
+        "type": "object"
+      },
+      "band": {
+        "domain": "heat_set_inserts",
+        "free": "Warnings \u2014 always free",
+        "pro": "Sizing for the insert you bought",
+        "business": "Sizing for the insert you bought",
+        "enterprise": "Sizing for the insert you bought"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
+      }
+    },
+    {
       "name": "check_magnet_design",
       "description": "Check a proposed printed magnet design for hidden failure modes.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Design guidance \u00b7 Business: + Validation tests & QC plans \u00b7 Enterprise: + Child-safety & supplier vetting.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
@@ -12592,6 +12747,130 @@
         "headline": "Choose a bonding path for this material pair and exposure.",
         "outcome_preview": "Kiln Pro would rank suitable bonding paths and prepare the surface-preparation and cure steps for the stated conditions.",
         "free_included": "General bonding cautions stay available where safety requires them."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
+      }
+    },
+    {
+      "name": "recommend_heat_set_insert",
+      "description": "Size a heat-set threaded insert for a 3D-printed part.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Sizing for the insert you bought \u00b7 Business: Sizing for the insert you bought \u00b7 Enterprise: Sizing for the insert you bought.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "thread": {
+            "default": "",
+            "title": "Thread",
+            "type": "string"
+          },
+          "insert": {
+            "default": "",
+            "title": "Insert",
+            "type": "string"
+          },
+          "measured_od_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Measured Od Mm"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          },
+          "print_temp_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Print Temp C"
+          },
+          "measured_hole_shrink_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Measured Hole Shrink Mm"
+          },
+          "orientation": {
+            "default": "vertical",
+            "title": "Orientation",
+            "type": "string"
+          },
+          "through_hole": {
+            "default": false,
+            "title": "Through Hole",
+            "type": "boolean"
+          },
+          "load_n": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Load N"
+          },
+          "insert_count": {
+            "default": 1,
+            "title": "Insert Count",
+            "type": "integer"
+          },
+          "infill_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Infill Pct"
+          },
+          "environment": {
+            "default": "",
+            "title": "Environment",
+            "type": "string"
+          },
+          "application_class": {
+            "default": "consumer_product",
+            "title": "Application Class",
+            "type": "string"
+          }
+        },
+        "title": "recommend_heat_set_insertArguments",
+        "type": "object"
+      },
+      "band": {
+        "domain": "heat_set_inserts",
+        "free": "Warnings \u2014 always free",
+        "pro": "Sizing for the insert you bought",
+        "business": "Sizing for the insert you bought",
+        "enterprise": "Sizing for the insert you bought"
       },
       "offline": {
         "schema_version": 1,
