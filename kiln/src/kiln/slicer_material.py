@@ -49,7 +49,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, NamedTuple
 
 logger = logging.getLogger(__name__)
 
@@ -315,13 +315,13 @@ def _resolve(word: str, *, printer_id: str | None, label: str | None, nozzle_mm:
     missing = ""
     if own_flow is not None:
         flow, source, why = own_flow, SOURCE_PRODUCT, f"{name}'s own settings"
-    elif machine and machine[0] is not None:
-        flow, source = machine[0], SOURCE_PRINTER
-        why = f"{BASIS_WORDS.get(machine[1], BASIS_WORDS['slicer_presets'])} {material_name} on the {machine[2]}"
+    elif machine and machine.mm3s is not None:
+        flow, source = machine.mm3s, SOURCE_PRINTER
+        why = f"{BASIS_WORDS.get(machine.basis, BASIS_WORDS['slicer_presets'])} {material_name} on the {machine.printer}"
     else:
         flow, source = slicing.get("max_volumetric_speed_mm3s"), SOURCE_MATERIAL
         why = f"the most cautious figure slicer makers give {material_name}"
-        missing = machine[3] if machine else ""
+        missing = machine.missing if machine else ""
     if flow:
         needs.append(
             Need("flow", (("filament_max_volumetric_speed", f"{float(flow):g}"),), source, why, missing=missing)
@@ -358,27 +358,36 @@ BASIS_WORDS = {
 }
 
 
-def _printer_melt(
-    printer_id: str, nozzle_mm: float | None, material_id: str,
-) -> tuple[float | None, str, str, str]:
-    """The printer's own melt rate for the material at the nozzle, how it was
-    established, the printer's name -- and, when no figure came, the sentence
-    that says why (empty when the table simply has none)."""
+class _MachineFlow(NamedTuple):
+    """A printer's own melt rate for one material, or why there is none."""
+
+    mm3s: float | None
+    #: How it was established: ``"maker"`` or ``"slicer_presets"``.
+    basis: str
+    #: The printer as the catalogue names it.
+    printer: str
+    #: The sentence saying why no figure came; empty when the table has none.
+    missing: str
+
+
+def _printer_melt(printer_id: str, nozzle_mm: float | None, material_id: str) -> _MachineFlow | None:
+    """The printer's own melt rate for the material at the nozzle; ``None``
+    for a printer the catalogue does not know."""
     from kiln import _pro_melt_bridge as melt
     from kiln.printer_intelligence import get_printer_intel
 
     try:
         intel = get_printer_intel(printer_id)
     except KeyError:
-        return None, "", "", ""
+        return None
     if intel.id == "default":
-        return None, "", "", ""
+        return None
     nozzle = float(nozzle_mm) if nozzle_mm else _profile_nozzle(printer_id)
     hit = melt.printer_melt_rate(intel.id, nozzle, material_id)
     if hit is not None:
-        return hit[0], hit[1], intel.display_name, ""
+        return _MachineFlow(hit[0], hit[1], intel.display_name, "")
     why_not = melt.unanswered(intel.id, nozzle)
-    return None, "", intel.display_name, f"{why_not}." if why_not else ""
+    return _MachineFlow(None, "", intel.display_name, f"{why_not}." if why_not else "")
 
 
 def _profile_nozzle(printer_id: str) -> float:
