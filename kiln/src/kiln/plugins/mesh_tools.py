@@ -1694,8 +1694,10 @@ class _MeshToolsPlugin:
             :param file_path: Path to an STL, OBJ, 3MF, STEP, ``.gcode.3mf``
                 or G-code file on this machine.
             :returns: ``stage_mesh_path`` (the file the stage draws),
-                ``shows`` and ``message``; the stage adds ``artifact``,
-                ``shown`` and, when the link is the stage, ``viewer_url``.
+                ``shows`` and ``message``, plus ``came_from`` for a file a
+                generator or a marketplace download brought in; the stage
+                adds ``artifact``, ``shown`` and, when the link is the
+                stage, ``viewer_url``.
             """
             from kiln import local_stage
             from kiln.server import _error_dict
@@ -1735,7 +1737,7 @@ class _MeshToolsPlugin:
             # (kiln.stage_link.find_mesh_path), so the token is minted for
             # exactly the file the evidence must be about.  No other key in
             # this result may carry a "stage" segment.
-            return {
+            result = {
                 "success": True,
                 "stage_mesh_path": staged,
                 "file_path": os.path.abspath(file_path),
@@ -1747,6 +1749,11 @@ class _MeshToolsPlugin:
                     "the preview token for this same file."
                 ),
             }
+            # A file that arrived from a generator or a marketplace says
+            # where it came from (kiln.arrival).
+            from kiln.arrival import announce
+
+            return announce(result, file_path)
 
         # ---------------------------------------------------------------
         # Mesh estimation (weight, print time)

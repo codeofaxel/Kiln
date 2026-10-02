@@ -1351,12 +1351,22 @@ _THIN_WALL_RAY_SAMPLE_CAP: int = 1000
 # never inflates the measurement).
 _THIN_WALL_INTERSECTION_TRI_CAP: int = 100_000
 
-# Per-ray chunk size for the vectorized intersection.  Each chunk
-# allocates ~CHUNK × tri_count × 24 bytes of intermediate floats —
-# at CHUNK=64 and tri_count=100K that's ~150MB per intermediate
-# array (h, s, q), peaking around 600MB.  Verified comfortable on
-# typical workstation RAM.
-_THIN_WALL_INTERSECTION_CHUNK: int = 64
+# How many chords the support check verifies before it looks for one that
+# holds (see ``_supported_chord_mask``).  It sets how far past the first
+# holding chord the check reads, not how much memory a cast takes.
+_CHORD_VERIFY_BATCH: int = 64
+
+# Working memory one batch of the ray-triangle intersection may hold.  The
+# kernel keeps ~200 bytes per (ray, triangle) pair live at its peak -- three
+# (rays, triangles, 3) float arrays and the (rays, triangles) ones beside them
+# -- so a fixed 64 rays against the 100k-triangle target cap held 1.2 GB
+# (measured 2026-10-01), and a whole analysis of a 328k-triangle part reached
+# ~2 GB: on a 2 GB hosted server, enough for the kernel to kill it.  Each ray's
+# distance comes from its own row alone, so the batch size moves memory and
+# nothing else; at this budget a batch is 6 rays at the cap, ~120 MB, measured
+# at the same speed as 64.
+_RAYCAST_BATCH_BYTES: int = 128 * 1024 * 1024
+_RAYCAST_BYTES_PER_PAIR: int = 210
 
 # Self-hit and parallel-ray epsilons for Möller-Trumbore.
 _THIN_WALL_RAY_EPS_DET: float = 1e-6      # parallel-ray determinant cutoff
@@ -1672,8 +1682,8 @@ def _supported_chord_mask(
     if not keep[verified].any():
         rest = np.where(measured & ~verified)[0]
         rest = rest[np.argsort(chord[rest])]
-        for start in range(0, rest.size, _THIN_WALL_INTERSECTION_CHUNK):
-            batch = rest[start:start + _THIN_WALL_INTERSECTION_CHUNK]
+        for start in range(0, rest.size, _CHORD_VERIFY_BATCH):
+            batch = rest[start:start + _CHORD_VERIFY_BATCH]
             verify(batch)
             if keep[batch].any():
                 break
@@ -2143,7 +2153,7 @@ def _raycast_min_distances(
     """
     n_rays = origins.shape[0]
     min_dist = np.full(n_rays, np.inf, dtype=np.float64)
-    chunk = _THIN_WALL_INTERSECTION_CHUNK
+    chunk = max(1, _RAYCAST_BATCH_BYTES // (_RAYCAST_BYTES_PER_PAIR * max(1, v0.shape[0])))
 
     if min_abs_perpendicular_dot is not None:
         # Per-target outward normals for the angle filter.  Re-computed
