@@ -87,20 +87,35 @@ FACT_CHAT_PREFIX = "chat:"
 #: The chat apps an agent can report, and the only words that are ever
 #: recorded for one.  Anything else an agent says is ``other``: the list
 #: is closed so that no word of an agent's choosing (a room, a person, a
-#: link) can ride out as a "chat app".
+#: link) can ride out as a "chat app".  It covers the apps a person can
+#: write to a relay host from, read off OpenClaw's own channel catalogue
+#: (its agent-to-agent channels are not a person's chat app and are left
+#: out), plus the relay's own web chat and a phone call.
 CHAT_APP_OTHER = "other"
 CHAT_APPS: tuple[str, ...] = (
     "telegram", "whatsapp", "discord", "imessage", "signal", "slack", "sms",
-    "matrix", "teams", "googlechat", "wechat", "line", CHAT_APP_OTHER,
+    "matrix", "teams", "googlechat", "wechat", "wecom", "line", "feishu",
+    "mattermost", "irc", "nextcloudtalk", "nostr", "qq", "synologychat",
+    "tlon", "twitch", "zalo", "yuanbao", "buzz", "clickclack",
+    "webchat", "voicecall", CHAT_APP_OTHER,
 )
 #: Other spellings an agent is likely to use, folded to the list's word.
 #: Compared after everything but letters and digits is dropped, so
 #: "Microsoft Teams", "ms-teams" and "msteams" are one spelling.
 _CHAT_APP_SPELLINGS: dict[str, str] = {
     "microsoftteams": "teams", "msteams": "teams",
-    "googlechat": "googlechat", "gchat": "googlechat",
-    "applemessages": "imessage", "messages": "imessage",
-    "textmessage": "sms", "text": "sms",
+    "gchat": "googlechat",
+    "applemessages": "imessage", "messages": "imessage", "bluebubbles": "imessage",
+    "textmessage": "sms", "text": "sms", "mms": "sms",
+    "weixin": "wechat", "wechatwork": "wecom",
+    "lark": "feishu",
+    "nextcloud": "nextcloudtalk",
+    "qqbot": "qq",
+    "synology": "synologychat",
+    "urbit": "tlon",
+    "zalouser": "zalo", "zalopersonal": "zalo", "zaloclawbot": "zalo",
+    "controlui": "webchat", "webui": "webchat",
+    "phonecall": "voicecall", "voice": "voicecall", "call": "voicecall",
 }
 
 #: Claude Code's own markers: it exports ``CLAUDECODE=1`` to every child,
@@ -392,6 +407,22 @@ def note_chat_app(said: Any) -> str:
 def reported_chat_app() -> str:
     """The chat app an agent reported in this process, or ``""``."""
     return _chat_app
+
+
+#: Hosts whose whole job is relaying a person's messages from a chat app,
+#: by the word their own client carries.  A person reaching Kiln through
+#: one is, as a rule, holding a phone.
+_CHAT_RELAY_HOSTS: tuple[str, ...] = ("openclaw",)
+
+
+def person_is_in_a_chat_app() -> bool:
+    """Whether the person is, as far as Kiln can tell, writing from a chat
+    app: the host on record is one that relays chat apps, or an agent said
+    which app.  Kiln cannot see a device; this is the stand-in, used only to
+    choose which way of approving a print is described first.  A relay host
+    that runs another app's agent names that app at the handshake, so it
+    reads ``False`` here until its agent says the chat app."""
+    return bool(_chat_app) or any(word in _recorded_label for word in _CHAT_RELAY_HOSTS)
 
 
 def reset_recorded() -> None:

@@ -475,6 +475,12 @@ def test_the_chat_app_an_agent_reports_is_a_fact_beside_its_host(pipeline):
         ("Microsoft Teams", "teams"),
         ("ms-teams", "teams"),
         ("Google Chat", "googlechat"),
+        ("Lark", "feishu"),
+        ("WeCom", "wecom"),
+        ("Nextcloud Talk", "nextcloudtalk"),
+        ("Zalo personal", "zalo"),
+        ("Control UI", "webchat"),
+        ("phone call", "voicecall"),
         # A name outside the list is "other": the list is closed, so no
         # word of an agent's own choosing ever leaves the machine.
         ("my-secret-project-room", "other"),
@@ -502,6 +508,32 @@ def test_a_chat_app_with_no_host_on_record_is_remembered_but_not_counted(pipelin
     assert agent_host.note_chat_app("telegram") == "telegram"
     assert agent_host.reported_chat_app() == "telegram"
     assert daily_stats._read()["agent_host_facts"] == {}
+
+
+def test_a_person_is_taken_to_be_in_a_chat_app_only_on_evidence(pipeline):
+    """The stand-in for "on a phone": a host that relays chat apps, or an
+    agent that said which app.  An editor or a desktop chat is neither."""
+    assert agent_host.person_is_in_a_chat_app() is False
+    agent_host.record_once(SimpleNamespace(), _ctx(CURSOR))
+    assert agent_host.person_is_in_a_chat_app() is False
+    # ...until its agent says the person is writing from a chat app.
+    agent_host.note_chat_app("whatsapp")
+    assert agent_host.person_is_in_a_chat_app() is True
+
+    agent_host.reset_recorded()
+    assert agent_host.person_is_in_a_chat_app() is False
+    agent_host.record_once(SimpleNamespace(), _ctx(OPENCLAW))
+    assert agent_host.person_is_in_a_chat_app() is True
+
+
+def test_the_list_covers_the_apps_a_relay_host_documents():
+    """Every chat app in the list is its own token, and the ones people
+    most often text an agent from are all there."""
+    assert len(set(agent_host.CHAT_APPS)) == len(agent_host.CHAT_APPS)
+    for app in ("telegram", "whatsapp", "discord", "imessage", "signal", "slack", "sms", "wechat", "webchat"):
+        assert app in agent_host.CHAT_APPS
+    for spelling, word in agent_host._CHAT_APP_SPELLINGS.items():
+        assert word in agent_host.CHAT_APPS and spelling not in agent_host.CHAT_APPS
 
 
 def test_the_hosted_server_keeps_no_chat_app(pipeline, monkeypatch):

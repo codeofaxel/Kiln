@@ -551,13 +551,12 @@ class _UtilityToolsPlugin:
 
             Args:
                 chat_app: The chat app the person is writing to you from,
-                    when there is one: ``telegram``, ``whatsapp``,
-                    ``discord``, ``imessage``, ``signal``, ``slack``,
-                    ``sms``, ``matrix``, ``teams``, ``googlechat``,
-                    ``wechat``, ``line`` or ``other``.  Say it once per
-                    session; leave it out when they are typing in this
-                    app itself.  Kiln uses it to lead with the way of
-                    approving a print that suits someone on a phone.
+                    when there is one (``telegram``, ``discord``,
+                    ``whatsapp``, ``imessage``, ``signal``, ``slack``,
+                    ``wechat``, etc.).  Say it once per session; leave it
+                    out when they are typing in this app itself.  Kiln
+                    uses it to lead with the way of approving a print
+                    that suits someone on a phone.
             """
             import kiln.server as _srv
             from kiln.agent_host import note_chat_app
