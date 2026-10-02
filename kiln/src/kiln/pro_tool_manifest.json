@@ -11288,7 +11288,7 @@
     },
     {
       "name": "check_heat_set_insert_design",
-      "description": "Check a heat-set insert pocket that is already drawn.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Sizing for the insert you bought \u00b7 Business: Sizing for the insert you bought \u00b7 Enterprise: Sizing for the insert you bought.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Check a heat-set insert pocket that is already drawn.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Sizing for the hardware you bought \u00b7 Business: Sizing for the hardware you bought \u00b7 Enterprise: Sizing for the hardware you bought.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "engineering_intelligence",
@@ -11432,9 +11432,9 @@
       "band": {
         "domain": "heat_set_inserts",
         "free": "Warnings \u2014 always free",
-        "pro": "Sizing for the insert you bought",
-        "business": "Sizing for the insert you bought",
-        "enterprise": "Sizing for the insert you bought"
+        "pro": "Sizing for the hardware you bought",
+        "business": "Sizing for the hardware you bought",
+        "enterprise": "Sizing for the hardware you bought"
       },
       "offline": {
         "schema_version": 1,
@@ -11873,7 +11873,7 @@
     },
     {
       "name": "lookup_fastener",
-      "description": "Get the full spec for a screw, bolt, or threaded fastener.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Sizing for the insert you bought \u00b7 Business: Sizing for the insert you bought \u00b7 Enterprise: Sizing for the insert you bought.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Get the full spec for a screw, bolt, or threaded fastener.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Sizing for the hardware you bought \u00b7 Business: Sizing for the hardware you bought \u00b7 Enterprise: Sizing for the hardware you bought.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "engineering_intelligence",
@@ -11893,9 +11893,9 @@
       "band": {
         "domain": "heat_set_inserts",
         "free": "Warnings \u2014 always free",
-        "pro": "Sizing for the insert you bought",
-        "business": "Sizing for the insert you bought",
-        "enterprise": "Sizing for the insert you bought"
+        "pro": "Sizing for the hardware you bought",
+        "business": "Sizing for the hardware you bought",
+        "enterprise": "Sizing for the hardware you bought"
       },
       "offline": {
         "schema_version": 1,
@@ -12762,7 +12762,7 @@
     },
     {
       "name": "recommend_heat_set_insert",
-      "description": "Size a heat-set threaded insert for a 3D-printed part.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Sizing for the insert you bought \u00b7 Business: Sizing for the insert you bought \u00b7 Enterprise: Sizing for the insert you bought.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Size a heat-set threaded insert for a 3D-printed part.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Sizing for the hardware you bought \u00b7 Business: Sizing for the hardware you bought \u00b7 Enterprise: Sizing for the hardware you bought.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "engineering_intelligence",
@@ -12875,9 +12875,9 @@
       "band": {
         "domain": "heat_set_inserts",
         "free": "Warnings \u2014 always free",
-        "pro": "Sizing for the insert you bought",
-        "business": "Sizing for the insert you bought",
-        "enterprise": "Sizing for the insert you bought"
+        "pro": "Sizing for the hardware you bought",
+        "business": "Sizing for the hardware you bought",
+        "enterprise": "Sizing for the hardware you bought"
       },
       "offline": {
         "schema_version": 1,
@@ -12886,7 +12886,7 @@
     },
     {
       "name": "recommend_hole",
-      "description": "Tell me what size hole to drill for something to fit through.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Sizing for the insert you bought \u00b7 Business: Sizing for the insert you bought \u00b7 Enterprise: Sizing for the insert you bought.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Tell me what size hole to drill for something to fit through.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Sizing for the hardware you bought \u00b7 Business: Sizing for the hardware you bought \u00b7 Enterprise: Sizing for the hardware you bought.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "engineering_intelligence",
@@ -12959,9 +12959,9 @@
       "band": {
         "domain": "heat_set_inserts",
         "free": "Warnings \u2014 always free",
-        "pro": "Sizing for the insert you bought",
-        "business": "Sizing for the insert you bought",
-        "enterprise": "Sizing for the insert you bought"
+        "pro": "Sizing for the hardware you bought",
+        "business": "Sizing for the hardware you bought",
+        "enterprise": "Sizing for the hardware you bought"
       },
       "offline": {
         "schema_version": 1,
