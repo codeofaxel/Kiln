@@ -45,7 +45,7 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from kiln.ams_routing import MATCH_DELTA_E
+from kiln.ams_routing import MATCH_DELTA_E, _colour_name
 from kiln.colour_distance import delta_e_76, hex_to_lab, normalize_hex
 
 logger = logging.getLogger(__name__)
@@ -86,8 +86,9 @@ class _Colour:
 
     @property
     def words(self) -> str:
-        """The colour as a person names it: as given, else a known name, else the code."""
-        return self.given_name or _known_name(self.hex6) or self.code
+        """The colour as a person names it: as given, else a known name, else
+        the plain name the print gate's own messages use for this code."""
+        return self.given_name or _known_name(self.hex6) or _colour_name(self.hex6)
 
 
 # ---------------------------------------------------------------------------
@@ -259,7 +260,8 @@ def _say(
         else:
             sentences.append(f"You have {spools} but {isnt} loaded on {printer}. Load {it} before printing.")
     if missing:
-        colours = _listed([c.words for c in missing], "or")
+        # Two near shades share a plain name; a person hears it once.
+        colours = _listed(list(dict.fromkeys(c.words for c in missing)), "or")
         where = "there either" if owned else f"on {printer}"
         question = (
             "want help finding a filament that suits this print?"

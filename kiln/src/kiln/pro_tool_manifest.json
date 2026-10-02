@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-02T08:44:02.155433+00:00",
+  "generated": "2026-10-02T18:43:20.167891+00:00",
   "tool_count": 432,
   "categories": {
     "product_generators": {
@@ -3038,7 +3038,7 @@
     },
     {
       "name": "find_closest_filaments",
-      "description": "Which filaments could I buy for this colour? Up to three per colour, from different makers.",
+      "description": "Which filaments could I buy for this colour? Call ONLY when the person asks. Up to three per colour, from different makers.",
       "tier": "free",
       "access": "free",
       "category": "decoration",
@@ -13803,7 +13803,7 @@
     },
     {
       "name": "fleet_colour_match",
-      "description": "Which of my printers already has each of these colours loaded, and what to buy for the rest (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Which of my printers already has each of these colours loaded, and which one to print on (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "fleet_operations",

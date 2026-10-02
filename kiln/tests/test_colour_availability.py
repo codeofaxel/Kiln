@@ -181,6 +181,19 @@ class TestWhatAColouringSays:
         )
         _assert_no_buying_talk(result)
 
+    def test_a_shade_with_no_name_is_said_in_plain_words_and_once(self, printer, tmp_path):
+        """A textured model's shades are codes nobody named.  The sentence
+        says them as the print gate's own messages do, and two shades that
+        share a plain name are said once."""
+        result = _tools()["auto_color_by_height"](
+            input_path=_stl(tmp_path), num_colors=3, color_palette=["#0A0A14", "#606070", "#70707F"],
+        )
+        say = result["colour_availability"]["say"]
+        assert say == (
+            "I don't see black or grey loaded on workshop. Want help finding filaments that suit this print?"
+        )
+        assert "#" not in say
+
     @pytest.mark.parametrize(
         "reading",
         [
@@ -230,7 +243,7 @@ class TestWhatAColouringSays:
         say = availability["say"]
         assert say == (
             "You have red PLA and black PLA but they aren't loaded on workshop, so load them before "
-            "printing. I don't see #3A7BD5 loaded there either; want help finding a filament that suits "
+            "printing. I don't see blue loaded there either; want help finding a filament that suits "
             "this print?"
         )
         # Several spools are named by colour and material, never as a list of brands.

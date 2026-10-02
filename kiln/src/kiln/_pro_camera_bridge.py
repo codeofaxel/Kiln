@@ -171,7 +171,7 @@ def _served_word(key: str) -> str | None:
         _last_miss[key] = Miss("unanswered", detail="the served door could not be opened on this install")
         return None
     try:
-        answer = _pro_api_call(WIRE_TOOL, _timeout=_CONSULT_TIMEOUT_S, printer_id=key)
+        answer = _pro_api_call(WIRE_TOOL, _timeout=_CONSULT_TIMEOUT_S, _asked_by_user=False, printer_id=key)
     except Exception as exc:  # noqa: BLE001 -- the network is a degrade, never a refusal to go on
         logger.debug("camera word not served", exc_info=True)
         miss = classify_transport_error(exc)
