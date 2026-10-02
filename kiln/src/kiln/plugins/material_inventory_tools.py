@@ -152,11 +152,16 @@ class _MaterialInventoryToolsPlugin:
         ) -> dict:
             """Check if a printer has enough material for a print job.
 
-            When material is insufficient, generates actionable suggestions
-            including shelf spool availability, pause-and-swap hints, and
-            purchase links.  Suggestions that point at OTHER machines are a
-            fleet-wide answer and need Kiln Business; the check itself —
-            does THIS printer have enough — works on every tier.
+            When material is insufficient, says what the person can do with
+            what they have: a spool on the shelf, a pause-and-swap.  Only
+            when nothing they have will do does it end with one offer of
+            help finding a filament.  Relay that offer as written and never
+            suggest buying filament unless the person asks or says yes;
+            then use ``find_closest_filaments`` or
+            ``get_material_purchase_urls``.  Suggestions that point at
+            OTHER machines are a fleet-wide answer and need Kiln Business;
+            the check itself — does THIS printer have enough — works on
+            every tier.
 
             Args:
                 printer_name: Name of the printer to check.
