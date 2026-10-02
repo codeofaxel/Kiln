@@ -703,6 +703,18 @@ class PrintWatchdog:
             # Job info is optional — a stall check just won't fire without it.
             job = None
 
+        # A print carrying a hardware plan hands each new moment to the
+        # person's phone (kiln.hardware_stops) -- before the retirement check
+        # below, so the reading that sees the print end can still say what
+        # goes in afterwards.  A courtesy on its own thread: it commands
+        # nothing, so a stopped watchdog may still pass it on.
+        try:
+            from kiln.hardware_stops import alert_phone
+
+            alert_phone(self._adapter, state, job)
+        except Exception:  # noqa: BLE001 — never breaks a watchdog poll
+            logger.debug("PrintWatchdog: hardware alert skipped", exc_info=True)
+
         if self._stop_event.is_set():
             # Stopped while this poll was reading -- most often retired by the
             # very read that saw its print end, which announces the ending

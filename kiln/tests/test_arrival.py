@@ -294,6 +294,49 @@ class TestTheSizeCheck:
         assert "meters" in arrival.size_check(downloaded, (0.04, 0.03, 0.02))
 
 
+class TestAGltfIsReadInMetresFirst:
+    """glTF 2.0, Coordinate System and Units: "The units for all linear
+    distances are meters."  A 50 mm part saved to that rule arrives as 0.05,
+    and the general reading offered metres beside inches as equal guesses —
+    or, for a 1.2 m bench, never mentioned metres at all."""
+
+    _DOWNLOADED = Arrival(kind=DOWNLOADED, by="FakeMarket")
+
+    def test_a_part_saved_in_metres_is_read_in_metres(self):
+        check = arrival.size_check(self._DOWNLOADED, (0.05, 0.03, 0.02), arrived_as="glb")
+        assert check == (
+            "This is a glTF file, and glTF measures in metres: read that way it is 50 mm at its "
+            "largest (as millimetres, 0.05 mm). Nothing was rescaled. If it is in metres, "
+            "rescale_model(file_path, scale_factor=1000) sets it to 50 mm."
+        )
+
+    def test_a_model_bigger_than_any_printer_in_metres_says_so(self):
+        check = arrival.size_check(self._DOWNLOADED, (1.2, 0.45, 0.4), arrived_as=".glb")
+        assert check.startswith("This is a glTF file, and glTF measures in metres: read that way it is 1200 mm")
+        assert "bigger than any printer in Kiln's catalog" in check
+        assert "max_dimension_mm=" in check and "split_mesh_to_fit" in check
+        assert "centimeters" not in check and "inches" not in check
+
+    def test_a_gltf_already_in_millimetres_is_left_alone(self):
+        assert arrival.size_check(self._DOWNLOADED, (40.0, 20.0, 10.0), arrived_as="glb") == ""
+
+    def test_a_generators_glb_still_has_no_size(self):
+        unsized = Arrival(kind=GENERATED, by="Tripo3D", real_size=False)
+        check = arrival.size_check(unsized, (1.0, 0.9, 0.6), arrived_as="glb")
+        assert "Tripo3D was asked for a shape, not a size" in check
+        assert "glTF" not in check
+
+    def test_another_format_keeps_the_general_reading(self):
+        check = arrival.size_check(self._DOWNLOADED, (0.05, 0.03, 0.02), arrived_as="stl")
+        assert "glTF" not in check and "inches" in check
+
+    def test_the_file_suffix_speaks_when_no_door_says_otherwise(self, tmp_path):
+        path = _cube(tmp_path / "part.glb", 0.05)
+        arrival.record(path, self._DOWNLOADED)
+        result = arrival.announce({}, path, size=(0.05, 0.05, 0.05))
+        assert result["size_check"].startswith("This is a glTF file")
+
+
 # ---------------------------------------------------------------------------
 # The download doors open the stage
 # ---------------------------------------------------------------------------
@@ -440,6 +483,49 @@ class TestTheDownloadDoorsOpenTheStage:
         assert local_stage.resolve(sc["artifact"]["artifact_token"]) == thing
         assert sc["came_from"].startswith("Downloaded from Thingiverse. Its listing was not read")
         assert arrival.read(thing).file_id == "7"
+
+    def test_a_single_file_from_another_marketplace_comes_from_that_marketplace(self, tmp_path, monkeypatch):
+        """Until 2026-10-02 every single-file download asked Thingiverse,
+        whatever marketplace the file ID belonged to."""
+
+        def _not_thingiverse():
+            raise AssertionError("a FakeMarket file was sent to Thingiverse")
+
+        monkeypatch.setattr("kiln.server._get_thingiverse", _not_thingiverse)
+        market = _Market({"box.stl": 40.0}, listing=_LISTING)
+        sc = _call(
+            _marketplace_door(monkeypatch, market),
+            "download_model",
+            file_id="box.stl",
+            model_id="m-1",
+            source="fakemarket",
+            dest_dir=str(tmp_path),
+        )
+
+        box = str(tmp_path / "box.stl")
+        assert sc["success"] is True and sc["local_path"] == box
+        assert sc["stage_mesh_path"] == box
+        # Naming the model reads its listing, as the whole-model download does.
+        assert sc["came_from"].startswith('Downloaded from FakeMarket: "Hinged box" by Ada')
+        assert "deprecation_notice" not in sc
+
+    def test_a_marketplace_that_offers_no_downloads_says_so(self, tmp_path, monkeypatch):
+        class _BrowseOnly(_Market):
+            @property
+            def supports_download(self) -> bool:
+                return False
+
+        def _not_thingiverse():
+            raise AssertionError("a FakeMarket file was sent to Thingiverse")
+
+        monkeypatch.setattr("kiln.server._get_thingiverse", _not_thingiverse)
+        mcp = _marketplace_door(monkeypatch, _BrowseOnly({}))
+        out = mcp._tool_manager._tools["download_model"].fn(  # type: ignore[attr-defined]
+            file_id="box.stl", source="fakemarket", dest_dir=str(tmp_path)
+        )
+        assert out["success"] is False
+        assert out["error"]["code"] == "UNSUPPORTED"
+        assert "FakeMarket does not support direct downloads" in out["error"]["message"]
 
     def test_the_one_shot_generator_says_where_its_best_attempt_came_from(self, tmp_path, monkeypatch):
         from kiln.original_design import OriginalDesignGeneration, OriginalDesignGenerationAttempt

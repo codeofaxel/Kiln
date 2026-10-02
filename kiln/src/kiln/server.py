@@ -138,6 +138,7 @@ from kiln.cost_estimator import (
 )
 from kiln.errors import HostedUnavailableError
 from kiln.events import Event, EventBus, EventType
+from kiln.format_conversion import ARRIVAL_CONVERSIONS, convert_on_arrival
 
 try:
     from kiln.fulfillment import (
@@ -4122,8 +4123,15 @@ def _retry_changes_the_object(overrides: dict[str, Any] | None, mesh_repaired: b
     )
 
 
-def _note_print_started(adapter: PrinterAdapter) -> None:
+def _note_print_started(adapter: PrinterAdapter, result: Any = None) -> None:
     """Tell the heater watchdog a print began — if it is watching *adapter*.
+
+    *result* is what ``adapter.start_print`` returned.  A start Kiln
+    refused before sending anything (``refused_before_send``) began no
+    print, and the watchdog is not told one did: marked busy, it would
+    stop cooling an idle printer until a print-ended notice that is never
+    coming.  A start that was sent is always notified, whatever the
+    adapter then said of it — the printer may be running it.
 
     The one door for this notification.  Every tool that starts a print
     used to call ``_get_heater_watchdog().notify_print_started()``
@@ -4139,6 +4147,8 @@ def _note_print_started(adapter: PrinterAdapter) -> None:
     once; a new start-side tool gets it by calling this instead of
     remembering to ask.
     """
+    if getattr(result, "refused_before_send", False) is True:
+        return
     try:
         if _is_heater_watchdog_machine(adapter):
             _get_heater_watchdog().notify_print_started()
@@ -5492,6 +5502,33 @@ def _get_thingiverse() -> ThingiverseClient:
 _marketplace_registry = MarketplaceRegistry()
 
 
+def _download_marketplace_file(
+    source: str, file_id: Any, dest_dir: str, *, file_name: str | None = None,
+) -> tuple[str | None, Any]:
+    """Download one file from the marketplace *source* names.
+
+    Returns ``(path, adapter)``; ``(None, adapter)`` when that marketplace
+    does not offer downloads.  Thingiverse is reached through its own client
+    (adapter ``None``), which leaves no note of its own, so the note is left
+    here.  Every single-file download door goes through this, so a file ID
+    is never sent to a marketplace it does not belong to.  (Until
+    2026-10-02 ``download_model`` sent every one to Thingiverse.)
+    """
+    if source != "thingiverse":
+        if _marketplace_registry.count == 0:
+            _init_marketplace_registry()
+        mkt = _marketplace_registry.get(source)
+        if not mkt.supports_download:
+            return None, mkt
+        named = {"file_name": file_name} if file_name else {}
+        return mkt.download_file(str(file_id), dest_dir, **named), mkt
+    path = _get_thingiverse().download_file(int(file_id), dest_dir, file_name=file_name)
+    from kiln.arrival import note_download
+
+    note_download("Thingiverse", path, file_id)
+    return path, None
+
+
 def _init_marketplace_registry() -> None:
     """Register marketplace adapters based on available credentials."""
     if _THINGIVERSE_TOKEN:
@@ -6379,6 +6416,15 @@ def printer_status(
             "printer": printer_block,
             "job": job.to_dict(),
         }
+        # A print carrying a hardware plan: when the next stop comes, what
+        # goes in at it, or what goes in now that the print is done.  At both
+        # detail levels -- the lite read is the one polled through a print.
+        # Absent for an ordinary print.  See kiln.hardware_stops.
+        from kiln.hardware_stops import observe as _observe_hardware
+
+        hardware = _observe_hardware(adapter, state, job)
+        if hardware:
+            response["hardware"] = hardware
         # A cool-down a Kiln server left running (killed with the part fan
         # on) is finished from this read, the one every filament answer
         # names as its follow-up: fan off once the nozzle is at or below
@@ -7335,6 +7381,16 @@ def monitor_print(
         goal_line = _format_goal_line_for_monitor(effective_brief_id)
         if goal_line:
             lines.append(goal_line)
+        # A print carrying a hardware plan says, in its own line, when the
+        # next stop comes and what goes in -- or, at the stop, the steps.
+        from kiln.hardware_stops import observe as _observe_hardware
+
+        _hardware = _observe_hardware(adapter, state, job)
+        if _hardware:
+            lines.append(f"- Hardware: {_hardware['say']}")
+            lines.extend(f"  {n}. {step}" for n, step in enumerate(_hardware.get("steps") or (), 1))
+            if _hardware.get("resume"):
+                lines.append(f"  {_hardware['resume']}")
 
         lines.extend(
             [
@@ -8917,7 +8973,7 @@ def start_print(
         # the command; ``resolve_print_start`` needs it to know which it has.
         sent_at = time.monotonic()
         result = adapter.start_print(file_name, **print_kwargs)
-        _note_print_started(adapter)
+        _note_print_started(adapter, result)
 
         # Layer 5, the print watchdog, attaches inside adapter.start_print --
         # a started hook, see _install_print_lifecycle_hooks -- so it follows
@@ -10051,7 +10107,7 @@ def skip_print_objects(object_ids: list[str], plate_number: int = 1) -> dict:
 
 
 def _resume_print_on(
-    adapter: PrinterAdapter, target_name: str, *, force: bool = False,
+    adapter: PrinterAdapter, target_name: str, *, force: bool = False, hardware_confirmed: bool = False,
 ) -> dict:
     """Resume the print on *adapter*, refusing a latched machine.
 
@@ -10068,7 +10124,10 @@ def _resume_print_on(
     if block := _emergency_latch_error("resume_print", target_name):
         return block
 
-    result = adapter.resume_print(force=force)
+    # The person's word on a hardware stop rides only when given, so an
+    # adapter written before the stop existed keeps its two-argument resume.
+    confirmed = {"hardware_confirmed": True} if hardware_confirmed else {}
+    result = adapter.resume_print(force=force, **confirmed)
     # Stop this printer's pause keep-alive thread if one was running —
     # the print is back under firmware control and re-asserting targets
     # here would race with the resume preamble gcode.
@@ -10085,7 +10144,9 @@ def _resume_print_on(
 
 
 @mcp.tool()
-def resume_print(force: bool = False, printer_name: str | None = None) -> dict:
+def resume_print(
+    force: bool = False, printer_name: str | None = None, hardware_confirmed: bool = False,
+) -> dict:
     """Resume a paused print job.
 
     The printer must currently be in a paused state.  Resuming will return
@@ -10095,6 +10156,13 @@ def resume_print(force: bool = False, printer_name: str | None = None) -> dict:
     silently ignored the command reports a failure instead of a cheerful
     "Print resumed."
 
+    A print paused at a planned hardware stop (a pause written into the file
+    so a nut, a magnet or a bearing can go in) is refused with
+    ``code: "HARDWARE_NOT_CONFIRMED"`` and a ``hardware`` block saying what
+    goes in.  Tell the person, wait for them to say every piece is in and
+    sits level with or below the top of the print, then resume with
+    ``hardware_confirmed=true``.  Never pass it on your own judgement.
+
     Args:
         force: Send the resume even when Kiln believes the printer is not
             paused.  Use this when the printer's own screen disagrees with
@@ -10103,6 +10171,9 @@ def resume_print(force: bool = False, printer_name: str | None = None) -> dict:
             the wrong state word would leave you unable to recover the print.
         printer_name: Which printer to resume.  Omit for the default
             printer.  Pass the same name you paused with.
+        hardware_confirmed: The person has said every piece of hardware for
+            this stop is in and sits level with or below the top of the
+            print.  Only on their word.
     """
     if err := _check_auth("print"):
         return err
@@ -10124,7 +10195,7 @@ def resume_print(force: bool = False, printer_name: str | None = None) -> dict:
             adapter, target_name = _resolve_control_target(printer_name)
         except PrinterNotFoundError:
             return _unknown_printer_error(printer_name, "resume a print on")
-        return _resume_print_on(adapter, target_name, force=force)
+        return _resume_print_on(adapter, target_name, force=force, hardware_confirmed=hardware_confirmed)
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to resume print: {exc}. Check that the printer is in a paused state.")
     except Exception as exc:
@@ -13523,7 +13594,9 @@ def download_and_upload(
 
     When ``file_id`` is provided, downloads and uploads that single file.
     When ``model_id`` is provided without ``file_id``, downloads and
-    uploads all printable files (.stl, .gcode, .3mf) for the model.
+    uploads all printable files (.stl, .gcode, .3mf, .glb) for the model.
+    A GLB goes to the printer as an STL beside it, never as a GLB; the
+    upload's ``conversion`` names the original, which stays on disk.
 
     Args:
         file_id: File ID (from ``model_files`` results).  For Thingiverse
@@ -13571,8 +13644,9 @@ def download_and_upload(
                     code="NOT_FOUND",
                 )
 
-            # Filter to printable extensions
-            _printable_exts = {"stl", "gcode", "gco", "g", "3mf"}
+            # Filter to printable extensions.  A GLB counts: it is uploaded
+            # as the STL it is converted to.
+            _printable_exts = {"stl", "gcode", "gco", "g", "3mf"} | ARRIVAL_CONVERSIONS
             printable_files = [
                 mf
                 for mf in all_files
@@ -13580,7 +13654,7 @@ def download_and_upload(
             ]
             if not printable_files:
                 return _error_dict(
-                    f"No printable files (.stl, .gcode, .3mf) found for model {model_id} on {source}.",
+                    f"No printable files (.stl, .gcode, .3mf, .glb) found for model {model_id} on {source}.",
                     code="NOT_FOUND",
                 )
 
@@ -13588,7 +13662,9 @@ def download_and_upload(
             errors: list[dict] = []
             for mf in printable_files:
                 try:
-                    local_path = mkt.download_file(mf.id, _dl_dir)
+                    local_path, conversion = convert_on_arrival(
+                        mkt.download_file(mf.id, _dl_dir), tool="download_and_upload"
+                    )
                     upload_result = adapter.upload_file(local_path)
                     up_name = upload_result.file_name or os.path.basename(local_path)
                     uploaded.append(
@@ -13597,9 +13673,10 @@ def download_and_upload(
                             "file_name": up_name,
                             "local_path": local_path,
                             "upload": upload_result.to_dict(),
+                            **({"conversion": conversion} if conversion else {}),
                         }
                     )
-                except (MarketplaceError, PrinterError, RuntimeError) as exc:
+                except (MarketplaceError, PrinterError, RuntimeError, ValueError, OSError) as exc:
                     errors.append(
                         {
                             "file_id": mf.id,
@@ -13637,20 +13714,23 @@ def download_and_upload(
                 code="INVALID_INPUT",
             )
 
-        mkt = _marketplace_registry.get(source) if source != "thingiverse" else None
+        # Step 1: Download from the marketplace the file belongs to
+        local_path, mkt = _download_marketplace_file(source, file_id, _dl_dir)
+        if local_path is None:
+            return _error_dict(
+                f"{mkt.display_name} does not support direct downloads.",
+                code="UNSUPPORTED",
+            )
 
-        # Step 1: Download from marketplace
-        if mkt is not None:
-            if not mkt.supports_download:
-                return _error_dict(
-                    f"{mkt.display_name} does not support direct downloads.",
-                    code="UNSUPPORTED",
-                )
-            local_path = mkt.download_file(str(file_id), _dl_dir)
-        else:
-            # Fallback to legacy Thingiverse client
-            client = _get_thingiverse()
-            local_path = client.download_file(int(file_id), _dl_dir)
+        # Step 1.5: a GLB goes to the printer as an STL, never as a GLB.
+        try:
+            local_path, conversion = convert_on_arrival(local_path, tool="download_and_upload")
+        except (ValueError, OSError) as exc:
+            return _error_dict(
+                f"{os.path.basename(local_path)} could not be turned into an STL ({exc}), "
+                "so it was not sent to the printer.",
+                code="CONVERSION_FAILED",
+            )
 
         # Step 2: Upload to printer
         upload_result = adapter.upload_file(local_path)
@@ -13709,7 +13789,7 @@ def download_and_upload(
             )
             sent_at = time.monotonic()
             print_res = adapter.start_print(file_name)
-            _note_print_started(adapter)
+            _note_print_started(adapter, print_res)
             print_verdict = resolve_print_start(
                 adapter, print_res, sent_at=sent_at, file_name=file_name,
             )
@@ -13726,6 +13806,8 @@ def download_and_upload(
             "verification_status": "unverified",
             "auto_print_enabled": _AUTO_PRINT_MARKETPLACE,
         }
+        if conversion:
+            resp["conversion"] = conversion
 
         if auto_printed:
             resp["print"] = print_data
@@ -14856,6 +14938,13 @@ def await_print_completion(
     Returns a dict with ``outcome`` (completed / failed / cancelled /
     timeout), final printer state, elapsed time, completion percentage
     history, and (when ``brief_id`` resolves) a ``design_goal`` block.
+
+    A print carrying a hardware plan (pauses written in for nuts, magnets or
+    bearings) also returns early with ``outcome: "hardware_stop"`` and a
+    ``hardware`` block: when a stop is a few minutes away, when the printer
+    has stopped for the parts, and when it went past a stop without
+    stopping.  Tell the person what the block says, then wait again.  A
+    finished print's ``hardware`` block names what goes in after the print.
     """
     if err := _check_auth("print"):
         return err
@@ -14989,6 +15078,28 @@ def await_print_completion(
                 )
                 last_pct = pct
 
+            # A print carrying a hardware plan comes back to the person at its
+            # moments: a stop close enough to get ready for, a stop gone past
+            # without stopping, and the stop itself -- every time, since a
+            # printer waiting there resumes only by a person's hands and
+            # waiting here would only run the clock out.
+            from kiln.hardware_stops import observe as _observe_hardware
+
+            hardware = _observe_hardware(adapter, state, job_progress, announce="chat")
+            if hardware and (
+                hardware["stage"] == "now"
+                or (hardware["new"] and hardware["stage"] in ("coming_up", "missed", "passed_unseen"))
+            ):
+                return {
+                    "success": True,
+                    "outcome": "hardware_stop",
+                    "hardware": hardware,
+                    "message": hardware["say"],
+                    "state": state.state.value,
+                    "elapsed_seconds": round(elapsed, 1),
+                    "progress_log": progress_log[-20:],
+                }
+
             # ``confirmed_state``: it looks through a FAULT headline, so a
             # fault raised while the machine kept working still matches here,
             # and it is as strict about staleness as the bare state word was:
@@ -15002,13 +15113,16 @@ def await_print_completion(
                 # covers every caller that polls, not just this tool, and it
                 # refuses a duration when the ending was noticed too late to
                 # have been watched; this call site could do neither.
-                return _attach_goal({
+                done = {
                     "success": True,
                     "outcome": "completed",
                     "state": state.state.value,
                     "elapsed_seconds": round(elapsed, 1),
                     "progress_log": progress_log[-20:],
-                })
+                }
+                if hardware and hardware["stage"] == "after_print":
+                    done["hardware"] = hardware
+                return _attach_goal(done)
             # ``confirmed_state``: it looks through a FAULT headline, so a
             # fault raised while the machine kept working still matches here,
             # and it is as strict about staleness as the bare state word was:

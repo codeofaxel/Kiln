@@ -459,7 +459,6 @@ class _GenerationAIToolsPlugin:
             from kiln.generation import (
                 GenerationAuthError,
                 GenerationError,
-                GenerationResult,
             )
             from kiln.preview_evidence import stage_file_for
 
@@ -477,28 +476,11 @@ class _GenerationAIToolsPlugin:
                 # stays on disk beside the STL (textures and materials live
                 # only there), and until 2026-08-28 nothing named it — the
                 # result path was overwritten and the source silently
-                # orphaned in a temp dir.
-                conversion = None
-                if result.format in ("obj", "glb"):
-                    source_format = result.format
-                    try:
-                        from kiln.format_conversion import convert_to_stl_recorded
+                # orphaned in a temp dir.  One helper for every door a
+                # generator's file arrives through, CLI included.
+                from kiln.format_conversion import convert_generated_result
 
-                        stl_path, conversion = convert_to_stl_recorded(
-                            result.local_path,
-                            tool="download_generated_model",
-                        )
-                        result = GenerationResult(
-                            job_id=result.job_id,
-                            provider=result.provider,
-                            local_path=stl_path,
-                            format="stl",
-                            file_size_bytes=os.path.getsize(stl_path),
-                            prompt=result.prompt,
-                        )
-                        _logger.info("Auto-converted %s to STL: %s", source_format.upper(), stl_path)
-                    except Exception as exc:
-                        _logger.warning("%s→STL conversion failed, keeping original: %s", source_format.upper(), exc)
+                result, conversion = convert_generated_result(result, tool="download_generated_model")
 
                 # Validate the mesh if it's a supported format.
                 validation = dimensions = size = None
@@ -752,26 +734,9 @@ class _GenerationAIToolsPlugin:
                 # Step 3.5: Auto-convert OBJ/GLB -> STL, with the receipt —
                 # same record the download tool attaches, so the print
                 # pipeline's makes tell the same story.
-                conversion = None
-                if result.format in ("obj", "glb"):
-                    source_format = result.format
-                    try:
-                        from kiln.format_conversion import convert_to_stl_recorded
+                from kiln.format_conversion import convert_generated_result
 
-                        stl_path, conversion = convert_to_stl_recorded(
-                            result.local_path,
-                            tool="generate_and_print",
-                        )
-                        result = GenerationResult(
-                            job_id=result.job_id,
-                            provider=result.provider,
-                            local_path=stl_path,
-                            format="stl",
-                            file_size_bytes=os.path.getsize(stl_path),
-                            prompt=result.prompt,
-                        )
-                    except Exception as exc:
-                        _logger.warning("%s->STL conversion failed: %s", source_format.upper(), exc)
+                result, conversion = convert_generated_result(result, tool="generate_and_print")
 
                 # Step 4: Comprehensive validation pipeline.
                 #
@@ -1012,7 +977,7 @@ class _GenerationAIToolsPlugin:
                     if upload_path.lower().endswith(".3mf") and os.path.isfile(upload_path):
                         start_kwargs["local_file_path"] = upload_path
                     print_result = adapter.start_print(file_name, **start_kwargs)
-                    _srv._note_print_started(adapter)
+                    _srv._note_print_started(adapter, print_result)
                     print_verdict = resolve_print_start(
                         adapter, print_result, sent_at=sent_at,
                         file_name=file_name, vendor_start_block=quiet_plan is None,

@@ -974,9 +974,13 @@ class _DesignReasoningToolsPlugin:
                     best_result = {"job": job.to_dict()}
                     break
 
-                # Download and analyze
+                # Download and analyze (a GLB or OBJ as the STL beside it)
                 try:
-                    dl = gen.download_result(job.id)
+                    from kiln.format_conversion import convert_generated_result
+
+                    dl, conversion = convert_generated_result(gen.download_result(job.id), tool="iterate_design")
+                    if conversion:
+                        iteration["conversion"] = conversion
                     analysis = analyze_mesh(dl.local_path)
                     iteration["analysis"] = {
                         "mesh_check_score": analysis.mesh_check_score,

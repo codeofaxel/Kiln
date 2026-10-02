@@ -258,6 +258,16 @@ def _resolve_support_style(support_mode: str, input_file: str) -> tuple[str | No
     return None, None
 
 
+def _echo_conversion(conversion: dict[str, Any] | None) -> None:
+    """Say that a generator's file was handed on as an STL, and where the
+    original still is (the record from ``kiln.format_conversion``)."""
+    if conversion:
+        click.echo(
+            f"  Converted from {conversion['from_format'].upper()} to STL; "
+            f"the original is kept at {conversion.get('original_path', 'its download folder')}"
+        )
+
+
 def _resolve_generation_provider(provider: str) -> GenerationProvider:  # noqa: F821
     """Resolve a generation provider by name.
 
@@ -2162,9 +2172,17 @@ def status(ctx: click.Context, json_mode: bool) -> None:
             except Exception as exc:
                 logger.debug("Failed to enrich printer info: %s", exc)  # Best-effort enrichment
 
+        # A print carrying a hardware plan: the next stop, or what goes in now.
+        from kiln.hardware_stops import observe as _observe_hardware
+
+        hardware = _observe_hardware(adapter, state, job)
+        if hardware:
+            extra["hardware"] = hardware
         click.echo(format_status(state.to_dict(), job.to_dict(), json_mode=json_mode, extra=extra))
         if cooldown and not json_mode:
             click.echo(f"  {cooldown['note']}")
+        if hardware and not json_mode:
+            click.echo("\n".join(_hardware_lines(hardware)))
 
         # Migration nag: warn if the active printer has no printer_model.
         # Incident #0 (2026-04-15) exposed that the field silently
@@ -3284,6 +3302,16 @@ def pause(ctx: click.Context, json_mode: bool) -> None:
         sys.exit(1)
 
 
+def _hardware_lines(note: dict) -> list[str]:
+    """A hardware-stop note (kiln.hardware_stops) as lines for the terminal."""
+    lines = [f"  Hardware: {note['say']}"]
+    lines += [f"    {n}. {step}" for n, step in enumerate(note.get("steps") or (), 1)]
+    if note.get("stage") == "now":
+        lines.append("    When every piece is in and sits level with or below the top of the print: "
+                     "kiln resume --hardware-in")
+    return lines
+
+
 @cli.command()
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.option(
@@ -3294,8 +3322,17 @@ def pause(ctx: click.Context, json_mode: bool) -> None:
         "Use when the printer's screen disagrees with what Kiln reports."
     ),
 )
+@click.option(
+    "--hardware-in",
+    "hardware_confirmed",
+    is_flag=True,
+    help=(
+        "At a hardware stop: every nut, magnet or bearing for this stop is in "
+        "and sits level with or below the top of the print."
+    ),
+)
 @click.pass_context
-def resume(ctx: click.Context, json_mode: bool, force: bool) -> None:
+def resume(ctx: click.Context, json_mode: bool, force: bool, hardware_confirmed: bool) -> None:
     """Resume a paused print job."""
     try:
         safety_printer = _resolve_emergency_printer_name(ctx)
@@ -3310,8 +3347,14 @@ def resume(ctx: click.Context, json_mode: bool, force: bool) -> None:
             )
             sys.exit(1)
         adapter = _get_adapter_from_ctx(ctx)
-        result = adapter.resume_print(force=force)
+        confirmed = {"hardware_confirmed": True} if hardware_confirmed else {}
+        result = adapter.resume_print(force=force, **confirmed)
         click.echo(format_action("resume", result.to_dict(), json_mode=json_mode))
+        if getattr(result, "code", None) == "HARDWARE_NOT_CONFIRMED":
+            # Waiting for a person's hands: the steps, and the way through.
+            if not json_mode and result.hardware:
+                click.echo("\n".join(_hardware_lines(result.hardware)[1:]))
+            sys.exit(3)
     except click.ClickException:
         raise
     except PrinterError as exc:
@@ -4814,10 +4857,13 @@ def wait(ctx: click.Context, interval: float, max_timeout: float, json_mode: boo
     """Block until the current print finishes.
 
     Polls printer status at the given interval.  Exits with code 0 on
-    successful completion, 1 on failure/cancellation/error.
+    successful completion, 1 on failure/cancellation/error, and 3 when the
+    print has stopped at a planned hardware stop and waits for a person.
+    A print carrying a hardware plan also says when a stop is close.
     """
     import time as _time
 
+    from kiln.hardware_stops import observe as _observe_hardware
     from kiln.printers.base import PrinterStatus
 
     try:
@@ -4828,6 +4874,18 @@ def wait(ctx: click.Context, interval: float, max_timeout: float, json_mode: boo
             state = adapter.get_state()
             job = adapter.get_job()
 
+            hardware = _observe_hardware(adapter, state, job, announce="chat")
+            if hardware and hardware["stage"] == "now":
+                if json_mode:
+                    click.echo(format_response("success", data={"final_state": "paused", "hardware": hardware},
+                                               json_mode=True))
+                else:
+                    click.echo("\n" + "\n".join(_hardware_lines(hardware)))
+                sys.exit(3)
+            if hardware and hardware["new"] and hardware["stage"] in ("coming_up", "missed", "passed_unseen"):
+                if not json_mode:
+                    click.echo("\n" + "\n".join(_hardware_lines(hardware)))
+
             # Terminal states
             if state.confirmed_state == PrinterStatus.IDLE:
                 # If we never saw a print, it's already idle
@@ -4836,7 +4894,11 @@ def wait(ctx: click.Context, interval: float, max_timeout: float, json_mode: boo
                     "file_name": job.file_name,
                     "elapsed_seconds": round(_time.time() - start, 1),
                 }
+                if hardware and hardware["stage"] == "after_print":
+                    data["hardware"] = hardware
                 click.echo(format_response("success", data=data, json_mode=json_mode))
+                if hardware and hardware["stage"] == "after_print" and not json_mode:
+                    click.echo("\n".join(_hardware_lines(hardware)))
                 return
 
             # ``effective_state``: a fault takes the headline while the machine goes
@@ -5136,7 +5198,7 @@ def monitor(ctx: click.Context, interval: float,
         # Resolve adapter early for friendly error messages, but the
         # health monitor itself looks the printer up via the registry
         # singleton when each tick runs.
-        _get_adapter_from_ctx(ctx)
+        adapter = _get_adapter_from_ctx(ctx)
         printer_name = ctx.obj.get("printer") or "default"
 
         # Build the policy directly from the CLI flags.  Wall-clock
@@ -5233,6 +5295,17 @@ def monitor(ctx: click.Context, interval: float,
                             click.echo(f"    [CRITICAL] {m.detail}")
                         elif m.severity == HealthSeverity.WARNING and m.detail:
                             click.echo(f"    [WARNING]  {m.detail}")
+
+                    # A print carrying a hardware plan: each moment once, as it comes.
+                    try:
+                        from kiln.hardware_stops import observe as _observe_hardware
+
+                        _hw = _observe_hardware(adapter, adapter.get_state(), adapter.get_job(), announce="chat")
+                    except Exception as _hw_exc:  # noqa: BLE001 -- never break a monitor tick
+                        logger.debug("hardware plan read skipped: %s", _hw_exc)
+                        _hw = None
+                    if _hw and _hw["new"]:
+                        click.echo("\n".join(_hardware_lines(_hw)))
 
                     # Smart-monitoring panel — surfaces the same Tier-1
                     # fields the MCP monitor_print one-shot reports.
@@ -9338,6 +9411,7 @@ def generate(
     """
     import time as _time
 
+    from kiln.format_conversion import convert_generated_result
     from kiln.generation import (
         GenerationAuthError,
         GenerationError,
@@ -9367,8 +9441,11 @@ def generate(
         if not wait_for or job.status == GenerationStatus.SUCCEEDED:
             if job.status == GenerationStatus.SUCCEEDED:
                 # Download the result for synchronous providers.
-                result = gen.download_result(
-                    job.id, output_dir=output_dir or os.path.join(tempfile.gettempdir(), "kiln_generated")
+                result, conversion = convert_generated_result(
+                    gen.download_result(
+                        job.id, output_dir=output_dir or os.path.join(tempfile.gettempdir(), "kiln_generated")
+                    ),
+                    tool="generate",
                 )
                 val = validate_mesh(result.local_path)
                 preview_data: dict[str, Any] | None = None
@@ -9396,6 +9473,7 @@ def generate(
                                 "data": {
                                     "job": job.to_dict(),
                                     "result": result.to_dict(),
+                                    "conversion": conversion,
                                     "validation": val.to_dict(),
                                     "preview": preview_data,
                                     "preview_notified": preview_notified,
@@ -9407,6 +9485,7 @@ def generate(
                 else:
                     click.echo(f"Generated: {result.local_path}")
                     click.echo(f"  Format: {result.format}  Size: {result.file_size_bytes:,} bytes")
+                    _echo_conversion(conversion)
                     click.echo(f"  Triangles: {val.triangle_count:,}  Manifold: {val.is_manifold}")
                     if preview_data:
                         click.echo(f"  Preview: {preview_data['path']}")
@@ -9453,8 +9532,11 @@ def generate(
                 click.echo(f"\r  Progress: {job.progress}%  ", nl=False)
 
             if job.status == GenerationStatus.SUCCEEDED:
-                result = gen.download_result(
-                    job.id, output_dir=output_dir or os.path.join(tempfile.gettempdir(), "kiln_generated")
+                result, conversion = convert_generated_result(
+                    gen.download_result(
+                        job.id, output_dir=output_dir or os.path.join(tempfile.gettempdir(), "kiln_generated")
+                    ),
+                    tool="generate",
                 )
                 val = validate_mesh(result.local_path)
                 preview_data: dict[str, Any] | None = None
@@ -9482,6 +9564,7 @@ def generate(
                                 "data": {
                                     "job": job.to_dict(),
                                     "result": result.to_dict(),
+                                    "conversion": conversion,
                                     "validation": val.to_dict(),
                                     "preview": preview_data,
                                     "preview_notified": preview_notified,
@@ -9494,6 +9577,7 @@ def generate(
                 else:
                     click.echo(f"\nGenerated: {result.local_path}")
                     click.echo(f"  Format: {result.format}  Size: {result.file_size_bytes:,} bytes")
+                    _echo_conversion(conversion)
                     click.echo(f"  Triangles: {val.triangle_count:,}  Manifold: {val.is_manifold}")
                     if preview_data:
                         click.echo(f"  Preview: {preview_data['path']}")
@@ -9603,6 +9687,7 @@ def generate_download(
 
     JOB_ID is the ID returned by 'kiln generate'.
     """
+    from kiln.format_conversion import convert_generated_result
     from kiln.generation import (
         GenerationAuthError,
         GenerationError,
@@ -9612,7 +9697,9 @@ def generate_download(
     try:
         gen = _resolve_generation_provider(provider)
 
-        result = gen.download_result(job_id, output_dir=output_dir)
+        result, conversion = convert_generated_result(
+            gen.download_result(job_id, output_dir=output_dir), tool="generate-download"
+        )
 
         validation = None
         if validate and result.format in ("stl", "obj"):
@@ -9622,12 +9709,15 @@ def generate_download(
             import json
 
             data: dict[str, Any] = {"result": result.to_dict()}
+            if conversion:
+                data["conversion"] = conversion
             if validation:
                 data["validation"] = validation.to_dict()
             click.echo(json.dumps({"status": "success", "data": data}, indent=2))
         else:
             click.echo(f"Downloaded: {result.local_path}")
             click.echo(f"  Format: {result.format}  Size: {result.file_size_bytes:,} bytes")
+            _echo_conversion(conversion)
             if validation:
                 click.echo(f"  Triangles: {validation.triangle_count:,}  Manifold: {validation.is_manifold}")
                 if not validation.valid:
@@ -9716,6 +9806,7 @@ def generate_and_print_cmd(
     """
     import time as _time
 
+    from kiln.format_conversion import convert_generated_result
     from kiln.generation import (
         GenerationAuthError,
         GenerationError,
@@ -9765,11 +9856,15 @@ def generate_and_print_cmd(
             sys.exit(1)
 
         # --- Step 2: Download ---
+        # A GLB is handed on as an STL: the slicer below refuses a GLB.
         output_dir = os.path.join(tempfile.gettempdir(), "kiln_generated")
-        result = gen.download_result(job.id, output_dir=output_dir)
+        result, conversion = convert_generated_result(
+            gen.download_result(job.id, output_dir=output_dir), tool="generate-and-print"
+        )
         val = validate_mesh(result.local_path)
         if not json_mode:
             click.echo(f"Generated: {result.local_path} ({result.file_size_bytes:,} bytes, {val.triangle_count:,} triangles)")
+            _echo_conversion(conversion)
 
         preview_data: dict[str, Any] | None = None
         preview_notified = False
@@ -9884,6 +9979,7 @@ def generate_and_print_cmd(
                         "status": "success",
                         "data": {
                             "generation": job.to_dict(),
+                            **({"conversion": conversion} if conversion else {}),
                             "validation": val.to_dict(),
                             "preview": preview_data,
                             "preview_notified": preview_notified,
