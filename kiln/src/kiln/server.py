@@ -3703,8 +3703,15 @@ def _retry_changes_the_object(overrides: dict[str, Any] | None, mesh_repaired: b
     )
 
 
-def _note_print_started(adapter: PrinterAdapter) -> None:
+def _note_print_started(adapter: PrinterAdapter, result: Any = None) -> None:
     """Tell the heater watchdog a print began — if it is watching *adapter*.
+
+    *result* is what ``adapter.start_print`` returned.  A start Kiln
+    refused before sending anything (``refused_before_send``) began no
+    print, and the watchdog is not told one did: marked busy, it would
+    stop cooling an idle printer until a print-ended notice that is never
+    coming.  A start that was sent is always notified, whatever the
+    adapter then said of it — the printer may be running it.
 
     The one door for this notification.  Every tool that starts a print
     used to call ``_get_heater_watchdog().notify_print_started()``
@@ -3720,6 +3727,8 @@ def _note_print_started(adapter: PrinterAdapter) -> None:
     once; a new start-side tool gets it by calling this instead of
     remembering to ask.
     """
+    if getattr(result, "refused_before_send", False) is True:
+        return
     try:
         if _is_heater_watchdog_machine(adapter):
             _get_heater_watchdog().notify_print_started()
@@ -8447,7 +8456,7 @@ def start_print(
         # the command; ``resolve_print_start`` needs it to know which it has.
         sent_at = time.monotonic()
         result = adapter.start_print(file_name, **print_kwargs)
-        _note_print_started(adapter)
+        _note_print_started(adapter, result)
 
         # Layer 5, the print watchdog, attaches inside adapter.start_print --
         # a started hook, see _install_print_lifecycle_hooks -- so it follows
@@ -13218,7 +13227,7 @@ def download_and_upload(
             )
             sent_at = time.monotonic()
             print_res = adapter.start_print(file_name)
-            _note_print_started(adapter)
+            _note_print_started(adapter, print_res)
             print_verdict = resolve_print_start(
                 adapter, print_res, sent_at=sent_at, file_name=file_name,
             )

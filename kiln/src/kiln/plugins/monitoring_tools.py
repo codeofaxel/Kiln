@@ -1501,7 +1501,7 @@ class _MonitoringToolsPlugin:
                 # the printer's last word about the previous one.
                 sent_at = time.monotonic()
                 print_result = adapter.start_print(file_name)
-                _srv._note_print_started(adapter)
+                _srv._note_print_started(adapter, print_result)
                 _srv._audit(
                     "start_monitored_print", "print_started", details={"file": file_name}
                 )
