@@ -186,7 +186,10 @@ def _box(shape: Any) -> tuple[float, ...]:
 
     box = Bnd_Box()
     BRepBndLib.AddOptimal_s(shape, box, False, False)
-    return box.Get()
+    # The two corners, not Get(): kernel 8.0 returns Get() as a struct its
+    # bindings cannot hand to Python (the same fix step_import carries).
+    lo, hi = box.CornerMin(), box.CornerMax()
+    return lo.X(), lo.Y(), lo.Z(), hi.X(), hi.Y(), hi.Z()
 
 
 def _faces(shape: Any) -> list[Any]:
