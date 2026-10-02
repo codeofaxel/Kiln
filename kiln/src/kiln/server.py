@@ -138,6 +138,7 @@ from kiln.cost_estimator import (
 )
 from kiln.errors import HostedUnavailableError
 from kiln.events import Event, EventBus, EventType
+from kiln.format_conversion import ARRIVAL_CONVERSIONS, convert_on_arrival
 
 try:
     from kiln.fulfillment import (
@@ -5491,6 +5492,33 @@ def _get_thingiverse() -> ThingiverseClient:
 
 # Marketplace registry (auto-registers adapters based on env vars)
 _marketplace_registry = MarketplaceRegistry()
+
+
+def _download_marketplace_file(
+    source: str, file_id: Any, dest_dir: str, *, file_name: str | None = None,
+) -> tuple[str | None, Any]:
+    """Download one file from the marketplace *source* names.
+
+    Returns ``(path, adapter)``; ``(None, adapter)`` when that marketplace
+    does not offer downloads.  Thingiverse is reached through its own client
+    (adapter ``None``), which leaves no note of its own, so the note is left
+    here.  Every single-file download door goes through this, so a file ID
+    is never sent to a marketplace it does not belong to.  (Until
+    2026-10-02 ``download_model`` sent every one to Thingiverse.)
+    """
+    if source != "thingiverse":
+        if _marketplace_registry.count == 0:
+            _init_marketplace_registry()
+        mkt = _marketplace_registry.get(source)
+        if not mkt.supports_download:
+            return None, mkt
+        named = {"file_name": file_name} if file_name else {}
+        return mkt.download_file(str(file_id), dest_dir, **named), mkt
+    path = _get_thingiverse().download_file(int(file_id), dest_dir, file_name=file_name)
+    from kiln.arrival import note_download
+
+    note_download("Thingiverse", path, file_id)
+    return path, None
 
 
 def _init_marketplace_registry() -> None:
@@ -13466,7 +13494,9 @@ def download_and_upload(
 
     When ``file_id`` is provided, downloads and uploads that single file.
     When ``model_id`` is provided without ``file_id``, downloads and
-    uploads all printable files (.stl, .gcode, .3mf) for the model.
+    uploads all printable files (.stl, .gcode, .3mf, .glb) for the model.
+    A GLB goes to the printer as an STL beside it, never as a GLB; the
+    upload's ``conversion`` names the original, which stays on disk.
 
     Args:
         file_id: File ID (from ``model_files`` results).  For Thingiverse
@@ -13514,8 +13544,9 @@ def download_and_upload(
                     code="NOT_FOUND",
                 )
 
-            # Filter to printable extensions
-            _printable_exts = {"stl", "gcode", "gco", "g", "3mf"}
+            # Filter to printable extensions.  A GLB counts: it is uploaded
+            # as the STL it is converted to.
+            _printable_exts = {"stl", "gcode", "gco", "g", "3mf"} | ARRIVAL_CONVERSIONS
             printable_files = [
                 mf
                 for mf in all_files
@@ -13523,7 +13554,7 @@ def download_and_upload(
             ]
             if not printable_files:
                 return _error_dict(
-                    f"No printable files (.stl, .gcode, .3mf) found for model {model_id} on {source}.",
+                    f"No printable files (.stl, .gcode, .3mf, .glb) found for model {model_id} on {source}.",
                     code="NOT_FOUND",
                 )
 
@@ -13531,7 +13562,9 @@ def download_and_upload(
             errors: list[dict] = []
             for mf in printable_files:
                 try:
-                    local_path = mkt.download_file(mf.id, _dl_dir)
+                    local_path, conversion = convert_on_arrival(
+                        mkt.download_file(mf.id, _dl_dir), tool="download_and_upload"
+                    )
                     upload_result = adapter.upload_file(local_path)
                     up_name = upload_result.file_name or os.path.basename(local_path)
                     uploaded.append(
@@ -13540,9 +13573,10 @@ def download_and_upload(
                             "file_name": up_name,
                             "local_path": local_path,
                             "upload": upload_result.to_dict(),
+                            **({"conversion": conversion} if conversion else {}),
                         }
                     )
-                except (MarketplaceError, PrinterError, RuntimeError) as exc:
+                except (MarketplaceError, PrinterError, RuntimeError, ValueError, OSError) as exc:
                     errors.append(
                         {
                             "file_id": mf.id,
@@ -13580,20 +13614,23 @@ def download_and_upload(
                 code="INVALID_INPUT",
             )
 
-        mkt = _marketplace_registry.get(source) if source != "thingiverse" else None
+        # Step 1: Download from the marketplace the file belongs to
+        local_path, mkt = _download_marketplace_file(source, file_id, _dl_dir)
+        if local_path is None:
+            return _error_dict(
+                f"{mkt.display_name} does not support direct downloads.",
+                code="UNSUPPORTED",
+            )
 
-        # Step 1: Download from marketplace
-        if mkt is not None:
-            if not mkt.supports_download:
-                return _error_dict(
-                    f"{mkt.display_name} does not support direct downloads.",
-                    code="UNSUPPORTED",
-                )
-            local_path = mkt.download_file(str(file_id), _dl_dir)
-        else:
-            # Fallback to legacy Thingiverse client
-            client = _get_thingiverse()
-            local_path = client.download_file(int(file_id), _dl_dir)
+        # Step 1.5: a GLB goes to the printer as an STL, never as a GLB.
+        try:
+            local_path, conversion = convert_on_arrival(local_path, tool="download_and_upload")
+        except (ValueError, OSError) as exc:
+            return _error_dict(
+                f"{os.path.basename(local_path)} could not be turned into an STL ({exc}), "
+                "so it was not sent to the printer.",
+                code="CONVERSION_FAILED",
+            )
 
         # Step 2: Upload to printer
         upload_result = adapter.upload_file(local_path)
@@ -13669,6 +13706,8 @@ def download_and_upload(
             "verification_status": "unverified",
             "auto_print_enabled": _AUTO_PRINT_MARKETPLACE,
         }
+        if conversion:
+            resp["conversion"] = conversion
 
         if auto_printed:
             resp["print"] = print_data

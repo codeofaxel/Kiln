@@ -234,6 +234,21 @@ def _slicer_sidecar(path: Path) -> bytes | None:
         return None
 
 
+def _stage_arrival(path: Path) -> str:
+    """Where *path* came from, as the JSON the upload carries — the same
+    ``kiln.arrival.v1`` block the inline stage's payload does — or ``""``
+    for a file Kiln made.  The /view page says it under "Your model"."""
+    try:
+        import json
+
+        from kiln.arrival import stage_block
+
+        block = stage_block(str(path))
+        return json.dumps(block, sort_keys=True) if block else ""
+    except Exception:  # noqa: BLE001 — furniture, never a failed link
+        return ""
+
+
 def _stage_key(sha: str, printer_id: str | None, slice_tag: str) -> str:
     """What the stage draws, as one tag: the file's bytes, the bed it stands
     on, and the slice this machine holds for it.  The link cache files a
@@ -458,6 +473,11 @@ def stage_link_for(
     # The slice is too: a re-slice between calls must not serve a link
     # still wearing the previous slice's tower.
     cache_key = _stage_key(sha, printer_id, slice_tag)
+    # Where the file came from rides the token too: a listing read after the
+    # first link must not leave the page crediting nobody for half an hour.
+    arrival = _stage_arrival(path)
+    if arrival:
+        cache_key += ":from:" + hashlib.sha256(arrival.encode("utf-8")).hexdigest()[:16]
     if bearer is not None:
         # Filed under who minted it as well, so a link made for another
         # credential is never handed back to a caller that named its own.
@@ -520,7 +540,7 @@ def stage_link_for(
             _inflight[cache_key] = upload
             threading.Thread(
                 target=_run_upload,
-                args=(upload, cache_key, path, token, printer_id, slice_tag),
+                args=(upload, cache_key, path, token, printer_id, slice_tag, arrival),
                 name="kiln-stage-link",
                 daemon=True,
             ).start()
@@ -558,7 +578,7 @@ def _record_outcome(path: Path, link: dict[str, Any] | None, reason: str) -> Non
 
 def _run_upload(
     upload: _Upload, cache_key: str, path: Path, token: str,
-    printer_id: str | None, slice_tag: str,
+    printer_id: str | None, slice_tag: str, arrival: str = "",
 ) -> None:
     """The thread behind one :class:`_Upload`.  Never raises."""
     global _slow_until
@@ -566,7 +586,7 @@ def _run_upload(
     link: dict[str, Any] | None = None
     reason = "unanswered"
     try:
-        link, reason = _upload(path, token, printer_id, slice_tag)
+        link, reason = _upload(path, token, printer_id, slice_tag, arrival)
     except Exception:  # noqa: BLE001 — a link is furniture, never a crash
         logger.debug("stage link upload failed", exc_info=True)
     quick = time.monotonic() - upload.started < _INLINE_WAIT_S
@@ -587,7 +607,7 @@ def _run_upload(
 
 
 def _upload(
-    path: Path, token: str, printer_id: str | None, slice_tag: str,
+    path: Path, token: str, printer_id: str | None, slice_tag: str, arrival: str = "",
 ) -> tuple[dict[str, Any] | None, str]:
     """Hand the bytes over; ``(link, "")`` or ``(None, reason)``.
 
@@ -616,7 +636,13 @@ def _upload(
                 files=files,
                 # The server canonicalises the claim and bakes it into the
                 # signed link, so the /view page draws THIS machine's bed.
-                data={"printer": printer_id} if printer_id else None,
+                # Where the file came from rides the same way, so the page
+                # can say it.  A server that predates the field ignores it.
+                data={
+                    **({"printer": printer_id} if printer_id else {}),
+                    **({"arrival": arrival} if arrival else {}),
+                }
+                or None,
                 timeout=_TIMEOUT_S,
             )
     except Exception as exc:  # noqa: BLE001 — any transport failure is a no-link

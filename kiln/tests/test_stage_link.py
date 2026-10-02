@@ -115,6 +115,49 @@ class TestStageLinkForOneMesh:
         assert stage_link.stage_link_for(path)["cached"] is False
         assert len(calls) == 2
 
+    def test_where_the_file_came_from_rides_the_upload(self, tmp_path, monkeypatch):
+        """The /view page says where a downloaded or generated model came
+        from only if the upload carries the note beside the file."""
+        import json
+
+        from kiln import arrival
+
+        calls = _wire(monkeypatch)
+        path = _stl(tmp_path / "part.stl")
+        noted = arrival.Arrival(kind=arrival.GENERATED, by="Meshy", prompt="a small dragon", real_size=False)
+        arrival.record(path, noted)
+
+        assert stage_link.stage_link_for(path)
+        assert json.loads(calls[0]["data"]["arrival"]) == {
+            "kind": "kiln.arrival.v1",
+            "came_from": 'Generated with Meshy from "a small dragon"',
+            "real_size": False,
+        }
+
+    def test_a_file_kiln_made_uploads_with_no_source(self, tmp_path, monkeypatch):
+        calls = _wire(monkeypatch)
+        monkeypatch.setattr(
+            "kiln.stage_plate.resolve_stage_plate",
+            lambda *a, **k: {"source": "printer", "printer_id": "prusa_mk4"},
+        )
+        assert stage_link.stage_link_for(_stl(tmp_path / "part.stl"))
+        assert calls[0]["data"] == {"printer": "prusa_mk4"}
+
+    def test_a_listing_read_later_is_a_new_link_not_a_stale_credit(self, tmp_path, monkeypatch):
+        from kiln import arrival
+
+        calls = _wire(monkeypatch)
+        path = _stl(tmp_path / "part.stl")
+        arrival.record(path, arrival.Arrival(kind=arrival.DOWNLOADED, by="FakeMarket", file_id="7"))
+        assert stage_link.stage_link_for(path)["cached"] is False
+        assert stage_link.stage_link_for(path)["cached"] is True
+        arrival.record(
+            path, arrival.Arrival(kind=arrival.DOWNLOADED, by="FakeMarket", name="Hinged box", creator="Ada")
+        )
+        assert stage_link.stage_link_for(path)["cached"] is False
+        assert len(calls) == 2
+        assert "Hinged box" in calls[1]["data"]["arrival"]
+
     def test_sixteen_poses_of_one_mesh_upload_once(self, tmp_path, monkeypatch):
         """The inspection-sheet case — the whole reason the cache is keyed on bytes."""
         calls = _wire(monkeypatch)
