@@ -18046,12 +18046,17 @@ def _served_wait_seconds(tool_name: str) -> float:
     return _SERVED_MAKE_WAIT_S if kind == "made" else _SERVED_WAIT_S
 
 
-def _pro_api_call(tool_name: str, _timeout: float | None = None, **kwargs) -> dict:
+def _pro_api_call(
+    tool_name: str, _timeout: float | None = None, _background: bool = False, **kwargs,
+) -> dict:
     """Call a hosted kiln-pro tool through the public REST API.
 
     ``_timeout`` is how long to wait for the answer.  Left out, it follows
     what the tool does (:func:`_served_wait_seconds`); a caller that must
     fail fast -- a check made on the way into a print -- passes its own.
+    ``_background`` marks a lookup the person did not reach for (a slice
+    asking for its printer's own figures): refused for want of a sign-in, it
+    is not counted as an account wall the person hit.
 
     Bearer-token resolution order:
       1. ``KILN_LICENSE_KEY`` env var (operator-supplied license)
@@ -18119,7 +18124,8 @@ def _pro_api_call(tool_name: str, _timeout: float | None = None, **kwargs) -> di
         try:
             from kiln.daily_stats import record_account_wall
 
-            record_account_wall(tool_name)
+            if not _background:
+                record_account_wall(tool_name)
         except Exception:
             pass
         required_tier = _PRO_TOOL_TIERS.get(tool_name, "")

@@ -105,6 +105,8 @@ class Need:
     why: str
     #: A sentence when the value was held under the printer's rating.
     held: str = ""
+    #: A sentence when a better figure could not be had, and why.
+    missing: str = ""
 
 
 @dataclass(frozen=True)
@@ -241,25 +243,27 @@ def material_needs(
     *,
     printer_id: str | None = None,
     label: str | None = None,
+    nozzle_mm: float | None = None,
 ) -> MaterialNeeds | None:
     """What *material* asks of the slicer on *printer_id*, or ``None`` when Kiln knows nothing of it.
 
     *material* is a caller's word for a filament -- a catalog id (``"tpu"``),
     a printer's spelling (``"PLA-CF"``), or a product (``"bambu_tpu_95a"``).
     *label* is the name the response should use; the material's own short
-    name when omitted.  Never raises.
+    name when omitted.  *nozzle_mm* is the nozzle the slice is for; the
+    printer's own profile's when omitted.  Never raises.
     """
     word = str(material or "").strip()
     if not word:
         return None
     try:
-        return _resolve(word, printer_id=printer_id, label=label)
+        return _resolve(word, printer_id=printer_id, label=label, nozzle_mm=nozzle_mm)
     except Exception:  # noqa: BLE001 -- a lookup must never fail a slice
         logger.debug("Material settings for %r could not be resolved", word, exc_info=True)
         return None
 
 
-def _resolve(word: str, *, printer_id: str | None, label: str | None) -> MaterialNeeds | None:
+def _resolve(word: str, *, printer_id: str | None, label: str | None, nozzle_mm: float | None) -> MaterialNeeds | None:
     from kiln.design_intelligence import get_brand_filament_profile
 
     product = get_brand_filament_profile(word.lower())
@@ -306,14 +310,22 @@ def _resolve(word: str, *, printer_id: str | None, label: str | None) -> Materia
     if bed is not None:
         bed, held = _hold(int(bed), limits.get("bed"), "bed", name)
         needs.append(Need("bed", (("bed_temperature", str(bed)), ("first_layer_bed_temperature", str(bed))), source, why, held))
-    flow, source, why = pick(
-        product.max_volumetric_speed_mm3s if product else None,
-        None,
-        slicing.get("max_volumetric_speed_mm3s"),
-        material_why=f"the most cautious figure slicer makers give {material_name}",
-    )
+    own_flow = product.max_volumetric_speed_mm3s if product else None
+    machine = _printer_melt(printer_id, nozzle_mm, catalog.material_id) if printer_id and own_flow is None else None
+    missing = ""
+    if own_flow is not None:
+        flow, source, why = own_flow, SOURCE_PRODUCT, f"{name}'s own settings"
+    elif machine and machine[0] is not None:
+        flow, source = machine[0], SOURCE_PRINTER
+        why = f"{BASIS_WORDS.get(machine[1], BASIS_WORDS['slicer_presets'])} {material_name} on the {machine[2]}"
+    else:
+        flow, source = slicing.get("max_volumetric_speed_mm3s"), SOURCE_MATERIAL
+        why = f"the most cautious figure slicer makers give {material_name}"
+        missing = machine[3] if machine else ""
     if flow:
-        needs.append(Need("flow", (("filament_max_volumetric_speed", f"{float(flow):g}"),), source, why))
+        needs.append(
+            Need("flow", (("filament_max_volumetric_speed", f"{float(flow):g}"),), source, why, missing=missing)
+        )
     fan, source, why = pick(
         None,
         on_printer.fan if on_printer else None,
@@ -336,6 +348,48 @@ def _resolve(word: str, *, printer_id: str | None, label: str | None) -> Materia
         flow_ceiling=float(flow) if flow else None,
         refusal=_refusal(printer_id, catalog.material_id),
     )
+
+
+#: How a printer's own figure was established, in a slice note's words.  The
+#: printer maker's slicer is never named: the class is the provenance.
+BASIS_WORDS = {
+    "maker": "the figure the printer's maker gives",
+    "slicer_presets": "the figure slicer presets give",
+}
+
+
+def _printer_melt(
+    printer_id: str, nozzle_mm: float | None, material_id: str,
+) -> tuple[float | None, str, str, str]:
+    """The printer's own melt rate for the material at the nozzle, how it was
+    established, the printer's name -- and, when no figure came, the sentence
+    that says why (empty when the table simply has none)."""
+    from kiln import _pro_melt_bridge as melt
+    from kiln.printer_intelligence import get_printer_intel
+
+    try:
+        intel = get_printer_intel(printer_id)
+    except KeyError:
+        return None, "", "", ""
+    if intel.id == "default":
+        return None, "", "", ""
+    nozzle = float(nozzle_mm) if nozzle_mm else _profile_nozzle(printer_id)
+    hit = melt.printer_melt_rate(intel.id, nozzle, material_id)
+    if hit is not None:
+        return hit[0], hit[1], intel.display_name, ""
+    why_not = melt.unanswered(intel.id, nozzle)
+    return None, "", intel.display_name, f"{why_not}." if why_not else ""
+
+
+def _profile_nozzle(printer_id: str) -> float:
+    """The nozzle the printer's own profile is written for; 0.4 mm without one."""
+    from kiln.slicer_profiles import get_slicer_profile
+
+    try:
+        raw = str(get_slicer_profile(printer_id).settings.get("nozzle_diameter", "0.4"))
+        return float(raw.replace(";", ",").split(",")[0])
+    except (KeyError, ValueError):
+        return 0.4
 
 
 def _limits(printer_id: str | None) -> dict[str, float]:
@@ -591,7 +645,7 @@ def _applied_sentence(needs: MaterialNeeds, applied: list[Need], kept: list[tupl
     )
     if kept:
         sentence += " Kept as stated: " + ", ".join(f"{k} {v}" for k, v in kept) + "."
-    held = [n.held for n in applied if n.held]
-    if held:
-        sentence += " " + " ".join(held)
+    after = [n.held for n in applied if n.held] + [n.missing for n in applied if n.missing]
+    if after:
+        sentence += " " + " ".join(after)
     return sentence

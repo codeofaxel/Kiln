@@ -1246,10 +1246,16 @@ def _forget_served_misses() -> None:
         ("kiln._pro_motion_bridge", "_misses"),
         ("kiln._pro_cutter_bridge", "_last_miss"),
         ("kiln._pro_nozzle_bridge", "_last_miss"),
+        ("kiln._pro_melt_bridge", "_last_miss"),
+        # Its answers too: a figure one test was served is not the next one's.
+        ("kiln._pro_melt_bridge", "_answers"),
     ):
         record = getattr(sys.modules.get(module), attr, None)
         if isinstance(record, dict):
             record.clear()
+    melt = sys.modules.get("kiln._pro_melt_bridge")
+    if melt is not None:
+        melt._service_down_until, melt._service_down_miss = 0.0, None
 
 
 @pytest.fixture(autouse=True)

@@ -515,7 +515,10 @@ def _material_settings(
     # weight table's "NYLON"), unless the ladder stood PLA in for a word it
     # had no row for: then the material's own name says what was asked.
     label = filament.filament_type if filament.source != SOURCE_DEFAULT else None
-    needs = material_needs(word, printer_id=origin.printer_id, label=label)
+    nozzle = str(settings.get("nozzle_diameter") or "").replace(";", ",").split(",")[0]
+    needs = material_needs(
+        word, printer_id=origin.printer_id, label=label, nozzle_mm=float(nozzle) if nozzle else None,
+    )
     if needs is None:
         return {}, unknown_material_report(filament.material)
     if needs.refusal is not None:
