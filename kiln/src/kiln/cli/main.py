@@ -3294,8 +3294,17 @@ def pause(ctx: click.Context, json_mode: bool) -> None:
         "Use when the printer's screen disagrees with what Kiln reports."
     ),
 )
+@click.option(
+    "--hardware-in",
+    "hardware_confirmed",
+    is_flag=True,
+    help=(
+        "At a hardware stop: every nut, magnet or bearing for this stop is in "
+        "and sits level with or below the top of the print."
+    ),
+)
 @click.pass_context
-def resume(ctx: click.Context, json_mode: bool, force: bool) -> None:
+def resume(ctx: click.Context, json_mode: bool, force: bool, hardware_confirmed: bool) -> None:
     """Resume a paused print job."""
     try:
         safety_printer = _resolve_emergency_printer_name(ctx)
@@ -3310,7 +3319,8 @@ def resume(ctx: click.Context, json_mode: bool, force: bool) -> None:
             )
             sys.exit(1)
         adapter = _get_adapter_from_ctx(ctx)
-        result = adapter.resume_print(force=force)
+        confirmed = {"hardware_confirmed": True} if hardware_confirmed else {}
+        result = adapter.resume_print(force=force, **confirmed)
         click.echo(format_action("resume", result.to_dict(), json_mode=json_mode))
     except click.ClickException:
         raise

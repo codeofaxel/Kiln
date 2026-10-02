@@ -6371,6 +6371,15 @@ def printer_status(
             "printer": printer_block,
             "job": job.to_dict(),
         }
+        # A print carrying a hardware plan: when the next stop comes, what
+        # goes in at it, or what goes in now that the print is done.  At both
+        # detail levels -- the lite read is the one polled through a print.
+        # Absent for an ordinary print.  See kiln.hardware_stops.
+        from kiln.hardware_stops import observe as _observe_hardware
+
+        hardware = _observe_hardware(adapter, state, job)
+        if hardware:
+            response["hardware"] = hardware
         # A cool-down a Kiln server left running (killed with the part fan
         # on) is finished from this read, the one every filament answer
         # names as its follow-up: fan off once the nozzle is at or below
@@ -7327,6 +7336,16 @@ def monitor_print(
         goal_line = _format_goal_line_for_monitor(effective_brief_id)
         if goal_line:
             lines.append(goal_line)
+        # A print carrying a hardware plan says, in its own line, when the
+        # next stop comes and what goes in -- or, at the stop, the steps.
+        from kiln.hardware_stops import observe as _observe_hardware
+
+        _hardware = _observe_hardware(adapter, state, job)
+        if _hardware:
+            lines.append(f"- Hardware: {_hardware['say']}")
+            lines.extend(f"  {n}. {step}" for n, step in enumerate(_hardware.get("steps") or (), 1))
+            if _hardware.get("resume"):
+                lines.append(f"  {_hardware['resume']}")
 
         lines.extend(
             [
@@ -10002,7 +10021,7 @@ def skip_print_objects(object_ids: list[str], plate_number: int = 1) -> dict:
 
 
 def _resume_print_on(
-    adapter: PrinterAdapter, target_name: str, *, force: bool = False,
+    adapter: PrinterAdapter, target_name: str, *, force: bool = False, hardware_confirmed: bool = False,
 ) -> dict:
     """Resume the print on *adapter*, refusing a latched machine.
 
@@ -10019,7 +10038,10 @@ def _resume_print_on(
     if block := _emergency_latch_error("resume_print", target_name):
         return block
 
-    result = adapter.resume_print(force=force)
+    # The person's word on a hardware stop rides only when given, so an
+    # adapter written before the stop existed keeps its two-argument resume.
+    confirmed = {"hardware_confirmed": True} if hardware_confirmed else {}
+    result = adapter.resume_print(force=force, **confirmed)
     # Stop this printer's pause keep-alive thread if one was running —
     # the print is back under firmware control and re-asserting targets
     # here would race with the resume preamble gcode.
@@ -10036,7 +10058,9 @@ def _resume_print_on(
 
 
 @mcp.tool()
-def resume_print(force: bool = False, printer_name: str | None = None) -> dict:
+def resume_print(
+    force: bool = False, printer_name: str | None = None, hardware_confirmed: bool = False,
+) -> dict:
     """Resume a paused print job.
 
     The printer must currently be in a paused state.  Resuming will return
@@ -10046,6 +10070,13 @@ def resume_print(force: bool = False, printer_name: str | None = None) -> dict:
     silently ignored the command reports a failure instead of a cheerful
     "Print resumed."
 
+    A print paused at a planned hardware stop (a pause written into the file
+    so a nut, a magnet or a bearing can go in) is refused with
+    ``code: "HARDWARE_NOT_CONFIRMED"`` and a ``hardware`` block saying what
+    goes in.  Tell the person, wait for them to say every piece is in and
+    sits level with or below the top of the print, then resume with
+    ``hardware_confirmed=true``.  Never pass it on your own judgement.
+
     Args:
         force: Send the resume even when Kiln believes the printer is not
             paused.  Use this when the printer's own screen disagrees with
@@ -10054,6 +10085,9 @@ def resume_print(force: bool = False, printer_name: str | None = None) -> dict:
             the wrong state word would leave you unable to recover the print.
         printer_name: Which printer to resume.  Omit for the default
             printer.  Pass the same name you paused with.
+        hardware_confirmed: The person has said every piece of hardware for
+            this stop is in and sits level with or below the top of the
+            print.  Only on their word.
     """
     if err := _check_auth("print"):
         return err
@@ -10075,7 +10109,7 @@ def resume_print(force: bool = False, printer_name: str | None = None) -> dict:
             adapter, target_name = _resolve_control_target(printer_name)
         except PrinterNotFoundError:
             return _unknown_printer_error(printer_name, "resume a print on")
-        return _resume_print_on(adapter, target_name, force=force)
+        return _resume_print_on(adapter, target_name, force=force, hardware_confirmed=hardware_confirmed)
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to resume print: {exc}. Check that the printer is in a paused state.")
     except Exception as exc:
@@ -14717,6 +14751,13 @@ def await_print_completion(
     Returns a dict with ``outcome`` (completed / failed / cancelled /
     timeout), final printer state, elapsed time, completion percentage
     history, and (when ``brief_id`` resolves) a ``design_goal`` block.
+
+    A print carrying a hardware plan (pauses written in for nuts, magnets or
+    bearings) also returns early with ``outcome: "hardware_stop"`` and a
+    ``hardware`` block: when a stop is a few minutes away, when the printer
+    has stopped for the parts, and when it went past a stop without
+    stopping.  Tell the person what the block says, then wait again.  A
+    finished print's ``hardware`` block names what goes in after the print.
     """
     if err := _check_auth("print"):
         return err
@@ -14850,6 +14891,28 @@ def await_print_completion(
                 )
                 last_pct = pct
 
+            # A print carrying a hardware plan comes back to the person at its
+            # moments: a stop close enough to get ready for, a stop gone past
+            # without stopping, and the stop itself -- every time, since a
+            # printer waiting there resumes only by a person's hands and
+            # waiting here would only run the clock out.
+            from kiln.hardware_stops import observe as _observe_hardware
+
+            hardware = _observe_hardware(adapter, state, job_progress)
+            if hardware and (
+                hardware["stage"] == "now"
+                or (hardware["new"] and hardware["stage"] in ("coming_up", "missed", "passed_unseen"))
+            ):
+                return {
+                    "success": True,
+                    "outcome": "hardware_stop",
+                    "hardware": hardware,
+                    "message": hardware["say"],
+                    "state": state.state.value,
+                    "elapsed_seconds": round(elapsed, 1),
+                    "progress_log": progress_log[-20:],
+                }
+
             # ``confirmed_state``: it looks through a FAULT headline, so a
             # fault raised while the machine kept working still matches here,
             # and it is as strict about staleness as the bare state word was:
@@ -14863,13 +14926,16 @@ def await_print_completion(
                 # covers every caller that polls, not just this tool, and it
                 # refuses a duration when the ending was noticed too late to
                 # have been watched; this call site could do neither.
-                return _attach_goal({
+                done = {
                     "success": True,
                     "outcome": "completed",
                     "state": state.state.value,
                     "elapsed_seconds": round(elapsed, 1),
                     "progress_log": progress_log[-20:],
-                })
+                }
+                if hardware and hardware["stage"] == "after_print":
+                    done["hardware"] = hardware
+                return _attach_goal(done)
             # ``confirmed_state``: it looks through a FAULT headline, so a
             # fault raised while the machine kept working still matches here,
             # and it is as strict about staleness as the bare state word was:

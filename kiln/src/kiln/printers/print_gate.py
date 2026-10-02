@@ -1399,6 +1399,12 @@ def run_adapter_gate(
         except _ReadBackFailed as exc:
             return _read_back_refusal(file_name, printer_id, str(exc), override)
     inspected = job if job is not None else fetched
+    # The file about to start may carry a hardware plan (a pause for a nut or
+    # a magnet); read it from this copy, the one certain to be that file, before
+    # a fetched copy is deleted below.  Filed only if the start succeeds.
+    from kiln.hardware_stops import stage as _stage_hardware_plan
+
+    _stage_hardware_plan(adapter, file_name, inspected)
     material_id = _resolve_material(kwargs)
     if inspected and read_quiet_start_contract(inspected) is not None:
         quiet = evaluate_quiet_start(adapter, inspected, kwargs)

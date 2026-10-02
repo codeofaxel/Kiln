@@ -1479,6 +1479,21 @@ class JobProgress:
         return data
 
 
+def hardware_stop_waiting(adapter: Any) -> dict[str, Any] | None:
+    """The stop *adapter*'s printer is paused at, waiting for hardware, or ``None``.
+
+    A function rather than a method, so a stand-in that borrows the resume
+    template keeps working.  Fails OPEN like every resume check: an error here
+    never stands between a person and their own print.
+    """
+    try:
+        from kiln.hardware_stops import stop_awaiting_hands
+
+        return stop_awaiting_hands(adapter)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def read_status(adapter: Any) -> tuple[PrinterState, JobProgress]:
     """Read both halves of a printer's status and make them agree.
 
@@ -1828,6 +1843,18 @@ class PrintResult:
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return asdict(self)
+
+
+@dataclass
+class HardwareStopRefusal(PrintResult):
+    """A resume refused because the printer is waiting at a hardware stop.
+
+    Carries the stop itself (what goes in, how), so every door that resumes
+    can show the person what they are being asked to confirm.
+    """
+
+    code: str = "HARDWARE_NOT_CONFIRMED"
+    hardware: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -3249,6 +3276,21 @@ class PrinterAdapter(ABC):
                 _logging.getLogger(__name__).debug(
                     "monitor-twin print-start note failed", exc_info=True
                 )
+            # A job carrying a hardware plan (a nut or a magnet that goes in
+            # during a pause) is filed against this machine here, so status,
+            # watch and resume can say when each stop comes and what goes in.
+            # A start without one clears the last print's.  See
+            # kiln.hardware_stops.
+            try:
+                from kiln.hardware_stops import note_print_started as _note_hardware_plan
+
+                _note_hardware_plan(self, file_name, kwargs)
+            except Exception:  # noqa: BLE001 — the plan never affects a print
+                import logging as _logging
+
+                _logging.getLogger(__name__).debug(
+                    "hardware plan print-start note failed", exc_info=True
+                )
             # The plate now holds a part.  Recorded here, at the one door
             # every print passes through, with the file's height when Kiln
             # can read it, so home_axes and park_head can refuse a travel
@@ -3388,7 +3430,7 @@ class PrinterAdapter(ABC):
             PrinterError: If the printer cannot pause.
         """
 
-    def resume_print(self, *, force: bool = False) -> PrintResult:
+    def resume_print(self, *, force: bool = False, hardware_confirmed: bool = False) -> PrintResult:
         """Resume a previously paused print job, and CHECK that it took.
 
         TEMPLATE METHOD — adapters must NOT override this; they implement
@@ -3432,14 +3474,32 @@ class PrinterAdapter(ABC):
         detector is for, which is why the success message declines to claim
         the print is progressing and says how to find out.
 
+        **The hardware stop.**  A print paused at a stop its plan wrote for a
+        nut, a magnet or a bearing (:mod:`kiln.hardware_stops`) is waiting for
+        a person's hands, not for a command.  It resumes only with
+        *hardware_confirmed* -- the person's word that every piece is in and
+        sits level with or below the top of the print -- and *force* does not
+        stand in for that word: it answers a different question.  Anything
+        uncertain about the stop lets the resume go on.
+
         Raises:
             PrinterError: If the printer cannot resume.
         """
+        waiting = hardware_stop_waiting(self)
+        if waiting is not None and not hardware_confirmed:
+            from kiln.hardware_stops import refusal_message
+
+            return HardwareStopRefusal(success=False, message=refusal_message(waiting), hardware=waiting)
         if not force:
             refusal = self._not_paused_refusal()
             if refusal is not None:
                 return refusal
-        return self._verify_resume_took(self._resume_print_impl())
+        result = self._verify_resume_took(self._resume_print_impl())
+        if waiting is not None and result.success:
+            from kiln.hardware_stops import note_resumed
+
+            note_resumed(self, waiting)
+        return result
 
     def _not_paused_refusal(self) -> PrintResult | None:
         """The refusal to return before resuming, or ``None`` to go ahead.
