@@ -312,6 +312,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **A GLB that arrives tiny is read in metres, the unit its format uses.** Kiln tells you the size it would be and how to set it; it never rescales on its own.
 
+- **A MyMiniFactory file download goes to MyMiniFactory.** It used to ask Thingiverse.
+
 - **Parts that nearly fill the bed now print instead of being turned away.**
 
 - **If a part's brim won't fit on the bed, Kiln tells you before printing and suggests a size that does.**

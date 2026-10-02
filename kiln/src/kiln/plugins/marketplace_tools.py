@@ -393,8 +393,8 @@ class _MarketplaceToolsPlugin:
                 _THINGIVERSE_DEPRECATION_NOTICE,
                 _check_auth,
                 _check_disk_space,
+                _download_marketplace_file,
                 _error_dict,
-                _get_thingiverse,
                 _init_marketplace_registry,
                 _marketplace_registry,
                 logger,
@@ -500,19 +500,18 @@ class _MarketplaceToolsPlugin:
                         )
                     return dl_resp
 
-                # Single-file download (legacy Thingiverse path)
+                # Single-file download, from the marketplace it belongs to
                 if file_id is None:
                     return _error_dict(
                         "Either file_id or model_id must be provided.",
                         code="INVALID_INPUT",
                     )
-                client = _get_thingiverse()
-                path = client.download_file(file_id, dest_dir, file_name=file_name)
-                # The bare client is not an adapter, so its download leaves
-                # no note of its own.
-                from kiln.arrival import note_download
-
-                note_download("Thingiverse", path, file_id)
+                path, mkt = _download_marketplace_file(source, file_id, dest_dir, file_name=file_name)
+                if path is None:
+                    return _error_dict(
+                        f"{mkt.display_name} does not support direct downloads.",
+                        code="UNSUPPORTED",
+                    )
                 single = {
                     "success": True,
                     "file_id": file_id,
@@ -524,9 +523,12 @@ class _MarketplaceToolsPlugin:
                         "with validate_generated_mesh before printing. Prefer "
                         "proven models with high download counts."
                     ),
-                    "deprecation_notice": _THINGIVERSE_DEPRECATION_NOTICE,
                 }
-                _arrive(single, [single])
+                if source == "thingiverse":
+                    single["deprecation_notice"] = _THINGIVERSE_DEPRECATION_NOTICE
+                # The listing is read when the model is named, as the
+                # whole-model download does.
+                _arrive(single, [single], mkt=mkt, model_id=model_id)
                 saved = single["local_path"]
                 single["message"] = (
                     f"{single['came_from']} Saved to {saved}." if "came_from" in single else f"Downloaded to {saved}"

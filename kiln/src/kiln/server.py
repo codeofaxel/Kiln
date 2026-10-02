@@ -5494,6 +5494,33 @@ def _get_thingiverse() -> ThingiverseClient:
 _marketplace_registry = MarketplaceRegistry()
 
 
+def _download_marketplace_file(
+    source: str, file_id: Any, dest_dir: str, *, file_name: str | None = None,
+) -> tuple[str | None, Any]:
+    """Download one file from the marketplace *source* names.
+
+    Returns ``(path, adapter)``; ``(None, adapter)`` when that marketplace
+    does not offer downloads.  Thingiverse is reached through its own client
+    (adapter ``None``), which leaves no note of its own, so the note is left
+    here.  Every single-file download door goes through this, so a file ID
+    is never sent to a marketplace it does not belong to.  (Until
+    2026-10-02 ``download_model`` sent every one to Thingiverse.)
+    """
+    if source != "thingiverse":
+        if _marketplace_registry.count == 0:
+            _init_marketplace_registry()
+        mkt = _marketplace_registry.get(source)
+        if not mkt.supports_download:
+            return None, mkt
+        named = {"file_name": file_name} if file_name else {}
+        return mkt.download_file(str(file_id), dest_dir, **named), mkt
+    path = _get_thingiverse().download_file(int(file_id), dest_dir, file_name=file_name)
+    from kiln.arrival import note_download
+
+    note_download("Thingiverse", path, file_id)
+    return path, None
+
+
 def _init_marketplace_registry() -> None:
     """Register marketplace adapters based on available credentials."""
     if _THINGIVERSE_TOKEN:
@@ -13587,20 +13614,13 @@ def download_and_upload(
                 code="INVALID_INPUT",
             )
 
-        mkt = _marketplace_registry.get(source) if source != "thingiverse" else None
-
-        # Step 1: Download from marketplace
-        if mkt is not None:
-            if not mkt.supports_download:
-                return _error_dict(
-                    f"{mkt.display_name} does not support direct downloads.",
-                    code="UNSUPPORTED",
-                )
-            local_path = mkt.download_file(str(file_id), _dl_dir)
-        else:
-            # Fallback to legacy Thingiverse client
-            client = _get_thingiverse()
-            local_path = client.download_file(int(file_id), _dl_dir)
+        # Step 1: Download from the marketplace the file belongs to
+        local_path, mkt = _download_marketplace_file(source, file_id, _dl_dir)
+        if local_path is None:
+            return _error_dict(
+                f"{mkt.display_name} does not support direct downloads.",
+                code="UNSUPPORTED",
+            )
 
         # Step 1.5: a GLB goes to the printer as an STL, never as a GLB.
         try:

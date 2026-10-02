@@ -299,6 +299,9 @@ _NOT_AN_ARRIVAL = {
     ("marketplaces/thingiverse.py", "download_file"): (
         "the adapter itself: the doors that call it hand its file on"
     ),
+    ("server.py", "_download_marketplace_file"): (
+        "the shared single-file fetch: the doors that call it hand its file on"
+    ),
 }
 
 
