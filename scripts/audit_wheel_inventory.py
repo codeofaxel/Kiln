@@ -72,7 +72,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-
 # Repo root is the parent of this script's directory.  Default
 # ``--package-dir`` is ``<repo>/kiln`` (where ``pyproject.toml`` lives).
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -661,9 +660,11 @@ def _render_human(
 def _render_derived(derived: DerivedResult) -> str:
     """The derived half, with the one edit that fixes each finding."""
     lines = [
-        f"Derived from the source tree: {derived.source_files} files, "
-        f"{derived.code_reads} read by code beside itself, "
-        f"{derived.excluded} excluded with a reason.",
+        (
+            f"Derived from the source tree: {derived.source_files} files, "
+            f"{derived.code_reads} read by code beside itself, "
+            f"{derived.excluded} excluded with a reason."
+        ),
     ]
     if derived.missing:
         lines.append("")

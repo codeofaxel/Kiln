@@ -387,12 +387,14 @@ from kiln.thingiverse import (
 )
 from kiln.tiers_and_terms import (
     AGENT_ACCOUNT_NUDGE,
+    PRICING_URL,
     TIERS_AND_TERMS,
     UPGRADE_NUDGE_SCHEMA_VERSION,
     account_required_message,
     session_expired_message,
     signin_hint_fields,
     tier_required_message,
+    upgrade_link,
     upgrade_nudge_block,
 )
 from kiln.tool_annotations import creates, read_only
@@ -18328,7 +18330,7 @@ def _pro_api_call(tool_name: str, _timeout: float | None = None, **kwargs) -> di
             "code": "KILN_ACCOUNT_NOT_PAIRED",
             "tool": tool_name,
             "required_tier": required_tier or "free",
-            "upgrade_url": "https://kiln3d.com/pricing",
+            "upgrade_url": upgrade_link(tool_name),
             "why": "signed_out",
             **signin_hint_fields(),
         }
@@ -18486,8 +18488,11 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                 description = (
                     f"{description}\n\n"
                     f"Requires Kiln {tier.capitalize()}. "
-                    f"Pricing: https://kiln3d.com/pricing"
+                    f"Pricing: {PRICING_URL}"
                 )
+        # The link an agent relays carries the tool that sent the person,
+        # so a visit to the pricing page can be counted back to it.
+        description = description.replace(PRICING_URL, upgrade_link(name))
         # Metered tools carry their real monthly allowance; unmetered ones
         # carry no block at all, and get no entry, so the account wall can
         # only ever state a number the server actually charges.

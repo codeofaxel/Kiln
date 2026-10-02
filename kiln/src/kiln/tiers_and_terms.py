@@ -392,6 +392,26 @@ def upgrade_nudge_block(
     }
 
 
+PRICING_URL = "https://kiln3d.com/pricing"
+
+
+def upgrade_link(tool: str = "", src: str = "agent") -> str:
+    """The pricing page, tagged with where the person came from.
+
+    A bare ``kiln3d.com/pricing`` arrives looking like every other visit,
+    so nothing could ever say which tool's refusal sent someone there.
+    The tag names the surface (``agent``, the served-tool stubs a local
+    agent reads) and the tool, which the pricing page can record.  Same
+    format on every surface: ``?src=<surface>&tool=<name>``.
+    """
+    from urllib.parse import urlencode
+
+    params = {"src": src}
+    if tool:
+        params["tool"] = tool
+    return f"{PRICING_URL}?{urlencode(params)}"
+
+
 def _names_tier(text: str, tier_name: str) -> bool:
     """True when *text* already names *tier_name* (case-insensitively)."""
     return tier_name.lower() in (text or "").lower()
@@ -426,8 +446,10 @@ __all__ = [
     "SIGNIN_COMMAND",
     "SUBSTITUTION_LINE",
     "TIERS_AND_TERMS",
+    "PRICING_URL",
     "UPGRADE_NUDGE_SCHEMA_VERSION",
     "account_required_message",
+    "upgrade_link",
     "free_allowance_phrase",
     "session_expired_message",
     "signed_out_message",

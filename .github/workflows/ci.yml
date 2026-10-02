@@ -110,6 +110,17 @@ jobs:
       - name: Core capabilities work on a default install
         run: python3 scripts/audit_clean_install.py
 
+      # The wheel carries every file the package tracks and every file the
+      # code reads beside itself (derived from the tree, not a list).  Until
+      # 2026-10-02 this ran only at publish, against a hand-written list, and
+      # pro_tool_manifest.json -- read by server.py at every start -- was on
+      # neither that list nor package-data, so no release ever shipped it.
+      - name: Wheel carries every file the code reads
+        if: always()
+        run: |
+          pip install build
+          python3 scripts/audit_wheel_inventory.py
+
   test:
     needs: changes
     if: needs.changes.outputs.code == 'true'
