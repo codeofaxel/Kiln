@@ -192,8 +192,14 @@ class TestTheSliceIsSetForTheMaterial:
             ini = _handed(seen)
             for key in ("temperature", "first_layer_temperature", "bed_temperature", "max_fan_speed"):
                 assert ini[key] == bundled[key], (material, key)
-            assert "filament_max_volumetric_speed" not in ini
-            assert result.to_dict()["filament"]["settings"]["outcome"] == PROFILE
+            # The one thing the profile leaves to the slicer -- whose default
+            # is no limit at all -- is the material's melt rate on this printer.
+            assert "filament_max_volumetric_speed" not in bundled
+            want = material_needs("PLA", printer_id="bambu_a1").values()["filament_max_volumetric_speed"]
+            assert ini["filament_max_volumetric_speed"] == want
+            report = result.to_dict()["filament"]["settings"]
+            assert report["outcome"] == PROFILE
+            assert "where it leaves the rest to the slicer, at most" in report["note"]
 
     def test_a_stated_setting_is_kept_and_named(self, tmp_path):
         seen: dict[str, Any] = {}

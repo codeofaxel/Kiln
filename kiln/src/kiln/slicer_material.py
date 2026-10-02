@@ -48,7 +48,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -466,15 +466,19 @@ def apply_material_needs(
 
     if not needs.needs:
         return unknown_material_report(needs.label)
-    if needs.material_id == PROFILE_MATERIAL and not needs.product and _within(settings, needs):
-        return MaterialReport(
-            material=needs.label,
-            outcome=PROFILE,
-            note=(
-                f"{needs.label}: the printer profile's own temperatures, cooling and speeds, "
-                f"which are tuned for {needs.label}."
-            ),
+    native = needs.material_id == PROFILE_MATERIAL and not needs.product and _within(settings, needs)
+    if native:
+        # The profile's tuning stands where it speaks.  Where it is silent the
+        # slicer's own default answers -- for the melt rate, no limit at all,
+        # tuned for no machine -- so the material's figure is written there.
+        silent = tuple(n for n in needs.needs if not settings.get(CONCEPT_KEYS[n.concept][0]))
+        own = (
+            f"{needs.label}: the printer profile's own temperatures, cooling and speeds, "
+            f"which are tuned for {needs.label}."
         )
+        if not silent:
+            return MaterialReport(material=needs.label, outcome=PROFILE, note=own)
+        needs = replace(needs, needs=silent)
 
     floor = start_floor(settings)
     floor_is_kilns = floor is not None and settings.get("start_gcode") == floor
@@ -499,10 +503,14 @@ def apply_material_needs(
     if floor_is_kilns and any(k in CONCEPT_KEYS["nozzle"] + CONCEPT_KEYS["bed"] for k, *_ in changed):
         settings["start_gcode"] = start_floor(settings) or settings["start_gcode"]
 
+    note = _applied_sentence(needs, applied, kept)
+    if native:
+        rest = note.removeprefix(f"Set for {needs.label}: ")
+        note = f"{own[:-1]}; where it leaves the rest to the slicer, {rest}" if applied else own
     return MaterialReport(
         material=needs.label,
-        outcome=APPLIED,
-        note=_applied_sentence(needs, applied, kept),
+        outcome=PROFILE if native else APPLIED,
+        note=note,
         changed=tuple(changed),
         kept=tuple(kept),
     )
