@@ -148,9 +148,9 @@ def load_mesh_triangles(mesh_path: str) -> np.ndarray:
     that the painting door relies on when it hands the same triangles to
     ``compose_painted_3mf``.
     """
-    import trimesh
+    from kiln.mesh_frame import load_mesh
 
-    mesh = trimesh.load(mesh_path, force="mesh", process=False)
+    mesh = load_mesh(mesh_path, force="mesh", process=False)
     return np.asarray(mesh.triangles, dtype=np.float64)
 
 

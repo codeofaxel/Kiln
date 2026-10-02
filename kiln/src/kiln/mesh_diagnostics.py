@@ -180,7 +180,8 @@ def _load_mesh(file_path: str) -> Any:
     :raises ValueError: If the file does not exist, has an unsupported
         extension, or contains no geometry.
     """
-    trimesh = _require_trimesh()
+    _require_trimesh()  # raises with an install hint when trimesh is missing
+    from kiln.mesh_frame import load_mesh
 
     path = Path(file_path)
     if not path.is_file():
@@ -197,9 +198,9 @@ def _load_mesh(file_path: str) -> Any:
     # (including any inverted normals, degenerate faces, etc.).
     # This is critical for diagnostics — we need to see defects,
     # not have them silently fixed on load.
-    loaded = trimesh.load(str(path), force="mesh", process=False)
+    loaded = load_mesh(str(path), force="mesh", process=False)
 
-    # trimesh.load with force="mesh" returns a Trimesh for single-mesh
+    # A load with force="mesh" returns a Trimesh for single-mesh
     # files and concatenates scenes.  Verify we got usable geometry.
     if not hasattr(loaded, "faces") or len(loaded.faces) == 0:
         raise ValueError("File contains no mesh geometry.")
