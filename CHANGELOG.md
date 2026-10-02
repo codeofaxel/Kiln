@@ -306,6 +306,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Parts that nearly fill the bed now print instead of being turned away.**
+
+- **If a part's brim won't fit on the bed, Kiln tells you before printing and suggests a size that does.**
+
+- **STEP files get the same brim and support decisions as mesh files, wherever you slice.**
+
 - **Your Bambu's screen shows the same print time Kiln does.**
 
 - **A STEP file sent straight to slicing shows on the 3D stage, and one too big for your bed says so plainly.**
