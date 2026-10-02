@@ -118,6 +118,14 @@ CURSOR = {
     "clientInfo": {"name": "cursor-vscode", "version": "1.0.0"},
 }
 
+# OpenClaw's own agent, as its client code builds it: a fixed name and
+# version, and no elicitation — it cannot draw an approval dialog.
+OPENCLAW = {
+    "protocolVersion": "2025-11-25",
+    "capabilities": {},
+    "clientInfo": {"name": "openclaw-bundle-mcp", "version": "0.0.0"},
+}
+
 NO_ENV: dict[str, str] = {}
 # What the desktop app's Code tab exports to a Kiln server it spawns,
 # read from a live process, minus everything not consulted.
@@ -264,6 +272,7 @@ def test_no_session_is_no_host_not_unknown():
         ({"name": "Visual Studio Code", "version": "1.105.0"}, "VS Code"),
         ({"name": "codex-mcp-client", "version": "0.40.0"}, "Codex"),
         ({"name": "openclaw", "version": "1.0.0"}, "OpenClaw"),
+        (OPENCLAW["clientInfo"], "OpenClaw"),
         ({"name": "Windsurf", "version": "1.0.0"}, "Windsurf"),
         ({"name": "probe-host", "version": "9.9"}, ""),
     ],
@@ -430,6 +439,152 @@ def test_a_real_connection_records_the_host_it_names(pipeline, monkeypatch):
         "claude-code model:unknown": 1,
         "claude-code elicitation": 1,
     }
+
+
+# ---------------------------------------------------------------------------
+# The chat app: what the AGENT says, never something the handshake carries
+# ---------------------------------------------------------------------------
+
+
+def test_openclaws_own_agent_cannot_draw_a_dialog():
+    host = agent_host.describe(SimpleNamespace(), _ctx(OPENCLAW), env=NO_ENV)
+    assert host is not None
+    assert (host.label, host.version) == ("openclaw-bundle-mcp", "0.0.0")
+    assert host.elicitation is False and host.apps is False
+
+
+def test_the_chat_app_an_agent_reports_is_a_fact_beside_its_host(pipeline):
+    agent_host.record_once(SimpleNamespace(), _ctx(OPENCLAW))
+    assert agent_host.reported_chat_app() == ""
+    assert agent_host.note_chat_app("Telegram") == "telegram"
+    assert agent_host.reported_chat_app() == "telegram"
+    # Said again, it is the same fact: one process, one count.
+    assert agent_host.note_chat_app("telegram") == "telegram"
+
+    facts = daily_stats._read()["agent_host_facts"]
+    assert facts["openclaw-bundle-mcp chat:telegram"] == 1
+    # The host itself is not counted a second time for it.
+    assert daily_stats._read()["agent_hosts"] == {"openclaw-bundle-mcp": 1}
+
+
+@pytest.mark.parametrize(
+    ("said", "kept"),
+    [
+        ("WhatsApp", "whatsapp"),
+        (" iMessage ", "imessage"),
+        ("Microsoft Teams", "teams"),
+        ("ms-teams", "teams"),
+        ("Google Chat", "googlechat"),
+        ("Lark", "feishu"),
+        ("WeCom", "wecom"),
+        ("Nextcloud Talk", "nextcloudtalk"),
+        ("Zalo personal", "zalo"),
+        ("Control UI", "webchat"),
+        ("phone call", "voicecall"),
+        # A name outside the list is "other": the list is closed, so no
+        # word of an agent's own choosing ever leaves the machine.
+        ("my-secret-project-room", "other"),
+        ("https://t.me/someone", "other"),
+    ],
+)
+def test_a_chat_app_is_one_of_a_closed_list(pipeline, said, kept):
+    agent_host.record_once(SimpleNamespace(), _ctx(OPENCLAW))
+    assert agent_host.note_chat_app(said) == kept
+    assert kept in agent_host.CHAT_APPS
+    assert daily_stats._read()["agent_host_facts"][f"openclaw-bundle-mcp chat:{kept}"] == 1
+
+
+@pytest.mark.parametrize("said", [None, "", "   ", 7])
+def test_no_chat_app_said_is_nothing_recorded(pipeline, said):
+    agent_host.record_once(SimpleNamespace(), _ctx(OPENCLAW))
+    assert agent_host.note_chat_app(said) == ""
+    assert agent_host.reported_chat_app() == ""
+    assert not any(" chat:" in key for key in daily_stats._read()["agent_host_facts"])
+
+
+def test_a_chat_app_with_no_host_on_record_is_remembered_but_not_counted(pipeline):
+    """No session, no host: there is no row to put the fact beside, and a
+    fact about a host the day never named is one the dashboard drops."""
+    assert agent_host.note_chat_app("telegram") == "telegram"
+    assert agent_host.reported_chat_app() == "telegram"
+    assert daily_stats._read()["agent_host_facts"] == {}
+
+
+def test_a_person_is_taken_to_be_in_a_chat_app_only_on_evidence(pipeline):
+    """The stand-in for "on a phone": a host that relays chat apps, or an
+    agent that said which app.  An editor or a desktop chat is neither."""
+    assert agent_host.person_is_in_a_chat_app() is False
+    agent_host.record_once(SimpleNamespace(), _ctx(CURSOR))
+    assert agent_host.person_is_in_a_chat_app() is False
+    # ...until its agent says the person is writing from a chat app.
+    agent_host.note_chat_app("whatsapp")
+    assert agent_host.person_is_in_a_chat_app() is True
+
+    agent_host.reset_recorded()
+    assert agent_host.person_is_in_a_chat_app() is False
+    agent_host.record_once(SimpleNamespace(), _ctx(OPENCLAW))
+    assert agent_host.person_is_in_a_chat_app() is True
+
+
+def test_the_list_covers_the_apps_a_relay_host_documents():
+    """Every chat app in the list is its own token, and the ones people
+    most often text an agent from are all there."""
+    assert len(set(agent_host.CHAT_APPS)) == len(agent_host.CHAT_APPS)
+    for app in ("telegram", "whatsapp", "discord", "imessage", "signal", "slack", "sms", "wechat", "webchat"):
+        assert app in agent_host.CHAT_APPS
+    for spelling, word in agent_host._CHAT_APP_SPELLINGS.items():
+        assert word in agent_host.CHAT_APPS and spelling not in agent_host.CHAT_APPS
+
+
+def test_the_hosted_server_keeps_no_chat_app(pipeline, monkeypatch):
+    """One hosted process answers every account: a chat app remembered
+    there would be one caller's, read back to the next."""
+    agent_host.record_once(SimpleNamespace(), _ctx(OPENCLAW))
+    monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+    assert agent_host.note_chat_app("telegram") == "telegram"
+    assert agent_host.reported_chat_app() == ""
+    assert not any(" chat:" in key for key in daily_stats._read()["agent_host_facts"])
+
+
+def test_every_chat_app_key_fits_the_dashboards_budget():
+    longest_label = "a" * 40 + " " + "b" * 40
+    for app in agent_host.CHAT_APPS:
+        assert len(f"{longest_label} {agent_host.FACT_CHAT_PREFIX}{app}") <= agent_host.KEY_BUDGET
+        assert agent_host.token(app) == app
+
+
+def test_get_started_is_where_an_agent_says_the_chat_app(pipeline, monkeypatch):
+    """Through a live session and the real tool: an agent on OpenClaw says
+    the person is on Telegram, and the fact lands beside its host."""
+    import asyncio
+
+    from mcp.types import Implementation
+
+    from kiln import server
+
+    for var in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "ANTHROPIC_MODEL"):
+        monkeypatch.delenv(var, raising=False)
+    info = Implementation(name="openclaw-bundle-mcp", version="0.0.0")
+
+    def _in_process_client():
+        try:
+            from mcp import Client
+        except ImportError:
+            from mcp.shared.memory import create_connected_server_and_client_session
+
+            return create_connected_server_and_client_session(server.mcp, client_info=info)
+        return Client(server.mcp, client_info=info)
+
+    async def _one_call():
+        async with _in_process_client() as client:
+            return await client.call_tool("get_started", {"chat_app": "Telegram"})
+
+    result = asyncio.run(_one_call())
+    assert not getattr(result, "isError", getattr(result, "is_error", False)), result
+    data = daily_stats._read()
+    assert data["agent_hosts"] == {"openclaw-bundle-mcp": 1}
+    assert data["agent_host_facts"]["openclaw-bundle-mcp chat:telegram"] == 1
+    assert agent_host.reported_chat_app() == "telegram"
 
 
 def test_the_dispatch_chokepoint_records_the_host():

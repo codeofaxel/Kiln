@@ -275,8 +275,8 @@ def compute_mesh_bbox(mesh_path: str) -> dict[str, float] | None:
             # No parseable <mesh> geometry (e.g. a gcode-carrying 3MF)
             # — fall through to trimesh as a last resort.
         # Fallback for .obj / .glb (and unparseable .3mf) via trimesh
-        import trimesh  # type: ignore[import-not-found]
-        mesh = trimesh.load(str(path), force="mesh")
+        from kiln.mesh_frame import load_mesh
+        mesh = load_mesh(str(path), force="mesh")
         if mesh is None or not hasattr(mesh, "bounds"):
             return None
         bounds = mesh.bounds

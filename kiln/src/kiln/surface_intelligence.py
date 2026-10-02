@@ -79,10 +79,10 @@ def _parse_mesh(path: str) -> list[dict[str, Any]]:
     if not p.exists():
         raise FileNotFoundError(f"Mesh file not found: {path}")
 
-    import trimesh
+    from kiln.mesh_frame import load_mesh
 
     try:
-        mesh = trimesh.load(path, force="mesh", process=False)
+        mesh = load_mesh(path, force="mesh", process=False)
         triangles = mesh.triangles
     except Exception as exc:
         raise ValueError(f"Mesh parse error ({suffix}): {exc}") from exc

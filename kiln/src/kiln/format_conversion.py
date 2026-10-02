@@ -123,9 +123,12 @@ def convert_to_stl_recorded(
     without a record becomes impossible to write by accident — the pair
     is the only thing this function returns.
     """
+    from kiln.arrival import carry
     from kiln.generation.validation import convert_to_stl
 
     stl_path = convert_to_stl(input_path)
+    # The STL is the same model, so it came from the same place.
+    carry(input_path, stl_path)
     return stl_path, format_conversion_record(
         from_path=input_path,
         to_path=stl_path,

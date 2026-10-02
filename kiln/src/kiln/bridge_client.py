@@ -741,6 +741,10 @@ class AccountAsk:
     #: The names of the card's fields the post carried (:class:`AskCard`,
     #: plus ``display_name`` and ``asked_from``), for the audit row.
     card_sent: tuple[str, ...] = ()
+    #: How many of the person's devices the server alerts about a waiting
+    #: ask, when it said: ``0`` is nobody has alerts on, ``None`` is a
+    #: server that did not say — unknown, never worded as "none".
+    alert_devices: int | None = None
 
 
 #: The bounds of the card's fields, the route's own.
@@ -854,12 +858,15 @@ class AccountAnswer:
     """``GET /api/print-authority/may-i-print``, in the fields read here."""
 
     allowed: bool
-    #: ``authority.kind`` — ``"approval"`` or ``"machine_window"`` when allowed.
+    #: ``authority.kind`` — ``"approval"``, ``"machine_window"`` or
+    #: ``"machine_always"`` when allowed.
     kind: str = ""
     id: str = ""
     grantor: str = ""
     expires_at: float | None = None
     via: str = ""
+    #: ``authority.issued_at_epoch`` — when the person gave it.
+    issued_at: float | None = None
     #: ``pending.id`` / ``pending.state`` — the newest ask for these bytes
     #: on this printer, when the server has one.
     pending_id: str = ""
@@ -968,15 +975,37 @@ def _epoch(value: Any) -> float | None:
     return parsed.timestamp()
 
 
+#: The header that names this machine to the account routes: the same id
+#: an ask carries as ``machine_fingerprint``.  A window a person opens for
+#: "this machine" is granted to that id, so a read that does not carry it
+#: is a read from no machine in particular, and is answered as one.
+_MACHINE_HEADER = "X-Kiln-Heartbeat-Device"
+
+
+def _machine_id() -> str:
+    """This install's device id, or ``""``.  Never raises."""
+    try:
+        from kiln.device import get_device_fingerprint
+
+        return str(get_device_fingerprint() or "").strip()
+    except Exception:  # noqa: BLE001 — a header is never worth failing a request over
+        return ""
+
+
 def _account_call(method: str, path: str, bearer: str, **kwargs: Any) -> tuple[int, dict[str, Any]] | None:
     """One request to the account routes: ``(status, body)``, or ``None``
-    when the server could not be reached.  Never raises."""
+    when the server could not be reached.  Carries the bearer and the
+    machine's id (:data:`_MACHINE_HEADER`).  Never raises."""
     import requests
 
+    headers = {"Authorization": f"Bearer {bearer}"}
+    machine = _machine_id()
+    if machine:
+        headers[_MACHINE_HEADER] = machine
     try:
         resp = requests.request(
             method, f"{_api_base()}{_ACCOUNT_ROUTE}{path}",
-            headers={"Authorization": f"Bearer {bearer}"}, timeout=_ACCOUNT_TIMEOUT_S, **kwargs,
+            headers=headers, timeout=_ACCOUNT_TIMEOUT_S, **kwargs,
         )
     except Exception as exc:  # noqa: BLE001 — offline, DNS, TLS, a timeout
         logger.debug("account: %s %s unreachable: %s", method, path, type(exc).__name__)
@@ -1059,6 +1088,7 @@ def ask_the_account(
     if memo is not None:
         return AccountAsk(
             id=memo.id, expires_at=memo.expires_at, repeat=True, picture_sent=memo.picture_sent, posted=False,
+            alert_devices=memo.alert_devices,
         )
     bearer = account_bearer()
     if not bearer:
@@ -1116,12 +1146,21 @@ def ask_the_account(
         repeat=bool(held.get("repeat")),
         picture_sent=picture is not None,
         card_sent=tuple(sorted(extra)),
+        alert_devices=_device_count(held.get("alert_devices")),
     )
     with _ask_lock:
         _asks[_ask_key(file_sha256, printer_name)] = ask
     with contextlib.suppress(Exception):
         _observe_in_background(_api_base(), bearer, nonce)
     return ask
+
+
+def _device_count(value: Any) -> int | None:
+    """The server's ``alert_devices`` as a count, or ``None`` when it sent
+    none or something that is not one (a bool is not a count)."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
 
 
 def withdraw_ask(file_sha256: str, printer_name: str) -> tuple[str, bool] | None:
@@ -1180,9 +1219,101 @@ def read_the_account(*, file_sha256: str, printer_name: str) -> AccountAnswer | 
         grantor=str(authority.get("grantor") or ""),
         expires_at=_epoch(authority.get("expires_at")),
         via=str(authority.get("via") or ""),
+        issued_at=float(issued) if isinstance((issued := authority.get("issued_at_epoch")), (int, float)) else None,
         pending_id=str(pending.get("id") or ""),
         pending_state=str(pending.get("state") or ""),
     )
+
+
+#: ``authority.kind`` for always allow turned on from the account page: a
+#: standing yes for this machine on one printer, with no end.
+KIND_MACHINE_ALWAYS = "machine_always"
+
+
+def read_always_allow(printer_name: str) -> AccountAnswer | None:
+    """``GET /api/print-authority/may-i-print?printer_name=`` with no file:
+    whether the account holds a standing yes for this machine on this
+    printer.  Reads the same fields :func:`read_the_account` reads.
+    ``None`` when not signed in or the server did not answer.  Never
+    raises."""
+    if not printer_name:
+        return None
+    bearer = account_bearer()
+    if not bearer:
+        return None
+    answered = _account_call("GET", "/may-i-print", bearer, params={"printer_name": printer_name})
+    if answered is None:
+        return None
+    status, data = answered
+    if not (200 <= status < 300):
+        return None
+    authority = data.get("authority") if isinstance(data.get("authority"), dict) else {}
+    return AccountAnswer(
+        allowed=data.get("allowed") is True,
+        kind=str(authority.get("kind") or ""),
+        id=str(authority.get("id") or ""),
+        grantor=str(authority.get("grantor") or ""),
+        via=str(authority.get("via") or ""),
+        issued_at=float(issued) if isinstance((issued := authority.get("issued_at_epoch")), (int, float)) else None,
+    )
+
+
+def always_allow_grants() -> list[dict[str, Any]] | None:
+    """``GET /api/print-authority/delegations``, kept to the live
+    always-allow grants made to THIS machine: each ``{"id", "printer",
+    "grantor", "issued_at"}``.  Reads ``delegations[].id``, ``.always``,
+    ``.live``, ``.grantee``, ``.printers``, ``.grantor`` and
+    ``.issued_at_epoch``.  ``None`` when not signed in or the server did
+    not answer — which is not the same as an empty list.  Never raises."""
+    bearer = account_bearer()
+    machine = _machine_id()
+    if not bearer or not machine:
+        return None
+    answered = _account_call("GET", "/delegations", bearer)
+    if answered is None:
+        return None
+    status, data = answered
+    rows = data.get("delegations")
+    if not (200 <= status < 300) or not isinstance(rows, list):
+        return None
+    mine: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict) or row.get("always") is not True or row.get("live") is not True:
+            continue
+        printers = row.get("printers")
+        if str(row.get("grantee") or "") != f"machine:{machine.lower()}":
+            continue
+        if not (isinstance(printers, list) and len(printers) == 1 and str(printers[0]).strip()):
+            continue
+        issued = row.get("issued_at_epoch")
+        mine.append({
+            "id": str(row.get("id") or ""), "printer": str(printers[0]).strip(),
+            "grantor": str(row.get("grantor") or ""),
+            "issued_at": float(issued) if isinstance(issued, (int, float)) else None,
+        })
+    return [g for g in mine if g["id"]]
+
+
+def revoke_on_account(grant_id: str, *, reason: str = "") -> bool:
+    """``POST /api/print-authority/delegations/{id}/revoke`` with
+    ``reason``: this machine is closing a standing yes the account holds.
+    True when the server closed it, or says it was already closed or is
+    not there; False when it could not be told.  Never raises."""
+    if not grant_id:
+        return True
+    bearer = account_bearer()
+    if not bearer:
+        return False
+    from urllib.parse import quote
+
+    answered = _account_call(
+        "POST", f"/delegations/{quote(str(grant_id), safe='')}/revoke", bearer,
+        json={"reason": reason} if reason else {},
+    )
+    if answered is None:
+        return False
+    status, data = answered
+    return 200 <= status < 300 or data.get("error") in ("delegation_revoked", "delegation_unknown")
 
 
 def record_start(*, authority_id: str, kind: str, file_sha256: str, printer_name: str) -> bool:

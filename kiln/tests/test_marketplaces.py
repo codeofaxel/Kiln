@@ -691,6 +691,27 @@ class TestMyMiniFactoryAdapterErrors:
 
 
 class TestMyMiniFactoryParseHelpers:
+    # The live API's own shape (the #3DBenchy listing, 2026-10-01): the
+    # license is a phrase in ``license``; ``licenses`` holds boolean flags.
+    _LIVE = {
+        "id": 6544, "name": "#3DBenchy", "url": "/object/6544",
+        "designer": {"name": "CreativeTools.se"},
+        "license": "Download - Share - Maintain License - Credit - Remix - Noncommercial",
+        "licenses": [
+            {"type": "share", "value": True},
+            {"type": "commercial-use", "value": False},
+        ],
+    }
+
+    def test_the_license_is_the_phrase_never_a_flag(self):
+        phrase = self._LIVE["license"]
+        assert MyMiniFactoryAdapter._parse_detail(self._LIVE).license == phrase
+        assert MyMiniFactoryAdapter._parse_summary(self._LIVE).license == phrase
+
+    def test_flags_alone_name_no_license(self):
+        flags_only = {k: v for k, v in self._LIVE.items() if k != "license"}
+        assert MyMiniFactoryAdapter._parse_detail(flags_only).license == ""
+
     def test_parse_summary_license_as_string(self):
         data = {
             "id": 1, "name": "X", "url": "/x",

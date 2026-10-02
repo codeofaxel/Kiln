@@ -541,15 +541,27 @@ class _UtilityToolsPlugin:
         # ------------------------------------------------------------------
 
         @mcp.tool()
-        def get_started() -> dict:
+        def get_started(chat_app: str | None = None) -> dict:
             """Quick-start guide for AI agents using Kiln.
 
             Returns an onboarding summary: what Kiln is, how to discover
             its tools, core workflows, and the most useful tools to call
             first.  Call this at the start of a session if you're
             unfamiliar with the available capabilities.
+
+            Args:
+                chat_app: The chat app the person is writing to you from,
+                    when there is one (``telegram``, ``discord``,
+                    ``whatsapp``, ``imessage``, ``signal``, ``slack``,
+                    ``wechat``, etc.).  Say it once per session; leave it
+                    out when they are typing in this app itself.  Kiln
+                    uses it to lead with the way of approving a print
+                    that suits someone on a phone.
             """
             import kiln.server as _srv
+            from kiln.agent_host import note_chat_app
+
+            note_chat_app(chat_app)
 
             # Live tool count — authoritative number of MCP tools this
             # session can actually call (public Kiln + kiln-pro if installed

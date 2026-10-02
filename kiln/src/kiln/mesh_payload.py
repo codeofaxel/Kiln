@@ -715,6 +715,8 @@ def mesh_to_viewer_payload(
 
     try:
         import trimesh
+
+        from kiln.mesh_frame import load_mesh
     except ImportError:
         raise ImportError(
             "Kiln's 3D stage needs trimesh to read the mesh, and it is "
@@ -731,7 +733,7 @@ def mesh_to_viewer_payload(
         # One path everywhere, so what the tests read is what a user reads.
         loaded = _load_3mf_stdlib(path)
     else:
-        loaded = trimesh.load(str(path))
+        loaded = load_mesh(str(path))
     if isinstance(loaded, trimesh.Scene):
         # The Scene path bakes per-part colors (a multicolor 3MF's whole
         # point) into vertex colors while flattening — force="mesh" loses

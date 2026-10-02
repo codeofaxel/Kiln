@@ -1292,7 +1292,10 @@ from OCP.STEPCAFControl import STEPCAFControl_Reader
 from OCP.StlAPI import StlAPI_Writer
 from OCP.TCollection import TCollection_ExtendedString
 from OCP.TDataStd import TDataStd_Name
-from OCP.TDF import TDF_LabelSequence
+try:
+    from OCP.TDF import TDF_LabelSequence
+except ImportError:  # OCP 8.0 moved the collection types into OCP.collections
+    from OCP.collections import Sequence_TDF_Label as TDF_LabelSequence
 from OCP.TopAbs import TopAbs_ShapeEnum
 from OCP.TopExp import TopExp_Explorer
 from OCP.TDocStd import TDocStd_Document
@@ -1854,7 +1857,10 @@ BRepGProp.SurfaceProperties_s(shape, area)
 # numbers exist to avoid.  AddOptimal, not Add — see ExactGeometry.size_mm.
 box = Bnd_Box()
 BRepBndLib.AddOptimal_s(shape, box, True, False)
-xmin, ymin, zmin, xmax, ymax, zmax = box.Get()
+# The two corners, not Get(): OCP 8.0 returns Get() as a struct its bindings
+# cannot hand to Python, and the corners read the same on 7.9 and 8.0.
+lo, hi = box.CornerMin(), box.CornerMax()
+xmin, ymin, zmin, xmax, ymax, zmax = lo.X(), lo.Y(), lo.Z(), hi.X(), hi.Y(), hi.Z()
 
 print("KILN_RESULT:" + json.dumps({{
     "volume_mm3": vol.Mass(),

@@ -5769,6 +5769,13 @@ class PrinterAdapter(ABC):
             getattr(self.capabilities, "can_snapshot", False)
         )
 
+    #: Whether every machine this backend drives leaves the factory with a
+    #: camera of its own.  ``True`` only where that is so; ``None`` where
+    #: the backend cannot say, because the camera -- if there is one -- is
+    #: whatever its owner plugged into the print server.  ``can_snapshot``
+    #: says a picture can be ASKED for; this says a camera is THERE.
+    camera_fitted_at_factory: bool | None = None
+
     @property
     def snapshot_source(self) -> str | None:
         """``"user_supplied"``, ``"printer"``, or ``None`` when there is no camera."""

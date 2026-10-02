@@ -780,11 +780,13 @@ def cli_gate(
     refusal = block.get("error") if isinstance(block.get("error"), dict) else {}
     code = str(refusal.get("code") or CODE_NOT_CONFIRMED)
     message = str(refusal.get("message") or block)
-    if code == CODE_NOT_CONFIRMED:
+    if code in (CODE_NOT_CONFIRMED, "ALWAYS_ALLOW_LOOK_FIRST"):
         # A person typing at their own terminal can be shown the print
         # (or, with a token, reminded what is on record) and asked.
         # Nobody at the terminal gets the refusal below.  See
-        # kiln.cli.print_gate.
+        # kiln.cli.print_gate.  The same when always allow is on and the
+        # bed has not been looked at: the person starting this print is
+        # here to ask, which is better than a frame for them to judge.
         from kiln.cli.print_gate import confirm_print_at_terminal
 
         if confirm_print_at_terminal(
@@ -815,7 +817,23 @@ def _standing_window_after_gate(json_mode: bool) -> dict[str, Any] | None:
         if w is None:
             return None
         block = consent_window_note.block_for_window(w, close_hint=f"run `kiln consent revoke {w.id}`")
-        if not json_mode:
+        if w.always:
+            from kiln.print_consent import unasked_look_noted
+            from kiln.server import _resolve_effective_printer_name
+
+            look = unasked_look_noted(cleared.printer_name or _resolve_effective_printer_name(None))
+            if look is not None:
+                evidence = look.evidence()
+                block["bed_check"] = {**evidence, "note": consent_window_note.bed_check_line(evidence)}
+        if not json_mode and w.always:
+            click.echo(
+                f"Always allow is on for {consent_windows.describe_scope(w.scope)}: starting without asking. "
+                f"Turn it off with: kiln consent revoke {w.id}"
+            )
+            checked = (block.get("bed_check") or {}).get("note")
+            if checked:
+                click.echo(checked)
+        elif not json_mode:
             facts = consent_windows.describe(w)
             click.echo(
                 f"Standing window {w.id} covers {facts['scope']} until {facts['until_clock']} "
@@ -3969,8 +3987,9 @@ def plate_status_cmd(printer_name, json_mode) -> None:
 def plate_clear_cmd(note, printer_name, json_mode) -> None:
     """You have looked: the plate is empty. Record it.
 
-    A person's statement, never an agent's -- there is no MCP tool for
-    this on purpose. The plate stays clear until the next print starts, so
+    A person's statement, never an agent's. (In a chat, an assistant can
+    pass on your own words that the bed is clear; that is recorded as
+    passed on, not as said here.) The plate stays clear until the next print starts, so
     home and park stop asking whether a part stands in the head's row. A Z
     home that presses the nozzle onto the plate still asks every time
     (kiln home --plate-clear): the record cannot see a print started from
@@ -10953,12 +10972,12 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
     try:
         from kiln import consent_windows as _cw
 
-        _live = [_cw.describe(w) for w in _cw.live_windows()]
+        _live = [_cw.describe(w) for w in _cw.standing_now()]
         checks.append({
             "name": "standing_consent_windows",
             "ok": True,
             "detail": (
-                "; ".join(f"{w['id']} {w['scope']} until {w['until']} via {w['opened_via']}" for w in _live)
+                "; ".join(f"{w['id']} {w['summary']} via {w['opened_via']}" for w in _live)
                 + " — prints there start without asking; close with `kiln consent revoke <id>`"
                 if _live
                 else "none open: every print asks you"

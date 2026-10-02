@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -2404,6 +2406,158 @@ class TestScaleCheckFires:
         )
 
         assert not result.get("repaired"), "a 2mm part must not be rescaled"
+
+
+# ---------------------------------------------------------------------------
+# Tests — units are judged on the measured size, in any unit
+# ---------------------------------------------------------------------------
+
+
+def _closed_box_stl(
+    tmp_dir: Path,
+    x: float,
+    y: float,
+    z: float,
+    *,
+    offset: float = 0.0,
+) -> str:
+    """A closed 12-triangle box as a binary STL, corner at (offset, offset, offset)."""
+    o = offset
+    v = [
+        (o, o, o), (o + x, o, o), (o + x, o + y, o), (o, o + y, o),
+        (o, o, o + z), (o + x, o, o + z), (o + x, o + y, o + z), (o, o + y, o + z),
+    ]
+    faces = [
+        (0, 2, 1), (0, 3, 2), (4, 5, 6), (4, 6, 7), (0, 1, 5), (0, 5, 4),
+        (1, 2, 6), (1, 6, 5), (2, 3, 7), (2, 7, 6), (3, 0, 4), (3, 4, 7),
+    ]
+    data = bytearray(b"\x00" * 80) + struct.pack("<I", len(faces))
+    for face in faces:
+        data += struct.pack("<3f", 0.0, 0.0, 0.0)
+        for i in face:
+            data += struct.pack("<3f", *v[i])
+        data += struct.pack("<H", 0)
+    path = tmp_dir / f"box_{x:g}_{y:g}_{z:g}_{offset:g}.stl"
+    path.write_bytes(bytes(data))
+    return str(path)
+
+
+def _flat_sheet_stl(tmp_dir: Path, size: float, *, offset: float = 0.0) -> str:
+    """A tilted sheet with no thickness: a 5 x 5 grid on z = 0.37x + 0.61y.
+
+    The slope and the offset are chosen so the coordinates are not exactly
+    representable as 32-bit floats: written into the STL, they round, and
+    far from the origin that rounding gives the sheet a measurable sliver
+    of thickness — the case the position allowance exists for.
+    """
+    n = 5
+    grid = [
+        [(offset + size * i / (n - 1), offset + size * j / (n - 1)) for j in range(n)]
+        for i in range(n)
+    ]
+    point = {
+        (i, j): (x, y, 0.37 * x + 0.61 * y)
+        for i, row in enumerate(grid)
+        for j, (x, y) in enumerate(row)
+    }
+    faces = []
+    for i in range(n - 1):
+        for j in range(n - 1):
+            faces.append((point[i, j], point[i + 1, j], point[i + 1, j + 1]))
+            faces.append((point[i, j], point[i + 1, j + 1], point[i, j + 1]))
+    data = bytearray(b"\x00" * 80) + struct.pack("<I", len(faces))
+    for face in faces:
+        data += struct.pack("<3f", 0.0, 0.0, 0.0)
+        for vertex in face:
+            data += struct.pack("<3f", *vertex)
+        data += struct.pack("<H", 0)
+    path = tmp_dir / f"sheet_{size:g}_{offset:g}.stl"
+    path.write_bytes(bytes(data))
+    return str(path)
+
+
+def _unit_check(result: dict[str, Any]) -> dict[str, Any] | None:
+    return next((c for c in result["checks"] if c["name"] == "unit_check"), None)
+
+
+class TestUnitsAreJudgedOnTheMeasuredSize:
+    """The units question reads the size itself, never the rounded readout.
+
+    ``dimensions_mm`` is rounded to two decimals for reading.  Judged from it,
+    a 4 mm part saved in metres (0.004) measured 0.0 and was called print-ready
+    with no word about units, and a 50 mm part saved in inches was offered back
+    as 50.038 mm.  A verdict that the size is not printable sat beside "ready
+    to print" in the same report, and a thin plate saved in metres was called
+    flat before its units were asked about at all.
+    """
+
+    def test_a_part_written_in_metres_is_rescaled_however_small(self, tmp_path: Path) -> None:
+        result = _invoke_tool(_closed_box_stl(tmp_path, 0.004, 0.004, 0.004))
+
+        scaled = [c for c in result["checks"] if c["name"] == "auto_scale"]
+        assert scaled and "0.004mm → 4mm" in scaled[0]["details"]
+        assert result["model_info"]["largest_dimension_mm"] == pytest.approx(4.0, rel=1e-5)
+        assert result["ready_to_print"] is True
+
+    def test_an_inch_file_is_offered_its_true_size(self, tmp_path: Path) -> None:
+        side = 50 / 25.4
+        details = _unit_check(_invoke_tool(_closed_box_stl(tmp_path, side, side, side)))["details"]
+
+        assert "inches → 50mm" in details
+        assert "50.038" not in details
+
+    def test_the_inline_reader_measures_the_size_too(self, tmp_path: Path) -> None:
+        """The reader used when the analysis module cannot load rounds as well."""
+        stl = _closed_box_stl(tmp_path, 0.004, 0.004, 0.004)
+        with (
+            patch("kiln.generation.validation.analyze_mesh", side_effect=ImportError),
+            patch("kiln.generation.validation.validate_mesh", side_effect=ImportError),
+            patch("kiln.printability.analyze_printability", side_effect=ImportError),
+            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
+        ):
+            result = _invoke_tool(stl)
+
+        scaled = [c for c in result["checks"] if c["name"] == "auto_scale"]
+        assert scaled and "0.004mm → 4mm" in scaled[0]["details"]
+        assert result["model_info"]["largest_dimension_mm"] == pytest.approx(4.0, rel=1e-5)
+
+    def test_a_size_no_printer_makes_as_it_stands_is_not_ready(self, tmp_path: Path) -> None:
+        """0.5 could be 500 mm, 5 mm or 12.7 mm; as it stands it is half a millimetre."""
+        result = _invoke_tool(_closed_box_stl(tmp_path, 0.5, 0.5, 0.5))
+
+        check = _unit_check(result)
+        assert check["passed"] is False and check["severity"] == "error"
+        assert result["ready_to_print"] is False
+        # The summary cut at the first "." and said the part "measures 0."
+        assert "measures 0.5mm" in result["summary"]
+
+    def test_a_part_bigger_than_every_printer_is_not_ready(self, tmp_path: Path) -> None:
+        result = _invoke_tool(_closed_box_stl(tmp_path, 1500, 1500, 1500))
+
+        assert _unit_check(result)["severity"] == "error"
+        assert result["ready_to_print"] is False
+
+    def test_a_thin_plate_written_in_metres_is_not_called_flat(self, tmp_path: Path) -> None:
+        """A 30 x 30 x 0.8 mm plate saved in metres is 0.0008 thick."""
+        result = _invoke_tool(_closed_box_stl(tmp_path, 0.03, 0.03, 0.0008))
+
+        assert "flat" not in result["summary"].lower()
+        assert result["model_info"]["largest_dimension_mm"] == pytest.approx(30.0, rel=1e-5)
+        assert result["ready_to_print"] is True
+
+    @pytest.mark.parametrize(
+        ("size", "offset"),
+        [(100.0, 0.0), (0.1, 0.0), (20.0, 5000.37), (0.02, 5.37)],
+        ids=["mm", "metres", "mm-far-from-origin", "metres-far-from-origin"],
+    )
+    def test_a_sheet_with_no_thickness_is_flat_in_any_unit(
+        self, tmp_path: Path, size: float, offset: float,
+    ) -> None:
+        """Far from the origin, 32-bit rounding gives a flat sheet a sliver of thickness."""
+        result = _invoke_tool(_flat_sheet_stl(tmp_path, size, offset=offset))
+
+        assert result["ready_to_print"] is False
+        assert "flat" in result["summary"].lower()
 
 
 # ---------------------------------------------------------------------------

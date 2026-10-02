@@ -2428,12 +2428,12 @@ def arrange_on_plate(
             msg = f"File not found: {fp}"
             raise ValueError(msg)
 
-    import trimesh  # lazy import — after validation
+    from kiln.mesh_frame import load_mesh  # lazy import — after validation
 
     # Build list of (path, width, depth, height) entries, expanding copies
     parts: list[tuple[str, float, float, float]] = []
     for fp in file_paths:
-        mesh = trimesh.load(fp, force="mesh")
+        mesh = load_mesh(fp, force="mesh")
         extents = mesh.bounding_box.extents  # [x, y, z]
         w, d, h = float(extents[0]), float(extents[1]), float(extents[2])
         count = 1

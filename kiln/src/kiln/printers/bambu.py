@@ -1737,6 +1737,11 @@ class BambuAdapter(PrinterAdapter):
     # stops on its own — so a late reading keeps counting and must be refused.
     _DURATION_SEMANTICS: ClassVar[str] = "stopwatch"
 
+    # Every printer this adapter drives ships with a camera of its own, so
+    # one that does not answer is a camera that is not answering -- never a
+    # printer without one.
+    camera_fitted_at_factory = True
+
     # Opt in to PrinterAdapter's idle connection release: a Bambu rations LAN
     # MQTT clients, so holding one while nobody is calling costs another
     # session its access to the printer.

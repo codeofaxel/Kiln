@@ -168,6 +168,21 @@ class _GenerationToolsPlugin:
                 result = session.to_dict()
                 result["status"] = "success"
                 result["message"] = session.summary
+                best_path = result.get("best_result_path")
+                if best_path:
+                    # Where the best attempt came from, and what its size
+                    # means (the provider's own scale, or millimetres).
+                    from kiln.arrival import announce, extent
+
+                    best = next(
+                        (
+                            a for a in result.get("attempts") or []
+                            if a.get("attempt_number") == result.get("best_attempt_number")
+                        ),
+                        {},
+                    )
+                    check = best.get("mesh_validation") or {}
+                    announce(result, best_path, size=extent(check.get("bounding_box")))
                 if resolved_model_id:
                     result["bed_size_source"] = "printer_intelligence"
                     result["bed_size_model_id"] = resolved_model_id
