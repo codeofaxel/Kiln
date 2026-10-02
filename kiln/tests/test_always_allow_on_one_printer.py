@@ -1473,11 +1473,11 @@ class TestTheBedIsLookedAt:
         out = _start(tmp_path)
         assert out["error"]["code"] == "PREVIEW_NOT_CONFIRMED" and printer.started == [], out
 
-    def test_bambu_printers_ship_with_a_camera(self):
-        from kiln.printers.bambu import BambuAdapter
+    def test_only_a_backend_that_knows_says_a_camera_is_fitted(self):
+        """Which Bambu machines say so is pinned in test_camera_knowledge
+        (the X1 is the exception); every other backend says nothing."""
         from kiln.printers.base import PrinterAdapter
 
-        assert BambuAdapter.camera_fitted_at_factory is True
         assert PrinterAdapter.camera_fitted_at_factory is None
 
     def test_unsure_kiln_asks_and_remembers_a_yes(self, at_terminal, tmp_path):

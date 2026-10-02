@@ -579,7 +579,9 @@ def _send_heartbeat() -> None:
                 # Whether live video from a printer's camera worked —
                 # {"<model>|<channel>|<source>|<event>": count_today} over
                 # the closed vocabularies in kiln.streaming, plus the
-                # results of camera checks a user asked for.  The only
+                # results of camera checks a user asked for, whether a
+                # still picture of the bed came back and through whose
+                # camera, and an owner saying a printer has one.  The only
                 # evidence of which cameras Kiln can really show: a feed
                 # opening or refusing happens on the user's own machine.
                 # Tokens only — the key's shape cannot spell a host, a

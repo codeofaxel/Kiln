@@ -110,6 +110,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln import camera_words
 from kiln.print_consent import (
     SOURCE_CODE,
     SOURCE_ELICITED,
@@ -160,6 +161,7 @@ __all__ = [
     "open_window",
     "open_window_from_dialog",
     "person_says_camera",
+    "signing_in_would_tell",
     "parse_duration",
     "person_at_terminal",
     "register_window_store",
@@ -717,8 +719,45 @@ def bed_camera(printer_name: str | None) -> str:
         return CAMERA_YES
     if plate_state.camera_of(adapter) is None:
         return CAMERA_NO
+    # Kiln's catalogue knows, for the models it lists, whether each ships
+    # with a camera.  Asked once here (the answer is kept on this computer);
+    # with no answer the rest goes on as if the model were not listed.
+    word = _catalogue_camera_word(adapter)
+    if word == camera_words.FITTED:
+        return CAMERA_YES
     plate_state.look(adapter)  # a real picture is remembered by the look itself
-    return CAMERA_YES if plate_state.knows_a_camera(adapter) is not None else CAMERA_UNSURE
+    if plate_state.knows_a_camera(adapter) is not None:
+        return CAMERA_YES
+    # No picture.  A model the catalogue says has no camera, and that shows
+    # none, has none: nothing to ask.  Anything else -- one its maker sells a
+    # camera for, one the catalogue does not know -- is the person's to say.
+    return CAMERA_NO if word == camera_words.NONE else CAMERA_UNSURE
+
+
+def _catalogue_camera_word(adapter: Any) -> str | None:
+    """The catalogue's word for this adapter's declared model, or ``None``
+    when no model is declared or nothing answered.  Never raises."""
+    try:
+        from kiln import _pro_camera_bridge
+
+        return _pro_camera_bridge.catalogue_word(adapter.declared_printer_model())
+    except Exception:  # noqa: BLE001 -- no word is no knowledge
+        return None
+
+
+def signing_in_would_tell(printer_name: str | None) -> bool:
+    """Whether Kiln had to leave the catalogue out for this printer only
+    because nobody is signed in -- so the person can be told that signing
+    in (free) lets Kiln look their model up instead of asking.  Never
+    raises."""
+    try:
+        import kiln.server as _srv
+        from kiln import _pro_camera_bridge
+
+        adapter = _srv._resolve_adapter(str(printer_name or "").strip())
+        return _pro_camera_bridge.why_unanswered(adapter.declared_printer_model()) == "signed_out"
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def person_says_camera(printer_name: str | None) -> None:
@@ -733,6 +772,10 @@ def person_says_camera(printer_name: str | None) -> None:
 
     adapter = _srv._resolve_adapter(str(printer_name or "").strip())
     plate_state.remember_camera(adapter, "printer", plate_state.CAMERA_PERSON_SAID)
+    with contextlib.suppress(Exception):
+        from kiln.streaming import note_owner_said_camera
+
+        note_owner_said_camera(str(printer_name or "").strip())
     _audit("camera_said_by_person", {"printer": str(printer_name or ""), "by": local_identity(), "at": _now()})
 
 
