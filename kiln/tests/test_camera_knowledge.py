@@ -114,6 +114,17 @@ class TestTheLookup:
         assert served.asked == [MODEL], "the second ask is answered from this computer"
         assert bridge.kept_word(MODEL) == FITTED and bridge.why_unanswered(MODEL) == ""
 
+    @pytest.mark.parametrize(
+        "declared, asked",
+        [("creality_k1", "k1"), ("K1", "k1"), ("bambu_a1", "bambu_a1"), ("some_unlisted_printer", "some_unlisted_printer")],
+    )
+    def test_the_model_is_asked_about_by_its_catalogue_id(self, served, declared, asked):
+        """A/B: with the declared spelling sent as written this fails on
+        ``creality_k1`` — the catalogue is asked about an id it does not
+        list, and answers unknown for a model it knows."""
+        bridge.catalogue_word(declared)
+        assert served.asked == [asked]
+
     def test_no_model_asks_nothing(self, served):
         assert bridge.catalogue_word("") is None and bridge.catalogue_word(None) is None
         assert served.asked == []

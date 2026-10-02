@@ -70,9 +70,30 @@ __all__ = [
 
 
 def _model_key(model: object) -> str:
-    """The model as it is sent and kept: the person's own spelling,
-    lowercased and trimmed.  ``""`` for no model."""
-    return str(model or "").strip().lower() if isinstance(model, str) else ""
+    """The model as it is sent and kept: the catalogue's own id for what
+    the person declared, found the way every other door finds it (the id
+    itself with a vendor prefix tolerated, then the shared hint table), so
+    ``creality_k1`` asks about ``k1``.  A spelling the catalogue does not
+    list is sent as written, lowercased -- the answer to that is
+    ``unknown``, which is true.  ``""`` for no model."""
+    raw = str(model or "").strip().lower() if isinstance(model, str) else ""
+    if not raw:
+        return ""
+    try:
+        from kiln.printers.bed_fit import _load_printer_intelligence, _printer_id_candidates
+
+        catalogue = _load_printer_intelligence() or {}
+        for candidate in _printer_id_candidates(raw):
+            if candidate in catalogue and not candidate.startswith("_"):
+                return candidate
+        from kiln.printer_profile_ids import map_printer_hint_to_profile_id
+
+        mapped = map_printer_hint_to_profile_id(raw)
+        if mapped and mapped in catalogue:
+            return mapped
+    except Exception:  # noqa: BLE001 -- an unreadable catalogue resolves nothing
+        logger.debug("declared model not resolved to a catalogue id", exc_info=True)
+    return raw
 
 
 def kept_word(model: object) -> str | None:
