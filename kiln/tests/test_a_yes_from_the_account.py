@@ -133,6 +133,40 @@ def signed_in(tmp_path):
     return "Bearer " + json.loads((home / "auth_tokens.json").read_text())["access_token"]
 
 
+@pytest.fixture(autouse=True)
+def _no_host_on_record():
+    from kiln import agent_host
+
+    agent_host.reset_recorded()
+    yield
+    agent_host.reset_recorded()
+
+
+@pytest.fixture
+def chat_agent(monkeypatch, tmp_path):
+    """Make the asking agent one a person texts: either its host is one
+    that relays a chat app (OpenClaw's own client), or the agent said which
+    chat app the person is writing from."""
+    from mcp.types import InitializeRequestParams
+
+    from kiln import agent_host, daily_stats
+
+    monkeypatch.setattr(daily_stats, "_STATS_PATH", tmp_path / "stats.json")
+
+    def become(how: str) -> None:
+        if how == "host":
+            params = InitializeRequestParams.model_validate({
+                "protocolVersion": "2025-11-25", "capabilities": {},
+                "clientInfo": {"name": "openclaw-bundle-mcp", "version": "0.0.0"},
+            })
+            ctx = types.SimpleNamespace(session=types.SimpleNamespace(client_params=params))
+            assert agent_host.record_once(types.SimpleNamespace(), ctx) is not None
+        else:
+            assert agent_host.note_chat_app("telegram") == "telegram"
+
+    return become
+
+
 @pytest.fixture
 def observed(monkeypatch):
     seen: list[tuple[str, str, str]] = []
@@ -183,11 +217,14 @@ def _may_i(allowed=False, authority=None, pending=None):
     })
 
 
-def _held(pending_id="pa_1", repeat=False, expires_at=None):
-    responses.add(responses.POST, PENDING, json={"success": True, "pending": {
+def _held(pending_id="pa_1", repeat=False, expires_at=None, alert_devices=None):
+    pending = {
         "id": pending_id, "expires_at": expires_at or time.time() + 600, "page": "/monitor",
         "state": "waiting", "repeat": repeat,
-    }})
+    }
+    if alert_devices is not None:
+        pending["alert_devices"] = alert_devices
+    responses.add(responses.POST, PENDING, json={"success": True, "pending": pending})
 
 
 def _calls(url: str) -> list:
@@ -415,6 +452,101 @@ class TestTheRefusal:
         r = _ask(model)
         assert "notification" not in r.text
         assert r.text.index("kiln3d.com/monitor") < r.text.index("kiln print benchy.3mf")
+
+    @responses.activate
+    def test_a_first_ask_reads_as_ready_and_waiting_not_as_a_failure(self, signed_in, model):
+        """The person asked to print and has not been asked yet: the reply an
+        agent relays says the print is ready and how they say go."""
+        _may_i()
+        _held()
+        r = _ask(model)
+        assert "has not started yet" in r.text and "not a failure" in r.text
+        assert "refuses to proceed" not in r.text
+        assert "nobody said go" in r.text  # still the fact: no yes is on record
+        # Every safety statement is still made.
+        assert "Nothing you can call reveals the code" in r.text and "a wrong guess counts" in r.text
+
+    @responses.activate
+    def test_an_agent_at_a_computer_is_told_the_code_first_and_the_phone_second(self, signed_in, model):
+        _may_i()
+        _held()
+        r = _ask(model)
+        assert r.text.index("give_print_code") < r.text.index("kiln3d.com/monitor") < r.text.index("kiln print benchy.3mf")
+
+    @responses.activate
+    @pytest.mark.parametrize("how", ["host", "chat_app"])
+    def test_an_agent_in_a_chat_app_is_told_the_phone_first(self, signed_in, model, chat_agent, how):
+        """A person texting an agent is holding a phone: the tap comes
+        first, the code on the computer's screen second, the terminal last.
+        Only the order changes — every door and every caution is still there."""
+        chat_agent(how)
+        _may_i()
+        _held()
+        r = _ask(model)
+        assert r.text.index("kiln3d.com/monitor") < r.text.index("give_print_code") < r.text.index("kiln print benchy.3mf")
+        assert "Approve" in r.text and "notification" in r.text
+        assert "Nothing you can call reveals the code" in r.text and "a wrong guess counts" in r.text
+        assert "pa_1" not in r.text and "http" not in r.text
+
+    def test_with_no_ask_waiting_a_chat_agent_still_gets_the_code_first(self, model, chat_agent):
+        """Not signed in: there is nothing on a phone to tap, so the phone
+        cannot lead."""
+        chat_agent("host")
+        r = _ask(model)
+        assert r.why == NOT_ASKED_CODE_SHOWN
+        assert "kiln3d.com/monitor" not in r.text and "give_print_code" in r.text
+        assert r.text.count("kiln signin") == 1
+
+    @responses.activate
+    @pytest.mark.parametrize(("devices", "says_alert"), [(2, True), (0, False), (None, False)])
+    def test_an_alert_is_only_claimed_when_one_went_out(self, signed_in, model, devices, says_alert):
+        """The server says how many devices it alerted.  None alerted, or a
+        server that did not say, is never worded as an alert."""
+        _may_i()
+        _held(alert_devices=devices)
+        r = _ask(model)
+        assert ("an alert went" in r.text) is says_alert
+        assert "kiln3d.com/monitor" in r.text
+
+    @responses.activate
+    def test_asking_again_about_the_same_print_still_says_the_alert_is_there(self, signed_in, model):
+        """The second start posts nothing (the ask is already held), and the
+        alert from the first is still on the person's device."""
+        _may_i()
+        _held(alert_devices=1)
+        first = _ask(model)
+        again = _ask(model)
+        assert len(_calls(PENDING)) == 1
+        assert "an alert went" in first.text and "an alert went" in again.text
+
+    @responses.activate
+    def test_the_phone_is_never_promised_from_anywhere(self, signed_in, model):
+        """Said beside the phone, and only there: it works on the printer's
+        own network on every plan, and from elsewhere on one plan."""
+        _may_i()
+        _held()
+        r = _ask(model)
+        line = "On the same Wi-Fi as your printer this works on every plan; approving from anywhere else is part of Kiln Pro (kiln3d.com/pricing)."
+        assert r.text.count(line) == 1
+        assert r.text.index("kiln3d.com/monitor") < r.text.index(line)
+
+    def test_without_the_phone_no_plan_is_named(self, model):
+        r = _ask(model)
+        assert "Kiln Pro" not in r.text and "every plan" not in r.text
+
+    @responses.activate
+    def test_always_allow_names_the_web_page_only_for_a_signed_in_machine(self, signed_in, model):
+        _may_i()
+        _held()
+        r = _ask(model)
+        assert "app.kiln3d.com/settings/agent" in r.text
+        assert "kiln consent window --always --printer bench" in r.text
+        assert "You cannot turn it on" in r.text and "ask me first" in r.text
+
+    def test_always_allow_on_a_signed_out_machine_names_only_the_terminal(self, model):
+        r = _ask(model)
+        assert "app.kiln3d.com/settings/agent" not in r.text
+        assert "kiln consent window --always --printer bench" in r.text
 
     def test_not_signed_in_nothing_is_posted_and_the_refusal_says_signin_once(self, model):
         with responses.RequestsMock(assert_all_requests_are_fired=False) as mock:

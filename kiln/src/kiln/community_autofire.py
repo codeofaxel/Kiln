@@ -93,13 +93,13 @@ def _signatures_via_mesh_load(source_path: str) -> tuple[str, str]:
     import tempfile
 
     try:
-        import trimesh  # optional dep; absent → skip (no worse than before A5)
+        from kiln.mesh_frame import load_mesh  # optional dep; absent → skip (no worse than before A5)
     except Exception:
         return ("", "")
     try:
         from kiln.print_dna import fingerprint_model
 
-        mesh = trimesh.load(source_path, force="mesh")
+        mesh = load_mesh(source_path, force="mesh")
         faces = getattr(mesh, "faces", None)
         if faces is None or len(faces) == 0:
             return ("", "")
