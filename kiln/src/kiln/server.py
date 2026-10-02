@@ -14186,8 +14186,12 @@ def set_material(
         printer_name: Target printer name.
         material: Material type (PLA, PETG, ABS, etc.).
         color: Optional filament color.
-        spool_id: Optional ID of a tracked spool.
-        tool_index: Extruder index for multi-tool printers (default 0).
+        spool_id: Optional ID of a tracked spool (see ``list_spools``).
+            Linking one is what lets Kiln count that spool down as this
+            printer prints from it.
+        tool_index: Extruder index for multi-tool printers (default 0).  On
+            a printer with a multi-material unit, the tray's id as
+            ``ams_status`` reports it.
     """
     if err := _check_auth("write"):
         return err
@@ -14273,7 +14277,18 @@ def check_material_match(
 
 @mcp.tool()
 def list_spools() -> dict:
-    """List all tracked filament spools in inventory."""
+    """List all tracked filament spools in inventory.
+
+    ``remaining_grams`` is what Kiln believes is left on each spool, and
+    ``remaining_determined_by`` says who set it: ``inferred`` is Kiln's own
+    count (what the spool held, less what the prints Kiln started were
+    sliced to use), ``observed`` is the printer's reading of a spool it can
+    measure, ``user_reported`` is what the person said.  A count misses
+    prints started outside Kiln, so report a counted figure as Kiln's
+    count, never as a measurement.  When the person says the figure is
+    wrong, correct it with ``add_spool(spool_id=..., remaining_grams=...)``;
+    when they say a spool is used up, ``remove_spool``.
+    """
     try:
         spools = _get_material_tracker().list_spools()
         return {
@@ -14287,30 +14302,81 @@ def list_spools() -> dict:
 
 @mcp.tool()
 def add_spool(
-    material: str,
+    material: str | None = None,
     color: str | None = None,
     brand: str | None = None,
     weight_grams: float = 1000.0,
     cost_usd: float | None = None,
+    remaining_grams: float | None = None,
+    spool_id: str | None = None,
 ) -> dict:
-    """Add a new filament spool to inventory.
+    """Add a filament spool to inventory, or correct how much is left on one.
+
+    To ADD a spool, give its ``material``.  ``remaining_grams`` is what is
+    left on a spool that is not new; left out, the spool is full.
+
+    To CORRECT a spool already on record, pass its ``spool_id`` (from
+    ``list_spools``) with ``remaining_grams``: the person says they have
+    more left than Kiln shows, or less.  Only the amount changes.  Kiln
+    counts a spool down as the prints it starts use it, and a count drifts,
+    so the person's word wins.  ``remaining_grams=0`` records the spool as
+    used up and keeps it on the list; ``remove_spool`` takes it off.
 
     Args:
-        material: Material type (PLA, PETG, ABS, etc.).
+        material: Material type (PLA, PETG, ABS, etc.).  Required to add.
         color: Filament color.
         brand: Manufacturer brand.
         weight_grams: Total spool weight in grams (default 1000).
         cost_usd: Cost of the spool in USD.
+        remaining_grams: Grams left on the spool.
+        spool_id: A spool already on record whose remaining amount to set.
     """
     if err := _check_auth("write"):
         return err
     try:
-        spool = _get_material_tracker().add_spool(
+        if remaining_grams is not None and remaining_grams < 0:
+            return _error_dict("remaining_grams cannot be negative.", code="VALIDATION_ERROR")
+        tracker = _get_material_tracker()
+        if spool_id:
+            if remaining_grams is None:
+                return _error_dict(
+                    "Give remaining_grams with spool_id: it is the amount left on that spool. "
+                    "To add another spool, leave spool_id out.",
+                    code="VALIDATION_ERROR",
+                )
+            existing = tracker.get_spool(spool_id)
+            if existing is None:
+                return _error_dict(f"Spool {spool_id!r} not found.", code="NOT_FOUND")
+            if remaining_grams > existing.weight_grams:
+                return _error_dict(
+                    f"{remaining_grams:g} g is more than the {existing.weight_grams:g} g this spool was "
+                    "recorded with. Add it as a new spool with its real weight instead.",
+                    code="VALIDATION_ERROR",
+                )
+            updated = tracker.set_spool_remaining(
+                spool_id,
+                remaining_grams,
+                # Stated at the writer: a caller of this tool is a person or
+                # an agent saying what is left.  No sensor is involved.
+                determined_by="user_reported",
+            )
+            if updated is None:
+                return _error_dict(f"Spool {spool_id!r} not found.", code="NOT_FOUND")
+            return {"success": True, "spool": updated.to_dict(), "updated": True}
+        if not material or not str(material).strip():
+            return _error_dict("Give the spool's material (PLA, PETG, ...) to add it.", code="VALIDATION_ERROR")
+        if remaining_grams is not None and remaining_grams > weight_grams:
+            return _error_dict(
+                f"remaining_grams ({remaining_grams:g}) cannot be more than weight_grams ({weight_grams:g}).",
+                code="VALIDATION_ERROR",
+            )
+        spool = tracker.add_spool(
             material_type=material,
             color=color,
             brand=brand,
             weight_grams=weight_grams,
             cost_usd=cost_usd,
+            remaining_grams=remaining_grams,
         )
         return {"success": True, "spool": spool.to_dict()}
     except Exception as exc:
@@ -14321,6 +14387,13 @@ def add_spool(
 @mcp.tool()
 def remove_spool(spool_id: str) -> dict:
     """Remove a filament spool from inventory.
+
+    When the person says a spool is used up, finished or gone, remove it
+    here (``list_spools`` gives its id) so Kiln stops treating it as
+    filament they have.  If they have more or less left than Kiln shows,
+    correct the figure with ``add_spool(spool_id=..., remaining_grams=...)``
+    instead.  A used-up spool is not a reason to suggest buying filament:
+    say nothing about that unless the person asks.
 
     Args:
         spool_id: The spool's unique identifier.

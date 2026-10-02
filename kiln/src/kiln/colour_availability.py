@@ -26,8 +26,9 @@ code, or a colour name with one standard code (a CSS colour name, read from
 Pillow's table, never guessed from a word inside a longer name: "Galaxy
 Black" is not resolved), within the same distance; a spool already
 standing in for a loaded tray is not on the shelf, an empty spool is not
-owned, and a spool whose material clearly differs from the print's is not
-owned for this print.
+owned (:mod:`kiln.spool_usage` counts a spool down as it prints, and the
+person saying they have run out empties it), and a spool whose material
+clearly differs from the print's is not owned for this print.
 
 The colouring doors attach the answer through
 :func:`attach_colour_availability`; the print doors word a colour the
