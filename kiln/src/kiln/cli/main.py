@@ -258,6 +258,16 @@ def _resolve_support_style(support_mode: str, input_file: str) -> tuple[str | No
     return None, None
 
 
+def _echo_conversion(conversion: dict[str, Any] | None) -> None:
+    """Say that a generator's file was handed on as an STL, and where the
+    original still is (the record from ``kiln.format_conversion``)."""
+    if conversion:
+        click.echo(
+            f"  Converted from {conversion['from_format'].upper()} to STL; "
+            f"the original is kept at {conversion.get('original_path', 'its download folder')}"
+        )
+
+
 def _resolve_generation_provider(provider: str) -> GenerationProvider:  # noqa: F821
     """Resolve a generation provider by name.
 
@@ -9338,6 +9348,7 @@ def generate(
     """
     import time as _time
 
+    from kiln.format_conversion import convert_generated_result
     from kiln.generation import (
         GenerationAuthError,
         GenerationError,
@@ -9367,8 +9378,11 @@ def generate(
         if not wait_for or job.status == GenerationStatus.SUCCEEDED:
             if job.status == GenerationStatus.SUCCEEDED:
                 # Download the result for synchronous providers.
-                result = gen.download_result(
-                    job.id, output_dir=output_dir or os.path.join(tempfile.gettempdir(), "kiln_generated")
+                result, conversion = convert_generated_result(
+                    gen.download_result(
+                        job.id, output_dir=output_dir or os.path.join(tempfile.gettempdir(), "kiln_generated")
+                    ),
+                    tool="generate",
                 )
                 val = validate_mesh(result.local_path)
                 preview_data: dict[str, Any] | None = None
@@ -9396,6 +9410,7 @@ def generate(
                                 "data": {
                                     "job": job.to_dict(),
                                     "result": result.to_dict(),
+                                    "conversion": conversion,
                                     "validation": val.to_dict(),
                                     "preview": preview_data,
                                     "preview_notified": preview_notified,
@@ -9407,6 +9422,7 @@ def generate(
                 else:
                     click.echo(f"Generated: {result.local_path}")
                     click.echo(f"  Format: {result.format}  Size: {result.file_size_bytes:,} bytes")
+                    _echo_conversion(conversion)
                     click.echo(f"  Triangles: {val.triangle_count:,}  Manifold: {val.is_manifold}")
                     if preview_data:
                         click.echo(f"  Preview: {preview_data['path']}")
@@ -9453,8 +9469,11 @@ def generate(
                 click.echo(f"\r  Progress: {job.progress}%  ", nl=False)
 
             if job.status == GenerationStatus.SUCCEEDED:
-                result = gen.download_result(
-                    job.id, output_dir=output_dir or os.path.join(tempfile.gettempdir(), "kiln_generated")
+                result, conversion = convert_generated_result(
+                    gen.download_result(
+                        job.id, output_dir=output_dir or os.path.join(tempfile.gettempdir(), "kiln_generated")
+                    ),
+                    tool="generate",
                 )
                 val = validate_mesh(result.local_path)
                 preview_data: dict[str, Any] | None = None
@@ -9482,6 +9501,7 @@ def generate(
                                 "data": {
                                     "job": job.to_dict(),
                                     "result": result.to_dict(),
+                                    "conversion": conversion,
                                     "validation": val.to_dict(),
                                     "preview": preview_data,
                                     "preview_notified": preview_notified,
@@ -9494,6 +9514,7 @@ def generate(
                 else:
                     click.echo(f"\nGenerated: {result.local_path}")
                     click.echo(f"  Format: {result.format}  Size: {result.file_size_bytes:,} bytes")
+                    _echo_conversion(conversion)
                     click.echo(f"  Triangles: {val.triangle_count:,}  Manifold: {val.is_manifold}")
                     if preview_data:
                         click.echo(f"  Preview: {preview_data['path']}")
@@ -9603,6 +9624,7 @@ def generate_download(
 
     JOB_ID is the ID returned by 'kiln generate'.
     """
+    from kiln.format_conversion import convert_generated_result
     from kiln.generation import (
         GenerationAuthError,
         GenerationError,
@@ -9612,7 +9634,9 @@ def generate_download(
     try:
         gen = _resolve_generation_provider(provider)
 
-        result = gen.download_result(job_id, output_dir=output_dir)
+        result, conversion = convert_generated_result(
+            gen.download_result(job_id, output_dir=output_dir), tool="generate-download"
+        )
 
         validation = None
         if validate and result.format in ("stl", "obj"):
@@ -9622,12 +9646,15 @@ def generate_download(
             import json
 
             data: dict[str, Any] = {"result": result.to_dict()}
+            if conversion:
+                data["conversion"] = conversion
             if validation:
                 data["validation"] = validation.to_dict()
             click.echo(json.dumps({"status": "success", "data": data}, indent=2))
         else:
             click.echo(f"Downloaded: {result.local_path}")
             click.echo(f"  Format: {result.format}  Size: {result.file_size_bytes:,} bytes")
+            _echo_conversion(conversion)
             if validation:
                 click.echo(f"  Triangles: {validation.triangle_count:,}  Manifold: {validation.is_manifold}")
                 if not validation.valid:
@@ -9716,6 +9743,7 @@ def generate_and_print_cmd(
     """
     import time as _time
 
+    from kiln.format_conversion import convert_generated_result
     from kiln.generation import (
         GenerationAuthError,
         GenerationError,
@@ -9765,11 +9793,15 @@ def generate_and_print_cmd(
             sys.exit(1)
 
         # --- Step 2: Download ---
+        # A GLB is handed on as an STL: the slicer below refuses a GLB.
         output_dir = os.path.join(tempfile.gettempdir(), "kiln_generated")
-        result = gen.download_result(job.id, output_dir=output_dir)
+        result, conversion = convert_generated_result(
+            gen.download_result(job.id, output_dir=output_dir), tool="generate-and-print"
+        )
         val = validate_mesh(result.local_path)
         if not json_mode:
             click.echo(f"Generated: {result.local_path} ({result.file_size_bytes:,} bytes, {val.triangle_count:,} triangles)")
+            _echo_conversion(conversion)
 
         preview_data: dict[str, Any] | None = None
         preview_notified = False
@@ -9884,6 +9916,7 @@ def generate_and_print_cmd(
                         "status": "success",
                         "data": {
                             "generation": job.to_dict(),
+                            **({"conversion": conversion} if conversion else {}),
                             "validation": val.to_dict(),
                             "preview": preview_data,
                             "preview_notified": preview_notified,

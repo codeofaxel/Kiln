@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import asdict, dataclass, fields
 from typing import Any
 
@@ -249,14 +250,16 @@ def measure(file_path: str) -> tuple[dict[str, Any], dict[str, Any] | None, tupl
     return val.to_dict(), dimensions, size
 
 
-def size_check(arrival: Arrival, size: tuple[float, float, float]) -> str:
+def size_check(arrival: Arrival, size: tuple[float, float, float], *, arrived_as: str = "") -> str:
     """What to settle about the size before printing, or ``""``.
 
     A generator that was never given a size gets the one sentence that is
     always true of it.  Everything else, a generator told to draw in
     millimetres included, gets the units reading a download gets: being
     told to draw in millimetres is not proof that it did, and the reading
-    is silent for any printable size.
+    is silent for any printable size.  A file that arrived as glTF
+    (*arrived_as*, its original format) is read in metres first, the unit
+    its own format names (:func:`_gltf_reading`).
     """
     if arrival.real_size is False:
         across = " x ".join(f"{v:.3g}" for v in size)
@@ -266,9 +269,59 @@ def size_check(arrival: Arrival, size: tuple[float, float, float]) -> str:
             "as millimetres. Set its size before printing: "
             "rescale_model(file_path, max_dimension_mm=<the size you want>)."
         )
+    if arrived_as.lower().lstrip(".") in _GLTF_TYPES:
+        said = _gltf_reading(max(size))
+        if said:
+            return said
     from kiln.generation.validation import unit_verdict
 
     return unit_verdict(max(size)).describe_unchanged()
+
+
+#: glTF's file types.  The glTF 2.0 specification (Coordinate System and
+#: Units): "The units for all linear distances are meters."
+_GLTF_TYPES = frozenset({"glb", "gltf"})
+
+
+def _gltf_reading(largest: float) -> str:
+    """The size sentence for a glTF file whose numbers are too small to be
+    millimetres, read first in metres; ``""`` to fall back to the general
+    reading.
+
+    A glTF's numbers are metres by its own specification, so for one that
+    reads under the size Kiln already speaks up about, metres is the
+    reading to lead with rather than one guess beside centimetres and
+    inches: a 50 mm part saved to the specification arrives as 0.05.  A
+    glTF that already reads as a printable size was written in millimetres
+    whatever its format says, and is left alone.  Nothing is rescaled.
+    """
+    from kiln.generation.validation import (
+        _PRINTABLE_MAX_MM,
+        _PRINTABLE_MIN_MM,
+        _UNIT_CONVERSIONS,
+        _UNIT_NOTICE_BELOW_MM,
+    )
+
+    factor = dict(_UNIT_CONVERSIONS)["meters"]
+    in_metres = largest * factor
+    if not 0 < largest < _UNIT_NOTICE_BELOW_MM or in_metres < _PRINTABLE_MIN_MM:
+        return ""
+    said = (
+        f"This is a glTF file, and glTF measures in metres: read that way it is "
+        f"{in_metres:g} mm at its largest"
+    )
+    if in_metres > _PRINTABLE_MAX_MM:
+        return (
+            f"{said}, bigger than any printer in Kiln's catalog (as millimetres, "
+            f"{largest:g} mm). Nothing was rescaled. Choose its size with "
+            "rescale_model(file_path, max_dimension_mm=<the size you want>), or "
+            "print it in sections with split_mesh_to_fit."
+        )
+    return (
+        f"{said} (as millimetres, {largest:g} mm). Nothing was rescaled. If it is "
+        f"in metres, rescale_model(file_path, scale_factor={factor:g}) sets it to "
+        f"{in_metres:g} mm."
+    )
 
 
 def announce(
@@ -276,6 +329,7 @@ def announce(
     file_path: str,
     *,
     size: tuple[float, float, float] | None = None,
+    arrived_as: str | None = None,
 ) -> dict[str, Any]:
     """Put where *file_path* came from on a door's *result*, in place.
 
@@ -283,7 +337,9 @@ def announce(
     ``size_check`` when *size* — the file's measured extent — needs a
     word before printing.  When the numbers are not millimetres, the
     result's ``dimensions`` summary stops saying they are.  A file with
-    no note adds nothing.
+    no note adds nothing.  *arrived_as* is the format the file came in
+    when a door converted it (a GLB handed on as an STL); otherwise the
+    file's own suffix says.
     """
     arrival = read(file_path)
     if arrival is None:
@@ -291,7 +347,7 @@ def announce(
     result["came_from"] = arrival.line()
     result["arrival"] = arrival.to_dict()
     if size and max(size) > 0:
-        check = size_check(arrival, size)
+        check = size_check(arrival, size, arrived_as=arrived_as or os.path.splitext(file_path)[1])
         if check:
             result["size_check"] = check
         dimensions = result.get("dimensions")

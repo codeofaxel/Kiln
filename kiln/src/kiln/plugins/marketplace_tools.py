@@ -18,6 +18,7 @@ this module automatically — no manual imports needed.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 from kiln.tool_annotations import read_only
@@ -25,20 +26,29 @@ from kiln.tool_annotations import read_only
 _logger = logging.getLogger(__name__)
 
 
-def _arrive(response: dict, paths: list[str], *, mkt: Any = None, model_id: Any = None) -> dict:
-    """Open the stage on the first downloaded file it can draw, and say
-    where the files came from.
+def _arrive(response: dict, entries: list[dict], *, mkt: Any = None, model_id: Any = None) -> dict:
+    """Make the downloaded files ready for every other door, open the stage
+    on the first one it can draw, and say where they came from.
 
-    The adapter's download left each file a note naming the marketplace;
-    the listing, read once here, adds who designed it, its license and its
-    page.  A listing that cannot be read leaves those notes as they are,
-    and the line says so rather than guessing.
+    *entries* are the result's own records of the files, each with its
+    ``local_path``.  The adapter's download left each file a note naming
+    the marketplace; the listing, read once here, adds who designed it,
+    its license and its page.  A listing that cannot be read leaves those
+    notes as they are, and the line says so rather than guessing.
+
+    A GLB is then handed on as an STL beside it (the stage, the slicer and
+    a printer all refuse a GLB): the entry's ``local_path`` becomes the STL
+    and its ``conversion`` names the original, which stays on disk with
+    its note.  The listing is recorded before the conversion, so the STL
+    carries it too.
     """
     from dataclasses import replace
 
     from kiln.arrival import DOWNLOADED, Arrival, announce, measure, read, record
+    from kiln.format_conversion import convert_on_arrival
     from kiln.preview_evidence import stage_file_for
 
+    paths = [entry["local_path"] for entry in entries]
     if mkt is not None and model_id is not None:
         try:
             detail = mkt.get_details(str(model_id))
@@ -57,6 +67,23 @@ def _arrive(response: dict, paths: list[str], *, mkt: Any = None, model_id: Any 
                 noted = read(path) or Arrival(kind=DOWNLOADED, by=mkt.display_name)
                 record(path, replace(noted, **listing))
 
+    arrived_as: dict[str, str] = {}
+    for entry in entries:
+        original = entry["local_path"]
+        try:
+            ready, conversion = convert_on_arrival(original, tool="download_model")
+        except Exception as exc:  # noqa: BLE001 — the download stands; the person is told
+            entry["conversion_failed"] = (
+                f"{os.path.basename(original)} could not be turned into an STL ({exc}), "
+                "so the 3D stage and the slicer cannot open it."
+            )
+            continue
+        if conversion is not None:
+            entry["local_path"] = ready
+            entry["conversion"] = conversion
+            arrived_as[ready] = conversion["from_format"]
+    paths = [entry["local_path"] for entry in entries]
+
     staged = next((s for s in (stage_file_for(p)[0] for p in paths) if s), None)
     if staged is None:
         return announce(response, paths[0]) if paths else response
@@ -68,7 +95,7 @@ def _arrive(response: dict, paths: list[str], *, mkt: Any = None, model_id: Any 
         validation = dimensions = size = None
     response["validation"] = validation
     response["dimensions"] = dimensions
-    return announce(response, staged, size=size)
+    return announce(response, staged, size=size, arrived_as=arrived_as.get(staged))
 
 
 class _MarketplaceToolsPlugin:
@@ -333,7 +360,12 @@ class _MarketplaceToolsPlugin:
                 download_all: When True, downloads all files for the model
                     regardless of whether ``file_id`` is provided.
 
-            The stage opens on the first downloaded file it can draw, and
+            A downloaded GLB is handed on as an STL beside it, because the
+            stage, the slicer and printers cannot open a GLB: its
+            ``local_path`` is the STL, and ``conversion`` names the
+            original, which stays on disk (``conversion_failed`` says so
+            when a GLB cannot be read).  The stage opens on the first
+            downloaded file it can draw, and
             the result measures that file (``validation``, ``dimensions``;
             ``size_check`` when its size reads like a units mix-up) and says
             where the files came from (``came_from``: the marketplace and,
@@ -460,12 +492,7 @@ class _MarketplaceToolsPlugin:
                     }
                     if source == "thingiverse":
                         dl_resp["deprecation_notice"] = _THINGIVERSE_DEPRECATION_NOTICE
-                    _arrive(
-                        dl_resp,
-                        [d["local_path"] for d in downloaded],
-                        mkt=mkt,
-                        model_id=model_id,
-                    )
+                    _arrive(dl_resp, downloaded, mkt=mkt, model_id=model_id)
                     if "came_from" in dl_resp:
                         dl_resp["message"] = (
                             f"{dl_resp['came_from']} {len(downloaded)} of {len(files)} "
@@ -498,11 +525,12 @@ class _MarketplaceToolsPlugin:
                         "proven models with high download counts."
                     ),
                     "deprecation_notice": _THINGIVERSE_DEPRECATION_NOTICE,
-                    "message": f"Downloaded to {path}",
                 }
-                _arrive(single, [path])
-                if "came_from" in single:
-                    single["message"] = f"{single['came_from']} Saved to {path}."
+                _arrive(single, [single])
+                saved = single["local_path"]
+                single["message"] = (
+                    f"{single['came_from']} Saved to {saved}." if "came_from" in single else f"Downloaded to {saved}"
+                )
                 return single
             except (ThingiverseNotFoundError, MktNotFoundError):
                 return _error_dict(
