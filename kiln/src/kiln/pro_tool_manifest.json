@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-02T05:00:12.787250+00:00",
-  "tool_count": 429,
+  "generated": "2026-10-02T18:59:45.641733+00:00",
+  "tool_count": 430,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -17019,6 +17019,72 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      }
+    },
+    {
+      "name": "plan_hardware_insertion",
+      "description": "Plan nuts, magnets, bearings and inserts into a printed part: where, when, how.\n\nFree door, tiered answer \u2014 Free: Safety checks \u2014 always free \u00b7 Pro: The layer, and the pause written for your printer \u00b7 Business: The layer, and the pause written for your printer \u00b7 Enterprise: The layer, and the pause written for your printer.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "model_path": {
+            "title": "Model Path",
+            "type": "string"
+          },
+          "hardware": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Hardware"
+          },
+          "gcode_path": {
+            "default": "",
+            "title": "Gcode Path",
+            "type": "string"
+          },
+          "printer": {
+            "default": "",
+            "title": "Printer",
+            "type": "string"
+          },
+          "material": {
+            "default": "",
+            "title": "Material",
+            "type": "string"
+          },
+          "write_pauses": {
+            "default": false,
+            "title": "Write Pauses",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "model_path"
+        ],
+        "title": "plan_hardware_insertionArguments",
+        "type": "object"
+      },
+      "band": {
+        "domain": "hardware_insertion",
+        "free": "Safety checks \u2014 always free",
+        "pro": "The layer, and the pause written for your printer",
+        "business": "The layer, and the pause written for your printer",
+        "enterprise": "The layer, and the pause written for your printer"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
       }
     },
     {
