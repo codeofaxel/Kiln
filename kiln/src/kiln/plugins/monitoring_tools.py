@@ -432,7 +432,7 @@ class _PrintWatcher:
                 # the person: a stop close enough to get ready for, and one the
                 # print went past without stopping.  The stop itself is a
                 # pause, answered with the other pauses below.
-                hardware = _observe_hardware(adapter, state, job)
+                hardware = _observe_hardware(adapter, state, job, announce=True)
                 if hardware and hardware["new"] and hardware["stage"] in ("coming_up", "missed", "passed_unseen"):
                     self._finish({
                         "success": True,

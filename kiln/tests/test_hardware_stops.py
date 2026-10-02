@@ -44,7 +44,8 @@ PLAN = {
          "steps": ["Put in: 4x 6x3 magnet in S3, S4, S5, S6."], "magnets": True},
     ],
     "after_print": [
-        {"item": "4x M3 heat-set insert", "kind": "heat_set_insert", "seats": ["S7", "S8", "S9", "S10"],
+        {"item": "4x M3 heat-set insert", "spoken": "the 4 M3 heat-set inserts", "kind": "heat_set_insert",
+         "seats": ["S7", "S8", "S9", "S10"], "safety": ["The insert iron burns on contact."],
          "where": ["S7: 4.0 mm round pocket open at the top"],
          "when": "After the print, once the part is cool and any supports are off.",
          "next_calls": [{"tool": "recommend_heat_set_insert", "arguments": {"thread": "M3"}}]},
@@ -109,16 +110,16 @@ def machine(tmp_path):
     return m
 
 
-def _at(m, status, layer=None, **fields):
+def _at(m, status, layer=None, *, announce=False, **fields):
     m.status, m.layer = status, layer
     for key, value in fields.items():
         setattr(m, key, value)
-    return hs.observe(m, m.get_state(), m.get_job(), now=fields.get("now"))
+    return hs.observe(m, m.get_state(), m.get_job(), now=fields.get("now"), announce=announce)
 
 
-def _see(m, *, now, status=PrinterStatus.PRINTING, layer=None):
+def _see(m, *, now, status=PrinterStatus.PRINTING, layer=None, announce=False):
     m.status, m.layer = status, layer
-    return hs.observe(m, m.get_state(), m.get_job(), now=now)
+    return hs.observe(m, m.get_state(), m.get_job(), now=now, announce=announce)
 
 
 # --- the line in the file ----------------------------------------------------
@@ -169,11 +170,19 @@ class TestDuringThePrint:
         assert note["before_layer"] == 29
 
     def test_a_close_stop_is_said_once(self, machine):
-        first = _at(machine, PrinterStatus.PRINTING, 25, completion=50.0, left_s=20 * 60)
+        first = _at(machine, PrinterStatus.PRINTING, 25, completion=50.0, left_s=20 * 60, announce=True)
         assert first["stage"] == "coming_up" and first["new"] is True
         assert "In about 4 minutes the printer stops before layer 29 so you can put in 2x M3 nut" in first["say"]
-        again = _at(machine, PrinterStatus.PRINTING, 26, completion=52.0, left_s=19 * 60)
+        again = _at(machine, PrinterStatus.PRINTING, 26, completion=52.0, left_s=19 * 60, announce=True)
         assert again["stage"] == "coming_up" and again["new"] is False
+
+    def test_a_status_read_shows_a_moment_without_using_it_up(self, machine):
+        """Found in a dress rehearsal: a status poll took the warning, and the
+        wait the person was relying on never passed it on."""
+        assert _at(machine, PrinterStatus.PRINTING, 25)["new"] is True  # a status read
+        assert _at(machine, PrinterStatus.PRINTING, 25)["new"] is True  # and another
+        assert _at(machine, PrinterStatus.PRINTING, 26, announce=True)["new"] is True  # the wait hands it over
+        assert _at(machine, PrinterStatus.PRINTING, 26)["new"] is False
 
     def test_without_a_time_it_warns_by_layers(self, machine):
         note = _at(machine, PrinterStatus.PRINTING, 25)
@@ -191,6 +200,7 @@ class TestDuringThePrint:
         assert note["steps"] == PLAN["stops"][0]["steps"]
         assert "hardware_confirmed=true" in note["resume"] and "on its own" in note["resume"]
         assert note["safety"] == PLAN["safety"]
+        assert _at(machine, PrinterStatus.PAUSED, 29, announce=True)["new"] is True
         assert _at(machine, PrinterStatus.PAUSED, 29)["new"] is False
 
     def test_a_printer_counting_from_zero_is_still_at_the_stop(self, machine):
@@ -206,6 +216,8 @@ class TestDuringThePrint:
         note = _see(machine, now=30, layer=30)
         assert note["stage"] == "missed" and note["new"] is True
         assert "went past layer 29 without stopping" in note["say"] and "(M400 U1)" in note["say"]
+        assert _see(machine, now=35, layer=30)["stage"] == "missed"  # a status read does not use it up
+        assert _see(machine, now=38, layer=31, announce=True)["stage"] == "missed"  # the wait hands it over
         assert _see(machine, now=40, layer=31)["stage"] == "planned"  # said once; stop 2 is next
 
     def test_a_stop_gone_past_between_far_apart_readings_is_unseen(self, machine):
@@ -227,11 +239,12 @@ class TestDuringThePrint:
         assert _at(machine, PrinterStatus.PAUSED, 29) is None
 
     def test_the_finished_print_names_what_goes_in_afterwards(self, machine):
-        done = _at(machine, PrinterStatus.IDLE, ended=JobResult.COMPLETED, now=1000.0)
+        done = _at(machine, PrinterStatus.IDLE, ended=JobResult.COMPLETED, now=1000.0, announce=True)
         assert done["stage"] == "after_print" and done["new"] is True
-        assert done["say"] == ("The print has finished. Now: Press in 4x M3 heat-set insert, one in each of S7, "
+        assert done["say"] == ("The print has finished. Now press in the 4 M3 heat-set inserts, one in each of S7, "
                                "S8, S9 and S10. After the print, once the part is cool and any supports are off.")
         assert done["after_print"][0]["next_calls"][0]["tool"] == "recommend_heat_set_insert"
+        assert done["safety"] == ["The insert iron burns on contact."]
         assert _at(machine, PrinterStatus.IDLE, now=2000.0)["new"] is False
         assert _at(machine, PrinterStatus.IDLE, now=1000.0 + 25 * 3600) is None
 

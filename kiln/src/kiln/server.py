@@ -14898,7 +14898,7 @@ def await_print_completion(
             # waiting here would only run the clock out.
             from kiln.hardware_stops import observe as _observe_hardware
 
-            hardware = _observe_hardware(adapter, state, job_progress)
+            hardware = _observe_hardware(adapter, state, job_progress, announce=True)
             if hardware and (
                 hardware["stage"] == "now"
                 or (hardware["new"] and hardware["stage"] in ("coming_up", "missed", "passed_unseen"))

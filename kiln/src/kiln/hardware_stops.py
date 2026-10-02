@@ -195,8 +195,10 @@ def _validated(data: Any) -> dict[str, Any] | None:
             continue
         after.append({
             "item": raw["item"],
+            "spoken": raw.get("spoken") if isinstance(raw.get("spoken"), str) else None,
             "kind": raw.get("kind") if isinstance(raw.get("kind"), str) else None,
             "seats": _texts(raw.get("seats")),
+            "safety": _texts(raw.get("safety")),
             "where": _texts(raw.get("where")),
             "when": raw.get("when") if isinstance(raw.get("when"), str) else None,
             "next_calls": [c for c in raw.get("next_calls") or () if isinstance(c, dict) and c.get("tool")],
@@ -391,15 +393,19 @@ def _label(file_name: Any) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def observe(adapter: Any, state: Any, job: Any, *, now: float | None = None) -> dict[str, Any] | None:
+def observe(
+    adapter: Any, state: Any, job: Any, *, now: float | None = None, announce: bool = False,
+) -> dict[str, Any] | None:
     """What the hardware plan says about the print right now, or ``None``.
 
     The one helper every door that reads the printer calls -- status, watch,
-    wait, the resume gate -- so each says the same thing.  Records what it
-    sees (a stop reached, a stop passed) as it goes; ``new`` on the answer is
-    ``True`` the first time a moment is seen, which is when a watcher hands
-    it back to the person.  ``None`` when no plan is on record for this
-    machine, or the machine is running a different job.  Never raises.
+    wait, the resume gate -- so each says the same thing, and records what it
+    sees (a stop reached, a stop passed) as it goes.  ``new`` on the answer is
+    ``True`` until a door that hands moments to the person -- the watcher and
+    the wait tool, which pass *announce* -- has handed this one over; a status
+    read shows a moment without using it up.  ``None`` when no plan is on
+    record for this machine, or the machine is running a different job.
+    Never raises.
     """
     try:
         if not _store_path().is_file():
@@ -411,7 +417,8 @@ def observe(adapter: Any, state: Any, job: Any, *, now: float | None = None) -> 
             plan = _validated(record.get("plan")) if isinstance(record, dict) else None
             if plan is None:
                 return None
-            note, changed = _observe(key, record, plan, state, job, time.time() if now is None else now)
+            clock = time.time() if now is None else now
+            note, changed = _observe(key, record, plan, state, job, clock, announce)
             if changed:
                 machines[key] = record
                 _write_store(machines)
@@ -422,8 +429,10 @@ def observe(adapter: Any, state: Any, job: Any, *, now: float | None = None) -> 
 
 
 def _observe(
-    key: str, record: dict[str, Any], plan: dict[str, Any], state: Any, job: Any, now: float,
+    key: str, record: dict[str, Any], plan: dict[str, Any], state: Any, job: Any, now: float, announce: bool,
 ) -> tuple[dict[str, Any] | None, bool]:
+    """Record what this reading shows, then answer with the most pressing moment:
+    the stop itself, a stop gone past, a stop close, a stop ahead, the finish."""
     from kiln.printers.base import JobResult, PrinterStatus, confirmed_state_of
 
     reported = getattr(job, "file_name", None)
@@ -432,16 +441,52 @@ def _observe(
     word = confirmed_state_of(state)
     layer = _whole(getattr(job, "current_layer", None))
     marks: dict[str, Any] = record.setdefault("stops", {})
+    changed = False
 
+    def mark_of(stop: dict[str, Any]) -> dict[str, Any]:
+        return marks.setdefault(str(stop["n"]), {})
+
+    def hand_over(mark: dict[str, Any], moment: str) -> bool:
+        """``new`` for a moment, and spend it when this door hands it over."""
+        nonlocal changed
+        given = mark.setdefault("announced", [])
+        if moment in given:
+            return False
+        if announce:
+            given.append(moment)
+            changed = True
+        return True
+
+    # -- what this reading shows ---------------------------------------------
     if word in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
         _note_reading(key, plan, layer, now)
+    if word is PrinterStatus.PRINTING:
+        changed = _passings(key, plan, marks, layer, now) or changed
+
+    # -- the stop itself -------------------------------------------------------
+    if word is PrinterStatus.PAUSED:
+        ahead = _next_stop(plan, marks, layer)
+        if ahead is None:
+            return None, changed
+        # The counter reads the stop's own layer on a printer that counts the
+        # way the slicer numbers them, and one less on one that counts from 0.
+        if layer is not None and not ahead["before_layer"] - 1 <= layer <= ahead["before_layer"]:
+            return _paused_elsewhere(ahead, layer), changed
+        mark = mark_of(ahead)
+        if mark.get("paused_at") is None:
+            mark["paused_at"] = now
+            changed = True
+        new = hand_over(mark, "now")
+        return _now(plan, ahead, certain=layer is not None, new=new, since=mark["paused_at"], now=now), changed
+
+    # -- a stop gone past, until a waiting door has said so -------------------
+    for stop in plan["stops"]:
+        mark = marks.get(str(stop["n"])) or {}
+        if mark.get("passed_how") and "went_past" not in (mark.get("announced") or ()):
+            hand_over(mark_of(stop), "went_past")
+            return _went_past(plan, stop, mark["passed_how"]), changed
 
     if word is PrinterStatus.PRINTING:
-        passed = _passings(key, plan, marks, layer, now)
-        changed = bool(passed)
-        missed = [p for p in passed if p["stage"] in ("missed", "passed_unseen")]
-        if missed:
-            return missed[0], True
         ahead = _next_stop(plan, marks, layer)
         if ahead is None:
             return None, changed
@@ -452,38 +497,22 @@ def _observe(
         )
         if not close:
             return _planned(plan, ahead, minutes, layers), changed
-        mark = marks.setdefault(str(ahead["n"]), {})
-        new = mark.get("prealerted_at") is None
-        if new:
-            mark["prealerted_at"] = now
-        return _coming_up(plan, ahead, minutes, layers, new), changed or new
-
-    if word is PrinterStatus.PAUSED:
-        ahead = _next_stop(plan, marks, layer)
-        if ahead is None:
-            return None, False
-        # The counter reads the stop's own layer on a printer that counts the
-        # way the slicer numbers them, and one less on one that counts from 0.
-        if layer is not None and not ahead["before_layer"] - 1 <= layer <= ahead["before_layer"]:
-            return _paused_elsewhere(ahead, layer), False
-        mark = marks.setdefault(str(ahead["n"]), {})
-        new = mark.get("paused_at") is None
-        if new:
-            mark["paused_at"] = now
-        return _now(plan, ahead, certain=layer is not None, new=new, since=mark["paused_at"], now=now), new
+        new = hand_over(mark_of(ahead), "coming_up")
+        return _coming_up(plan, ahead, minutes, layers, new), changed
 
     if word is PrinterStatus.IDLE:
         if getattr(job, "ended_as", None) is not JobResult.COMPLETED or not plan["after_print"]:
-            return None, False
+            return None, changed
         finished = record.get("finished_at")
-        new = not isinstance(finished, (int, float))
-        if new:
+        if not isinstance(finished, (int, float)):
             record["finished_at"] = finished = now
+            changed = True
         if now - finished > AFTER_PRINT_WINDOW_S:
-            return None, False
-        return _after_print(plan, new=new), new
+            return None, changed
+        new = hand_over(record.setdefault("finish", {}), "after_print")
+        return _after_print(plan, new=new), changed
 
-    return None, False
+    return None, changed
 
 
 def _note_reading(key: str, plan: dict[str, Any], layer: int | None, now: float) -> None:
@@ -500,22 +529,22 @@ def _note_reading(key: str, plan: dict[str, Any], layer: int | None, now: float)
 
 def _passings(
     key: str, plan: dict[str, Any], marks: dict[str, Any], layer: int | None, now: float,
-) -> list[dict[str, Any]]:
-    """Stops the print has gone past since the last reading, each with how."""
+) -> bool:
+    """Record the stops the print has gone past since the last reading, and how:
+    resumed from, ``missed`` (Kiln read the printer all the way through and it
+    never stopped) or ``passed_unseen``.  ``True`` when anything was recorded."""
     if layer is None:
-        return []
-    out: list[dict[str, Any]] = []
+        return False
+    recorded = False
     for stop in plan["stops"]:
         mark = marks.setdefault(str(stop["n"]), {})
         if mark.get("passed") is not None or layer <= stop["before_layer"]:
             continue
         mark["passed"] = now
-        if mark.get("paused_at") is not None:
-            continue  # it stopped, and the person resumed it
-        how = "missed" if stop["n"] in _watched.get(key, ()) else "passed_unseen"
-        mark["passed_how"] = how
-        out.append(_went_past(plan, stop, how))
-    return out
+        recorded = True
+        if mark.get("paused_at") is None:
+            mark["passed_how"] = "missed" if stop["n"] in _watched.get(key, ()) else "passed_unseen"
+    return recorded
 
 
 def _next_stop(plan: dict[str, Any], marks: dict[str, Any], layer: int | None) -> dict[str, Any] | None:
@@ -640,17 +669,18 @@ def _went_past(plan, stop, how: str) -> dict[str, Any]:
 
 
 def _after_print(plan, *, new: bool) -> dict[str, Any]:
-    lines = []
+    lines, safety = [], []
     for step in plan["after_print"]:
-        verb = "Press in" if step["kind"] == "heat_set_insert" else "Put in"
+        verb = "press in" if step["kind"] == "heat_set_insert" else "put in"
         seats = step["seats"]
-        target = (f", one in each of {_listed(seats)}" if len(seats) > 1 else f" in {seats[0]}" if seats else "")
-        lines.append(f"{verb} {step['item']}{target}." + (f" {step['when']}" if step["when"] else ""))
+        target = (f", one in each of {_listed(seats)}" if len(seats) > 1 else f" ({seats[0]})" if seats else "")
+        lines.append(f"{verb} {step['spoken'] or step['item']}{target}." + (f" {step['when']}" if step["when"] else ""))
+        safety.extend(line for line in step["safety"] if line not in safety)
     return {
         "stage": "after_print", "new": new,
-        "say": "The print has finished. Now: " + " ".join(lines),
+        "say": "The print has finished. Now " + " ".join(lines),
         "after_print": plan["after_print"],
-        "safety": plan["safety"],
+        "safety": safety,
     }
 
 
