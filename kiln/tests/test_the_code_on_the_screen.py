@@ -170,6 +170,62 @@ class TestTheCodeIsOffered:
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture
+def phone(monkeypatch):
+    """What Kiln knows about approving from a phone, set by the test: is
+    this machine signed out, and how many devices the account's last ask
+    alerted (``None``: the server never said)."""
+    from kiln import bridge_client
+
+    monkeypatch.setattr(server, "_phone_alerts", {"devices": None, "offered": False})
+
+    def known(*, signed_out: bool, devices=None) -> None:
+        monkeypatch.setattr(bridge_client, "account_signed_out", lambda: signed_out)
+        server._phone_alerts["devices"] = devices
+
+    return known
+
+
+class TestThePhoneIsOfferedOnce:
+    """Someone who just typed a code is someone the phone would help.  The
+    offer rides the code's own reply, for the agent to make once the print
+    has started — never before the first print, and never twice."""
+
+    def test_a_signed_out_machine_is_offered_signin_and_the_page_once(self, banners, phone):
+        phone(signed_out=True)
+        _ask()
+        out = _give(banners[0].code)
+        offer = out["phone_next_time"]
+        assert "Once the print has started" in offer and "once" in offer
+        assert "kiln signin" in offer and "app.kiln3d.com/monitor" in offer
+        assert "Pro" not in offer and "plan" not in offer
+        _ask(file_name="second.3mf")
+        again = _give(banners[1].code)
+        assert again["success"] and "phone_next_time" not in again
+
+    def test_an_account_with_no_device_alerted_is_pointed_at_the_page(self, banners, phone):
+        phone(signed_out=False, devices=0)
+        _ask()
+        offer = _give(banners[0].code)["phone_next_time"]
+        assert "app.kiln3d.com/monitor" in offer and "kiln signin" not in offer
+
+    @pytest.mark.parametrize("devices", [1, 3, None])
+    def test_alerts_already_on_or_unknown_is_no_offer(self, banners, phone, devices):
+        """Unknown is not "none": a person with alerts on is never told to
+        go and turn them on."""
+        phone(signed_out=False, devices=devices)
+        _ask()
+        out = _give(banners[0].code)
+        assert out["success"] and "phone_next_time" not in out
+
+    def test_a_wrong_code_earns_no_offer_and_does_not_spend_it(self, banners, phone):
+        phone(signed_out=True)
+        _ask()
+        wrong = "0000" if banners[0].code != "0000" else "1111"
+        assert "phone_next_time" not in _give(wrong)
+        assert "phone_next_time" in _give(banners[0].code)
+
+
 class TestGivingTheCode:
     def test_the_right_code_is_the_yes_for_the_next_start(self, banners, audits):
         _ask()

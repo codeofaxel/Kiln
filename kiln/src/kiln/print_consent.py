@@ -698,6 +698,22 @@ def why_not_asked() -> str:
     return _not_asked.get()
 
 
+#: How many of the person's devices were alerted about the ask this call
+#: put to the account, as the server said: ``None`` when no ask is held or
+#: the server did not say.  Read by the refusal, which says an alert went
+#: out only when one did.
+_alerted_devices: ContextVar[int | None] = ContextVar("kiln_print_consent_alerted_devices", default=None)
+
+
+def note_alerted_devices(count: int | None) -> None:
+    _alerted_devices.set(count if isinstance(count, int) and not isinstance(count, bool) else None)
+
+
+def alerted_devices() -> int | None:
+    """The count recorded for this call, or ``None`` (unknown)."""
+    return _alerted_devices.get()
+
+
 def reset_consent(token) -> None:
     """Drop the answer — or the not-asked note — when its call ends.
     Always in a ``finally``.  A token knows its own variable, so the one

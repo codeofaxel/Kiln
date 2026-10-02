@@ -741,6 +741,10 @@ class AccountAsk:
     #: The names of the card's fields the post carried (:class:`AskCard`,
     #: plus ``display_name`` and ``asked_from``), for the audit row.
     card_sent: tuple[str, ...] = ()
+    #: How many of the person's devices the server alerts about a waiting
+    #: ask, when it said: ``0`` is nobody has alerts on, ``None`` is a
+    #: server that did not say — unknown, never worded as "none".
+    alert_devices: int | None = None
 
 
 #: The bounds of the card's fields, the route's own.
@@ -1084,6 +1088,7 @@ def ask_the_account(
     if memo is not None:
         return AccountAsk(
             id=memo.id, expires_at=memo.expires_at, repeat=True, picture_sent=memo.picture_sent, posted=False,
+            alert_devices=memo.alert_devices,
         )
     bearer = account_bearer()
     if not bearer:
@@ -1141,12 +1146,21 @@ def ask_the_account(
         repeat=bool(held.get("repeat")),
         picture_sent=picture is not None,
         card_sent=tuple(sorted(extra)),
+        alert_devices=_device_count(held.get("alert_devices")),
     )
     with _ask_lock:
         _asks[_ask_key(file_sha256, printer_name)] = ask
     with contextlib.suppress(Exception):
         _observe_in_background(_api_base(), bearer, nonce)
     return ask
+
+
+def _device_count(value: Any) -> int | None:
+    """The server's ``alert_devices`` as a count, or ``None`` when it sent
+    none or something that is not one (a bool is not a count)."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
 
 
 def withdraw_ask(file_sha256: str, printer_name: str) -> tuple[str, bool] | None:

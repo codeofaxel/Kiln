@@ -94,9 +94,11 @@ from kiln.print_consent import (
     SOURCE_HOSTED_APPROVAL,
     SOURCE_HOSTED_DELEGATION,
     PrintConsent,
+    alerted_devices,
     consent_for,
     describe_file_for_approval,
     describe_print_request,
+    note_alerted_devices,
     note_not_asked,
     note_unasked_look,
     note_window_outcome,
@@ -825,7 +827,8 @@ def _build_instructions() -> str:
         "START HERE: before anything else, call `get_started()` and "
         "`get_skill_manifest()`. These return the full capability map, "
         "agent rules, common workflows, and current tool count — "
-        "everything else is downstream. "
+        "everything else is downstream. If the person is writing to you from a "
+        "chat app, say which: `get_started(chat_app=\"telegram\")`. "
         f"This server has {_count_phrase}; use `ToolSearch(keyword)` to "
         "load schemas on demand instead of guessing names.",
         "Kiln — AI agent infrastructure for 3D printing. "
@@ -966,8 +969,11 @@ def _build_instructions() -> str:
         "they say \"ask me first\" you call `revoke_consent_window`. A start held with "
         "`ALWAYS_ALLOW_LOOK_FIRST` hands you a picture of the bed: judge it with "
         "`look_at_plate`, then start again. If this app cannot show the "
-        "dialog, Kiln shows a short code in a notification on the person's screen: ask them "
-        "to type it here, pass their exact words to `give_print_code`, then start again. "
+        "dialog, calling the start tool is how their go-ahead is asked for: its reply is "
+        "the normal first step, never a failed print, and says how they say go — a tap on "
+        "Approve in Kiln on their phone, or a short code Kiln shows in a notification on the "
+        "computer's screen, which they type here and you pass, exactly, to `give_print_code` "
+        "before starting again. Describe those in the order the reply does. "
         "Nothing you can call reveals the code. With no screen either, the yes comes from "
         "the person at a terminal (`kiln print`, or `kiln consent window --for 2h --printer NAME`)."
     )
@@ -2559,6 +2565,7 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
     if _is_resume_mode_3mf(file_value) or arguments.get("resume_from_paused"):
         return None  # already running, already approved
     note_window_outcome(None)  # nothing from an earlier call rides this result
+    note_alerted_devices(None)
     printer_name = arguments.get("printer_name")
     # The one machine this print is aimed at — the name a window is
     # matched on, and the name a window opened here is written for.
@@ -3167,7 +3174,53 @@ async def _ask_the_account(
                 "card": list(ask.card_sent),
             },
         )
+    # What the server said about alerts, for this call's refusal and for
+    # the offer made once a code has been typed (:func:`_phone_offer`).
+    note_alerted_devices(ask.alert_devices)
+    _phone_alerts["devices"] = ask.alert_devices
     return NOT_ASKED_PENDING_TAG + ask.id
+
+
+#: What this process last heard about the account's alerts
+#: (``devices``: the server's count, or ``None`` when it never said), and
+#: whether the phone was already offered (``offered``).  Process-wide on
+#: purpose: off the hosted server one process serves one person, and the
+#: hosted server never reaches the code path that reads it.
+_phone_alerts: dict[str, Any] = {"devices": None, "offered": False}
+
+#: Said beside the phone wherever the phone is named, and nowhere else.
+_PHONE_PLAN_LINE = (
+    'Tell them too: "On the same Wi-Fi as your printer this works on every plan; approving from '
+    'anywhere else is part of Kiln Pro (kiln3d.com/pricing)."'
+)
+
+
+def _phone_offer() -> str:
+    """One line for the agent to pass on after a print approved with the
+    screen's code has started: how the person approves from their phone
+    next time.  Made once per process, and only to someone it would help —
+    a machine nobody has signed in, or an account with no device alerted.
+    An account whose alerts are unknown is offered nothing: unknown is not
+    "none".  ``""`` otherwise.  Never raises."""
+    if _phone_alerts["offered"] or _hosted_now():
+        return ""
+    try:
+        from kiln.bridge_client import account_signed_out
+
+        signed_out = account_signed_out()
+    except Exception:  # noqa: BLE001 — cannot tell is no offer
+        return ""
+    if signed_out:
+        how = "run `kiln signin` on the computer Kiln runs on, then open app.kiln3d.com/monitor on their phone"
+    elif _phone_alerts["devices"] == 0:
+        how = "open app.kiln3d.com/monitor on their phone"
+    else:
+        return ""
+    _phone_alerts["offered"] = True
+    return (
+        "Once the print has started, offer this once, in one line: next time they can approve from "
+        f"their phone instead of typing a code — {how}; the page shows how to turn on alerts."
+    )
 
 
 def _withdraw_blocking(file_value: str, aimed: str):
@@ -3619,24 +3672,72 @@ def _no_yes_message(tool_name: str, file_name: str, aimed: str) -> str:
 
 
 def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
-    """:func:`_no_yes_message` off the hosted server.  Wherever a terminal
-    is already named, so is the one thing only a terminal can do: turn on
-    always allow for this printer."""
-    always = f"`kiln consent window --always --printer {aimed}` stops Kiln asking on {aimed} until they turn it off"
+    """:func:`_no_yes_message` off the hosted server: the print is ready,
+    nobody has said go yet, and the ways the person says it.
+
+    Worded as the first step it is, not as a failure: a person who asks to
+    print and has not been asked yet should hear "ready — here is how you
+    say go", so the agent is told in as many words not to report a failed
+    or refused print.
+
+    The ORDER the doors are described in follows where the person is, as
+    far as Kiln can tell (:func:`kiln.agent_host.person_is_in_a_chat_app`):
+    someone writing from a chat app is told the tap on their phone first and
+    the code on the computer's screen second; anyone else the code first.
+    Only the order of the words: which doors exist, and which one is tried
+    first, is :func:`_obtain_print_consent`'s and does not change here.  The
+    phone leads only when an ask is really waiting on the account, an alert
+    is claimed only when the server said one went out, and beside the phone
+    one sentence says where it works.  The terminal stays last for the
+    print in hand, and always allow — which is about every later print —
+    comes after it.
+    """
+    from kiln import agent_host
+
     why = why_not_asked()
     pending = ""
     if NOT_ASKED_PENDING_TAG in why:
         why, pending = why.rsplit(NOT_ASKED_PENDING_TAG, 1)
-    monitor = (
-        "approve it in Kiln on their phone or any signed-in browser at kiln3d.com/monitor, "
-        "then start again."
-    ) if pending else ""
-    signin = ""
-    if why and not pending:
-        from kiln.bridge_client import account_signed_out
+    ready = (
+        f"{tool_name} has not started yet: {name} was shown, and nobody said go yet. This is the normal "
+        "first step, not a failure: do not tell the person the print failed or was refused. Tell them "
+        f"{name} is ready for {aimed}, and how they say go."
+    )
+    monitor = ""
+    if pending:
+        alert = (
+            " (an alert went to each device they turned approval alerts on for; tapping it opens the print)"
+            if (alerted_devices() or 0) > 0
+            else ""
+        )
+        monitor = (
+            "tap Approve in Kiln on their phone or any signed-in browser at kiln3d.com/monitor"
+            f"{alert}, then start again. {_PHONE_PLAN_LINE}"
+        )
+    signed_out = False
+    if not pending:
+        try:
+            from kiln.bridge_client import account_signed_out
 
-        if account_signed_out():
-            signin = "`kiln signin` on this machine lets them approve from their phone next time."
+            signed_out = account_signed_out()
+        except Exception:  # noqa: BLE001 — cannot tell: name only the door that needs no account
+            signed_out = True
+    signin = (
+        "`kiln signin` on this machine lets them approve from their phone next time."
+        if why and signed_out
+        else ""
+    )
+    # The account page's switch reaches this machine only once it is signed in.
+    web = (
+        ""
+        if signed_out
+        else "in Kiln's web app on their phone or browser, at app.kiln3d.com/settings/agent (Always allow), or "
+    )
+    always = (
+        f" To stop being asked on {aimed}, they turn on always allow for it themselves: {web}with "
+        f"`kiln consent window --always --printer {aimed}` in a terminal on the computer Kiln runs on. "
+        'You cannot turn it on; when they say "ask me first", you turn it off.'
+    )
     if why.startswith(NOT_ASKED_CODE_SHOWN):
         hook = ""
         if ":hook=" in why:
@@ -3644,23 +3745,28 @@ def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
                 " This host's own hooks answer its dialogs (" + why.split(":hook=", 1)[1]
                 + "), so the dialog was not used."
             )
-        account = f" Or they can {monitor}" if monitor else (f" {signin}" if signin else "")
         switch = ""
         if screen_code.last_kiln_status() == screen_code.KILN_OFF:
             switch = (
                 " Notifications from Kiln are turned off on this Mac, so the code went out another "
                 "way and may not show: they can turn them on in System Settings, Notifications, Kiln."
             )
-        return (
-            f"{tool_name} refuses to proceed: {name} was shown, but nobody said go. A code was just "
-            "shown in a notification on the screen of the machine Kiln runs on." + hook + switch + " Tell the "
-            f"person: type the code here to print {name} on {aimed} — the code alone approves this "
-            f"print; the code followed by 2h or today also keeps printing on {aimed} without asking. "
-            "Then pass their exact words to give_print_code and start again. Nothing you can call "
-            "reveals the code, and a wrong guess counts." + account + " If no notification appeared, "
-            f"their yes can be given at a terminal: `kiln print {name}` or `kiln consent window --for "
-            f"2h --printer {aimed}`; {always}."
+        code = (
+            "code was just shown in a notification on the screen of the computer Kiln runs on." + hook + switch
+            + f" They type the code here to print {name} on {aimed} — the code alone approves this print; "
+            f"the code followed by 2h or today also keeps printing on {aimed} without asking — and you pass "
+            "their exact words to give_print_code, then start again. Nothing you can call reveals the "
+            "code, and a wrong guess counts."
         )
+        terminal = (
+            (" If neither reaches them, " if monitor else " If no notification appeared, ")
+            + f"their yes can be given at a terminal: `kiln print {name}` or `kiln consent window --for "
+            f"2h --printer {aimed}`."
+        )
+        if monitor and agent_host.person_is_in_a_chat_app():
+            return f"{ready} First, they can {monitor} Or, at the computer: a {code}{terminal}{always}"
+        account = f" Or they can {monitor}" if monitor else (f" {signin}" if signin else "")
+        return f"{ready} A {code}{account}{terminal}{always}"
     if why.startswith(NOT_ASKED_CODE_COOLDOWN):
         secs = why.split(":", 1)[1] if ":" in why else "60"
         lead = (
@@ -3673,32 +3779,36 @@ def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
         return f"{lead}; or their yes can be given at a terminal (`kiln print {name}`)."
     if why == NOT_ASKED_HOST_CANNOT:
         lead = (
-            f"{tool_name} refuses to proceed: {name} was shown, but nobody said go, and "
-            "this host cannot show an approval dialog, so no dialog is coming — tell the "
+            f"{ready} This host cannot show an approval dialog, so no dialog is coming — tell the "
             "person that plainly."
         )
         terminal = (
             f"`kiln print {name}` (or `kiln queue submit {name}`) asks them about this one print, and "
             f"`kiln consent window --for 2h --printer {aimed}` opens a standing window for a "
-            f"while, and {always}. Kiln cannot open a window from here, and an agent cannot supply "
+            "while. Kiln cannot open a window from here, and an agent cannot supply "
         )
         if monitor:
-            return f"{lead} They can {monitor} Or their yes can be given at a terminal: {terminal}any of these yeses."
-        return f"{lead}{(' ' + signin) if signin else ''} Their yes has to be given at a terminal: {terminal}either yes."
-    lead = f"{tool_name} refuses to proceed: {name} was shown, but nobody said go"
+            return (
+                f"{lead} They can {monitor} Or their yes can be given at a terminal: {terminal}any of "
+                f"these yeses.{always}"
+            )
+        return (
+            f"{lead}{(' ' + signin) if signin else ''} Their yes has to be given at a terminal: "
+            f"{terminal}either yes.{always}"
+        )
     doors = (
         "comes from the host's approval dialog (a host that asks shows one; the person "
         "approves it, and can choose there to open a standing window for this printer), "
         f"from a person at a terminal (`kiln print {name}` or `kiln queue submit {name}` "
         "asks them), or from a standing window a person opened at a terminal (`kiln "
-        f"consent window --for 2h --printer {aimed}`; {always}); an agent cannot supply any of the "
+        f"consent window --for 2h --printer {aimed}`); an agent cannot supply any of the "
         "three."
     )
     if monitor:
-        return f"{lead}. They can {monitor} Otherwise a yes {doors}"
+        return f"{ready} They can {monitor} Otherwise a yes {doors}{always}"
     if signin:
-        return f"{lead}. {signin} For this print, a yes {doors}"
-    return f"{lead} — a yes {doors}"
+        return f"{ready} {signin} For this print, a yes {doors}{always}"
+    return f"{ready} A yes {doors}{always}"
 
 
 def _preview_gate_error(
