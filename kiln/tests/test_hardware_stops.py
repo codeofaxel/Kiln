@@ -387,6 +387,40 @@ class TestTheDoors:
         assert watcher._result["outcome"] == "hardware_stop"
         assert watcher._result["hardware"]["stage"] == "coming_up"
 
+    def test_cli_status_says_what_goes_in(self, machine):
+        from click.testing import CliRunner
+
+        from kiln.cli.main import cli
+
+        machine.status, machine.layer = PrinterStatus.PAUSED, 29
+        with patch("kiln.cli.main._get_adapter_from_ctx", return_value=machine):
+            result = CliRunner().invoke(cli, ["status"])
+        assert "Hardware: Now is the time to put in 2x M3 nut in S1, S2." in result.output
+        assert "kiln resume --hardware-in" in result.output
+
+    def test_cli_wait_stops_at_the_stop_for_the_person(self, machine):
+        from click.testing import CliRunner
+
+        from kiln.cli.main import cli
+
+        machine.status, machine.layer = PrinterStatus.PAUSED, 29
+        with patch("kiln.cli.main._get_adapter_from_ctx", return_value=machine):
+            result = CliRunner().invoke(cli, ["wait", "--interval", "0"])
+        assert result.exit_code == 3, result.output
+        assert "Now is the time to put in 2x M3 nut" in result.output
+
+    def test_cli_resume_refused_at_the_stop_shows_the_way_through(self, machine):
+        from click.testing import CliRunner
+
+        from kiln.cli.main import cli
+
+        machine.status, machine.layer = PrinterStatus.PAUSED, 29
+        with patch("kiln.cli.main._get_adapter_from_ctx", return_value=machine), \
+                patch("kiln.cli.main._emergency_latch_status", return_value=None):
+            result = CliRunner().invoke(cli, ["resume"])
+        assert result.exit_code == 3 and machine.resumed == 0
+        assert "kiln resume --hardware-in" in result.output
+
     def test_the_cli_carries_the_persons_word(self):
         from click.testing import CliRunner
 
