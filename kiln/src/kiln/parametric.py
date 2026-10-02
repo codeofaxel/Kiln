@@ -8,6 +8,7 @@ the file. Users can tweak parameters without re-prompting.
 from __future__ import annotations
 
 import logging
+import math
 import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
@@ -797,7 +798,7 @@ def template_slot_values(scad_template: str, params: dict[str, Any]) -> dict[str
 
 def _slot_number(name: str, value: Any) -> str:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        if value != value or value in (float("inf"), float("-inf")):
+        if isinstance(value, float) and not math.isfinite(value):
             raise ValueError(f"Parameter {name!r} takes a finite number, got {value!r}.")
         return str(value)
     if isinstance(value, str) and _NUMBER.fullmatch(value.strip()):
