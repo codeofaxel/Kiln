@@ -9818,9 +9818,15 @@ def _pause_print_on(
 def pause_print(keep_temps: bool = True, printer_name: str | None = None) -> dict:
     """Pause the currently running print job.
 
-    Pausing lifts the nozzle and parks the head.
+    What happens next is decided by the printer's own firmware, not by
+    Kiln, and it differs a lot between machines.  Some lift the nozzle
+    and park the head; others leave it resting on the part.  Many lower
+    or switch off the nozzle heater while paused, and some switch the
+    heaters and motors off after a timeout, after which the print may
+    not be able to resume.  Do not tell the person the head will park or
+    that temperatures will hold; check ``printer_status`` instead.
 
-    Heater behaviour during pause varies by firmware:
+    One measured case:
 
       - Bambu A1 / A1 mini: the firmware sets a ~90°C hotend standby
         target IMMEDIATELY on pause, regardless of slicer settings (the
@@ -9833,10 +9839,6 @@ def pause_print(keep_temps: bool = True, printer_name: str | None = None) -> dic
         measurement says the damage starts at once.  A resume onto a
         cooled nozzle can't extrude until it re-heats — and bed adhesion
         can fail in the meantime.
-      - Bambu X1/P1 series: typically holds both targets, but a long
-        idle can still trigger cooldown.
-      - OctoPrint / Moonraker / Klipper: depends on firmware config;
-        most hold targets across pause.
 
     To fight this, ``pause_print`` spawns a best-effort daemon thread
     that re-asserts the pre-pause hotend + bed targets immediately, and
@@ -9844,7 +9846,9 @@ def pause_print(keep_temps: bool = True, printer_name: str | None = None) -> dic
     (resume, cancel, error, or manual button press).  This is enabled by
     default.  The immediate assert is the part that matters on an A1:
     without it, a pause shorter than the interval got no protection at
-    all, which is most pauses a person actually takes.
+    all, which is most pauses a person actually takes.  It can only help
+    on a printer Kiln can set temperatures on: Prusa Link offers no way
+    to, so on a Prusa the keep-alive does nothing.
 
     Args:
         keep_temps: When ``True`` (default), capture the pre-pause tool
