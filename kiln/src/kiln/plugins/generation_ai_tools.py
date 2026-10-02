@@ -846,8 +846,6 @@ class _GenerationAIToolsPlugin:
                     )
 
                 # Step 5: Slice
-                from kiln.slicer import slice_file
-
                 effective_printer_id, effective_profile = _srv._resolve_slice_profile_context(
                     profile=profile,
                     printer_id=printer_id,
@@ -876,7 +874,8 @@ class _GenerationAIToolsPlugin:
                     if _sg_patch:
                         try:
                             effective_profile = resolve_slicer_profile(
-                                effective_printer_id, overrides=_sg_patch
+                                effective_printer_id, overrides=_sg_patch,
+                                printer_name=printer_name,
                             )
                             start_handoff = _sg_reason.removeprefix("handoff:")
                         except Exception:
@@ -887,32 +886,24 @@ class _GenerationAIToolsPlugin:
                 # PLA -- the same reading slice_and_print makes, and the
                 # response's slice.filament says which.
                 from kiln.plugins.slicer_tools import (
-                    _apply_plate_placement,
                     _attach_placement,
-                    _lift_floor_of,
                     _loaded_material_for,
-                    _quiet_start_plan,
-                    _verify_plate_placement,
+                    _placed_slice,
                 )
 
-                # The plate may still hold the last print: same gate as
-                # slice_model, before the generated part is sliced.
-                placed_path, place_err, place_info = _apply_plate_placement(
+                # The plate may still hold the last print: the shared step
+                # slice_model takes (plate gate, slicer, a skirt or brim past
+                # the bed's edge settled, the second verdict).
+                slice_result, slice_err, sinfo = _placed_slice(
                     result.local_path, effective_printer_id=effective_printer_id,
                     printer_name=printer_name, placement=placement,
                     profile_path=effective_profile,
-                )
-                if place_err is not None:
-                    return place_err
-                slice_result = slice_file(
-                    placed_path,
-                    profile=effective_profile,
                     material=material,
                     loaded_material=_loaded_material_for(printer_name, material),
                 )
-                verify_err, place_info = _verify_plate_placement(slice_result.output_path, place_info)
-                if verify_err is not None:
-                    return verify_err
+                if slice_err is not None:
+                    return slice_err
+                placed_path, place_info = sinfo["effective_input"], sinfo["placement"]
 
                 # Step 6: Upload (but do NOT auto-start — require explicit start_print)
                 # Same door as the control verbs: config.yaml fallback included.
@@ -923,12 +914,12 @@ class _GenerationAIToolsPlugin:
                 # start's plan and the lift floor when a part is on the plate.
                 from kiln.printers.upload_prep import prepare_upload_for_adapter
 
-                quiet_plan = _quiet_start_plan(place_info)
+                quiet_plan = sinfo["quiet_start"]
                 try:
                     upload_path, _wrapped = prepare_upload_for_adapter(
                         adapter, slice_result.output_path,
                         stl_paths=[placed_path] if str(placed_path).lower().endswith(".stl") else None,
-                        quiet_start=quiet_plan, lift_floor_mm=_lift_floor_of(place_info),
+                        quiet_start=quiet_plan, lift_floor_mm=sinfo["lift_floor_mm"],
                     )
                 except ValueError as exc:
                     # No printer file for an occupied plate without the plan;

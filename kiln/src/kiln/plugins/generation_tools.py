@@ -72,7 +72,7 @@ class _GenerationToolsPlugin:
             build_volume_x: float | None = None,
             build_volume_y: float | None = None,
             build_volume_z: float | None = None,
-            nozzle_diameter: float = 0.4,
+            nozzle_diameter: float | None = None,
             layer_height: float = 0.2,
             max_overhang_angle: float = 45.0,
             timeout: int = 600,
@@ -321,7 +321,7 @@ class _GenerationToolsPlugin:
         def validate_and_prepare_mesh(
             file_path: str,
             material: str = "PLA",
-            nozzle_diameter: float = 0.4,
+            nozzle_diameter: float | None = None,
             layer_height: float = 0.2,
             build_volume_x: float | None = None,
             build_volume_y: float | None = None,
@@ -357,7 +357,8 @@ class _GenerationToolsPlugin:
                     the user can fix this (``kiln install-step-backend``) or
                     is on a hosted server with nothing to install.
                 material: Filament material for printability analysis (default PLA).
-                nozzle_diameter: Printer nozzle diameter in mm (default 0.4).
+                nozzle_diameter: Printer nozzle diameter in mm.  Leave unset to
+                    check for the nozzle Kiln has for ``printer_id``.
                 layer_height: Print layer height in mm (default 0.2).
                 build_volume_x: Optional X build dimension (mm).
                 build_volume_y: Optional Y build dimension (mm).

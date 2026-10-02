@@ -37,6 +37,7 @@ from kiln.printer_backends import (
     PRINTER_TYPES,
     format_printer_types,
 )
+from kiln.printer_setup import CLI_REMEDY
 from kiln.printers.base import PrinterError
 from kiln.printers.command_verdict import CommandVerdict
 
@@ -196,25 +197,26 @@ def _support_extra_args(style: str) -> list[str]:
 
 
 def _auto_support_style(input_file: str) -> tuple[str | None, str | None]:
-    """Infer whether the model needs supports based on printability analysis."""
-    ext = os.path.splitext(input_file)[1].lower()
-    if ext not in {".stl", ".obj"}:
-        return None, None
+    """Infer whether the model needs supports based on printability analysis.
+
+    Every format the engine reads, a STEP as Kiln's mesh of it.  A model it
+    cannot read gets no supports and the reason says the check was not made,
+    rather than reading like a model that needs none.
+    """
+    from kiln.printability import analyze_printability
 
     try:
-        from kiln.printability import analyze_printability
-
         report = analyze_printability(input_file)
-        reasons: list[str] = []
-        if report.overhangs.needs_supports and report.overhangs.overhang_percentage >= 1.0:
-            reasons.append(f"overhangs={report.overhangs.overhang_percentage:.1f}%")
-        if report.bridging.needs_supports_for_bridges:
-            reasons.append(f"bridges={report.bridging.max_bridge_length_mm:.1f}mm")
-        if reasons:
-            return "minimal", ", ".join(reasons)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 -- the slice stands without supports, and says so
         logger.debug("Auto-support analysis failed for %s: %s", input_file, exc)
-
+        return None, f"not checked: {' '.join(str(exc).split())}"
+    reasons: list[str] = []
+    if report.overhangs.needs_supports and report.overhangs.overhang_percentage >= 1.0:
+        reasons.append(f"overhangs={report.overhangs.overhang_percentage:.1f}%")
+    if report.bridging.needs_supports_for_bridges:
+        reasons.append(f"bridges={report.bridging.max_bridge_length_mm:.1f}mm")
+    if reasons:
+        return "minimal", ", ".join(reasons)
     return None, None
 
 
@@ -2154,15 +2156,11 @@ def status(ctx: click.Context, json_mode: bool) -> None:
                         )
                         if suggestion:
                             click.echo(click.style(
-                                f"  Suggested: add `printer_model: {suggestion}` "
-                                f"to ~/.kiln/config.yaml",
+                                f"  Suggested: kiln set-model {suggestion}",
                                 fg="cyan",
                             ))
                         else:
-                            click.echo(
-                                "  Fix: add `printer_model: <value>` to the "
-                                "printer entry in ~/.kiln/config.yaml"
-                            )
+                            click.echo(f"  {CLI_REMEDY}")
                         click.echo(
                             "  Or run `kiln setup` for the interactive flow."
                         )
@@ -3858,7 +3856,7 @@ def home_cmd(axes, wait_seconds, step, plan_only, plate_clear, printer_name, jso
 @click.option("--wait", "wait_seconds", type=float, default=None, help="Seconds to watch for a fault code afterwards.")
 @click.option("--step", type=int, default=None, help="Send only this step (1-based); the answer describes the next one.")
 @click.option("--plan", "plan_only", is_flag=True, help="Describe the steps; send nothing.")
-@click.option("--plate-clear", "plate_clear", is_flag=True, help="You have looked: the plate is empty. Lets a park cross a plate the record says holds a part.")
+@click.option("--plate-clear", "plate_clear", is_flag=True, help="You have looked: the plate is empty. Lets a park cross a plate the record says holds a part, and records the plate as clear.")
 @click.option("--printer", "printer_name", default=None, help="Target printer name.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def park_cmd(wait_seconds, step, plan_only, plate_clear, printer_name, json_mode) -> None:
@@ -4148,6 +4146,46 @@ def use(name: str) -> None:
         raise click.ClickException(str(exc)) from exc
 
 
+@cli.command("set-model")
+@click.argument("model", required=False)
+@click.option(
+    "--from-file",
+    "slicer_file",
+    type=click.Path(dir_okay=False),
+    help="Read the model from a project saved in Bambu Studio, OrcaSlicer or PrusaSlicer.",
+)
+@click.option("--printer", "printer_name", help="The saved printer to set (default: the active one).")
+@click.option(
+    "--replace",
+    is_flag=True,
+    help="Change a printer that already has a different model, or take a newer file's bed.",
+)
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def set_model(
+    model: str | None, slicer_file: str | None, printer_name: str | None, replace: bool, json_mode: bool,
+) -> None:
+    """Tell Kiln which printer model a saved printer is.
+
+    Name the MODEL ("Bambu Lab A1", "MK4"), or pass --from-file with a
+    project saved from your slicer.  Kiln checks prints against that
+    model's bed and temperature limits; with no model set, it cannot.
+
+    A printer outside Kiln's catalogue is set up from its slicer file: Kiln
+    saves the file's bed with its own generic limits.
+    """
+    from kiln.printer_setup import set_printer_model
+
+    result = set_printer_model(model, slicer_file=slicer_file, printer_name=printer_name, replace=replace)
+    if json_mode:
+        click.echo(json.dumps(result, indent=2))
+        if not result["success"]:
+            sys.exit(1)
+        return
+    if not result["success"]:
+        raise click.ClickException(result["error"])
+    click.echo(result["message"])
+
+
 @cli.command("remove")
 @click.argument("name")
 def remove(name: str) -> None:
@@ -4403,6 +4441,8 @@ def slice(
                     click.echo(f"Placement: {placement_info['approval_note']}")
                 if getattr(result, "filament", None) is not None:
                     click.echo(f"Weighed as: {result.filament.note}")
+                if getattr(result, "nozzle", None):
+                    click.echo(f"Nozzle: {result.nozzle['note']}")
                 if copies > 1:
                     click.echo(f"Copies: {copies} (strategy: {copy_strategy}, spacing: {spacing}mm)")
                 if plan["printer_id"]:
@@ -4410,6 +4450,8 @@ def slice(
                 if plan["support_style"]:
                     note = f" ({plan['support_reason']})" if plan["support_reason"] else ""
                     click.echo(f"Supports: {plan['support_style']}{note}")
+                elif plan["support_reason"]:
+                    click.echo(f"Supports: none ({plan['support_reason']})")
             return
 
         # --print-after: wrap for Bambu if needed, upload, and start
@@ -8860,14 +8902,10 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
                     )
                     if suggestion:
                         click.echo(click.style(
-                            f"    Suggested value for your Bambu: printer_model: {suggestion}",
+                            f"    Suggested for your Bambu: kiln set-model {suggestion}",
                             fg="cyan",
                         ))
-                    click.echo(
-                        "    Fix: add `printer_model: <value>` under the printer "
-                        "entry in\n    ~/.kiln/config.yaml.  Run `kiln setup` to "
-                        "re-run the interactive\n    flow which now asks for this."
-                    )
+                    click.echo(f"    {CLI_REMEDY}")
                 results["setup"]["missing_printer_model"] = missing
         except Exception:
             pass
@@ -9735,13 +9773,20 @@ def generate_and_print_cmd(
             loaded_determined_by=plan.get("loaded_determined_by") or "observed",
         )
         if not json_mode:
-            click.echo(f"Sliced: {slice_result.output_path}")
+            # The slice's own message, as kiln slice prints it: it says when
+            # a skirt past the bed's edge was dropped.
+            click.echo(slice_result.message or "Sliced.")
+            click.echo(f"Output: {slice_result.output_path}")
             click.echo(f"Material: {plan['material']}")
             if getattr(slice_result, "filament", None) is not None:
                 click.echo(f"Weighed as: {slice_result.filament.note}")
+            if getattr(slice_result, "nozzle", None):
+                click.echo(f"Nozzle: {slice_result.nozzle['note']}")
             if plan["support_style"]:
                 note = f" ({plan['support_reason']})" if plan["support_reason"] else ""
                 click.echo(f"Supports: {plan['support_style']}{note}")
+            elif plan["support_reason"]:
+                click.echo(f"Supports: none ({plan['support_reason']})")
 
         # --- Step 4: Upload ---
         adapter = _get_adapter_from_ctx(ctx)
@@ -11047,7 +11092,7 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
                                 "detail": (
                                     "not set and not self-reported — model-specific "
                                     "checks (temperature limits, bed fit) fall back to "
-                                    "defaults. Add printer_model to ~/.kiln/config.yaml."
+                                    "defaults. " + CLI_REMEDY
                                 ),
                             }
                         )

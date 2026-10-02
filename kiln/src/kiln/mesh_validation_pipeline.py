@@ -161,7 +161,7 @@ def run_validation_pipeline(
     file_path: str,
     *,
     material: str = "PLA",
-    nozzle_diameter: float = 0.4,
+    nozzle_diameter: float | None = None,
     layer_height: float = 0.2,
     build_volume: tuple[float, float, float] | None = None,
     auto_repair: bool = True,
@@ -177,7 +177,8 @@ def run_validation_pipeline(
 
     :param file_path: Path to an STL or OBJ mesh file.
     :param material: Filament material for printability analysis.
-    :param nozzle_diameter: Printer nozzle diameter in mm.
+    :param nozzle_diameter: Printer nozzle diameter in mm.  Left unsaid, the
+        size :func:`kiln.assumed_nozzle.assumed_nozzle` picks for *printer_id*.
     :param layer_height: Print layer height in mm.
     :param build_volume: Optional ``(x, y, z)`` build volume in mm.
     :param auto_repair: Attempt automatic repair of non-manifold meshes.
@@ -407,17 +408,22 @@ def run_validation_pipeline(
                 )
         else:
             try:
+                from kiln.assumed_nozzle import assumed_nozzle
                 from kiln.printability import analyze_printability
 
+                nozzle = assumed_nozzle(printer_id, stated=nozzle_diameter)
                 report = analyze_printability(
                     working_path,
-                    nozzle_diameter=nozzle_diameter,
+                    nozzle_diameter=nozzle.diameter_mm,
                     layer_height=layer_height,
                     material=material.lower(),
                     # Same bed the bundle branch checks against, so the
                     # two branches cannot reach different verdicts.
                     build_volume=placement_volume,
                 )
+                # The engine was handed a size, not the printer: say where
+                # the size really came from.
+                report.nozzle = nozzle.to_dict()
                 printability_score = report.score
                 printability_grade = report.grade
                 printability_details = report.to_dict()

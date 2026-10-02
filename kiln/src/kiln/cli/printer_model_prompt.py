@@ -31,6 +31,8 @@ from typing import Any
 
 import click
 
+from kiln.printer_setup import CLI_REMEDY
+
 logger = logging.getLogger(__name__)
 
 # Bambu serial-number prefix → model, from the maker's own published
@@ -168,8 +170,7 @@ def prompt_for_printer_model(
         if not raw:
             if allow_skip:
                 click.echo(click.style(
-                    "  Skipped.  Add `printer_model: <value>` to "
-                    "~/.kiln/config.yaml later to turn on safety checks.",
+                    f"  Skipped.  Safety checks stay off until the model is set.  {CLI_REMEDY}",
                     fg="yellow",
                 ))
                 return None

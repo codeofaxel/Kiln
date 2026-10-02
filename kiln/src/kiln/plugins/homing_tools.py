@@ -226,7 +226,9 @@ def park_head(
         plate_clear: A PERSON's statement that the plate is empty.  Lets a
             park proceed over a plate the record says holds a part, and lets
             the full home (Z included) stand in for the park on a machine
-            whose Z home touches the plate.
+            whose Z home touches the plate.  Written to the plate record,
+            as on ``home_axes``: the plate reads ``clear`` until the next
+            print starts.  Never set it on a person's behalf.
         printer_name: Which printer.  Omit for the default one.
     """
     args = {"wait_seconds": wait_seconds, "step": step, "plan_only": plan_only,
@@ -289,9 +291,9 @@ def plate_status(printer_name: str | None = None) -> dict[str, Any]:
     Kiln records the plate at the moments it can be sure of: a print Kiln
     started puts a part there (``occupied``, with the file and, where Kiln
     could read it, the part's height); a print seen ending leaves it there;
-    a PERSON says it is empty (``plate_clear=true`` on ``home_axes``, or
-    ``kiln plate clear`` at the command line); and a LOOK through the
-    machine's camera settles it either way (``look_at_plate``).  Anything
+    a PERSON says it is empty (``plate_clear=true`` on ``home_axes`` or
+    ``park_head``, or ``kiln plate clear`` at the command line); and a LOOK
+    through the machine's camera settles it either way (``look_at_plate``).  Anything
     else -- no record, a torn record, a print started at the printer's own
     screen -- reads as ``unknown``, and the answer then says whether a
     camera could settle it.
@@ -305,6 +307,11 @@ def plate_status(printer_name: str | None = None) -> dict[str, Any]:
     record cannot see a print started from the printer's own screen, and
     that press is the one motion a stale record must never answer for.
 
+    An ``occupied`` record says a part WAS there.  ``recorded_ago`` says
+    how long ago, and every refusal that rests on it carries a look at the
+    plate where the machine has a camera -- so look (``look_at_plate``)
+    rather than take an old record's word that the part is still there.
+
     There is deliberately no tool that marks the plate clear from nothing:
     that is a statement someone has to make, at the machine, at the command
     line, or by looking through the camera and saying what they see.
@@ -315,8 +322,9 @@ def plate_status(printer_name: str | None = None) -> dict[str, Any]:
     Returns ``plate`` with ``status`` (``unknown`` / ``occupied`` /
     ``clear``), ``source``, ``since``, ``job`` (``file``, ``footprint_mm``,
     ``max_z_mm``, ``printer_id``), ``from_camera`` and ``looked_by`` when a
-    look wrote it, and a one-line ``description``; plus ``camera``, whether
-    this machine has one that could settle an unknown plate.
+    look wrote it, ``recorded_ago`` (how old the record is, in words), and a
+    one-line ``description``; plus ``camera``, whether this machine has one
+    that could settle an unknown plate.
     """
     import kiln.server as _srv
 
@@ -328,14 +336,25 @@ def plate_status(printer_name: str | None = None) -> dict[str, Any]:
 def look_at_plate(
     printer_name: str | None = None,
     seen: str | None = None,
-) -> dict[str, Any]:
+) -> dict[str, Any] | list[Any]:
     """Look at the build plate through the machine's camera, and record what is there.
 
     Two steps, one tool.  Called WITHOUT ``seen`` it fetches a frame and
-    hands it back for you to look at: ``image_b64`` is the picture, and
-    nothing is recorded.  Look at it, then call again with ``seen="clear"``
+    hands it to you as a picture, after a short text record that names
+    ``snapshot_path``, the same picture saved on this computer -- and
+    records nothing.  Look at it, then call again with ``seen="clear"``
     (nothing on the plate) or ``seen="occupied"`` (something is), and that
     answer becomes the plate record with you named as the one who looked.
+
+    The picture shows whatever the camera sees, the room around the
+    printer included.  This tool saves it only on this computer and hands
+    it only to you; it is never written to a log.
+
+    A refusal over a recorded part (a slice with no spot named, a print
+    start, a park or home that would cross it) already carries that frame
+    as ``snapshot_path`` and says how old the record is: look at it and
+    come straight here with ``seen``.  A record days old most likely
+    describes a part someone took off -- look before you ask a person.
 
     Kiln ships no vision model and judges nothing here.  The eyes are
     yours; this tool is the camera and the pen.  Say what you actually see:
@@ -354,7 +373,8 @@ def look_at_plate(
             record what you saw in the picture you were just given.
 
     Returns the ``plate`` record and a ``look`` block saying whether a
-    frame was available and which camera it came from.
+    frame was available and which camera it came from -- followed, when a
+    picture was taken, by the picture itself as image content.
     """
     import kiln.server as _srv
     from kiln import plate_state
@@ -376,11 +396,11 @@ def look_at_plate(
                     code="PLATE_LOOK_UNAVAILABLE",
                     extra={"look": found.to_dict(), "plate": plate_state.read(adapter).to_dict()},
                 )
-            return {
+            answer = {
                 "success": True,
                 "printer_name": target_name,
                 "look": found.to_dict(),
-                "image_b64": found.image_b64,
+                "snapshot_path": plate_state.save_frame(found),
                 "media_type": found.media_type,
                 "plate": plate_state.read(adapter).to_dict(),
                 "next": (
@@ -388,6 +408,12 @@ def look_at_plate(
                     "empty or seen=\"occupied\" if anything is on it. If you cannot tell, say occupied."
                 ),
             }
+            # The picture travels as an image block, never as text.  A real
+            # frame is ~220,000 characters of base64 (a 167 KB A1 frame), and
+            # a host that reads results as text refuses one that size whole --
+            # the record beside it lost too (measured on the monitor door,
+            # 2026-09-16).  A host that cannot open files still sees an image.
+            return [answer, _picture(found)]
 
         if seen not in ("clear", "occupied"):
             return _srv._error_dict(
@@ -396,7 +422,7 @@ def look_at_plate(
             )
         # An agent is calling this tool, so an agent is what did the looking.
         # A person's own statement has its own doors (`kiln plate clear`,
-        # plate_clear=true on home_axes) and is recorded as theirs.
+        # plate_clear=true on home_axes or park_head) and is recorded as theirs.
         status = plate_state.mark_from_camera(adapter, seen=seen, judged_by="agent")
         state = plate_state.read(adapter)
         if status is None or state.status != seen:
@@ -409,6 +435,15 @@ def look_at_plate(
     except Exception as exc:
         _logger.exception("Unexpected error in look_at_plate")
         return _srv._error_dict(f"Unexpected error looking at the plate: {exc}", code="INTERNAL_ERROR")
+
+
+def _picture(found: Any) -> Any:
+    """A look's frame as an MCP image, for the host to hand to the model."""
+    import base64
+
+    from kiln.mcp_compat import Image
+
+    return Image(data=base64.b64decode(found.image_b64), format=(found.media_type or "image/jpeg").split("/")[-1])
 
 
 class _HomingToolsPlugin:
@@ -437,7 +472,11 @@ class _HomingToolsPlugin:
         mcp.tool()(home_axes)
         mcp.tool()(park_head)
         mcp.tool()(plate_status)
-        mcp.tool()(look_at_plate)
+        # No structured output: a look answers with [record, picture], and a
+        # schema built from a dict annotation would reject the list -- the
+        # tool would fail exactly when it has a picture to show.  Without one
+        # the record goes out as a text block and the picture as an image.
+        mcp.tool(structured_output=False)(look_at_plate)
 
 
 plugin = _HomingToolsPlugin()

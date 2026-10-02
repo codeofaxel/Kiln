@@ -68,6 +68,11 @@ def map_printer_hint_to_profile_id(raw: str | None) -> str | None:
     Returns ``None`` when nothing matches — the caller then slices with
     the slicer's own defaults rather than a profile for some other
     machine.
+
+    A printer outside the catalogue that its owner set up on this machine
+    (:mod:`kiln.printer_setup`) answers to its own key, before any of the
+    loose rules below can read a catalogue model into its name: it slices
+    with the generic profile on its own bed, and that is found by its key.
     """
     if not raw:
         return None
@@ -75,6 +80,14 @@ def map_printer_hint_to_profile_id(raw: str | None) -> str | None:
     if not hint:
         return None
     hint_compact = hint.replace("_", "")
+
+    from kiln.printer_setup import LOCAL_PREFIX
+
+    if hint.startswith(LOCAL_PREFIX):
+        from kiln.printers.bed_fit import owner_stated_build_volume
+
+        if owner_stated_build_volume(hint) is not None:
+            return hint
 
     # A vendor model code, bare or as the machine spells it in a config
     # directory or firmware file name, names the row outright.

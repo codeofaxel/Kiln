@@ -57,7 +57,11 @@ class _Adapter:
     def reported_firmware_version(self):
         return self._firmware
 
+    @property
     def snapshot_source(self):
+        # A property, as on a real adapter.  As a method this stand-in kept
+        # the bench's pictures green while every real printer read as having
+        # no camera (2026-10-01).
         return "printer" if self._camera else None
 
     def get_snapshot(self):
@@ -457,10 +461,21 @@ def server(monkeypatch):
     return SimpleNamespace(machine=machine, log=log, tool=tool)
 
 
-def _step(server, answer=None, **kw):
-    out = server.tool.printer_bench(printer_name="a1", answer=answer, **kw)
+def _split(result):
+    """A reply and the pictures that follow it: ``(text dict, [image blocks])``."""
+    if not isinstance(result, list):
+        return result, []
+    return result[0], [p.to_image_content().model_dump(by_alias=True, mode="json") for p in result[1:]]
+
+
+def _step(server, answer=None, *, with_pictures=False, **kw):
+    out, pictures = _split(server.tool.printer_bench(printer_name="a1", answer=answer, **kw))
     assert out.get("success") is True, out
-    return out
+    # Every picture the reply names follows it as an image, in order, and
+    # none of them rides as base64 in the text.
+    assert [p["mimeType"] for p in pictures] == [p["media_type"] for p in out.get("images") or []]
+    assert "image_b64" not in json.dumps(out)
+    return (out, pictures) if with_pictures else out
 
 
 class TestTheConversation:
@@ -473,9 +488,9 @@ class TestTheConversation:
             "resumes it, and lets it finish, then prints a second one and cancels it partway, watching where the head "
             "goes each time, and you measure the head with calipers. Kiln will ask you where the head stopped, with a "
             "picture. Ready?")
-        out = _step(server, "yes")
+        out, pictures = _step(server, "yes", with_pictures=True)
         assert out["step"] == "plate" and out["ask"] == "Is the plate empty?" and out["images"][0]["kind"] == "camera"
-        assert out["image_b64"] == out["images"][0]["image_b64"]
+        assert base64.b64decode(pictures[0]["data"]) == _png(), "the camera's own frame, as a picture"
         out = _step(server, "no")
         assert "Take everything off" in out["ask"]
         out = _step(server, "yes")
@@ -572,8 +587,9 @@ class TestTheConversation:
         assert out["step"] == "pause_zone"
         # A new process, a new call, no answer: the same ask comes back.
         server.tool._LOGS.clear()
-        out = server.tool.printer_bench(printer_name="a1")
+        out, pictures = _split(server.tool.printer_bench(printer_name="a1"))
         assert out["step"] == "pause_zone" and out["ask"].startswith("Where did the head stop")
+        assert len(pictures) == len(out["images"]) == 2
         out = _step(server, "24")
         assert out["step"] == "pause_lift"
 
@@ -744,19 +760,50 @@ class TestTheConversation:
         assert only_head == ["intro", "head_width", "head_rod", "done"]      # no print, so no plate ask
         assert "runout" not in " ".join(full)
 
+    def test_the_pictures_reach_the_model_as_images_through_a_real_server(self, server):
+        """2026-10-01: every reply carried its pictures as base64 inside the
+        JSON, the first one twice.  Once the camera answered on real
+        printers that made the "is the plate empty?" step ~445,000
+        characters -- past the size at which a host that reads results as
+        text refused the monitor's whole result on 2026-09-16."""
+        import asyncio
+
+        from kiln.mcp_compat import FastMCP, tool_result_blocks
+
+        mcp = FastMCP("bench")
+        server.tool._PrinterBenchPlugin().register(mcp)
+
+        def call(**arguments):
+            blocks = list(tool_result_blocks(asyncio.run(mcp.call_tool("printer_bench", {"printer_name": "a1", **arguments}))))
+            text = "".join(b.text for b in blocks if b.type == "text")
+            return json.loads(text), [b.model_dump(by_alias=True, mode="json") for b in blocks if b.type == "image"], text
+
+        out, images, _ = call()
+        assert out["step"] == "intro" and images == []
+        out, images, text = call(answer="yes")
+        assert out["step"] == "plate" and [p["kind"] for p in out["images"]] == ["camera"]
+        assert len(images) == 1 and base64.b64decode(images[0]["data"]) == _png()
+        assert images[0]["data"] not in text and len(text) < 5_000
+
     def test_the_tool_is_registered_and_classified(self):
         from kiln.plugins.printer_bench_tools import plugin
 
         captured: list = []
 
+        settings: list = []
+
         class _Mcp:
-            def tool(self):
+            def tool(self, **kwargs):
+                settings.append(kwargs)
                 return lambda fn: captured.append(fn.__name__) or fn
 
         import kiln.server as srv
 
         plugin.register(_Mcp())
         assert captured == ["printer_bench"] and "printer_bench" in srv._TOOL_RATE_LIMITS
+        # A reply with pictures is [text, image, ...]; a schema built from the
+        # dict annotation would reject it exactly when there is a picture.
+        assert settings == [{"structured_output": False}]
         import importlib.resources as res
 
         data = json.loads((res.files("kiln") / "data" / "tool_safety.json").read_text())

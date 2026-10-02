@@ -536,15 +536,13 @@ def test_importing_the_server_attaches_nothing_until_a_printer_is_resolved(tmp_p
         print("AFTER_RESOLVE", *count())
         """
     )
-    import site
-
     env = {
         **os.environ,
-        # A scratch home keeps the probe away from a real ~/.kiln; the user
-        # site directory is derived from HOME, so name it outright or the
-        # packages installed there vanish with it.
+        # A scratch home keeps the probe away from a real ~/.kiln.  The user
+        # site directory would move with it; conftest pins that directory in
+        # the environment this one is built from, so the probe keeps the
+        # packages installed there.
         "HOME": str(tmp_path),
-        "PYTHONUSERBASE": site.getuserbase(),
         "PYTHONPATH": os.pathsep.join(
             [str(_KILN.parent), *filter(None, [os.environ.get("PYTHONPATH")])]
         ),

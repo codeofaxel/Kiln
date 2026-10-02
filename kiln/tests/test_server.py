@@ -2988,6 +2988,7 @@ class TestWrapGcodeAs3mf:
             filament_types=None,
             stl_paths=None,
             resume_mode=False,
+            bed_type=None,
         )
 
     @patch("kiln.server._get_adapter")
@@ -3132,6 +3133,7 @@ class TestWrapGcodeAs3mf:
             filament_types=None,
             stl_paths=None,
             resume_mode=False,
+            bed_type=None,
         )
 
     @patch("kiln.server._get_adapter")
@@ -3234,6 +3236,7 @@ class TestResliceWithOverrides:
         mock_resolve.assert_called_once_with(
             "prusa_mini",
             overrides={"brim_width": "8", "fill_density": "25%"},
+            printer_name=None,
         )
 
     @patch("kiln.server._check_auth", return_value=None)
@@ -3263,7 +3266,7 @@ class TestResliceWithOverrides:
         assert result["success"] is True
         assert "applied_overrides" not in result
         # With no overrides, resolve_slicer_profile is called with overrides=None
-        mock_resolve.assert_called_once_with("prusa_mini", overrides=None)
+        mock_resolve.assert_called_once_with("prusa_mini", overrides=None, printer_name=None)
 
     @patch("kiln.server._check_auth", return_value=None)
     def test_reslice_invalid_json_overrides(self, mock_auth, tmp_path):
@@ -3349,7 +3352,9 @@ class TestResliceWithOverrides:
         assert "profile_validation" in result
         assert "profile_validation_warning" in result
         assert "unsafe" in result["profile_validation_warning"].lower()
-        mock_validate.assert_called_once_with("bambu_a1", "bambu_a1")
+        # The check reads the file about to be sliced, the override in it: a
+        # check of the bundled profile could never see the 350 it warns about.
+        mock_validate.assert_called_once_with("bambu_a1", "bambu_a1", settings={"temperature": "350"})
 
 
 # ---------------------------------------------------------------------------

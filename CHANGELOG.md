@@ -314,9 +314,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **A design you import still opens after a restart.** Kiln keeps its own copy of the model with the design, instead of pointing at a temporary file your Mac clears.
 
-- **A dimensioned drawing works for an imported design (Business+).** Ask for one by design and Kiln draws its measured model, instead of saying it has nothing to draw. See https://kiln3d.com/pricing.
+- **Dimensioned drawings work for imported designs, 3MF files and very detailed parts (Business+).**
 
 - **Texturing a large model no longer times out.** The preview now finishes within your assistant's wait.
+
+- **Long jobs started from your own computer no longer give up early.**
 
 - **File details name the right material, print time and layer count for every slicer's files.**
 

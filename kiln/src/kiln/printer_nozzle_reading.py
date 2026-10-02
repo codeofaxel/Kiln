@@ -68,6 +68,21 @@ def _with_deadline(fn, seconds: float):
         pool.shutdown(wait=False)
 
 
+def read_setting(adapter: Any) -> Any:
+    """*adapter*'s own nozzle setting (a :class:`~kiln.printers.base.NozzleSetting`),
+    asked within :data:`LIVE_READ_DEADLINE_S`, or ``None``: the backend has
+    no such setting, did not answer in time, or reported nothing.  The one
+    read every caller shares; may raise what the adapter raises.
+    """
+    read = getattr(adapter, "read_nozzle_setting", None)
+    if not callable(read):
+        return None
+    setting = _with_deadline(read, LIVE_READ_DEADLINE_S)
+    if setting is None or getattr(setting, "is_empty", lambda: True)():
+        return None
+    return setting
+
+
 def observe_printer_nozzle(printer_id: str) -> dict[str, Any] | None:
     """What the machine *printer_id* names holds as its nozzle, or ``None``.
 
@@ -101,11 +116,8 @@ def observe_printer_nozzle(printer_id: str) -> dict[str, Any] | None:
                 return None
         except ImportError:
             pass
-        read = getattr(adapter, "read_nozzle_setting", None)
-        if not callable(read):
-            return None
-        setting = _with_deadline(read, LIVE_READ_DEADLINE_S)
-        if setting is None or getattr(setting, "is_empty", lambda: True)():
+        setting = read_setting(adapter)
+        if setting is None:
             return None
         observation = {
             "machine": registered_name,
@@ -166,5 +178,6 @@ __all__ = [
     "LIVE_READ_DEADLINE_S",
     "TOOLS_THAT_TAKE_A_READING",
     "observe_printer_nozzle",
+    "read_setting",
     "with_local_reading",
 ]

@@ -282,12 +282,41 @@ class TestTheSliceModelTool:
         assert y1 - y0 == pytest.approx(200.0, abs=1.5)
         assert x0 >= 0.0 and x1 <= 250.0 and y0 >= 0.0 and y1 <= 210.0
         assert "outside of the print volume" not in str(result)
-        # A part this close to the edge may be sliced with its skirt past
-        # it.  Whenever the file's print moves leave the bed, the result
-        # says so -- in the block and in the warnings people read.
-        printed = fit["bbox"]
-        leaves_the_bed = (
-            printed["x_min"] < -0.5 or printed["x_max"] > 250.5 or printed["y_min"] < -0.5 or printed["y_max"] > 210.5
-        )
-        assert bool(fit.get("prints_past_bed")) == leaves_the_bed
-        assert any("past the edge of the bed" in w for w in result.get("warnings", [])) == leaves_the_bed
+        # 2.5 mm each side is too little room for PrusaSlicer's skirt, which
+        # printed at X -3.7 .. 253.7: the file a person is handed is the one
+        # the check before a print takes, sliced again without the skirt.
+        verdict = bed_fit.validate_gcode_for_printer(result["output_path"], "prusa_mk4")
+        assert verdict["ok"], verdict
+        assert "3.7 mm past the edge of the bed" in fit["skirt_dropped"] and "without one" in fit["skirt_dropped"]
+        assert "prints_past_bed" not in fit and not result.get("warnings")
+
+    def _reslice(self, path: str, out: Path, brim_width: str) -> dict:
+        from kiln.plugins.slicer_tools import _SlicerToolsPlugin
+
+        tools: dict = {}
+
+        class _FakeMcp:
+            def tool(self, name=None, **_kwargs):
+                def decorator(fn):
+                    tools[name or fn.__name__] = fn
+                    return fn
+
+                return decorator
+
+        _SlicerToolsPlugin().register(_FakeMcp())
+        with patch("kiln.server._check_auth", return_value=None):
+            return tools["reslice_with_overrides"](
+                input_path=path, output_dir=str(out), printer_id="prusa_mk4", slicer_path=_real_prusaslicer(),
+                overrides={"brim_width": brim_width},
+            )
+
+    def test_a_brim_that_does_not_fit_beside_the_part_is_refused_with_the_width_that_does(self, tmp_path: Path) -> None:
+        step = _light_step(tmp_path / "tall.step", 200.0, 245.0, 215.0, at=(500.0, -500.0, 40.0))
+        refused = self._reslice(step, tmp_path / "out", "5")
+        assert refused.get("success") is False and refused["error"]["code"] == "BRIM_PAST_BED", refused
+        assert "5 mm brim" in refused["error"]["message"] and "brim_width=2" in refused["error"]["message"]
+        # The width it names prints: the brim stays, the skirt goes.
+        kept = self._reslice(step, tmp_path / "out", "2")
+        assert kept.get("success"), kept
+        assert bed_fit.validate_gcode_for_printer(kept["output_path"], "prusa_mk4")["ok"]
+        assert "kept the 2 mm brim" in kept["bed_fit"]["skirt_dropped"]
