@@ -5322,23 +5322,6 @@ class TestOptimizeTemplateParamsTool:
 # Multi-part plate arrangement
 # ---------------------------------------------------------------------------
 
-@pytest.fixture()
-def _mock_trimesh():
-    """Inject a fake trimesh module so arrange_on_plate can import it."""
-    import sys
-
-    fake = MagicMock()
-    had = "trimesh" in sys.modules
-    old = sys.modules.get("trimesh")
-    sys.modules["trimesh"] = fake
-    yield fake
-    if had:
-        sys.modules["trimesh"] = old
-    else:
-        sys.modules.pop("trimesh", None)
-
-
-@pytest.mark.usefixtures("_mock_trimesh")
 class TestArrangeOnPlate:
     """Tests for arrange_on_plate bin-packing.
 

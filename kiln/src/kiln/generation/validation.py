@@ -1,9 +1,11 @@
 """Mesh validation pipeline for generated 3D models.
 
-Validates STL, OBJ, and GLB files for 3D-printing readiness: parseable
+Validates STL, OBJ, 3MF and GLB files for 3D-printing readiness: parseable
 geometry, reasonable dimensions, manifold checks, and polygon counts.
-Uses only the Python standard library (``struct`` + ``json`` for binary
-STL/GLB parsing) — no external mesh libraries required.
+STL, OBJ and 3MF are parsed with the Python standard library.  GLB is read
+through :mod:`kiln.mesh_frame`, the one place glTF's Y-up convention is
+turned into Kiln's Z-up frame, so a GLB validates in the same frame every
+other door sees it in.
 """
 
 from __future__ import annotations
@@ -54,19 +56,8 @@ _STL_HEADER_SIZE = 80
 _STL_COUNT_SIZE = 4
 _STL_TRIANGLE_SIZE = 50  # 12 floats (normal + 3 vertices) + 2 byte attr
 
-# GLB (binary glTF 2.0) constants
-_GLB_MAGIC = 0x46546C67  # "glTF" in little-endian
-_GLB_JSON_CHUNK = 0x4E4F534A  # "JSON"
-_GLB_BIN_CHUNK = 0x004E4942  # "BIN\0"
-# componentType → (struct format, byte size)
-_COMPONENT_FMT: dict[int, tuple[str, int]] = {
-    5120: ("b", 1),  # BYTE
-    5121: ("B", 1),  # UNSIGNED_BYTE
-    5122: ("h", 2),  # SHORT
-    5123: ("H", 2),  # UNSIGNED_SHORT
-    5125: ("I", 4),  # UNSIGNED_INT
-    5126: ("f", 4),  # FLOAT
-}
+# A binary glTF file opens with this magic number: "glTF", little-endian.
+_GLB_MAGIC = 0x46546C67
 
 
 # ---------------------------------------------------------------------------
@@ -950,211 +941,40 @@ def _parse_glb(
     path: Path,
     errors: list[str],
 ) -> tuple[list[tuple[tuple[float, ...], ...]], list[tuple[float, ...]]]:
-    """Parse a binary glTF 2.0 (.glb) file.
+    """Parse a binary glTF 2.0 (.glb) file in Kiln's frame.
 
-    Extracts vertex positions and triangle indices from all mesh
-    primitives.  Only ``TRIANGLES`` mode (4) is supported — strips
-    and fans are skipped.
+    Read through :func:`kiln.mesh_frame.load_mesh`, the door every mesh
+    read goes through, so each part sits where the file's scene graph
+    places it and the model stands Z-up: the same geometry the 3D stage,
+    the renders and the slicer get.
 
     Returns:
         (triangles, unique_vertices).
     """
     try:
         with open(path, "rb") as fh:
-            data = fh.read()
-    except Exception as exc:
+            header = fh.read(12)
+    except OSError as exc:
         errors.append(f"Could not read GLB file: {exc}")
         return [], []
-
-    if len(data) < 12:
+    if len(header) < 12:
         errors.append("GLB file too small (< 12 bytes).")
         return [], []
-
-    magic, version, total_length = struct.unpack_from("<III", data, 0)
+    magic = struct.unpack_from("<I", header, 0)[0]
     if magic != _GLB_MAGIC:
         errors.append(f"Not a valid GLB file (magic: {magic:#010x}).")
         return [], []
 
-    # Parse chunks.
-    json_data: dict | None = None
-    bin_data: bytes = b""
-    offset = 12
+    from kiln.mesh_frame import load_mesh
 
-    while offset + 8 <= len(data):
-        chunk_length, chunk_type = struct.unpack_from("<II", data, offset)
-        chunk_start = offset + 8
-        chunk_end = chunk_start + chunk_length
-
-        if chunk_type == _GLB_JSON_CHUNK:
-            try:
-                json_data = _json.loads(data[chunk_start:chunk_end])
-            except Exception as exc:
-                errors.append(f"Failed to parse GLB JSON chunk: {exc}")
-                return [], []
-        elif chunk_type == _GLB_BIN_CHUNK:
-            bin_data = data[chunk_start:chunk_end]
-
-        offset = chunk_end
-        # Chunks are padded to 4-byte boundaries.
-        if offset % 4 != 0:
-            offset += 4 - (offset % 4)
-
-    if json_data is None:
-        errors.append("GLB file has no JSON chunk.")
+    try:
+        mesh = load_mesh(str(path), force="mesh", process=False)
+    except Exception as exc:  # noqa: BLE001 — a malformed file is reported, never raised
+        errors.append(f"Could not parse GLB file: {exc}")
         return [], []
-
-    accessors = json_data.get("accessors", [])
-    buffer_views = json_data.get("bufferViews", [])
-    meshes = json_data.get("meshes", [])
-
-    all_triangles: list[tuple[tuple[float, ...], ...]] = []
-    vertex_set: set[tuple[float, ...]] = set()
-
-    for mesh in meshes:
-        for primitive in mesh.get("primitives", []):
-            # Only handle TRIANGLES mode (4, the default).
-            mode = primitive.get("mode", 4)
-            if mode != 4:
-                continue
-
-            pos_idx = primitive.get("attributes", {}).get("POSITION")
-            if pos_idx is None:
-                continue
-
-            # Read vertex positions.
-            positions = _read_glb_accessor(
-                accessors, buffer_views, bin_data, pos_idx, errors,
-            )
-            if not positions:
-                continue
-
-            # Read triangle indices (if present).
-            idx_accessor = primitive.get("indices")
-            if idx_accessor is not None:
-                indices = _read_glb_accessor_scalar(
-                    accessors, buffer_views, bin_data, idx_accessor, errors,
-                )
-                if not indices:
-                    continue
-                # Build triangles from indexed geometry.
-                for i in range(0, len(indices) - 2, 3):
-                    i0, i1, i2 = indices[i], indices[i + 1], indices[i + 2]
-                    if i0 < len(positions) and i1 < len(positions) and i2 < len(positions):
-                        v0 = positions[i0]
-                        v1 = positions[i1]
-                        v2 = positions[i2]
-                        all_triangles.append((v0, v1, v2))
-                        vertex_set.update((v0, v1, v2))
-            else:
-                # Non-indexed: every 3 vertices form a triangle.
-                for i in range(0, len(positions) - 2, 3):
-                    v0 = positions[i]
-                    v1 = positions[i + 1]
-                    v2 = positions[i + 2]
-                    all_triangles.append((v0, v1, v2))
-                    vertex_set.update((v0, v1, v2))
-
-    return all_triangles, list(vertex_set)
-
-
-def _read_glb_accessor(
-    accessors: list[dict],
-    buffer_views: list[dict],
-    bin_data: bytes,
-    accessor_idx: int,
-    errors: list[str],
-) -> list[tuple[float, ...]]:
-    """Read a VEC3 accessor from the GLB binary buffer.
-
-    Returns a list of ``(x, y, z)`` tuples.
-    """
-    if accessor_idx >= len(accessors):
-        errors.append(f"Accessor index {accessor_idx} out of range.")
-        return []
-
-    acc = accessors[accessor_idx]
-    component_type = acc.get("componentType", 5126)
-    acc_type = acc.get("type", "")
-    count = acc.get("count", 0)
-
-    if acc_type != "VEC3":
-        errors.append(f"Expected VEC3 accessor, got {acc_type!r}.")
-        return []
-
-    fmt_info = _COMPONENT_FMT.get(component_type)
-    if not fmt_info:
-        errors.append(f"Unsupported component type: {component_type}.")
-        return []
-
-    fmt_char, comp_size = fmt_info
-    bv_idx = acc.get("bufferView")
-    if bv_idx is None or bv_idx >= len(buffer_views):
-        errors.append("Missing or invalid bufferView for accessor.")
-        return []
-
-    bv = buffer_views[bv_idx]
-    bv_offset = bv.get("byteOffset", 0)
-    bv_stride = bv.get("byteStride", 0)
-    acc_offset = acc.get("byteOffset", 0)
-
-    start = bv_offset + acc_offset
-    stride = bv_stride if bv_stride > 0 else comp_size * 3
-
-    result: list[tuple[float, ...]] = []
-    for i in range(count):
-        pos = start + i * stride
-        if pos + comp_size * 3 > len(bin_data):
-            break
-        x, y, z = struct.unpack_from(f"<3{fmt_char}", bin_data, pos)
-        result.append((float(x), float(y), float(z)))
-
-    return result
-
-
-def _read_glb_accessor_scalar(
-    accessors: list[dict],
-    buffer_views: list[dict],
-    bin_data: bytes,
-    accessor_idx: int,
-    errors: list[str],
-) -> list[int]:
-    """Read a SCALAR accessor from the GLB binary buffer.
-
-    Returns a flat list of integer index values.
-    """
-    if accessor_idx >= len(accessors):
-        errors.append(f"Accessor index {accessor_idx} out of range.")
-        return []
-
-    acc = accessors[accessor_idx]
-    component_type = acc.get("componentType", 5123)
-    count = acc.get("count", 0)
-
-    fmt_info = _COMPONENT_FMT.get(component_type)
-    if not fmt_info:
-        errors.append(f"Unsupported index component type: {component_type}.")
-        return []
-
-    fmt_char, comp_size = fmt_info
-    bv_idx = acc.get("bufferView")
-    if bv_idx is None or bv_idx >= len(buffer_views):
-        errors.append("Missing or invalid bufferView for index accessor.")
-        return []
-
-    bv = buffer_views[bv_idx]
-    bv_offset = bv.get("byteOffset", 0)
-    acc_offset = acc.get("byteOffset", 0)
-
-    start = bv_offset + acc_offset
-    result: list[int] = []
-    for i in range(count):
-        pos = start + i * comp_size
-        if pos + comp_size > len(bin_data):
-            break
-        val = struct.unpack_from(f"<{fmt_char}", bin_data, pos)[0]
-        result.append(int(val))
-
-    return result
+    points = [tuple(p) for p in mesh.vertices.tolist()]
+    triangles = [(points[a], points[b], points[c]) for a, b, c in mesh.faces.tolist()]
+    return triangles, list({v for tri in triangles for v in tri})
 
 
 def _convert_glb_to_stl(path: Path, output_path: str | None = None) -> str:
