@@ -41,10 +41,21 @@ other host reads ``unknown``.  An honest unknown beats a guess: the
 dashboard counts the unknowns as unknowns rather than filing them
 under whichever model was fashionable.
 
+The CHAT APP is not part of the protocol either.  A host that relays a
+person's messages from Telegram or WhatsApp (OpenClaw is one) opens the
+same connection whichever app the person wrote from, and names none of
+them: not in the handshake, not on a tool call, not in the environment.
+So the one way Kiln learns it is the agent saying so
+(:func:`note_chat_app`, from ``get_started(chat_app=...)``), and what it
+says is kept as one word from a closed list (:data:`CHAT_APPS`) — the
+agent's report, never a reading of the conversation, and labelled that
+way wherever it is shown.
+
 What leaves the machine: the host NAME and VERSION, whether it declared
-Apps and elicitation, and the model hint or ``unknown``.  Never the
-session id, the project directory, the working tree, or anything else
-the environment happens to carry.  Same switch as the rest of the
+Apps and elicitation, the model hint or ``unknown``, and the chat app an
+agent reported, as its word from the closed list.  Never the session id,
+the project directory, the working tree, a chat or user name, or anything
+else the environment happens to carry.  Same switch as the rest of the
 heartbeat (``KILN_TELEMETRY=false``).
 """
 
@@ -68,6 +79,29 @@ FACT_APPS = "apps"
 FACT_ELICITATION = "elicitation"
 FACT_VERSION_PREFIX = "v:"
 FACT_MODEL_PREFIX = "model:"
+#: The chat app an agent said the person is writing from, as
+#: ``chat:<app>`` — the one fact here that is the agent's report rather
+#: than the host's own declaration.
+FACT_CHAT_PREFIX = "chat:"
+
+#: The chat apps an agent can report, and the only words that are ever
+#: recorded for one.  Anything else an agent says is ``other``: the list
+#: is closed so that no word of an agent's choosing (a room, a person, a
+#: link) can ride out as a "chat app".
+CHAT_APP_OTHER = "other"
+CHAT_APPS: tuple[str, ...] = (
+    "telegram", "whatsapp", "discord", "imessage", "signal", "slack", "sms",
+    "matrix", "teams", "googlechat", "wechat", "line", CHAT_APP_OTHER,
+)
+#: Other spellings an agent is likely to use, folded to the list's word.
+#: Compared after everything but letters and digits is dropped, so
+#: "Microsoft Teams", "ms-teams" and "msteams" are one spelling.
+_CHAT_APP_SPELLINGS: dict[str, str] = {
+    "microsoftteams": "teams", "msteams": "teams",
+    "googlechat": "googlechat", "gchat": "googlechat",
+    "applemessages": "imessage", "messages": "imessage",
+    "textmessage": "sms", "text": "sms",
+}
 
 #: Claude Code's own markers: it exports ``CLAUDECODE=1`` to every child,
 #: and ``CLAUDE_CODE_ENTRYPOINT`` names the door it was started from.
@@ -108,6 +142,13 @@ KEY_BUDGET = 128
 _USER_SUFFIXED_NAME_PREFIXES = ("local-agent-mode-",)
 
 _recorded = False
+#: The label the host was recorded under, so a fact learned later in the
+#: process (the chat app) is filed beside the same host.
+_recorded_label = ""
+#: The chat app an agent reported in this process, or ``""``.
+_chat_app = ""
+#: The chat apps already counted in this process: one count each.
+_chat_apps_counted: set[str] = set()
 
 
 class AgentHost(NamedTuple):
@@ -279,7 +320,7 @@ def record_once(mcp: Any, ctx: Any = None) -> AgentHost | None:
     is not the same number as ``surface_sessions["mcp"]``, which counts
     process starts.
     """
-    global _recorded  # noqa: PLW0603
+    global _recorded, _recorded_label  # noqa: PLW0603
     if _recorded:
         return None
     host = describe(mcp, ctx)
@@ -290,12 +331,74 @@ def record_once(mcp: Any, ctx: Any = None) -> AgentHost | None:
 
         record_agent_host(host.label, host.facts)
         _recorded = True
+        _recorded_label = host.label
     except Exception as exc:  # noqa: BLE001
         _logger.debug("agent_host.record_once failed: %s", exc)
     return host
 
 
+def chat_app_word(said: Any) -> str:
+    """What an agent said the chat app is, as its word in
+    :data:`CHAT_APPS` — or ``""`` when it said nothing.  A name outside
+    the list is ``other``, never the name itself."""
+    if not isinstance(said, str):
+        return ""
+    plain = re.sub(r"[^a-z0-9]+", "", said.strip().lower())
+    if not plain:
+        return ""
+    if plain in CHAT_APPS:
+        return plain
+    return _CHAT_APP_SPELLINGS.get(plain, CHAT_APP_OTHER)
+
+
+def note_chat_app(said: Any) -> str:
+    """Keep the chat app an agent reported, and count it once beside the
+    host on record.  Returns its word, or ``""`` when nothing was said.
+
+    This is the agent's report: the handshake carries no chat app, and
+    Kiln does not read the conversation to find one.  The word is
+    remembered for this process (:func:`reported_chat_app`) even when no
+    host is on record to count it beside — a fact about a host the day
+    never named is one the dashboard drops.  Never raises.
+
+    On the hosted server one process answers every account, so nothing is
+    kept there: a word remembered for the process would be one caller's
+    chat app read back to the next.
+    """
+    global _chat_app  # noqa: PLW0603
+    word = chat_app_word(said)
+    if not word:
+        return ""
+    try:
+        from kiln.runtime_env import is_hosted_multitenant
+
+        if is_hosted_multitenant():
+            return word
+    except Exception as exc:  # noqa: BLE001 — cannot tell is not kept
+        _logger.debug("agent_host.note_chat_app: hosted check failed: %s", exc)
+        return word
+    _chat_app = word
+    if _recorded_label and word not in _chat_apps_counted:
+        try:
+            from kiln.daily_stats import record_agent_host_fact
+
+            record_agent_host_fact(f"{_recorded_label} {FACT_CHAT_PREFIX}{word}")
+            _chat_apps_counted.add(word)
+        except Exception as exc:  # noqa: BLE001 — telemetry never breaks a call
+            _logger.debug("agent_host.note_chat_app failed: %s", exc)
+    return word
+
+
+def reported_chat_app() -> str:
+    """The chat app an agent reported in this process, or ``""``."""
+    return _chat_app
+
+
 def reset_recorded() -> None:
-    """Forget that a host was recorded.  Test isolation only."""
-    global _recorded  # noqa: PLW0603
+    """Forget that a host was recorded, and any chat app said.  Test
+    isolation only."""
+    global _recorded, _recorded_label, _chat_app  # noqa: PLW0603
     _recorded = False
+    _recorded_label = ""
+    _chat_app = ""
+    _chat_apps_counted.clear()
