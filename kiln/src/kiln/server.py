@@ -1445,6 +1445,9 @@ def _install_mcp_request_context_capture() -> None:
             # the tools because sync tools run on this event loop and could
             # not await the answer.  Raises if they say no, before dispatch.
             consent_token = await _obtain_print_consent(name, arguments, context)
+            # A person's word that the bed is clear, typed in a chat: where
+            # this app can draw a dialog, the person is asked directly.
+            await _ask_the_person_about_the_bed(name, arguments, context)
             # ``null`` for a non-Optional field and a bare string for a list
             # field are coerced here, once, for every tool — see
             # kiln.tool_args.  Everything else pydantic still judges.
@@ -2659,6 +2662,59 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
     return await _offer_screen_code(
         tool_name, file_value, aimed, ctx, hook_path=None, fallback=f"unavailable:{answer.detail}",
     )
+
+
+def bed_question(printer: str) -> str:
+    """What the person is asked when their assistant passes on that they
+    said the bed is clear."""
+    return (
+        f"Is the bed on {printer} empty right now?\n\n"
+        "Your assistant says you told it the bed is clear. Kiln could not tell from the camera, "
+        "so it goes on your answer. Say yes only if nothing is on the bed."
+    )
+
+
+async def _ask_the_person_about_the_bed(tool_name: str, arguments: dict | None, ctx: Any) -> None:
+    """``look_at_plate(person_says=...)`` carries a person's word that the
+    bed is empty, typed in a chat and passed on by the assistant.
+
+    Where the connected app can draw a dialog, that word is not taken on
+    relay: the person is asked, in a dialog the assistant does not hold,
+    and their answer is what the tool records (as theirs) or refuses on.
+    Where no dialog can be drawn -- a chat app, a host whose own hooks
+    answer its dialogs, the question failing -- nothing is noted, and the
+    tool records the words as passed on, which is what they are.  Asked
+    only for words that say the bed is clear, about a plate the record
+    says holds a part: anything else the tool refuses without troubling
+    anyone.  Never raises.
+    """
+    from kiln import plate_state
+    from kiln.mcp_compat import ASKED_NO, ASKED_YES, ask_user_yes_or_no
+
+    plate_state.note_plate_word_answer("")
+    args = arguments if isinstance(arguments, dict) else {}
+    if tool_name != "look_at_plate" or ctx is None or not plate_state.says_plate_is_clear(args.get("person_says")):
+        return
+    try:
+        if _hosted_now():
+            return
+        adapter, target_name = _resolve_control_target(args.get("printer_name") or None)
+        if not plate_state.read(adapter).occupied:
+            return
+        if not host_can_ask_the_user(mcp, ctx) or screen_code.host_dialog_hook(_host_client_name(ctx)):
+            return
+        answer = await ask_user_yes_or_no(
+            ctx, bed_question(_printer_label_for_a_person(target_name)),
+            title="IsTheBedClear", yes="Yes, the bed is empty", no="No, or I'm not sure",
+        )
+    except Exception:  # noqa: BLE001 -- a question that could not be put is not an answer
+        logger.debug("the person could not be asked about the bed", exc_info=True)
+        return
+    if answer == ASKED_YES:
+        plate_state.note_plate_word_answer(plate_state.WORD_CONFIRMED)
+    elif answer == ASKED_NO:
+        plate_state.note_plate_word_answer(plate_state.WORD_DECLINED)
+    _audit("look_at_plate", "bed_question_answered", details={"printer": target_name, "answer": answer})
 
 
 def _host_client_name(ctx: Any) -> str:

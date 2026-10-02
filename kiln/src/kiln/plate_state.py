@@ -67,6 +67,7 @@ import os
 import re
 import tempfile
 import zipfile
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -95,6 +96,23 @@ CAMERA_JUDGES = ("agent", "human")
 #: an old record is weaker evidence, not a different record, and only a look
 #: or a person's word clears it (:func:`offer_look`).
 LIKELY_GONE_AFTER_HOURS = 24.0
+
+#: A person's own word that the plate is empty, and how it reached Kiln.
+#: ``human``: said where the assistant does not hold the pen -- at this
+#: computer's terminal, or in a dialog the person's app drew.
+#: ``human_relayed``: typed in a chat and passed on by the assistant
+#: (``look_at_plate(person_says=...)``), kept with the words typed.  Both
+#: read as clear; the record says which, so nobody mistakes one for the
+#: other afterwards.
+SAID_DIRECTLY = "human"
+SAID_IN_CHAT = "human_relayed"
+PERSON_SOURCES = (SAID_DIRECTLY, SAID_IN_CHAT)
+
+#: What the person answered when their app asked them about the plate
+#: directly, for the call being served: set by the tool-call wrapper, read
+#: by ``look_at_plate``.  Empty when nobody could be asked.
+WORD_CONFIRMED = "confirmed"
+WORD_DECLINED = "declined"
 
 #: How long a frame of the plate stays good as the picture a start rests
 #: on.  A look taken for a print that starts minutes later is about this
@@ -355,12 +373,13 @@ class PlateState:
         plate the camera showed and eyes could not judge: the person at
         the machine outranks a picture, for as long as their word is
         about the plate as it is now."""
-        if not (self.clear and self.source == "human" and self.since):
+        if not (self.clear and self.source in PERSON_SOURCES and self.since):
             return None
         age = _seconds_since(self.since)
         if age is None or age > LOOK_GOOD_FOR_SECONDS:
             return None
-        return {"frame": None, "frame_at": self.since, "judged_by": "person"}
+        who = "person" if self.source == SAID_DIRECTLY else "person_via_assistant"
+        return {"frame": None, "frame_at": self.since, "judged_by": who}
 
     def since_clock(self) -> str:
         """``18:12`` for today, ``Sep 15 18:12`` otherwise, the raw stamp when unparsable."""
@@ -418,8 +437,10 @@ class PlateState:
                 height = "height unknown"
             return f"{what} since {self.since_clock()}, {height}"
         if self.status == "clear":
-            if self.source == "human":
+            if self.source == SAID_DIRECTLY:
                 who = "a person said so"
+            elif self.source == SAID_IN_CHAT:
+                who = "a person said so, passed on by their assistant"
             elif self.from_camera:
                 who = f"seen empty through the camera by {'a person' if self.looked_by == 'human' else 'an agent'}"
             else:
@@ -783,6 +804,45 @@ def mark_occupied(
         logger.debug("mark_occupied failed", exc_info=True)
 
 
+_plate_word_answer: ContextVar[str] = ContextVar("kiln_plate_word_answer", default="")
+
+
+def note_plate_word_answer(answer: str) -> None:
+    """Record, for the call being served, what the person answered when
+    their app asked them about the plate; ``""`` forgets it."""
+    _plate_word_answer.set(str(answer or ""))
+
+
+def plate_word_answer() -> str:
+    """:data:`WORD_CONFIRMED`, :data:`WORD_DECLINED`, or ``""`` when nobody
+    could be asked on this call."""
+    return _plate_word_answer.get()
+
+
+#: Words that turn "clear" into something else.  A person who is not sure
+#: has not said the plate is empty.
+_NOT_A_CLEAR = re.compile(
+    r"\?|\b(not|isn'?t|ain'?t|wasn'?t|never|unsure|maybe|probably|think|guess|should|might|almost|"
+    r"don'?t|doesn'?t|can'?t|cannot|if)\b"
+)
+_A_CLEAR = re.compile(r"\b(clear|cleared|empty|emptied|nothing on)\b")
+
+
+def says_plate_is_clear(words: str | None) -> bool:
+    """Whether a person's typed words say, flatly, that the plate is empty.
+
+    Read narrowly on purpose: "bed clear", "printbed clear", "the plate is
+    empty", "nothing on it".  A question, a hedge ("should be clear", "I
+    think so") or a negation is not a statement that it is empty, and
+    neither is a bare "yes" -- the words have to carry it themselves,
+    because they are what is kept on the record.
+    """
+    text = " ".join(str(words or "").lower().split())
+    if not text or len(text) > 200:
+        return False
+    return bool(_A_CLEAR.search(text)) and not _NOT_A_CLEAR.search(text)
+
+
 def mark_clear(adapter: Any, source: str, *, note: str = "") -> None:
     """A person says the plate is empty.  It stays clear until the next print starts.
 
@@ -962,7 +1022,10 @@ def camera_could_settle(adapter: Any) -> str | None:
 
 #: What a person says when they have looked themselves -- the fallback every
 #: offer ends on, and the default for a door that names no verb of its own.
-SAY_SO = "`kiln plate clear`, or plate_clear=true on park_head"
+SAY_SO = (
+    "`kiln plate clear`, or plate_clear=true on park_head; or, in a chat, the person's own words that it "
+    "is clear, passed exactly as typed to look_at_plate(person_says=...)"
+)
 
 
 @dataclass(frozen=True)

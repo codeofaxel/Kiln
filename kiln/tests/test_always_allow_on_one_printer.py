@@ -258,27 +258,48 @@ def _turn_on(name: str = "garage"):
     return entry
 
 
-def _client():
+def _client(person=None):
     """A host connected to the real server, in process.  SDK 2 connects
     ``Client`` to a server object directly; 1.x has the memory-stream
-    helper that 2.x removed."""
+    helper that 2.x removed.  *person* makes it an app that can draw a
+    dialog: the callback is the person answering it, over a session with
+    the handshake that gives the server a way to ask (SDK 2's default
+    connection has none)."""
+    extra = {"elicitation_callback": person} if person is not None else {}
     try:
         from mcp import Client
     except ImportError:
         from mcp.shared.memory import create_connected_server_and_client_session
 
-        return create_connected_server_and_client_session(server.mcp)
+        return create_connected_server_and_client_session(server.mcp, **extra)
+    if person is not None:
+        return Client(server.mcp, mode="legacy", **extra)
     return Client(server.mcp)
 
 
-def _call(tool: str, **arguments) -> dict:
+class _Person:
+    """Someone at an app that can draw a dialog: answers every question
+    Kiln puts to them with *answer*, and keeps what they were asked."""
+
+    def __init__(self, answer: str) -> None:
+        self.answer = answer
+        self.asked: list[str] = []
+
+    async def __call__(self, context, params):
+        from mcp import types
+
+        self.asked.append(str(getattr(params, "message", "")))
+        return types.ElicitResult(action="accept", content={"answer": self.answer})
+
+
+def _call(tool: str, _person=None, **arguments) -> dict:
     """A registered tool, called the way a host calls it: a ``tools/call``
     request from a connected client, through the server's own dispatch —
     the consent wrapper before the tool and the result hooks after it.
     Returns the result as the host reads it."""
 
     async def _one_call():
-        async with _client() as client:
+        async with _client(_person) as client:
             return await client.call_tool(tool, arguments)
 
     result = asyncio.run(_one_call())
@@ -1374,3 +1395,146 @@ class TestTheBedIsLookedAt:
         with pytest.raises(SystemExit):
             cli_gate("print", path, _previewed(path), printer_name="garage", json_mode=True)
         assert len(answers) == 1
+
+
+# ---------------------------------------------------------------------------
+# "Bed clear", typed in a chat
+# ---------------------------------------------------------------------------
+
+
+class TestThePersonSaysTheBedIsClear:
+    """The assistant looked and could not tell, so the print is held.  The
+    person, in a chat, says the bed is clear.  Their words reach the plate
+    record through ``look_at_plate(person_says=...)`` — recorded as theirs
+    when Kiln could ask them itself, as passed on when it could not."""
+
+    @pytest.fixture
+    def held(self, at_terminal, tmp_path, no_rate_limit):
+        """``garage`` with a camera and always allow on; the assistant has
+        looked, could not tell, and said so: a start is refused."""
+        from kiln import plate_state
+
+        printer = _CameraPrinter("SERIAL-A")
+        server._get_registry().register("garage", printer)
+        _turn_on()
+        assert _start(tmp_path)["error"]["code"] == "ALWAYS_ALLOW_LOOK_FIRST"
+        said = _call("look_at_plate", printer_name="garage", seen="occupied")
+        assert "person_says" in said["next"]
+        assert _start(tmp_path)["error"]["code"] == plate_state.START_NOT_YET_CODE
+        return printer
+
+    def test_in_a_chat_app_the_words_are_recorded_as_passed_on(self, held, tmp_path, audits):
+        from kiln import plate_state
+
+        out = _call("look_at_plate", printer_name="garage", person_says="  Bed clear ")
+        assert out["success"] is True, out
+        assert out["recorded_as"] == "the person's words, passed on by you"
+        state = plate_state.read(held)
+        assert state.clear and state.source == plate_state.SAID_IN_CHAT
+        assert 'the person typed: "Bed clear"' in state.note
+        assert "passed on by their assistant" in state.describe()
+        [details] = [d for _, action, d in audits if action == "plate_cleared_by_persons_word"]
+        assert details == {"printer": "garage", "words": "Bed clear", "through": "assistant"}
+        # The print now starts, and says what it rested on.
+        started = _start(tmp_path)
+        assert started["success"] is True and held.started == ["part.gcode"]
+        check = started[consent_window_note.RESULT_KEY]["bed_check"]
+        assert check["judged_by"] == "person_via_assistant" and check["frame"] is None
+        assert check["note"] == "Before it started, you told your assistant the bed was clear."
+
+    def test_where_the_app_can_ask_the_person_is_asked_and_the_answer_is_theirs(self, held, tmp_path, audits):
+        """A/B: with the dialog removed from the wrapper this fails — the
+        words are recorded as passed on and nobody is asked."""
+        from kiln import plate_state
+
+        person = _Person("yes")
+        out = _call("look_at_plate", _person=person, printer_name="garage", person_says="bed clear")
+        assert out["success"] is True, out
+        [question] = person.asked
+        assert question == server.bed_question("garage")
+        assert out["recorded_as"] == "the person's own answer, in a dialog this app showed them"
+        assert plate_state.read(held).source == plate_state.SAID_DIRECTLY
+        [details] = [d for _, action, d in audits if action == "plate_cleared_by_persons_word"]
+        assert details["through"] == "dialog"
+        started = _start(tmp_path)
+        assert started["success"] is True
+        assert started[consent_window_note.RESULT_KEY]["bed_check"]["note"] == "Before it started, you said the bed was clear."
+
+    def test_a_person_who_answers_no_clears_nothing(self, held, tmp_path):
+        """The assistant passed on "bed clear"; asked directly, the person
+        did not say yes.  A/B: with the declined check removed from the
+        tool this fails — the relayed words clear the bed anyway."""
+        from kiln import plate_state
+
+        person = _Person("no")
+        out = _call("look_at_plate", _person=person, printer_name="garage", person_says="bed clear")
+        assert out["error"]["code"] == "PLATE_WORD_NOT_CONFIRMED", out
+        assert len(person.asked) == 1
+        assert plate_state.read(held).occupied
+        assert _start(tmp_path)["error"]["code"] == plate_state.START_NOT_YET_CODE
+        assert held.started == []
+
+    @pytest.mark.parametrize(
+        "words",
+        ["should be clear", "is it clear?", "not clear", "it isn't empty", "yes", "", "I think it's empty",
+         "clear, maybe", "go ahead", "probably clear", "clear if you move the purge line"],
+    )
+    def test_words_that_do_not_say_it_record_nothing_and_ask_nobody(self, held, words):
+        from kiln import plate_state
+
+        person = _Person("yes")
+        out = _call("look_at_plate", _person=person, printer_name="garage", person_says=words)
+        assert out["error"]["code"] == "INVALID_INPUT", (words, out)
+        assert person.asked == [] and plate_state.read(held).occupied
+
+    @pytest.mark.parametrize(
+        "words", ["bed clear", "printbed clear", "The plate is empty.", "it's clear", "all clear", "nothing on it",
+                  "I cleared the bed", "bed's empty now"],
+    )
+    def test_the_ways_a_person_says_it(self, words):
+        from kiln import plate_state
+
+        assert plate_state.says_plate_is_clear(words), words
+
+    def test_a_word_cannot_stand_in_for_the_look(self, at_terminal, tmp_path, no_rate_limit):
+        """Nothing on record says a part is there, so there is nothing for
+        a word to settle: the held start still wants eyes on the frame.
+        A/B: with the occupied-record rule removed from the tool this fails
+        — the words clear the plate and the print starts unseen."""
+        printer = _CameraPrinter("SERIAL-A")
+        server._get_registry().register("garage", printer)
+        _turn_on()
+        assert _start(tmp_path)["error"]["code"] == "ALWAYS_ALLOW_LOOK_FIRST"
+        person = _Person("yes")
+        out = _call("look_at_plate", _person=person, printer_name="garage", person_says="bed clear")
+        assert out["error"]["code"] == "PLATE_NOTHING_TO_SETTLE", out
+        assert person.asked == []
+        assert _start(tmp_path)["error"]["code"] == "ALWAYS_ALLOW_LOOK_FIRST"
+        assert printer.started == []
+
+    def test_an_old_word_is_not_enough(self, held, tmp_path, monkeypatch):
+        from kiln import plate_state
+
+        assert _call("look_at_plate", printer_name="garage", person_says="bed clear")["success"] is True
+        monkeypatch.setattr(plate_state, "LOOK_GOOD_FOR_SECONDS", -1.0)  # said long ago
+        assert _start(tmp_path)["error"]["code"] == "ALWAYS_ALLOW_LOOK_FIRST"
+        assert held.started == []
+
+    def test_what_was_seen_and_what_was_said_are_two_calls(self, held):
+        out = _call("look_at_plate", printer_name="garage", seen="clear", person_says="bed clear")
+        assert out["error"]["code"] == "INVALID_INPUT"
+
+    def test_without_a_camera_the_word_clears_a_finished_print(self, garage, at_terminal, tmp_path, no_rate_limit):
+        """No camera at all: after a print, the part on the bed is the
+        record, and the person's word is what clears it."""
+        from kiln import plate_state
+
+        _turn_on()
+        plate_state.mark_occupied(garage, plate_state.PlateJob(file="earlier.gcode"))
+        assert _start(tmp_path)["error"]["code"] == plate_state.START_NOT_YET_CODE
+        assert _call("look_at_plate", printer_name="garage", person_says="plate is empty")["success"] is True
+        assert _start(tmp_path)["success"] is True and garage.started == ["part.gcode"]
+
+    def test_the_refusal_over_a_part_names_the_chat_door(self, held, tmp_path):
+        message = _start(tmp_path)["error"]["message"]
+        assert "look_at_plate(person_says=" in message

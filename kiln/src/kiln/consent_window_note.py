@@ -132,6 +132,8 @@ def bed_check_line(evidence: dict[str, Any] | None) -> str:
     if not evidence:
         return ""
     if evidence.get("checked") and not evidence.get("frame"):
+        if evidence.get("judged_by") == "person_via_assistant":
+            return "Before it started, you told your assistant the bed was clear."
         return "Before it started, you said the bed was clear."
     if evidence.get("checked"):
         who = "you" if evidence.get("judged_by") == "human" else "your assistant"

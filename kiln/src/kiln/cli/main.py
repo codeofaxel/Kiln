@@ -3987,8 +3987,9 @@ def plate_status_cmd(printer_name, json_mode) -> None:
 def plate_clear_cmd(note, printer_name, json_mode) -> None:
     """You have looked: the plate is empty. Record it.
 
-    A person's statement, never an agent's -- there is no MCP tool for
-    this on purpose. The plate stays clear until the next print starts, so
+    A person's statement, never an agent's. (In a chat, an assistant can
+    pass on your own words that the bed is clear; that is recorded as
+    passed on, not as said here.) The plate stays clear until the next print starts, so
     home and park stop asking whether a part stands in the head's row. A Z
     home that presses the nozzle onto the plate still asks every time
     (kiln home --plate-clear): the record cannot see a print started from
