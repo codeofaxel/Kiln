@@ -521,7 +521,10 @@ CALLERS = {
     "plugins/printability_tools.py::register.diagnose_print_failure_live": "reads: failure signals for a diagnosis",
     "plugins/material_tools.py::register.check_print_health": "reads: adhesion risk for a print already running",
     "plugins/estimate_tools.py::register.slice_and_estimate": "reads: the brim decision for an estimate; prints nothing",
-    "plugins/generation_ai_tools.py::register.download_generated_model": "reads: reports the downloaded mesh; prints nothing",
+    "arrival.py::measure": (
+        "reads: reports what both download doors brought in (download_generated_model, "
+        "download_model); prints nothing"
+    ),
     "print_service.py::_printability_score": "reads: the quote's score, None when the file cannot be read",
     "server.py::generate_from_template": "reads: reports the generated mesh; prints nothing",
 }

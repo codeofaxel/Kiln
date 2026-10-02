@@ -427,6 +427,9 @@ class GeminiDeepThinkProvider(GenerationProvider):
     :param compile_timeout: Max OpenSCAD compilation time in seconds.
     """
 
+    #: The code Gemini writes is in millimetres (its system prompt says so).
+    sets_real_size = True
+
     def __init__(
         self,
         api_key: str = "",

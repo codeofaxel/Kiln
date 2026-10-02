@@ -14,11 +14,12 @@ Workflow::
 from __future__ import annotations
 
 import enum
+import functools
 import os
 import tempfile
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 from kiln.daily_stats import counts_outside_service, record_generation_provider
 
@@ -184,6 +185,21 @@ def _count_generation(provider: Any, job: Any) -> None:
     record_generation_provider(provider.name)
 
 
+def _notes_arrival(download: Any) -> Any:
+    """Wrap a provider's ``download_result`` so the file it returns gets
+    its arrival note (:mod:`kiln.arrival`)."""
+
+    @functools.wraps(download)
+    def _download(self: Any, *args: Any, **kwargs: Any) -> Any:
+        result = download(self, *args, **kwargs)
+        from kiln.arrival import note_generation
+
+        note_generation(self, result)
+        return result
+
+    return _download
+
+
 class GenerationProvider(ABC):
     """Abstract base for 3D model generation backends.
 
@@ -191,18 +207,34 @@ class GenerationProvider(ABC):
     :meth:`get_job_status`, and :meth:`download_result`.
 
     Every subclass's :meth:`generate` is counted in the daily usage stats
-    under the provider's own :attr:`name` (see ``__init_subclass__``), so
-    a provider added later is counted with no further wiring.
+    under the provider's own :attr:`name`, and every file its
+    :meth:`download_result` returns gets a note saying where it came from
+    (see ``__init_subclass__``), so a provider added later is counted and
+    noted with no further wiring.
     """
+
+    #: The provider draws in millimetres, so the size a file arrives at is
+    #: the size it was designed at.  Kiln sends Tripo, Meshy and Stability a
+    #: prompt and never a size, so each picks its own scale: Tripo's "40 mm
+    #: calibration cube" came back 1.0 units across (a live job, 2026-09-30).
+    sets_real_size: ClassVar[bool] = False
+
+    #: The model is drawn by a service outside this machine, so where it came
+    #: from earns a note.  False for a provider that compiles code here: the
+    #: code is its own record.
+    drawn_elsewhere: ClassVar[bool] = True
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         # Wrapped here rather than at each caller: the MCP tools, the CLI
         # and the pipelines all reach a provider their own way, and the
-        # one thing they share is this method.
+        # one thing they share is these methods.
         generate = cls.__dict__.get("generate")
         if callable(generate) and not getattr(generate, "__isabstractmethod__", False):
             cls.generate = counts_outside_service("generation", _count_generation)(generate)
+        download = cls.__dict__.get("download_result")
+        if callable(download) and not getattr(download, "__isabstractmethod__", False):
+            cls.download_result = _notes_arrival(download)
 
     @property
     @abstractmethod

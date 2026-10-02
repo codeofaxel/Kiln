@@ -182,6 +182,13 @@ STAGE_DESCRIPTION_CLAUSE = (
 #: re-slice" reached the link door and nothing better.  ``visualize_model``
 #: stays off: it is the still door, called after every make round, and a
 #: second panel of the mesh the make just opened is ceremony.
+#:
+#: The download doors are in for the same reason as a make: what arrives
+#: is a model nobody has seen yet.  ``download_model`` sat out until
+#: 2026-10-01 and handed back a bare path; it now names the first file the
+#: stage can draw, and says where the files came from (``kiln.arrival``).
+#: ``download_and_upload`` stays out with ``upload_file``: it hands a file
+#: to the printer, and the print gate asks to see that file before a start.
 VIEWER_TOOLS: frozenset[str] = frozenset(
     {
         "add_feature_during_print",
@@ -218,6 +225,7 @@ VIEWER_TOOLS: frozenset[str] = frozenset(
         "design_session",
         "design_to_gcode_pipeline",
         "download_generated_model",
+        "download_model",
         "extract_model_from_3mf",
         "generate_and_print",
         "generate_ashtray",
@@ -898,11 +906,18 @@ def _payload_for_mesh(mesh: str, **encode: Any) -> dict:
     The mesh path rides along so the plate door can find the slice this
     machine made of it and lay the skirt, brim, prime tower and supports
     around the part (:mod:`kiln.slicer_geometry`) — a mesh nobody sliced
-    gets exactly the payload it always did.
+    gets exactly the payload it always did.  It also finds where a
+    downloaded or generated file came from (:func:`kiln.arrival.stage_block`),
+    so every door's stage says it, not just the result that opened it.
     """
+    from kiln.arrival import stage_block
     from kiln.stage_plate import attach_stage_plate
 
-    return attach_stage_plate(mesh_to_viewer_payload(mesh, **encode), mesh_path=mesh)
+    payload = attach_stage_plate(mesh_to_viewer_payload(mesh, **encode), mesh_path=mesh)
+    arrival = stage_block(mesh)
+    if arrival:
+        payload["arrival"] = arrival
+    return payload
 
 
 def _inline_payload(token: str) -> dict | None:
@@ -1450,10 +1465,10 @@ def _install_result_hook(mcp: Any) -> bool:
                         "door": "none",
                         "file": "",
                         "reason": (
-                            "this result names no mesh the stage can show (the "
-                            "slicer was handed a file the stage cannot draw, or "
-                            "the file is gone), so the panel the host opens has "
-                            "nothing to draw"
+                            "this result names no mesh the stage can show (a "
+                            "file the stage cannot draw, such as an archive or a "
+                            "STEP the slicer took as-is, or a file that is gone), "
+                            "so the panel the host opens has nothing to draw"
                         ),
                     }
                     set_result_structured_content(inner, sc)
