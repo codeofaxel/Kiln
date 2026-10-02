@@ -1337,7 +1337,8 @@ class TestEveryDoorThatStartsAPrint:
         # ...and then looks instead of assuming: this machine has no camera.
         assert message.endswith(
             "This printer has no camera Kiln can read, so look at the plate yourself, then say so: "
-            "`kiln plate clear`, or plate_clear=true on park_head."
+            "`kiln plate clear`, or plate_clear=true on park_head; or, in a chat, the person's own words "
+            "that it is clear, passed exactly as typed to look_at_plate(person_says=...)."
         )
         assert block["plate"]["status"] == "occupied" and block["occupancy"]["kind"] == bridge.OCCUPANCY_KIND
         assert start_refusal(machine, resume=True) is None, "a resume is the same job, still on the plate"

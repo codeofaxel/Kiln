@@ -48,9 +48,10 @@ Where a yes can come from, graded by who is holding the pen:
   never as the person.
 * **Grade B** — a person at a terminal typed yes (``user_terminal``), or
   a person at a terminal opened a standing window (``standing_window``,
-  see :mod:`kiln.consent_windows`).  A terminal is a fact about the
-  process, not about a person, so on the hosted multi-tenant server
-  grade B is not accepted.
+  see :mod:`kiln.consent_windows`) or turned on always allow for one
+  printer (``always_allow``, the same record with no end).  A terminal
+  is a fact about the process, not about a person, so on the hosted
+  multi-tenant server grade B is not accepted.
 
 A yes is for ONE print, on the printer it was aimed at.  A person may
 name a wider scope — a list of printers, or the fleet — and ``matches()``
@@ -103,6 +104,11 @@ SOURCE_TERMINAL = "user_terminal"
 SOURCE_DERIVED = "derived"
 #: A person at a terminal opened a standing window covering this printer.
 SOURCE_WINDOW = "standing_window"
+#: A person at a terminal turned on always allow for this printer: a
+#: standing window with no end, for one machine
+#: (:func:`kiln.consent_windows.open_always`).  Its own word, so every
+#: start that rests on it reads apart from one inside a timed window.
+SOURCE_ALWAYS = "always_allow"
 #: A person typed the code Kiln showed on this machine's screen
 #: (:mod:`kiln.screen_code`): the agent relayed the words, the code proved
 #: someone at the screen chose to type them.  The terminal's rung.
@@ -131,7 +137,7 @@ def grade_of(source: str) -> str | None:
     own (a derived plate rides its input's; a bypass is not a yes)."""
     if source in (SOURCE_ELICITED, *HOSTED_SOURCES):
         return GRADE_A
-    if source in (SOURCE_TERMINAL, SOURCE_WINDOW, SOURCE_CODE):
+    if source in (SOURCE_TERMINAL, SOURCE_WINDOW, SOURCE_ALWAYS, SOURCE_CODE):
         return GRADE_B
     return None
 
@@ -189,8 +195,11 @@ FIELD_ANSWER = "answer"
 FIELD_FOR_HOW_LONG = "for_how_long"
 FIELD_WHERE = "where"
 
-#: The longest a standing window lasts, through EITHER door.  Longer than
-#: a day is "auto-print on", which is what the standing opt-in is for.
+#: The longest a standing window lasts, through EVERY door that takes a
+#: length.  Longer than a day is not a longer window: it is always allow,
+#: which has no length, covers one printer, and is turned on only at a
+#: terminal (:func:`kiln.consent_windows.open_always`) — or one of the
+#: two auto-print switches, which cover their own flows.
 MAX_WINDOW_SECONDS = 24 * 3600.0
 
 _TWO_HOURS = 2 * 3600.0
@@ -721,6 +730,45 @@ def take_window_outcome() -> dict[str, Any] | None:
     return outcome
 
 
+#: The look at the plate taken for the call being served, when its start
+#: rests on always allow: ``(printer, taken_at_monotonic, look)``.  One
+#: look per call -- the asker takes it, the gate and the line on the
+#: result read it -- because each look fetches a frame from the camera.
+#: Honoured only briefly, so a look can never be read by a later call.
+_unasked_look: ContextVar[tuple[str, float, Any] | None] = ContextVar(
+    "kiln_print_consent_unasked_look", default=None,
+)
+_UNASKED_LOOK_READ_WITHIN_S = 30.0
+
+
+def note_unasked_look(printer_name: str | None, look: Any) -> None:
+    """Record the look taken for this call; ``look=None`` forgets it."""
+    _unasked_look.set(None if look is None else (_norm(printer_name), time.monotonic(), look))
+
+
+def unasked_look_noted(printer_name: str | None) -> Any | None:
+    """The look noted for this call and this printer, or ``None``."""
+    noted = _unasked_look.get()
+    if noted is None or noted[0] != _norm(printer_name):
+        return None
+    if time.monotonic() - noted[1] > _UNASKED_LOOK_READ_WITHIN_S:
+        return None
+    return noted[2]
+
+
+def unasked_look(printer_name: str | None) -> Any:
+    """The look at *printer_name*'s plate for this call: the one already
+    noted, else taken now and noted."""
+    noted = unasked_look_noted(printer_name)
+    if noted is not None:
+        return noted
+    from kiln import consent_windows
+
+    look = consent_windows.look_at_bed(printer_name)
+    note_unasked_look(printer_name, look)
+    return look
+
+
 def consent_for(
     *, file_name: str, printer_name: str | None, aimed_at: str | None = None,
 ) -> PrintConsent | None:
@@ -757,11 +805,34 @@ def consent_for(
     try:
         from kiln import consent_windows
 
-        window = consent_windows.covering(aimed_at or printer_name)
+        window = consent_windows.covering(aimed_at or printer_name, for_a_start=True)
     except Exception:  # noqa: BLE001 — an unreadable store is no window
         window = None
     if window is None:
         return None
+    if window.always:
+        # Nobody is being asked, so the plate is looked at.  A camera that
+        # gives nothing usable cannot vouch for the plate: the standing
+        # yes is not used for this print, and the person is asked the
+        # ordinary way.  (A frame not yet judged does not withdraw the
+        # yes -- the gate holds the start until eyes have judged it.)
+        from kiln.plate_state import LOOK_BLIND
+
+        if unasked_look(aimed_at or printer_name).verdict == LOOK_BLIND:
+            return None
+        # Always allow is for a machine, and ``covering`` has just matched
+        # the machine this print is aimed at.  The consent is therefore
+        # for the printer the call named, not for a list of names: the
+        # entry's own name may be another label for the same machine.
+        return PrintConsent(
+            tool="kiln consent window --always",
+            file_name=file_name,
+            printer_name=printer_name,
+            granted_at=window.set_at,
+            source=SOURCE_ALWAYS,
+            identity=window.set_by,
+            window_id=window.id,
+        )
     return PrintConsent(
         tool="kiln consent window",
         file_name=file_name,
@@ -890,6 +961,7 @@ def drop_consent() -> None:
     _current.set(None)
     _not_asked.set("")
     _window_outcome.set(None)
+    _unasked_look.set(None)
 
 
 def _reset_for_tests() -> None:

@@ -314,7 +314,10 @@ def plate_status(printer_name: str | None = None) -> dict[str, Any]:
 
     There is deliberately no tool that marks the plate clear from nothing:
     that is a statement someone has to make, at the machine, at the command
-    line, or by looking through the camera and saying what they see.
+    line, by looking through the camera and saying what they see, or -- a
+    person in a chat -- in their own words, which ``look_at_plate`` records
+    as theirs (``person_says``) and labels as passed on when it could not
+    ask them itself.
 
     Args:
         printer_name: Which printer.  Omit for the default one.
@@ -336,6 +339,7 @@ def plate_status(printer_name: str | None = None) -> dict[str, Any]:
 def look_at_plate(
     printer_name: str | None = None,
     seen: str | None = None,
+    person_says: str | None = None,
 ) -> dict[str, Any] | list[Any]:
     """Look at the build plate through the machine's camera, and record what is there.
 
@@ -356,6 +360,23 @@ def look_at_plate(
     come straight here with ``seen``.  A record days old most likely
     describes a part someone took off -- look before you ask a person.
 
+    A print held with ``ALWAYS_ALLOW_LOOK_FIRST`` carries a frame the same
+    way: always allow is on for that printer, nobody is being asked, so
+    the bed is looked at first.  Judge that frame here with ``seen`` and
+    start the print again; the picture is kept with the print's record.
+    If you cannot tell, say ``occupied`` -- the person is then the one who
+    says the bed is clear.
+
+    When the PERSON tells you the bed is clear -- typed to you in a chat,
+    after a refusal that says a part is on it -- pass their words exactly
+    as ``person_says``.  They have to say it flatly ("bed clear", "the
+    plate is empty"); a hedge or a question is not that.  Where this app
+    can show a dialog, Kiln asks the person itself and records their
+    answer; otherwise the words are recorded as passed on by you, kept on
+    the record.  Never write these words yourself: if they have not said
+    it, ask them.  It settles a plate the record says is occupied; a plate
+    with no such record is settled by looking.
+
     Kiln ships no vision model and judges nothing here.  The eyes are
     yours; this tool is the camera and the pen.  Say what you actually see:
     a plate you are not sure about is ``occupied``, because the cost of a
@@ -371,6 +392,8 @@ def look_at_plate(
         printer_name: Which printer.  Omit for the default one.
         seen: Omit to fetch the picture.  ``"clear"`` or ``"occupied"`` to
             record what you saw in the picture you were just given.
+        person_says: The person's own words that the bed is clear, exactly
+            as they typed them.  Not with ``seen``.
 
     Returns the ``plate`` record and a ``look`` block saying whether a
     frame was available and which camera it came from -- followed, when a
@@ -388,6 +411,14 @@ def look_at_plate(
         except PrinterNotFoundError:
             return _srv._unknown_printer_error(printer_name, "plate")
 
+        if person_says is not None:
+            if seen is not None:
+                return _srv._error_dict(
+                    "Pass seen (what you saw in the picture) or person_says (what the person told you), not both.",
+                    code="INVALID_INPUT",
+                )
+            return _record_persons_word(adapter, target_name, str(person_says))
+
         if seen is None:
             found = plate_state.look(adapter)
             if not found.available:
@@ -400,7 +431,9 @@ def look_at_plate(
                 "success": True,
                 "printer_name": target_name,
                 "look": found.to_dict(),
-                "snapshot_path": plate_state.save_frame(found),
+                # Handed over, so the answer that follows (``seen``) is
+                # recorded against this picture.
+                "snapshot_path": plate_state.hand_over_frame(adapter, found),
                 "media_type": found.media_type,
                 "plate": plate_state.read(adapter).to_dict(),
                 "next": (
@@ -422,7 +455,8 @@ def look_at_plate(
             )
         # An agent is calling this tool, so an agent is what did the looking.
         # A person's own statement has its own doors (`kiln plate clear`,
-        # plate_clear=true on home_axes or park_head) and is recorded as theirs.
+        # plate_clear=true on home_axes or park_head, their words passed as
+        # person_says) and is recorded as theirs.
         status = plate_state.mark_from_camera(adapter, seen=seen, judged_by="agent")
         state = plate_state.read(adapter)
         if status is None or state.status != seen:
@@ -431,10 +465,76 @@ def look_at_plate(
                 + (state.note or "the record did not take."),
                 code="PLATE_RECORD_FAILED", extra={"plate": state.to_dict()},
             )
-        return {"success": True, "printer_name": target_name, "plate": state.to_dict()}
+        answer: dict[str, Any] = {"success": True, "printer_name": target_name, "plate": state.to_dict()}
+        if seen == "occupied":
+            answer["next"] = (
+                "A print will not start onto this bed. If the person tells you the bed is clear, pass "
+                "their exact words as person_says; do not write them yourself."
+            )
+        return answer
     except Exception as exc:
         _logger.exception("Unexpected error in look_at_plate")
         return _srv._error_dict(f"Unexpected error looking at the plate: {exc}", code="INTERNAL_ERROR")
+
+
+def _record_persons_word(adapter: Any, target_name: str, words: str) -> dict[str, Any]:
+    """The plate record's door for a person's "the bed is clear", typed in
+    a chat.  Three refusals, then one write: words that do not say it; a
+    plate the record does not say is occupied (that one is settled by
+    looking); and a person who, asked directly by their app, said no."""
+    import kiln.server as _srv
+    from kiln import plate_state
+
+    words = " ".join(words.split())
+    if not plate_state.says_plate_is_clear(words):
+        return _srv._error_dict(
+            "Those words do not say the bed is clear, so nothing was recorded. Pass exactly what the "
+            'person typed; it has to say it flatly, like "bed clear" or "the plate is empty". If they '
+            "are not sure, the bed stays as recorded.",
+            code="INVALID_INPUT",
+        )
+    state = plate_state.read(adapter)
+    if not state.occupied:
+        return _srv._error_dict(
+            f"Kiln's record does not say a part is on {target_name}'s bed, so there is nothing for the "
+            "person's word to settle. Before a print starts with nobody asked, the bed is looked at: call "
+            "look_at_plate with no arguments, look at the picture, and say what you see.",
+            code="PLATE_NOTHING_TO_SETTLE", extra={"plate": state.to_dict()},
+        )
+    answered = plate_state.plate_word_answer()
+    if answered == plate_state.WORD_DECLINED:
+        return _srv._error_dict(
+            f"Kiln asked the person directly whether {target_name}'s bed is empty, and they did not say "
+            "yes. Nothing was recorded; the bed stays as it was.",
+            code="PLATE_WORD_NOT_CONFIRMED", extra={"plate": state.to_dict()},
+        )
+    direct = answered == plate_state.WORD_CONFIRMED
+    plate_state.mark_clear(
+        adapter,
+        plate_state.SAID_DIRECTLY if direct else plate_state.SAID_IN_CHAT,
+        note=(
+            f'the person answered yes when their app asked; they had typed: "{words}"' if direct
+            else f'passed on by the assistant; the person typed: "{words}"'
+        ),
+    )
+    state = plate_state.read(adapter)
+    if not state.clear:
+        return _srv._error_dict(
+            "The person's word could not be recorded against this printer: " + (state.note or "the record did not take."),
+            code="PLATE_RECORD_FAILED", extra={"plate": state.to_dict()},
+        )
+    _srv._audit(
+        "look_at_plate", "plate_cleared_by_persons_word",
+        details={"printer": target_name, "words": words, "through": "dialog" if direct else "assistant"},
+    )
+    return {
+        "success": True, "printer_name": target_name, "plate": state.to_dict(),
+        "recorded_as": (
+            "the person's own answer, in a dialog this app showed them" if direct
+            else "the person's words, passed on by you"
+        ),
+        "next": "The bed is on record as clear for the next few minutes. Start the print again.",
+    }
 
 
 def _picture(found: Any) -> Any:
