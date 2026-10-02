@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-01T06:50:26.874716+00:00",
+  "generated": "2026-10-02T04:52:06.839475+00:00",
   "tool_count": 427,
   "categories": {
     "product_generators": {
@@ -18156,7 +18156,7 @@
     },
     {
       "name": "verify_mesh_fit",
-      "description": "Prove that separate parts can PHYSICALLY assemble \u2014 the ONE fit check, exact shared-material math, not a picture.",
+      "description": "Prove that separate parts can PHYSICALLY assemble, and that a hinged part can turn \u2014 the ONE fit check, exact shared-material math, not a picture.",
       "tier": "free",
       "access": "free",
       "category": "print_intelligence",
@@ -18199,6 +18199,22 @@
             ],
             "default": null,
             "title": "Recipe"
+          },
+          "joint": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Joint"
           }
         },
         "title": "verify_mesh_fitArguments",
