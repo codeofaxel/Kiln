@@ -829,7 +829,7 @@ def _fits_on_another_face(bbox: dict[str, float], build_volume: tuple[float, flo
     """
     extents = sorted(bbox[f"{a}_max"] - bbox[f"{a}_min"] for a in "xyz")
     sides = sorted(float(v) for v in build_volume)
-    return all(e <= s + _FIT_EPSILON_MM for e, s in zip(extents, sides))
+    return all(e <= s + _FIT_EPSILON_MM for e, s in zip(extents, sides, strict=True))
 
 
 def validate_gcode_for_printer(
