@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-01T23:32:54.700996+00:00",
-  "tool_count": 429,
+  "generated": "2026-10-02T02:41:49.756628+00:00",
+  "tool_count": 430,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -15064,9 +15064,16 @@
             "type": "number"
           },
           "nozzle_mm": {
-            "default": 0.4,
-            "title": "Nozzle Mm",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Nozzle Mm"
           }
         },
         "required": [
@@ -16359,6 +16366,18 @@
             ],
             "default": null,
             "title": "Printer Reading"
+          },
+          "file_nozzle_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Nozzle Mm"
           }
         },
         "required": [
@@ -16650,9 +16669,16 @@
             "type": "string"
           },
           "nozzle_mm": {
-            "default": 0.4,
-            "title": "Nozzle Mm",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Nozzle Mm"
           },
           "printer_id": {
             "default": "",
@@ -17544,6 +17570,65 @@
       }
     },
     {
+      "name": "record_filament_colour",
+      "description": "Tell Kiln what colour a filament really printed, so its colour suggestions show your result.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "access": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "brand": {
+            "title": "Brand",
+            "type": "string"
+          },
+          "line": {
+            "title": "Line",
+            "type": "string"
+          },
+          "material": {
+            "title": "Material",
+            "type": "string"
+          },
+          "colour": {
+            "title": "Colour",
+            "type": "string"
+          },
+          "observed_hex": {
+            "title": "Observed Hex",
+            "type": "string"
+          },
+          "observed_by": {
+            "title": "Observed By",
+            "type": "string"
+          },
+          "printer_id": {
+            "default": "",
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "brand",
+          "line",
+          "material",
+          "colour",
+          "observed_hex",
+          "observed_by"
+        ],
+        "title": "record_filament_colourArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
+      }
+    },
+    {
       "name": "record_nozzle_replacement",
       "description": "Pro+ \u2014 record a nozzle replacement event with the WHY.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -17929,9 +18014,16 @@
             "type": "number"
           },
           "nozzle_mm": {
-            "default": 0.4,
-            "title": "Nozzle Mm",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Nozzle Mm"
           },
           "include_fusions": {
             "default": false,
@@ -19864,9 +19956,16 @@
             "type": "number"
           },
           "nozzle_mm": {
-            "default": 0.4,
-            "title": "Nozzle Mm",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Nozzle Mm"
           }
         },
         "required": [
