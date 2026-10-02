@@ -25,6 +25,52 @@ from kiln.tool_annotations import read_only
 _logger = logging.getLogger(__name__)
 
 
+def _arrive(response: dict, paths: list[str], *, mkt: Any = None, model_id: Any = None) -> dict:
+    """Open the stage on the first downloaded file it can draw, and say
+    where the files came from.
+
+    The adapter's download left each file a note naming the marketplace;
+    the listing, read once here, adds who designed it, its license and its
+    page.  A listing that cannot be read leaves those notes as they are,
+    and the line says so rather than guessing.
+    """
+    from dataclasses import replace
+
+    from kiln.arrival import DOWNLOADED, Arrival, announce, measure, read, record
+    from kiln.preview_evidence import stage_file_for
+
+    if mkt is not None and model_id is not None:
+        try:
+            detail = mkt.get_details(str(model_id))
+        except Exception:  # noqa: BLE001 — the files are here either way
+            _logger.debug("listing not read for model %s", model_id, exc_info=True)
+            detail = None
+        if detail is not None:
+            listing = {
+                "name": detail.name or "",
+                "creator": detail.creator or "",
+                "license": detail.license or "",
+                "url": detail.url or "",
+                "model_id": str(model_id),
+            }
+            for path in paths:
+                noted = read(path) or Arrival(kind=DOWNLOADED, by=mkt.display_name)
+                record(path, replace(noted, **listing))
+
+    staged = next((s for s in (stage_file_for(p)[0] for p in paths) if s), None)
+    if staged is None:
+        return announce(response, paths[0]) if paths else response
+    response["stage_mesh_path"] = staged
+    try:
+        validation, dimensions, size = measure(staged)
+    except Exception:  # noqa: BLE001 — a download is never lost to its measurement
+        _logger.debug("could not measure %s", staged, exc_info=True)
+        validation = dimensions = size = None
+    response["validation"] = validation
+    response["dimensions"] = dimensions
+    return announce(response, staged, size=size)
+
+
 class _MarketplaceToolsPlugin:
     """Marketplace search, browse, download, status, and diagnostics tools.
 
@@ -287,8 +333,15 @@ class _MarketplaceToolsPlugin:
                 download_all: When True, downloads all files for the model
                     regardless of whether ``file_id`` is provided.
 
-            After downloading, validate with ``validate_generated_mesh``, then
-            upload to a printer with ``upload_file`` and print with ``start_print``.
+            The stage opens on the first downloaded file it can draw, and
+            the result measures that file (``validation``, ``dimensions``;
+            ``size_check`` when its size reads like a units mix-up) and says
+            where the files came from (``came_from``: the marketplace and,
+            when its listing could be read, the designer, license and page).
+            A note beside each file keeps where it came from, so the stage
+            and design history can say so later; ``show_on_stage(path)``
+            opens any of the other files.  Then upload to a printer with
+            ``upload_file`` and print with ``start_print``.
             """
             import os
             import tempfile
@@ -407,6 +460,17 @@ class _MarketplaceToolsPlugin:
                     }
                     if source == "thingiverse":
                         dl_resp["deprecation_notice"] = _THINGIVERSE_DEPRECATION_NOTICE
+                    _arrive(
+                        dl_resp,
+                        [d["local_path"] for d in downloaded],
+                        mkt=mkt,
+                        model_id=model_id,
+                    )
+                    if "came_from" in dl_resp:
+                        dl_resp["message"] = (
+                            f"{dl_resp['came_from']} {len(downloaded)} of {len(files)} "
+                            f"files saved to {dest_dir}."
+                        )
                     return dl_resp
 
                 # Single-file download (legacy Thingiverse path)
@@ -417,7 +481,12 @@ class _MarketplaceToolsPlugin:
                     )
                 client = _get_thingiverse()
                 path = client.download_file(file_id, dest_dir, file_name=file_name)
-                return {
+                # The bare client is not an adapter, so its download leaves
+                # no note of its own.
+                from kiln.arrival import note_download
+
+                note_download("Thingiverse", path, file_id)
+                single = {
                     "success": True,
                     "file_id": file_id,
                     "local_path": path,
@@ -431,6 +500,10 @@ class _MarketplaceToolsPlugin:
                     "deprecation_notice": _THINGIVERSE_DEPRECATION_NOTICE,
                     "message": f"Downloaded to {path}",
                 }
+                _arrive(single, [path])
+                if "came_from" in single:
+                    single["message"] = f"{single['came_from']} Saved to {path}."
+                return single
             except (ThingiverseNotFoundError, MktNotFoundError):
                 return _error_dict(
                     f"File {file_id or model_id} not found on {source}.",

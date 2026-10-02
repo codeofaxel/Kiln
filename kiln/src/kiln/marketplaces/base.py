@@ -7,6 +7,7 @@ can search, browse, and download models through a uniform interface.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import logging
 from abc import ABC, abstractmethod
@@ -150,6 +151,21 @@ def _count_as(kind: str) -> Callable[[Any, Any], None]:
     return _record
 
 
+def _notes_arrival(download: Callable[..., str]) -> Callable[..., str]:
+    """Wrap an adapter's ``download_file`` so the file it saves gets its
+    arrival note (:mod:`kiln.arrival`)."""
+
+    @functools.wraps(download)
+    def _download(self: Any, file_id: Any, *args: Any, **kwargs: Any) -> str:
+        path = download(self, file_id, *args, **kwargs)
+        from kiln.arrival import note_download
+
+        note_download(self.display_name, path, file_id)
+        return path
+
+    return _download
+
+
 class MarketplaceAdapter(ABC):
     """Abstract base class for marketplace backends.
 
@@ -159,9 +175,10 @@ class MarketplaceAdapter(ABC):
     metadata-only adapters.
 
     Every subclass's :meth:`search` and :meth:`download_file` are counted
-    in the daily usage stats under the adapter's own :attr:`name` (see
-    ``__init_subclass__``), so a marketplace added later is counted with
-    no further wiring.
+    in the daily usage stats under the adapter's own :attr:`name`, and
+    every file :meth:`download_file` saves gets a note saying where it came
+    from (see ``__init_subclass__``), so a marketplace added later is
+    counted and noted with no further wiring.
     """
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
@@ -173,6 +190,9 @@ class MarketplaceAdapter(ABC):
             original = cls.__dict__.get(method)
             if callable(original) and not getattr(original, "__isabstractmethod__", False):
                 setattr(cls, method, counts_outside_service("marketplace", _count_as(kind))(original))
+        download = cls.__dict__.get("download_file")
+        if callable(download):
+            cls.download_file = _notes_arrival(download)
 
     @property
     @abstractmethod

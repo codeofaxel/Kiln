@@ -297,6 +297,9 @@ class OpenSCADProvider(GenerationProvider):
         timeout: Maximum compilation time in seconds.
     """
 
+    sets_real_size = True
+    drawn_elsewhere = False
+
     def __init__(
         self,
         binary_path: str | None = None,

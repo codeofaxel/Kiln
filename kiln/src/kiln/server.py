@@ -15869,10 +15869,12 @@ def _safe_filename(name: str) -> str:
 
 @mcp.tool()
 def resolve_model_source(file_path: str) -> dict:
-    """Identify where a .3mf or .gcode.3mf file was downloaded from.
+    """Identify where a model file came from.
 
-    Reads embedded metadata to determine the original marketplace source.
-    Supports MakerWorld metadata and generic 3MF metadata (Title,
+    A file Kiln downloaded from a marketplace or a generator answers from
+    the note Kiln left beside it, in any format (``came_from`` says it in
+    a sentence).  Otherwise a .3mf or .gcode.3mf answers from its embedded
+    metadata: MakerWorld metadata and generic 3MF metadata (Title,
     Designer, Application, License, etc.).
 
     Returns the model title, designer, model URL (if available), slicer
@@ -15888,6 +15890,22 @@ def resolve_model_source(file_path: str) -> dict:
     """
     if err := _check_auth("generate"):
         return err
+    # A file Kiln downloaded or generated carries its own note, whatever
+    # its format, and that note is the most direct answer there is.
+    from kiln.arrival import read as _read_arrival
+
+    noted = _read_arrival(file_path)
+    if noted is not None:
+        return {
+            "success": True,
+            "source": noted.by,
+            "title": noted.name,
+            "designer": noted.creator,
+            "license": noted.license,
+            "model_url": noted.url,
+            "came_from": noted.line(),
+            "arrival": noted.to_dict(),
+        }
     try:
         from kiln.marketplaces.makerworld import resolve_makerworld_source
 
