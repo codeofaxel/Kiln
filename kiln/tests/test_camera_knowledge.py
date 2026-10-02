@@ -280,6 +280,14 @@ class TestWhichBambu:
         two rows that could be the X1."""
         assert self._bambu(serial, declared).camera_fitted_at_factory is fitted
 
+    def test_a_machine_that_could_be_the_x1_is_not_answered_from_the_x1_carbons_row(self):
+        """The catalogue's row for this family is the X1 Carbon's, whose
+        camera is fitted.  A/B: with the declared model always asked about,
+        this fails — a possible X1 is told it ships with a camera."""
+        assert self._bambu("ZZZ00A000000001", "bambu_x1c").camera_catalogue_model() == ""
+        assert self._bambu("00M00A000000001", "bambu_x1c").camera_catalogue_model() == "bambu_x1c"
+        assert self._bambu("03900A000000001", "bambu_a1").camera_catalogue_model() == "bambu_a1"
+
     def test_other_backends_do_not_say(self):
         from kiln.printers.base import PrinterAdapter
 

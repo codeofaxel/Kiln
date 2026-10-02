@@ -169,6 +169,7 @@ __all__ = [
     "revoke_covering",
     "revoke_window",
     "scope_covers",
+    "settle_copy_bed_check",
     "standing_now",
     "summary_line",
     "sync_account_always",
@@ -740,7 +741,7 @@ def _catalogue_camera_word(adapter: Any) -> str | None:
     try:
         from kiln import _pro_camera_bridge
 
-        return _pro_camera_bridge.catalogue_word(adapter.declared_printer_model())
+        return _pro_camera_bridge.catalogue_word(adapter.camera_catalogue_model())
     except Exception:  # noqa: BLE001 -- no word is no knowledge
         return None
 
@@ -755,7 +756,7 @@ def signing_in_would_tell(printer_name: str | None) -> bool:
         from kiln import _pro_camera_bridge
 
         adapter = _srv._resolve_adapter(str(printer_name or "").strip())
-        return _pro_camera_bridge.why_unanswered(adapter.declared_printer_model()) == "signed_out"
+        return _pro_camera_bridge.why_unanswered(adapter.camera_catalogue_model()) == "signed_out"
     except Exception:  # noqa: BLE001
         return False
 
@@ -1108,13 +1109,11 @@ def mirror_account_always(*, grant_id: str, printer_name: str, set_by: str, set_
     entry = Window(
         id=f"w_{secrets.token_hex(6)}", set_by=str(set_by or "account"), set_at=float(set_at or _now()),
         until=None, scope=(name,), source=SOURCE_WEB, always=True, machine=machine, account_grant=grant,
-        # The account page told the person that without a camera Kiln cannot
-        # check the bed.  Here is where it is known which this printer is:
-        # no camera only when its connection cannot carry a picture and none
-        # is registered beside it.  Where Kiln is unsure there is nobody at
-        # this door to ask, so the copy is one that looks, and asks when it
+        # What the copy says about the bed is left undecided here: a copy is
+        # also made by a status read, which must not go asking about cameras.
+        # It is decided at the copy's first start (:func:`settle_copy_bed_check`);
+        # until then an undecided copy is one that looks, and asks when it
         # cannot see.
-        bed_check=BED_NO_CAMERA if bed_camera(name) == CAMERA_NO else BED_CAMERA,
     )
     with _lock:
         windows = _read()
@@ -1127,6 +1126,38 @@ def mirror_account_always(*, grant_id: str, printer_name: str, set_by: str, set_
          "at": entry.set_at, "source": entry.source, "account_grant": grant},
     )
     return entry
+
+
+def settle_copy_bed_check(window_id: str, printer_name: str | None) -> Window | None:
+    """Decide, once, what an account copy says about the bed -- at a start,
+    where Kiln may look and may ask its catalogue.
+
+    The account page told the person that without a camera Kiln cannot
+    check the bed.  Here is where it is known which this printer is: no
+    camera when its connection cannot carry a picture and none is
+    registered beside it, or when Kiln's catalogue says the model has none
+    and no picture comes back (:func:`bed_camera`).  Where Kiln is unsure
+    there is nobody at this door to ask, so the copy is one that looks,
+    and asks when it cannot see.  A copy already decided, a terminal
+    entry, and a closed copy come back unchanged.  Never raises.
+    """
+    w = get_window(window_id)
+    if w is None or not w.account_grant or w.bed_check or w.revoked_at is not None or _hosted():
+        return w
+    try:
+        name = str(printer_name or (w.scope[0] if w.scope else ""))
+        decided = BED_NO_CAMERA if bed_camera(name) == CAMERA_NO else BED_CAMERA
+        settled = dataclasses.replace(w, bed_check=decided)
+        with _lock:
+            windows = _read()
+            for i, each in enumerate(windows):
+                if each.id == w.id and each.revoked_at is None and not each.bed_check:
+                    windows[i] = settled
+                    _write(windows)
+                    return settled
+    except (OSError, KeyError):
+        logger.debug("account copy's bed check not settled", exc_info=True)
+    return get_window(window_id)
 
 
 def account_confirms(w: Window, printer_name: str | None) -> bool:

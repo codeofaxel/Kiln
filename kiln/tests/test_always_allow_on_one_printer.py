@@ -1942,6 +1942,27 @@ class TestFromTheAccountPage:
         [copy] = [w for w in consent_windows.live_windows() if w.always]
         assert copy.account_grant and copy.bed_check == "none"
 
+    def test_a_status_read_makes_the_copy_without_asking_about_cameras(self, account, monkeypatch):
+        """Status shows always allow turned on from the account page before
+        any print.  Making that copy looks through no camera and asks no
+        catalogue: what it says about the bed is decided at its first start.
+        A/B: with the copy deciding it when it is made this fails — a status
+        read fetches a picture."""
+        printer = _CameraPrinter("SERIAL-A")
+        server._get_registry().register("garage", printer)
+        import responses as responses_lib
+
+        account.add(responses_lib.GET, DELEGATIONS, json={"success": True, "delegations": [{
+            "id": GRANT, "always": True, "live": True, "grantee": f"machine:{THIS_COMPUTER}",
+            "printers": ["garage"], "grantor": "account:uid-1", "issued_at_epoch": ISSUED,
+        }]})
+        asked: list[str] = []
+        monkeypatch.setattr(consent_windows, "bed_camera", lambda name: asked.append(name) or "yes")
+        _call("consent_window_status")
+        [copy] = [w for w in consent_windows.live_windows() if w.always]
+        assert copy.account_grant and copy.bed_check == ""
+        assert asked == [] and printer.frames_fetched == 0
+
     def test_the_copy_alone_starts_nothing(self, account, garage, tmp_path, no_rate_limit):
         """The account is asked every time.  When it cannot be reached, a
         copy left from an earlier print is not a yes.  A/B: with copies

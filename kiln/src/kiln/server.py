@@ -3393,6 +3393,11 @@ async def _consent_from_account_always(
         if not await asyncio.to_thread(consent_windows.is_live, entry.id, printer_name=aimed):
             return None
         look = unasked_look_noted(aimed)
+        if not entry.bed_check:
+            # The copy's first start: decide what it says about the bed, then
+            # look with that decided (a look taken before it was is not used).
+            entry = await asyncio.to_thread(consent_windows.settle_copy_bed_check, entry.id, aimed) or entry
+            look = None
         if look is None:
             look = await asyncio.to_thread(consent_windows.look_at_bed, aimed)
             note_unasked_look(aimed, look)

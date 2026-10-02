@@ -998,7 +998,7 @@ def knows_a_camera(adapter: Any) -> str | None:
         from kiln import _pro_camera_bridge
         from kiln.camera_words import FITTED
 
-        if _pro_camera_bridge.kept_word(adapter.declared_printer_model()) == FITTED:
+        if _pro_camera_bridge.kept_word(adapter.camera_catalogue_model()) == FITTED:
             return "printer"
     except Exception:  # noqa: BLE001 -- no word kept is no knowledge
         pass
