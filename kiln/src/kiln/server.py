@@ -2506,7 +2506,15 @@ def _consent_filament_line(
         plan = plan_ams_mapping(wanted, trays)
         if plan.ok:
             return plan.summary + (" (" + "; ".join(plan.warnings) + ")" if plan.warnings else "")
-        return "MISSING COLOUR — " + plan.summary
+        line = "MISSING COLOUR — " + plan.summary
+        if len(wanted) >= 2:
+            # The print gate will refuse this file; the dialog says what to
+            # load in the refusal's own words.  No question here: a dialog
+            # cannot answer one, and the refusal that follows carries it.
+            line += ". " + _unsuppliable_colour_words(
+                plan, wanted, trays, adapter=adapter, printer_name=printer_name, offer=False,
+            )
+        return line
     except Exception as exc:  # noqa: BLE001 — the dialog must still open
         logger.debug("consent: filament routing line skipped: %s", exc)
         return None
@@ -7862,12 +7870,50 @@ def _ams_tray_rows(ams_result: dict[str, Any]) -> list[tuple[int, str, dict[str,
     return rows
 
 
+def _unsuppliable_colour_words(
+    plan: Any,
+    wanted: list[Any],
+    trays: list[Any],
+    *,
+    adapter: Any = None,
+    printer_name: str | None = None,
+    offer: bool = True,
+) -> str:
+    """What to tell a person about the colours *plan* could not supply.
+
+    Worded by :func:`kiln.colour_availability.not_loaded_say`, so a print
+    door says what a colouring says about the same colours: a spool on
+    record is named with a reminder to load it, a colour with nothing on
+    record gets one offer of help.  The gate's decision is the plan's; this
+    is only its words.  Falls back to the plain instruction when there is
+    nothing more to say.
+    """
+    words = ""
+    try:
+        if printer_name is None:
+            registered = getattr(adapter, "_kiln_registered_name", None)
+            printer_name = registered if isinstance(registered, str) and registered else None
+        from kiln.colour_availability import not_loaded_say
+
+        in_use = {m.get("slot") for m in plan.matches if m.get("slot") is not None}
+        words = not_loaded_say(
+            [wanted[i] for i in plan.unmatched if i < len(wanted)],
+            printer_name=printer_name,
+            loaded=[f"#{t.hex6}" for t in trays if t.tray_id in in_use and t.hex6],
+            offer=offer,
+        )
+    except Exception:  # noqa: BLE001 -- words never change or break the gate's decision
+        logger.debug("unsupplied colours not worded", exc_info=True)
+    return words or "Load the missing colour."
+
+
 def _undriven_multi_material_decision(
     mm: Any,
     ams_mapping: list[int] | None,
     *,
     file_path: str | None = None,
     wanted: list[Any] | None = None,
+    adapter: Any = None,
 ) -> dict[str, Any]:
     """The routing decision for a printer whose filament changes Kiln does not drive.
 
@@ -7918,11 +7964,13 @@ def _undriven_multi_material_decision(
             warnings_out.extend(plan.warnings)
         elif len(wanted) >= 2:
             out["blocked"] = True
+            load = _unsuppliable_colour_words(plan, list(wanted), list(mm.slots), adapter=adapter)
             warnings_out.append(
                 f"This file needs {len(wanted)} filaments and the {mm.label}'s "
-                f"loaded slots cannot supply them all: {plan.summary}. Load the "
-                f"missing colour, or remap the unit's tool map yourself — Kiln "
-                f"does not drive this unit and cannot substitute a slot for you."
+                f"loaded slots cannot supply them all: {plan.summary}. {load} "
+                f"To print it with a substitute instead, remap the unit's tool "
+                f"map yourself — Kiln does not drive this unit and cannot "
+                f"substitute a slot for you."
             )
             warnings_out.extend(plan.warnings)
         else:
@@ -8079,7 +8127,7 @@ def _resolve_use_ams(
 
         return _undriven_multi_material_decision(
             multi_material_status(adapter), ams_mapping,
-            file_path=file_path, wanted=wanted,
+            file_path=file_path, wanted=wanted, adapter=adapter,
         )
 
     try:
@@ -8227,15 +8275,15 @@ def _resolve_use_ams(
             # A partial mapping is a wrong print.  Say which colour is
             # missing and stop; the caller decides what to do about it.
             logger.warning("AMS colour routing blocked: %s", plan.summary)
+            load = _unsuppliable_colour_words(plan, wanted, trays, adapter=adapter)
             return {
                 "use_ams": True,
                 "ams_mapping": None,
                 "warnings": [
                     "This file needs "
                     f"{len(wanted)} filaments and the loaded spools cannot "
-                    f"supply them all: {plan.summary}. Load the missing "
-                    "colour, or pass an explicit ams_mapping to print it "
-                    "with a substitute."
+                    f"supply them all: {plan.summary}. {load} To print it "
+                    "with a substitute instead, pass an explicit ams_mapping."
                 ]
                 + plan.warnings,
                 "selection": None,
@@ -8295,8 +8343,9 @@ def _spool_advisory(
 ) -> dict[str, Any] | None:
     """Say whether *colours* are loaded on the printer, for a colouring tool.
 
-    The colouring tools call this the moment a colour is chosen, so "make
-    it red" answers "made it red; no red is loaded on default" instead of
+    The reading under :func:`kiln.colour_availability.colour_availability`,
+    which every colouring door attaches the moment a colour is chosen, so
+    "make it red" is answered with whether red is on the printer instead of
     leaving the miss for a warning at print time.  Advice only — the
     print gate (:func:`_resolve_use_ams`) still decides, on whatever
     printer is in front of the job when it starts.
@@ -10711,6 +10760,13 @@ def wrap_gcode_as_3mf(
     Returns a dict with ``output_path`` pointing to the generated 3MF.
     Use ``upload_file()`` to send it to the printer, then ``start_print()``
     to begin printing.
+
+    When ``filament_colors`` are given, the result says whether they are on
+    the printer, as ``colour_availability`` (absent when Kiln cannot see
+    what is loaded).  Relay its ``say`` as written and add nothing about
+    filament: never suggest buying filament unless the person asks for one
+    or says yes to the offer in ``say``.  On a yes, call
+    ``find_closest_filaments`` with these colours and the print's material.
     """
     if err := _check_auth("files"):
         return err
@@ -10805,14 +10861,20 @@ def wrap_gcode_as_3mf(
             "num_filaments": num_filaments,
         }
         if filament_colors:
-            # The colours were chosen here; say now whether they are loaded,
-            # and which filaments you could buy for them.
-            advisory = _spool_advisory(list(filament_colors), adapter=adapter)
-            if advisory:
-                result["ams_advisory"] = advisory
-            from kiln._pro_colour_bridge import attach_closest_filaments
+            # The colours were chosen here; say now whether they are on the
+            # printer.  The material counts only when the print has one.
+            from kiln.colour_availability import attach_colour_availability
 
-            attach_closest_filaments(result, list(filament_colors))
+            types = {str(t).strip().upper() for t in (filament_types or []) if t}
+            if len(types) > 1:
+                material = None  # several materials: no one material to hold a spool to
+            elif types:
+                material = next(iter(types))
+            else:
+                material = result.get("filament_type")
+            attach_colour_availability(
+                result, list(filament_colors), adapter=adapter, material=material,
+            )
         return result
     except FileNotFoundError as exc:
         return _error_dict(f"G-code file not found: {exc}")
@@ -16709,7 +16771,13 @@ def compose_multicolor_3mf(
 
     Returns:
         Dict with ``success``, ``output_path``, ``parts``, ``total_triangles``,
-        ``total_vertices``, ``extruder_map``, and ``message``.
+        ``total_vertices``, ``extruder_map``, and ``message``.  It also says
+        whether the part colours are on the printer, as
+        ``colour_availability`` (absent when Kiln cannot see what is loaded).
+        Relay its ``say`` as written and add nothing about filament: never
+        suggest buying filament unless the person asks for one or says yes
+        to the offer in ``say``.  On a yes, call ``find_closest_filaments``
+        with these colours and the print's material.
     """
     _check_auth("design:compose")
 
@@ -16750,19 +16818,14 @@ def compose_multicolor_3mf(
         printer_id=printer_id or None,
     )
     if result.get("success"):
-        # The part colours were chosen here; say now whether they are loaded.
-        try:
-            advisory = _spool_advisory(
-                [p.get("color") for p in parts], printer_name=printer_id or None,
-            )
-        except Exception as exc:  # advice never fails a good composition
-            logger.debug("compose: spool advisory skipped (%s)", exc)
-            advisory = None
-        if advisory:
-            result["ams_advisory"] = advisory
-        from kiln._pro_colour_bridge import attach_closest_filaments
+        # The part colours were chosen here; say now whether they are on
+        # the printer.  A part's ``material`` is a display label ("PLA
+        # Grey"), not the print's material, so it is not passed.
+        from kiln.colour_availability import attach_colour_availability
 
-        attach_closest_filaments(result, [p.get("color") for p in parts])
+        attach_colour_availability(
+            result, [p.get("color") for p in parts], printer_name=printer_id or None,
+        )
     return result
 
 
@@ -18180,8 +18243,8 @@ def _pro_api_call(
     fail fast -- a check made on the way into a print -- passes its own.
 
     ``_asked_by_user=False`` marks an ask the person never made -- extra
-    information a tool fetches on its own, like the filaments to buy beside
-    a colouring.  Without a sign-in it gets the same answer, but it is not
+    information a tool fetches on its own, like the blade status behind a
+    pre-flight.  Without a sign-in it gets the same answer, but it is not
     counted as someone reaching for the feature: that counter
     (:func:`kiln.daily_stats.record_account_wall`) means a person asked.
 

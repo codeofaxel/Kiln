@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln.colour_availability import attach_colour_availability
 from kiln.cost_estimator import BUILTIN_MATERIALS, DEFAULT_MATERIAL
 
 _logger = logging.getLogger(__name__)
@@ -1132,52 +1133,6 @@ def _build_summary(
     return f"{count} color zone{'s' if count != 1 else ''}: {', '.join(parts)}"
 
 
-def _attach_spool_advisory(
-    response: dict[str, Any],
-    colours: list[str | None],
-    printer_id: str | None = None,
-) -> None:
-    """Say, as the colours are chosen, whether the printer has them loaded.
-
-    Adds ``ams_advisory`` to a successful *response* when there is a
-    printer to ask — the same field every colouring tool carries, so an
-    agent reads "no red is loaded" in the answer to "make it red" rather
-    than in a warning at print time.  Advice only: the print gate decides.
-    """
-    try:
-        from kiln.server import _spool_advisory
-
-        advisory = _spool_advisory(colours, printer_name=printer_id or None)
-    except Exception as exc:  # a courtesy layer never fails a good colouring
-        _logger.debug("spool advisory skipped: %s", exc)
-        return
-    if advisory:
-        response["ams_advisory"] = advisory
-
-
-def _attach_colour_advice(
-    response: dict[str, Any],
-    colours: list[str | None],
-    printer_id: str | None = None,
-) -> None:
-    """Everything a colouring says about the colours it chose, in one call.
-
-    Whether the printer has them loaded (:func:`_attach_spool_advisory`),
-    and the closest filaments you can buy for each one
-    (:func:`kiln._pro_colour_bridge.attach_closest_filaments`).  Every
-    colouring tool in this file calls this helper rather than either half,
-    so a door cannot carry one without the other.  Both are best-effort:
-    neither ever fails a good colouring.
-    """
-    _attach_spool_advisory(response, colours, printer_id)
-    try:
-        from kiln._pro_colour_bridge import attach_closest_filaments
-
-        attach_closest_filaments(response, colours)
-    except Exception as exc:  # a courtesy layer never fails a good colouring
-        _logger.debug("closest filaments skipped: %s", exc)
-
-
 def _build_result(
     zones: list[_ColorZone],
     output_dir: str,
@@ -1211,8 +1166,8 @@ def _build_result(
             # ``ams_slot`` is the zone's ORDINAL, not a slot anything was
             # read from: this tool never asks the printer.  Said explicitly
             # so a reader does not mistake it for a routed assignment; the
-            # ``ams_advisory`` beside the result is where a real reading
-            # of the printer's slots lives.
+            # ``colour_availability`` beside the result is where a real
+            # reading of the printer's slots lives.
             "slot_source": "zone_index",
             "estimated_weight_g": weight,
         }
@@ -1612,6 +1567,14 @@ class _ColorToolsPlugin:
 
             Zero cloud dependencies — pure geometry.
 
+            Says whether its colours are on the printer, as
+            ``colour_availability`` (absent when Kiln cannot see what is
+            loaded).  Relay its ``say`` as written and add nothing about
+            filament: never suggest buying filament unless the person asks
+            for one or says yes to the offer in ``say``.  On a yes, call
+            ``find_closest_filaments`` with these colours and the print's
+            material.
+
             :param input_path: Path to a binary STL file.
             :param num_colors: Number of color zones (default 4).
             :param color_palette: List of hex colors (e.g.
@@ -1671,7 +1634,9 @@ class _ColorToolsPlugin:
                 compose_3mf_error=compose_err,
                 band_warning=warn,
             )
-            _attach_colour_advice(response, palette[:num_colors], printer_id)
+            attach_colour_availability(
+                response, palette[:num_colors], printer_name=printer_id or None,
+            )
             try:
                 from kiln_pro.plugins.git_render_tools import (
                     attach_inspect_bundle,
@@ -1711,6 +1676,14 @@ class _ColorToolsPlugin:
             color to a filament on open.
 
             Zero cloud dependencies — pure geometry.
+
+            Says whether its colours are on the printer, as
+            ``colour_availability`` (absent when Kiln cannot see what is
+            loaded).  Relay its ``say`` as written and add nothing about
+            filament: never suggest buying filament unless the person asks
+            for one or says yes to the offer in ``say``.  On a yes, call
+            ``find_closest_filaments`` with these colours and the print's
+            material.
 
             :param input_path: Path to a binary STL file.
             :param num_colors: Number of color zones (default 4).
@@ -1798,7 +1771,9 @@ class _ColorToolsPlugin:
                 compose_3mf_error=compose_err,
                 band_warning=warn,
             )
-            _attach_colour_advice(response, palette[:num_colors], printer_id)
+            attach_colour_availability(
+                response, palette[:num_colors], printer_name=printer_id or None,
+            )
             try:
                 from kiln_pro.plugins.git_render_tools import (
                     attach_inspect_bundle,
@@ -1845,6 +1820,14 @@ class _ColorToolsPlugin:
             target, output file) so the design's provenance says
             "carved, then painted" — ``paint_recorded`` in the result
             reports whether that write-back landed.
+
+            Says whether its colours are on the printer, as
+            ``colour_availability`` (absent when Kiln cannot see what is
+            loaded).  Relay its ``say`` as written and add nothing about
+            filament: never suggest buying filament unless the person asks
+            for one or says yes to the offer in ``say``.  On a yes, call
+            ``find_closest_filaments`` with these colours and the print's
+            material.
 
             :param model_path: The decorated mesh (STL/OBJ/3MF) whose
                 ``<mesh>.decoration_faces.json`` sidecar to consume.
@@ -2079,8 +2062,9 @@ class _ColorToolsPlugin:
             for key in ("colors", "bed_translation", "native_paint_truncated"):
                 if key in composed:
                     response[key] = composed[key]
-            _attach_colour_advice(
-                response, sorted({c for c in colors if c}), printer_id,
+            attach_colour_availability(
+                response, sorted({c for c in colors if c}),
+                printer_name=printer_id or None,
             )
             if "floor_indices" in record and target == "all":
                 response["hint"] = (

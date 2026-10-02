@@ -663,8 +663,11 @@ def advise_colours(
             entry["delta_e"] = round(nearest[1], 1) if nearest else None
             missing.append(entry)
         else:
-            tray_hex = by_slot[match["slot"]].hex6
-            entry["nearest_color"] = f"#{tray_hex}" if tray_hex else None
+            tray = by_slot[match["slot"]]
+            entry["nearest_color"] = f"#{tray.hex6}" if tray.hex6 else None
+            # The slot in the printer's own words (``slot B2``), for a
+            # sentence that says where a colour is.
+            entry["where"] = tray.where
             matched.append(entry)
 
     if not missing:
