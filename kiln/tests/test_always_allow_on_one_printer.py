@@ -71,8 +71,9 @@ class _Printer(PrinterAdapter):
     """A real adapter subclass, so a start runs the whole template: the
     sign-off backstop and every check :func:`run_adapter_gate` makes."""
 
-    def __init__(self, serial: str) -> None:
+    def __init__(self, serial: str, host: str = "") -> None:
         self.serial = serial
+        self.host = host
         self.started: list[str] = []
 
     @property
@@ -143,6 +144,50 @@ def _install_result_line() -> None:
     if not _result_line_installed:
         assert consent_window_note.install(server.mcp)
         _result_line_installed = True
+
+
+def _png(width: int = 640, height: int = 480, grey: int = 128) -> bytes:
+    """A real PNG the snapshot screen accepts: big enough, mid-bright, and
+    varied enough not to read as a blank frame."""
+    import struct
+    import zlib
+
+    rows = b""
+    for y in range(height):
+        row = b"\x00"
+        for x in range(width):
+            v = (grey + ((x * 7 + y * 13) % 90)) % 256
+            row += bytes((v, v, v))
+        rows += row
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
+
+
+_FRAME = _png()
+
+
+class _CameraPrinter(_Printer):
+    """A printer with a camera of its own.  ``frame`` is what it returns:
+    a usable picture, nothing, or an error."""
+
+    def __init__(self, serial: str, frame: bytes | Exception = _FRAME) -> None:
+        super().__init__(serial)
+        self.frame = frame
+        self.frames_fetched = 0
+
+    @property
+    def snapshot_source(self) -> str:
+        return "printer"
+
+    def get_snapshot(self) -> bytes:
+        self.frames_fetched += 1
+        if isinstance(self.frame, Exception):
+            raise self.frame
+        return self.frame
 
 
 @pytest.fixture(autouse=True)
@@ -350,12 +395,11 @@ class TestTurningItOn:
             consent_windows.open_always(printer_name="garage", typed_name="garage")
         assert consent_windows.live_windows() == []
 
-    def test_it_is_for_one_printer_whatever_the_tier(self, garage, at_terminal, monkeypatch):
+    def test_every_printer_at_once_is_not_offered(self, garage, at_terminal, monkeypatch):
+        """Printers are named.  ``--fleet`` names none, on any tier."""
         monkeypatch.setattr(consent_windows, "_fleet_tier_allows", lambda: True)
-        for flags in (["--fleet"], ["--printers", "garage,workshop"], ["--printers", "garage"]):
-            result = _kiln("consent", "window", "--always", *flags, typed="garage")
-            assert result.exit_code != 0, (flags, result.output)
-            assert "one printer" in _said(result)
+        result = _kiln("consent", "window", "--always", "--fleet", typed="garage")
+        assert result.exit_code != 0 and "printers you name" in _said(result)
         # A length and no end are two different asks.
         result = _kiln("consent", "window", "--always", "--for", "2h", "--printer", "garage", typed="garage")
         assert result.exit_code != 0
@@ -630,6 +674,33 @@ class TestAPrintUnderIt:
         out = _start(tmp_path)
         assert out["success"] is False, out
 
+    def test_the_line_never_says_started_for_a_start_the_adapter_turned_away(self, garage, at_terminal):
+        """Seen live: the adapter's safety gate refused a file, the tool's
+        result still read ``accepted`` (the printer had not been heard from
+        since), and the line said "Started without asking".  The line now
+        says started only when the adapter did."""
+        import types
+
+        _turn_on()
+        turned_away = types.SimpleNamespace(
+            structuredContent={
+                "success": True, "print_start": "accepted",
+                "evidence": {"adapter_reported_success": False, "adapter_message": "not ready for the printer"},
+            },
+            isError=False, content=[],
+        )
+        consent_window_note._attach(turned_away, None, "start_print", {"printer_name": "garage"})
+        block = turned_away.structuredContent[consent_window_note.RESULT_KEY]
+        assert block["note"] == 'Always allow is on for garage. Say "ask me first" to turn it off.'
+        assert "bed_check" not in block
+        # The control: the adapter reported the start, and the line says so.
+        took_it = types.SimpleNamespace(
+            structuredContent={"success": True, "print_start": "accepted", "evidence": {"adapter_reported_success": True}},
+            isError=False, content=[],
+        )
+        consent_window_note._attach(took_it, None, "start_print", {"printer_name": "garage"})
+        assert took_it.structuredContent[consent_window_note.RESULT_KEY]["note"] == ON_LINE
+
     def test_the_rate_limit_still_applies(self, garage, at_terminal, tmp_path):
         """Two starts back to back: the second is held by the limiter that
         holds every caller, standing permission or not."""
@@ -762,6 +833,28 @@ class TestADifferentMachine:
         assert [d["job_id"] for d in summary["dispatched"]] == [job], summary
         assert garage.started == ["part.gcode"]
 
+    def test_a_stored_clearance_is_asked_again_wherever_it_is_re_granted(self, garage, at_terminal):
+        """A paused pipeline, like a queued job, re-grants the clearance it
+        stored.  Under always allow that re-grant asks the gate's question
+        again, and a start with nothing granted is turned away by the
+        adapter itself.  A/B: with the re-check removed from
+        ``grant_from_record`` the replacement printer starts the file."""
+        entry = _turn_on()
+        record = {"source": SOURCE_ALWAYS, "door": "stage", "printer_name": "garage", "window_id": entry.id}
+        # While it stands: granted, and the start goes through.
+        assert print_signoff.grant_from_record(record, tool="pipeline", file_name="part.gcode", printer_name="garage")
+        assert garage.start_print("part.gcode").success is True
+        # A different machine under the name: not granted, and not started.
+        replacement = self._swap()
+        assert print_signoff.grant_from_record(
+            record, tool="pipeline", file_name="part.gcode", printer_name="garage",
+        ) is None
+        assert print_signoff.current() is None
+        assert replacement.start_print("part.gcode").success is False and replacement.started == []
+        # A record that names no entry rests on nothing.
+        nameless = {"source": SOURCE_ALWAYS, "door": "stage", "printer_name": "garage"}
+        assert print_signoff.record_refusal(nameless, "garage")
+
     def test_a_job_queued_under_it_does_not_start_once_it_is_turned_off(self, garage, at_terminal, tmp_path):
         from kiln.events import EventBus
         from kiln.queue import PrintQueue
@@ -798,6 +891,7 @@ class TestSeeingIt:
         safety = _call("safety_status")
         assert "always allow on garage" in safety["summary"]
         assert [w["id"] for w in safety["standing_windows"]] == [entry.id]
+        assert _call("safety_settings")["always_allow"]["on_for"] == ["garage"]
         # The printer's own status.
         block = _call("printer_status", printer_name="garage")["always_allow"]
         assert block["always"] is True and block["id"] == entry.id
@@ -924,3 +1018,359 @@ def test_the_one_parser_has_no_word_for_it():
     and an answer that was not on the form is not a yes."""
     answer = answer_from_content("accept", {FIELD_ANSWER: "always"})
     assert not answer.accepted and answer.action == "unavailable"
+
+
+# ---------------------------------------------------------------------------
+# Two printers of one make are two machines
+# ---------------------------------------------------------------------------
+
+
+class TestWhichMachine:
+    def test_two_of_the_same_model_are_told_apart_by_serial(self, at_terminal, tmp_path, no_rate_limit):
+        """Same make, same model, both set up: the permission for one is
+        not a permission for its twin."""
+        left, right = _Printer("SERIAL-L"), _Printer("SERIAL-R")
+        for name, printer in (("left", left), ("right", right)):
+            server._get_registry().register(name, printer)
+            printer.set_safety_profile("bambu_a1")
+        _turn_on("left")
+        assert _start(tmp_path, printer_name="left")["success"] is True
+        assert _start(tmp_path, printer_name="right")["error"]["code"] == "PREVIEW_NOT_CONFIRMED"
+        assert left.started == ["part.gcode"] and right.started == []
+
+    def test_printers_without_a_serial_are_told_apart_by_address(self, at_terminal, tmp_path, no_rate_limit):
+        one, other = _Printer("", host="http://192.168.1.50"), _Printer("", host="http://192.168.1.51")
+        server._get_registry().register("one", one)
+        server._get_registry().register("other", other)
+        entry = _turn_on("one")
+        assert entry.machine == "fake:host:192.168.1.50"
+        assert _start(tmp_path, printer_name="one")["success"] is True
+        assert _start(tmp_path, printer_name="other")["error"]["code"] == "PREVIEW_NOT_CONFIRMED"
+        assert other.started == []
+
+    def test_a_new_address_under_the_name_turns_it_off(self, at_terminal, tmp_path):
+        """Known by address only: a printer that comes back at another
+        address is, to Kiln, not provably the same machine — so it asks."""
+        server._get_registry().register("one", _Printer("", host="192.168.1.50"))
+        entry = _turn_on("one")
+        moved = _Printer("", host="192.168.1.77")
+        server._get_registry().register("one", moved)
+        out = _start(tmp_path, printer_name="one")
+        assert out["error"]["code"] == "PREVIEW_NOT_CONFIRMED" and moved.started == []
+        assert consent_windows.get_window(entry.id).revoked_reason == consent_windows.REASON_MACHINE_CHANGED
+
+
+# ---------------------------------------------------------------------------
+# Several named printers at once
+# ---------------------------------------------------------------------------
+
+
+class TestSeveralAtOnce:
+    @pytest.fixture
+    def three(self, at_terminal, monkeypatch):
+        """Three printers, on the tier that runs several at once."""
+        monkeypatch.setattr(consent_windows, "_fleet_tier_allows", lambda: True)
+        printers = {"garage": _Printer("SERIAL-A"), "workshop": _Printer("SERIAL-W"), "attic": _Printer("SERIAL-T")}
+        for name, printer in printers.items():
+            server._get_registry().register(name, printer)
+        return printers
+
+    def _several(self, typed: str, names: str = "garage,workshop,attic"):
+        return _kiln("consent", "window", "--always", "--printers", names, typed=typed)
+
+    def test_each_named_printer_gets_its_own_entry(self, three, tmp_path, no_rate_limit):
+        result = self._several("3")
+        assert result.exit_code == 0, result.output
+        said = _said(result)
+        # Every printer is listed before the person confirms.
+        assert "Always allow prints on these 3 printers?" in said
+        assert all(name in said for name in three)
+        assert "Type the number of printers listed (3)" in said
+        entries = {w.scope[0]: w for w in _always_entries()}
+        assert set(entries) == set(three)
+        assert {w.machine for w in entries.values()} == {"fake:serial:serial-a", "fake:serial:serial-w", "fake:serial:serial-t"}
+        # Each covers its own machine...
+        assert _start(tmp_path, printer_name="workshop")["success"] is True
+        assert three["workshop"].started == ["part.gcode"] and three["garage"].started == []
+        # ...and is turned off on its own.
+        _call("revoke_consent_window", printer_name="workshop")
+        assert {w.scope[0] for w in _always_entries()} == {"garage", "attic"}
+
+    @pytest.mark.parametrize("typed", ["2", "4", "", "y", "yes", "garage", "three"])
+    def test_anything_but_the_count_turns_none_on(self, three, typed):
+        """A/B: with the count comparison removed from
+        ``open_always_for_several`` this fails."""
+        result = self._several(typed)
+        assert result.exit_code != 0, result.output
+        assert "not turned on" in _said(result)
+        assert consent_windows.live_windows() == []
+
+    def test_below_the_fleet_tier_it_is_one_at_a_time(self, three, monkeypatch):
+        """A/B: with the tier check removed this fails."""
+        monkeypatch.setattr(consent_windows, "_fleet_tier_allows", lambda: False)
+        result = self._several("3")
+        assert result.exit_code != 0 and "Business" in _said(result)
+        assert consent_windows.live_windows() == []
+        # One printer is every tier's.
+        assert _kiln("consent", "window", "--always", "--printer", "garage", typed="garage").exit_code == 0
+
+    def test_one_printer_kiln_cannot_tell_apart_stops_all_of_them(self, three):
+        server._get_registry().register("shed", _Printer(""))
+        result = self._several("3", names="garage,shed,attic")
+        assert result.exit_code != 0 and "cannot tell which machine shed is" in _said(result)
+        assert consent_windows.live_windows() == []
+
+    def test_one_machine_named_twice_is_refused(self, three):
+        server._get_registry().register("default", three["garage"])
+        result = self._several("3", names="garage,default,attic")
+        assert result.exit_code != 0 and "same machine" in _said(result)
+        result = self._several("3", names="garage,Garage,attic")
+        assert result.exit_code != 0 and "named twice" in _said(result)
+        assert consent_windows.live_windows() == []
+
+    def test_off_a_terminal_it_refuses(self, three, monkeypatch):
+        monkeypatch.setattr(consent_windows, "person_at_terminal", lambda: False)
+        assert self._several("3").exit_code != 0
+        with pytest.raises(consent_windows.NotAPerson):
+            consent_windows.open_always_for_several(printer_names=list(three), typed_count="3")
+        assert consent_windows.live_windows() == []
+
+    def test_one_of_them_swapped_turns_only_that_one_off(self, three, tmp_path, no_rate_limit):
+        assert self._several("3").exit_code == 0
+        server._get_registry().register("attic", _Printer("SERIAL-NEW"))
+        assert _start(tmp_path, printer_name="attic")["error"]["code"] == "PREVIEW_NOT_CONFIRMED"
+        assert {w.scope[0] for w in _always_entries()} == {"garage", "workshop"}
+
+
+# ---------------------------------------------------------------------------
+# Nobody is asked, so the bed is looked at
+# ---------------------------------------------------------------------------
+
+
+class TestTheBedIsLookedAt:
+    @pytest.fixture
+    def camera(self, at_terminal):
+        """``garage`` with a working camera, always allow on."""
+        printer = _CameraPrinter("SERIAL-A")
+        server._get_registry().register("garage", printer)
+        _turn_on()
+        return printer
+
+    def test_the_start_waits_for_eyes_on_a_fresh_frame(self, camera, tmp_path, audits, no_rate_limit):
+        """A/B: with the held start removed from the gate this fails — the
+        first call starts the print with nobody having looked."""
+        token = _previewed(_gcode(tmp_path))
+        held = _call("start_print", file_name="part.gcode", printer_name="garage", preview_token=token)
+        assert held["error"]["code"] == "ALWAYS_ALLOW_LOOK_FIRST", held
+        assert camera.started == []
+        assert pathlib.Path(held["snapshot_path"]).read_bytes() == _FRAME
+        assert "look_at_plate" in held["error"]["message"]
+
+        # The assistant looks at the frame it was handed and says what it saw.
+        seen = _call("look_at_plate", printer_name="garage", seen="clear")
+        assert seen["success"] is True, seen
+
+        # The same call again — the token was not spent by the held start.
+        out = _call("start_print", file_name="part.gcode", printer_name="garage", preview_token=token)
+        assert out["success"] is True, out
+        assert camera.started == ["part.gcode"]
+        # The picture the clear rested on is kept, and named on the result.
+        check = out[consent_window_note.RESULT_KEY]["bed_check"]
+        kept = pathlib.Path(check["frame"])
+        assert check["checked"] is True and check["judged_by"] == "agent"
+        assert kept.read_bytes() == _FRAME and kept.parent.name == "plate_looks"
+        assert str(kept) in check["note"] and "your assistant checked the bed" in check["note"]
+        assert out[consent_window_note.RESULT_KEY]["note"] == ON_LINE
+        # And on the audit line.
+        [details] = [d for _, action, d in audits if action == "preview_gate_satisfied"]
+        assert details["bed_look"] == {
+            "checked": True, "camera": "printer", "frame": str(kept),
+            "frame_at": check["frame_at"], "judged_by": "agent",
+        }
+
+    def test_one_frame_is_fetched_per_start(self, camera, tmp_path, no_rate_limit):
+        """The asker, the gate and the result line share one look."""
+        token = _previewed(_gcode(tmp_path))
+        _call("start_print", file_name="part.gcode", printer_name="garage", preview_token=token)
+        assert camera.frames_fetched == 1
+        _call("look_at_plate", printer_name="garage", seen="clear")
+        _call("start_print", file_name="part.gcode", printer_name="garage", preview_token=token)
+        assert camera.frames_fetched == 1 and camera.started == ["part.gcode"]
+
+    def test_a_clear_nobody_looked_for_is_not_enough(self, camera, tmp_path, monkeypatch):
+        """A record that says clear — a print taken off this morning, a
+        reset — is not a look.  A/B: with ``look_for_unasked_start``
+        accepting any clear record this fails."""
+        from kiln import plate_state
+
+        plate_state.mark_clear(camera, "human")
+        monkeypatch.setattr(plate_state, "LOOK_GOOD_FOR_SECONDS", -1.0)  # said long ago
+        out = _start(tmp_path)
+        assert out["error"]["code"] == "ALWAYS_ALLOW_LOOK_FIRST", out
+        assert camera.started == []
+
+    def test_the_persons_own_word_settles_a_picture_nobody_could_judge(self, camera, tmp_path, no_rate_limit):
+        """The assistant could not tell and said so; the person says the
+        bed is clear.  Their word, just given, is what the start rests on
+        — and the result says that, not that a picture was checked."""
+        from kiln import plate_state
+
+        assert _start(tmp_path)["error"]["code"] == "ALWAYS_ALLOW_LOOK_FIRST"
+        _call("look_at_plate", printer_name="garage", seen="occupied")
+        assert _start(tmp_path)["error"]["code"] == plate_state.START_NOT_YET_CODE
+        plate_state.mark_clear(camera, "human", note="the person says the plate is empty")
+        out = _start(tmp_path)
+        assert out["success"] is True and camera.started == ["part.gcode"]
+        check = out[consent_window_note.RESULT_KEY]["bed_check"]
+        assert check["checked"] is True and check["judged_by"] == "person" and check["frame"] is None
+        assert check["note"] == "Before it started, you said the bed was clear."
+
+    def test_an_old_look_is_not_enough(self, camera, tmp_path, monkeypatch, no_rate_limit):
+        from kiln import plate_state
+
+        assert _start(tmp_path)["error"]["code"] == "ALWAYS_ALLOW_LOOK_FIRST"
+        _call("look_at_plate", printer_name="garage", seen="clear")
+        assert plate_state.read(camera).fresh_look() is not None
+        # Time passes: the look is about a plate that may have changed.
+        monkeypatch.setattr(plate_state, "LOOK_GOOD_FOR_SECONDS", -1.0)
+        assert _start(tmp_path)["error"]["code"] == "ALWAYS_ALLOW_LOOK_FIRST"
+        assert camera.started == []
+
+    def test_a_verdict_with_no_frame_behind_it_is_not_a_look(self, camera, tmp_path):
+        """``seen="clear"`` with no picture handed over first: recorded,
+        as before, but nothing a start may rest on."""
+        from kiln import plate_state
+
+        _call("look_at_plate", printer_name="garage", seen="clear")
+        assert plate_state.read(camera).clear and plate_state.read(camera).fresh_look() is None
+        assert _start(tmp_path)["error"]["code"] == "ALWAYS_ALLOW_LOOK_FIRST"
+
+    def test_seen_occupied_stops_the_start(self, camera, tmp_path, no_rate_limit):
+        from kiln import plate_state
+
+        assert _start(tmp_path)["error"]["code"] == "ALWAYS_ALLOW_LOOK_FIRST"
+        _call("look_at_plate", printer_name="garage", seen="occupied")
+        out = _start(tmp_path)
+        assert out["error"]["code"] == plate_state.START_NOT_YET_CODE, out
+        assert camera.started == []
+
+    @pytest.mark.parametrize(
+        "frame",
+        [b"", RuntimeError("camera timed out"), _png(width=32, height=24)],
+        ids=["no image", "camera error", "too small to judge"],
+    )
+    def test_a_camera_that_cannot_see_means_the_person_is_asked(self, at_terminal, tmp_path, frame):
+        """Nothing usable from the camera: always allow is not used for
+        this print, and the refusal says why.  A/B: with the blind
+        fallback removed from ``consent_for`` this fails — the print
+        starts with the bed unseen."""
+        printer = _CameraPrinter("SERIAL-A", frame=frame)
+        server._get_registry().register("garage", printer)
+        entry = _turn_on()
+        out = _start(tmp_path)
+        assert out["error"]["code"] == "PREVIEW_NOT_CONFIRMED", out
+        assert printer.started == []
+        message = out["error"]["message"]
+        assert "Always allow is on for garage, but Kiln could not see the bed through the camera" in message
+        assert "asking you this time" in message
+        # It is still on: one blind look turns nothing off.
+        assert [w.id for w in _always_entries()] == [entry.id]
+
+    def test_the_dialog_says_why_it_is_asking(self, at_terminal, monkeypatch):
+        printer = _CameraPrinter("SERIAL-A", frame=b"")
+        server._get_registry().register("garage", printer)
+        _turn_on()
+        monkeypatch.setattr(server, "host_can_ask_the_user", lambda mcp, ctx: True)
+        asked: list[str] = []
+
+        class _RecordingHost(_Host):
+            async def elicit(self, message, schema):
+                asked.append(message)
+                return await super().elicit(message, schema)
+
+        async def _one_ask():
+            token = await server._obtain_print_consent(
+                "start_print", {"file_name": "part.gcode", "printer_name": "garage"}, _RecordingHost(CHOICE_THIS_PRINT),
+            )
+            if token is not None:
+                print_consent.reset_consent(token)
+
+        asyncio.run(_one_ask())
+        [message] = asked
+        assert "Always allow: on, but Kiln could not see the bed through the camera" in message
+
+    def test_no_camera_starts_and_says_the_bed_was_not_checked(self, garage, at_terminal, tmp_path, audits):
+        _turn_on()
+        out = _start(tmp_path)
+        assert out["success"] is True and garage.started == ["part.gcode"]
+        check = out[consent_window_note.RESULT_KEY]["bed_check"]
+        assert check["checked"] is False and check["camera"] is None
+        assert check["note"] == "This printer has no camera Kiln can use, so the bed was not checked first."
+        [details] = [d for _, action, d in audits if action == "preview_gate_satisfied"]
+        assert details["bed_look"]["checked"] is False
+
+    def test_a_persons_own_yes_needs_no_look(self, tmp_path, monkeypatch):
+        """The rule is for a start nobody was asked about.  A person who
+        said yes to this print is not held for a frame."""
+        printer = _CameraPrinter("SERIAL-A")
+        server._get_registry().register("garage", printer)
+        token = _previewed(_gcode(tmp_path))
+        reset = print_consent.set_consent(print_consent.PrintConsent(
+            tool="start_print", file_name="part.gcode", printer_name="garage", source=SOURCE_ELICITED,
+        ))
+        try:
+            assert server._preview_gate_error("start_print", "part.gcode", token, printer_name="garage") is None
+        finally:
+            print_consent.reset_consent(reset)
+        assert printer.frames_fetched == 0
+
+    def test_a_timed_window_needs_no_look(self, at_terminal, tmp_path):
+        """Unchanged on purpose: the look is always allow's."""
+        printer = _CameraPrinter("SERIAL-A")
+        server._get_registry().register("garage", printer)
+        consent_windows.open_window(seconds=3600, scope=("garage",))
+        assert _start(tmp_path)["success"] is True
+        assert printer.frames_fetched == 0
+
+    def test_the_screen_says_what_kiln_does_about_the_bed(self, at_terminal):
+        server._get_registry().register("garage", _CameraPrinter("SERIAL-A"))
+        server._get_registry().register("shed", _Printer("SERIAL-S"))
+        with_camera = _said(_kiln("consent", "window", "--always", "--printer", "garage", typed="garage"))
+        assert "Kiln looks at the bed through the camera before every print" in with_camera
+        without = _said(_kiln("consent", "window", "--always", "--printer", "shed", typed="shed"))
+        assert "shed has no camera Kiln can use, so Kiln can't check the bed before it prints" in without
+        assert "looks at the bed" not in without
+
+    def test_a_queued_job_is_not_sent_to_a_bed_nobody_looked_at(self, camera, tmp_path):
+        from kiln.events import EventBus
+        from kiln.queue import PrintQueue
+        from kiln.scheduler import JobScheduler
+
+        [entry] = _always_entries()
+        queue = PrintQueue(db_path=str(tmp_path / "q.db"))
+        scheduler = JobScheduler(queue, server._get_registry(), EventBus(), poll_interval=0.01)
+        record = {"source": SOURCE_ALWAYS, "door": "stage", "printer_name": "garage", "window_id": entry.id}
+        job = queue.submit("part.gcode", "garage", "test", metadata={"preview_signoff": record})
+        assert scheduler.tick()["dispatched"] == [] and camera.started == []
+        assert "seen clear through the camera" in (queue.get_job(job).error or "")
+
+    def test_at_a_terminal_the_person_is_asked_instead_of_handed_a_frame(self, camera, tmp_path, monkeypatch):
+        """``kiln print`` typed by a person: they are here, so they are
+        asked; an agent's shell gets the held start."""
+        import click
+
+        from kiln.cli.main import cli_gate
+
+        monkeypatch.setattr("kiln.cli.print_gate._audit", lambda *a, **k: None)
+        path = _gcode(tmp_path)
+        token = _previewed(path)
+        answers: list[str] = []
+        monkeypatch.setattr(click, "confirm", lambda question, **_k: answers.append(question) or True)
+        assert cli_gate("print", path, token, printer_name="garage", json_mode=True) is None
+        assert len(answers) == 1
+        # Nobody at the terminal: the refusal, and no question.
+        monkeypatch.setattr(consent_windows, "person_at_terminal", lambda: False)
+        print_consent.drop_consent()
+        with pytest.raises(SystemExit):
+            cli_gate("print", path, _previewed(path), printer_name="garage", json_mode=True)
+        assert len(answers) == 1

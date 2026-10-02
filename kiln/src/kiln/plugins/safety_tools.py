@@ -221,12 +221,38 @@ class _SafetyToolsPlugin:
             """Show current safety and auto-print settings.
 
             Displays whether auto-print is enabled for marketplace downloads
-            and AI-generated models, along with guidance on how to change them.
+            and AI-generated models, and which printers have always allow on,
+            along with guidance on how to change them.
             Call this early in a session to understand what safety protections
             are active.
             """
+            # Always allow sits beside the auto-print switches because it
+            # answers the same question -- where does a print start with
+            # nobody asked -- for one printer at a time.
+            always_on: list[str] = []
+            try:
+                from kiln import consent_windows
+
+                always_on = [
+                    consent_windows.describe_scope(w.scope) for w in consent_windows.standing_now() if w.always
+                ]
+            except Exception as exc:
+                _logger.debug("Always-allow entries not read for safety settings: %s", exc)
             return {
                 "success": True,
+                "always_allow": {
+                    "on_for": always_on,
+                    "description": (
+                        "Prints on a printer listed here start without asking the person. Each one "
+                        "is still previewed first and still passes every start check, and where the "
+                        "printer has a camera the bed is looked at first."
+                    ),
+                    "how_to_change": (
+                        "Only the person turns it on, at a terminal: "
+                        "kiln consent window --always --printer NAME. Anyone can turn it off: "
+                        "revoke_consent_window, or kiln consent revoke."
+                    ),
+                },
                 "auto_print_marketplace": {
                     "enabled": _srv._AUTO_PRINT_MARKETPLACE,
                     "env_var": "KILN_AUTO_PRINT_MARKETPLACE",

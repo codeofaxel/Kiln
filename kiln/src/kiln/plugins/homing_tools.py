@@ -356,6 +356,13 @@ def look_at_plate(
     come straight here with ``seen``.  A record days old most likely
     describes a part someone took off -- look before you ask a person.
 
+    A print held with ``ALWAYS_ALLOW_LOOK_FIRST`` carries a frame the same
+    way: always allow is on for that printer, nobody is being asked, so
+    the bed is looked at first.  Judge that frame here with ``seen`` and
+    start the print again; the picture is kept with the print's record.
+    If you cannot tell, say ``occupied`` -- the person is then the one who
+    says the bed is clear.
+
     Kiln ships no vision model and judges nothing here.  The eyes are
     yours; this tool is the camera and the pen.  Say what you actually see:
     a plate you are not sure about is ``occupied``, because the cost of a
@@ -400,7 +407,9 @@ def look_at_plate(
                 "success": True,
                 "printer_name": target_name,
                 "look": found.to_dict(),
-                "snapshot_path": plate_state.save_frame(found),
+                # Handed over, so the answer that follows (``seen``) is
+                # recorded against this picture.
+                "snapshot_path": plate_state.hand_over_frame(adapter, found),
                 "media_type": found.media_type,
                 "plate": plate_state.read(adapter).to_dict(),
                 "next": (

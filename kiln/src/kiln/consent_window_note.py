@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 RESULT_KEY = "standing_window"
 
 
-def note_for(printer_name: str | None, *, outcome_word: str = "") -> dict[str, Any] | None:
+def note_for(printer_name: str | None) -> dict[str, Any] | None:
     """The block for this result, or ``None``.
 
     Two things it can say.  A window the person asked for on this very
@@ -77,7 +77,24 @@ def note_for(printer_name: str | None, *, outcome_word: str = "") -> dict[str, A
     if window is None:
         closed = consent_windows.turned_itself_off(printer_name)
         return turned_off_block(closed) if closed is not None else None
-    return block_for_window(window, outcome=outcome_word)
+    return block_for_window(window)
+
+
+def for_outcome(block: dict[str, Any], outcome: str, printer_name: str | None) -> dict[str, Any]:
+    """An always-allow block, worded for what the call did: the line says
+    the print was started (or queued) without asking, and the block
+    carries what the bed was known to be — the look taken for this call,
+    with its picture.  Any other block, and a call that started nothing,
+    comes back as it was."""
+    if not (outcome and block.get("always") and block.get("opened")):
+        return block
+    from kiln.print_consent import unasked_look_noted
+
+    worded = {**block, "note": always_line(block["printer"], outcome)}
+    look = unasked_look_noted(printer_name)
+    if look is not None:
+        worded["bed_check"] = {**look.evidence(), "note": bed_check_line(look.evidence())}
+    return worded
 
 
 #: What the call did, for the first words of the always-allow line.
@@ -97,6 +114,31 @@ def turned_off_line(printer: str) -> str:
         f"Always allow is off for {printer}. A different printer is now set up under that name, "
         "so Kiln turned it off. Kiln will ask before each print."
     )
+
+
+def could_not_see_line(printer: str, why: str) -> str:
+    """What a person is told when always allow is on and they are asked
+    anyway, because the camera could not show the bed."""
+    reason = f" ({why})" if why else ""
+    return (
+        f"Always allow is on for {printer}, but Kiln could not see the bed through the camera{reason}, "
+        "so it is asking you this time."
+    )
+
+
+def bed_check_line(evidence: dict[str, Any] | None) -> str:
+    """One sentence on what the bed was known to be for a print nobody
+    was asked about; ``""`` when nothing is known."""
+    if not evidence:
+        return ""
+    if evidence.get("checked") and not evidence.get("frame"):
+        return "Before it started, you said the bed was clear."
+    if evidence.get("checked"):
+        who = "you" if evidence.get("judged_by") == "human" else "your assistant"
+        return f"Before it started, {who} checked the bed through the camera. The picture: {evidence.get('frame')}"
+    if evidence.get("camera") is None:
+        return "This printer has no camera Kiln can use, so the bed was not checked first."
+    return ""
 
 
 def turned_off_block(window: Any) -> dict[str, Any]:
@@ -172,6 +214,12 @@ def _outcome_of(name: str, args: dict, result: dict) -> str:
     says nothing either way — the line then claims no start."""
     if result.get("success") is not True or args.get("dry_run"):
         return ""
+    # A start result can read as accepted while the adapter itself turned
+    # the print away (its safety gate refused and the printer has not been
+    # heard from since).  "Started" is said only when the adapter said so.
+    evidence = result.get("evidence")
+    if isinstance(evidence, dict) and evidence.get("adapter_reported_success") is False:
+        return ""
     return QUEUED if name in _QUEUE_DOORS else STARTED
 
 
@@ -190,6 +238,10 @@ def _attach(inner: Any, ctx: Any, name: str | None, arguments: dict | None) -> N
             aimed = printer_name or _srv._resolve_effective_printer_name(None)
         except Exception:  # noqa: BLE001
             aimed = printer_name or "default"
+        block = note_for(aimed)
+        if block is None:
+            return
+
         from kiln.local_stage import _result_as_dict
         from kiln.mcp_compat import result_structured_content, set_result_structured_content
 
@@ -201,10 +253,9 @@ def _attach(inner: Any, ctx: Any, name: str | None, arguments: dict | None) -> N
             sc = _result_as_dict(inner) or {}
         else:
             sc = dict(sc)
-        block = note_for(aimed, outcome_word=_outcome_of(name, args, sc))
-        if block is None or not sc:
+        if not sc:
             return
-        sc[RESULT_KEY] = block
+        sc[RESULT_KEY] = for_outcome(block, _outcome_of(name, args, sc), aimed)
         set_result_structured_content(inner, sc)
     except Exception:  # noqa: BLE001 -- a note must never break a result
         logger.debug("standing window note not attached", exc_info=True)

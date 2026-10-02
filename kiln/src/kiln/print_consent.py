@@ -730,6 +730,45 @@ def take_window_outcome() -> dict[str, Any] | None:
     return outcome
 
 
+#: The look at the plate taken for the call being served, when its start
+#: rests on always allow: ``(printer, taken_at_monotonic, look)``.  One
+#: look per call -- the asker takes it, the gate and the line on the
+#: result read it -- because each look fetches a frame from the camera.
+#: Honoured only briefly, so a look can never be read by a later call.
+_unasked_look: ContextVar[tuple[str, float, Any] | None] = ContextVar(
+    "kiln_print_consent_unasked_look", default=None,
+)
+_UNASKED_LOOK_READ_WITHIN_S = 30.0
+
+
+def note_unasked_look(printer_name: str | None, look: Any) -> None:
+    """Record the look taken for this call; ``look=None`` forgets it."""
+    _unasked_look.set(None if look is None else (_norm(printer_name), time.monotonic(), look))
+
+
+def unasked_look_noted(printer_name: str | None) -> Any | None:
+    """The look noted for this call and this printer, or ``None``."""
+    noted = _unasked_look.get()
+    if noted is None or noted[0] != _norm(printer_name):
+        return None
+    if time.monotonic() - noted[1] > _UNASKED_LOOK_READ_WITHIN_S:
+        return None
+    return noted[2]
+
+
+def unasked_look(printer_name: str | None) -> Any:
+    """The look at *printer_name*'s plate for this call: the one already
+    noted, else taken now and noted."""
+    noted = unasked_look_noted(printer_name)
+    if noted is not None:
+        return noted
+    from kiln import consent_windows
+
+    look = consent_windows.look_at_bed(printer_name)
+    note_unasked_look(printer_name, look)
+    return look
+
+
 def consent_for(
     *, file_name: str, printer_name: str | None, aimed_at: str | None = None,
 ) -> PrintConsent | None:
@@ -772,6 +811,15 @@ def consent_for(
     if window is None:
         return None
     if window.always:
+        # Nobody is being asked, so the plate is looked at.  A camera that
+        # gives nothing usable cannot vouch for the plate: the standing
+        # yes is not used for this print, and the person is asked the
+        # ordinary way.  (A frame not yet judged does not withdraw the
+        # yes -- the gate holds the start until eyes have judged it.)
+        from kiln.plate_state import LOOK_BLIND
+
+        if unasked_look(aimed_at or printer_name).verdict == LOOK_BLIND:
+            return None
         # Always allow is for a machine, and ``covering`` has just matched
         # the machine this print is aimed at.  The consent is therefore
         # for the printer the call named, not for a list of names: the
@@ -913,6 +961,7 @@ def drop_consent() -> None:
     _current.set(None)
     _not_asked.set("")
     _window_outcome.set(None)
+    _unasked_look.set(None)
 
 
 def _reset_for_tests() -> None:

@@ -41,6 +41,7 @@ from typing import Any
 
 from kiln.print_consent import (
     SCOPE_FLEET,
+    SOURCE_ALWAYS,
     SOURCE_CI_BYPASS,
     SOURCE_ELICITED,
     SOURCE_PREVIEW_TOKEN,
@@ -269,6 +270,13 @@ def record_refusal(record: dict[str, Any] | None, printer_name: str | None) -> s
             "have them name a wider scope."
         )
     window_id = str(record.get("window_id") or "")
+    if not window_id and str(record.get("source") or "") == SOURCE_ALWAYS:
+        # A record that says it rested on always allow and names no entry
+        # rests on nothing that can be checked.
+        return (
+            f"not started on {printer_name}: this job says it was cleared under always allow, "
+            "and names no always-allow entry. A person can approve the print."
+        )
     if window_id:
         always = False
         try:
@@ -281,6 +289,23 @@ def record_refusal(record: dict[str, Any] | None, printer_name: str | None) -> s
             always = bool(window is not None and window.always)
         except Exception:  # noqa: BLE001 — an unreadable store is no window
             live = False
+        if live and always:
+            # Nobody is asked when a queued job is sent, so the plate is
+            # looked at here as it is at every other door: seen clear in a
+            # fresh frame, or the job does not go.  (A machine with no
+            # camera has nothing to look through; a plate on record as
+            # occupied is refused by the start itself.)
+            from kiln.consent_windows import look_at_bed
+            from kiln.plate_state import LOOK_BLIND, LOOK_NEEDED
+
+            look = look_at_bed(printer_name)
+            if look.verdict in (LOOK_NEEDED, LOOK_BLIND):
+                return (
+                    f"not started on {printer_name}: always allow starts a print only after the bed has "
+                    "been seen clear through the camera, and nobody has looked in the last few minutes"
+                    + (f" ({look.why})" if look.verdict == LOOK_BLIND and look.why else "")
+                    + ". Look at the bed (look_at_plate), then queue it again."
+                )
         if not live and always:
             return (
                 f"not started on {printer_name}: this job was queued while always allow was on, "
@@ -306,6 +331,17 @@ def grant_from_record(
     aimed at the file actually being started."""
     if not isinstance(record, dict):
         return None
+    if str(record.get("source") or "") == SOURCE_ALWAYS:
+        # A yes nobody gave in person is asked again at every re-grant,
+        # whichever door stored it (a queue, a pipeline paused and resumed
+        # later): always allow still on for this machine, and the plate
+        # seen clear.  Refused, nothing is granted, and the adapter's own
+        # backstop turns the start away.
+        refusal = record_refusal(record, printer_name)
+        if refusal:
+            logger.warning("stored always-allow clearance not re-granted: %s", refusal)
+            clear()
+            return None
     return grant(
         tool, file_name, printer_name,
         source=str(record.get("source") or SOURCE_QUEUED),

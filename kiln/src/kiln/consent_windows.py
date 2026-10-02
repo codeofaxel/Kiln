@@ -60,6 +60,16 @@ What a window is:
   itself off when a different machine appears under the name, recording
   why (:data:`REASON_MACHINE_CHANGED`), so the refusal that follows can
   say so.  Turning it off is the ordinary revoke, from anywhere.
+  Several printers can be turned on in one go, each named
+  (:func:`open_always_for_several`, the fleet tier's): one entry apiece,
+  so each stands, turns itself off and is turned off on its own.
+
+  A start under it has nobody looking at the printer, so where the
+  machine has a camera the plate is looked at first
+  (:func:`look_at_bed`): the start goes ahead only on a plate seen clear
+  in a fresh frame, waits for eyes on a frame that has not been judged,
+  and falls back to asking the person when the camera gives nothing
+  usable.  :mod:`kiln.print_consent` and the gate hold that rule.
 
 Two readers: the gate (through :func:`kiln.print_consent.consent_for`)
 when a start arrives with a preview and no other yes, and the scheduler
@@ -115,9 +125,11 @@ __all__ = [
     "is_live",
     "live_windows",
     "local_identity",
+    "look_at_bed",
     "machine_under",
     "normalize_scope",
     "open_always",
+    "open_always_for_several",
     "open_window",
     "open_window_from_dialog",
     "parse_duration",
@@ -547,6 +559,23 @@ def machine_under(printer_name: str | None) -> str:
         return ""
 
 
+def look_at_bed(printer_name: str | None) -> Any:
+    """The plate of the machine under *printer_name*, for a start nobody
+    is being asked about (:func:`kiln.plate_state.look_for_unasked_start`)
+    -- through the resolver a start uses, so it is the plate a print
+    would land on.  A name that cannot be resolved has no camera Kiln can
+    reach and nothing seen: blind.  Never raises."""
+    from kiln import plate_state
+
+    try:
+        import kiln.server as _srv
+
+        adapter = _srv._resolve_adapter(str(printer_name or "").strip())
+    except Exception:  # noqa: BLE001 -- no machine, no look
+        return plate_state.UnaskedStartLook(plate_state.LOOK_BLIND, why="Kiln could not reach this printer")
+    return plate_state.look_for_unasked_start(adapter)
+
+
 def _audit(action: str, details: dict[str, Any]) -> None:
     """The audit table every door writes to.  Bookkeeping: never raises."""
     try:
@@ -559,6 +588,50 @@ def _audit(action: str, details: dict[str, Any]) -> None:
         logger.debug("audit write failed for %s", action, exc_info=True)
 
 
+def _machine_for_always(name: str) -> str:
+    """The machine under *name*, or ``ValueError`` in the person's words
+    when Kiln cannot tell which machine that is."""
+    machine = machine_under(name)
+    if not machine:
+        raise ValueError(
+            f"Kiln cannot tell which machine {name} is (no printer by that name is set up here, "
+            "or it reports neither a serial number nor an address), so it could not notice a "
+            "different one; always allow was not turned on"
+        )
+    return machine
+
+
+def _write_always(machines: dict[str, str]) -> list[Window]:
+    """Write one always-allow entry per ``{name: machine}``, all or none.
+    The one writer; each door does its own guarding BEFORE calling this.
+    An entry already on for a machine is closed in favour of the new one,
+    so there is one per machine and it says who last turned it on."""
+    now = _now()
+    by = local_identity()
+    entries = [
+        Window(
+            id=f"w_{secrets.token_hex(6)}", set_by=by, set_at=now, until=None,
+            scope=(name,), source=SOURCE_TERMINAL, always=True, machine=machine,
+        )
+        for name, machine in machines.items()
+    ]
+    with _lock:
+        windows = _read()
+        for i, w in enumerate(windows):
+            if w.always and w.revoked_at is None and w.machine in machines.values():
+                windows[i] = _closed(w, now, REASON_REPLACED)
+        windows.extend(entries)
+        _write(windows)
+    for w in entries:
+        logger.info("always allow %s turned on by %s for %s (%s)", w.id, w.set_by, w.scope[0], w.machine)
+        _audit(
+            "always_allow_turned_on",
+            {"window_id": w.id, "printer": w.scope[0], "machine": w.machine, "by": w.set_by,
+             "at": w.set_at, "source": w.source, "together_with": len(entries) - 1},
+        )
+    return entries
+
+
 def open_always(*, printer_name: str, typed_name: str) -> Window:
     """The terminal door for always allow: a standing yes with no end, on
     the ONE printer named.
@@ -568,9 +641,7 @@ def open_always(*, printer_name: str, typed_name: str) -> Window:
     terminal (and on the hosted server), ``ValueError`` when the name
     typed is another one, when no printer is named, or when Kiln cannot
     tell which machine the name is — a permission for a machine has to be
-    able to notice a different one.  An entry already on for the same
-    machine is closed in favour of this one, so there is one per machine
-    and it says who last turned it on.
+    able to notice a different one.
     """
     _require_person()
     name = str(printer_name or "").strip()
@@ -578,32 +649,49 @@ def open_always(*, printer_name: str, typed_name: str) -> Window:
         raise ValueError("always allow is for one printer; name it")
     if _norm(typed_name) != _norm(name):
         raise ValueError(f"that is not this printer's name ({name}); always allow was not turned on")
-    machine = machine_under(name)
-    if not machine:
-        raise ValueError(
-            f"Kiln cannot tell which machine {name} is (no printer by that name is set up here, "
-            "or it reports neither a serial number nor an address), so it could not notice a "
-            "different one; always allow was not turned on"
+    [entry] = _write_always({name: _machine_for_always(name)})
+    return entry
+
+
+def open_always_for_several(*, printer_names: list[str] | tuple[str, ...], typed_count: str) -> list[Window]:
+    """The terminal door for always allow on several printers at once:
+    one entry per printer, each exactly what :func:`open_always` writes,
+    so each is for its own machine, turns itself off on its own, and is
+    turned off on its own.
+
+    The printers are named, every one; there is no "all of them".  The
+    person confirms by typing how many they named (*typed_count*), which
+    has to be that number.  Several machines at once is the tier that
+    runs several machines at once (:class:`NotTheFleetTier` below it).
+    Raises :class:`NotAPerson` off a terminal, ``ValueError`` for a count
+    that is not the number named, a name given twice, two names for one
+    machine, or any machine Kiln cannot tell apart — and then turns on
+    none of them.
+    """
+    _require_person()
+    names = [str(n or "").strip() for n in printer_names]
+    names = [n for n in names if n]
+    if len(names) < 2:
+        raise ValueError("name at least two printers, or use the one-printer form")
+    if len({_norm(n) for n in names}) != len(names):
+        raise ValueError("a printer is named twice; name each one once")
+    if not _fleet_tier_allows():
+        raise NotTheFleetTier(
+            "Always allow on several printers at once is a Business feature — running more than "
+            "one printer at once is what that tier adds. Turn it on for one printer "
+            "(--always --printer NAME), or see https://kiln3d.com/pricing."
         )
-    now = _now()
-    window = Window(
-        id=f"w_{secrets.token_hex(6)}", set_by=local_identity(), set_at=now, until=None,
-        scope=(name,), source=SOURCE_TERMINAL, always=True, machine=machine,
-    )
-    with _lock:
-        windows = _read()
-        for i, w in enumerate(windows):
-            if w.always and w.revoked_at is None and w.machine == machine:
-                windows[i] = _closed(w, now, REASON_REPLACED)
-        windows.append(window)
-        _write(windows)
-    logger.info("always allow %s turned on by %s for %s (%s)", window.id, window.set_by, name, machine)
-    _audit(
-        "always_allow_turned_on",
-        {"window_id": window.id, "printer": name, "machine": machine, "by": window.set_by,
-         "at": window.set_at, "source": window.source},
-    )
-    return window
+    if str(typed_count or "").strip() != str(len(names)):
+        raise ValueError(f"that is not the number of printers named ({len(names)}); always allow was not turned on")
+    machines = {name: _machine_for_always(name) for name in names}
+    seen: dict[str, str] = {}
+    for name, machine in machines.items():
+        if machine in seen:
+            raise ValueError(
+                f"{seen[machine]} and {name} are the same machine; name it once. Always allow was not turned on"
+            )
+        seen[machine] = name
+    return _write_always(machines)
 
 
 def open_window_from_dialog(

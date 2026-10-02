@@ -98,9 +98,12 @@ from kiln.print_consent import (
     describe_file_for_approval,
     describe_print_request,
     note_not_asked,
+    note_unasked_look,
     note_window_outcome,
     reset_consent,
     set_consent,
+    unasked_look,
+    unasked_look_noted,
     why_not_asked,
 )
 from kiln.tool_args import parse_json_array, parse_json_object
@@ -959,7 +962,9 @@ def _build_instructions() -> str:
         "always allow for one printer, at a terminal only (`kiln consent window "
         "--always --printer NAME`): prints there start without asking until it is "
         "turned off, each result says so in a line to show them as written, and when "
-        "they say \"ask me first\" you call `revoke_consent_window`. If this app cannot show the "
+        "they say \"ask me first\" you call `revoke_consent_window`. A start held with "
+        "`ALWAYS_ALLOW_LOOK_FIRST` hands you a picture of the bed: judge it with "
+        "`look_at_plate`, then start again. If this app cannot show the "
         "dialog, Kiln shows a short code in a notification on the person's screen: ask them "
         "to type it here, pass their exact words to `give_print_code`, then start again. "
         "Nothing you can call reveals the code. With no screen either, the yes comes from "
@@ -2557,6 +2562,16 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
         aimed = printer_name or _resolve_effective_printer_name(None)
     except Exception:  # noqa: BLE001
         aimed = printer_name or "default"
+    # A start that would rest on always allow has nobody looking at the
+    # printer, so the plate is looked at: once, here, off the event loop
+    # (a frame is a camera fetch).  The reading below, the gate and the
+    # line on the result all use this one look.
+    note_unasked_look(None, None)
+    with contextlib.suppress(Exception):
+        from kiln import consent_windows
+
+        if consent_windows.always_for(aimed) is not None:
+            note_unasked_look(aimed, await asyncio.to_thread(consent_windows.look_at_bed, aimed))
     try:
         standing = consent_for(file_name=file_value, printer_name=printer_name, aimed_at=aimed)
     except Exception:  # noqa: BLE001 — an unreadable store is no window
@@ -3614,6 +3629,21 @@ def _preview_gate_error(
             return _error_dict(_no_yes_message(tool_name, file_name, aimed), code="PREVIEW_NOT_CONFIRMED")
         return _error_dict(print_signoff.not_confirmed_message(tool_name), code="PREVIEW_NOT_CONFIRMED")
 
+    # LOOKED.  Always allow means nobody was asked, so where the machine
+    # has a camera the plate has to have been seen clear in a fresh frame.
+    # A frame nobody has judged yet holds the start and is handed over;
+    # asked before the token is touched, so the token is still good for
+    # the call that follows the look.
+    bed_look = None
+    if granted.source == SOURCE_ALWAYS:
+        from kiln.plate_state import LOOK_NEEDED
+
+        bed_look = unasked_look(aimed)
+        if bed_look.verdict == LOOK_NEEDED:
+            print_signoff.clear()
+            _audit(tool_name, "always_allow_look_first", details={"file": file_name, "printer": aimed, "frame": bed_look.frame})
+            return _look_first_error(tool_name, aimed, bed_look)
+
     # SAW.  The token half lives in kiln.print_signoff so every door asks
     # the same question of the same code.  We can't hash a file on the
     # printer, so the token is matched against the name it was issued for.
@@ -3684,8 +3714,29 @@ def _preview_gate_error(
         details["window_until"] = granted.expires_at
     if granted.source == SOURCE_ALWAYS:
         details["always_allow"] = _always_allow_for_audit(granted.window_id)
+        # What the plate was known to be when nobody was asked: the frame
+        # it was seen clear in and who judged it, or why it was not checked.
+        if bed_look is not None:
+            details["bed_look"] = bed_look.evidence()
     _audit(tool_name, "preview_gate_satisfied", details=details)
     return None
+
+
+def _look_first_error(tool_name: str, aimed: str, look: Any) -> dict:
+    """The refusal that hands over the plate: always allow is on, nobody
+    is being asked, and the frame has not been judged yet."""
+    return _error_dict(
+        f"{tool_name} has not started: always allow is on for {aimed}, so nobody is being asked, and "
+        "before a print starts that way the bed is looked at through the camera. Here is the bed now: "
+        f"{look.frame} (or call look_at_plate to see it). Look at the picture, then call look_at_plate "
+        'with seen="clear" if the bed is empty, or seen="occupied" if anything is on it or you cannot '
+        "tell, and start again. The picture is kept with this print's record.",
+        code="ALWAYS_ALLOW_LOOK_FIRST",
+        extra={
+            "snapshot_path": look.frame,
+            "look": {"camera": look.camera, "settle_with": "look_at_plate", "good_for_minutes": 10},
+        },
+    )
 
 
 def _always_allow_for_audit(window_id: str) -> dict[str, Any]:
@@ -3718,14 +3769,19 @@ def _always_allow_dialog_row(aimed: str) -> str | None:
 
         if consent_windows.turned_itself_off(aimed) is not None:
             return "off. A different printer is now set up under this name, so Kiln is asking again"
+        from kiln.plate_state import LOOK_BLIND
+
+        look = unasked_look_noted(aimed)
+        if look is not None and look.verdict == LOOK_BLIND:
+            return f"on, but Kiln could not see the bed through the camera ({look.why}), so it is asking you"
     return None
 
 
 def _always_allow_went_off(aimed: str) -> str:
-    """One sentence, with a trailing space, when always allow for *aimed*
-    turned itself off in the last day; ``""`` otherwise.  The refusal
-    leads with it so the person hears why prints on this printer ask
-    again."""
+    """One sentence, with a trailing space, on why a printer that had
+    always allow is asking: it turned itself off in the last day, or it
+    is on and the camera could not see the bed for this print.  ``""``
+    otherwise.  The refusal leads with it."""
     with contextlib.suppress(Exception):
         from kiln import consent_window_note, consent_windows
 
@@ -3733,7 +3789,22 @@ def _always_allow_went_off(aimed: str) -> str:
         if closed is not None:
             line = consent_window_note.turned_off_line(consent_windows.describe_scope(closed.scope))
             return f"Tell the person first: {line} "
+        blind = _always_allow_could_not_see(aimed)
+        if blind:
+            return f"Tell the person first: {blind} "
     return ""
+
+
+def _always_allow_could_not_see(aimed: str) -> str:
+    """The sentence for a print that always allow would have started, had
+    the camera shown the bed; ``""`` when that is not this call."""
+    from kiln import consent_window_note
+    from kiln.plate_state import LOOK_BLIND
+
+    look = unasked_look_noted(aimed)
+    if look is None or look.verdict != LOOK_BLIND:
+        return ""
+    return consent_window_note.could_not_see_line(aimed, look.why)
 
 
 # Slicer settings that change how the object is MADE but not what it is.
