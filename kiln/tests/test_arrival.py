@@ -294,6 +294,49 @@ class TestTheSizeCheck:
         assert "meters" in arrival.size_check(downloaded, (0.04, 0.03, 0.02))
 
 
+class TestAGltfIsReadInMetresFirst:
+    """glTF 2.0, Coordinate System and Units: "The units for all linear
+    distances are meters."  A 50 mm part saved to that rule arrives as 0.05,
+    and the general reading offered metres beside inches as equal guesses —
+    or, for a 1.2 m bench, never mentioned metres at all."""
+
+    _DOWNLOADED = Arrival(kind=DOWNLOADED, by="FakeMarket")
+
+    def test_a_part_saved_in_metres_is_read_in_metres(self):
+        check = arrival.size_check(self._DOWNLOADED, (0.05, 0.03, 0.02), arrived_as="glb")
+        assert check == (
+            "This is a glTF file, and glTF measures in metres: read that way it is 50 mm at its "
+            "largest (as millimetres, 0.05 mm). Nothing was rescaled. If it is in metres, "
+            "rescale_model(file_path, scale_factor=1000) sets it to 50 mm."
+        )
+
+    def test_a_model_bigger_than_any_printer_in_metres_says_so(self):
+        check = arrival.size_check(self._DOWNLOADED, (1.2, 0.45, 0.4), arrived_as=".glb")
+        assert check.startswith("This is a glTF file, and glTF measures in metres: read that way it is 1200 mm")
+        assert "bigger than any printer in Kiln's catalog" in check
+        assert "max_dimension_mm=" in check and "split_mesh_to_fit" in check
+        assert "centimeters" not in check and "inches" not in check
+
+    def test_a_gltf_already_in_millimetres_is_left_alone(self):
+        assert arrival.size_check(self._DOWNLOADED, (40.0, 20.0, 10.0), arrived_as="glb") == ""
+
+    def test_a_generators_glb_still_has_no_size(self):
+        unsized = Arrival(kind=GENERATED, by="Tripo3D", real_size=False)
+        check = arrival.size_check(unsized, (1.0, 0.9, 0.6), arrived_as="glb")
+        assert "Tripo3D was asked for a shape, not a size" in check
+        assert "glTF" not in check
+
+    def test_another_format_keeps_the_general_reading(self):
+        check = arrival.size_check(self._DOWNLOADED, (0.05, 0.03, 0.02), arrived_as="stl")
+        assert "glTF" not in check and "inches" in check
+
+    def test_the_file_suffix_speaks_when_no_door_says_otherwise(self, tmp_path):
+        path = _cube(tmp_path / "part.glb", 0.05)
+        arrival.record(path, self._DOWNLOADED)
+        result = arrival.announce({}, path, size=(0.05, 0.05, 0.05))
+        assert result["size_check"].startswith("This is a glTF file")
+
+
 # ---------------------------------------------------------------------------
 # The download doors open the stage
 # ---------------------------------------------------------------------------
