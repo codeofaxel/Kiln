@@ -68,7 +68,7 @@ def test_disagreement_fails_the_run_and_names_every_claim(monkeypatch, tmp_path)
         "firmware_product_name": "bambu_x1c",
     }
     assert "bambu_x1c" in check["detail"]
-    assert "config.yaml" in check["detail"]
+    assert "kiln set-model --replace" in check["detail"]
 
 
 def test_agreement_reports_the_model_and_passes(monkeypatch, tmp_path):
@@ -100,7 +100,7 @@ def test_no_model_anywhere_warns_without_failing(monkeypatch, tmp_path):
     assert check is not None
     assert check["ok"] is True
     assert check["warn"] is True
-    assert "printer_model" in check["detail"]
+    assert "kiln set-model" in check["detail"]
 
 
 def test_a_broken_adapter_never_breaks_doctor(monkeypatch, tmp_path):

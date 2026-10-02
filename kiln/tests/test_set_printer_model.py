@@ -389,6 +389,16 @@ def _acme_project(path: Path, **changes) -> str:
     })
 
 
+def _reply(out) -> dict:
+    """The tool's own dict from whatever the SDK's ``call_tool`` hands back:
+    a list of content blocks, a (blocks, dict) pair, or a result object
+    carrying the blocks."""
+    if isinstance(out, tuple):
+        out = out[0]
+    blocks = out if isinstance(out, list) else out.content
+    return json.loads(blocks[0].text)
+
+
 class TestAPrinterOutsideTheCatalogue:
     def test_its_slicer_file_sets_it_up_on_this_machine(self, config, tmp_path):
         out = set_printer_model(slicer_file=_acme_project(tmp_path / "part.3mf"), printer_name="shed", config_path=config)
@@ -502,7 +512,7 @@ class TestAPrinterOutsideTheCatalogue:
             "input_path": _plate(tmp_path / "plate.stl"), "output_dir": str(tmp_path / "out"),
             "printer_name": "shed", "slicer_path": _PRUSASLICER, "material": "PLA",
         }))
-        reply = json.loads((out[0] if isinstance(out, tuple) else out)[0].text)
+        reply = _reply(out)
         assert reply["success"] is True, reply
         assert reply["printer_id"] == ACME and reply["nozzle"]["diameter_mm"] == 0.4
 
@@ -677,8 +687,7 @@ class TestEveryDoor:
         out = asyncio.run(server.mcp.call_tool(
             "set_printer_model", {"slicer_file": _prusa_project(tmp_path / "part.3mf"), "printer_name": "shed"},
         ))
-        content = out[0] if isinstance(out, tuple) else out
-        reply = json.loads(content[0].text)
+        reply = _reply(out)
         assert reply["applied"] is True and reply["printer_model"] == "prusa_mk4"
         assert _saved(config)["shed"]["printer_model"] == "prusa_mk4"
 
@@ -688,8 +697,7 @@ class TestEveryDoor:
         from kiln import server
 
         out = asyncio.run(server.mcp.call_tool("set_printer_model", {"printer_model": "Acme Printomatic 9"}))
-        content = out[0] if isinstance(out, tuple) else out
-        reply = json.loads(content[0].text)
+        reply = _reply(out)
         assert reply["success"] is False and reply["code"] == "UNKNOWN_MODEL"
 
     def test_the_command_line(self, config, tmp_path):
