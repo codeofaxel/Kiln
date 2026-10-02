@@ -1012,7 +1012,7 @@ class _GenerationAIToolsPlugin:
                     if upload_path.lower().endswith(".3mf") and os.path.isfile(upload_path):
                         start_kwargs["local_file_path"] = upload_path
                     print_result = adapter.start_print(file_name, **start_kwargs)
-                    _srv._note_print_started(adapter)
+                    _srv._note_print_started(adapter, print_result)
                     print_verdict = resolve_print_start(
                         adapter, print_result, sent_at=sent_at,
                         file_name=file_name, vendor_start_block=quiet_plan is None,

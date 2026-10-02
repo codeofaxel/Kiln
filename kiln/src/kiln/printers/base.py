@@ -1824,10 +1824,23 @@ class PrintResult:
     success: bool
     message: str
     job_id: str | None = None
+    #: True when Kiln turned the operation away itself and sent the printer
+    #: nothing: the start template's safety gate or its sign-off backstop
+    #: refused.  Distinct from a command that WAS sent and then judged to
+    #: have failed, because the two need opposite handling downstream: a
+    #: sent command's failure is doubted until the printer confirms it (the
+    #: printer may be running the job), while a refusal before sending is
+    #: certain -- there is no job, on any reading of the printer.
+    refused_before_send: bool = False
 
     def to_dict(self) -> dict[str, Any]:
-        """Return a JSON-serialisable dictionary."""
-        return asdict(self)
+        """Return a JSON-serialisable dictionary.  ``refused_before_send``
+        is present only when it is true, so every other result keeps the
+        three keys it has always had."""
+        out = asdict(self)
+        if not self.refused_before_send:
+            out.pop("refused_before_send", None)
+        return out
 
 
 # ---------------------------------------------------------------------------
@@ -3167,6 +3180,7 @@ class PrinterAdapter(ABC):
             return PrintResult(
                 success=False,
                 message=reason + (" " + hint if hint else ""),
+                refused_before_send=True,
             )
         # The consent backstop.  An adapter a door handed out (a printer
         # registry, the CLI) starts nothing no clearance covers: the gate
@@ -3184,7 +3198,7 @@ class PrinterAdapter(ABC):
             )
             unsigned = None
         if unsigned is not None:
-            return PrintResult(success=False, message=unsigned["reason"])
+            return PrintResult(success=False, message=unsigned["reason"], refused_before_send=True)
         result = self._start_print_impl(file_name, **kwargs)
         if getattr(result, "success", False) and not is_resume_mode_3mf(file_name):
             # A resume 3MF continues the print that's already running (a
