@@ -550,6 +550,8 @@ class _SafetyToolsPlugin:
             also keeps printing on that printer without asking for a while. Then
             call the start tool again. Nothing you can call reveals the code; a
             wrong guess counts, and three wrong guesses void every code for a minute.
+            When the reply carries ``phone_next_time``, pass that one line on once
+            the print has started.
 
             Args:
                 words: Exactly what the person typed, e.g. ``4821`` or ``4821 2h``.
@@ -584,6 +586,11 @@ class _SafetyToolsPlugin:
                         "opens": "when the print is started",
                         "for": rec.answer.describe_window_ask(),
                     }
+                # Someone who typed a code is someone the phone would help:
+                # one line for after the print starts, once.
+                offer = _srv._phone_offer()
+                if offer:
+                    reply["phone_next_time"] = offer
                 _srv._audit(
                     "give_print_code", "consent_code_answered",
                     details={

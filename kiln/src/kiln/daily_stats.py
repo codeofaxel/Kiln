@@ -572,6 +572,27 @@ def record_agent_host(label: str, facts: list[str]) -> None:
         _logger.debug("record_agent_host failed: %s", exc)
 
 
+def record_agent_host_fact(fact: str) -> None:
+    """Count one more fact beside a host already counted today — a
+    ``"<label> <fact>"`` key learned after the handshake (the chat app an
+    agent reported).  The host's own count is not touched.  Once-per-process
+    is the caller's rule (``kiln.agent_host.note_chat_app``).  Never raises.
+    """
+    if not isinstance(fact, str) or not fact:
+        return
+    try:
+        with _lock:
+            data = _read()
+            host_facts = data.get("agent_host_facts")
+            if not isinstance(host_facts, dict):
+                host_facts = {}
+            host_facts[fact] = int(host_facts.get(fact, 0)) + 1
+            data["agent_host_facts"] = host_facts
+            _write(data)
+    except Exception as exc:
+        _logger.debug("record_agent_host_fact failed: %s", exc)
+
+
 def record_event(event_type: str, *, detail: str | None = None) -> None:
     """Increment a daily counter.  Thread-safe, never raises.
 
