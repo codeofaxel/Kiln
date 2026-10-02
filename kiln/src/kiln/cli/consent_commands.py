@@ -161,14 +161,10 @@ def always_allow_screen(cameras: dict[str, bool]) -> str:
 
 
 def _has_camera(name: str) -> bool:
-    """Whether Kiln can look at this printer's bed.  Never raises."""
-    try:
-        import kiln.server as _srv
-        from kiln.plate_state import camera_of
-
-        return camera_of(_srv._resolve_adapter(name)) is not None
-    except Exception:  # noqa: BLE001 — a printer that cannot be reached has no camera to promise
-        return False
+    """Whether Kiln can look at this printer's bed -- found out by taking
+    a picture now, because printer software that can serve a camera says
+    so whether or not one is plugged in.  Never raises."""
+    return consent_windows.bed_can_be_seen(name)
 
 
 def _turn_on_always(
@@ -192,17 +188,25 @@ def _turn_on_always(
             "nothing else can turn it on"
         ), json_mode)
         return
-    click.echo(always_allow_screen({name: _has_camera(name) for name in names}))
+    cameras = {name: _has_camera(name) for name in names}
+    # What the screen said, handed to the engine with the names: an entry
+    # records "no camera" only for a printer the person read that about.
+    blind = [name for name in names if not cameras[name]]
+    click.echo(always_allow_screen(cameras))
     try:
         if len(names) == 1:
             typed = click.prompt("Type the printer's name to turn it on", default="", show_default=False)
-            opened = [consent_windows.open_always(printer_name=names[0], typed_name=typed)]
+            opened = [consent_windows.open_always(
+                printer_name=names[0], typed_name=typed, told_no_camera=bool(blind),
+            )]
         else:
             typed = click.prompt(
                 f"Are you sure? Type the number of printers listed ({len(names)}) to turn it on for all of them",
                 default="", show_default=False,
             )
-            opened = consent_windows.open_always_for_several(printer_names=names, typed_count=typed)
+            opened = consent_windows.open_always_for_several(
+                printer_names=names, typed_count=typed, told_no_camera=blind,
+            )
     except (consent_windows.NotAPerson, consent_windows.NotTheFleetTier, ValueError) as exc:
         _refused(exc, json_mode)
         return
@@ -298,8 +302,9 @@ def status(json_mode: bool) -> None:
         row = _row(w)
         if row["always"]:
             click.echo(
-                f"{w.id}  Always allow is on for {row['scope']}: prints start without asking.  "
-                f"Turned on {row['set_at']} by {w.set_by} via {row['opened_via']}"
+                f"{w.id}  Always allow is on for {row['scope']}: prints start without asking"
+                + (", and the bed is not checked first (no camera)" if w.bed_check == consent_windows.BED_NO_CAMERA else "")
+                + f".  Turned on {row['set_at']} by {w.set_by} via {row['opened_via']}"
             )
             continue
         click.echo(

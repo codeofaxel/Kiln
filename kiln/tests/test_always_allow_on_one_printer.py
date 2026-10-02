@@ -890,6 +890,29 @@ class TestADifferentMachine:
         assert scheduler.tick()["dispatched"] == [] and garage.started == []
         assert "always allow" in (queue.get_job(job).error or "")
 
+    def test_closing_it_never_hides_the_hosted_servers_refusal(self, garage, at_terminal, monkeypatch):
+        """Turning itself off writes the store.  A disk fault there is
+        logged and tried again at the next read; the hosted server's
+        refusal is not a fault and is never caught as one.  A/B: with the
+        handler catching every exception this fails — the refusal is
+        swallowed."""
+        from kiln.errors import HostedUnavailableError
+
+        entry = _turn_on()
+
+        def refuses(*_a, **_k):
+            raise HostedUnavailableError("this store is not served here")
+
+        monkeypatch.setattr(consent_windows, "revoke_window", refuses)
+        with pytest.raises(HostedUnavailableError):
+            consent_windows._turn_off(entry, "SERIAL-B")
+
+        def unwritable(*_a, **_k):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(consent_windows, "revoke_window", unwritable)
+        consent_windows._turn_off(entry, "SERIAL-B")
+
 
 # ---------------------------------------------------------------------------
 # Seeing that it is on
@@ -1212,6 +1235,7 @@ class TestTheBedIsLookedAt:
     def test_one_frame_is_fetched_per_start(self, camera, tmp_path, no_rate_limit):
         """The asker, the gate and the result line share one look."""
         token = _previewed(_gcode(tmp_path))
+        camera.frames_fetched = 0  # turning it on took a picture of its own, to see whether one can be had
         _call("start_print", file_name="part.gcode", printer_name="garage", preview_token=token)
         assert camera.frames_fetched == 1
         _call("look_at_plate", printer_name="garage", seen="clear")
@@ -1285,9 +1309,10 @@ class TestTheBedIsLookedAt:
         this print, and the refusal says why.  A/B: with the blind
         fallback removed from ``consent_for`` this fails — the print
         starts with the bed unseen."""
-        printer = _CameraPrinter("SERIAL-A", frame=frame)
+        printer = _CameraPrinter("SERIAL-A")
         server._get_registry().register("garage", printer)
         entry = _turn_on()
+        printer.frame = frame  # it showed the bed when always allow was turned on; now it cannot
         out = _start(tmp_path)
         assert out["error"]["code"] == "PREVIEW_NOT_CONFIRMED", out
         assert printer.started == []
@@ -1298,9 +1323,10 @@ class TestTheBedIsLookedAt:
         assert [w.id for w in _always_entries()] == [entry.id]
 
     def test_the_dialog_says_why_it_is_asking(self, at_terminal, monkeypatch):
-        printer = _CameraPrinter("SERIAL-A", frame=b"")
+        printer = _CameraPrinter("SERIAL-A")
         server._get_registry().register("garage", printer)
         _turn_on()
+        printer.frame = b""
         monkeypatch.setattr(server, "host_can_ask_the_user", lambda mcp, ctx: True)
         asked: list[str] = []
 
@@ -1330,6 +1356,57 @@ class TestTheBedIsLookedAt:
         [details] = [d for _, action, d in audits if action == "preview_gate_satisfied"]
         assert details["bed_look"]["checked"] is False
 
+    def test_a_printer_whose_camera_never_answers_is_one_with_no_camera(self, at_terminal, tmp_path, audits):
+        """Some printer software can serve a camera and has none plugged in:
+        it says it can take a picture and never gives one.  Turned on in
+        that state, the person is told Kiln cannot check the bed, the entry
+        records it, and prints start with that said -- instead of always
+        allow asking on every print for a camera that is not there.  A/B:
+        with the camera judged by what the printer says it can do, this
+        fails — the screen promises a look and every start asks."""
+        printer = _CameraPrinter("SERIAL-A", frame=RuntimeError("Webcam snapshot failed (HTTP 404)"))
+        server._get_registry().register("garage", printer)
+        turned_on = _kiln("consent", "window", "--always", "--printer", "garage", typed="garage")
+        assert turned_on.exit_code == 0, turned_on.output
+        assert "garage has no camera Kiln can use, so Kiln can't check the bed before it prints." in _said(turned_on)
+        assert "Kiln looks at the bed" not in _said(turned_on)
+        [entry] = _always_entries()
+        assert entry.bed_check == "none"
+        assert "the bed is not checked first (no camera)" in _said(_kiln("consent", "status"))
+        out = _start(tmp_path)
+        assert out.get("success") is True and printer.started == ["part.gcode"], out
+        check = out[consent_window_note.RESULT_KEY]["bed_check"]
+        assert check["checked"] is False
+        assert check["note"] == "This printer has no camera Kiln can use, so the bed was not checked first."
+        [details] = [d for _, action, d in audits if action == "preview_gate_satisfied"]
+        assert details["bed_look"]["checked"] is False
+
+    def test_a_camera_that_appears_later_is_used(self, at_terminal, tmp_path, no_rate_limit):
+        """Turned on with no picture to be had, then a camera is plugged in:
+        the bed is looked at from then on."""
+        printer = _CameraPrinter("SERIAL-A", frame=b"")
+        server._get_registry().register("garage", printer)
+        _turn_on()
+        printer.frame = _FRAME
+        out = _start(tmp_path)
+        assert out["error"]["code"] == "ALWAYS_ALLOW_LOOK_FIRST", out
+        assert printer.started == []
+
+    def test_the_record_says_no_camera_only_when_the_person_was_told(self, at_terminal):
+        """The engine holds the rule itself: an entry is marked as having
+        no camera only when the door says the person read that, and a
+        picture really cannot be had.  A caller that did not say so gets an
+        entry that asks when the camera shows nothing."""
+        blind = _CameraPrinter("SERIAL-A", frame=b"")
+        server._get_registry().register("garage", blind)
+        assert consent_windows.open_always(printer_name="garage", typed_name="garage").bed_check == "camera"
+        told = consent_windows.open_always(printer_name="garage", typed_name="garage", told_no_camera=True)
+        assert told.bed_check == "none"
+        seeing = _CameraPrinter("SERIAL-B")
+        server._get_registry().register("workshop", seeing)
+        claimed = consent_windows.open_always(printer_name="workshop", typed_name="workshop", told_no_camera=True)
+        assert claimed.bed_check == "camera"
+
     def test_a_persons_own_yes_needs_no_look(self, tmp_path, monkeypatch):
         """The rule is for a start nobody was asked about.  A person who
         said yes to this print is not held for a frame."""
@@ -1352,6 +1429,39 @@ class TestTheBedIsLookedAt:
         consent_windows.open_window(seconds=3600, scope=("garage",))
         assert _start(tmp_path)["success"] is True
         assert printer.frames_fetched == 0
+
+    def test_a_look_that_goes_blind_before_the_gate_holds_the_start(self, camera, tmp_path, monkeypatch, no_rate_limit):
+        """The yes rests on the look taken when the call arrives; the gate
+        takes its own once that one is no longer fresh (a door that slices
+        first).  If the gate's look shows nothing, the print does not start
+        with the bed unseen.  A/B: with only an unjudged frame held at the
+        gate this fails — the print starts."""
+        from kiln import plate_state
+
+        blind = plate_state.UnaskedStartLook(plate_state.LOOK_BLIND, "printer", why="it gave no picture")
+        monkeypatch.setattr(server, "unasked_look", lambda _name: blind)
+        out = _start(tmp_path)
+        assert camera.started == []
+        assert out["error"]["code"] == "PREVIEW_NOT_CONFIRMED", out
+        assert "could not see the bed through the camera (it gave no picture)" in out["error"]["message"]
+        # One blind look turns nothing off.
+        assert len(_always_entries()) == 1
+
+    def test_a_timed_window_still_covers_when_the_camera_cannot_see(self, at_terminal, tmp_path):
+        """The look is always allow's.  A person who also opened a window
+        with an end said yes for that while, camera or no camera, exactly as
+        they would have with always allow off.  A/B: without the fall to
+        the timed window in ``consent_for`` this fails — the person is
+        asked."""
+        printer = _CameraPrinter("SERIAL-A")
+        server._get_registry().register("garage", printer)
+        _turn_on()
+        printer.frame = RuntimeError("camera timed out")
+        timed = consent_windows.open_window(seconds=3600, scope=("garage",))
+        out = _start(tmp_path)
+        assert out.get("success") is True, out
+        assert printer.started == ["part.gcode"]
+        assert out[consent_window_note.RESULT_KEY]["id"] in {timed.id, _always_entries()[0].id}
 
     def test_the_screen_says_what_kiln_does_about_the_bed(self, at_terminal):
         server._get_registry().register("garage", _CameraPrinter("SERIAL-A"))
@@ -1477,7 +1587,11 @@ class TestThePersonSaysTheBedIsClear:
     @pytest.mark.parametrize(
         "words",
         ["should be clear", "is it clear?", "not clear", "it isn't empty", "yes", "", "I think it's empty",
-         "clear, maybe", "go ahead", "probably clear", "clear if you move the purge line"],
+         "clear, maybe", "go ahead", "probably clear", "clear if you move the purge line",
+         # Something they will do, or are asking for, is not something that is so.
+         "I'll clear the bed later", "clear the bed for me", "it will be clear soon", "going to clear it",
+         "I need to clear the bed", "please clear the plate", "once it's clear", "can you clear it",
+         "clear it when the print is done", "let me clear it first", "empty it tomorrow"],
     )
     def test_words_that_do_not_say_it_record_nothing_and_ask_nobody(self, held, words):
         from kiln import plate_state

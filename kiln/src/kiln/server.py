@@ -3768,12 +3768,20 @@ def _preview_gate_error(
     # has a camera the plate has to have been seen clear in a fresh frame.
     # A frame nobody has judged yet holds the start and is handed over;
     # asked before the token is touched, so the token is still good for
-    # the call that follows the look.
+    # the call that follows the look.  The yes was read on the look taken
+    # when the call arrived; a door that works for a while first (slicing)
+    # gets a fresh one here, and if that one shows nothing the print does
+    # not start on a bed nobody could see: the person is asked instead.
     bed_look = None
     if granted.source == SOURCE_ALWAYS:
-        from kiln.plate_state import LOOK_NEEDED
+        from kiln.plate_state import LOOK_BLIND, LOOK_NEEDED
 
         bed_look = unasked_look(aimed)
+        if bed_look.verdict == LOOK_BLIND:
+            print_signoff.clear()
+            note_unasked_look(aimed, bed_look)
+            _audit(tool_name, "always_allow_could_not_see", details={"file": file_name, "printer": aimed, "why": bed_look.why})
+            return _error_dict(_no_yes_message(tool_name, file_name, aimed), code="PREVIEW_NOT_CONFIRMED")
         if bed_look.verdict == LOOK_NEEDED:
             print_signoff.clear()
             _audit(tool_name, "always_allow_look_first", details={"file": file_name, "printer": aimed, "frame": bed_look.frame})

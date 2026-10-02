@@ -820,10 +820,16 @@ def plate_word_answer() -> str:
 
 
 #: Words that turn "clear" into something else.  A person who is not sure
-#: has not said the plate is empty.
+#: has not said the plate is empty -- and neither has one who says they
+#: WILL empty it ("I'll clear it later", "once it's clear") or asks for it
+#: to be emptied ("clear the bed for me"): "clear" and "empty" are verbs
+#: too, and only the statement that it IS so counts.
 _NOT_A_CLEAR = re.compile(
     r"\?|\b(not|isn'?t|ain'?t|wasn'?t|never|unsure|maybe|probably|think|guess|should|might|almost|"
-    r"don'?t|doesn'?t|can'?t|cannot|if)\b"
+    r"don'?t|doesn'?t|can'?t|cannot|if|"
+    r"will|won'?t|(i|we|it|that|you)'?ll|gonna|later|tomorrow|soon|once|when|until|unless|before|after|"
+    r"need|needs|must|please|let|wait|(can|could|would) (you|u|we|i)|"
+    r"(to|and|then) (clear|empty)|(clear|empty) (the|my|it|off|out|this|that))\b"
 )
 _A_CLEAR = re.compile(r"\b(clear|cleared|empty|emptied|nothing on)\b")
 
