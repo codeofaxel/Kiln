@@ -3,7 +3,7 @@
 # newer interpreter can silently resolve packages that drop 3.10/3.11
 # support, as happened with numpy 2.5.1 on 2026-07-12):
 # python3.10 -m venv /tmp/kiln-lock && /tmp/kiln-lock/bin/python -m pip install -e ".[dev,bambu]" && /tmp/kiln-lock/bin/python -m pip freeze | grep -v "^-e" | sort > requirements-lock.txt
-PyJWT==2.14.0
+PyJWT==2.15.0
 PyYAML==6.0.3
 Pygments==2.21.0
 annotated-types==0.8.0
