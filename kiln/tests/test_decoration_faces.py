@@ -783,5 +783,6 @@ class TestPaintSaysWhetherTheColourIsLoaded:
             output_path=str(tmp_path / "painted.3mf"),
         )
         assert result["success"] is True, result.get("error")
-        assert result["ams_advisory"]["verdict"] == "mismatch"
+        assert [c["colour"] for c in result["colour_availability"]["colours"]] == ["#F72323", "#FFFFFF"]
+        assert "ams_advisory" not in result
         assert seen["colours"] == ["#F72323", "#FFFFFF"]

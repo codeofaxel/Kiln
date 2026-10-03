@@ -117,8 +117,9 @@ _STATE_MAP: dict[str, PrinterStatus] = {
 # "STOPPED" is Prusa Link's word for a print the user ended early; the
 # firmware has no separate cancelled state.  "ERROR" and "ATTENTION" are
 # deliberately absent: those describe a condition the PRINTER is in
-# (a thermal fault, a filament-change prompt), not a verdict on a job,
-# and they already map to an ERROR status that says so.
+# (a thermal fault, a filament-change prompt), not a verdict on a job.
+# ERROR maps to an ERROR status; ATTENTION does too unless a job is on
+# the printer, where get_state reads it as PAUSED -- waiting for a person.
 _JOB_RESULT_MAP: dict[str, JobResult] = {
     "FINISHED": JobResult.COMPLETED,
     "STOPPED": JobResult.CANCELLED,
@@ -683,6 +684,11 @@ class PrusaLinkAdapter(PrinterAdapter):
         state_str = printer.get("state", "IDLE") if isinstance(printer, dict) else "IDLE"
         mapped_status = _STATE_MAP.get(state_str, PrinterStatus.UNKNOWN)
         job_result = _JOB_RESULT_MAP.get(state_str)
+        # ATTENTION during a job is a print stopped and waiting for a person
+        # (a filament-change prompt, a feed problem), not a failed one.
+        job = _safe_get(data, "job", default={})
+        if state_str == "ATTENTION" and isinstance(job, dict) and job.get("id") is not None:
+            mapped_status = PrinterStatus.PAUSED
 
         tool_actual = printer.get("temp_nozzle") if isinstance(printer, dict) else None
         tool_target = printer.get("target_nozzle") if isinstance(printer, dict) else None

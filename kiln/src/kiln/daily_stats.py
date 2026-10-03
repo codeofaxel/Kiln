@@ -357,8 +357,10 @@ def _empty_day() -> dict[str, Any]:
         "template_uses": {},       # {"shelf_bracket": 3, "stackable_bin": 1}
         # Whether live video from a printer's camera worked, as classes:
         # {"<model>|<channel>|<source>|<event>": count}.  Written by the
-        # relay (kiln.streaming) and the camera check (kiln.camera_check),
-        # the only two places that know; see record_video_outcome.
+        # relay (kiln.streaming), the camera check (kiln.camera_check), and
+        # -- for a still picture of the bed, or an owner saying their
+        # printer has a camera -- kiln.streaming.note_still /
+        # note_owner_said_camera; see record_video_outcome.
         "video_outcomes": {},
         "motion_refusals": {},
         # What a served motion plan did on a real machine, as classes:
@@ -1190,9 +1192,11 @@ def record_video_outcome(model: object, channel: str, source: str, event: str) -
 
     ``channel``, ``source`` and ``event`` come from the closed vocabularies
     in :mod:`kiln.streaming`; the relay and the planning helper every door
-    calls are the only writers, once per session (see
-    ``kiln.streaming.MJPEGProxy``).  A key that is not four well-formed
-    tokens is dropped.  Silent by contract.
+    calls write once per session (see ``kiln.streaming.MJPEGProxy``), and
+    the two camera facts that are not live video -- a still picture came
+    back, an owner said the printer has a camera -- once a day
+    (``kiln.streaming.note_still`` / ``note_owner_said_camera``).  A key
+    that is not four well-formed tokens is dropped.  Silent by contract.
     """
     key = f"{video_model_token(model)}|{channel}|{source}|{event}"
     _record_name_count(

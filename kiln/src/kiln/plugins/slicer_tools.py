@@ -3149,7 +3149,7 @@ class _SlicerToolsPlugin:
                     return block
                 sent_at = time.monotonic()
                 print_result = adapter.start_print(file_name, **print_kwargs)
-                _srv._note_print_started(adapter)
+                _srv._note_print_started(adapter, print_result)
 
                 base_name = os.path.basename(input_path)
                 verdict = resolve_print_start(

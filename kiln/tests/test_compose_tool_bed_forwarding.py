@@ -325,11 +325,12 @@ class TestComposeSaysWhetherColoursAreLoaded:
     def test_part_colours_are_checked(self, monkeypatch):
         result, seen = self._compose(monkeypatch, {"verdict": "mismatch", "message": "No red loaded."})
         assert result["success"] is True, result.get("error")
-        assert result["ams_advisory"]["verdict"] == "mismatch"
+        assert [c["state"] for c in result["colour_availability"]["colours"]] == ["missing", "missing"]
+        assert "ams_advisory" not in result
         assert seen["colours"] == ["#FFFFFF", "#F72323"]
         assert seen["printer_name"] == "bambu_a1"
 
     def test_silence_when_there_is_nothing_to_say(self, monkeypatch):
         result, _ = self._compose(monkeypatch, None)
         assert result["success"] is True
-        assert "ams_advisory" not in result
+        assert "colour_availability" not in result

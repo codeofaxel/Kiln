@@ -167,7 +167,7 @@ class TestGetState:
 
         assert state.state == PrinterStatus.ERROR
 
-    def test_attention_maps_to_error(self):
+    def test_attention_without_a_job_maps_to_error(self):
         a = _adapter()
         resp = _mock_response(json_data={
             "printer": {"state": "ATTENTION"},
@@ -177,6 +177,20 @@ class TestGetState:
             state = a.get_state()
 
         assert state.state == PrinterStatus.ERROR
+
+    def test_attention_during_a_job_is_paused_not_failed(self):
+        """A Prusa showing a prompt mid-print (a filament change, a feed
+        problem) is waiting for a person.  Reading it as ERROR made the
+        watchers report a healthy print as failed."""
+        a = _adapter()
+        resp = _mock_response(json_data={
+            "printer": {"state": "ATTENTION"},
+            "job": {"id": 7, "progress": 42.0},
+        })
+        with patch.object(a._session, "request", return_value=resp):
+            state = a.get_state()
+
+        assert state.state == PrinterStatus.PAUSED
 
     def test_unknown_state(self):
         a = _adapter()

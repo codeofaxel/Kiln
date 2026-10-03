@@ -49,8 +49,10 @@ What a window is:
   (:func:`kiln.print_consent.check_window_length`); a person who wants
   longer opens another when it runs out — or turns on always allow.
 * **Always allow.**  The same record with no end, for ONE printer
-  (:func:`open_always`).  Three things keep it from being the cap with a
-  hole in it.  Only a person's own door opens one — a terminal, where
+  (:func:`open_always`), and part of Kiln Pro: it lets prints start with
+  nobody asked, from wherever the person is, which is what Pro sells
+  (:func:`always_allow_is_yours`, asked at the door and at every start).
+  Three things keep it from being the cap with a hole in it.  Only a person's own door opens one — a terminal, where
   they type the printer's name, or their signed-in account's page, whose
   record this computer keeps a copy of (:func:`mirror_account_always`)
   and confirms with the account at every start.  The dialog and the
@@ -73,6 +75,20 @@ What a window is:
   and falls back to asking the person when the camera gives nothing
   usable.  :mod:`kiln.print_consent` and the gate hold that rule.
 
+  Whether a machine HAS a camera is something Kiln knows, not something
+  it guesses from one picture.  It knows from the backend (one whose
+  every machine ships with a camera says so), from having had a picture
+  through the printer's own connection before, from a camera the person
+  registered beside the printer, and -- only when none of those says, and
+  no picture can be had -- from asking the person, once, at the terminal
+  (:func:`bed_camera`, :func:`kiln.plate_state.knows_a_camera`).  The
+  entry records what the person was told (``bed_check``).  A start goes
+  ahead unlooked only under an entry turned on for a printer with no
+  camera, and only while Kiln still knows of none; under every other
+  entry, nothing seen means the person is asked -- a camera that is not
+  answering, or has been taken away, never turns "Kiln looks first" into
+  "Kiln does not look".
+
 Two readers: the gate (through :func:`kiln.print_consent.consent_for`)
 when a start arrives with a preview and no other yes, and the scheduler
 when it dispatches a job that was queued under a window — a window that
@@ -83,6 +99,7 @@ start that rests on a window is audited with the window's id.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import getpass
 import json
 import logging
@@ -95,6 +112,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln import camera_words
 from kiln.print_consent import (
     SOURCE_CODE,
     SOURCE_ELICITED,
@@ -109,18 +127,29 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "ALWAYS_DOORS",
+    "BED_CAMERA",
+    "BED_NO_CAMERA",
+    "CAMERA_NO",
+    "CAMERA_UNSURE",
+    "CAMERA_YES",
     "REASON_MACHINE_CHANGED",
     "REASON_OFF_ON_ACCOUNT",
     "SCOPE_FLEET",
     "SOURCE_DOORS",
     "SOURCE_WEB",
+    "ALWAYS_ALLOW_NEEDS_PRO",
     "NotAPerson",
     "NotTheFleetTier",
+    "NotTheProTier",
     "Window",
     "WindowStore",
     "account_confirms",
     "all_windows",
+    "always_allow_is_yours",
     "always_for",
+    "always_waiting_on_pro",
+    "bed_camera",
+    "bed_goes_unchecked",
     "covering",
     "describe",
     "describe_scope",
@@ -137,6 +166,8 @@ __all__ = [
     "open_always_for_several",
     "open_window",
     "open_window_from_dialog",
+    "person_says_camera",
+    "signing_in_would_tell",
     "parse_duration",
     "person_at_terminal",
     "register_window_store",
@@ -144,6 +175,7 @@ __all__ = [
     "revoke_covering",
     "revoke_window",
     "scope_covers",
+    "settle_copy_bed_check",
     "standing_now",
     "summary_line",
     "sync_account_always",
@@ -188,6 +220,10 @@ REASON_REPLACED = "replaced"
 #: A copy of the account's always allow closed because the account no
 #: longer holds it: the person turned it off on their account page.
 REASON_OFF_ON_ACCOUNT = "turned_off_on_account"
+#: What an always-allow entry records about the bed (``Window.bed_check``).
+BED_CAMERA = "camera"
+BED_NO_CAMERA = "none"
+
 #: What the account is told when always allow is turned off on this
 #: computer (its own word for it).
 _TOLD_TURNED_OFF_HERE = "turned_off_at_home"
@@ -220,6 +256,54 @@ def _fleet_tier_allows() -> bool:
 
         return int(max_printers_for_tier(get_tier()) or 1) > 1
     except Exception:  # noqa: BLE001 — no licence module, no fleet
+        return False
+
+
+class NotTheProTier(RuntimeError):
+    """Always allow below Kiln Pro."""
+
+
+#: What a person below Pro is told when they try to turn always allow on:
+#: what it does, the tier once, and what Free does instead.
+ALWAYS_ALLOW_NEEDS_PRO = (
+    "Always allow lets your assistant start prints on a printer without asking you first, "
+    "wherever you are. It is part of Kiln Pro (https://kiln3d.com/pricing). On Free, Kiln asks "
+    "before each print, or you can allow prints for a while, up to a day: "
+    "kiln consent window --for 2h --printer NAME"
+)
+
+#: The plans a signed-in account holds that include always allow.
+_PRO_PLANS = frozenset({"pro", "business", "enterprise"})
+
+
+def always_allow_is_yours() -> bool:
+    """Whether the person on this install is on Kiln Pro or above -- what
+    always allow needs.  Asked at the door and again at every start, so an
+    entry stops starting prints unasked once the account leaves Pro, and
+    starts again if it comes back.
+
+    The licence first, the same read the fleet door makes; else the plan
+    the account signed in on this machine holds (``kiln signin``), while
+    that sign-in stands: one the server refused grants nothing.  Never
+    raises."""
+    try:
+        from kiln.licensing import LicenseTier, get_tier
+
+        licensed = get_tier() >= LicenseTier.PRO
+    except Exception:  # noqa: BLE001 — no licence module: the sign-in decides
+        licensed = False
+    if licensed:
+        return True
+    try:
+        from kiln.auth_session import _read_tokens, session_rejected
+
+        stored = _read_tokens()
+        return (
+            bool(str(stored.get("access_token") or "").strip())
+            and not session_rejected(stored)
+            and str(stored.get("tier") or "").strip().lower() in _PRO_PLANS
+        )
+    except Exception:  # noqa: BLE001 — an unreadable sign-in grants no plan
         return False
 
 
@@ -323,6 +407,13 @@ class Window:
     account_grant: str = ""
     #: A copy closed here whose closing the account has not been told yet.
     account_owed: bool = False
+    #: What the person was told about the bed when always allow was turned
+    #: on: :data:`BED_CAMERA` (Kiln looks before each print, and asks when
+    #: it cannot see) or :data:`BED_NO_CAMERA` (no picture could be had, the
+    #: screen said Kiln cannot check the bed, and they turned it on knowing
+    #: that).  Empty on a record that says neither, which reads as the
+    #: first: a look that shows nothing means the person is asked.
+    bed_check: str = ""
 
     def live(self, now: float | None = None) -> bool:
         if self.revoked_at is not None:
@@ -349,6 +440,8 @@ class Window:
         if self.always:
             row["always"] = True
             row["machine"] = self.machine
+            if self.bed_check:
+                row["bed_check"] = self.bed_check
         if self.revoked_reason:
             row["revoked_reason"] = self.revoked_reason
         if self.account_grant:
@@ -372,6 +465,7 @@ class Window:
             # short of that is an ordinary record whose ``until`` is
             # missing, which has run out.
             account_grant = str(raw.get("account_grant") or "").strip()
+            bed_check = str(raw.get("bed_check") or "")
             always = (
                 raw.get("always") is True
                 and raw.get("until") is None
@@ -397,6 +491,7 @@ class Window:
                 revoked_reason=str(raw.get("revoked_reason") or ""),
                 account_grant=account_grant if always else "",
                 account_owed=bool(raw.get("account_owed")) if always else False,
+                bed_check=bed_check if always and bed_check in (BED_CAMERA, BED_NO_CAMERA) else "",
             )
         except Exception:  # noqa: BLE001 — an unreadable record covers nothing
             return None
@@ -592,7 +687,7 @@ def look_at_bed(printer_name: str | None) -> Any:
     is being asked about (:func:`kiln.plate_state.look_for_unasked_start`)
     -- through the resolver a start uses, so it is the plate a print
     would land on.  A name that cannot be resolved has no camera Kiln can
-    reach and nothing seen: blind.  Never raises."""
+    reach and nothing seen: blind.  Raises nothing of its own."""
     from kiln import plate_state
 
     try:
@@ -601,7 +696,158 @@ def look_at_bed(printer_name: str | None) -> Any:
         adapter = _srv._resolve_adapter(str(printer_name or "").strip())
     except Exception:  # noqa: BLE001 -- no machine, no look
         return plate_state.UnaskedStartLook(plate_state.LOOK_BLIND, why="Kiln could not reach this printer")
-    return plate_state.look_for_unasked_start(adapter)
+    look = plate_state.look_for_unasked_start(adapter)
+    if look.verdict not in (plate_state.LOOK_BLIND, plate_state.LOOK_NO_CAMERA):
+        return look
+    # Nothing was seen.  Whether that stops the print or not is decided by
+    # what the person was told when always allow was turned on, which the
+    # entry records -- never by how the printer looks to Kiln today.
+    #
+    # An entry turned on for a printer with NO camera (the screen said Kiln
+    # cannot check its bed) starts prints unlooked, for as long as Kiln
+    # still knows of no camera on that machine.  One it has since had a
+    # picture from, been told of, or that is registered beside it is a
+    # camera: the day it does not answer, the person is asked.
+    #
+    # Every other entry was turned on with the person told that Kiln looks.
+    # Under those, nothing seen means the person is asked -- whether the
+    # camera did not answer, or is no longer set up at all.  A camera that
+    # has gone away does not turn "Kiln looks first" into "Kiln does not
+    # look".  An entry that cannot be read is treated the same way.
+    from kiln.errors import HostedUnavailableError
+
+    try:
+        entry = always_for(printer_name)
+        told_no_camera = entry is not None and entry.bed_check == BED_NO_CAMERA
+        unknown_here = entry is None
+        knows = plate_state.knows_a_camera(adapter) is not None
+    except HostedUnavailableError:
+        raise  # a refusal to serve this store is not a fault to work around
+    except Exception:  # noqa: BLE001 -- unreadable: the person is asked
+        told_no_camera, unknown_here, knows = False, False, True
+    if unknown_here:
+        return look  # not a start under always allow: the look stands as taken
+    if told_no_camera and not knows:
+        return plate_state.UnaskedStartLook(
+            plate_state.LOOK_NO_CAMERA, None,
+            why="Kiln knows of no camera on this printer, and it gives no picture now",
+        )
+    if look.verdict == plate_state.LOOK_NO_CAMERA:
+        return plate_state.UnaskedStartLook(
+            plate_state.LOOK_BLIND, None,
+            why="the camera Kiln looked through is no longer set up for this printer",
+        )
+    return look
+
+
+#: What Kiln can say about a printer's camera before always allow is
+#: turned on (:func:`bed_camera`).
+CAMERA_YES = "yes"
+CAMERA_NO = "no"
+CAMERA_UNSURE = "unsure"
+
+
+def bed_camera(printer_name: str | None) -> str:
+    """Whether this printer has a camera Kiln can look at the bed through.
+
+    :data:`CAMERA_YES` when Kiln knows of one
+    (:func:`kiln.plate_state.knows_a_camera`: fitted at the factory, seen
+    before, said by the person, or registered beside the printer) -- whether
+    or not it answers right now -- or when a picture comes back now.
+    :data:`CAMERA_NO` when the printer's connection cannot carry a picture
+    and no camera is registered, or the printer cannot be reached at all.
+    :data:`CAMERA_UNSURE` for what is left: a connection that could carry a
+    picture, no camera Kiln knows of, and none answering.  Printer software
+    that can serve a camera says so whether or not one is plugged in, so
+    that case is not "no camera"; it is a question for the person.  Never
+    raises.
+    """
+    from kiln import plate_state
+
+    try:
+        import kiln.server as _srv
+
+        adapter = _srv._resolve_adapter(str(printer_name or "").strip())
+    except Exception:  # noqa: BLE001 -- a printer that cannot be reached shows nothing
+        return CAMERA_NO
+    if plate_state.knows_a_camera(adapter) is not None:
+        return CAMERA_YES
+    if plate_state.camera_of(adapter) is None:
+        return CAMERA_NO
+    # Kiln's catalogue knows, for the models it lists, whether each ships
+    # with a camera.  Asked once here (the answer is kept on this computer);
+    # with no answer the rest goes on as if the model were not listed.
+    word = _catalogue_camera_word(adapter)
+    if word == camera_words.FITTED:
+        return CAMERA_YES
+    plate_state.look(adapter)  # a real picture is remembered by the look itself
+    if plate_state.knows_a_camera(adapter) is not None:
+        return CAMERA_YES
+    # No picture.  A model the catalogue says has no camera, and that shows
+    # none, has none: nothing to ask.  Anything else -- one its maker sells a
+    # camera for, one the catalogue does not know -- is the person's to say.
+    return CAMERA_NO if word == camera_words.NONE else CAMERA_UNSURE
+
+
+def _catalogue_camera_word(adapter: Any) -> str | None:
+    """The catalogue's word for this adapter's declared model, or ``None``
+    when no model is declared or nothing answered.  Never raises."""
+    try:
+        from kiln import _pro_camera_bridge
+
+        return _pro_camera_bridge.catalogue_word(adapter.camera_catalogue_model())
+    except Exception:  # noqa: BLE001 -- no word is no knowledge
+        return None
+
+
+def signing_in_would_tell(printer_name: str | None) -> bool:
+    """Whether Kiln had to leave the catalogue out for this printer only
+    because nobody is signed in -- so the person can be told that signing
+    in (free) lets Kiln look their model up instead of asking.  Never
+    raises."""
+    try:
+        import kiln.server as _srv
+        from kiln import _pro_camera_bridge
+
+        adapter = _srv._resolve_adapter(str(printer_name or "").strip())
+        return _pro_camera_bridge.why_unanswered(adapter.camera_catalogue_model()) == "signed_out"
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def person_says_camera(printer_name: str | None) -> None:
+    """The person, at their terminal, says this printer has a camera Kiln
+    could not reach just now.  Remembered for the machine, so Kiln neither
+    asks again nor ever records it as having none.  A person's door only
+    (:class:`NotAPerson` anywhere else): what is remembered here decides
+    whether a print may start on a bed nobody saw."""
+    _require_person()
+    import kiln.server as _srv
+    from kiln import plate_state
+
+    adapter = _srv._resolve_adapter(str(printer_name or "").strip())
+    plate_state.remember_camera(adapter, "printer", plate_state.CAMERA_PERSON_SAID)
+    with contextlib.suppress(Exception):
+        from kiln.streaming import note_owner_said_camera
+
+        note_owner_said_camera(str(printer_name or "").strip())
+    _audit("camera_said_by_person", {"printer": str(printer_name or ""), "by": local_identity(), "at": _now()})
+
+
+def bed_goes_unchecked(w: Window) -> bool:
+    """Whether prints under this always-allow entry start with the bed not
+    looked at: it was turned on for a printer with no camera, and Kiln
+    still knows of none.  For the status surfaces.  Never raises."""
+    if not (w.always and w.bed_check == BED_NO_CAMERA and w.scope):
+        return False
+    from kiln import plate_state
+
+    try:
+        import kiln.server as _srv
+
+        return plate_state.knows_a_camera(_srv._resolve_adapter(w.scope[0])) is None
+    except Exception:  # noqa: BLE001 -- a printer that cannot be reached is not looked at either
+        return True
 
 
 def _audit(action: str, details: dict[str, Any]) -> None:
@@ -629,7 +875,17 @@ def _machine_for_always(name: str) -> str:
     return machine
 
 
-def _write_always(machines: dict[str, str]) -> list[Window]:
+def _bed_check_for(name: str, told_no_camera: bool) -> str:
+    """What an entry records about the bed.  :data:`BED_NO_CAMERA` takes
+    both halves: the door says the person read that Kiln cannot check this
+    printer's bed, and Kiln itself knows of no camera on it and can get no
+    picture (:func:`bed_camera`).  Anything else is :data:`BED_CAMERA`, the
+    one that asks when it cannot see -- so a camera Kiln knows of is never
+    recorded as absent because it was not answering that day."""
+    return BED_NO_CAMERA if told_no_camera and bed_camera(name) != CAMERA_YES else BED_CAMERA
+
+
+def _write_always(machines: dict[str, str], bed_checks: dict[str, str]) -> list[Window]:
     """Write one always-allow entry per ``{name: machine}``, all or none.
     The one writer; each door does its own guarding BEFORE calling this.
     An entry already on for a machine is closed in favour of the new one,
@@ -640,6 +896,7 @@ def _write_always(machines: dict[str, str]) -> list[Window]:
         Window(
             id=f"w_{secrets.token_hex(6)}", set_by=by, set_at=now, until=None,
             scope=(name,), source=SOURCE_TERMINAL, always=True, machine=machine,
+            bed_check=bed_checks.get(name) or BED_CAMERA,
         )
         for name, machine in machines.items()
     ]
@@ -657,12 +914,13 @@ def _write_always(machines: dict[str, str]) -> list[Window]:
         _audit(
             "always_allow_turned_on",
             {"window_id": w.id, "printer": w.scope[0], "machine": w.machine, "by": w.set_by,
-             "at": w.set_at, "source": w.source, "together_with": len(entries) - 1},
+             "at": w.set_at, "source": w.source, "together_with": len(entries) - 1,
+             "bed_check": w.bed_check},
         )
     return entries
 
 
-def open_always(*, printer_name: str, typed_name: str) -> Window:
+def open_always(*, printer_name: str, typed_name: str, told_no_camera: bool = False) -> Window:
     """The terminal door for always allow: a standing yes with no end, on
     the ONE printer named.
 
@@ -672,18 +930,29 @@ def open_always(*, printer_name: str, typed_name: str) -> Window:
     typed is another one, when no printer is named, or when Kiln cannot
     tell which machine the name is — a permission for a machine has to be
     able to notice a different one.
+
+    *told_no_camera* is the door saying the screen the person read told
+    them Kiln cannot check this printer's bed.  The entry records that
+    only if a picture really cannot be had (:func:`_bed_check_for`).
+    Below Kiln Pro, :class:`NotTheProTier`.
     """
     _require_person()
     name = str(printer_name or "").strip()
     if not name:
         raise ValueError("always allow is for one printer; name it")
+    if not always_allow_is_yours():
+        raise NotTheProTier(ALWAYS_ALLOW_NEEDS_PRO)
     if _norm(typed_name) != _norm(name):
         raise ValueError(f"that is not this printer's name ({name}); always allow was not turned on")
-    [entry] = _write_always({name: _machine_for_always(name)})
+    machine = _machine_for_always(name)
+    [entry] = _write_always({name: machine}, {name: _bed_check_for(name, told_no_camera)})
     return entry
 
 
-def open_always_for_several(*, printer_names: list[str] | tuple[str, ...], typed_count: str) -> list[Window]:
+def open_always_for_several(
+    *, printer_names: list[str] | tuple[str, ...], typed_count: str,
+    told_no_camera: list[str] | tuple[str, ...] = (),
+) -> list[Window]:
     """The terminal door for always allow on several printers at once:
     one entry per printer, each exactly what :func:`open_always` writes,
     so each is for its own machine, turns itself off on its own, and is
@@ -696,7 +965,8 @@ def open_always_for_several(*, printer_names: list[str] | tuple[str, ...], typed
     Raises :class:`NotAPerson` off a terminal, ``ValueError`` for a count
     that is not the number named, a name given twice, two names for one
     machine, or any machine Kiln cannot tell apart — and then turns on
-    none of them.
+    none of them.  *told_no_camera* names the printers the screen said
+    Kiln cannot check the bed of (see :func:`open_always`).
     """
     _require_person()
     names = [str(n or "").strip() for n in printer_names]
@@ -721,7 +991,8 @@ def open_always_for_several(*, printer_names: list[str] | tuple[str, ...], typed
                 f"{seen[machine]} and {name} are the same machine; name it once. Always allow was not turned on"
             )
         seen[machine] = name
-    return _write_always(machines)
+    told = {_norm(n) for n in told_no_camera}
+    return _write_always(machines, {name: _bed_check_for(name, _norm(name) in told) for name in names})
 
 
 def open_window_from_dialog(
@@ -799,13 +1070,10 @@ def _closed(w: Window, now: float, reason: str = "") -> Window:
     """*w* as a closed record.  One already closed keeps its time and reason."""
     if w.revoked_at is not None:
         return w
-    return Window(
-        id=w.id, set_by=w.set_by, set_at=w.set_at, until=w.until, scope=w.scope,
-        revoked_at=now, extensions=w.extensions, source=w.source,
-        always=w.always, machine=w.machine, revoked_reason=reason,
+    return dataclasses.replace(
+        w, revoked_at=now, revoked_reason=reason,
         # A copy of the account's record: its closing is owed to the account
         # until the account has been told (:func:`_tell_the_account`).
-        account_grant=w.account_grant,
         account_owed=bool(w.account_grant) and reason != REASON_OFF_ON_ACCOUNT,
     )
 
@@ -855,12 +1123,7 @@ def _tell_the_account(closed: Window) -> Window:
         told = False
     if not told:
         return closed
-    settled = Window(
-        id=closed.id, set_by=closed.set_by, set_at=closed.set_at, until=closed.until, scope=closed.scope,
-        revoked_at=closed.revoked_at, extensions=closed.extensions, source=closed.source,
-        always=closed.always, machine=closed.machine, revoked_reason=closed.revoked_reason,
-        account_grant=closed.account_grant, account_owed=False,
-    )
+    settled = dataclasses.replace(closed, account_owed=False)
     with _lock:
         windows = _read()
         for i, w in enumerate(windows):
@@ -903,6 +1166,11 @@ def mirror_account_always(*, grant_id: str, printer_name: str, set_by: str, set_
     entry = Window(
         id=f"w_{secrets.token_hex(6)}", set_by=str(set_by or "account"), set_at=float(set_at or _now()),
         until=None, scope=(name,), source=SOURCE_WEB, always=True, machine=machine, account_grant=grant,
+        # What the copy says about the bed is left undecided here: a copy is
+        # also made by a status read, which must not go asking about cameras.
+        # It is decided at the copy's first start (:func:`settle_copy_bed_check`);
+        # until then an undecided copy is one that looks, and asks when it
+        # cannot see.
     )
     with _lock:
         windows = _read()
@@ -915,6 +1183,38 @@ def mirror_account_always(*, grant_id: str, printer_name: str, set_by: str, set_
          "at": entry.set_at, "source": entry.source, "account_grant": grant},
     )
     return entry
+
+
+def settle_copy_bed_check(window_id: str, printer_name: str | None) -> Window | None:
+    """Decide, once, what an account copy says about the bed -- at a start,
+    where Kiln may look and may ask its catalogue.
+
+    The account page told the person that without a camera Kiln cannot
+    check the bed.  Here is where it is known which this printer is: no
+    camera when its connection cannot carry a picture and none is
+    registered beside it, or when Kiln's catalogue says the model has none
+    and no picture comes back (:func:`bed_camera`).  Where Kiln is unsure
+    there is nobody at this door to ask, so the copy is one that looks,
+    and asks when it cannot see.  A copy already decided, a terminal
+    entry, and a closed copy come back unchanged.  Never raises.
+    """
+    w = get_window(window_id)
+    if w is None or not w.account_grant or w.bed_check or w.revoked_at is not None or _hosted():
+        return w
+    try:
+        name = str(printer_name or (w.scope[0] if w.scope else ""))
+        decided = BED_NO_CAMERA if bed_camera(name) == CAMERA_NO else BED_CAMERA
+        settled = dataclasses.replace(w, bed_check=decided)
+        with _lock:
+            windows = _read()
+            for i, each in enumerate(windows):
+                if each.id == w.id and each.revoked_at is None and not each.bed_check:
+                    windows[i] = settled
+                    _write(windows)
+                    return settled
+    except (OSError, KeyError):
+        logger.debug("account copy's bed check not settled", exc_info=True)
+    return get_window(window_id)
 
 
 def account_confirms(w: Window, printer_name: str | None) -> bool:
@@ -1046,6 +1346,17 @@ def _always_stands(w: Window, printer_name: str | None) -> bool:
     record; a machine Kiln cannot identify is covered by nothing, and the
     person is asked the ordinary way.
     """
+    if not w.account_grant and not always_allow_is_yours():
+        # Pro, asked at every start: an entry from a terminal stops starting
+        # prints unasked when the account leaves Pro.  Left on, not closed,
+        # so it stands again if the account comes back.  The account's own
+        # record is asked of the account, which draws the same line.
+        return False
+    return _covers_its_machine(w, printer_name)
+
+
+def _covers_its_machine(w: Window, printer_name: str | None) -> bool:
+    """:func:`_always_stands` past the plan: the machine half."""
     name = w.scope[0] if isinstance(w.scope, tuple) and w.scope else ""
     under_name = machine_under(name)
     if under_name and under_name != w.machine:
@@ -1061,7 +1372,12 @@ def _turn_off(w: Window, found_machine: str) -> None:
     """Close an always-allow entry whose name now reaches another machine."""
     try:
         revoke_window(w.id, reason=REASON_MACHINE_CHANGED)
-    except Exception:  # noqa: BLE001 — unwritable now; the next read finds the same machine and tries again
+    except KeyError:
+        return  # gone since it was read: nothing left to close
+    except OSError:
+        # Unwritable now: the next read finds the same machine and tries
+        # again.  Named faults only, so a refusal to serve this store at
+        # all is never taken for one.
         logger.warning("always allow %s could not be closed after its machine changed", w.id, exc_info=True)
         return
     logger.warning(
@@ -1086,6 +1402,20 @@ def always_for(printer_name: str | None) -> Window | None:
     return None
 
 
+def always_waiting_on_pro(printer_name: str | None) -> Window | None:
+    """The always-allow entry from a terminal that would cover a start
+    aimed at *printer_name* but for the plan: on, for this machine, and not
+    starting prints because this computer is not signed in on Kiln Pro now
+    (left Pro, or signed out).  What a start says first when it asks
+    anyway.  ``None`` otherwise.  Local only."""
+    if _hosted() or always_allow_is_yours():
+        return None
+    for w in live_windows():
+        if w.always and not w.account_grant and _covers_its_machine(w, printer_name):
+            return w
+    return None
+
+
 def standing_now(now: float | None = None) -> list[Window]:
     """Every window a start could rest on right now — what a status
     surface lists.  The live timed windows, and always allow after its
@@ -1094,6 +1424,8 @@ def standing_now(now: float | None = None) -> list[Window]:
     what the next print would find off."""
     standing: list[Window] = []
     for w in live_windows(now):
+        if w.always and not w.account_grant and not _hosted() and not always_allow_is_yours():
+            continue
         if w.always and not _hosted():
             under_name = machine_under(w.scope[0])
             if under_name and under_name != w.machine:
@@ -1138,7 +1470,9 @@ def turned_itself_off(printer_name: str | None, now: float | None = None) -> Win
     return None
 
 
-def covering(printer_name: str | None, now: float | None = None, *, for_a_start: bool = False) -> Window | None:
+def covering(
+    printer_name: str | None, now: float | None = None, *, for_a_start: bool = False, timed_only: bool = False,
+) -> Window | None:
     """The live window that covers *printer_name*, or ``None``.  On the
     hosted server the file is nobody's, so the account's store answers,
     or nothing does.
@@ -1147,7 +1481,12 @@ def covering(printer_name: str | None, now: float | None = None, *, for_a_start:
     window's word alone?  A copy of the account's always allow may not:
     the account is asked each time, and the asker does that.  Everything
     that only REPORTS a window (the line on a result, a status surface)
-    leaves it False and sees the copies too."""
+    leaves it False and sees the copies too.
+
+    *timed_only* leaves always allow out: the window with an end that
+    covers this printer, if there is one.  Asked when always allow cannot
+    be used for a print (the camera showed nothing), because a window a
+    person opened for a while is their yes either way."""
     if _hosted():
         store = window_store()
         if store is None:
@@ -1164,7 +1503,7 @@ def covering(printer_name: str | None, now: float | None = None, *, for_a_start:
     live = live_windows(now)
     # Always allow first: where both cover a start, the standing fact with
     # no end is the one the result and the audit line should name.
-    for w in live:
+    for w in () if timed_only else live:
         if w.always and not (for_a_start and w.account_grant) and _always_stands(w, printer_name):
             return w
     for w in live:
@@ -1201,6 +1540,8 @@ def describe(w: Window, now: float | None = None) -> dict[str, Any]:
         })
     if w.revoked_reason:
         facts["revoked_reason"] = w.revoked_reason
+    if w.always:
+        facts["bed_check"] = w.bed_check or BED_CAMERA
     facts["summary"] = summary_line(facts)
     return facts
 

@@ -1060,6 +1060,28 @@ def _isolate_printer_engagement(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_hardware_stops(tmp_path_factory, monkeypatch):
+    """Give every test its own hardware-stop record, never the developer's.
+
+    ``kiln.hardware_stops`` files a print's hardware plan from ``start_print``
+    and reads it on every status, watch and resume.  A plan left by one test
+    would speak over the next test's print -- or refuse its resume -- so each
+    test gets an empty record and a process with nothing staged or watched.
+    """
+    try:
+        from kiln import hardware_stops
+    except ImportError:  # pragma: no cover — module absent
+        yield
+        return
+
+    home = tmp_path_factory.mktemp("kiln_hardware_stops_home")
+    monkeypatch.setattr(hardware_stops, "_store_path", lambda: home / "hardware_stops.json")
+    hardware_stops.forget_process_state()
+    yield
+    hardware_stops.forget_process_state()
+
+
+@pytest.fixture(autouse=True)
 def _no_real_pypi_check(monkeypatch):
     """Keep the update check off the network, for the whole suite.
 

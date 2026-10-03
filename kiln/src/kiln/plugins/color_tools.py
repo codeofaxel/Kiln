@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln.colour_availability import attach_colour_availability
 from kiln.cost_estimator import BUILTIN_MATERIALS, DEFAULT_MATERIAL
 
 _logger = logging.getLogger(__name__)
@@ -1132,29 +1133,6 @@ def _build_summary(
     return f"{count} color zone{'s' if count != 1 else ''}: {', '.join(parts)}"
 
 
-def _attach_spool_advisory(
-    response: dict[str, Any],
-    colours: list[str | None],
-    printer_id: str | None = None,
-) -> None:
-    """Say, as the colours are chosen, whether the printer has them loaded.
-
-    Adds ``ams_advisory`` to a successful *response* when there is a
-    printer to ask — the same field every colouring tool carries, so an
-    agent reads "no red is loaded" in the answer to "make it red" rather
-    than in a warning at print time.  Advice only: the print gate decides.
-    """
-    try:
-        from kiln.server import _spool_advisory
-
-        advisory = _spool_advisory(colours, printer_name=printer_id or None)
-    except Exception as exc:  # a courtesy layer never fails a good colouring
-        _logger.debug("spool advisory skipped: %s", exc)
-        return
-    if advisory:
-        response["ams_advisory"] = advisory
-
-
 def _build_result(
     zones: list[_ColorZone],
     output_dir: str,
@@ -1188,8 +1166,8 @@ def _build_result(
             # ``ams_slot`` is the zone's ORDINAL, not a slot anything was
             # read from: this tool never asks the printer.  Said explicitly
             # so a reader does not mistake it for a routed assignment; the
-            # ``ams_advisory`` beside the result is where a real reading
-            # of the printer's slots lives.
+            # ``colour_availability`` beside the result is where a real
+            # reading of the printer's slots lives.
             "slot_source": "zone_index",
             "estimated_weight_g": weight,
         }
@@ -1575,6 +1553,7 @@ class _ColorToolsPlugin:
             num_colors: int = 4,
             color_palette: list[str] | None = None,
             printer_id: str = "",
+            material: str = "",
         ) -> dict:
             """Split a 3D model into horizontal color zones by Z-height.
 
@@ -1589,10 +1568,21 @@ class _ColorToolsPlugin:
 
             Zero cloud dependencies — pure geometry.
 
+            Says whether its colours are on the printer, as
+            ``colour_availability`` (absent when Kiln cannot see what is
+            loaded).  Relay its ``say`` as written and add nothing about
+            filament: never suggest buying filament unless the person asks
+            for one or says yes to the offer in ``say``.  On a yes, call
+            ``find_closest_filaments`` with these colours and the print's
+            material.
+
             :param input_path: Path to a binary STL file.
             :param num_colors: Number of color zones (default 4).
             :param color_palette: List of hex colors (e.g.
                 ``["#FF0000", "#00FF00"]``).  Defaults to white/red/black/grey.
+            :param material: Optional material the part will be printed in
+                (e.g. ``"PETG"``).  A spool on record in a clearly
+                different material is then not named as one to load.
             :param printer_id: Optional supported printer model id.  Names
                 the bed the composed 3MF is placed on, so a model sitting
                 off the plate is centred on the machine's real bed rather
@@ -1648,7 +1638,10 @@ class _ColorToolsPlugin:
                 compose_3mf_error=compose_err,
                 band_warning=warn,
             )
-            _attach_spool_advisory(response, palette[:num_colors], printer_id)
+            attach_colour_availability(
+                response, palette[:num_colors], printer_name=printer_id or None,
+                material=material or None,
+            )
             try:
                 from kiln_pro.plugins.git_render_tools import (
                     attach_inspect_bundle,
@@ -1668,6 +1661,7 @@ class _ColorToolsPlugin:
             method: str = "z_height",
             color_palette: list[str] | None = None,
             printer_id: str = "",
+            material: str = "",
         ) -> dict:
             """Split a 3D model into color zones by geometric region.
 
@@ -1690,12 +1684,23 @@ class _ColorToolsPlugin:
 
             Zero cloud dependencies — pure geometry.
 
+            Says whether its colours are on the printer, as
+            ``colour_availability`` (absent when Kiln cannot see what is
+            loaded).  Relay its ``say`` as written and add nothing about
+            filament: never suggest buying filament unless the person asks
+            for one or says yes to the offer in ``say``.  On a yes, call
+            ``find_closest_filaments`` with these colours and the print's
+            material.
+
             :param input_path: Path to a binary STL file.
             :param num_colors: Number of color zones (default 4).
             :param method: Assignment method — ``"z_height"``,
                 ``"normal"``, or ``"random"``.
             :param color_palette: List of hex colors.  Defaults to
                 white/red/black/grey.
+            :param material: Optional material the part will be printed in
+                (e.g. ``"PETG"``).  A spool on record in a clearly
+                different material is then not named as one to load.
             :param printer_id: Optional supported printer model id.  Names
                 the bed the composed 3MF is placed on, so a model sitting
                 off the plate is centred on the machine's real bed rather
@@ -1776,7 +1781,10 @@ class _ColorToolsPlugin:
                 compose_3mf_error=compose_err,
                 band_warning=warn,
             )
-            _attach_spool_advisory(response, palette[:num_colors], printer_id)
+            attach_colour_availability(
+                response, palette[:num_colors], printer_name=printer_id or None,
+                material=material or None,
+            )
             try:
                 from kiln_pro.plugins.git_render_tools import (
                     attach_inspect_bundle,
@@ -1798,6 +1806,7 @@ class _ColorToolsPlugin:
             step_colors: dict | None = None,
             output_path: str = "",
             printer_id: str = "",
+            material: str = "",
         ) -> dict:
             """Paint exactly the faces a decoration carve created (Pro-free).
 
@@ -1825,6 +1834,14 @@ class _ColorToolsPlugin:
             "carved, then painted" — ``paint_recorded`` in the result
             reports whether that write-back landed.
 
+            Says whether its colours are on the printer, as
+            ``colour_availability`` (absent when Kiln cannot see what is
+            loaded).  Relay its ``say`` as written and add nothing about
+            filament: never suggest buying filament unless the person asks
+            for one or says yes to the offer in ``say``.  On a yes, call
+            ``find_closest_filaments`` with these colours and the print's
+            material.
+
             :param model_path: The decorated mesh (STL/OBJ/3MF) whose
                 ``<mesh>.decoration_faces.json`` sidecar to consume.
             :param color: Hex color for the carved faces (default red).
@@ -1845,6 +1862,9 @@ class _ColorToolsPlugin:
                 ``target``; ``color`` is ignored.
             :param output_path: Where to write the painted 3MF.  Default:
                 beside the model as ``<name>_painted.3mf``.
+            :param material: Optional material the part will be printed in
+                (e.g. ``"PETG"``).  A spool on record in a clearly
+                different material is then not named as one to load.
             :param printer_id: Optional supported printer model id for
                 bed placement of the composed 3MF.
             :returns: Dict with ``output_path``, ``painted_triangles``,
@@ -2058,8 +2078,10 @@ class _ColorToolsPlugin:
             for key in ("colors", "bed_translation", "native_paint_truncated"):
                 if key in composed:
                     response[key] = composed[key]
-            _attach_spool_advisory(
-                response, sorted({c for c in colors if c}), printer_id,
+            attach_colour_availability(
+                response, sorted({c for c in colors if c}),
+                printer_name=printer_id or None,
+                material=material or None,
             )
             if "floor_indices" in record and target == "all":
                 response["hint"] = (

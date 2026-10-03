@@ -138,6 +138,7 @@ from kiln.cost_estimator import (
 )
 from kiln.errors import HostedUnavailableError
 from kiln.events import Event, EventBus, EventType
+from kiln.format_conversion import ARRIVAL_CONVERSIONS, convert_on_arrival
 
 try:
     from kiln.fulfillment import (
@@ -961,7 +962,7 @@ def _build_instructions() -> str:
         "previewed but not asked about, and every print result carries a "
         "`standing_window` block naming it. When the person says to close it, call "
         "`revoke_consent_window`; `consent_window_status` shows what is open. "
-        "Nothing you can call opens or extends one. The person can also turn on "
+        "Nothing you can call opens or extends one. On Kiln Pro the person can also turn on "
         "always allow for one printer, themselves: at a terminal (`kiln consent window "
         "--always --printer NAME`) or on their Kiln account page with their "
         "authenticator. Prints there start without asking until it is "
@@ -2506,7 +2507,15 @@ def _consent_filament_line(
         plan = plan_ams_mapping(wanted, trays)
         if plan.ok:
             return plan.summary + (" (" + "; ".join(plan.warnings) + ")" if plan.warnings else "")
-        return "MISSING COLOUR — " + plan.summary
+        line = "MISSING COLOUR — " + plan.summary
+        if len(wanted) >= 2:
+            # The print gate will refuse this file; the dialog says what to
+            # load in the refusal's own words.  No question here: a dialog
+            # cannot answer one, and the refusal that follows carries it.
+            line += ". " + _unsuppliable_colour_words(
+                plan, wanted, trays, adapter=adapter, printer_name=printer_name, offer=False,
+            )
+        return line
     except Exception as exc:  # noqa: BLE001 — the dialog must still open
         logger.debug("consent: filament routing line skipped: %s", exc)
         return None
@@ -3393,6 +3402,11 @@ async def _consent_from_account_always(
         if not await asyncio.to_thread(consent_windows.is_live, entry.id, printer_name=aimed):
             return None
         look = unasked_look_noted(aimed)
+        if not entry.bed_check:
+            # The copy's first start: decide what it says about the bed, then
+            # look with that decided (a look taken before it was is not used).
+            entry = await asyncio.to_thread(consent_windows.settle_copy_bed_check, entry.id, aimed) or entry
+            look = None
         if look is None:
             look = await asyncio.to_thread(consent_windows.look_at_bed, aimed)
             note_unasked_look(aimed, look)
@@ -3733,11 +3747,23 @@ def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
         if signed_out
         else "in Kiln's web app on their phone or browser, at app.kiln3d.com/settings/agent (Always allow), or "
     )
-    always = (
-        f" To stop being asked on {aimed}, they turn on always allow for it themselves: {web}with "
-        f"`kiln consent window --always --printer {aimed}` in a terminal on the computer Kiln runs on. "
-        'You cannot turn it on; when they say "ask me first", you turn it off.'
-    )
+    from kiln.consent_windows import always_allow_is_yours
+
+    if always_allow_is_yours():
+        always = (
+            f" To stop being asked on {aimed}, they turn on always allow for it themselves: {web}with "
+            f"`kiln consent window --always --printer {aimed}` in a terminal on the computer Kiln runs on. "
+            'You cannot turn it on; when they say "ask me first", you turn it off.'
+        )
+    else:
+        # Below Pro, the way that is open to them -- and no plan named: a
+        # plan is said beside the phone and nowhere else on this text, and
+        # always allow says its own at its own door.
+        always = (
+            f" To stop being asked on {aimed} for a while, they can allow prints there for up to a day "
+            f"themselves: in the approval dialog, or with `kiln consent window --for 2h --printer {aimed}` "
+            "in a terminal on the computer Kiln runs on. You cannot open it."
+        )
     if why.startswith(NOT_ASKED_CODE_SHOWN):
         hook = ""
         if ":hook=" in why:
@@ -3878,12 +3904,20 @@ def _preview_gate_error(
     # has a camera the plate has to have been seen clear in a fresh frame.
     # A frame nobody has judged yet holds the start and is handed over;
     # asked before the token is touched, so the token is still good for
-    # the call that follows the look.
+    # the call that follows the look.  The yes was read on the look taken
+    # when the call arrived; a door that works for a while first (slicing)
+    # gets a fresh one here, and if that one shows nothing the print does
+    # not start on a bed nobody could see: the person is asked instead.
     bed_look = None
     if granted.source == SOURCE_ALWAYS:
-        from kiln.plate_state import LOOK_NEEDED
+        from kiln.plate_state import LOOK_BLIND, LOOK_NEEDED
 
         bed_look = unasked_look(aimed)
+        if bed_look.verdict == LOOK_BLIND:
+            print_signoff.clear()
+            note_unasked_look(aimed, bed_look)
+            _audit(tool_name, "always_allow_could_not_see", details={"file": file_name, "printer": aimed, "why": bed_look.why})
+            return _error_dict(_no_yes_message(tool_name, file_name, aimed), code="PREVIEW_NOT_CONFIRMED")
         if bed_look.verdict == LOOK_NEEDED:
             print_signoff.clear()
             _audit(tool_name, "always_allow_look_first", details={"file": file_name, "printer": aimed, "frame": bed_look.frame})
@@ -4015,6 +4049,8 @@ def _always_allow_dialog_row(aimed: str) -> str | None:
 
         if consent_windows.turned_itself_off(aimed) is not None:
             return "off. A different printer is now set up under this name, so Kiln is asking again"
+        if consent_windows.always_waiting_on_pro(aimed) is not None:
+            return f"on, but {_ALWAYS_ALLOW_NEEDS_SIGNED_IN_PRO}, so Kiln is asking"
         from kiln.plate_state import LOOK_BLIND
 
         look = unasked_look_noted(aimed)
@@ -4035,10 +4071,23 @@ def _always_allow_went_off(aimed: str) -> str:
         if closed is not None:
             line = consent_window_note.turned_off_line(consent_windows.describe_scope(closed.scope))
             return f"Tell the person first: {line} "
+        if consent_windows.always_waiting_on_pro(aimed) is not None:
+            return (
+                f"Tell the person first: always allow on {aimed} is still on, but "
+                f"{_ALWAYS_ALLOW_NEEDS_SIGNED_IN_PRO}, so Kiln is asking. If their account is on Pro, "
+                "`kiln signin` on this computer brings it back. "
+            )
         blind = _always_allow_could_not_see(aimed)
         if blind:
             return f"Tell the person first: {blind} "
     return ""
+
+
+#: Why always allow is asking when it is on and this computer holds no Pro
+#: plan now -- said where the person meets it, in its own words.
+_ALWAYS_ALLOW_NEEDS_SIGNED_IN_PRO = (
+    "it is part of Kiln Pro and this computer is not signed in on a Pro account right now"
+)
 
 
 def _always_allow_could_not_see(aimed: str) -> str:
@@ -4101,8 +4150,15 @@ def _retry_changes_the_object(overrides: dict[str, Any] | None, mesh_repaired: b
     )
 
 
-def _note_print_started(adapter: PrinterAdapter) -> None:
+def _note_print_started(adapter: PrinterAdapter, result: Any = None) -> None:
     """Tell the heater watchdog a print began — if it is watching *adapter*.
+
+    *result* is what ``adapter.start_print`` returned.  A start Kiln
+    refused before sending anything (``refused_before_send``) began no
+    print, and the watchdog is not told one did: marked busy, it would
+    stop cooling an idle printer until a print-ended notice that is never
+    coming.  A start that was sent is always notified, whatever the
+    adapter then said of it — the printer may be running it.
 
     The one door for this notification.  Every tool that starts a print
     used to call ``_get_heater_watchdog().notify_print_started()``
@@ -4118,6 +4174,8 @@ def _note_print_started(adapter: PrinterAdapter) -> None:
     once; a new start-side tool gets it by calling this instead of
     remembering to ask.
     """
+    if getattr(result, "refused_before_send", False) is True:
+        return
     try:
         if _is_heater_watchdog_machine(adapter):
             _get_heater_watchdog().notify_print_started()
@@ -5471,6 +5529,33 @@ def _get_thingiverse() -> ThingiverseClient:
 _marketplace_registry = MarketplaceRegistry()
 
 
+def _download_marketplace_file(
+    source: str, file_id: Any, dest_dir: str, *, file_name: str | None = None,
+) -> tuple[str | None, Any]:
+    """Download one file from the marketplace *source* names.
+
+    Returns ``(path, adapter)``; ``(None, adapter)`` when that marketplace
+    does not offer downloads.  Thingiverse is reached through its own client
+    (adapter ``None``), which leaves no note of its own, so the note is left
+    here.  Every single-file download door goes through this, so a file ID
+    is never sent to a marketplace it does not belong to.  (Until
+    2026-10-02 ``download_model`` sent every one to Thingiverse.)
+    """
+    if source != "thingiverse":
+        if _marketplace_registry.count == 0:
+            _init_marketplace_registry()
+        mkt = _marketplace_registry.get(source)
+        if not mkt.supports_download:
+            return None, mkt
+        named = {"file_name": file_name} if file_name else {}
+        return mkt.download_file(str(file_id), dest_dir, **named), mkt
+    path = _get_thingiverse().download_file(int(file_id), dest_dir, file_name=file_name)
+    from kiln.arrival import note_download
+
+    note_download("Thingiverse", path, file_id)
+    return path, None
+
+
 def _init_marketplace_registry() -> None:
     """Register marketplace adapters based on available credentials."""
     if _THINGIVERSE_TOKEN:
@@ -6358,6 +6443,15 @@ def printer_status(
             "printer": printer_block,
             "job": job.to_dict(),
         }
+        # A print carrying a hardware plan: when the next stop comes, what
+        # goes in at it, or what goes in now that the print is done.  At both
+        # detail levels -- the lite read is the one polled through a print.
+        # Absent for an ordinary print.  See kiln.hardware_stops.
+        from kiln.hardware_stops import observe as _observe_hardware
+
+        hardware = _observe_hardware(adapter, state, job)
+        if hardware:
+            response["hardware"] = hardware
         # A cool-down a Kiln server left running (killed with the part fan
         # on) is finished from this read, the one every filament answer
         # names as its follow-up: fan off once the nozzle is at or below
@@ -7314,6 +7408,16 @@ def monitor_print(
         goal_line = _format_goal_line_for_monitor(effective_brief_id)
         if goal_line:
             lines.append(goal_line)
+        # A print carrying a hardware plan says, in its own line, when the
+        # next stop comes and what goes in -- or, at the stop, the steps.
+        from kiln.hardware_stops import observe as _observe_hardware
+
+        _hardware = _observe_hardware(adapter, state, job)
+        if _hardware:
+            lines.append(f"- Hardware: {_hardware['say']}")
+            lines.extend(f"  {n}. {step}" for n, step in enumerate(_hardware.get("steps") or (), 1))
+            if _hardware.get("resume"):
+                lines.append(f"  {_hardware['resume']}")
 
         lines.extend(
             [
@@ -7854,12 +7958,50 @@ def _ams_tray_rows(ams_result: dict[str, Any]) -> list[tuple[int, str, dict[str,
     return rows
 
 
+def _unsuppliable_colour_words(
+    plan: Any,
+    wanted: list[Any],
+    trays: list[Any],
+    *,
+    adapter: Any = None,
+    printer_name: str | None = None,
+    offer: bool = True,
+) -> str:
+    """What to tell a person about the colours *plan* could not supply.
+
+    Worded by :func:`kiln.colour_availability.not_loaded_say`, so a print
+    door says what a colouring says about the same colours: a spool on
+    record is named with a reminder to load it, a colour with nothing on
+    record gets one offer of help.  The gate's decision is the plan's; this
+    is only its words.  Falls back to the plain instruction when there is
+    nothing more to say.
+    """
+    words = ""
+    try:
+        if printer_name is None:
+            registered = getattr(adapter, "_kiln_registered_name", None)
+            printer_name = registered if isinstance(registered, str) and registered else None
+        from kiln.colour_availability import not_loaded_say
+
+        in_use = {m.get("slot") for m in plan.matches if m.get("slot") is not None}
+        words = not_loaded_say(
+            [wanted[i] for i in plan.unmatched if i < len(wanted)],
+            printer_name=printer_name,
+            loaded=[f"#{t.hex6}" for t in trays if t.tray_id in in_use and t.hex6],
+            offer=offer,
+        )
+    except Exception:  # noqa: BLE001 -- words never change or break the gate's decision
+        logger.debug("unsupplied colours not worded", exc_info=True)
+    return words or "Load the missing colour."
+
+
 def _undriven_multi_material_decision(
     mm: Any,
     ams_mapping: list[int] | None,
     *,
     file_path: str | None = None,
     wanted: list[Any] | None = None,
+    adapter: Any = None,
 ) -> dict[str, Any]:
     """The routing decision for a printer whose filament changes Kiln does not drive.
 
@@ -7910,11 +8052,13 @@ def _undriven_multi_material_decision(
             warnings_out.extend(plan.warnings)
         elif len(wanted) >= 2:
             out["blocked"] = True
+            load = _unsuppliable_colour_words(plan, list(wanted), list(mm.slots), adapter=adapter)
             warnings_out.append(
                 f"This file needs {len(wanted)} filaments and the {mm.label}'s "
-                f"loaded slots cannot supply them all: {plan.summary}. Load the "
-                f"missing colour, or remap the unit's tool map yourself — Kiln "
-                f"does not drive this unit and cannot substitute a slot for you."
+                f"loaded slots cannot supply them all: {plan.summary}. {load} "
+                f"To print it with a substitute instead, remap the unit's tool "
+                f"map yourself — Kiln does not drive this unit and cannot "
+                f"substitute a slot for you."
             )
             warnings_out.extend(plan.warnings)
         else:
@@ -8071,7 +8215,7 @@ def _resolve_use_ams(
 
         return _undriven_multi_material_decision(
             multi_material_status(adapter), ams_mapping,
-            file_path=file_path, wanted=wanted,
+            file_path=file_path, wanted=wanted, adapter=adapter,
         )
 
     try:
@@ -8219,15 +8363,15 @@ def _resolve_use_ams(
             # A partial mapping is a wrong print.  Say which colour is
             # missing and stop; the caller decides what to do about it.
             logger.warning("AMS colour routing blocked: %s", plan.summary)
+            load = _unsuppliable_colour_words(plan, wanted, trays, adapter=adapter)
             return {
                 "use_ams": True,
                 "ams_mapping": None,
                 "warnings": [
                     "This file needs "
                     f"{len(wanted)} filaments and the loaded spools cannot "
-                    f"supply them all: {plan.summary}. Load the missing "
-                    "colour, or pass an explicit ams_mapping to print it "
-                    "with a substitute."
+                    f"supply them all: {plan.summary}. {load} To print it "
+                    "with a substitute instead, pass an explicit ams_mapping."
                 ]
                 + plan.warnings,
                 "selection": None,
@@ -8287,8 +8431,9 @@ def _spool_advisory(
 ) -> dict[str, Any] | None:
     """Say whether *colours* are loaded on the printer, for a colouring tool.
 
-    The colouring tools call this the moment a colour is chosen, so "make
-    it red" answers "made it red; no red is loaded on default" instead of
+    The reading under :func:`kiln.colour_availability.colour_availability`,
+    which every colouring door attaches the moment a colour is chosen, so
+    "make it red" is answered with whether red is on the printer instead of
     leaving the miss for a warning at print time.  Advice only — the
     print gate (:func:`_resolve_use_ams`) still decides, on whatever
     printer is in front of the job when it starts.
@@ -8855,7 +9000,7 @@ def start_print(
         # the command; ``resolve_print_start`` needs it to know which it has.
         sent_at = time.monotonic()
         result = adapter.start_print(file_name, **print_kwargs)
-        _note_print_started(adapter)
+        _note_print_started(adapter, result)
 
         # Layer 5, the print watchdog, attaches inside adapter.start_print --
         # a started hook, see _install_print_lifecycle_hooks -- so it follows
@@ -9810,9 +9955,15 @@ def _pause_print_on(
 def pause_print(keep_temps: bool = True, printer_name: str | None = None) -> dict:
     """Pause the currently running print job.
 
-    Pausing lifts the nozzle and parks the head.
+    What happens next is decided by the printer's own firmware, not by
+    Kiln, and it differs a lot between machines.  Some lift the nozzle
+    and park the head; others leave it resting on the part.  Many lower
+    or switch off the nozzle heater while paused, and some switch the
+    heaters and motors off after a timeout, after which the print may
+    not be able to resume.  Do not tell the person the head will park or
+    that temperatures will hold; check ``printer_status`` instead.
 
-    Heater behaviour during pause varies by firmware:
+    One measured case:
 
       - Bambu A1 / A1 mini: the firmware sets a ~90°C hotend standby
         target IMMEDIATELY on pause, regardless of slicer settings (the
@@ -9825,10 +9976,6 @@ def pause_print(keep_temps: bool = True, printer_name: str | None = None) -> dic
         measurement says the damage starts at once.  A resume onto a
         cooled nozzle can't extrude until it re-heats — and bed adhesion
         can fail in the meantime.
-      - Bambu X1/P1 series: typically holds both targets, but a long
-        idle can still trigger cooldown.
-      - OctoPrint / Moonraker / Klipper: depends on firmware config;
-        most hold targets across pause.
 
     To fight this, ``pause_print`` spawns a best-effort daemon thread
     that re-asserts the pre-pause hotend + bed targets immediately, and
@@ -9836,7 +9983,9 @@ def pause_print(keep_temps: bool = True, printer_name: str | None = None) -> dic
     (resume, cancel, error, or manual button press).  This is enabled by
     default.  The immediate assert is the part that matters on an A1:
     without it, a pause shorter than the interval got no protection at
-    all, which is most pauses a person actually takes.
+    all, which is most pauses a person actually takes.  It can only help
+    on a printer Kiln can set temperatures on: Prusa Link offers no way
+    to, so on a Prusa the keep-alive does nothing.
 
     Args:
         keep_temps: When ``True`` (default), capture the pre-pause tool
@@ -9985,7 +10134,7 @@ def skip_print_objects(object_ids: list[str], plate_number: int = 1) -> dict:
 
 
 def _resume_print_on(
-    adapter: PrinterAdapter, target_name: str, *, force: bool = False,
+    adapter: PrinterAdapter, target_name: str, *, force: bool = False, hardware_confirmed: bool = False,
 ) -> dict:
     """Resume the print on *adapter*, refusing a latched machine.
 
@@ -10002,7 +10151,10 @@ def _resume_print_on(
     if block := _emergency_latch_error("resume_print", target_name):
         return block
 
-    result = adapter.resume_print(force=force)
+    # The person's word on a hardware stop rides only when given, so an
+    # adapter written before the stop existed keeps its two-argument resume.
+    confirmed = {"hardware_confirmed": True} if hardware_confirmed else {}
+    result = adapter.resume_print(force=force, **confirmed)
     # Stop this printer's pause keep-alive thread if one was running —
     # the print is back under firmware control and re-asserting targets
     # here would race with the resume preamble gcode.
@@ -10019,7 +10171,9 @@ def _resume_print_on(
 
 
 @mcp.tool()
-def resume_print(force: bool = False, printer_name: str | None = None) -> dict:
+def resume_print(
+    force: bool = False, printer_name: str | None = None, hardware_confirmed: bool = False,
+) -> dict:
     """Resume a paused print job.
 
     The printer must currently be in a paused state.  Resuming will return
@@ -10029,6 +10183,13 @@ def resume_print(force: bool = False, printer_name: str | None = None) -> dict:
     silently ignored the command reports a failure instead of a cheerful
     "Print resumed."
 
+    A print paused at a planned hardware stop (a pause written into the file
+    so a nut, a magnet or a bearing can go in) is refused with
+    ``code: "HARDWARE_NOT_CONFIRMED"`` and a ``hardware`` block saying what
+    goes in.  Tell the person, wait for them to say every piece is in and
+    sits level with or below the top of the print, then resume with
+    ``hardware_confirmed=true``.  Never pass it on your own judgement.
+
     Args:
         force: Send the resume even when Kiln believes the printer is not
             paused.  Use this when the printer's own screen disagrees with
@@ -10037,6 +10198,9 @@ def resume_print(force: bool = False, printer_name: str | None = None) -> dict:
             the wrong state word would leave you unable to recover the print.
         printer_name: Which printer to resume.  Omit for the default
             printer.  Pass the same name you paused with.
+        hardware_confirmed: The person has said every piece of hardware for
+            this stop is in and sits level with or below the top of the
+            print.  Only on their word.
     """
     if err := _check_auth("print"):
         return err
@@ -10058,7 +10222,7 @@ def resume_print(force: bool = False, printer_name: str | None = None) -> dict:
             adapter, target_name = _resolve_control_target(printer_name)
         except PrinterNotFoundError:
             return _unknown_printer_error(printer_name, "resume a print on")
-        return _resume_print_on(adapter, target_name, force=force)
+        return _resume_print_on(adapter, target_name, force=force, hardware_confirmed=hardware_confirmed)
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to resume print: {exc}. Check that the printer is in a paused state.")
     except Exception as exc:
@@ -10703,6 +10867,13 @@ def wrap_gcode_as_3mf(
     Returns a dict with ``output_path`` pointing to the generated 3MF.
     Use ``upload_file()`` to send it to the printer, then ``start_print()``
     to begin printing.
+
+    When ``filament_colors`` are given, the result says whether they are on
+    the printer, as ``colour_availability`` (absent when Kiln cannot see
+    what is loaded).  Relay its ``say`` as written and add nothing about
+    filament: never suggest buying filament unless the person asks for one
+    or says yes to the offer in ``say``.  On a yes, call
+    ``find_closest_filaments`` with these colours and the print's material.
     """
     if err := _check_auth("files"):
         return err
@@ -10797,10 +10968,20 @@ def wrap_gcode_as_3mf(
             "num_filaments": num_filaments,
         }
         if filament_colors:
-            # The colours were chosen here; say now whether they are loaded.
-            advisory = _spool_advisory(list(filament_colors), adapter=adapter)
-            if advisory:
-                result["ams_advisory"] = advisory
+            # The colours were chosen here; say now whether they are on the
+            # printer.  The material counts only when the print has one.
+            from kiln.colour_availability import attach_colour_availability
+
+            types = {str(t).strip().upper() for t in (filament_types or []) if t}
+            if len(types) > 1:
+                material = None  # several materials: no one material to hold a spool to
+            elif types:
+                material = next(iter(types))
+            else:
+                material = result.get("filament_type")
+            attach_colour_availability(
+                result, list(filament_colors), adapter=adapter, material=material,
+            )
         return result
     except FileNotFoundError as exc:
         return _error_dict(f"G-code file not found: {exc}")
@@ -13440,7 +13621,9 @@ def download_and_upload(
 
     When ``file_id`` is provided, downloads and uploads that single file.
     When ``model_id`` is provided without ``file_id``, downloads and
-    uploads all printable files (.stl, .gcode, .3mf) for the model.
+    uploads all printable files (.stl, .gcode, .3mf, .glb) for the model.
+    A GLB goes to the printer as an STL beside it, never as a GLB; the
+    upload's ``conversion`` names the original, which stays on disk.
 
     Args:
         file_id: File ID (from ``model_files`` results).  For Thingiverse
@@ -13488,8 +13671,9 @@ def download_and_upload(
                     code="NOT_FOUND",
                 )
 
-            # Filter to printable extensions
-            _printable_exts = {"stl", "gcode", "gco", "g", "3mf"}
+            # Filter to printable extensions.  A GLB counts: it is uploaded
+            # as the STL it is converted to.
+            _printable_exts = {"stl", "gcode", "gco", "g", "3mf"} | ARRIVAL_CONVERSIONS
             printable_files = [
                 mf
                 for mf in all_files
@@ -13497,7 +13681,7 @@ def download_and_upload(
             ]
             if not printable_files:
                 return _error_dict(
-                    f"No printable files (.stl, .gcode, .3mf) found for model {model_id} on {source}.",
+                    f"No printable files (.stl, .gcode, .3mf, .glb) found for model {model_id} on {source}.",
                     code="NOT_FOUND",
                 )
 
@@ -13505,7 +13689,9 @@ def download_and_upload(
             errors: list[dict] = []
             for mf in printable_files:
                 try:
-                    local_path = mkt.download_file(mf.id, _dl_dir)
+                    local_path, conversion = convert_on_arrival(
+                        mkt.download_file(mf.id, _dl_dir), tool="download_and_upload"
+                    )
                     upload_result = adapter.upload_file(local_path)
                     up_name = upload_result.file_name or os.path.basename(local_path)
                     uploaded.append(
@@ -13514,9 +13700,10 @@ def download_and_upload(
                             "file_name": up_name,
                             "local_path": local_path,
                             "upload": upload_result.to_dict(),
+                            **({"conversion": conversion} if conversion else {}),
                         }
                     )
-                except (MarketplaceError, PrinterError, RuntimeError) as exc:
+                except (MarketplaceError, PrinterError, RuntimeError, ValueError, OSError) as exc:
                     errors.append(
                         {
                             "file_id": mf.id,
@@ -13554,20 +13741,23 @@ def download_and_upload(
                 code="INVALID_INPUT",
             )
 
-        mkt = _marketplace_registry.get(source) if source != "thingiverse" else None
+        # Step 1: Download from the marketplace the file belongs to
+        local_path, mkt = _download_marketplace_file(source, file_id, _dl_dir)
+        if local_path is None:
+            return _error_dict(
+                f"{mkt.display_name} does not support direct downloads.",
+                code="UNSUPPORTED",
+            )
 
-        # Step 1: Download from marketplace
-        if mkt is not None:
-            if not mkt.supports_download:
-                return _error_dict(
-                    f"{mkt.display_name} does not support direct downloads.",
-                    code="UNSUPPORTED",
-                )
-            local_path = mkt.download_file(str(file_id), _dl_dir)
-        else:
-            # Fallback to legacy Thingiverse client
-            client = _get_thingiverse()
-            local_path = client.download_file(int(file_id), _dl_dir)
+        # Step 1.5: a GLB goes to the printer as an STL, never as a GLB.
+        try:
+            local_path, conversion = convert_on_arrival(local_path, tool="download_and_upload")
+        except (ValueError, OSError) as exc:
+            return _error_dict(
+                f"{os.path.basename(local_path)} could not be turned into an STL ({exc}), "
+                "so it was not sent to the printer.",
+                code="CONVERSION_FAILED",
+            )
 
         # Step 2: Upload to printer
         upload_result = adapter.upload_file(local_path)
@@ -13626,7 +13816,7 @@ def download_and_upload(
             )
             sent_at = time.monotonic()
             print_res = adapter.start_print(file_name)
-            _note_print_started(adapter)
+            _note_print_started(adapter, print_res)
             print_verdict = resolve_print_start(
                 adapter, print_res, sent_at=sent_at, file_name=file_name,
             )
@@ -13643,6 +13833,8 @@ def download_and_upload(
             "verification_status": "unverified",
             "auto_print_enabled": _AUTO_PRINT_MARKETPLACE,
         }
+        if conversion:
+            resp["conversion"] = conversion
 
         if auto_printed:
             resp["print"] = print_data
@@ -14103,8 +14295,12 @@ def set_material(
         printer_name: Target printer name.
         material: Material type (PLA, PETG, ABS, etc.).
         color: Optional filament color.
-        spool_id: Optional ID of a tracked spool.
-        tool_index: Extruder index for multi-tool printers (default 0).
+        spool_id: Optional ID of a tracked spool (see ``list_spools``).
+            Linking one is what lets Kiln count that spool down as this
+            printer prints from it.
+        tool_index: Extruder index for multi-tool printers (default 0).  On
+            a printer with a multi-material unit, the tray's id as
+            ``ams_status`` reports it.
     """
     if err := _check_auth("write"):
         return err
@@ -14190,7 +14386,18 @@ def check_material_match(
 
 @mcp.tool()
 def list_spools() -> dict:
-    """List all tracked filament spools in inventory."""
+    """List all tracked filament spools in inventory.
+
+    ``remaining_grams`` is what Kiln believes is left on each spool, and
+    ``remaining_determined_by`` says who set it: ``inferred`` is Kiln's own
+    count (what the spool held, less what the prints Kiln started were
+    sliced to use), ``observed`` is the printer's reading of a spool it can
+    measure, ``user_reported`` is what the person said.  A count misses
+    prints started outside Kiln, so report a counted figure as Kiln's
+    count, never as a measurement.  When the person says the figure is
+    wrong, correct it with ``add_spool(spool_id=..., remaining_grams=...)``;
+    when they say a spool is used up, ``remove_spool``.
+    """
     try:
         spools = _get_material_tracker().list_spools()
         return {
@@ -14204,30 +14411,81 @@ def list_spools() -> dict:
 
 @mcp.tool()
 def add_spool(
-    material: str,
+    material: str | None = None,
     color: str | None = None,
     brand: str | None = None,
     weight_grams: float = 1000.0,
     cost_usd: float | None = None,
+    remaining_grams: float | None = None,
+    spool_id: str | None = None,
 ) -> dict:
-    """Add a new filament spool to inventory.
+    """Add a filament spool to inventory, or correct how much is left on one.
+
+    To ADD a spool, give its ``material``.  ``remaining_grams`` is what is
+    left on a spool that is not new; left out, the spool is full.
+
+    To CORRECT a spool already on record, pass its ``spool_id`` (from
+    ``list_spools``) with ``remaining_grams``: the person says they have
+    more left than Kiln shows, or less.  Only the amount changes.  Kiln
+    counts a spool down as the prints it starts use it, and a count drifts,
+    so the person's word wins.  ``remaining_grams=0`` records the spool as
+    used up and keeps it on the list; ``remove_spool`` takes it off.
 
     Args:
-        material: Material type (PLA, PETG, ABS, etc.).
+        material: Material type (PLA, PETG, ABS, etc.).  Required to add.
         color: Filament color.
         brand: Manufacturer brand.
         weight_grams: Total spool weight in grams (default 1000).
         cost_usd: Cost of the spool in USD.
+        remaining_grams: Grams left on the spool.
+        spool_id: A spool already on record whose remaining amount to set.
     """
     if err := _check_auth("write"):
         return err
     try:
-        spool = _get_material_tracker().add_spool(
+        if remaining_grams is not None and remaining_grams < 0:
+            return _error_dict("remaining_grams cannot be negative.", code="VALIDATION_ERROR")
+        tracker = _get_material_tracker()
+        if spool_id:
+            if remaining_grams is None:
+                return _error_dict(
+                    "Give remaining_grams with spool_id: it is the amount left on that spool. "
+                    "To add another spool, leave spool_id out.",
+                    code="VALIDATION_ERROR",
+                )
+            existing = tracker.get_spool(spool_id)
+            if existing is None:
+                return _error_dict(f"Spool {spool_id!r} not found.", code="NOT_FOUND")
+            if remaining_grams > existing.weight_grams:
+                return _error_dict(
+                    f"{remaining_grams:g} g is more than the {existing.weight_grams:g} g this spool was "
+                    "recorded with. Add it as a new spool with its real weight instead.",
+                    code="VALIDATION_ERROR",
+                )
+            updated = tracker.set_spool_remaining(
+                spool_id,
+                remaining_grams,
+                # Stated at the writer: a caller of this tool is a person or
+                # an agent saying what is left.  No sensor is involved.
+                determined_by="user_reported",
+            )
+            if updated is None:
+                return _error_dict(f"Spool {spool_id!r} not found.", code="NOT_FOUND")
+            return {"success": True, "spool": updated.to_dict(), "updated": True}
+        if not material or not str(material).strip():
+            return _error_dict("Give the spool's material (PLA, PETG, ...) to add it.", code="VALIDATION_ERROR")
+        if remaining_grams is not None and remaining_grams > weight_grams:
+            return _error_dict(
+                f"remaining_grams ({remaining_grams:g}) cannot be more than weight_grams ({weight_grams:g}).",
+                code="VALIDATION_ERROR",
+            )
+        spool = tracker.add_spool(
             material_type=material,
             color=color,
             brand=brand,
             weight_grams=weight_grams,
             cost_usd=cost_usd,
+            remaining_grams=remaining_grams,
         )
         return {"success": True, "spool": spool.to_dict()}
     except Exception as exc:
@@ -14238,6 +14496,13 @@ def add_spool(
 @mcp.tool()
 def remove_spool(spool_id: str) -> dict:
     """Remove a filament spool from inventory.
+
+    When the person says a spool is used up, finished or gone, remove it
+    here (``list_spools`` gives its id) so Kiln stops treating it as
+    filament they have.  If they have more or less left than Kiln shows,
+    correct the figure with ``add_spool(spool_id=..., remaining_grams=...)``
+    instead.  A used-up spool is not a reason to suggest buying filament:
+    say nothing about that unless the person asks.
 
     Args:
         spool_id: The spool's unique identifier.
@@ -14700,6 +14965,13 @@ def await_print_completion(
     Returns a dict with ``outcome`` (completed / failed / cancelled /
     timeout), final printer state, elapsed time, completion percentage
     history, and (when ``brief_id`` resolves) a ``design_goal`` block.
+
+    A print carrying a hardware plan (pauses written in for nuts, magnets or
+    bearings) also returns early with ``outcome: "hardware_stop"`` and a
+    ``hardware`` block: when a stop is a few minutes away, when the printer
+    has stopped for the parts, and when it went past a stop without
+    stopping.  Tell the person what the block says, then wait again.  A
+    finished print's ``hardware`` block names what goes in after the print.
     """
     if err := _check_auth("print"):
         return err
@@ -14833,6 +15105,28 @@ def await_print_completion(
                 )
                 last_pct = pct
 
+            # A print carrying a hardware plan comes back to the person at its
+            # moments: a stop close enough to get ready for, a stop gone past
+            # without stopping, and the stop itself -- every time, since a
+            # printer waiting there resumes only by a person's hands and
+            # waiting here would only run the clock out.
+            from kiln.hardware_stops import observe as _observe_hardware
+
+            hardware = _observe_hardware(adapter, state, job_progress, announce="chat")
+            if hardware and (
+                hardware["stage"] == "now"
+                or (hardware["new"] and hardware["stage"] in ("coming_up", "missed", "passed_unseen"))
+            ):
+                return {
+                    "success": True,
+                    "outcome": "hardware_stop",
+                    "hardware": hardware,
+                    "message": hardware["say"],
+                    "state": state.state.value,
+                    "elapsed_seconds": round(elapsed, 1),
+                    "progress_log": progress_log[-20:],
+                }
+
             # ``confirmed_state``: it looks through a FAULT headline, so a
             # fault raised while the machine kept working still matches here,
             # and it is as strict about staleness as the bare state word was:
@@ -14846,13 +15140,16 @@ def await_print_completion(
                 # covers every caller that polls, not just this tool, and it
                 # refuses a duration when the ending was noticed too late to
                 # have been watched; this call site could do neither.
-                return _attach_goal({
+                done = {
                     "success": True,
                     "outcome": "completed",
                     "state": state.state.value,
                     "elapsed_seconds": round(elapsed, 1),
                     "progress_log": progress_log[-20:],
-                })
+                }
+                if hardware and hardware["stage"] == "after_print":
+                    done["hardware"] = hardware
+                return _attach_goal(done)
             # ``confirmed_state``: it looks through a FAULT headline, so a
             # fault raised while the machine kept working still matches here,
             # and it is as strict about staleness as the bare state word was:
@@ -16644,6 +16941,7 @@ def compose_multicolor_3mf(
     plate_width: float = 256.0,
     plate_depth: float = 256.0,
     printer_id: str = "",
+    material: str = "",
 ) -> dict:
     """Compose a multi-color / multi-material .3mf from multiple STL files.
 
@@ -16689,6 +16987,9 @@ def compose_multicolor_3mf(
         plate_width: Print plate X dimension in mm (default 256 for legacy
             callers without a printer id).
         plate_depth: Print plate Y dimension in mm (default 256).
+        material: Optional material the parts will be printed in (e.g.
+            ``"PETG"``).  A spool on record in a clearly different
+            material is then not named as one to load.
         printer_id: Optional supported printer model id.  When it resolves,
             its build volume overrides ``plate_width`` / ``plate_depth``.
             The composer centres an off-plate group on THIS plate, so name
@@ -16698,7 +16999,13 @@ def compose_multicolor_3mf(
 
     Returns:
         Dict with ``success``, ``output_path``, ``parts``, ``total_triangles``,
-        ``total_vertices``, ``extruder_map``, and ``message``.
+        ``total_vertices``, ``extruder_map``, and ``message``.  It also says
+        whether the part colours are on the printer, as
+        ``colour_availability`` (absent when Kiln cannot see what is loaded).
+        Relay its ``say`` as written and add nothing about filament: never
+        suggest buying filament unless the person asks for one or says yes
+        to the offer in ``say``.  On a yes, call ``find_closest_filaments``
+        with these colours and the print's material.
     """
     _check_auth("design:compose")
 
@@ -16739,16 +17046,15 @@ def compose_multicolor_3mf(
         printer_id=printer_id or None,
     )
     if result.get("success"):
-        # The part colours were chosen here; say now whether they are loaded.
-        try:
-            advisory = _spool_advisory(
-                [p.get("color") for p in parts], printer_name=printer_id or None,
-            )
-        except Exception as exc:  # advice never fails a good composition
-            logger.debug("compose: spool advisory skipped (%s)", exc)
-            advisory = None
-        if advisory:
-            result["ams_advisory"] = advisory
+        # The part colours were chosen here; say now whether they are on
+        # the printer.  A part's ``material`` is a display label ("PLA
+        # Grey"), not the print's material, so it is not passed.
+        from kiln.colour_availability import attach_colour_availability
+
+        attach_colour_availability(
+            result, [p.get("color") for p in parts], printer_name=printer_id or None,
+            material=material or None,
+        )
     return result
 
 
@@ -18157,16 +18463,22 @@ def _served_wait_seconds(tool_name: str) -> float:
 
 
 def _pro_api_call(
-    tool_name: str, _timeout: float | None = None, _background: bool = False, **kwargs,
+    tool_name: str,
+    _timeout: float | None = None,
+    _asked_by_user: bool = True,
+    **kwargs,
 ) -> dict:
     """Call a hosted kiln-pro tool through the public REST API.
 
     ``_timeout`` is how long to wait for the answer.  Left out, it follows
     what the tool does (:func:`_served_wait_seconds`); a caller that must
     fail fast -- a check made on the way into a print -- passes its own.
-    ``_background`` marks a lookup the person did not reach for (a slice
-    asking for its printer's own figures): refused for want of a sign-in, it
-    is not counted as an account wall the person hit.
+
+    ``_asked_by_user=False`` marks an ask the person never made -- extra
+    information a tool fetches on its own, like the blade status behind a
+    pre-flight.  Without a sign-in it gets the same answer, but it is not
+    counted as someone reaching for the feature: that counter
+    (:func:`kiln.daily_stats.record_account_wall`) means a person asked.
 
     Bearer-token resolution order:
       1. ``KILN_LICENSE_KEY`` env var (operator-supplied license)
@@ -18230,14 +18542,15 @@ def _pro_api_call(
     if not bearer:
         # The most-hit refusal in the product, and until now the only one
         # that recorded nothing: it returns here without ever reaching a
-        # server, so no server-side counter could see it.  Best-effort.
-        try:
-            from kiln.daily_stats import record_account_wall
+        # server, so no server-side counter could see it.  Best-effort, and
+        # only for an ask a person made (see ``_asked_by_user``).
+        if _asked_by_user:
+            try:
+                from kiln.daily_stats import record_account_wall
 
-            if not _background:
                 record_account_wall(tool_name)
-        except Exception:
-            pass
+            except Exception:
+                pass
         required_tier = _PRO_TOOL_TIERS.get(tool_name, "")
         allowance = _PRO_TOOL_QUOTA.get(tool_name)
         # Two audiences, two fields — the same split ``_tier_required_error``

@@ -486,6 +486,7 @@ HOSTED_DOORS: dict[str, tuple[str, str]] = {
     "kiln._pro_placement_bridge": ("served_answer", "the plate-clearance verdict for slicing beside a part left on the plate"),
     "kiln._pro_cost_bridge": ("served_answer", "cost intelligence for a print file's estimate; the estimate itself is the floor"),
     "kiln._pro_melt_bridge": ("served_answer", "a printer's own melt rates for a slice; the material's cautious figure is the floor"),
+    "kiln._pro_camera_bridge": ("served_answer", "whether a printer model ships with a camera, for always allow; a miss asks the person instead"),
     "kiln.stage_link": ("served_answer", "browser stage links; the four served causes word through here, the local stage is the floor"),
     "kiln.stage_cache": ("infrastructure", "the stage document upload behind stage_link; its refusals surface through stage_link"),
     "kiln.monitor_twin": ("infrastructure", "print twins pushed best-effort; the local monitor is the floor"),

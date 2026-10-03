@@ -7,6 +7,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Check that a hinge opens before you print it.**
+
 - **Texture just one part of a model, and painted models keep their colours.** Different textures on different parts is Pro+. See https://kiln3d.com/pricing.
 
 - **Paint a model by saying which part.** Ask Kiln to make the inside red and the handle blue and it knows which surfaces you mean; when a word could mean more than one, it asks.
@@ -305,6 +307,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   https://kiln3d.com/pricing.
 
 ### Fixed
+
+- **A GLB model, downloaded or generated, now opens on the 3D stage and slices.** Kiln saves an STL copy beside the original and never overwrites a file the listing came with.
+
+- **A GLB that arrives tiny is read in metres, the unit its format uses.** Kiln tells you the size it would be and how to set it; it never rescales on its own.
+
+- **A MyMiniFactory file download goes to MyMiniFactory.** It used to ask Thingiverse.
 
 - **Parts that nearly fill the bed now print instead of being turned away.**
 

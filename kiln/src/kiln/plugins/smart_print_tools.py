@@ -451,7 +451,7 @@ class _SmartPrintToolsPlugin:
                     f"Failed to start print: {exc}", code="PRINT_ERROR"
                 )
 
-            _srv._note_print_started(adapter)
+            _srv._note_print_started(adapter, print_result)
 
             # ------------------------------------------------------------------
             # 7. Build response message.

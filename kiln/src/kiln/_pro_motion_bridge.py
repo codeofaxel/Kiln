@@ -221,7 +221,7 @@ def _served_plan(request: dict[str, Any]) -> dict[str, Any] | None:
         _misses[key] = Miss("unanswered", detail="the served door could not be opened on this install")
         return None
     try:
-        answer = _pro_api_call("motion_plan", **request)
+        answer = _pro_api_call("motion_plan", _asked_by_user=False, **request)
     except Exception as exc:  # noqa: BLE001 -- the network is a degrade, never a motion
         logger.debug("motion_plan request failed", exc_info=True)
         miss = classify_transport_error(exc)

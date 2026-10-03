@@ -31,6 +31,7 @@ from kiln.printers.base import (
     FilamentOpResult,
     FirmwareComponent,
     FirmwareStatus,
+    HardwareStopRefusal,
     JobProgress,
     JobResult,
     PrinterAdapter,
@@ -43,6 +44,7 @@ from kiln.printers.base import (
     PrintResult,
     UploadResult,
     canonical_model_key,
+    hardware_stop_waiting,
 )
 from kiln.printers.command_verdict import CommandVerdict
 from kiln.printers.safe_motion import build_firmware_resume_positioning
@@ -865,7 +867,7 @@ class SerialPrinterAdapter(PrinterAdapter):
             message="Print paused.",
         )
 
-    def resume_print(self, *, force: bool = False) -> PrintResult:
+    def resume_print(self, *, force: bool = False, hardware_confirmed: bool = False) -> PrintResult:
         """Resume a paused SD print — OVERRIDE of the base template.
 
         Serial has no real printer-state telemetry: pause is tracked by the
@@ -885,9 +887,19 @@ class SerialPrinterAdapter(PrinterAdapter):
         confident sentence built on a signal known to be blind is the failure
         this work exists to remove, not a check.
         """
+        waiting = hardware_stop_waiting(self)
+        if waiting is not None and not hardware_confirmed:
+            from kiln.hardware_stops import refusal_message
+
+            return HardwareStopRefusal(success=False, message=refusal_message(waiting), hardware=waiting)
         if not (self._paused or force):
             return self._no_paused_print_result()
-        return self._resume_print_impl()
+        result = self._resume_print_impl()
+        if waiting is not None and result.success:
+            from kiln.hardware_stops import note_resumed
+
+            note_resumed(self, waiting)
+        return result
 
     def _resume_print_impl(self) -> PrintResult:
         """Resume a previously paused SD print.

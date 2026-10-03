@@ -27,9 +27,13 @@ dialog shows the same plan.  Ahead of time it is a preview; at print start
 it is the decision — the AMS at that moment is the only truth about what is
 loaded.
 
-The colour maths (CIE76 in CIELAB, match tolerance ΔE 28) is the same as
-kiln-pro's palette advisor so the two never disagree about whether a spool
-is "close enough".
+The colour maths is :mod:`kiln.colour_distance`, the one conversion from a
+colour code to CIELAB that both of Kiln's colour questions share: this
+planner's "is that spool the one for this colour?" and the look bands'
+"how close will it look?".  The planner measures plain CIE76 distance and
+takes a spool within :data:`MATCH_DELTA_E`, the same edge kiln-pro's
+palette advisor uses, so the two never disagree about whether a spool is
+"close enough".
 """
 
 from __future__ import annotations
@@ -45,6 +49,7 @@ from typing import Any
 from kiln.bambu_trays import TRAYS_PER_UNIT as _TRAYS_PER_UNIT
 from kiln.bambu_trays import tray_id as _bambu_tray_id
 from kiln.bambu_trays import tray_name as _bambu_tray_name
+from kiln.colour_distance import delta_e_76, hex_to_lab, normalize_hex
 from kiln.gcode import slicer_filament_types
 from kiln.gcode_metadata import read_member_text, sliced_gcode_member
 
@@ -73,7 +78,6 @@ MATCH_DELTA_E = 28.0
 _UNREAD_SENTINEL = "000000"
 
 _RE_COLOUR_LINE = re.compile(r";\s*filament_colou?r\s*=\s*(.+)", re.IGNORECASE)
-_HEX6 = re.compile(r"^[0-9A-F]{6}$")
 
 #: How much of a G-code file to read from each end.  OrcaSlicer, Bambu
 #: Studio and PrusaSlicer write the config block at the END; the header
@@ -86,45 +90,18 @@ _TAIL_BYTES = 256 * 1024
 # Colour maths
 # ---------------------------------------------------------------------------
 
+# ``normalize_hex`` is :func:`kiln.colour_distance.normalize_hex`, re-exported
+# under the name callers already import from here.
 
-def normalize_hex(value: Any) -> str | None:
-    """``RRGGBB`` upper-hex, alpha dropped; ``None`` when it is not a colour.
-
-    Accepts ``#RRGGBB``, ``RRGGBB`` and Bambu's ``RRGGBBAA`` tray colour.
-    """
-    if not isinstance(value, str):
-        return None
-    h = value.strip().lstrip("#").upper()
-    if len(h) >= 6:
-        h = h[:6]
-    if not _HEX6.fullmatch(h):
-        return None
-    return h
-
-
-def _srgb_to_linear(channel: int) -> float:
-    v = channel / 255.0
-    return v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
-
-
-def _lab(hex6: str) -> tuple[float, float, float]:
-    r = _srgb_to_linear(int(hex6[0:2], 16))
-    g = _srgb_to_linear(int(hex6[2:4], 16))
-    b = _srgb_to_linear(int(hex6[4:6], 16))
-    x = (r * 0.4124564 + g * 0.3575761 + b * 0.1804375) / 0.95047
-    y = r * 0.2126729 + g * 0.7151522 + b * 0.0721750
-    z = (r * 0.0193339 + g * 0.1191920 + b * 0.9503041) / 1.08883
-
-    def pivot(t: float) -> float:
-        return t ** (1 / 3) if t > 0.008856 else 7.787 * t + 16 / 116
-
-    fx, fy, fz = pivot(x), pivot(y), pivot(z)
-    return (116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz))
+#: The planner's colour conversion is :func:`kiln.colour_distance.hex_to_lab`
+#: itself, not a copy of it, so the planner and the look bands read one Lab
+#: value for one code.
+_lab = hex_to_lab
 
 
 def _delta_e(a: str, b: str) -> float:
-    la, lb = _lab(a), _lab(b)
-    return ((la[0] - lb[0]) ** 2 + (la[1] - lb[1]) ** 2 + (la[2] - lb[2]) ** 2) ** 0.5
+    """CIE76 distance between two normalised codes: the planner's measure."""
+    return delta_e_76(hex_to_lab(a), hex_to_lab(b))
 
 
 def _colour_name(hex6: str | None) -> str:
@@ -686,8 +663,11 @@ def advise_colours(
             entry["delta_e"] = round(nearest[1], 1) if nearest else None
             missing.append(entry)
         else:
-            tray_hex = by_slot[match["slot"]].hex6
-            entry["nearest_color"] = f"#{tray_hex}" if tray_hex else None
+            tray = by_slot[match["slot"]]
+            entry["nearest_color"] = f"#{tray.hex6}" if tray.hex6 else None
+            # The slot in the printer's own words (``slot B2``), for a
+            # sentence that says where a colour is.
+            entry["where"] = tray.where
             matched.append(entry)
 
     if not missing:

@@ -820,10 +820,16 @@ def plate_word_answer() -> str:
 
 
 #: Words that turn "clear" into something else.  A person who is not sure
-#: has not said the plate is empty.
+#: has not said the plate is empty -- and neither has one who says they
+#: WILL empty it ("I'll clear it later", "once it's clear") or asks for it
+#: to be emptied ("clear the bed for me"): "clear" and "empty" are verbs
+#: too, and only the statement that it IS so counts.
 _NOT_A_CLEAR = re.compile(
     r"\?|\b(not|isn'?t|ain'?t|wasn'?t|never|unsure|maybe|probably|think|guess|should|might|almost|"
-    r"don'?t|doesn'?t|can'?t|cannot|if)\b"
+    r"don'?t|doesn'?t|can'?t|cannot|if|"
+    r"will|won'?t|(i|we|it|that|you)'?ll|gonna|later|tomorrow|soon|once|when|until|unless|before|after|"
+    r"need|needs|must|please|let|wait|(can|could|would) (you|u|we|i)|"
+    r"(to|and|then) (clear|empty)|(clear|empty) (the|my|it|off|out|this|that))\b"
 )
 _A_CLEAR = re.compile(r"\b(clear|cleared|empty|emptied|nothing on)\b")
 
@@ -917,6 +923,132 @@ def camera_of(adapter: Any) -> str | None:
     return source if source in ("user_supplied", "printer") else None
 
 
+#: How Kiln came to know a machine has a camera.
+CAMERA_SEEN = "seen"                # it gave Kiln a picture
+CAMERA_PERSON_SAID = "person_said"  # the person said so, at their own terminal
+_CAMERA_SOURCES = ("printer", "user_supplied")
+
+
+def remember_camera(adapter: Any, source: str | None, how: str = CAMERA_SEEN) -> None:
+    """Keep, for this machine, that a camera exists and whose it is.
+
+    *source* is the adapter's own word for where the picture came from:
+    ``"printer"`` (through the printer's own connection) or
+    ``"user_supplied"`` (a camera the person registered beside it).  The
+    two are kept apart, so a camera on a tripod is never remembered as the
+    printer's own.  A camera once seen is never unlearned by a failed
+    look: a camera that does not answer today is a camera that is not
+    answering, not a printer that never had one.  Written once per source;
+    a look that only confirms what is known writes nothing.  Never raises.
+    """
+    machine = machine_id(adapter)
+    if not machine or source not in _CAMERA_SOURCES:
+        return
+    try:
+        store = _read_store() or {"machines": {}}
+        known = store.setdefault("cameras", {}).setdefault(machine, {})
+        had = known.get(source) if isinstance(known.get(source), dict) else None
+        if had is not None and (had.get("how") == CAMERA_SEEN or how != CAMERA_SEEN):
+            return  # nothing new: already seen, or already said and only said again
+        known[source] = {"how": how, "first_at": (had or {}).get("first_at") or _now_iso()}
+        _write_store(store)
+    except Exception:  # noqa: BLE001 -- forgetting costs one question later; it never breaks a look
+        logger.debug("camera not remembered", exc_info=True)
+
+
+def cameras_on_record(adapter: Any) -> dict[str, dict[str, Any]]:
+    """What :func:`remember_camera` has kept for this machine, by source.
+    Empty when nothing is known.  Never raises."""
+    machine = machine_id(adapter)
+    if not machine:
+        return {}
+    try:
+        known = (_read_store().get("cameras") or {}).get(machine)
+        return {k: dict(v) for k, v in known.items() if k in _CAMERA_SOURCES and isinstance(v, dict)} if isinstance(known, dict) else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def knows_a_camera(adapter: Any) -> str | None:
+    """Which camera Kiln knows this machine has -- whether or not it is
+    answering right now -- or ``None`` when it knows of none.
+
+    ``"user_supplied"``: a camera the person registered, for as long as it
+    is registered.  Taking it away takes the knowledge with it; having
+    once seen through it says nothing about the printer itself.
+    ``"printer"``: the machine's own, known one of four ways -- its
+    backend says every machine it drives leaves the factory with one
+    (``camera_fitted_at_factory``), Kiln has had a picture through the
+    printer's own connection before, the person said it has one, or
+    Kiln's catalogue says its model ships with one (the word kept on this
+    computer; nothing is asked here, see :mod:`kiln._pro_camera_bridge`).
+    ``None`` also for a backend that cannot read a camera at all.
+    """
+    source = camera_of(adapter)
+    if source != "printer":
+        return source  # a registered camera, or no way to read one
+    try:
+        if adapter.camera_fitted_at_factory is True:
+            return "printer"
+    except Exception:  # noqa: BLE001 -- an adapter that cannot say has not said yes
+        pass
+    if "printer" in cameras_on_record(adapter):
+        return "printer"
+    try:
+        from kiln import _pro_camera_bridge
+        from kiln.camera_words import FITTED
+
+        if _pro_camera_bridge.kept_word(adapter.camera_catalogue_model()) == FITTED:
+            return "printer"
+    except Exception:  # noqa: BLE001 -- no word kept is no knowledge
+        pass
+    return None
+
+
+def keep_catalogue_word(model: str, word: str) -> None:
+    """Keep the catalogue's word about a printer MODEL on this computer,
+    with when it was told (:mod:`kiln._pro_camera_bridge` is the one
+    writer).  About a model, not a machine, so it is keyed by the model
+    as the person spelled it.  Never raises."""
+    key = str(model or "").strip().lower()
+    if not key or not word:
+        return
+    try:
+        store = _read_store() or {"machines": {}}
+        store.setdefault("camera_words", {})[key] = {"word": str(word), "at": _now_iso()}
+        _write_store(store)
+    except Exception:  # noqa: BLE001 -- not kept costs one more ask later
+        logger.debug("catalogue camera word not kept", exc_info=True)
+
+
+def catalogue_word_on_record(model: str) -> tuple[str, float] | None:
+    """``(word, seconds since it was told)`` for *model*, or ``None`` when
+    this computer has never been told.  Never raises."""
+    key = str(model or "").strip().lower()
+    if not key:
+        return None
+    try:
+        row = (_read_store().get("camera_words") or {}).get(key)
+        if not isinstance(row, dict) or not isinstance(row.get("word"), str):
+            return None
+        age = _seconds_since(str(row.get("at") or ""))
+        return row["word"], (float("inf") if age is None else max(0.0, age))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _note_still(adapter: Any) -> None:
+    """Count, for Kiln's own learning, that this printer model gave a still
+    picture and through whose camera -- so a model the catalogue has
+    wrong, or does not know, shows up.  Once a day; never raises."""
+    try:
+        from kiln.streaming import note_still
+
+        note_still(adapter)
+    except Exception:  # noqa: BLE001 -- counting never breaks a look
+        logger.debug("still not counted", exc_info=True)
+
+
 def look(adapter: Any) -> PlateLook:
     """Fetch a frame of this machine's plate for someone to look at.
 
@@ -924,7 +1056,8 @@ def look(adapter: Any) -> PlateLook:
     worth looking at, hand it over.  The judging is done by eyes -- the
     agent's or the person's -- and their answer comes back through
     :func:`mark_from_camera`.  Never raises, never moves a head, never
-    writes the record.
+    writes the plate's record.  (A camera that answers with a real picture
+    is remembered as one this machine has: :func:`remember_camera`.)
     """
     camera = camera_of(adapter)
     if camera is None:
@@ -944,6 +1077,11 @@ def look(adapter: Any) -> PlateLook:
         # whether a part is on the bed, and the screen skips that check
         # when it is not told the size.
         verdict = analyze_snapshot(frame, width=size[0] if size else None, height=size[1] if size else None)
+        if verdict.valid:
+            # A real picture came back, usable or not (a capped lens is
+            # still a camera): this machine has one.
+            remember_camera(adapter, camera)
+            _note_still(adapter)
         if not verdict.valid or not verdict.usable_quality:
             # The camera is there and answering, but the frame cannot settle
             # anything -- lens capped, light off, too small to read.  Saying

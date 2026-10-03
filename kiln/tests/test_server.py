@@ -4501,9 +4501,12 @@ class TestWrapGcodeSaysWhetherColoursAreLoaded:
             filament_colors=["#FFFFFF", "#F72323"],
         )
         assert result["success"] is True
-        assert result["ams_advisory"]["verdict"] == "mismatch"
-        assert result["ams_advisory"]["printer"] == "default"
-        assert [m["color"] for m in result["ams_advisory"]["missing"]] == ["#F72323"]
+        availability = result["colour_availability"]
+        assert availability["colours"] == [
+            {"colour": "#FFFFFF", "state": "loaded", "slot": "slot A1"},
+            {"colour": "#F72323", "state": "missing"},
+        ]
+        assert "ams_advisory" not in result
 
     @patch("kiln.server._get_adapter")
     def test_no_colours_given_means_nothing_to_say(self, mock_get_adapter):
@@ -4513,5 +4516,5 @@ class TestWrapGcodeSaysWhetherColoursAreLoaded:
 
         result = wrap_gcode_as_3mf(gcode_path="/tmp/test.gcode")
         assert result["success"] is True
-        assert "ams_advisory" not in result
+        assert "colour_availability" not in result
         adapter.get_ams_status.assert_not_called()

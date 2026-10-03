@@ -117,7 +117,7 @@ def _served(printer_id: str, nozzle_mm: float, material_id: str) -> tuple[tuple[
         return none, Miss("unanswered", _NOT_ASKED, "this install could not open its connection to Kiln's servers")
     try:
         answer = _pro_api_call(
-            WIRE_TOOL, _timeout=_CONSULT_TIMEOUT_S, _background=True,
+            WIRE_TOOL, _timeout=_CONSULT_TIMEOUT_S, _asked_by_user=False,
             printer_model=printer_id, nozzle_mm=nozzle_mm, material=material_id,
         )
     except Exception as exc:  # noqa: BLE001 -- the network is a degrade, never a slice failure

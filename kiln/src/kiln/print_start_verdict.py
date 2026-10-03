@@ -38,6 +38,16 @@ Three states, and every answer is exactly one of them
     The printer, asked after the command went out, is idle or errored — it did
     not take the job.
 
+``failed`` is also the answer, with no reading consulted at all, when Kiln
+turned the start away itself before sending anything (its pre-print safety
+gate, or the sign-off backstop: ``PrintResult.refused_before_send``).  The
+doubt above is about a command that went out and a printer that may be
+running it.  A start Kiln refused sent no command, so there is nothing for a
+stale reading to be mistaken about -- and softening that refusal to
+``accepted`` told callers a blocked print had been taken (seen on an A1,
+2026-10-01: the gate refused a file, nothing was sent, and the answer read
+``success: true, print_start: accepted``).
+
 The softening is ONE-DIRECTIONAL by design: an uncorroborated failure becomes
 ``accepted``, and an ``accepted`` is never promoted to ``started`` on the
 strength of a reading the adapter itself did not confirm.  A false "it failed"
@@ -222,6 +232,21 @@ def resolve_print_start(
     adapter_message = str(getattr(result, "message", "") or "")
     job_id = getattr(result, "job_id", None)
     name = file_name or "the file"
+
+    if not adapter_ok and getattr(result, "refused_before_send", False) is True:
+        # Kiln refused before any command went out.  Nothing was sent, so
+        # the printer has nothing to confirm or refute and is not asked.
+        return PrintStartVerdict(
+            state=FAILED,
+            message=adapter_message or f"Kiln did not start {name}, and sent the printer nothing.",
+            job_id=job_id,
+            evidence={
+                "corroboration": "not_needed",
+                "refused_before_send": True,
+                "adapter_reported_success": False,
+                "adapter_message": adapter_message,
+            },
+        )
 
     status, evidence = _reading_after_command(adapter, sent_at)
     evidence["adapter_reported_success"] = adapter_ok

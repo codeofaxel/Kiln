@@ -60,7 +60,7 @@ def test_the_printers_own_figure_replaces_the_cautious_one(served):
     needs = material_needs("tpu", printer_id="bambu_a1")
     assert _flow(needs) == "3.2"
     assert _flow_need(needs).why == "the figure the printer's maker gives TPU on the Bambu Lab A1"
-    assert calls == [{"tool": "get_printer_melt_rate", "_timeout": melt._CONSULT_TIMEOUT_S, "_background": True,
+    assert calls == [{"tool": "get_printer_melt_rate", "_timeout": melt._CONSULT_TIMEOUT_S, "_asked_by_user": False,
                       "printer_model": "bambu_a1", "nozzle_mm": 0.4, "material": "tpu"}]
 
 
@@ -224,7 +224,7 @@ def test_a_background_lookup_is_not_counted_as_an_account_wall(monkeypatch):
     monkeypatch.setattr(kiln.auth_session, "resolve_api_bearer", lambda *a, **k: SimpleNamespace(token=None, state="unpaired"))
     monkeypatch.setattr(kiln.daily_stats, "record_account_wall", walls.append)
     args = {"printer_model": "bambu_a1", "material": "tpu", "nozzle_mm": 0.4}
-    assert kiln.server._pro_api_call("get_printer_melt_rate", _background=True, **args).get("success") is not True
+    assert kiln.server._pro_api_call("get_printer_melt_rate", _asked_by_user=False, **args).get("success") is not True
     assert walls == []
     kiln.server._pro_api_call("get_printer_melt_rate", **args)
     assert walls == ["get_printer_melt_rate"]

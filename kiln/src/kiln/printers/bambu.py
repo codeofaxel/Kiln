@@ -1737,6 +1737,39 @@ class BambuAdapter(PrinterAdapter):
     # stops on its own — so a late reading keeps counting and must be refused.
     _DURATION_SEMANTICS: ClassVar[str] = "stopwatch"
 
+    @property
+    def camera_fitted_at_factory(self) -> bool | None:
+        """Whether this machine left the factory with a camera of its own.
+
+        Every printer this adapter drives ships with one, so a camera that
+        does not answer is a camera that is not answering -- never a
+        printer without one.  The exception is the X1 (not the X1 Carbon):
+        its chamber camera is an optional upgrade, and Kiln keeps the X1
+        in the X1 Carbon's family (:data:`_BAMBU_MODEL_FAMILIES`).  The
+        serial number tells them apart: a prefix Kiln knows names a model
+        that ships with a camera, the X1 Carbon's own prefix included.  An
+        unknown prefix on a machine declared as X1-family, or declared as
+        nothing, could be the X1: ``None``, which reads as "not known" and
+        leaves it to what Kiln has seen and what its owner says.
+        """
+        prefix = str(getattr(self, "_serial", "") or "")[:3].upper()
+        if _BAMBU_MODEL_FAMILIES.get(prefix) is not None:
+            return True
+        declared = str(getattr(self, "_printer_model", "") or "").lower()
+        if not declared or ("x1" in declared and "x1e" not in declared):
+            return None
+        return True
+
+    def camera_catalogue_model(self) -> str:
+        """The declared model -- except for a machine that could be the X1
+        (see :attr:`camera_fitted_at_factory`).  The catalogue's row for the
+        X1 Carbon's family describes the X1 Carbon, whose camera is fitted;
+        asked about a machine that may be the X1, it would answer for the
+        wrong one.  ``""`` then: nothing is asked, and the owner says."""
+        if self.camera_fitted_at_factory is None:
+            return ""
+        return self.declared_printer_model()
+
     # Opt in to PrinterAdapter's idle connection release: a Bambu rations LAN
     # MQTT clients, so holding one while nobody is calling costs another
     # session its access to the printer.
