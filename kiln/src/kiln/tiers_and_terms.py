@@ -152,7 +152,9 @@ AGENT_SIGNIN_HINT = (
     "Run `kiln signin` for the user — it opens a browser and finishes on its "
     "own. Do not ask them to type a command. On a machine with no browser, "
     "`kiln pair <code>` works instead, with a code from "
-    "https://app.kiln3d.com/connect"
+    "https://app.kiln3d.com/connect. When sign-in finishes, retry the "
+    "request that needed it: the user should not have to ask twice, and if "
+    "their plan does not include it the retry says what it includes."
 )
 
 

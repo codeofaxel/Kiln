@@ -140,3 +140,20 @@ def test_every_public_agent_door_carries_the_offer_first_rule():
         assert TIERS_AND_TERMS in text, door
         assert OFFER_FIRST_LINE in text, door
         assert text.count("OFFER FIRST:") == 1, f"{door}: said more than once"
+
+
+def test_a_sign_in_wall_tells_the_agent_to_retry_the_request(tmp_path, monkeypatch):
+    """One ask, one moment: after signing in, the original request runs again.
+
+    Without this the person signs in and then has to repeat themselves, and a
+    free account learns only on that second ask that the tool is paid.
+    """
+    monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
+    monkeypatch.delenv("KILN_API_URL", raising=False)
+    monkeypatch.delenv("KILN_LICENSE_KEY", raising=False)
+    monkeypatch.setattr(server, "_PRO_TOOL_TIERS", {"paid_thing": "business"})
+    monkeypatch.setattr(server, "_PRO_TOOL_QUOTA", {})
+    monkeypatch.setattr(server, "_PRO_TOOL_NUDGES", {})
+    hint = server._pro_api_call("paid_thing")["agent_hint"]
+    assert "kiln signin" in hint
+    assert "retry the request" in hint
