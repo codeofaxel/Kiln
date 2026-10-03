@@ -1,6 +1,6 @@
 # Kiln Privacy Policy
 
-*Last updated: 2026-10-03 · Version 2.5*
+*Last updated: 2026-10-03 · Version 2.6*
 
 > **Plain-English summary** — Kiln is operated by **Hadron Labs Inc.**, a
 > Delaware C corporation headquartered in California. Most of Kiln runs
@@ -377,12 +377,12 @@ marketing site; the only cookie ever written is your consent record
 (`kiln_consent`) when you save a preference. If no banner appears
 on your visit, no third-party tracking is active for that visit.
 
-When you open the pricing page through a link from Kiln itself — a
-button in the web app or a message from your AI agent — the page tells
-Kiln which link it was: two short labels, such as `web_home` and a tool
-name. We keep only the day, those two labels and a count — no cookie,
-no IP address, nothing about you or your device. If you start a
-checkout from that visit, the same two labels go with it.
+When you open kiln3d.com/pricing, the page tells Kiln which steps of
+choosing a plan were taken — the visit, a plan button, your answer to
+'Are you selling what you print?', the checkout opening and a completed
+payment — and, if a Kiln link brought you, which one. We keep only the
+day, those labels and a count: no cookie, no IP address, nothing stored
+on your device and nothing that links one step to another or to you.
 
 The **web workshop** (`app.kiln3d.com`) uses:
 
@@ -407,7 +407,7 @@ Google Analytics 4 and Meta Pixel — and only with your explicit
 consent (see §3.2). **Neither is loaded on the web workshop
 (`app.kiln3d.com`) at all.** Vercel Web Analytics is first-party,
 cookieless, and the only analytics that runs without consent, apart
-from that count of visits through Kiln's own links — it now covers
+from that count of steps on the pricing page — it now covers
 both the marketing site and the workshop.
 
 ## 9. Your rights
