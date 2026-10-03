@@ -962,7 +962,7 @@ def _build_instructions() -> str:
         "previewed but not asked about, and every print result carries a "
         "`standing_window` block naming it. When the person says to close it, call "
         "`revoke_consent_window`; `consent_window_status` shows what is open. "
-        "Nothing you can call opens or extends one. The person can also turn on "
+        "Nothing you can call opens or extends one. On Kiln Pro the person can also turn on "
         "always allow for one printer, themselves: at a terminal (`kiln consent window "
         "--always --printer NAME`) or on their Kiln account page with their "
         "authenticator. Prints there start without asking until it is "
@@ -3747,11 +3747,23 @@ def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
         if signed_out
         else "in Kiln's web app on their phone or browser, at app.kiln3d.com/settings/agent (Always allow), or "
     )
-    always = (
-        f" To stop being asked on {aimed}, they turn on always allow for it themselves: {web}with "
-        f"`kiln consent window --always --printer {aimed}` in a terminal on the computer Kiln runs on. "
-        'You cannot turn it on; when they say "ask me first", you turn it off.'
-    )
+    from kiln.consent_windows import always_allow_is_yours
+
+    if always_allow_is_yours():
+        always = (
+            f" To stop being asked on {aimed}, they turn on always allow for it themselves: {web}with "
+            f"`kiln consent window --always --printer {aimed}` in a terminal on the computer Kiln runs on. "
+            'You cannot turn it on; when they say "ask me first", you turn it off.'
+        )
+    else:
+        # Below Pro, the way that is open to them -- and no plan named: a
+        # plan is said beside the phone and nowhere else on this text, and
+        # always allow says its own at its own door.
+        always = (
+            f" To stop being asked on {aimed} for a while, they can allow prints there for up to a day "
+            f"themselves: in the approval dialog, or with `kiln consent window --for 2h --printer {aimed}` "
+            "in a terminal on the computer Kiln runs on. You cannot open it."
+        )
     if why.startswith(NOT_ASKED_CODE_SHOWN):
         hook = ""
         if ":hook=" in why:
@@ -4037,6 +4049,8 @@ def _always_allow_dialog_row(aimed: str) -> str | None:
 
         if consent_windows.turned_itself_off(aimed) is not None:
             return "off. A different printer is now set up under this name, so Kiln is asking again"
+        if consent_windows.always_waiting_on_pro(aimed) is not None:
+            return f"on, but {_ALWAYS_ALLOW_NEEDS_SIGNED_IN_PRO}, so Kiln is asking"
         from kiln.plate_state import LOOK_BLIND
 
         look = unasked_look_noted(aimed)
@@ -4057,10 +4071,23 @@ def _always_allow_went_off(aimed: str) -> str:
         if closed is not None:
             line = consent_window_note.turned_off_line(consent_windows.describe_scope(closed.scope))
             return f"Tell the person first: {line} "
+        if consent_windows.always_waiting_on_pro(aimed) is not None:
+            return (
+                f"Tell the person first: always allow on {aimed} is still on, but "
+                f"{_ALWAYS_ALLOW_NEEDS_SIGNED_IN_PRO}, so Kiln is asking. If their account is on Pro, "
+                "`kiln signin` on this computer brings it back. "
+            )
         blind = _always_allow_could_not_see(aimed)
         if blind:
             return f"Tell the person first: {blind} "
     return ""
+
+
+#: Why always allow is asking when it is on and this computer holds no Pro
+#: plan now -- said where the person meets it, in its own words.
+_ALWAYS_ALLOW_NEEDS_SIGNED_IN_PRO = (
+    "it is part of Kiln Pro and this computer is not signed in on a Pro account right now"
+)
 
 
 def _always_allow_could_not_see(aimed: str) -> str:
