@@ -118,3 +118,25 @@ def test_the_sign_in_refusal_link_names_the_tool(tmp_path, monkeypatch):
     result = server._pro_api_call("paid_thing")
     assert result.get("code") == "KILN_ACCOUNT_NOT_PAIRED", result
     assert result["upgrade_url"] == upgrade_link("paid_thing")
+
+
+def test_every_public_agent_door_carries_the_offer_first_rule():
+    """The rule that keeps a paid tool from being quietly rebuilt for free.
+
+    It used to reach only the hosted connector.  A stub's tier is printed in
+    its description, and an agent that reads a tier off the listing never
+    calls the tool, so no refusal ever reaches it: the instructions are the
+    only place this can be said.  Three public doors carry them.
+    """
+    from kiln.agent_loop import _get_default_system_prompt
+    from kiln.tiers_and_terms import OFFER_FIRST_LINE, TIERS_AND_TERMS
+
+    doors = {
+        "MCP instructions (built per connect)": server._build_instructions(),
+        "MCP instructions (static fallback)": server.mcp.instructions or "",
+        "CLI agent default prompt": _get_default_system_prompt(),
+    }
+    for door, text in doors.items():
+        assert TIERS_AND_TERMS in text, door
+        assert OFFER_FIRST_LINE in text, door
+        assert text.count("OFFER FIRST:") == 1, f"{door}: said more than once"

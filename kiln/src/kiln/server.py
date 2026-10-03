@@ -387,6 +387,7 @@ from kiln.thingiverse import (
 )
 from kiln.tiers_and_terms import (
     AGENT_ACCOUNT_NUDGE,
+    OFFER_FIRST_LINE,
     PRICING_URL,
     TIERS_AND_TERMS,
     UPGRADE_NUDGE_SCHEMA_VERSION,
@@ -794,8 +795,11 @@ def ensure_runtime_config() -> None:
 # connector, and the desktop chat prompt are the others); a literal here
 # meant three of the four silently shipped without it.  Aliased so both the
 # dynamic builder (``_build_instructions``) and the static FastMCP fallback
-# below keep reading one definition.
-_TIERS_AND_TERMS = TIERS_AND_TERMS
+# below keep reading one definition.  The offer-first line rides with it: on
+# an install without kiln-pro every paid tool is a stub whose tier is in its
+# description, which is exactly where an agent reads a tier and builds the
+# feature itself without ever calling the tool.
+_TIERS_AND_TERMS = TIERS_AND_TERMS + "\n\n" + OFFER_FIRST_LINE
 
 
 def _build_instructions() -> str:
