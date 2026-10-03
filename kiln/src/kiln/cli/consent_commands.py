@@ -101,7 +101,12 @@ def _resolve_scope(
 
 
 def _refused(exc: Exception, json_mode: bool) -> None:
-    code = "CONSENT_NOT_A_PERSON" if isinstance(exc, consent_windows.NotAPerson) else "CONSENT_INVALID"
+    if isinstance(exc, consent_windows.NotAPerson):
+        code = "CONSENT_NOT_A_PERSON"
+    elif isinstance(exc, consent_windows.NotTheProTier):
+        code = "CONSENT_PRO_REQUIRED"
+    else:
+        code = "CONSENT_INVALID"
     click.echo(format_error(str(exc), code=code, json_mode=json_mode))
     sys.exit(1)
 
@@ -205,6 +210,11 @@ def _turn_on_always(
             "nothing else can turn it on"
         ), json_mode)
         return
+    if not consent_windows.always_allow_is_yours():
+        # Before any question about cameras or names: nobody answers a
+        # screen only to be told at the end.
+        _refused(consent_windows.NotTheProTier(consent_windows.ALWAYS_ALLOW_NEEDS_PRO), json_mode)
+        return
     cameras = {name: _has_camera(name) for name in names}
     # What the screen said, handed to the engine with the names: an entry
     # records "no camera" only for a printer the person read that about.
@@ -224,7 +234,7 @@ def _turn_on_always(
             opened = consent_windows.open_always_for_several(
                 printer_names=names, typed_count=typed, told_no_camera=blind,
             )
-    except (consent_windows.NotAPerson, consent_windows.NotTheFleetTier, ValueError) as exc:
+    except (consent_windows.NotAPerson, consent_windows.NotTheFleetTier, consent_windows.NotTheProTier, ValueError) as exc:
         _refused(exc, json_mode)
         return
     if json_mode:

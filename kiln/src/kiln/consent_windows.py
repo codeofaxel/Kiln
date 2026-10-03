@@ -49,8 +49,10 @@ What a window is:
   (:func:`kiln.print_consent.check_window_length`); a person who wants
   longer opens another when it runs out — or turns on always allow.
 * **Always allow.**  The same record with no end, for ONE printer
-  (:func:`open_always`).  Three things keep it from being the cap with a
-  hole in it.  Only a person's own door opens one — a terminal, where
+  (:func:`open_always`), and part of Kiln Pro: it lets prints start with
+  nobody asked, from wherever the person is, which is what Pro sells
+  (:func:`always_allow_is_yours`, asked at the door and at every start).
+  Three things keep it from being the cap with a hole in it.  Only a person's own door opens one — a terminal, where
   they type the printer's name, or their signed-in account's page, whose
   record this computer keeps a copy of (:func:`mirror_account_always`)
   and confirms with the account at every start.  The dialog and the
@@ -135,13 +137,17 @@ __all__ = [
     "SCOPE_FLEET",
     "SOURCE_DOORS",
     "SOURCE_WEB",
+    "ALWAYS_ALLOW_NEEDS_PRO",
     "NotAPerson",
     "NotTheFleetTier",
+    "NotTheProTier",
     "Window",
     "WindowStore",
     "account_confirms",
     "all_windows",
+    "always_allow_is_yours",
     "always_for",
+    "always_waiting_on_pro",
     "bed_camera",
     "bed_goes_unchecked",
     "covering",
@@ -250,6 +256,54 @@ def _fleet_tier_allows() -> bool:
 
         return int(max_printers_for_tier(get_tier()) or 1) > 1
     except Exception:  # noqa: BLE001 — no licence module, no fleet
+        return False
+
+
+class NotTheProTier(RuntimeError):
+    """Always allow below Kiln Pro."""
+
+
+#: What a person below Pro is told when they try to turn always allow on:
+#: what it does, the tier once, and what Free does instead.
+ALWAYS_ALLOW_NEEDS_PRO = (
+    "Always allow lets your assistant start prints on a printer without asking you first, "
+    "wherever you are. It is part of Kiln Pro (https://kiln3d.com/pricing). On Free, Kiln asks "
+    "before each print, or you can allow prints for a while, up to a day: "
+    "kiln consent window --for 2h --printer NAME"
+)
+
+#: The plans a signed-in account holds that include always allow.
+_PRO_PLANS = frozenset({"pro", "business", "enterprise"})
+
+
+def always_allow_is_yours() -> bool:
+    """Whether the person on this install is on Kiln Pro or above -- what
+    always allow needs.  Asked at the door and again at every start, so an
+    entry stops starting prints unasked once the account leaves Pro, and
+    starts again if it comes back.
+
+    The licence first, the same read the fleet door makes; else the plan
+    the account signed in on this machine holds (``kiln signin``), while
+    that sign-in stands: one the server refused grants nothing.  Never
+    raises."""
+    try:
+        from kiln.licensing import LicenseTier, get_tier
+
+        licensed = get_tier() >= LicenseTier.PRO
+    except Exception:  # noqa: BLE001 — no licence module: the sign-in decides
+        licensed = False
+    if licensed:
+        return True
+    try:
+        from kiln.auth_session import _read_tokens, session_rejected
+
+        stored = _read_tokens()
+        return (
+            bool(str(stored.get("access_token") or "").strip())
+            and not session_rejected(stored)
+            and str(stored.get("tier") or "").strip().lower() in _PRO_PLANS
+        )
+    except Exception:  # noqa: BLE001 — an unreadable sign-in grants no plan
         return False
 
 
@@ -880,11 +934,14 @@ def open_always(*, printer_name: str, typed_name: str, told_no_camera: bool = Fa
     *told_no_camera* is the door saying the screen the person read told
     them Kiln cannot check this printer's bed.  The entry records that
     only if a picture really cannot be had (:func:`_bed_check_for`).
+    Below Kiln Pro, :class:`NotTheProTier`.
     """
     _require_person()
     name = str(printer_name or "").strip()
     if not name:
         raise ValueError("always allow is for one printer; name it")
+    if not always_allow_is_yours():
+        raise NotTheProTier(ALWAYS_ALLOW_NEEDS_PRO)
     if _norm(typed_name) != _norm(name):
         raise ValueError(f"that is not this printer's name ({name}); always allow was not turned on")
     machine = _machine_for_always(name)
@@ -1289,6 +1346,17 @@ def _always_stands(w: Window, printer_name: str | None) -> bool:
     record; a machine Kiln cannot identify is covered by nothing, and the
     person is asked the ordinary way.
     """
+    if not w.account_grant and not always_allow_is_yours():
+        # Pro, asked at every start: an entry from a terminal stops starting
+        # prints unasked when the account leaves Pro.  Left on, not closed,
+        # so it stands again if the account comes back.  The account's own
+        # record is asked of the account, which draws the same line.
+        return False
+    return _covers_its_machine(w, printer_name)
+
+
+def _covers_its_machine(w: Window, printer_name: str | None) -> bool:
+    """:func:`_always_stands` past the plan: the machine half."""
     name = w.scope[0] if isinstance(w.scope, tuple) and w.scope else ""
     under_name = machine_under(name)
     if under_name and under_name != w.machine:
@@ -1334,6 +1402,20 @@ def always_for(printer_name: str | None) -> Window | None:
     return None
 
 
+def always_waiting_on_pro(printer_name: str | None) -> Window | None:
+    """The always-allow entry from a terminal that would cover a start
+    aimed at *printer_name* but for the plan: on, for this machine, and not
+    starting prints because this computer is not signed in on Kiln Pro now
+    (left Pro, or signed out).  What a start says first when it asks
+    anyway.  ``None`` otherwise.  Local only."""
+    if _hosted() or always_allow_is_yours():
+        return None
+    for w in live_windows():
+        if w.always and not w.account_grant and _covers_its_machine(w, printer_name):
+            return w
+    return None
+
+
 def standing_now(now: float | None = None) -> list[Window]:
     """Every window a start could rest on right now — what a status
     surface lists.  The live timed windows, and always allow after its
@@ -1342,6 +1424,8 @@ def standing_now(now: float | None = None) -> list[Window]:
     what the next print would find off."""
     standing: list[Window] = []
     for w in live_windows(now):
+        if w.always and not w.account_grant and not _hosted() and not always_allow_is_yours():
+            continue
         if w.always and not _hosted():
             under_name = machine_under(w.scope[0])
             if under_name and under_name != w.machine:

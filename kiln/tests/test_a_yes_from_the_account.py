@@ -133,6 +133,14 @@ def signed_in(tmp_path):
     return "Bearer " + json.loads((home / "auth_tokens.json").read_text())["access_token"]
 
 
+@pytest.fixture
+def on_pro(signed_in, tmp_path):
+    """The signed-in account is on Kiln Pro, as ``kiln signin`` records it."""
+    path = tmp_path / "auth" / ".kiln" / "auth_tokens.json"
+    path.write_text(json.dumps({**json.loads(path.read_text()), "tier": "pro"}))
+    return signed_in
+
+
 @pytest.fixture(autouse=True)
 def _no_host_on_record():
     from kiln import agent_host
@@ -535,7 +543,7 @@ class TestTheRefusal:
         assert "Kiln Pro" not in r.text and "every plan" not in r.text
 
     @responses.activate
-    def test_always_allow_names_the_web_page_only_for_a_signed_in_machine(self, signed_in, model):
+    def test_always_allow_names_the_web_page_only_for_a_signed_in_machine(self, on_pro, model):
         _may_i()
         _held()
         r = _ask(model)
@@ -543,10 +551,24 @@ class TestTheRefusal:
         assert "kiln consent window --always --printer bench" in r.text
         assert "You cannot turn it on" in r.text and "ask me first" in r.text
 
-    def test_always_allow_on_a_signed_out_machine_names_only_the_terminal(self, model):
+    @responses.activate
+    def test_below_pro_the_way_open_to_them_is_named_and_no_plan(self, signed_in, model):
+        """Always allow is Kiln Pro's; below it the person is told what they
+        can do -- allow prints for a while -- and the plan is not named on
+        this text (it is said beside the phone, and at always allow's own
+        door).  A/B: with the plan check removed from the ask this names
+        always allow to a Free account."""
+        _may_i()
+        _held()
         r = _ask(model)
-        assert "app.kiln3d.com/settings/agent" not in r.text
-        assert "kiln consent window --always --printer bench" in r.text
+        assert "kiln consent window --for 2h --printer bench" in r.text and "approval dialog" in r.text
+        assert "--always" not in r.text and "settings/agent" not in r.text
+        assert r.text.count("Kiln Pro") == 1  # the phone's own line, and no other
+
+    def test_a_signed_out_machine_holds_no_plan_and_is_told_the_way_open_to_it(self, model):
+        r = _ask(model)
+        assert "app.kiln3d.com/settings/agent" not in r.text and "--always" not in r.text
+        assert "kiln consent window --for 2h --printer bench" in r.text
 
     def test_not_signed_in_nothing_is_posted_and_the_refusal_says_signin_once(self, model):
         with responses.RequestsMock(assert_all_requests_are_fired=False) as mock:

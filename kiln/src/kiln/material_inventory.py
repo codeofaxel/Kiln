@@ -613,20 +613,21 @@ def check_material_sufficiency(
 ) -> MaterialCheck:
     """Check if a printer has enough material for a print.
 
-    When the loaded material is insufficient, generates actionable suggestions
-    including alternative printers, shelf stock, and purchase links.
+    When the loaded material is insufficient, says what the person can do
+    with what they have: another printer that has enough loaded, a spool on
+    the shelf, a pause-and-swap.  Only when none of those will do does it
+    offer help finding a filament, as one question: never a store, a link
+    or a list unasked.
     """
     materials = db.list_materials(printer_name)
     loaded_grams: float | None = None
     loaded_type: str | None = material_type
-    loaded_color: str | None = None
 
     # Find the primary tool material (tool_index 0)
     for mat in materials:
         if mat.get("tool_index", 0) == 0:
             loaded_grams = mat.get("remaining_grams")
             loaded_type = mat.get("material_type") or material_type
-            loaded_color = mat.get("color")
             break
 
     if loaded_grams is None:
@@ -662,6 +663,7 @@ def check_material_sufficiency(
         loaded_spool_ids = {
             m.get("spool_id") for m in _get_all_materials(db) if m.get("spool_id")
         }
+        on_the_shelf = False
         for spool in spools:
             spool_mt = (spool.get("material_type") or "").upper()
             if spool_mt != loaded_type.upper():
@@ -670,6 +672,7 @@ def check_material_sufficiency(
                 continue
             rem = spool.get("remaining_grams", 0.0) or 0.0
             if rem >= required_grams:
+                on_the_shelf = True
                 brand = spool.get("brand", "")
                 color = spool.get("color", "")
                 label = " ".join(filter(None, [brand, color]))
@@ -683,11 +686,14 @@ def check_material_sufficiency(
                 "Slice with pause-and-swap at the estimated depletion layer"
             )
 
-        # Purchase links
-        if not alt_printers:
-            urls = _get_purchase_urls(loaded_type, None, loaded_color)
-            for store, url in urls.items():
-                suggestions.append(f"Purchase more on {store}: {url}")
+        # Kiln never reads as if it is selling filament.  When the person
+        # has nothing that will do (no other printer, no spool on the
+        # shelf) they get one offer of help: no store, no link, no list.
+        # A yes is answered by the tools they reach by asking.
+        if not alt_printers and not on_the_shelf:
+            suggestions.append(
+                f"Want help finding a {loaded_type} filament that suits this print?"
+            )
 
     return MaterialCheck(
         sufficient=sufficient,

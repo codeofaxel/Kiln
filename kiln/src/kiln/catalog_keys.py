@@ -12,6 +12,11 @@ token order, a vendor prefix — and never substitutes a family: "Hyper PLA"
 is not ``pla`` to an engineering table, so it returns ``None`` plus the
 nearest ids for the door's error message.  A door that wants a family
 fallback says so in its own words.
+
+For printers, the catalogue's own names are spellings too: every row's
+``display_name`` and every model it lists after a slash ("Prusa MK4 / MK4S"
+lists the MK4S) name that row, read from the catalogue rather than typed
+here, so a printer added tomorrow is found by its name the day it lands.
 """
 
 from __future__ import annotations
@@ -19,15 +24,22 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
-# Vendor words a caller prefixes to a printer id that the catalog keys omit
-# ("creality_k1c" → "k1c").  Keys that DO carry the vendor ("bambu_a1",
-# "prusa_mk4", "elegoo_neptune4") match exactly before this is consulted.
-_PRINTER_VENDOR_PREFIXES: tuple[str, ...] = (
-    "creality_",
-    "bambulab_",
-    "bambu_lab_",
-    "prusa_research_",
+# Vendor words a caller prefixes to a printer id, and the form the catalog
+# keys write that vendor in: none for Creality ("creality_k1c" → "k1c"), a
+# short one for Bambu Lab and Prusa ("bambu_lab_a1" → "bambu_a1",
+# "original_prusa_mk4" → "prusa_mk4").  The vendor-less remainder is tried
+# too, as it always was.  Keys that already carry the catalog's form match
+# exactly before any of this is consulted.
+_PRINTER_VENDOR_FORMS: tuple[tuple[str, str], ...] = (
+    ("creality_", ""),
+    ("bambulab_", "bambu_"),
+    ("bambu_lab_", "bambu_"),
+    ("original_prusa_", "prusa_"),
+    ("prusa_research_", "prusa_"),
 )
+
+#: Catalogue rows that name no one printer: never the answer to a name.
+_NOT_A_PRINTER_NAME = frozenset({"default", "klipper_generic"})
 
 
 def _slug(value: str) -> str:
@@ -88,21 +100,99 @@ def suggest_material_keys(material_id: str, keys: Iterable[str], limit: int = 5)
     return suggest_keys(material_id, keys, limit)
 
 
+def _compact(slug: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", slug)
+
+
+def listed_names(display_name: str) -> list[str]:
+    """Every printer a catalogue display name lists, each written out whole.
+
+    ``"Prusa MK4 / MK4S"`` → ``["Prusa MK4", "Prusa MK4S"]``;
+    ``"Creality Ender 3 / Ender 3 Pro"`` → ``[..., "Creality Ender 3 Pro"]``;
+    ``"Elegoo Neptune 3 / 3 Pro / 3 Plus"`` → ``[..., "Elegoo Neptune 3 Pro",
+    "Elegoo Neptune 3 Plus"]``.  A name after a slash takes the words of the
+    first name that come before its own first word when that word appears
+    there, else every word of the first name but its last.
+    """
+    parts = [p.strip() for p in str(display_name or "").split("/") if p.strip()]
+    if not parts:
+        return []
+    first = parts[0].split()
+    names = [parts[0]]
+    for later in parts[1:]:
+        words = later.split()
+        lead = next(
+            (first[:i] for i, w in enumerate(first) if w.lower() == words[0].lower()),
+            first[:-1],
+        )
+        names.append(" ".join([*lead, *words]))
+    return names
+
+
+_names_cache: tuple[int, dict[str, str | None]] | None = None
+
+
+def _catalogue_names() -> dict[str, str | None]:
+    """``{compact name: catalogue key}`` for every name the catalogue gives
+    its printers.  A name two rows share maps to ``None``: it names neither,
+    and a resolver that picked one would be guessing.  A name that is itself
+    another row's key belongs to that row.  Read from the catalogue the
+    bed-fit and motion doors read, so the two cannot disagree about which
+    printers exist.  Empty when the catalogue cannot be read.
+    """
+    global _names_cache  # noqa: PLW0603
+    try:
+        from kiln.printers.bed_fit import _load_printer_intelligence
+
+        catalogue = _load_printer_intelligence() or {}
+    except Exception:  # noqa: BLE001 -- no catalogue, no names; spelling rules still stand
+        return {}
+    if _names_cache is not None and _names_cache[0] == id(catalogue):
+        return _names_cache[1]
+    rows = {k: v for k, v in catalogue.items() if not k.startswith("_") and k not in _NOT_A_PRINTER_NAME}
+    keys_compact = {_compact(k): k for k in rows}
+    names: dict[str, str | None] = {}
+    for key, row in rows.items():
+        display = row.get("display_name") if isinstance(row, dict) else None
+        for name in listed_names(display or ""):
+            compact = _compact(_slug(name))
+            if not compact or keys_compact.get(compact, key) != key:
+                continue
+            names[compact] = key if names.get(compact, key) == key else None
+    _names_cache = (id(catalogue), names)
+    return names
+
+
 def printer_key_candidates(printer_id: str) -> list[str]:
     """Spellings to try for a printer id, most specific first.
 
-    The normalised form, then with a vendor prefix stripped, then each
-    with the separators removed ("ender 3 v3 ke" → ``ender3v3ke``) so a
-    key spelled ``ender3_v3_ke`` still matches.
+    The normalised form; then with a vendor prefix written the catalog's
+    way, and stripped; then the catalogue row whose own name it is ("Bambu
+    Lab X1 Carbon" → ``bambu_x1c``, "Prusa MK4S" → ``prusa_mk4``).  The
+    resolver also compares each with its separators removed ("ender 3 v3
+    ke" → ``ender3v3ke``) so a key spelled ``ender3_v3_ke`` still matches.
     """
     if not printer_id:
         return []
     slug = _slug(printer_id)
     out: list[str] = [slug]
-    for prefix in _PRINTER_VENDOR_PREFIXES:
+    for prefix, form in _PRINTER_VENDOR_FORMS:
         if slug.startswith(prefix):
-            out.append(slug.removeprefix(prefix))
-    return out
+            rest = slug.removeprefix(prefix)
+            if form:
+                out.append(form + rest)
+            out.append(rest)
+    names = _catalogue_names()
+    for candidate in list(out):
+        named = names.get(_compact(candidate))
+        if named:
+            out.append(named)
+            break
+    ordered: list[str] = []
+    for candidate in out:
+        if candidate and candidate not in ordered:
+            ordered.append(candidate)
+    return ordered
 
 
 def resolve_printer_key(printer_id: str, keys: Iterable[str]) -> str | None:

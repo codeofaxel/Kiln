@@ -15,7 +15,10 @@ way a host calls them:
 * the preview is still required, and every safety check at print start
   still runs — a file the printer would refuse is still refused;
 * every start under it says so on its result and on the audit line;
-* turning it off is one step, from anywhere, the agent included.
+* turning it off is one step, from anywhere, the agent included;
+* it is part of Kiln Pro: refused below it before any question is asked,
+  and an entry stops starting prints when the account leaves Pro
+  (:class:`TestItIsPro`).  Every other test here is on Pro.
 
 A/B: the tests that pin a guard were run with that guard removed and
 observed failing; each says which in its docstring.
@@ -137,6 +140,9 @@ class _Printer(PrinterAdapter):
 _result_line_installed = False
 
 
+#: The real plan read, kept before the file's fixture stands it in.
+_ALWAYS_ALLOW_IS_YOURS = consent_windows.always_allow_is_yours
+
 def _install_result_line() -> None:
     """The hook that puts the standing-window block on a print result, on
     the real server, once — what startup does (``server._start``)."""
@@ -213,6 +219,8 @@ def _isolated(monkeypatch, tmp_path):
     # The real limiter, fresh: another test's starts are not this test's.
     monkeypatch.setattr(server, "_tool_limiter", type(server._tool_limiter)())
     monkeypatch.setattr(consent_windows, "person_at_terminal", lambda: False)
+    # Always allow is Kiln Pro's; the person here is on it (TestItIsPro takes it away).
+    monkeypatch.setattr(consent_windows, "always_allow_is_yours", lambda: True)
     monkeypatch.setattr("kiln.local_stage.host_renders_apps", lambda *a, **k: False)
     monkeypatch.setattr(screen_code, "_show_hook", lambda issued: False)  # never a real banner
     screen_code._reset_for_tests()
@@ -2141,3 +2149,109 @@ class TestFromTheAccountPage:
         self._says_always(account)
         assert [d["job_id"] for d in scheduler.tick()["dispatched"]] == [sent]
         assert garage.started == ["part.gcode"]
+
+
+class TestItIsPro:
+    """Always allow lets prints start with nobody asked, from wherever the
+    person happens to be -- an assistant on this computer can be messaged
+    from anywhere -- so it is part of Kiln Pro (decided 2026-10-02).  Below
+    Pro the person is told so before they answer anything, and allowing
+    prints for a while, up to a day, stays every plan's."""
+
+    @pytest.fixture
+    def on_free(self, monkeypatch):
+        monkeypatch.setattr(consent_windows, "always_allow_is_yours", lambda: False)
+
+    def test_free_is_told_before_any_question(self, garage, at_terminal, on_free, monkeypatch):
+        """A/B: with the command's early ask removed the person answers the
+        camera question and types the name before being told."""
+        monkeypatch.setattr(consent_windows, "bed_camera", lambda name: consent_windows.CAMERA_UNSURE)
+        result = _kiln("consent", "window", "--always", "--printer", "garage", typed="y\ngarage")
+        said = _said(result)
+        assert result.exit_code != 0
+        assert "CONSENT_PRO_REQUIRED" in said and "Kiln Pro" in said and "--for 2h" in said
+        assert "Does garage have a camera" not in said and "Type the printer's name" not in said
+        assert [w for w in consent_windows.live_windows() if w.always] == []
+
+    def test_the_door_itself_refuses_free(self, garage, at_terminal, on_free):
+        """A/B: with the tier ask removed from ``open_always`` this turns it on."""
+        with pytest.raises(consent_windows.NotTheProTier):
+            consent_windows.open_always(printer_name="garage", typed_name="garage")
+        assert [w for w in consent_windows.live_windows() if w.always] == []
+
+    def test_an_entry_stops_starting_prints_when_the_account_leaves_pro(self, garage, at_terminal, monkeypatch):
+        """Left on, not closed: it stands again when the account is back on
+        Pro.  A/B: with the tier ask removed from ``_always_stands`` this is
+        still covered on Free."""
+        entry = _turn_on()
+        assert consent_windows.covering("garage", for_a_start=True) == entry
+        monkeypatch.setattr(consent_windows, "always_allow_is_yours", lambda: False)
+        assert consent_windows.covering("garage", for_a_start=True) is None
+        assert consent_windows.always_for("garage") is None
+        assert entry.id not in [w.id for w in consent_windows.standing_now()]
+        assert consent_windows.get_window(entry.id).revoked_at is None
+        monkeypatch.setattr(consent_windows, "always_allow_is_yours", lambda: True)
+        assert consent_windows.covering("garage", for_a_start=True) == entry
+
+    def test_a_start_says_why_it_is_asking(self, garage, at_terminal, tmp_path, monkeypatch):
+        """On, and asking because this computer holds no Pro plan now: the
+        person hears why, and that signing in brings it back.  A/B: with the
+        plan branch removed from ``_always_allow_went_off`` the reply asks
+        without saying why."""
+        _turn_on()
+        monkeypatch.setattr(consent_windows, "always_allow_is_yours", lambda: False)
+        out = _start(tmp_path)
+        assert out["success"] is False and garage.started == []
+        message = out["error"]["message"]
+        assert "always allow on garage is still on" in message and "part of Kiln Pro" in message
+        assert "`kiln signin`" in message
+
+    def test_the_dialog_says_why_too(self, garage, at_terminal, monkeypatch):
+        """A/B: with the plan branch removed from ``_always_allow_dialog_row``
+        the dialog carries no row for it."""
+        _turn_on()
+        assert server._always_allow_dialog_row("garage") is None
+        monkeypatch.setattr(consent_windows, "always_allow_is_yours", lambda: False)
+        assert "part of Kiln Pro" in (server._always_allow_dialog_row("garage") or "")
+
+    def test_a_while_is_every_plans(self, garage, at_terminal, on_free):
+        window = consent_windows.open_window(seconds=7200, scope=("garage",))
+        assert consent_windows.covering("garage", for_a_start=True) == window
+
+
+class TestWhoseAlwaysAllowItIs:
+    """The plan is read from the licence, else from the account signed in on
+    this computer while that sign-in stands.  Called past the fixture that
+    stands it in for the rest of this file."""
+
+    @pytest.fixture
+    def signed_in_as(self, monkeypatch, tmp_path):
+        import sys
+
+        monkeypatch.setitem(sys.modules, "kiln.licensing", None)  # no licence: the sign-in decides
+        monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path / "auth"))
+        (tmp_path / "auth" / ".kiln").mkdir(parents=True)
+
+        def write(**tokens):
+            (tmp_path / "auth" / ".kiln" / "auth_tokens.json").write_text(json.dumps(tokens))
+
+        return write
+
+    @pytest.mark.parametrize("plan", ["pro", "business", "enterprise"])
+    def test_a_signed_in_paid_plan_is_pro_or_above(self, signed_in_as, plan):
+        signed_in_as(access_token="t", tier=plan)
+        assert _ALWAYS_ALLOW_IS_YOURS() is True
+
+    @pytest.mark.parametrize(
+        "tokens",
+        [{}, {"access_token": "t", "tier": "free"}, {"access_token": "", "tier": "pro"}, {"tier": "pro"}],
+    )
+    def test_free_signed_out_or_no_session_is_not(self, signed_in_as, tokens):
+        signed_in_as(**tokens)
+        assert _ALWAYS_ALLOW_IS_YOURS() is False
+
+    def test_a_sign_in_the_server_refused_grants_nothing(self, signed_in_as, monkeypatch):
+        """A/B: with the refused-session clause removed this reads Pro."""
+        signed_in_as(access_token="t", tier="pro")
+        monkeypatch.setattr("kiln.auth_session.session_rejected", lambda stored=None: True)
+        assert _ALWAYS_ALLOW_IS_YOURS() is False

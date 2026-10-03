@@ -586,6 +586,7 @@ class KilnDB:
         self._migrate_agent_memory()
         self._migrate_print_outcomes()
         self._migrate_printer_materials()
+        self._migrate_spools()
         self._enforce_permissions()
 
     # ------------------------------------------------------------------
@@ -683,6 +684,33 @@ class KilnDB:
         if "determined_by" not in columns:
             self._conn.execute(
                 "ALTER TABLE printer_materials ADD COLUMN determined_by TEXT DEFAULT NULL"
+            )
+        self._conn.commit()
+
+    def _migrate_spools(self) -> None:
+        """Add the remaining_determined_by column to existing spools tables.
+
+        The same vocabulary as the two columns above
+        (:attr:`VALID_DETERMINED_BY`), about a different fact: who last set
+        ``remaining_grams``.  NULL means the row predates the column, which
+        honestly reads as ``user_reported`` -- until Kiln counted prints
+        against a spool, the person adding it was the only writer the figure
+        ever had.
+        """
+        if self._is_postgres:
+            rows = self._conn.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'spools'",
+            ).fetchall()
+            columns = {row[0] for row in rows}
+        else:
+            columns = {
+                row[1]
+                for row in self._conn.execute("PRAGMA table_info(spools)").fetchall()
+            }
+        if "remaining_determined_by" not in columns:
+            self._conn.execute(
+                "ALTER TABLE spools ADD COLUMN remaining_determined_by TEXT DEFAULT NULL"
             )
         self._conn.commit()
 
@@ -835,7 +863,16 @@ class KilnDB:
                     remaining_grams REAL NOT NULL DEFAULT 1000.0,
                     cost_usd        REAL,
                     purchase_date   REAL,
-                    notes           TEXT
+                    notes           TEXT,
+                    remaining_determined_by TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS spool_charges (
+                    printer_name    TEXT PRIMARY KEY,
+                    file_name       TEXT NOT NULL,
+                    started_at      REAL NOT NULL,
+                    state           TEXT NOT NULL DEFAULT 'open',
+                    charges         TEXT NOT NULL DEFAULT '[]'
                 );
 
                 CREATE TABLE IF NOT EXISTS leveling_history (
@@ -1521,9 +1558,11 @@ class KilnDB:
                 """
                 INSERT OR REPLACE INTO spools
                     (id, material_type, color, brand, weight_grams,
-                     remaining_grams, cost_usd, purchase_date, notes)
+                     remaining_grams, cost_usd, purchase_date, notes,
+                     remaining_determined_by)
                 VALUES (:id, :material_type, :color, :brand, :weight_grams,
-                        :remaining_grams, :cost_usd, :purchase_date, :notes)
+                        :remaining_grams, :cost_usd, :purchase_date, :notes,
+                        :remaining_determined_by)
                 """,
                 {
                     "id": spool["id"],
@@ -1535,6 +1574,7 @@ class KilnDB:
                     "cost_usd": spool.get("cost_usd"),
                     "purchase_date": spool.get("purchase_date"),
                     "notes": spool.get("notes", ""),
+                    "remaining_determined_by": spool.get("remaining_determined_by"),
                 },
             )
             self._conn.commit()
@@ -1556,12 +1596,96 @@ class KilnDB:
             self._conn.commit()
             return cur.rowcount > 0
 
-    def update_spool_remaining(self, spool_id: str, remaining_grams: float) -> None:
-        """Update remaining grams for a spool."""
+    def update_spool_remaining(
+        self,
+        spool_id: str,
+        remaining_grams: float,
+        determined_by: str | None = None,
+    ) -> None:
+        """Update remaining grams for a spool.
+
+        ``determined_by`` records who set the figure -- see
+        :attr:`VALID_DETERMINED_BY` and :meth:`_migrate_spools`.  ``None``
+        leaves the stored provenance as it is.
+        """
+        if determined_by and determined_by not in self.VALID_DETERMINED_BY:
+            raise ValueError(
+                f"Invalid determined_by {determined_by!r}. "
+                f"Must be one of: {sorted(self.VALID_DETERMINED_BY)}"
+            )
+        with self._write_lock:
+            if determined_by:
+                self._conn.execute(
+                    "UPDATE spools SET remaining_grams = ?, remaining_determined_by = ? WHERE id = ?",
+                    (remaining_grams, determined_by, spool_id),
+                )
+            else:
+                self._conn.execute(
+                    "UPDATE spools SET remaining_grams = ? WHERE id = ?",
+                    (remaining_grams, spool_id),
+                )
+            self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # Spool charges: what the print Kiln last started on a printer took
+    # ------------------------------------------------------------------
+
+    def save_spool_charge(
+        self,
+        printer_name: str,
+        file_name: str,
+        charges: list[dict[str, Any]],
+        *,
+        state: str = "open",
+        started_at: float | None = None,
+    ) -> None:
+        """Remember what a print Kiln started took from which spools.
+
+        One row per printer: a new start on the same printer replaces the
+        last one, because only the print that is running can be given
+        anything back.  ``state`` and the shape of ``charges`` belong to
+        :mod:`kiln.spool_usage`, the only reader.  ``started_at`` is kept
+        when a row is saved again for the same print.
+        """
         with self._write_lock:
             self._conn.execute(
-                "UPDATE spools SET remaining_grams = ? WHERE id = ?",
-                (remaining_grams, spool_id),
+                """
+                INSERT OR REPLACE INTO spool_charges
+                    (printer_name, file_name, started_at, state, charges)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    printer_name,
+                    file_name,
+                    time.time() if started_at is None else started_at,
+                    state,
+                    json.dumps(charges),
+                ),
+            )
+            self._conn.commit()
+
+    def get_spool_charge(self, printer_name: str) -> dict[str, Any] | None:
+        """The charge remembered for *printer_name*, or ``None``."""
+        row = self._conn.execute(
+            "SELECT * FROM spool_charges WHERE printer_name = ?",
+            (printer_name,),
+        ).fetchone()
+        if not row:
+            return None
+        out = dict(row)
+        try:
+            charges = json.loads(out.get("charges") or "[]")
+        except (TypeError, ValueError):
+            charges = []
+        out["charges"] = charges if isinstance(charges, list) else []
+        return out
+
+    def clear_spool_charge(self, printer_name: str) -> None:
+        """Forget the charge remembered for *printer_name*."""
+        with self._write_lock:
+            self._conn.execute(
+                "DELETE FROM spool_charges WHERE printer_name = ?",
+                (printer_name,),
             )
             self._conn.commit()
 

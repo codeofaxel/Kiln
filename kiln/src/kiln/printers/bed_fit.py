@@ -120,6 +120,15 @@ def _printer_id_candidates(printer_id: str | None) -> list[str]:
         if candidate in aliases:
             candidates.append(aliases[candidate])
 
+    # Then the spellings every other door resolves a printer by: the
+    # catalogue's own names for its rows ("Bambu Lab X1 Carbon", "Prusa
+    # MK4S") and the vendor forms.  Last, so nothing above resolves
+    # differently; a name only this rule knows is no longer a miss here
+    # while it is a hit at the safety and compatibility doors.
+    from kiln.catalog_keys import printer_key_candidates
+
+    candidates.extend(printer_key_candidates(printer_id))
+
     seen: set[str] = set()
     ordered: list[str] = []
     for candidate in candidates:

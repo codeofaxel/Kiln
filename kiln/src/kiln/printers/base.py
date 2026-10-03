@@ -1479,6 +1479,21 @@ class JobProgress:
         return data
 
 
+def hardware_stop_waiting(adapter: Any) -> dict[str, Any] | None:
+    """The stop *adapter*'s printer is paused at, waiting for hardware, or ``None``.
+
+    A function rather than a method, so a stand-in that borrows the resume
+    template keeps working.  Fails OPEN like every resume check: an error here
+    never stands between a person and their own print.
+    """
+    try:
+        from kiln.hardware_stops import stop_awaiting_hands
+
+        return stop_awaiting_hands(adapter)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def read_status(adapter: Any) -> tuple[PrinterState, JobProgress]:
     """Read both halves of a printer's status and make them agree.
 
@@ -1841,6 +1856,18 @@ class PrintResult:
         if not self.refused_before_send:
             out.pop("refused_before_send", None)
         return out
+
+
+@dataclass
+class HardwareStopRefusal(PrintResult):
+    """A resume refused because the printer is waiting at a hardware stop.
+
+    Carries the stop itself (what goes in, how), so every door that resumes
+    can show the person what they are being asked to confirm.
+    """
+
+    code: str = "HARDWARE_NOT_CONFIRMED"
+    hardware: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -2325,6 +2352,95 @@ def _install_engagement_gate(cls: type, *, own_methods_only: bool) -> None:
             continue
         setattr(cls, action, _make_engagement_gated(action, original))
 
+
+def _wrap_cancel_gives_back(cls: type) -> None:
+    """Wrap *cls*'s own ``cancel_print`` so a cancelled print gives filament back.
+
+    Called from ``PrinterAdapter.__init_subclass__``.  Before the stop: when
+    spools were charged for the print on this printer, one job read for how
+    far it has got, because afterwards the printer no longer says.  A
+    printer nothing was charged for is asked nothing; that is decided from
+    the local database.  After a stop that succeeded: the unprinted share
+    goes back (:func:`kiln.spool_usage.after_cancel`).  Neither half can
+    change or fail the stop.
+
+    An emergency stop does not come through here and keeps its whole
+    charge, except on a backend whose only stop IS its cancel.
+    """
+    original = cls.__dict__.get("cancel_print")
+    if (
+        original is None
+        or not callable(original)
+        or getattr(original, "_kiln_spool_wrapped", False)
+        or getattr(original, "__isabstractmethod__", False)
+    ):
+        return
+    import functools
+
+    @functools.wraps(original)
+    def _cancel_and_give_back(self, *args, **kwargs):
+        reading = None
+        try:
+            from kiln.spool_usage import before_cancel
+
+            reading = before_cancel(self)
+        except Exception:  # noqa: BLE001 — bookkeeping never touches a stop
+            import logging as _logging
+
+            _logging.getLogger(__name__).debug(
+                "spool charge not read before a cancel", exc_info=True
+            )
+        result = original(self, *args, **kwargs)
+        if reading is not None and getattr(result, "success", False):
+            try:
+                from kiln.spool_usage import after_cancel
+
+                after_cancel(reading)
+            except Exception:  # noqa: BLE001 — bookkeeping never changes a result
+                import logging as _logging
+
+                _logging.getLogger(__name__).debug(
+                    "spool give-back failed", exc_info=True
+                )
+        return result
+
+    _cancel_and_give_back._kiln_spool_wrapped = True  # type: ignore[attr-defined]
+    cls.cancel_print = _cancel_and_give_back
+
+
+def _wrap_emergency_reads_nothing(cls: type) -> None:
+    """Wrap *cls*'s own ``emergency_stop`` so no spool bookkeeping sits in front of it.
+
+    On a backend whose emergency stop is its cancel, the cancel wrap above
+    would read the print's progress first.  Inside this wrap it reads
+    nothing (:class:`kiln.spool_usage.urgent_stop`): the stop goes out as it
+    always did and the spools keep their whole charge.
+    """
+    original = cls.__dict__.get("emergency_stop")
+    if (
+        original is None
+        or not callable(original)
+        or getattr(original, "_kiln_spool_urgent", False)
+        or getattr(original, "__isabstractmethod__", False)
+    ):
+        return
+    import functools
+
+    @functools.wraps(original)
+    def _emergency_stop(self, *args, **kwargs):
+        try:
+            from kiln.spool_usage import urgent_stop
+
+            guard = urgent_stop()
+        except Exception:  # noqa: BLE001 — bookkeeping never touches a stop
+            return original(self, *args, **kwargs)
+        with guard:
+            return original(self, *args, **kwargs)
+
+    _emergency_stop._kiln_spool_urgent = True  # type: ignore[attr-defined]
+    cls.emergency_stop = _emergency_stop
+
+
 # ---------------------------------------------------------------------------
 # A camera the user supplies — frame plumbing only
 # ---------------------------------------------------------------------------
@@ -2797,6 +2913,17 @@ class PrinterAdapter(ABC):
             cls.get_state = _observed_get_state
 
         # ------------------------------------------------------------------
+        # Spool give-back: a print Kiln cancels returns the filament it had
+        # not printed to the spools that were charged for it at the start
+        # (kiln.spool_usage).  The same engine-not-instance shape: every
+        # backend defines its own cancel_print and every door that cancels
+        # calls it.  Installed BEFORE the engagement gate below, so that
+        # gate wraps it and a refused cancel never reaches it.
+        # ------------------------------------------------------------------
+        _wrap_cancel_gives_back(cls)
+        _wrap_emergency_reads_nothing(cls)
+
+        # ------------------------------------------------------------------
         # Single-printer engagement: every printer-directed command asks
         # whether Kiln is already working with a DIFFERENT machine.  Same
         # engine-not-instance shape as the two wraps above, and the same
@@ -3263,6 +3390,21 @@ class PrinterAdapter(ABC):
                 _logging.getLogger(__name__).debug(
                     "monitor-twin print-start note failed", exc_info=True
                 )
+            # A job carrying a hardware plan (a nut or a magnet that goes in
+            # during a pause) is filed against this machine here, so status,
+            # watch and resume can say when each stop comes and what goes in.
+            # A start without one clears the last print's.  See
+            # kiln.hardware_stops.
+            try:
+                from kiln.hardware_stops import note_print_started as _note_hardware_plan
+
+                _note_hardware_plan(self, file_name, kwargs)
+            except Exception:  # noqa: BLE001 — the plan never affects a print
+                import logging as _logging
+
+                _logging.getLogger(__name__).debug(
+                    "hardware plan print-start note failed", exc_info=True
+                )
             # The plate now holds a part.  Recorded here, at the one door
             # every print passes through, with the file's height when Kiln
             # can read it, so home_axes and park_head can refuse a travel
@@ -3312,6 +3454,22 @@ class PrinterAdapter(ABC):
 
                 _logging.getLogger(__name__).debug(
                     "cutter count recording failed", exc_info=True
+                )
+            # The spools on record count down at START too: the sliced file
+            # says how many grams each filament uses, and this is the one
+            # event Kiln cannot miss.  The kwargs go along because they
+            # carry the slot each filament prints from.  Costs the start one
+            # look at the local spool list; the file and the printer are
+            # read on a thread of their own.  Never blocks a print.
+            try:
+                from kiln.spool_usage import charge_print
+
+                charge_print(self, file_name, kwargs)
+            except Exception:  # noqa: BLE001 — spool bookkeeping never blocks a print
+                import logging as _logging
+
+                _logging.getLogger(__name__).debug(
+                    "spool count not started", exc_info=True
                 )
             # Open the outcome row NOW, while we can still see the print.
             # The start is the one event Kiln is guaranteed to witness (it
@@ -3367,6 +3525,19 @@ class PrinterAdapter(ABC):
             # hook does -- a watchdog waiting for the one a previous print
             # left behind to stop -- delays the stamps and the pending row.
             _fire_print_started_hooks(self, file_name)
+        elif getattr(result, "success", False):
+            # A resume file finishes the print a cancel interrupted, so what
+            # that cancel gave back to the spools is being used after all.
+            try:
+                from kiln.spool_usage import resume_print as _spools_resume
+
+                _spools_resume(self)
+            except Exception:  # noqa: BLE001 — spool bookkeeping never blocks a print
+                import logging as _logging
+
+                _logging.getLogger(__name__).debug(
+                    "spool charge not restored on resume", exc_info=True
+                )
         return result
 
     @abstractmethod
@@ -3402,7 +3573,7 @@ class PrinterAdapter(ABC):
             PrinterError: If the printer cannot pause.
         """
 
-    def resume_print(self, *, force: bool = False) -> PrintResult:
+    def resume_print(self, *, force: bool = False, hardware_confirmed: bool = False) -> PrintResult:
         """Resume a previously paused print job, and CHECK that it took.
 
         TEMPLATE METHOD — adapters must NOT override this; they implement
@@ -3446,14 +3617,32 @@ class PrinterAdapter(ABC):
         detector is for, which is why the success message declines to claim
         the print is progressing and says how to find out.
 
+        **The hardware stop.**  A print paused at a stop its plan wrote for a
+        nut, a magnet or a bearing (:mod:`kiln.hardware_stops`) is waiting for
+        a person's hands, not for a command.  It resumes only with
+        *hardware_confirmed* -- the person's word that every piece is in and
+        sits level with or below the top of the print -- and *force* does not
+        stand in for that word: it answers a different question.  Anything
+        uncertain about the stop lets the resume go on.
+
         Raises:
             PrinterError: If the printer cannot resume.
         """
+        waiting = hardware_stop_waiting(self)
+        if waiting is not None and not hardware_confirmed:
+            from kiln.hardware_stops import refusal_message
+
+            return HardwareStopRefusal(success=False, message=refusal_message(waiting), hardware=waiting)
         if not force:
             refusal = self._not_paused_refusal()
             if refusal is not None:
                 return refusal
-        return self._verify_resume_took(self._resume_print_impl())
+        result = self._verify_resume_took(self._resume_print_impl())
+        if waiting is not None and result.success:
+            from kiln.hardware_stops import note_resumed
+
+            note_resumed(self, waiting)
+        return result
 
     def _not_paused_refusal(self) -> PrintResult | None:
         """The refusal to return before resuming, or ``None`` to go ahead.

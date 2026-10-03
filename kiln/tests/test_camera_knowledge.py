@@ -63,6 +63,10 @@ def _fresh_bridge(monkeypatch):
         monkeypatch.setitem(sys.modules, name, None)
     bridge._reset_for_tests()
     streaming._CAMERA_FACTS_RECORDED.clear()
+    # Turning always allow on is Kiln Pro's; the person here is on it.
+    from kiln import consent_windows
+
+    monkeypatch.setattr(consent_windows, "always_allow_is_yours", lambda: True)
     yield
     bridge._reset_for_tests()
     streaming._CAMERA_FACTS_RECORDED.clear()

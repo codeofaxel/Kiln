@@ -30,6 +30,7 @@ kiln_pro.enterprise.licensing
 kiln_pro.enterprise.licensing.check_tier
 kiln_pro.enterprise.licensing.verify_license_key
 kiln_pro.fasteners_intelligence
+kiln_pro.filament_colours
 kiln_pro.hosted_intelligence
 kiln_pro.intent_verification
 kiln_pro.intent_verification.load_intent_sidecar
