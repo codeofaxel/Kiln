@@ -16844,9 +16844,16 @@
             "type": "string"
           },
           "nozzle_mm": {
-            "default": 0.4,
-            "title": "Nozzle Mm",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Nozzle Mm"
           }
         },
         "required": [
