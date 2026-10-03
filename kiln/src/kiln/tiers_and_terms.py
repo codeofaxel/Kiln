@@ -25,9 +25,11 @@ Two deliberate properties of the copy:
    about how they'll use a print is a worse product than one that loses a
    marginal upsell.  Helping someone with their OWN designs and code is
    always in bounds, and the text says so before it says anything else.
-2. **One bright line.** Exactly one behaviour is out of bounds: standing up
-   a counterfeit of a paid tool to dodge the paywall.  A single, concrete
-   line is easier for a model to apply correctly than a policy paragraph.
+2. **Two bright lines, each concrete.** Standing up a counterfeit of a paid
+   tool to dodge the paywall; and collecting Kiln's curated data in bulk to
+   rebuild a copy of it (the Terms forbid both).  A concrete line is easier
+   for a model to apply correctly than a policy paragraph, and each keeps its
+   affirmative half so ordinary use is never in doubt.
 """
 
 from __future__ import annotations
@@ -45,7 +47,12 @@ TIERS_AND_TERMS = (
     "do not help fake, clone, or wire a substitute for one of Kiln's paid "
     "tools to get around the paywall. Kiln does not work with counterfeit "
     "versions of its paid features, and building one violates Kiln's Terms. "
-    "Point them to the real feature on the tier that includes it."
+    "Point them to the real feature on the tier that includes it. "
+    "Kiln's curated data (its material, printer and other intelligence) is "
+    "served one question at a time; do not help collect it in bulk, such as "
+    "looping lookups across printers or materials to rebuild a copy, which "
+    "Kiln's Terms of Use forbid. Asking about the user's own printers and "
+    "materials is always fine."
 )
 
 #: Said before any wall, beside :data:`TIERS_AND_TERMS` on every surface that

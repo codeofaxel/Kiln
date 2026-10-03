@@ -822,6 +822,7 @@ class _ValidationPipelinePlugin:
 
                 return attach_inspect_bundle(
                     response, level="quick", source_path=working_path,
+                    self_check_before=input_path,
                 )
             except ImportError:
                 return response

@@ -1154,6 +1154,11 @@ def _placed_slice(
         return None, err, info
     effective_input = placed
     if auto_center is not None:
+        # The material the slice is for is the one the hotend must melt,
+        # whichever door named it: the caller's word, else the printer's
+        # spool.  Only slice_and_print used to pass it, so the other doors
+        # sliced a material their printer cannot melt and said nothing.
+        material_id = material_id or slice_kwargs.get("material") or slice_kwargs.get("loaded_material")
         effective_input, gate_err, bed_fit = _apply_bed_fit_gate(
             placed, effective_printer_id, auto_center and place_info.get("plate") != "occupied",
             material_id=material_id,
@@ -2058,10 +2063,14 @@ class _SlicerToolsPlugin:
                 slicer_path: Explicit path to the slicer binary.  Auto-detected
                     if omitted.
                 material: Filament material for this slice (``"PLA"``,
-                    ``"PETG"``, ``"ABS"``, …).  Its density is what the
-                    slicer weighs the print with.  Omitted, the spool the
-                    printer reports loaded answers, then PLA; the response's
-                    ``filament`` block says which.
+                    ``"PETG"``, ``"TPU"``, …, or a product such as
+                    ``"bambu_tpu_95a"``).  It sets the slice's temperatures,
+                    melt rate and cooling -- Kiln's settings for it on this
+                    printer, see ``build_material_overrides`` -- and its
+                    density weighs the print.  Omitted, the spool the printer
+                    reports loaded answers, then PLA; the response's
+                    ``filament`` block says which, and ``filament.settings``
+                    what the slice was set to and why.
                 auto_center: When True (default), off-bed STLs are translated
                     to a bed-centered copy before slicing.  This prevents the
                     class of crash where origin-centered meshes (common from
@@ -2256,7 +2265,7 @@ class _SlicerToolsPlugin:
                     code="SLICER_NOT_FOUND",
                 )
             except SlicerError as exc:
-                return _srv._error_dict(f"Failed to slice model: {exc}", code="SLICER_ERROR")
+                return _srv._error_dict(f"Failed to slice model: {exc}", code=getattr(exc, "code", "SLICER_ERROR"))
             except FileNotFoundError as exc:
                 return _srv._error_dict(f"Failed to slice model: {exc}", code="FILE_NOT_FOUND")
             except Exception as exc:
@@ -2319,9 +2328,12 @@ class _SlicerToolsPlugin:
                     resolves its profile, its bed and its temperature
                     ceilings instead of the default printer's.
                 material: Filament material for this slice (``"PLA"``,
-                    ``"PETG"``, …); its density is what the slicer weighs
-                    the print with.  Omitted, the loaded spool answers,
-                    then PLA — the response's ``filament`` block says which.
+                    ``"PETG"``, …).  It sets the temperatures, melt rate and
+                    cooling (``build_material_overrides`` shows them) and its
+                    density weighs the print; any of them you also pass in
+                    ``overrides`` stays yours.  Omitted, the loaded spool
+                    answers, then PLA — the response's ``filament`` block
+                    says which.
                 placement: Where the part goes when the plate still holds the
                     last print: ``[x, y]`` in mm (the part's footprint
                     origin), a named region (``"front-left"``, ``"centre"``,
@@ -2434,9 +2446,16 @@ class _SlicerToolsPlugin:
                 # Temperature ceilings belong to the TARGET machine — an
                 # override checked against the default printer's hotend is
                 # the wrong ceiling for the machine that will heat it.
+                # Judged on the file about to be sliced, overrides included:
+                # the bundled profile is the one thing these keys replaced.
                 _target_model = _srv._resolve_target_printer_model(printer_name)
                 if has_temp_overrides and effective_printer_id and _target_model:
-                    validation_result = validate_profile_for_printer(effective_printer_id, _target_model)
+                    from kiln.slicer_orca import ini_to_settings
+
+                    validation_result = validate_profile_for_printer(
+                        effective_printer_id, _target_model,
+                        settings=ini_to_settings(effective_profile) if effective_profile else None,
+                    )
 
                 # -- Plate gate, bed-fit gate, slice, second verdict: the
                 # one shared step (see _placed_slice) --
@@ -2547,7 +2566,7 @@ class _SlicerToolsPlugin:
             except SlicerError as exc:
                 return _srv._error_dict(
                     f"Failed to reslice model: {exc}",
-                    code="SLICER_ERROR",
+                    code=getattr(exc, "code", "SLICER_ERROR"),
                 )
             except FileNotFoundError as exc:
                 return _srv._error_dict(
@@ -2632,11 +2651,13 @@ class _SlicerToolsPlugin:
                 profile: Path to a slicer profile/config file.
                 printer_id: Optional printer model ID for bundled profile
                     auto-selection (e.g. ``"prusa_mini"``).
-                material: Filament material (e.g. ``"PLA"``, ``"ABS"``).  Its
-                    density is what the slicer weighs the print with, and it
-                    steers the automatic brim/raft decision.  Omitted, the
-                    spool the printer reports loaded answers, then PLA — the
-                    response's ``slice.filament`` says which.
+                material: Filament material (e.g. ``"PLA"``, ``"ABS"``).  It
+                    sets the slice's temperatures, melt rate and cooling
+                    (``build_material_overrides`` shows them), its density
+                    weighs the print, and it steers the automatic brim/raft
+                    decision.  Omitted, the spool the printer reports loaded
+                    answers, then PLA — the response's ``slice.filament``
+                    says which.
                 metadata: Optional dict of pass-through fields.  When
                     kiln-pro (https://kiln3d.com) is installed it
                     consumes keys here to generate a printable
@@ -2880,6 +2901,7 @@ class _SlicerToolsPlugin:
                         _sg_adapter,
                         effective_printer_id,
                         {**parsed_overrides, **adhesion_overrides},
+                        material=material,
                     )
                     if _sg_patch:
                         adhesion_overrides.update(_sg_patch)
@@ -3248,7 +3270,7 @@ class _SlicerToolsPlugin:
                     code="SLICER_NOT_FOUND",
                 )
             except SlicerError as exc:
-                return _srv._error_dict(f"Failed to slice and print: {exc}", code="SLICER_ERROR")
+                return _srv._error_dict(f"Failed to slice and print: {exc}", code=getattr(exc, "code", "SLICER_ERROR"))
             except PrinterNotFoundError:
                 return _srv._error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
             except (PrinterError, RuntimeError, FileNotFoundError) as exc:

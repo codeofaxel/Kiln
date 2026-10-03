@@ -328,7 +328,7 @@ class _DesignReasoningToolsPlugin:
                         attach_inspect_bundle,
                     )
 
-                    return attach_inspect_bundle(response, level="quick")
+                    return attach_inspect_bundle(response, level="quick", self_check_before=file_path)
                 except ImportError:
                     return response
             except ValueError as exc:

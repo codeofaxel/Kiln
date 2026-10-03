@@ -3489,6 +3489,33 @@ def test_a_same_named_file_kiln_did_not_make_is_left_alone(real_kernel, tmp_dir)
     assert any("bracket.stl" in w and "left as it was" in w for w in result.warnings)
 
 
+def test_every_name_a_conversion_gives_leads_back_to_its_step(real_kernel, tmp_dir):
+    """step_converted_from is the inverse of the naming rule, for every
+    name the rule can hand out -- bracket.stl, bracket.kiln.stl,
+    bracket.kiln-2.stl, ... -- and a mesh that is not Kiln's has no source."""
+    from kiln.step_import import convert_step, step_converted_from
+
+    step = _write_box_step(tmp_dir / "bracket.step", 5.0)
+    names = []
+    for _ in range(3):
+        result = convert_step(str(step))
+        names.append(Path(result.output_path).name)
+        assert Path(step_converted_from(result.output_path)).resolve() == step.resolve()
+        assert Path(step_converted_from(result.output_path)).name == "bracket.step"
+        Path(result.output_path).write_bytes(b"now the person's own file")  # the next conversion goes beside it
+        assert step_converted_from(result.output_path) is None
+    assert names == ["bracket.stl", "bracket.kiln.stl", "bracket.kiln-2.stl"]
+
+
+def test_a_step_edited_since_is_not_taken_for_the_source(real_kernel, tmp_dir):
+    from kiln.step_import import convert_step, step_converted_from
+
+    step = tmp_dir / "bracket.step"
+    mesh = convert_step(str(_write_box_step(step, 5.0))).output_path
+    _write_box_step(step, 8.0)  # re-exported taller; the mesh is still the 5 mm one
+    assert step_converted_from(mesh) is None
+
+
 def test_reconverting_an_edited_step_replaces_its_own_mesh(real_kernel, tmp_dir):
     from kiln.step_import import convert_step
 

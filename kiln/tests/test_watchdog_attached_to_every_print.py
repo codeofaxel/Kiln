@@ -739,7 +739,7 @@ def test_slice_and_print_attaches_a_watchdog_to_the_print_it_starts(
     )
     monkeypatch.setattr(
         "kiln.slicer_profiles.start_gcode_override_from_printer",
-        lambda adapter, printer_id, overrides: (None, "declined: bench"),
+        lambda adapter, printer_id, overrides, **_kw: (None, "declined: bench"),
     )
     monkeypatch.setattr("kiln.slicer.slice_file", _sliced(gcode))
     monkeypatch.setattr(server, "preflight_check", _ready)

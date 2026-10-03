@@ -409,7 +409,10 @@ class TestSlice:
         kwargs = mock_slice.call_args.kwargs
         assert kwargs["profile"] == "/tmp/prusa_mini.ini"
 
-    def test_slice_defaults_to_pla_temperatures_when_no_profile(self, runner, tmp_path):
+    def test_slice_with_no_profile_leaves_the_temperatures_to_the_slice(self, runner, tmp_path):
+        """The slice sets the material's temperatures itself (kiln.slicer_material);
+        this command used to pass its own seven-material table as slicer
+        arguments, which outrank the profile the slice writes."""
         stl = tmp_path / "temps.stl"
         stl.write_text("solid\nendsolid\n")
         mock_result = MagicMock()
@@ -422,11 +425,10 @@ class TestSlice:
             result = runner.invoke(cli, ["slice", str(stl), "--json"])
 
         assert result.exit_code == 0
-        args = mock_slice.call_args.kwargs["extra_args"]
-        assert "--bed-temperature" in args
-        assert "60" in args
+        assert "--bed-temperature" not in (mock_slice.call_args.kwargs.get("extra_args") or [])
+        assert mock_slice.call_args.kwargs.get("material") is None  # PLA by default, said by the slice
 
-    def test_slice_uses_loaded_material_defaults(self, runner, tmp_path):
+    def test_slice_hands_the_loaded_material_to_the_slice(self, runner, tmp_path):
         stl = tmp_path / "petg.stl"
         stl.write_text("solid\nendsolid\n")
         mock_result = MagicMock()
@@ -444,9 +446,8 @@ class TestSlice:
             result = runner.invoke(cli, ["slice", str(stl), "--json"])
 
         assert result.exit_code == 0
-        args = mock_slice.call_args.kwargs["extra_args"]
-        assert "--bed-temperature" in args
-        assert "80" in args
+        assert "--bed-temperature" not in (mock_slice.call_args.kwargs.get("extra_args") or [])
+        assert mock_slice.call_args.kwargs["loaded_material"] == "PETG"
 
     def test_slice_auto_supports_enable_minimal_args(self, runner, tmp_path):
         stl = tmp_path / "supports.stl"

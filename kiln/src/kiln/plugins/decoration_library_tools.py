@@ -401,7 +401,7 @@ class _DecorationLibraryPlugin:
             try:
                 from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
 
-                return attach_inspect_bundle(result, level="quick")
+                return attach_inspect_bundle(result, level="quick", self_check_before=model_path)
             except ImportError:
                 return result
 

@@ -3352,7 +3352,9 @@ class TestResliceWithOverrides:
         assert "profile_validation" in result
         assert "profile_validation_warning" in result
         assert "unsafe" in result["profile_validation_warning"].lower()
-        mock_validate.assert_called_once_with("bambu_a1", "bambu_a1")
+        # The check reads the file about to be sliced, the override in it: a
+        # check of the bundled profile could never see the 350 it warns about.
+        mock_validate.assert_called_once_with("bambu_a1", "bambu_a1", settings={"temperature": "350"})
 
 
 # ---------------------------------------------------------------------------

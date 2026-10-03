@@ -1503,13 +1503,19 @@ def apply_reinforcements(
     Runs the full improvement plan, then applies fixable reinforcements
     in sequence:
 
-    1. **thicken_wall** → runs ``thicken_walls()`` on thin sections
-    2. **fillet** → runs ``add_fillet()`` on sharp edges
+    1. **thicken_wall** → :func:`kiln.wall_thicken.thicken_part` (the CAD file when
+       there is one, a measured mesh offset otherwise)
+    2. **fillet** / **chamfer** → :func:`kiln.edge_finish.fillet_part` /
+       ``chamfer_part``, at the angle the plan found the sharp edges at;
+       refused when it would damage the part
     3. **add_base** → unions a wider base plate via OpenSCAD boolean
     4. **gusset** → unions triangular gusset ribs at cantilever bases
 
-    Reinforcements that can't be auto-applied (like ``reorient``) are
-    listed in ``skipped`` with guidance for the agent.
+    Thickening, rounding and bevelling act on the whole part, so each runs
+    once: its one entry names the first risk it ``addresses`` and lists the
+    rest of its kind under ``also_addresses``.  Reinforcements that can't be
+    auto-applied (like ``reorient``) are listed in ``skipped`` with guidance
+    for the agent.
 
     :param file_path: Path to the input STL file.
     :param output_path: Output path (defaults to ``<name>_reinforced.stl``).
@@ -1546,6 +1552,11 @@ def apply_reinforcements(
             summary="No reinforcements needed — design is structurally sound.",
         )
 
+    # The edges are rounded or bevelled at the threshold the plan found them
+    # at -- None means the public default there, and must here too.
+    edge_angle_deg = (sharp_angle_threshold_deg if sharp_angle_threshold_deg is not None
+                      else _SHARP_ANGLE_THRESHOLD_DEG_PUBLIC)
+
     # Step 2: Apply reinforcements in priority order
     applied: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
@@ -1565,42 +1576,40 @@ def apply_reinforcements(
         key=lambda r: priority_order.get(r.priority, 3),
     )
 
+    # Thickening, rounding and bevelling act on the WHOLE part, not on the
+    # spot a recommendation names: each runs once, and every later
+    # recommendation of its kind is answered by that one edit.  (Run once per
+    # recommendation, fourteen sharp corners filleted the part fourteen
+    # times over -- or refused it fourteen times, identically.)
+    whole_part = {
+        "thicken_wall": (
+            lambda p: _apply_thicken(p, work_dir, wall_thicken_mm), {"amount_mm": wall_thicken_mm},
+        ),
+        "fillet": (
+            lambda p: _apply_fillet(p, work_dir, fillet_radius_mm, edge_angle_deg), {"radius_mm": fillet_radius_mm},
+        ),
+        "chamfer": (lambda p: _apply_chamfer(p, work_dir, edge_angle_deg), {}),
+    }
+    answered: dict[str, dict[str, Any]] = {}
+
     for rec in sorted_recs:
         try:
-            if rec.reinforcement_type == "thicken_wall":
-                result = _apply_thicken(current_path, work_dir, wall_thicken_mm)
-                if result:
-                    current_path = result
-                    applied.append({
-                        "type": "thicken_wall",
-                        "amount_mm": wall_thicken_mm,
-                        "addresses": rec.addresses_risk,
-                    })
-                else:
-                    skipped.append({
-                        "type": "thicken_wall",
-                        "reason": "No thin walls detected in mesh",
-                        "addresses": rec.addresses_risk,
-                    })
+            kind = rec.reinforcement_type
+            if kind in answered:
+                entry = answered[kind]
+                if rec.addresses_risk != entry["addresses"] and rec.addresses_risk not in entry.get("also_addresses", []):
+                    entry.setdefault("also_addresses", []).append(rec.addresses_risk)
 
-            elif rec.reinforcement_type == "fillet":
-                result = _apply_fillet(
-                    current_path, work_dir,
-                    fillet_radius_mm, sharp_angle_threshold_deg,
-                )
+            elif kind in whole_part:
+                edit, settings = whole_part[kind]
+                result, why_not = edit(current_path)
                 if result:
                     current_path = result
-                    applied.append({
-                        "type": "fillet",
-                        "radius_mm": fillet_radius_mm,
-                        "addresses": rec.addresses_risk,
-                    })
+                    answered[kind] = {"type": kind, **settings, "addresses": rec.addresses_risk}
+                    applied.append(answered[kind])
                 else:
-                    skipped.append({
-                        "type": "fillet",
-                        "reason": "No sharp edges found at threshold",
-                        "addresses": rec.addresses_risk,
-                    })
+                    answered[kind] = {"type": kind, "reason": why_not, "addresses": rec.addresses_risk}
+                    skipped.append(answered[kind])
 
             elif rec.reinforcement_type == "add_base":
                 result = _apply_base(
@@ -1649,23 +1658,6 @@ def apply_reinforcements(
                     "addresses": rec.addresses_risk,
                     "guidance": rec.description,
                 })
-
-            elif rec.reinforcement_type == "chamfer":
-                result = _apply_chamfer(
-                    current_path, work_dir, sharp_angle_threshold_deg,
-                )
-                if result:
-                    current_path = result
-                    applied.append({
-                        "type": "chamfer",
-                        "addresses": rec.addresses_risk,
-                    })
-                else:
-                    skipped.append({
-                        "type": "chamfer",
-                        "reason": "No sharp edges at threshold",
-                        "addresses": rec.addresses_risk,
-                    })
 
             else:
                 skipped.append({
@@ -1743,18 +1735,15 @@ def _apply_thicken(
     stl_path: str,
     work_dir: str,
     amount_mm: float,
-) -> str | None:
-    """Apply wall thickening and return new path, or None on failure."""
+) -> tuple[str | None, str]:
+    """Thicken through the one measured door; the new path, or None and why."""
     try:
-        from kiln.generation.validation import thicken_walls
+        from kiln.wall_thicken import thicken_part
 
-        out = str(Path(work_dir) / "thickened.stl")
-        result = thicken_walls(stl_path, amount_mm=amount_mm, output_path=out)
-        if result.get("vertices_modified", 0) > 0:
-            return out
-        return None
-    except Exception:
-        return None
+        reply = thicken_part(stl_path, amount_mm=amount_mm, output_path=str(Path(work_dir) / "thickened.stl"))
+    except Exception as exc:  # noqa: BLE001 -- a reinforcement that cannot run is skipped, and says why
+        return None, f"Wall thickening could not run: {exc}"
+    return (reply["path"], "") if reply.get("success") else (None, reply["message"])
 
 
 def _apply_fillet(
@@ -1762,46 +1751,36 @@ def _apply_fillet(
     work_dir: str,
     radius_mm: float,
     angle_deg: float,
-) -> str | None:
-    """Apply fillets to sharp edges and return new path, or None on failure."""
+) -> tuple[str | None, str]:
+    """Round edges through the one measured door; the new path, or None and why."""
     try:
-        from kiln.generation.validation import add_fillet
+        from kiln.edge_finish import fillet_part
 
-        out = str(Path(work_dir) / "filleted.stl")
-        result = add_fillet(
-            stl_path,
-            radius_mm=radius_mm,
-            angle_threshold_deg=angle_deg,
-            output_path=out,
+        reply = fillet_part(
+            stl_path, radius_mm=radius_mm, angle_threshold_deg=angle_deg,
+            output_path=str(Path(work_dir) / "filleted.stl"),
         )
-        if result.get("sharp_edges_found", 0) > 0:
-            return out
-        return None
-    except Exception:
-        return None
+    except Exception as exc:  # noqa: BLE001
+        return None, f"Edge rounding could not run: {exc}"
+    return (reply["path"], "") if reply.get("success") else (None, reply["message"])
 
 
 def _apply_chamfer(
     stl_path: str,
     work_dir: str,
     angle_deg: float,
-) -> str | None:
-    """Apply chamfers to sharp edges and return new path, or None."""
+) -> tuple[str | None, str]:
+    """Bevel edges through the one measured door; the new path, or None and why."""
     try:
-        from kiln.generation.validation import add_chamfer
+        from kiln.edge_finish import chamfer_part
 
-        out = str(Path(work_dir) / "chamfered.stl")
-        result = add_chamfer(
-            stl_path,
-            distance_mm=0.5,
-            angle_threshold_deg=angle_deg,
-            output_path=out,
+        reply = chamfer_part(
+            stl_path, distance_mm=0.5, angle_threshold_deg=angle_deg,
+            output_path=str(Path(work_dir) / "chamfered.stl"),
         )
-        if result.get("sharp_edges_found", 0) > 0:
-            return out
-        return None
-    except Exception:
-        return None
+    except Exception as exc:  # noqa: BLE001
+        return None, f"Edge bevelling could not run: {exc}"
+    return (reply["path"], "") if reply.get("success") else (None, reply["message"])
 
 
 def _apply_base(
@@ -2987,7 +2966,8 @@ def design_to_gcode(
 
     :param description: Natural-language design description.
     :param output_dir: Directory for output files (uses tempdir if empty).
-    :param material: Material for weight estimation and slicing.
+    :param material: Material the slice is set for -- temperatures, melt
+        rate and cooling -- and weighed as.
     :param printer_model: Printer model for slicer profile lookup.
     :param infill_percent: Infill percentage for weight estimation.
     :returns: ``DesignToGCodeResult`` with paths and metadata.

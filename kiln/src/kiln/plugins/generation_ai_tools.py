@@ -677,9 +677,10 @@ class _GenerationAIToolsPlugin:
                     auto-selection (e.g. ``"prusa_mini"``).
                 timeout: Max seconds to wait for generation (default 600).
                 material: Filament material for the slice (``"PLA"``,
-                    ``"PETG"``, …); its density is what the slicer weighs
-                    the print with.  Omitted, the spool the printer reports
-                    loaded answers, then PLA — ``slice.filament`` says which.
+                    ``"PETG"``, …).  It sets the temperatures, melt rate and
+                    cooling, and its density weighs the print.  Omitted, the
+                    spool the printer reports loaded answers, then PLA —
+                    ``slice.filament`` says which.
                 placement: Where the part goes when the plate still holds
                     the last print: ``[x, y]`` in mm, a named region
                     (``"front-left"``, ``"centre"``, …), or ``"keep"``.
@@ -827,13 +828,15 @@ class _GenerationAIToolsPlugin:
                 except Exception:
                     _sg_adapter = None
                 if _sg_adapter is not None and effective_printer_id:
+                    from kiln.plugins.slicer_tools import _loaded_material_for as _loaded_for
                     from kiln.slicer_profiles import (
                         resolve_slicer_profile,
                         start_gcode_override_from_printer,
                     )
 
                     _sg_patch, _sg_reason = start_gcode_override_from_printer(
-                        _sg_adapter, effective_printer_id, None
+                        _sg_adapter, effective_printer_id, None,
+                        material=material or _loaded_for(printer_name, material),
                     )
                     if _sg_patch:
                         try:
