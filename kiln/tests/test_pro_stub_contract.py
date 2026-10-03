@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from kiln import server
-from kiln.tiers_and_terms import PRICING_URL, upgrade_link
+from kiln.tiers_and_terms import PRICING_URL, tag_pricing_links, upgrade_link
 
 _MANIFEST = Path(server.__file__).parent / "pro_tool_manifest.json"
 
@@ -81,7 +81,30 @@ def test_a_stub_link_names_the_tool_that_sent_the_person(tmp_path, monkeypatch):
     assert PRICING_URL + "\n" not in doc and not doc.endswith(PRICING_URL)
 
 
-_BARE_LINK = re.compile(re.escape(PRICING_URL) + r"(?![?/\w])")
+def test_a_link_that_already_says_where_it_came_from_is_left_alone(tmp_path, monkeypatch):
+    """Tagging a tagged link again appends a second query and breaks it."""
+    tagged = upgrade_link("paid_thing", src="web_card")
+    mcp = _register(tmp_path, monkeypatch, {"tools": [
+        {"name": "paid_thing", "tier": "pro", "parameters": {},
+         "description": f"Does the thing.\n\nRequires Kiln Pro.\nUpgrade: {tagged}"},
+    ]})
+    doc = mcp.tools["paid_thing"].__doc__
+    assert re.findall(re.escape(PRICING_URL) + r"\S*", doc) == [tagged]
+
+
+def test_only_a_bare_pricing_link_is_tagged():
+    link = upgrade_link("x")
+    assert tag_pricing_links(f"See {PRICING_URL}.", "x") == f"See {link}."
+    for kept in (
+        upgrade_link("y", src="web_home"),
+        f"{PRICING_URL}/business",
+        f"{PRICING_URL}#faq",
+        "kiln3d.com/pricing",
+    ):
+        assert tag_pricing_links(f"See {kept} now", "x") == f"See {kept} now"
+
+
+_BARE_LINK =re.compile(re.escape(PRICING_URL) + r"(?![?/\w])")
 
 
 @pytest.mark.skipif(not _MANIFEST.is_file(), reason="no bundled manifest in this tree")

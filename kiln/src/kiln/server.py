@@ -394,6 +394,7 @@ from kiln.tiers_and_terms import (
     account_required_message,
     session_expired_message,
     signin_hint_fields,
+    tag_pricing_links,
     tier_required_message,
     upgrade_link,
     upgrade_nudge_block,
@@ -18754,7 +18755,7 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                 )
         # The link an agent relays carries the tool that sent the person,
         # so a visit to the pricing page can be counted back to it.
-        description = description.replace(PRICING_URL, upgrade_link(name))
+        description = tag_pricing_links(description, name)
         # Metered tools carry their real monthly allowance; unmetered ones
         # carry no block at all, and get no entry, so the account wall can
         # only ever state a number the server actually charges.

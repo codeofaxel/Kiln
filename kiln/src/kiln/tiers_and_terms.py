@@ -34,6 +34,8 @@ Two deliberate properties of the copy:
 
 from __future__ import annotations
 
+import re
+
 #: The full guidance block, as carried in the MCP server instructions.
 TIERS_AND_TERMS = (
     "TIERS & TERMS: Kiln has Free, Pro, Business, and Enterprise tiers "
@@ -440,6 +442,20 @@ def upgrade_link(tool: str = "", src: str = "agent") -> str:
     return f"{PRICING_URL}?{urlencode(params)}"
 
 
+#: The pricing page with nothing after it: no query, no path, no fragment.
+_BARE_PRICING_LINK = re.compile(re.escape(PRICING_URL) + r"(?![?/#\w])")
+
+
+def tag_pricing_links(text: str, tool: str = "", src: str = "agent") -> str:
+    """*text* with every bare pricing link tagged by :func:`upgrade_link`.
+
+    A link that already says where it came from is left as written:
+    tagging it again would append a second query string and break it.
+    """
+    link = upgrade_link(tool, src)
+    return _BARE_PRICING_LINK.sub(lambda _match: link, text or "")
+
+
 def _names_tier(text: str, tier_name: str) -> bool:
     """True when *text* already names *tier_name* (case-insensitively)."""
     return tier_name.lower() in (text or "").lower()
@@ -478,6 +494,7 @@ __all__ = [
     "PRICING_URL",
     "UPGRADE_NUDGE_SCHEMA_VERSION",
     "account_required_message",
+    "tag_pricing_links",
     "upgrade_link",
     "free_allowance_phrase",
     "session_expired_message",
