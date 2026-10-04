@@ -112,7 +112,13 @@ def test_every_shipped_paid_stub_leads_with_value_and_says_the_tier_once(tmp_pat
     """Over the manifest this tree ships, not a toy."""
     manifest = json.loads(_MANIFEST.read_text(encoding="utf-8"))
     mcp = _register(tmp_path, monkeypatch, manifest)
-    paid = [t for t in manifest["tools"] if str(t.get("tier", "")).lower() not in ("", "free")]
+    every_paid = [t for t in manifest["tools"] if str(t.get("tier", "")).lower() not in ("", "free")]
+    # A tool the servers refuse to run is not listed here at all: no stub,
+    # so nothing sold that this install could never run.
+    not_served = [t["name"] for t in every_paid if t.get("served") is False]
+    assert not_served, "the manifest marks no tool as not served"
+    assert [n for n in not_served if n in mcp.tools] == []
+    paid = [t for t in every_paid if t.get("served") is not False]
     assert len(paid) > 100, len(paid)
 
     problems = []

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-04T01:11:26.339935+00:00",
+  "generated": "2026-10-04T02:29:15.737987+00:00",
   "tool_count": 434,
   "categories": {
     "product_generators": {
@@ -698,7 +698,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
-      }
+      },
+      "served": false
     },
     {
       "name": "find_manual_siblings",
@@ -957,7 +958,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "get_manual_revision",
@@ -1051,7 +1053,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "action"
-      }
+      },
+      "served": false
     },
     {
       "name": "record_build_outcome",
@@ -1161,7 +1164,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "retire_manual_revision",
@@ -1222,7 +1226,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "billing_delete_data",
@@ -1244,7 +1249,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "billing_export",
@@ -1342,7 +1348,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "billing_status",
@@ -1427,7 +1434,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "kiln_spend_caps_confirm_order_approval",
@@ -1456,7 +1464,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "kiln_spend_caps_request_change",
@@ -1509,7 +1518,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "kiln_spend_caps_request_order_approval",
@@ -1538,7 +1548,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "kiln_spend_caps_show",
@@ -1554,7 +1565,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "license_status_live",
@@ -2598,7 +2610,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
-      }
+      },
+      "served": false
     },
     {
       "name": "cloud_remote_add",
@@ -2653,7 +2666,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
-      }
+      },
+      "served": false
     },
     {
       "name": "cloud_remote_list",
@@ -2678,7 +2692,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
-      }
+      },
+      "served": false
     },
     {
       "name": "cloud_remote_remove",
@@ -2702,7 +2717,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
-      }
+      },
+      "served": false
     },
     {
       "name": "cloud_retire_remote_branch",
@@ -2761,7 +2777,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
-      }
+      },
+      "served": false
     },
     {
       "name": "cloud_sync_history",
@@ -2792,7 +2809,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
-      }
+      },
+      "served": false
     },
     {
       "name": "cloud_sync_resolve_conflict",
@@ -2830,7 +2848,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
-      }
+      },
+      "served": false
     },
     {
       "name": "auto_add_rubber_feet",
@@ -2934,7 +2953,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
-      }
+      },
+      "served": false
     },
     {
       "name": "auto_recess_pocket",
@@ -3137,7 +3157,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "paint_mesh_regions",
@@ -3216,6 +3237,9 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "mesh": "input_path"
       }
     },
     {
@@ -3241,7 +3265,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "remove_brand_asset",
@@ -3266,7 +3291,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "resolve_template_decoration",
@@ -3390,6 +3416,9 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "mesh": "input_path"
       }
     },
     {
@@ -3439,7 +3468,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "iterate_decoration",
@@ -3488,7 +3518,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
-      }
+      },
+      "served": false
     },
     {
       "name": "record_decoration_success",
@@ -3537,7 +3568,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "rollback_decoration",
@@ -3566,7 +3598,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
-      }
+      },
+      "served": false
     },
     {
       "name": "inspect_design",
@@ -3621,6 +3654,9 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "inputs": {
+        "mesh": "mesh_path"
       }
     },
     {
@@ -3700,6 +3736,9 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "inputs": {
+        "mesh": "mesh_path"
       }
     },
     {
@@ -3733,6 +3772,9 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
+      },
+      "inputs": {
+        "mesh": "mesh_path"
       }
     },
     {
@@ -3779,7 +3821,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
-      }
+      },
+      "served": false
     },
     {
       "name": "build_organic_mesh",
@@ -3837,6 +3880,9 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "image": "reference_images"
       }
     },
     {
@@ -3988,6 +4034,9 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "image": "reference_images"
       }
     },
     {
@@ -4024,7 +4073,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "solve_sketch",
@@ -4311,6 +4361,9 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "mesh": "host_mesh_path"
       }
     },
     {
@@ -4483,6 +4536,9 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "mesh": "host_mesh_path"
       }
     },
     {
@@ -5053,7 +5109,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      }
+      },
+      "served": false
     },
     {
       "name": "create_decoration_preset",
@@ -5980,7 +6037,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "get_design_pull_request",
@@ -6094,7 +6152,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "get_regression_alerts",
@@ -6220,7 +6279,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
-      }
+      },
+      "served": false
     },
     {
       "name": "import_external_mesh",
@@ -6283,6 +6343,9 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "mesh": "mesh_path"
       }
     },
     {
@@ -6317,6 +6380,9 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "mesh": "model_path"
       }
     },
     {
@@ -6346,7 +6412,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "list_cherry_pick_candidates",
@@ -6661,7 +6728,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "list_designs",
@@ -7410,6 +7478,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "served": false,
+      "inputs": {
+        "mesh": "stl_path"
       }
     },
     {
@@ -7704,6 +7776,9 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "inputs": {
+        "mesh": "mesh_path"
       }
     },
     {
@@ -7833,6 +7908,9 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "inputs": {
+        "mesh": "mesh_path"
       }
     },
     {
@@ -7993,6 +8071,9 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "mesh": "mesh_path"
       }
     },
     {
@@ -8135,7 +8216,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
-      }
+      },
+      "served": false
     },
     {
       "name": "retire_decoration_preset_branch",
@@ -8241,7 +8323,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "retire_feature_branch",
@@ -8526,7 +8609,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "show_branch_history",
@@ -8675,7 +8759,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "sign_decoration_preset_release",
@@ -8908,7 +8993,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "sign_feature_release",
@@ -9128,7 +9214,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
-      }
+      },
+      "served": false
     },
     {
       "name": "verify_decoration_preset_release",
@@ -9337,7 +9424,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "visualize_branch_tree",
@@ -9509,7 +9597,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "manage_drawing_intakes",
@@ -9574,7 +9663,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "submit_drawing_extraction",
@@ -9898,7 +9988,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
-      }
+      },
+      "served": false
     },
     {
       "name": "assess_calibration_status",
@@ -10275,7 +10366,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      }
+      },
+      "served": false
     },
     {
       "name": "get_calibration_freshness",
@@ -10313,7 +10405,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      }
+      },
+      "served": false
     },
     {
       "name": "get_calibration_health_recommendations",
@@ -10344,7 +10437,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      }
+      },
+      "served": false
     },
     {
       "name": "get_parser_health_summary",
@@ -10360,7 +10454,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "get_provenance_history",
@@ -10412,7 +10507,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "import_third_party_calibration",
@@ -10455,7 +10551,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
-      }
+      },
+      "served": false
     },
     {
       "name": "ingest_measurement",
@@ -10495,7 +10592,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "query_per_machine_offset",
@@ -10543,7 +10641,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "recommend_running_clearance",
@@ -10690,7 +10789,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "request_calibration_test_print",
@@ -10749,7 +10849,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "action"
-      }
+      },
+      "served": false
     },
     {
       "name": "tolerance_stack_analysis",
@@ -10866,7 +10967,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      }
+      },
+      "served": false
     },
     {
       "name": "assess_bom_sourcing_risk",
@@ -13858,7 +13960,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "fleet_nozzle_agreement",
@@ -13890,7 +13993,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "action"
-      }
+      },
+      "served": false
     },
     {
       "name": "fleet_pause",
@@ -14053,7 +14157,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "action"
-      }
+      },
+      "served": false
     },
     {
       "name": "maintenance_due",
@@ -14453,7 +14558,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "action"
-      }
+      },
+      "served": false
     },
     {
       "name": "list_event_subscriptions",
@@ -14469,7 +14575,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "list_hooks",
@@ -14485,7 +14592,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "set_event_subscriptions",
@@ -14609,7 +14717,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "set_hooks",
@@ -14637,7 +14746,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "summarize_events",
@@ -14659,7 +14769,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "tail_event_log",
@@ -14681,7 +14792,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "delete_decoration",
@@ -14715,7 +14827,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "delete_design",
@@ -14996,7 +15109,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      }
+      },
+      "served": false
     },
     {
       "name": "print_cost_intelligence",
@@ -15251,7 +15365,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
-      }
+      },
+      "served": false
     },
     {
       "name": "add_pin_joints",
@@ -15315,7 +15430,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
-      }
+      },
+      "served": false
     },
     {
       "name": "advise_kit_scale",
@@ -15369,7 +15485,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      }
+      },
+      "served": false
     },
     {
       "name": "analyze_mid_print_impact",
@@ -15819,7 +15936,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      }
+      },
+      "served": false
     },
     {
       "name": "check_nozzle_capacity_for_print",
@@ -16137,7 +16255,11 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
-      }
+      },
+      "inputs": {
+        "image": "image_path"
+      },
+      "served": false
     },
     {
       "name": "decorate_during_print",
@@ -16296,7 +16418,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
-      }
+      },
+      "served": false
     },
     {
       "name": "food_safety_for_printer",
@@ -16463,7 +16586,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      }
+      },
+      "served": false
     },
     {
       "name": "get_community_wear_baseline",
@@ -16530,7 +16654,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      }
+      },
+      "served": false
     },
     {
       "name": "get_material_success_rates",
@@ -16554,7 +16679,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "get_material_warnings",
@@ -16716,7 +16842,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      }
+      },
+      "served": false
     },
     {
       "name": "get_print_confidence",
@@ -16772,7 +16899,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      }
+      },
+      "served": false
     },
     {
       "name": "get_print_learning_summary",
@@ -16825,7 +16953,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "get_printer_melt_rate",
@@ -16905,7 +17034,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      }
+      },
+      "served": false
     },
     {
       "name": "get_recovery_strategy_stats",
@@ -16942,7 +17072,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "get_telemetry_preferences",
@@ -17051,6 +17182,9 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "mesh": "model_path"
       }
     },
     {
@@ -17229,6 +17363,9 @@
       "offline": {
         "schema_version": 1,
         "kind": "action"
+      },
+      "inputs": {
+        "mesh": "model_path"
       }
     },
     {
@@ -17526,7 +17663,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "action"
-      }
+      },
+      "served": false
     },
     {
       "name": "plan_object_skip",
@@ -17642,7 +17780,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      }
+      },
+      "served": false
     },
     {
       "name": "preview_decorated_mesh",
@@ -17846,7 +17985,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "record_cutter_replacement",
@@ -18146,7 +18286,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "record_recovery_outcome",
@@ -18205,7 +18346,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "recover_power_loss_print",
@@ -18319,7 +18461,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
-      }
+      },
+      "served": false
     },
     {
       "name": "revert_mid_print",
@@ -18436,7 +18579,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
-      }
+      },
+      "served": false
     },
     {
       "name": "set_nozzle_state",
@@ -18700,6 +18844,9 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "mesh": "model_path"
       }
     },
     {
@@ -18825,7 +18972,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
-      }
+      },
+      "served": false
     },
     {
       "name": "generate_ashtray",
@@ -20324,6 +20472,9 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "image": "photo"
       }
     },
     {
@@ -20394,6 +20545,9 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "mesh": "product_stl_path"
       }
     },
     {
@@ -20559,6 +20713,9 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "image": "photo_path"
       }
     },
     {
@@ -20791,7 +20948,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "get_proven_recipe",
@@ -20820,7 +20978,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "list_proven_recipes",
@@ -20842,7 +21001,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "record_proven_recipe",
@@ -20911,7 +21071,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "cancel_speed_schedule",
@@ -22436,6 +22597,9 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "mesh": "source_path"
       }
     },
     {
@@ -22736,6 +22900,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "mesh": "input_path",
+        "image": "mark_image_path"
       }
     },
     {
@@ -22925,6 +23093,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "mesh": "input_path",
+        "image": "image_path"
       }
     },
     {
@@ -23165,6 +23337,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "mesh": "input_path",
+        "image": "image_path"
       }
     },
     {
@@ -23244,6 +23420,9 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "mesh": "model_path"
       }
     },
     {
@@ -23379,6 +23558,9 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "image": "image_path"
       }
     },
     {
@@ -23450,6 +23632,9 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "mesh": "model_path"
       }
     },
     {

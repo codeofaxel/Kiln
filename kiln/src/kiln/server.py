@@ -18534,6 +18534,10 @@ def _pro_api_call(
         # floor (e.g. force an upgrade for a release with new terms / fixes).
         # A client that never sends this is treated as below the floor.
         headers["X-Kiln-Client-Version"] = _current_version()
+        # A heavy make (a texture over a whole model) runs for minutes, longer
+        # than one request stays open.  The servers accept such a tool as a
+        # job when asked this way and answer every other tool as usual.
+        headers[_SERVED_JOB_HEADER] = "1"
         req = urllib.request.Request(
             f"{api_url.rstrip('/')}/api/tools/{tool_name}",
             data=json.dumps(kwargs).encode() if kwargs else None,
@@ -18544,7 +18548,11 @@ def _pro_api_call(
         for attempt in (1, 2):
             try:
                 with urllib.request.urlopen(req, timeout=wait_s) as resp:
-                    return json.loads(resp.read())
+                    answer = json.loads(resp.read())
+                    accepted = getattr(resp, "status", 200) == 202
+                if accepted and isinstance(answer, dict) and answer.get("job_id"):
+                    return _await_served_job(tool_name, api_url, headers, answer)
+                return answer
             except urllib.error.HTTPError as exc:
                 # Preserve the server's own error body when present — it
                 # usually carries a structured ``code`` + ``error`` the agent
@@ -18573,6 +18581,72 @@ def _pro_api_call(
         return envelope_for_transport(
             tool_name, exc, host=api_url, kind=_PRO_TOOL_OFFLINE_KIND.get(tool_name),
         )
+
+
+#: Asks the servers to run a heavy tool as a job (they ignore it for any
+#: other tool).
+_SERVED_JOB_HEADER = "X-Kiln-Tool-Async"
+#: How long a job is waited for: the servers stop one at fifteen minutes.
+_SERVED_JOB_WAIT_S = 15 * 60 + 30
+_SERVED_JOB_POLL_S = 3.0
+
+
+def _await_served_job(
+    tool_name: str, api_url: str, headers: dict[str, str], accepted: dict
+) -> dict:
+    """Wait for a job the servers accepted, and return the tool's answer.
+
+    The job lives on the one machine that took it, so each poll names that
+    machine.  The answer is the tool's own, exactly as a direct call would
+    have returned it; a miss is worded the way every served miss is.
+    """
+    import json
+    import time
+    import urllib.error
+    import urllib.request
+
+    from kiln.served_answer import envelope_for_http, envelope_for_transport
+
+    kind = _PRO_TOOL_OFFLINE_KIND.get(tool_name)
+    poll = str(accepted.get("poll") or f"/api/tools/jobs/{accepted.get('job_id')}")
+    poll_headers = {k: v for k, v in headers.items() if k != _SERVED_JOB_HEADER}
+    machine = str(accepted.get("machine_id") or "").strip()
+    if machine:
+        poll_headers["fly-force-instance-id"] = machine
+    deadline = time.monotonic() + _SERVED_JOB_WAIT_S
+    try:
+        while True:
+            time.sleep(_SERVED_JOB_POLL_S)
+            req = urllib.request.Request(
+                f"{api_url.rstrip('/')}{poll}", headers=poll_headers, method="GET",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=_SERVED_WAIT_S) as resp:
+                    answer = json.loads(resp.read())
+            except urllib.error.HTTPError as exc:
+                try:
+                    body = json.loads(exc.read().decode("utf-8"))
+                except Exception:
+                    body = None
+                return envelope_for_http(tool_name, exc.code, body, kind=kind)
+            if not (isinstance(answer, dict) and answer.get("status") == "running"):
+                return answer
+            if time.monotonic() > deadline:
+                return envelope_for_http(
+                    tool_name,
+                    504,
+                    {
+                        "status": "error",
+                        "code": "JOB_TIMEOUT",
+                        "error": (
+                            "That took longer than Kiln's servers allow, so "
+                            "Kiln stopped waiting. Nothing was charged."
+                        ),
+                    },
+                    kind=kind,
+                )
+    except Exception as exc:
+        return envelope_for_transport(tool_name, exc, host=api_url, kind=kind)
 
 
 def _register_pro_tool_stubs(mcp_instance) -> None:
@@ -18630,6 +18704,12 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
         name = tool_def.get("name", "")
         if not name or name.startswith("_"):
             continue
+        if tool_def.get("served") is False:
+            # Kiln's servers refuse this tool whoever asks: it works on
+            # state that lives on the caller's own machine, and without
+            # kiln-pro there is no code here to run it.  A stub would list
+            # a tool that can never run on this install, at any tier.
+            continue
 
         description = tool_def.get("description", name)
         # Say what this costs, in the one place an agent always reads.
@@ -18685,11 +18765,23 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
             if offline_kind in _OFFLINE_KINDS:
                 _PRO_TOOL_OFFLINE_KIND[name] = offline_kind
         params_schema = tool_def.get("parameters", {})
+        # Which parameter takes the caller's own model, and which their
+        # image: files the servers cannot read off this disk.
+        served_inputs = tool_def.get("inputs")
+        if not isinstance(served_inputs, dict):
+            served_inputs = None
 
         # Build the stub function.  Closures capture `name` by reference,
         # so we use a factory to freeze the value.
-        def _make_stub(_name: str):
+        def _make_stub(_name: str, _inputs: dict | None):
             def _stub(**kwargs):
+                from kiln import served_makes
+
+                # A model or image on this computer goes up first, and a
+                # make still on the servers is named by its token.
+                kwargs, cannot_send = served_makes.send_inputs(_name, kwargs, _inputs)
+                if cannot_send is not None:
+                    return cannot_send
                 # A nozzle tool is about a printer only this process can
                 # reach: read it here and send the reading with the request,
                 # so the hosted side can compare it with the record it holds.
@@ -18707,10 +18799,14 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                     from kiln._pro_nozzle_bridge import forget_recorded_nozzle
 
                     forget_recorded_nozzle()
-                return answer
+                # A make was built on the servers: its paths are there, not
+                # here.  Say so, and fetch its look for the stage.
+                return served_makes.arrive(
+                    _name, answer, allowance=_PRO_TOOL_QUOTA.get(_name),
+                )
             return _stub
 
-        stub = _make_stub(name)
+        stub = _make_stub(name, served_inputs)
 
         # Reconstruct a typed Python signature from the JSON Schema so
         # that FastMCP generates the correct tool schema for clients.
@@ -18767,11 +18863,58 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
         except Exception as exc:
             logger.debug("Failed to register stub %s: %s", name, exc)
 
+    _register_keep_design(mcp_instance)
     logger.info(
         "Registered %d pro tool stubs from manifest (%d categories)",
         registered,
         len(manifest.get("categories", {})),
     )
+
+
+def _register_keep_design(mcp_instance) -> None:
+    """The keep verb for makes built on Kiln's servers.
+
+    Registered beside the stubs, so it exists exactly where a served make
+    can arrive: an install without kiln-pro.  (With kiln-pro a make is
+    built on this computer and is already a file here.)
+    """
+
+    def keep_design(artifact_token: str) -> dict:
+        """Keep a make that Kiln's servers built: save its file to this computer.
+
+        A make from one of Kiln's served tools (a coaster, a textured part,
+        a decorated model) is built on Kiln's servers and shown on the
+        stage.  Looking at it and changing it are free.  Call this when the
+        user wants to KEEP it: to slice, print or export it.  It saves the
+        full-quality file on this computer and returns its path
+        (``mesh_path``), which every local tool takes.
+
+        On the Free plan a keep counts toward that kind of make's monthly
+        allowance, and the answer says how many are left (``keep``).  Paid
+        plans keep without limit.  A make is only ever counted once.
+
+        Args:
+            artifact_token: The token of the make to keep.  It is in the
+                make's own answer, under ``made_on_kiln_servers``.
+        """
+        from kiln import served_makes
+
+        return served_makes.keep(artifact_token)
+
+    # Stamped here, at registration, to open the stage on the kept file: the
+    # shared stage roster is read by the hosted connector too, where keeping
+    # is a different verb that opens no panel.
+    from kiln.local_stage import MESH_VIEWER_RESOURCE_URI
+
+    try:
+        mcp_instance.tool(
+            meta={"ui": {"resourceUri": MESH_VIEWER_RESOURCE_URI}},
+        )(keep_design)
+    except TypeError:
+        # A registry that takes no ``meta`` (older SDK): the verb still works.
+        mcp_instance.tool()(keep_design)
+    except Exception as exc:
+        logger.debug("Failed to register keep_design: %s", exc)
 
 
 def _ensure_internal_tool_plugins_registered() -> None:

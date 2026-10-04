@@ -843,6 +843,10 @@ def token_for_call_result(result: Any) -> str | None:
             return None
         hosted_token: str | None = None
         existing = result_structured_content(result)
+        if not isinstance(existing, dict):
+            # A served tool's answer arrives as text alone; its artifact
+            # block is in there.
+            existing = _result_as_dict(result)
         if isinstance(existing, dict):
             art = existing.get("artifact")
             if isinstance(art, dict) and art.get("artifact_token"):
@@ -864,6 +868,15 @@ def token_for_call_result(result: Any) -> str | None:
             if hosted_token:
                 return _adopt(hosted_token, mesh)
             return _mint(mesh)
+        if hosted_token:
+            # A make built on Kiln's servers names no file on this
+            # computer.  Its look was fetched when it arrived
+            # (kiln.served_makes), and the stage shows that.
+            from kiln.served_makes import arrival_path
+
+            look = arrival_path(hosted_token)
+            if look:
+                return _adopt(hosted_token, look)
     except Exception as exc:  # noqa: BLE001 — a stage must never break a tool
         logger.debug("local stage token not minted: %s", exc)
     return None
