@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-03T01:36:43.968827+00:00",
+  "generated": "2026-10-04T01:11:26.339935+00:00",
   "tool_count": 434,
   "categories": {
     "product_generators": {
@@ -1587,7 +1587,7 @@
     },
     {
       "name": "open_billing_portal",
-      "description": "Get a Stripe Billing Portal URL so a paying customer can manage their subscription (update card, change plan, cancel).",
+      "description": "Get a Stripe Billing Portal URL so a paying customer can update their card, see invoices, or cancel.  Plan switches are not in the portal and never made by an agent: explain the plans, then send the person to Billing in the Kiln web app (https://app.kiln3d.com/settings/billing) to choose and confirm.",
       "tier": "free",
       "access": "free",
       "category": "billing",
