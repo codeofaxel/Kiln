@@ -170,6 +170,38 @@ class TestArrival:
         assert json.dumps(served_makes.arrive("recommend_hole", answer), sort_keys=True) == before
         assert calls == []
 
+    def test_a_document_made_on_the_servers_is_not_named_as_a_local_file(self, wire):
+        """A drawing or a manual has no model to fetch.  Its server paths
+        go, and the answer says where the files are."""
+        calls, _ = wire
+        answer = served_makes.arrive(
+            "generate_technical_drawing",
+            {
+                "status": "success",
+                "summary": "3 views, 12 dimensions.",
+                "pdf_path": "/tmp/kiln_drawing_ab12/drawing.pdf",
+                "svg_path": "/tmp/kiln_drawing_ab12/drawing.svg",
+            },
+        )
+        assert "pdf_path" not in answer and "svg_path" not in answer
+        assert answer["summary"] == "3 views, 12 dimensions."
+        block = answer["files_on_kiln_servers"]
+        assert block["files"] == {"pdf_path": "drawing.pdf", "svg_path": "drawing.svg"}
+        assert block["on_this_computer"] is False
+        assert calls == []
+
+    def test_a_model_the_servers_did_not_hand_over_is_a_failure_not_a_success(self, wire):
+        """Seen live: "Generated 90mm coaster" with a server path and no
+        artifact token.  There is nothing to show or keep, so the caller is
+        told to make it again rather than handed a success."""
+        made = _served_answer()
+        del made["artifact"]
+        answer = served_makes.arrive("generate_coaster", made)
+        assert answer["success"] is False and answer["retryable"] is True
+        assert answer["code"] == "MAKE_NOT_HANDED_OVER"
+        assert "generate_coaster again" in answer["error"]
+        assert SERVER_STL not in json.dumps(answer)
+
     def test_a_look_that_cannot_be_fetched_still_tells_the_truth(self, wire):
         _calls, answers = wire
         del answers[("GET", f"/api/artifact/{TOKEN}")]

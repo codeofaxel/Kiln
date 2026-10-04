@@ -232,6 +232,27 @@ def _is_elsewhere(value: Any) -> bool:
     return bool(path.suffix) and not path.exists()
 
 
+def _without_server_files(answer: dict) -> dict:
+    """An answer that made no model but names files (a drawing, a manual):
+    they are on Kiln's servers, and nothing brings them to this computer
+    yet.  The paths go, and the answer says so, rather than handing an
+    agent a path that opens nothing."""
+    removed = sorted(key for key, value in answer.items() if _is_elsewhere(value))
+    if not removed:
+        return answer
+    names = {key: Path(answer.pop(key)).name for key in removed}
+    answer["files_on_kiln_servers"] = {
+        "on_this_computer": False,
+        "files": names,
+        "note": (
+            "These files were made on Kiln's servers and cannot be saved to "
+            "this computer from here yet. Everything else in this answer is "
+            "complete. Tell the user plainly; do not offer a path to them."
+        ),
+    }
+    return answer
+
+
 def arrive(tool: str, answer: Any, *, allowance: dict | None = None) -> Any:
     """*answer* from a served tool, made true for this computer.
 
@@ -246,11 +267,34 @@ def arrive(tool: str, answer: Any, *, allowance: dict | None = None) -> Any:
         if answer.get("success") is False or answer.get("status") == "error":
             return answer
         artifact = answer.get("artifact")
-        if not isinstance(artifact, dict):
-            return answer
-        token = str(artifact.get("artifact_token") or "").strip()
+        token = (
+            str(artifact.get("artifact_token") or "").strip()
+            if isinstance(artifact, dict)
+            else ""
+        )
         if not _TOKEN_SHAPE.match(token):
-            return answer
+            if any(
+                _is_elsewhere(value)
+                and Path(value).suffix.lower() in _SENDABLE_MODEL_TYPES
+                for value in answer.values()
+            ):
+                # The servers built a model and handed over no token for
+                # it, so there is nothing to show and nothing to keep.
+                # Seen live 2026-10-03, now and then.  A "success" nobody
+                # can use is a failure the caller should hear as one.
+                return {
+                    "success": False,
+                    "status": "error",
+                    "code": "MAKE_NOT_HANDED_OVER",
+                    "tool": tool,
+                    "retryable": True,
+                    "error": (
+                        f"Kiln's servers built this, but did not hand it over, "
+                        f"so there is nothing to show or keep. Nothing was "
+                        f"charged. Call {tool} again with the same settings."
+                    ),
+                }
+            return _without_server_files(answer)
         kind = str(artifact.get("format") or "stl").lower()
 
         removed = sorted(key for key, value in answer.items() if _is_elsewhere(value))
