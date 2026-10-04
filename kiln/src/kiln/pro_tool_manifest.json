@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-04T06:23:25.048043+00:00",
+  "generated": "2026-10-04T08:46:27.186436+00:00",
   "tool_count": 437,
   "categories": {
     "product_generators": {
@@ -3112,7 +3112,7 @@
     },
     {
       "name": "find_closest_filaments",
-      "description": "Which filaments could I buy for this colour? Call ONLY when the person asks. Up to three per colour, from different makers.",
+      "description": "Which filaments could I buy for this color? Call ONLY when the person asks. Up to three per color, from different makers.",
       "tier": "free",
       "access": "free",
       "category": "decoration",
@@ -3140,6 +3140,11 @@
           "brand": {
             "default": "",
             "title": "Brand",
+            "type": "string"
+          },
+          "finish": {
+            "default": "",
+            "title": "Finish",
             "type": "string"
           }
         },
