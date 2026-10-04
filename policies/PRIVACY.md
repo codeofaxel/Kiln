@@ -1,6 +1,6 @@
 # Kiln Privacy Policy
 
-*Last updated: 2026-10-03 · Version 2.7*
+*Last updated: 2026-10-04 · Version 2.8*
 
 > **Plain-English summary** — Kiln is operated by **Hadron Labs Inc.**, a
 > Delaware C corporation headquartered in California. Most of Kiln runs
@@ -386,8 +386,9 @@ on your device and nothing that links one step to another or to you.
 
 When you use kiln3d.com/filament-colors, the page tells Kiln when it was
 opened and when you press "Sign in free" or a "See where to buy" link.
-Kiln counts each color lookup by the material you chose, the color code
-you looked up and how close the best match was. A standard color name
+Kiln counts each color lookup by the material and finish you chose, the
+color code you looked up (or, for a multicolor lookup, the two or three
+codes) and how close the best match was. A standard color name
 such as "navy" is kept as that name; any other text you type is not
 kept. If you create a Kiln account through that page's sign-in button, it
 adds one to the page's count of new accounts. We keep only the day, those
