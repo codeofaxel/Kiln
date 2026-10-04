@@ -1,6 +1,6 @@
 # Kiln Privacy Policy
 
-*Last updated: 2026-10-04 · Version 2.8*
+*Last updated: 2026-10-04 · Version 2.9*
 
 > **Plain-English summary** — Kiln is operated by **Hadron Labs Inc.**, a
 > Delaware C corporation headquartered in California. Most of Kiln runs
@@ -306,13 +306,15 @@ perform.
 | **Stripe, Inc.** | Card payments, subscription billing, invoices | US | Standard Contractual Clauses (EU→US); PCI-DSS Level 1 |
 | **Circle Internet Financial, LLC** | USDC stablecoin payments (Solana / Base networks), if used | US | Standard Contractual Clauses (EU→US) |
 | **Fly.io (Fly Software Inc.)** | Hosting for `api.kiln3d.com` | US | Standard Contractual Clauses (EU→US) |
-| **Vercel Inc.** | Hosting for `kiln3d.com` and `app.kiln3d.com`; first-party privacy-preserving Web Analytics on `kiln3d.com` only (no cookies, no PII, daily-rotating IP hash — see §3.2) | US | Standard Contractual Clauses (EU→US) |
+| **Vercel Inc.** | Hosting for `kiln3d.com` and `app.kiln3d.com`; first-party privacy-preserving Web Analytics on both (no cookies, no PII, daily-rotating IP hash — see §3.2) | US | Standard Contractual Clauses (EU→US) |
 | **Meta Platforms, Inc.** | Ad measurement + retargeting on `kiln3d.com`, only when paid acquisition is active AND you've granted advertising consent (see §3.2) | US | Standard Contractual Clauses (EU→US); Meta's data-processing addendum |
-| **Google LLC** (Analytics + Ads) | GA4 site analytics + Google Ads conversion tracking on `kiln3d.com`, only when active AND you've granted the corresponding consent (see §3.2) | US | Standard Contractual Clauses (EU→US); Google's data-processing terms |
+| **Google LLC** (Analytics + Ads) | GA4 site analytics + Google Ads conversion tracking on `kiln3d.com`, only when active AND you've granted the corresponding consent; plus our server's counts of sign-ups, first plan-limit hits and payments, which carry a one-way hash instead of your email (see §3.2) | US | Standard Contractual Clauses (EU→US); Google's data-processing terms |
 | **Google (OAuth), Apple (Sign in with Apple), GitHub (OAuth)** | OAuth authentication only | US | Standard Contractual Clauses + each provider's own data policies |
 | **Craftcloud (All3DP GmbH)** | Fulfillment order routing | Germany / EU | Not applicable — EU processor |
 | **MyMiniFactory / Cults3D** | Marketplace search queries you initiate | UK / France | Standard Contractual Clauses |
-| **Our email provider (SendGrid / Postmark / similar)** | Transactional email (welcome, receipts, sign-in links) | US | Standard Contractual Clauses |
+| **Google LLC** (Google Workspace) | The emails we send you: welcome, team invitations, spend-cap changes, refund notices | US | Standard Contractual Clauses (EU→US) |
+| **Cloudflare, Inc.** (R2 storage) | Nightly backup copies of our database and stored files, kept for disaster recovery | US | Standard Contractual Clauses (EU→US) |
+| **GitHub, Inc.** (Actions) | Runs our scheduled jobs; each nightly backup and weekly report passes through it | US | Standard Contractual Clauses (EU→US) |
 
 We will publish any changes to this list with at least 30 days'
 notice before a new subprocessor begins processing your data.
@@ -323,8 +325,9 @@ business model depends on reselling user data.
 
 The advertising and analytics services listed above (Meta,
 Google) are bound subprocessors under data-processing
-agreements; they receive only what's described in §3.2 and only
-with your explicit consent.
+agreements; they receive only what's described in §3.2, and only
+with your explicit consent apart from the server-side counts to
+Google Analytics that §3.2 describes.
 
 ## 6. International data transfers
 
@@ -565,7 +568,7 @@ new purposes), we will:
 - Update the "Last updated" date and increment the version number
   at the top of this document;
 - Preserve prior versions in the public Git history at
-  https://github.com/codeofaxel/Kiln/blob/main/PRIVACY.md.
+  https://github.com/codeofaxel/Kiln/blob/main/policies/PRIVACY.md.
 
 Non-material changes (typos, reorganization) are pushed
 immediately and noted in Git history.
