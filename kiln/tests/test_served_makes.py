@@ -202,6 +202,26 @@ class TestArrival:
         assert "generate_coaster again" in answer["error"]
         assert SERVER_STL not in json.dumps(answer)
 
+    def test_a_tool_that_only_read_a_model_is_not_a_missing_make(self, wire):
+        """Seen live on the first deploy: ``inspect_design`` echoes the
+        model it was handed (``source_path``, on the server) and makes
+        none.  That answer is a success, with the server paths removed."""
+        answer = served_makes.arrive(
+            "inspect_design",
+            {
+                "status": "success",
+                "source_path": "/tmp/kiln_decorate_src_9zlwlgvz.stl",
+                "bundle_dir": "/tmp/kiln-inspect-vei014a0",
+                "data": {"bbox_mm": [40, 30, 8]},
+            },
+        )
+        assert answer["status"] == "success" and "code" not in answer
+        assert answer["data"] == {"bbox_mm": [40, 30, 8]}
+        # The servers' copy of the input and the tool's working folder go
+        # without comment: neither is a file the person made or wants.
+        assert "source_path" not in answer and "bundle_dir" not in answer
+        assert "files_on_kiln_servers" not in answer
+
     def test_a_look_that_cannot_be_fetched_still_tells_the_truth(self, wire):
         _calls, answers = wire
         del answers[("GET", f"/api/artifact/{TOKEN}")]

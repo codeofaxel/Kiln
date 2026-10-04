@@ -229,7 +229,26 @@ def _is_elsewhere(value: Any) -> bool:
     if not value.startswith("/") or "\n" in value:
         return False
     path = Path(value)
-    return bool(path.suffix) and not path.exists()
+    # A file by its suffix, or anything in a scratch folder (a tool's
+    # working directory has none).
+    scratch = value.startswith(("/tmp/", "/var/tmp/", "/private/tmp/"))
+    return (bool(path.suffix) or scratch) and not path.exists()
+
+
+def _made_a_model(answer: dict) -> bool:
+    """Whether the answer names a model the tool MADE, at a path that is not
+    on this computer.  A tool that only read a model echoes the one it was
+    handed (``source_path``); that is its input, and no make went missing.
+    Told apart by the rule the stage uses to pick what to show."""
+    from kiln.stage_link import _key_rank, _looks_like_mesh_key
+
+    return any(
+        _is_elsewhere(value)
+        and Path(value).suffix.lower() in _SENDABLE_MODEL_TYPES
+        and _looks_like_mesh_key(key)
+        and _key_rank(key) is not None
+        for key, value in answer.items()
+    )
 
 
 def _without_server_files(answer: dict) -> dict:
@@ -237,10 +256,21 @@ def _without_server_files(answer: dict) -> dict:
     they are on Kiln's servers, and nothing brings them to this computer
     yet.  The paths go, and the answer says so, rather than handing an
     agent a path that opens nothing."""
+    from kiln.stage_link import _key_rank
+
     removed = sorted(key for key, value in answer.items() if _is_elsewhere(value))
     if not removed:
         return answer
     names = {key: Path(answer.pop(key)).name for key in removed}
+    # The servers' copy of what the caller sent, and a tool's working
+    # folder, are nobody's files to want: they go without comment.
+    names = {
+        key: name
+        for key, name in names.items()
+        if _key_rank(key) is not None and Path(name).suffix
+    }
+    if not names:
+        return answer
     answer["files_on_kiln_servers"] = {
         "on_this_computer": False,
         "files": names,
@@ -273,11 +303,7 @@ def arrive(tool: str, answer: Any, *, allowance: dict | None = None) -> Any:
             else ""
         )
         if not _TOKEN_SHAPE.match(token):
-            if any(
-                _is_elsewhere(value)
-                and Path(value).suffix.lower() in _SENDABLE_MODEL_TYPES
-                for value in answer.values()
-            ):
+            if _made_a_model(answer):
                 # The servers built a model and handed over no token for
                 # it, so there is nothing to show and nothing to keep.
                 # Seen live 2026-10-03, now and then.  A "success" nobody

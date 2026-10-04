@@ -53,7 +53,6 @@ import atexit
 # Import kiln-pro early so compatibility shims are installed before
 # any try/except imports of pro modules (kiln.billing, kiln.licensing, etc.).
 import contextlib
-import functools
 import logging
 import os
 import re
@@ -173,7 +172,7 @@ from kiln.tool_results import unwrap_tool_result
 # The plan gates read.  ``kiln.licensing`` is kiln-pro's licensing module when
 # kiln-pro is installed, and otherwise the signed-in account's plan
 # (``kiln.account_plan``), so a subscriber on a plain install is on their plan.
-from kiln.licensing import (
+from kiln.licensing import (  # noqa: F401 — plugins read these off this module
     BUSINESS_TIER_MAX_PRINTERS,
     FREE_TIER_MAX_PRINTERS,
     PRO_TIER_MAX_PRINTERS,
@@ -18605,7 +18604,7 @@ def _await_served_job(
     import urllib.error
     import urllib.request
 
-    from kiln.served_answer import envelope_for_http, envelope_for_transport
+    from kiln.served_answer import envelope_for_http
 
     kind = _PRO_TOOL_OFFLINE_KIND.get(tool_name)
     poll = str(accepted.get("poll") or f"/api/tools/jobs/{accepted.get('job_id')}")
@@ -18622,7 +18621,6 @@ def _await_served_job(
             "waiting. Nothing was charged."
         ),
     }
-    last_miss: Exception | None = None
     while time.monotonic() <= deadline:
         time.sleep(_SERVED_JOB_POLL_S)
         # A job outlives a sign-in token (they last an hour and are renewed
@@ -18648,18 +18646,17 @@ def _await_served_job(
                 body = None
             if exc.code >= 500 and not (isinstance(body, dict) and body.get("code")):
                 # The machine is busy with the job itself; ask again.
-                last_miss = exc
                 continue
             return envelope_for_http(tool_name, exc.code, body, kind=kind)
-        except Exception as exc:
+        except Exception:
             # One poll that got no answer says nothing about the job: the
             # machine running a heavy make can be slow to answer anything.
-            last_miss = exc
             continue
         if not (isinstance(answer, dict) and answer.get("status") == "running"):
             return answer
-    if last_miss is not None and not isinstance(last_miss, urllib.error.HTTPError):
-        return envelope_for_transport(tool_name, last_miss, host=api_url, kind=kind)
+    # The whole wait passed with no answer.  Whatever the last poll did, what
+    # the person needs to hear is that the make ran out of time, not that a
+    # minute's wait will fix it.
     return envelope_for_http(tool_name, 504, too_long, kind=kind)
 
 
