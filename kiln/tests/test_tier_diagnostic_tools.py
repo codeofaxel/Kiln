@@ -80,8 +80,7 @@ def _patch_license_manager_returning(monkeypatch, tier_name: str):
 # ---------------------------------------------------------------------------
 
 
-def test_free_tier_without_kiln_pro(monkeypatch):
-    """When kiln-pro is not importable, tool reports free + clear reason."""
+def _block_kiln_pro(monkeypatch):
     real_import = __builtins__["__import__"] if isinstance(__builtins__, dict) else __builtins__.__import__
 
     def blocking_import(name, *args, **kwargs):
@@ -91,13 +90,59 @@ def test_free_tier_without_kiln_pro(monkeypatch):
 
     monkeypatch.setattr("builtins.__import__", blocking_import)
 
+
+def test_plain_install_signed_out_is_free(monkeypatch, tmp_path):
+    """Without kiln-pro and without a sign-in, the answer is Free and says
+    how a subscriber connects this machine."""
+    _block_kiln_pro(monkeypatch)
+    monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
+
     out = _walk_resolution_chain()
     assert out["success"] is True
     assert out["effective_tier"] == "free"
-    assert out["matched_source"] == "kiln_pro_install"
-    assert any("kiln-pro is not installed" in step["detail"] for step in out["resolution_chain"])
+    assert out["matched_source"] == "default"
+    assert any("isn't connected to a Kiln account" in step["detail"] for step in out["resolution_chain"])
     assert "Free tier" in out["agent_summary"]
     assert "kiln3d.com/pricing" in out["agent_summary"]
+    assert out["setup_hint"] == "kiln signin"
+
+
+def test_plain_install_reports_the_signed_in_accounts_plan(monkeypatch, tmp_path):
+    """Without kiln-pro, a signed-in subscriber is on their plan, and the
+    account is asked NOW: this is the tool for "I just paid and it still
+    says Free"."""
+    import base64
+    import json
+    import time
+    from unittest import mock
+
+    from kiln import account_plan
+
+    _block_kiln_pro(monkeypatch)
+    monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
+    monkeypatch.setattr(account_plan, "_last_ask_at", 0.0)
+
+    def b64(obj) -> str:
+        return base64.urlsafe_b64encode(json.dumps(obj).encode()).rstrip(b"=").decode()
+
+    (tmp_path / ".kiln").mkdir()
+    (tmp_path / ".kiln" / "auth_tokens.json").write_text(json.dumps({
+        "access_token": f"{b64({'alg': 'none'})}.{b64({'exp': int(time.time()) + 86400})}.s",
+        "refresh_token": "r",
+        "email": "maker@example.com",
+        "tier": "free",  # what the sign-in saved, before the upgrade
+        "signed_in_at": int(time.time()),
+    }))
+    resp = mock.MagicMock(status_code=200)
+    resp.json.return_value = {"success": True, "tier": "pro", "has_entitlement": True}
+    with mock.patch("requests.get", return_value=resp) as get:
+        out = _walk_resolution_chain()
+
+    assert get.call_count == 1
+    assert out["effective_tier"] == "pro"
+    assert out["matched_source"] == "account_plan"
+    assert "setup_hint" not in out
+    assert json.loads((tmp_path / ".kiln" / "auth_tokens.json").read_text())["tier"] == "pro"
 
 
 @requires_kiln_pro

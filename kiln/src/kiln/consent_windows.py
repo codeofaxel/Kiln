@@ -272,38 +272,21 @@ ALWAYS_ALLOW_NEEDS_PRO = (
     "kiln consent window --for 2h --printer NAME"
 )
 
-#: The plans a signed-in account holds that include always allow.
-_PRO_PLANS = frozenset({"pro", "business", "enterprise"})
-
-
 def always_allow_is_yours() -> bool:
     """Whether the person on this install is on Kiln Pro or above -- what
     always allow needs.  Asked at the door and again at every start, so an
     entry stops starting prints unasked once the account leaves Pro, and
     starts again if it comes back.
 
-    The licence first, the same read the fleet door makes; else the plan
-    the account signed in on this machine holds (``kiln signin``), while
-    that sign-in stands: one the server refused grants nothing.  Never
-    raises."""
+    One read, the same one every gate makes (``kiln.licensing.get_tier``):
+    the licence where kiln-pro is installed, else the plan of the account
+    signed in on this machine (``kiln signin``) while that sign-in stands;
+    one the server refused grants nothing.  Never raises."""
     try:
         from kiln.licensing import LicenseTier, get_tier
 
-        licensed = get_tier() >= LicenseTier.PRO
-    except Exception:  # noqa: BLE001 — no licence module: the sign-in decides
-        licensed = False
-    if licensed:
-        return True
-    try:
-        from kiln.auth_session import _read_tokens, session_rejected
-
-        stored = _read_tokens()
-        return (
-            bool(str(stored.get("access_token") or "").strip())
-            and not session_rejected(stored)
-            and str(stored.get("tier") or "").strip().lower() in _PRO_PLANS
-        )
-    except Exception:  # noqa: BLE001 — an unreadable sign-in grants no plan
+        return get_tier() >= LicenseTier.PRO
+    except Exception:  # noqa: BLE001 — an unreadable plan grants nothing
         return False
 
 

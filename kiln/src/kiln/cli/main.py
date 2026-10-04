@@ -11583,6 +11583,62 @@ cli.add_command(verify, name="doctor")
 # ---------------------------------------------------------------------------
 
 
+def _license_manager_or_none():
+    """kiln-pro's licence manager, or ``None`` on an install without it.
+
+    Licence KEYS are kiln-pro's to read.  Without it a plan comes from the
+    Kiln account this machine is signed in to, and the commands below say
+    so instead of failing on the missing manager.
+    """
+    try:
+        from kiln.licensing import get_license_manager
+    except ImportError:
+        return None
+    return get_license_manager()
+
+
+def _account_plan_summary() -> dict:
+    """The signed-in account's plan, asked of the account now."""
+    from kiln.account_plan import refresh_plan
+    from kiln.auth_session import _read_tokens, session_rejected
+
+    stored = _read_tokens()
+    signed_in = bool(str(stored.get("access_token") or "").strip())
+    return {
+        "tier": refresh_plan().value,
+        "source": "account" if signed_in else "none",
+        "signed_in": signed_in and not session_rejected(stored),
+        "email": str(stored.get("email") or "") if signed_in else "",
+    }
+
+
+def _echo_account_plan(json_mode: bool, *, title: str = "Kiln plan") -> None:
+    """Print the plan of the signed-in account (an install without kiln-pro)."""
+    from kiln.tiers_and_terms import upgrade_link
+
+    data = _account_plan_summary()
+    if json_mode:
+        import json as _json
+
+        click.echo(_json.dumps({"success": True, **data}, indent=2))
+        return
+    click.echo(f"\n  {title}")
+    click.echo("  " + "─" * len(title))
+    click.echo(f"  Plan:    {data['tier'].title()}")
+    if data["signed_in"]:
+        click.echo(f"  Account: {data['email'] or 'signed in'}")
+    elif data["source"] == "account":
+        click.echo("  Account: the sign-in on this machine has expired")
+        click.echo("\n  Run `kiln signin` to sign back in.")
+        return
+    else:
+        click.echo("  Account: not signed in")
+    if data["tier"] == "free":
+        if not data["signed_in"]:
+            click.echo("\n  Already subscribed?  Run `kiln signin` to connect this machine.")
+        click.echo(f"  See the plans:       {upgrade_link(src='cli')}")
+
+
 @cli.command()
 @click.option(
     "--key",
@@ -11600,9 +11656,22 @@ cli.add_command(verify, name="doctor")
 @click.pass_context
 def upgrade(ctx: click.Context, key: str | None, session: str | None, json_mode: bool) -> None:
     """Activate a Kiln Pro or Business license, or view current tier."""
-    from kiln.licensing import LicenseTier, get_license_manager
-
-    mgr = get_license_manager()
+    mgr = _license_manager_or_none()
+    if mgr is None:
+        if key or session:
+            click.echo(
+                format_error(
+                    "This install takes its plan from your Kiln account, not from a "
+                    "license key. Run `kiln signin` and sign in with the email you "
+                    "subscribed with; your plan applies as soon as you are signed in.",
+                    code="SIGN_IN_INSTEAD",
+                    json_mode=json_mode,
+                )
+            )
+            sys.exit(1)
+        _echo_account_plan(json_mode)
+        return
+    from kiln.licensing import LicenseTier
 
     if session:
         try:
@@ -11738,9 +11807,16 @@ def register(email: str | None, json_mode: bool) -> None:
     Required for outsourced manufacturing via the fulfillment proxy.
     If you already have a license key, shows your current tier.
     """
-    from kiln.licensing import get_license_manager
-
-    mgr = get_license_manager()
+    mgr = _license_manager_or_none()
+    if mgr is None:
+        click.echo(
+            format_error(
+                "A free Kiln account is created by signing in: run `kiln signin`.",
+                code="SIGN_IN_INSTEAD",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
     info = mgr.get_info()
 
     # If user already has a valid key, show it and exit.
@@ -11817,9 +11893,10 @@ def register(email: str | None, json_mode: bool) -> None:
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def license_info(json_mode: bool) -> None:
     """Show current license tier and details."""
-    from kiln.licensing import get_license_manager
-
-    mgr = get_license_manager()
+    mgr = _license_manager_or_none()
+    if mgr is None:
+        _echo_account_plan(json_mode)
+        return
     info = mgr.get_info()
     data = info.to_dict()
 

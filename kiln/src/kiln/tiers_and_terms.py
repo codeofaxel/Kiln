@@ -247,6 +247,40 @@ def tier_required_message(subject: str, tier: str, alternative: str = "") -> str
     )
 
 
+def plan_does_not_include_message(
+    subject: str, tier: str, current_plan: str, email: str = ""
+) -> str:
+    """Person-facing copy for a SIGNED-IN person whose plan does not include
+    what they reached for.
+
+    Distinct from :func:`tier_required_message`, which also speaks to someone
+    whose machine is not connected yet: here it is, so "connect this machine"
+    would send them round a sign-in that changes nothing.  Says which account
+    and plan Kiln sees, so someone who pays on another account can tell at
+    once, then where the plan that includes it is described.
+    """
+    tier_name = str(tier).strip().title() or "Pro"
+    plan_name = str(current_plan).strip().title() or "Free"
+    who = f" as {email.strip()}" if email and email.strip() else ""
+    return (
+        f"{subject} needs Kiln {tier_name}. This machine is signed in{who}, "
+        f"on the {plan_name} plan. See what {tier_name} includes at "
+        "kiln3d.com/pricing"
+    )
+
+
+def plan_unconfirmed_message(subject: str, plan: str) -> str:
+    """Person-facing copy for a paid plan Kiln has not been able to confirm
+    with the account for too long to keep honouring.  Not an upsell: nothing
+    needs buying, the machine needs to reach Kiln once."""
+    plan_name = str(plan).strip().title() or "paid"
+    return (
+        f"{subject} is part of your {plan_name} plan, but this machine has not "
+        "been able to reach Kiln to confirm the plan for over a week. It "
+        "works again as soon as this machine is online."
+    )
+
+
 def free_allowance_phrase(allowance: dict | None) -> str:
     """``"3 textures a month"`` from a manifest allowance block, or ``""``.
 
@@ -497,6 +531,8 @@ __all__ = [
     "tag_pricing_links",
     "upgrade_link",
     "free_allowance_phrase",
+    "plan_does_not_include_message",
+    "plan_unconfirmed_message",
     "session_expired_message",
     "signed_out_message",
     "signin_hint_fields",

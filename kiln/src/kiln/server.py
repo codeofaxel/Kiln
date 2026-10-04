@@ -170,123 +170,19 @@ from kiln.generation import (
 from kiln.heater_watchdog import HeaterWatchdog
 from kiln.tool_results import unwrap_tool_result
 
-try:
-    from kiln.licensing import (
-        FREE_TIER_MAX_PRINTERS,
-        LicenseTier,
-        check_tier,
-        get_tier,
-        requires_tier,
-    )
-    # Pro / Business caps are supplied by kiln-pro's licensing module
-    # when installed.  Free users never have kiln-pro so the fallback
-    # block below is their runtime state.
-    try:
-        from kiln.licensing import (
-            BUSINESS_TIER_MAX_PRINTERS,
-            PRO_TIER_MAX_PRINTERS,
-            max_printers_for_tier,
-        )
-    except ImportError:
-        PRO_TIER_MAX_PRINTERS = 1
-        BUSINESS_TIER_MAX_PRINTERS = 50
-
-        def max_printers_for_tier(tier: object) -> int | None:
-            value = getattr(tier, "value", tier)
-            if value == "free":
-                return FREE_TIER_MAX_PRINTERS
-            if value == "pro":
-                return PRO_TIER_MAX_PRINTERS
-            if value == "business":
-                return BUSINESS_TIER_MAX_PRINTERS
-            return None  # enterprise → unlimited
-
-except ImportError:
-    # Free-tier fallback when kiln-pro is not installed — which is nearly every
-    # install, so THIS is the cap most users actually run under, not the branch
-    # above.  That asymmetry is what let it rot: the numbers here read 2 and 5
-    # against an enforced 1 and 1 for months, and could not be noticed locally
-    # by anyone who HAD kiln-pro installed, because they never execute there.
-    # Public CI runs this branch on every job and asserted nothing about it.
-    # Pinned now by kiln-pro's scripts/audit_tier_claims.py, which compares
-    # these literals to the licensing constants across the repo boundary.
-    FREE_TIER_MAX_PRINTERS = 1
-    PRO_TIER_MAX_PRINTERS = 1
-    BUSINESS_TIER_MAX_PRINTERS = 50
-
-    def max_printers_for_tier(tier: object) -> int | None:  # type: ignore[no-redef]
-        value = getattr(tier, "value", tier)
-        if value == "free":
-            return FREE_TIER_MAX_PRINTERS
-        if value == "pro":
-            return PRO_TIER_MAX_PRINTERS
-        if value == "business":
-            return BUSINESS_TIER_MAX_PRINTERS
-        return None
-
-    class _DummyTier:
-        """Stub for LicenseTier when licensing module is not installed."""
-
-        PRO = "pro"
-        ENTERPRISE = "enterprise"
-        BUSINESS = "business"
-        FREE = "free"
-
-    LicenseTier = _DummyTier  # type: ignore[misc]
-
-    def check_tier(required, *_a, **_kw):
-        # Imported locally: this stub is defined above the module's import
-        # block, and the message is the one a caller shows a person.  The
-        # (ok, message) tuple is an established contract with no room for an
-        # agent-addressed field, so callers that build a response dict around
-        # it splat ``signin_hint_fields()`` in themselves.
-        from kiln.tiers_and_terms import tier_required_message
-
-        tier_label = getattr(required, "value", required) if required else "pro"
-        return (False, tier_required_message("This feature", str(tier_label)))
-
-    def get_tier(*_a, **_kw):
-        return "free"
-
-    def requires_tier(_tier):
-        """Gate pro/enterprise features when kiln-pro is not installed."""
-        tier_label = getattr(_tier, "value", _tier) if _tier else "pro"
-
-        def decorator(fn):
-            @functools.wraps(fn)
-            def wrapper(*args, **kwargs):
-                tool_name = fn.__name__
-                # Funnel-leak telemetry: every TIER_REQUIRED on this
-                # path is a user reaching for a locked door.  Counted
-                # in daily_stats and rolled up in the heartbeat so we
-                # can see which tools are driving "I paid but my agent
-                # doesn't know" support volume.  Best-effort; never
-                # blocks the error path.
-                try:
-                    from kiln.daily_stats import record_tier_denial
-                    record_tier_denial(tool_name)
-                except Exception:
-                    pass
-                from kiln.tiers_and_terms import (
-                    signin_hint_fields,
-                    tier_required_message,
-                )
-
-                return {
-                    "success": False,
-                    "error": tier_required_message(tool_name, str(tier_label)),
-                    "code": "TIER_REQUIRED",
-                    "required_tier": str(tier_label),
-                    "tool": tool_name,
-                    "retryable": False,
-                    "upgrade_url": "https://kiln3d.com/pricing",
-                    **signin_hint_fields(),
-                }
-
-            return wrapper
-
-        return decorator
-
+# The plan gates read.  ``kiln.licensing`` is kiln-pro's licensing module when
+# kiln-pro is installed, and otherwise the signed-in account's plan
+# (``kiln.account_plan``), so a subscriber on a plain install is on their plan.
+from kiln.licensing import (
+    BUSINESS_TIER_MAX_PRINTERS,
+    FREE_TIER_MAX_PRINTERS,
+    PRO_TIER_MAX_PRINTERS,
+    LicenseTier,
+    check_tier,
+    get_tier,
+    max_printers_for_tier,
+    requires_tier,
+)
 
 from kiln.log_config import configure_logging as _configure_log_rotation
 from kiln.marketplaces import (

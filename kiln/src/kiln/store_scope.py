@@ -373,14 +373,14 @@ def _tier_from_licensing() -> str | None:
 def current_tier() -> str:
     """Return the caller's licence tier as a lowercase string.
 
-    ``kiln.licensing`` is a shim kiln-pro registers when it is imported,
-    so a plain ``from kiln.licensing import ...`` answers only in a
-    process that has already touched kiln-pro.  Resolving straight to
-    ``"free"`` on that miss is how a paid-key holder gets told a
-    local store is their whole library, so the miss is retried after
-    importing kiln-pro, and only a genuinely absent kiln-pro means free:
+    ``kiln.licensing`` answers on every install: kiln-pro's licence where
+    it is installed, else the plan of the signed-in Kiln account.  Should
+    it not answer at all, resolving straight to ``"free"`` is how a paid
+    holder gets told a local store is their whole library, so the miss is
+    retried after importing kiln-pro, and only a genuinely absent kiln-pro
+    means free:
 
-    * kiln-pro absent → ``"free"``.  There is no cloud half to miss.
+    * no answer and kiln-pro absent → ``"free"``.
     * tier resolved → that tier.
     * kiln-pro present but the tier will not resolve → ``"unknown"``,
       which is treated as possibly-paid.  It grants nothing; it only

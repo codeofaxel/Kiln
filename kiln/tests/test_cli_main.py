@@ -1162,8 +1162,8 @@ class TestErrorHandling:
 
 
 @pytest.mark.skipif(
-    not importlib.util.find_spec("kiln.licensing"),
-    reason="kiln.licensing extracted to kiln-pro",
+    not importlib.util.find_spec("kiln_pro"),
+    reason="exercises kiln-pro's licence manager and commands",
 )
 class TestLicenseCommands:
     """Tests for kiln upgrade and kiln license-info CLI commands."""
@@ -1324,8 +1324,8 @@ class TestLicenseCommands:
 
 
 @pytest.mark.skipif(
-    not importlib.util.find_spec("kiln.licensing"),
-    reason="kiln.licensing extracted to kiln-pro",
+    not importlib.util.find_spec("kiln_pro"),
+    reason="exercises kiln-pro's licence manager and commands",
 )
 class TestFleetCLI:
     """Tests for kiln fleet CLI commands."""
@@ -1465,10 +1465,6 @@ class TestFleetCLI:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(
-    not importlib.util.find_spec("kiln.licensing"),
-    reason="kiln.licensing extracted to kiln-pro",
-)
 class TestQueueCLI:
     """Tests for kiln queue CLI commands."""
 
@@ -1751,6 +1747,10 @@ class TestQueueCLI:
         data = json.loads(result.output)
         assert data["status"] == "success"
 
+    @pytest.mark.skipif(
+        not importlib.util.find_spec("kiln_pro"),
+        reason="builds kiln-pro's licence manager",
+    )
     def test_queue_submit_available_on_free_tier(self, runner, tmp_path):
         """kiln queue submit is available on Free tier (subject to queue cap)."""
         from kiln.licensing import LicenseManager

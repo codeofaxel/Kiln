@@ -170,18 +170,66 @@ def _walk_resolution_chain() -> dict[str, Any]:
         )
 
     except ImportError:
-        # kiln-pro not installed — user is necessarily on free tier
+        # A plain install: the plan is the signed-in account's.
+        return _account_plan_chain()
+
+
+def _account_plan_chain() -> dict[str, Any]:
+    """The answer on an install without kiln-pro: the plan of the Kiln
+    account this machine is signed in to, asked of the account NOW so that
+    "I just paid and it still says Free" is settled by this call."""
+    from kiln.account_plan import refresh_plan
+    from kiln.auth_session import _tokens_path, resolve_session_bearer
+
+    chain: list[dict[str, Any]] = []
+    auth_path = _tokens_path()
+    session = None
+    if not auth_path.is_file():
         chain.append({
-            "source": "kiln_pro_install",
+            "source": "oauth_session",
             "matched": False,
-            "detail": "kiln-pro is not installed on this machine. Free tier only — no paid features available locally. (Free users can still call paid tools through api.kiln3d.com if they have an account; this diagnostic only inspects local state.)",
+            "detail": f"No sign-in at {auth_path}; this machine isn't connected to a Kiln account",
         })
         return _build_response(
-            "free",
-            chain,
-            matched_source="kiln_pro_install",
-            matched_detail="kiln-pro not installed locally",
+            "free", chain,
+            matched_source="default",
+            matched_detail="not signed in to a Kiln account",
         )
+    try:
+        session = resolve_session_bearer()
+    except Exception:  # noqa: BLE001 — a diagnostic must not break
+        session = None
+    lapsed = session is not None and not session.token
+    chain.append({
+        "source": "oauth_session",
+        "matched": True,
+        "detail": (
+            f"Sign-in present at {auth_path}"
+            + ("; it has expired and could not be renewed" if lapsed else "")
+        ),
+    })
+    try:
+        plan = refresh_plan().value
+    except Exception as exc:  # noqa: BLE001
+        plan = "free"
+        chain.append({
+            "source": "account_plan",
+            "matched": False,
+            "detail": f"The account's plan could not be read: {exc}",
+        })
+    else:
+        chain.append({
+            "source": "account_plan",
+            "matched": True,
+            "tier": plan,
+            "detail": "The plan of the Kiln account this machine is signed in to",
+        })
+    return _build_response(
+        plan, chain,
+        matched_source="account_plan",
+        matched_detail=f"the signed-in account is on {plan}",
+        session=session,
+    )
 
 
 def _build_response(

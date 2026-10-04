@@ -1575,17 +1575,16 @@ class TestSendGcodeWithValidation:
 # fleet_status()
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(
-    not importlib.util.find_spec("kiln.licensing"),
-    reason="kiln.licensing extracted to kiln-pro",
-)
 class TestFleetStatus:
     """Tests for the fleet_status MCP tool."""
 
     @pytest.fixture(autouse=True)
     def _bypass_license(self, monkeypatch):
-        """Bypass PRO tier check so fleet tests can exercise the tool logic."""
+        """Stand in a plan that covers fleet tools, so these exercise the
+        tool logic: kiln-pro's gate where it is installed, the signed-in
+        account's plan on a plain install."""
         monkeypatch.setattr("kiln.licensing.check_tier", lambda _tier: (True, None))
+        monkeypatch.setattr("kiln.account_plan._covers", lambda _required: True)
 
     def test_empty_registry_no_env(self, monkeypatch):
         """Empty registry with no env adapter returns empty list."""

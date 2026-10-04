@@ -2220,19 +2220,26 @@ class TestItIsPro:
 
 
 class TestWhoseAlwaysAllowItIs:
-    """The plan is read from the licence, else from the account signed in on
-    this computer while that sign-in stands.  Called past the fixture that
-    stands it in for the rest of this file."""
+    """The plan is read through ``kiln.licensing``: on a plain install, the
+    plan of the account signed in on this computer while that sign-in
+    stands.  Called past the fixture that stands it in for the rest of this
+    file."""
 
     @pytest.fixture
     def signed_in_as(self, monkeypatch, tmp_path):
         import sys
+        import time
 
-        monkeypatch.setitem(sys.modules, "kiln.licensing", None)  # no licence: the sign-in decides
+        from kiln import account_plan
+
+        # A plain install: the names gates import are the account's plan.
+        monkeypatch.setitem(sys.modules, "kiln.licensing", account_plan)
         monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path / "auth"))
         (tmp_path / "auth" / ".kiln").mkdir(parents=True)
 
         def write(**tokens):
+            # A real sign-in stamps when the account last said its plan.
+            tokens.setdefault("signed_in_at", int(time.time()))
             (tmp_path / "auth" / ".kiln" / "auth_tokens.json").write_text(json.dumps(tokens))
 
         return write
