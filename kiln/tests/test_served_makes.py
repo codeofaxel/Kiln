@@ -202,6 +202,20 @@ class TestArrival:
         assert "generate_coaster again" in answer["error"]
         assert SERVER_STL not in json.dumps(answer)
 
+    def test_the_servers_saying_they_could_not_hand_it_over_is_a_failure(self, wire):
+        """The servers tried twice to store the make and say so.  That is
+        heard as the same retryable failure, whatever keys the answer has."""
+        answer = served_makes.arrive(
+            "smart_decorate",
+            {
+                "status": "success",
+                "result_file": "/tmp/kiln_decorate_x1/out.bin",
+                "hand_over": {"available": False, "retryable": True, "note": "..."},
+            },
+        )
+        assert answer["success"] is False and answer["retryable"] is True
+        assert answer["code"] == "MAKE_NOT_HANDED_OVER"
+
     def test_a_tool_that_only_read_a_model_is_not_a_missing_make(self, wire):
         """Seen live on the first deploy: ``inspect_design`` echoes the
         model it was handed (``source_path``, on the server) and makes
@@ -235,6 +249,136 @@ class TestArrival:
         local.write_bytes(LOOK_BYTES)
         answer = served_makes.arrive("generate_coaster", _served_answer(source_model=str(local)))
         assert answer["source_model"] == str(local)
+
+
+DOC_TOKEN = "Dx7pQ2mLRbyH2N-ZAHsJrK3vJX_k51tZ"
+PDF_BYTES = b"%PDF-1.7\n" + b"drawing " * 50
+
+
+def _drawing_answer(**extra) -> dict:
+    return {
+        "status": "success",
+        "summary": "3 views, 12 dimensions.",
+        "drawing": {"pdf_path": "/tmp/kiln_drawing_ab12/bracket drawing.pdf"},
+        "documents": [
+            {
+                "at": ["drawing", "pdf_path"],
+                "filename": "bracket drawing.pdf",
+                "format": "pdf",
+                "artifact_token": DOC_TOKEN,
+                "url": f"/api/artifact/{DOC_TOKEN}",
+                "expires_in": 1800,
+            }
+        ],
+        **extra,
+    }
+
+
+class TestDocuments:
+    """A drawing or a manual made on the servers is saved to this computer."""
+
+    def test_a_document_is_saved_here_and_its_path_is_real(self, wire):
+        calls, answers = wire
+        answers[("GET", f"/api/artifact/{DOC_TOKEN}")] = _Response(content=PDF_BYTES)
+        answer = served_makes.arrive("generate_technical_drawing", _drawing_answer())
+        saved = Path(answer["drawing"]["pdf_path"])
+        assert saved.read_bytes() == PDF_BYTES
+        assert saved.parent == served_makes.documents_dir()
+        assert saved.suffix == ".pdf" and " " not in saved.name
+        doc = answer["documents"][0]
+        assert doc["on_this_computer"] is True and doc["path"] == str(saved)
+        # The token has done its work, and no server path is left anywhere.
+        assert DOC_TOKEN not in json.dumps(answer)
+        assert all(Path(path).exists() for path in _paths_in(answer))
+        assert "files_on_kiln_servers" not in answer
+        assert calls[0][2]["headers"]["Authorization"] == "Bearer bearer-token"
+
+    def test_a_sheet_named_twice_is_local_in_both_places(self, wire):
+        """A drawing names its PNG under its outputs and under its preview."""
+        _, answers = wire
+        answers[("GET", f"/api/artifact/{DOC_TOKEN}")] = _Response(content=b"\x89PNG")
+        theirs = "/tmp/kiln-drawing-06je/block.png"
+        answer = served_makes.arrive(
+            "generate_technical_drawing",
+            {
+                "status": "success",
+                "outputs": {"png": theirs},
+                "preview": {"previews": [{"angle": "sheet", "path": theirs}]},
+                "documents": [
+                    {"at": ["outputs", "png"], "format": "png", "artifact_token": DOC_TOKEN}
+                ],
+            },
+        )
+        saved = answer["outputs"]["png"]
+        assert Path(saved).exists()
+        assert answer["preview"]["previews"][0]["path"] == saved
+        assert theirs not in json.dumps(answer)
+
+    def test_a_document_that_cannot_be_fetched_is_not_named_as_a_file(self, wire):
+        answer = served_makes.arrive(
+            "generate_technical_drawing",
+            _drawing_answer(pdf_path="/tmp/kiln_drawing_ab12/bracket drawing.pdf"),
+        )
+        assert answer["documents"][0]["on_this_computer"] is False
+        assert "pdf_path" not in answer
+        assert answer["summary"] == "3 views, 12 dimensions."
+        assert not (served_makes.documents_dir()).exists()
+
+    def test_a_document_beside_a_model_arrives_with_it(self, wire):
+        calls, answers = wire
+        answers[("GET", f"/api/artifact/{DOC_TOKEN}")] = _Response(content=PDF_BYTES)
+        made = _served_answer(
+            manual_pdf="/tmp/kiln_manual_q/manual.pdf",
+            documents=[
+                {
+                    "at": ["manual_pdf"],
+                    "filename": "manual.pdf",
+                    "format": "pdf",
+                    "artifact_token": DOC_TOKEN,
+                }
+            ],
+        )
+        answer = served_makes.arrive("generate_coaster", made)
+        assert Path(answer["manual_pdf"]).read_bytes() == PDF_BYTES
+        assert SERVER_STL not in json.dumps(answer)
+        assert answer.get("success") is not False
+
+    @pytest.mark.parametrize(
+        "entry",
+        [
+            {"at": ["drawing", "pdf_path"], "format": "exe", "artifact_token": DOC_TOKEN},
+            {"at": ["drawing", "pdf_path"], "format": "pdf", "artifact_token": "../etc"},
+            {"at": "drawing", "format": "pdf", "artifact_token": DOC_TOKEN},
+            {"at": [], "format": "pdf", "artifact_token": DOC_TOKEN},
+            "not-an-entry",
+        ],
+    )
+    def test_an_entry_that_is_not_a_document_fetches_nothing(self, wire, entry):
+        calls, _ = wire
+        served_makes.arrive("generate_technical_drawing", _drawing_answer(documents=[entry]))
+        assert calls == []
+
+    def test_the_servers_name_for_a_file_cannot_leave_the_documents_folder(self, wire):
+        _, answers = wire
+        answers[("GET", f"/api/artifact/{DOC_TOKEN}")] = _Response(content=PDF_BYTES)
+        made = _drawing_answer()
+        made["documents"][0]["filename"] = "../../../.ssh/authorized_keys.pdf"
+        answer = served_makes.arrive("generate_technical_drawing", made)
+        saved = Path(answer["drawing"]["pdf_path"])
+        assert saved.parent == served_makes.documents_dir()
+
+    def test_an_oversized_document_is_not_saved(self, wire, monkeypatch):
+        _, answers = wire
+        answers[("GET", f"/api/artifact/{DOC_TOKEN}")] = _Response(content=PDF_BYTES)
+        monkeypatch.setattr(served_makes, "MAX_DOCUMENT_BYTES", 10)
+        answer = served_makes.arrive("generate_technical_drawing", _drawing_answer())
+        assert answer["documents"][0]["on_this_computer"] is False
+
+    def test_signed_out_fetches_nothing(self, wire, monkeypatch):
+        calls, _ = wire
+        monkeypatch.setattr(served_makes, "_bearer", lambda: "")
+        answer = served_makes.arrive("generate_technical_drawing", _drawing_answer())
+        assert calls == [] and answer["documents"][0]["on_this_computer"] is False
 
 
 class TestKeep:

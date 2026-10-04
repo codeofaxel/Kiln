@@ -82,6 +82,11 @@ def kept_dir() -> Path:
     return _served_home() / "kept"
 
 
+def documents_dir() -> Path:
+    """Where documents a served tool made (a drawing, a manual) are saved."""
+    return _served_home() / "documents"
+
+
 def _record_path() -> Path:
     return _served_home() / "makes.json"
 
@@ -217,6 +222,108 @@ def _fetch_look(token: str, kind: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Documents
+# ---------------------------------------------------------------------------
+
+#: The largest document saved (the servers' own ceiling for one).
+MAX_DOCUMENT_BYTES = 32 * 1024 * 1024
+_DOCUMENT_SUFFIX = {"pdf": ".pdf", "svg": ".svg", "dxf": ".dxf", "png": ".png"}
+
+
+def _safe_filename(name: Any, kind: str, token: str) -> str:
+    """A file name for a fetched document: the servers' name for it with
+    anything that is not a plain character removed, the right suffix, and
+    part of its token so two drawings never overwrite each other."""
+    suffix = _DOCUMENT_SUFFIX[kind]
+    stem = Path(str(name or "document")).stem
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip("-.") or "document"
+    return f"{stem[:60]}-{token[:6]}{suffix}"
+
+
+def _replace_everywhere(value: Any, theirs: str, ours: str, depth: int = 0) -> None:
+    """Swap every string equal to ``theirs`` for ``ours``, in place."""
+    if depth > 6:
+        return
+    items: Any = ()
+    if isinstance(value, dict):
+        items = list(value.items())
+    elif isinstance(value, list):
+        items = list(enumerate(value))
+    for key, item in items:
+        if item == theirs and isinstance(item, str):
+            value[key] = ours
+        elif isinstance(item, (dict, list)):
+            _replace_everywhere(item, theirs, ours, depth + 1)
+
+
+def _bring_documents(answer: dict) -> None:
+    """Save each document the answer carries to this computer and put its
+    path where the servers' path was.
+
+    The servers name each one (``documents``: where it sits in the answer,
+    its format, a token).  A drawing is the tool's product and was already
+    paid for by the plan check that let the tool run, so there is no keep:
+    it is fetched now.  One that cannot be fetched keeps its entry and says
+    so; the rest of the answer stands.  Never raises.
+    """
+    documents = answer.get("documents")
+    if not isinstance(documents, list) or not documents:
+        return
+    bearer = _bearer()
+    import httpx
+
+    for doc in documents:
+        if not isinstance(doc, dict):
+            continue
+        token = str(doc.get("artifact_token") or "")
+        kind = str(doc.get("format") or "").lower()
+        where = doc.get("at")
+        doc["on_this_computer"] = False
+        if (
+            not bearer
+            or not _TOKEN_SHAPE.match(token)
+            or kind not in _DOCUMENT_SUFFIX
+            or not isinstance(where, list)
+            or not where
+            or not all(isinstance(key, str) for key in where)
+        ):
+            continue
+        try:
+            resp = httpx.get(
+                f"{_api_base()}/api/artifact/{token}",
+                headers={"Authorization": f"Bearer {bearer}"},
+                timeout=_FETCH_TIMEOUT_S,
+            )
+            if resp.status_code != 200 or not resp.content:
+                continue
+            if len(resp.content) > MAX_DOCUMENT_BYTES:
+                continue
+            folder = documents_dir()
+            folder.mkdir(parents=True, exist_ok=True)
+            path = folder / _safe_filename(doc.get("filename"), kind, token)
+            path.write_bytes(resp.content)
+        except Exception:  # noqa: BLE001 — one document must not cost the answer
+            logger.debug("served makes: document not fetched", exc_info=True)
+            continue
+        # Put the path where the servers' own path was, and wherever else
+        # the answer repeats that same path (a drawing names its sheet
+        # under its outputs and again under its preview).
+        block: Any = answer
+        for key in where[:-1]:
+            block = block.get(key) if isinstance(block, dict) else None
+        if isinstance(block, dict) and where[-1] in block:
+            theirs = block[where[-1]]
+            block[where[-1]] = str(path)
+            if _is_elsewhere(theirs):
+                _replace_everywhere(answer, theirs, str(path))
+        doc["path"] = str(path)
+        doc["on_this_computer"] = True
+        # The token and its link have done their work.
+        doc.pop("artifact_token", None)
+        doc.pop("url", None)
+
+
+# ---------------------------------------------------------------------------
 # Arrival
 # ---------------------------------------------------------------------------
 
@@ -296,6 +403,9 @@ def arrive(tool: str, answer: Any, *, allowance: dict | None = None) -> Any:
             return answer
         if answer.get("success") is False or answer.get("status") == "error":
             return answer
+        # Documents first: once saved here their paths are real, and the
+        # sweep for server-only paths below leaves them alone.
+        _bring_documents(answer)
         artifact = answer.get("artifact")
         token = (
             str(artifact.get("artifact_token") or "").strip()
@@ -303,7 +413,11 @@ def arrive(tool: str, answer: Any, *, allowance: dict | None = None) -> Any:
             else ""
         )
         if not _TOKEN_SHAPE.match(token):
-            if _made_a_model(answer):
+            hand_over = answer.get("hand_over")
+            said_not_handed_over = (
+                isinstance(hand_over, dict) and hand_over.get("available") is False
+            )
+            if said_not_handed_over or _made_a_model(answer):
                 # The servers built a model and handed over no token for
                 # it, so there is nothing to show and nothing to keep.
                 # Seen live 2026-10-03, now and then.  A "success" nobody
