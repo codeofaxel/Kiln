@@ -18614,39 +18614,53 @@ def _await_served_job(
     if machine:
         poll_headers["fly-force-instance-id"] = machine
     deadline = time.monotonic() + _SERVED_JOB_WAIT_S
-    try:
-        while True:
-            time.sleep(_SERVED_JOB_POLL_S)
-            req = urllib.request.Request(
-                f"{api_url.rstrip('/')}{poll}", headers=poll_headers, method="GET",
-            )
+    too_long = {
+        "status": "error",
+        "code": "JOB_TIMEOUT",
+        "error": (
+            "That took longer than Kiln's servers allow, so Kiln stopped "
+            "waiting. Nothing was charged."
+        ),
+    }
+    last_miss: Exception | None = None
+    while time.monotonic() <= deadline:
+        time.sleep(_SERVED_JOB_POLL_S)
+        # A job outlives a sign-in token (they last an hour and are renewed
+        # near their end), so each poll carries the current one.
+        try:
+            from kiln.auth_session import resolve_api_bearer
+
+            bearer = resolve_api_bearer().token
+            if bearer:
+                poll_headers["Authorization"] = f"Bearer {bearer}"
+        except Exception:
+            pass
+        req = urllib.request.Request(
+            f"{api_url.rstrip('/')}{poll}", headers=poll_headers, method="GET",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=_SERVED_WAIT_S) as resp:
+                answer = json.loads(resp.read())
+        except urllib.error.HTTPError as exc:
             try:
-                with urllib.request.urlopen(req, timeout=_SERVED_WAIT_S) as resp:
-                    answer = json.loads(resp.read())
-            except urllib.error.HTTPError as exc:
-                try:
-                    body = json.loads(exc.read().decode("utf-8"))
-                except Exception:
-                    body = None
-                return envelope_for_http(tool_name, exc.code, body, kind=kind)
-            if not (isinstance(answer, dict) and answer.get("status") == "running"):
-                return answer
-            if time.monotonic() > deadline:
-                return envelope_for_http(
-                    tool_name,
-                    504,
-                    {
-                        "status": "error",
-                        "code": "JOB_TIMEOUT",
-                        "error": (
-                            "That took longer than Kiln's servers allow, so "
-                            "Kiln stopped waiting. Nothing was charged."
-                        ),
-                    },
-                    kind=kind,
-                )
-    except Exception as exc:
-        return envelope_for_transport(tool_name, exc, host=api_url, kind=kind)
+                body = json.loads(exc.read().decode("utf-8"))
+            except Exception:
+                body = None
+            if exc.code >= 500 and not (isinstance(body, dict) and body.get("code")):
+                # The machine is busy with the job itself; ask again.
+                last_miss = exc
+                continue
+            return envelope_for_http(tool_name, exc.code, body, kind=kind)
+        except Exception as exc:
+            # One poll that got no answer says nothing about the job: the
+            # machine running a heavy make can be slow to answer anything.
+            last_miss = exc
+            continue
+        if not (isinstance(answer, dict) and answer.get("status") == "running"):
+            return answer
+    if last_miss is not None and not isinstance(last_miss, urllib.error.HTTPError):
+        return envelope_for_transport(tool_name, last_miss, host=api_url, kind=kind)
+    return envelope_for_http(tool_name, 504, too_long, kind=kind)
 
 
 def _register_pro_tool_stubs(mcp_instance) -> None:

@@ -517,3 +517,79 @@ class TestAHeavyMakeRunsAsAJob:
         ]
         out = server._pro_api_call("apply_procedural_texture", texture="marble")
         assert "Apply again" in json.dumps(out, ensure_ascii=False)
+
+
+class TestAJobIsWaitedForPatiently:
+    """Measured on the live servers 2026-10-03: a poll timed out while the
+    machine was busy with the job itself, and a sign-in token expired during
+    a nine-minute make.  Neither is the job failing."""
+
+    @pytest.fixture
+    def served(self, monkeypatch, tmp_path):
+        import io
+        import urllib.error
+
+        import kiln.server as server
+        from kiln import auth_session
+
+        monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
+        monkeypatch.delenv("KILN_LICENSE_KEY", raising=False)
+        monkeypatch.setattr(server, "_SERVED_JOB_POLL_S", 0.0)
+        tokens = iter(["token-1", "token-1", "token-2", "token-2", "token-2"])
+        monkeypatch.setattr(
+            auth_session,
+            "resolve_api_bearer",
+            lambda *a, **k: auth_session.ApiBearer(token=next(tokens), state="live"),
+        )
+        requests: list[dict] = []
+        script: list = []
+
+        class _Resp:
+            status = 200
+
+            def __init__(self, body):
+                self._body = json.dumps(body).encode()
+
+            def read(self):
+                return self._body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        def urlopen(req, timeout=None):
+            requests.append(dict(req.header_items()))
+            step = script.pop(0)
+            if isinstance(step, Exception):
+                raise step
+            status, body = step
+            if status >= 400:
+                raise urllib.error.HTTPError(
+                    req.full_url, status, "error", {}, io.BytesIO(json.dumps(body).encode())
+                )
+            resp = _Resp(body)
+            resp.status = status
+            return resp
+
+        monkeypatch.setattr("urllib.request.urlopen", urlopen)
+        return server, requests, script
+
+    def test_a_poll_that_gets_no_answer_is_asked_again(self, served):
+        server, requests, script = served
+        script += [
+            (202, {"status": "accepted", "job_id": "j1", "machine_id": "m", "poll": "/api/tools/jobs/j1"}),
+            TimeoutError("timed out"),
+            (502, {}),
+            (200, {"status": "running"}),
+            (200, {"status": "success", "message": "Textured."}),
+        ]
+        assert server._pro_api_call("apply_procedural_texture", texture="marble") == {
+            "status": "success",
+            "message": "Textured.",
+        }
+        # Each poll carried the sign-in as it stood at that moment.
+        assert [r["Authorization"] for r in requests] == [
+            "Bearer token-1", "Bearer token-1", "Bearer token-2", "Bearer token-2", "Bearer token-2",
+        ]
