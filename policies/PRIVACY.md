@@ -1,6 +1,6 @@
 # Kiln Privacy Policy
 
-*Last updated: 2026-10-04 · Version 2.9*
+*Last updated: 2026-10-04 · Version 2.10*
 
 > **Plain-English summary** — Kiln is operated by **Hadron Labs Inc.**, a
 > Delaware C corporation headquartered in California. Most of Kiln runs
@@ -315,6 +315,7 @@ perform.
 | **Google LLC** (Google Workspace) | The emails we send you: welcome, team invitations, spend-cap changes, refund notices | US | Standard Contractual Clauses (EU→US) |
 | **Cloudflare, Inc.** (R2 storage) | Nightly backup copies of our database and stored files, kept for disaster recovery | US | Standard Contractual Clauses (EU→US) |
 | **GitHub, Inc.** (Actions) | Runs our scheduled jobs; each nightly backup and weekly report passes through it | US | Standard Contractual Clauses (EU→US) |
+| **Better Stack, Inc.** | Runs our status page; holds your email only if you subscribe to updates at status.kiln3d.com | US | Standard Contractual Clauses (EU→US), under Better Stack's data-processing agreement |
 
 We will publish any changes to this list with at least 30 days'
 notice before a new subprocessor begins processing your data.
