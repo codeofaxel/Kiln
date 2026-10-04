@@ -740,7 +740,7 @@ def step_converted_from(mesh_path: str) -> str | None:
     candidate must still convert to a mesh of this one's size, so a STEP
     edited since is not mistaken for the source.
     """
-    import trimesh
+    from kiln.mesh_frame import load_mesh
 
     path = Path(mesh_path)
     if not _made_by_step_conversion(path):
@@ -755,8 +755,10 @@ def step_converted_from(mesh_path: str) -> str | None:
     for candidate in beside:
         try:
             converted, _note = ensure_mesh_path(str(candidate))
-            theirs = trimesh.load(converted, force="mesh").extents
-            ours = trimesh.load(mesh_path, force="mesh").extents
+            # Both in Kiln's frame, or a glTF beside its STEP compares
+            # sideways and is never recognised as the same part.
+            theirs = load_mesh(converted, force="mesh").extents
+            ours = load_mesh(mesh_path, force="mesh").extents
         except Exception:  # noqa: BLE001 -- an unreadable candidate is no source
             return None
         if all(abs(a - b) <= _SAME_SIZE_MM for a, b in zip(theirs, ours, strict=True)):

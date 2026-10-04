@@ -331,18 +331,23 @@ class TestWithKilnPro:
         pro_licensing.get_tier = lambda: "from kiln-pro"
         enterprise.licensing = pro_licensing
         pro.enterprise = enterprise
+        import kiln
+
         monkeypatch.setitem(sys.modules, "kiln_pro", pro)
         monkeypatch.setitem(sys.modules, "kiln_pro.enterprise", enterprise)
         monkeypatch.setitem(sys.modules, "kiln_pro.enterprise.licensing", pro_licensing)
+        # Both halves of "what kiln.licensing is" go back at teardown: the
+        # module registry AND the package's own attribute.  Restoring only the
+        # registry left ``kiln.licensing`` pointing at this stand-in, and the
+        # next test that patched ``kiln.licensing.<name>`` failed on it (public
+        # CI, Python 3.12 job, 2026-10-04).
         monkeypatch.delitem(sys.modules, "kiln.licensing", raising=False)
-        try:
-            module = importlib.import_module("kiln.licensing")
-            assert module is pro_licensing
-            from kiln.licensing import get_tier
+        monkeypatch.setattr(kiln, "licensing", getattr(kiln, "licensing", None), raising=False)
+        module = importlib.import_module("kiln.licensing")
+        assert module is pro_licensing
+        from kiln.licensing import get_tier
 
-            assert get_tier() == "from kiln-pro"
-        finally:
-            sys.modules.pop("kiln.licensing", None)
+        assert get_tier() == "from kiln-pro"
 
 
 class TestThePlanCommands:

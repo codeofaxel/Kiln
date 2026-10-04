@@ -56,11 +56,13 @@ class MeshMeasure:
 
 def measure_mesh(path: str) -> MeshMeasure:
     """Measure *path* the way every edit is judged.  Raises on an unreadable mesh."""
-    import trimesh
-
+    from kiln.mesh_frame import load_mesh
     from kiln.printability import analyze_printability
 
-    mesh = trimesh.load(path, force="mesh")
+    # Kiln's frame, as every other reader of the same file sees it: a glTF
+    # measured raw lies on its side, and its extents disagree with the
+    # printability report taken beside them.
+    mesh = load_mesh(path, force="mesh")
     report = analyze_printability(path, include_hole_detection=True)
     holes = sorted(float(h.get("diameter_mm") or 0.0) for h in report.holes or [] if h.get("diameter_mm"))
     wall = report.thin_walls.min_wall_thickness_mm if report.thin_walls is not None else None

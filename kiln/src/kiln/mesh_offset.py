@@ -98,7 +98,11 @@ def _child(request: dict[str, Any]) -> dict[str, Any]:
     import numpy as np
     import trimesh
 
-    original = trimesh.load(request["mesh"], force="mesh")
+    from kiln.mesh_frame import load_mesh
+
+    # Offset the part as Kiln stands it: a glTF read raw would come back
+    # thickened and lying on its side.
+    original = load_mesh(request["mesh"], force="mesh")
     solid = mf.Manifold(mf.Mesh64(
         vert_properties=np.asarray(original.vertices, dtype=np.float64),
         tri_verts=np.asarray(original.faces, dtype=np.uint64),
