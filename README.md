@@ -494,7 +494,7 @@ All local printing is **free forever** — status, file management, slicing, fle
 
 **Founding offer:** half off for life while founding spots last — Pro $24.50/mo or $234/yr, Business $99.50/mo or $954/yr. Students get half off for 12 months. Details and how to claim the student price: **[kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&utm_medium=readme)**.
 
-Full comparison at **[kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&utm_medium=readme)**. Run `kiln upgrade` to activate a license key. For provider-routed orders, the provider remains merchant of record; Kiln acts as orchestration infrastructure.
+Full comparison at **[kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&utm_medium=readme)**. Already subscribed? Run `kiln signin` to put this machine on your plan. For provider-routed orders, the provider remains merchant of record; Kiln acts as orchestration infrastructure.
 
 ## Safety
 
