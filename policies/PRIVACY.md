@@ -1,6 +1,6 @@
 # Kiln Privacy Policy
 
-*Last updated: 2026-10-03 · Version 2.6*
+*Last updated: 2026-10-03 · Version 2.7*
 
 > **Plain-English summary** — Kiln is operated by **Hadron Labs Inc.**, a
 > Delaware C corporation headquartered in California. Most of Kiln runs
@@ -384,6 +384,16 @@ payment — and, if a Kiln link brought you, which one. We keep only the
 day, those labels and a count: no cookie, no IP address, nothing stored
 on your device and nothing that links one step to another or to you.
 
+When you use kiln3d.com/filament-colors, the page tells Kiln when it was
+opened and when you press "Sign in free" or a "See where to buy" link.
+Kiln counts each color lookup by the material you chose, the color code
+you looked up and how close the best match was. A standard color name
+such as "navy" is kept as that name; any other text you type is not
+kept. If you create a Kiln account through that page's sign-in button, it
+adds one to the page's count of new accounts. We keep only the day, those
+labels and a count: no cookie, no IP address, nothing stored on your
+device, and nothing in the count that names your account.
+
 The **web workshop** (`app.kiln3d.com`) uses:
 
 - A **Supabase authentication cookie** (`sb-access-token`,
@@ -407,7 +417,7 @@ Google Analytics 4 and Meta Pixel — and only with your explicit
 consent (see §3.2). **Neither is loaded on the web workshop
 (`app.kiln3d.com`) at all.** Vercel Web Analytics is first-party,
 cookieless, and the only analytics that runs without consent, apart
-from that count of steps on the pricing page — it now covers
+from the counts of steps on the pricing and filament color pages — it now covers
 both the marketing site and the workshop.
 
 ## 9. Your rights
