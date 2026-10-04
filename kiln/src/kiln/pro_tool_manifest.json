@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-04T02:29:15.737987+00:00",
-  "tool_count": 434,
+  "generated": "2026-10-04T06:23:25.048043+00:00",
+  "tool_count": 437,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -963,9 +963,9 @@
     },
     {
       "name": "get_manual_revision",
-      "description": "Fetch a single manual revision by id (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
+      "description": "Fetch a single manual revision by id.",
+      "tier": "free",
+      "access": "free",
       "category": "assembly_manuals",
       "parameters": {
         "properties": {
@@ -987,9 +987,9 @@
     },
     {
       "name": "list_manual_history",
-      "description": "List the chronological revision history of a design's manuals (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
+      "description": "List the chronological revision history of a design's manuals.",
+      "tier": "free",
+      "access": "free",
       "category": "assembly_manuals",
       "parameters": {
         "properties": {
@@ -2220,9 +2220,9 @@
     },
     {
       "name": "cloud_pull_manual_history",
-      "description": "Merge a design's remote manual-revision history into local.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
+      "description": "Bring a design's manuals back from a remote, PDFs included.",
+      "tier": "free",
+      "access": "free",
       "category": "cloud_sync",
       "parameters": {
         "properties": {
@@ -2293,6 +2293,33 @@
           "preset_id"
         ],
         "title": "cloud_pull_preset_branchArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
+      }
+    },
+    {
+      "name": "cloud_pull_technical_drawings",
+      "description": "Bring the account's technical drawings back to this computer.",
+      "tier": "free",
+      "access": "free",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
+          },
+          "remote": {
+            "default": "default",
+            "title": "Remote",
+            "type": "string"
+          }
+        },
+        "title": "cloud_pull_technical_drawingsArguments",
         "type": "object"
       },
       "offline": {
@@ -2481,9 +2508,9 @@
     },
     {
       "name": "cloud_push_manual_history",
-      "description": "Push a design's assembly-manual revision history to a remote.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
+      "description": "Push a design's assembly manuals, PDFs included, to a remote.",
+      "tier": "free",
+      "access": "free",
       "category": "cloud_sync",
       "parameters": {
         "properties": {
@@ -2612,6 +2639,33 @@
         "kind": "sync"
       },
       "served": false
+    },
+    {
+      "name": "cloud_push_technical_drawings",
+      "description": "Push this computer's technical drawings, files included, to a remote.",
+      "tier": "free",
+      "access": "free",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
+          },
+          "remote": {
+            "default": "default",
+            "title": "Remote",
+            "type": "string"
+          }
+        },
+        "title": "cloud_push_technical_drawingsArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
+      }
     },
     {
       "name": "cloud_remote_add",
@@ -22600,6 +22654,28 @@
       },
       "inputs": {
         "mesh": "source_path"
+      }
+    },
+    {
+      "name": "list_technical_drawings",
+      "description": "List the dimensioned drawings this person has made, newest first.",
+      "tier": "free",
+      "access": "free",
+      "category": "technical_drawings",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
+          }
+        },
+        "title": "list_technical_drawingsArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
