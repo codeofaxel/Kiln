@@ -154,19 +154,24 @@ def _model_key_of(printer_name: str) -> str | None:
     return None
 
 
-def _stock_mm(printer_id: str) -> float | None:
-    """The model's stock size from its bundled slicer profile, or ``None``."""
-    key = _profile_id_of(printer_id)
-    if key is None:
+def stock_setting(printer_id: str, key: str) -> str | None:
+    """The bundled slicer profile's *key* for the model *printer_id* slices as, or ``None``."""
+    profile = _profile_id_of(printer_id)
+    if profile is None:
         return None
     try:
         from kiln.slicer_profiles import get_slicer_profile
 
-        raw = str(get_slicer_profile(key).settings.get("nozzle_diameter", ""))
-        return _valid(raw.replace(";", ",").split(",")[0])
+        raw = str(get_slicer_profile(profile).settings.get(key, "")).replace(";", ",").split(",")[0].strip()
+        return raw or None
     except Exception:  # noqa: BLE001
         logger.debug("assumed nozzle: stock lookup failed", exc_info=True)
     return None
+
+
+def _stock_mm(printer_id: str) -> float | None:
+    """The model's stock size from its bundled slicer profile, or ``None``."""
+    return _valid(stock_setting(printer_id, "nozzle_diameter"))
 
 
 def _registered_machines() -> list[str]:
@@ -273,4 +278,4 @@ def nozzle_for_profile(profile_id: str, printer_name: str | None = None) -> Assu
     return assumed_nozzle(key)
 
 
-__all__ = ["DEFAULT_MM", "AssumedNozzle", "assumed_nozzle", "nozzle_for_profile"]
+__all__ = ["DEFAULT_MM", "AssumedNozzle", "assumed_nozzle", "nozzle_for_profile", "stock_setting"]

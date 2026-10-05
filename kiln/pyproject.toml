@@ -124,7 +124,13 @@ mesh-diagnostics = []
 # never open a STEP file; `kiln install-step-backend` installs it for the
 # ones who do.  Anyone who already has full cadquery keeps working — the OCP
 # backend uses whichever build provides the `OCP` module.
-step = ["cadquery-ocp-novtk>=7.9"]
+#
+# The ceiling is the newest kernel Kiln's own kernel code has been run
+# against (CI's cad-kernel job), not a guess at what will break: kernel 8.0
+# renamed calls, and code written on 7.9 stopped at its first import on it.
+# kiln.step_import.KERNEL_RANGE states the same range; a test holds them
+# together.
+step = ["cadquery-ocp-novtk>=7.9,<8.1"]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",

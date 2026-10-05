@@ -15,6 +15,12 @@ allows, is refused and nothing runs.  No step here commands a printer.
 with a slicer flag list checked flag by flag against what a placement
 needs.  The servers decide where the part goes; this computer's slicer
 makes the toolpath; the servers then judge the result.
+
+``printer_facts``: say which printers this install has -- each one's name,
+connection kind and model, and when asked, a Klipper printer's own
+configuration -- with the time they were read.  Never an address, a serial
+number or a credential: a served tool needs to know WHAT the printer is,
+and nothing here tells it where the printer is or how to reach it.
 """
 
 from __future__ import annotations
@@ -137,8 +143,75 @@ def _slice(tool: str, step: dict[str, Any]) -> tuple[str | None, dict[str, Any] 
     return str(out), None
 
 
+#: What a ``printer_facts`` step may ask for beyond the basics.
+_FACTS_EXTRAS = frozenset({"klipper_config"})
+#: How long a printer is given to answer for its configuration.
+_FACTS_DEADLINE_S = 8.0
+_UNNAMED = frozenset({"", "default", "active"})
+
+
+def _printer_facts(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """The printers this install has, as plain facts; never how to reach one."""
+    import concurrent.futures
+    from datetime import datetime, timezone
+
+    import kiln.server as server
+
+    want = step.get("want") or []
+    if not isinstance(want, list) or not set(want) <= _FACTS_EXTRAS:
+        return None, _refusal(
+            tool, "LOCAL_STEP_REFUSED",
+            f"{tool} asked this computer for something about your printer "
+            "that Kiln does not hand to a served tool. Nothing was sent.",
+        )
+    asked = str(step.get("printer_name") or "").strip()
+    try:
+        entries = server._read_config_printers() or {}
+        default = server._resolve_effective_printer_name(None)
+    except Exception:  # noqa: BLE001
+        entries, default = {}, ""
+    target = asked if asked.lower() not in _UNNAMED else default
+    printers: list[dict[str, Any]] = []
+    for name, entry in entries.items():
+        if not isinstance(entry, dict):
+            continue
+        kind = str(entry.get("type") or entry.get("printer_type") or "").lower()
+        fact: dict[str, Any] = {
+            "name": str(name),
+            "type": kind,
+            "model": str(entry.get("printer_model") or ""),
+            "is_default": str(name) == default,
+        }
+        if "klipper_config" in want and kind == "moonraker" and str(name) == target:
+            pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            try:
+                adapter = server._get_registry().get(str(name))
+                fact["klipper_config"] = pool.submit(adapter.get_printer_config).result(
+                    timeout=_FACTS_DEADLINE_S,
+                )
+            except Exception as exc:  # noqa: BLE001 — said, never guessed
+                fact["klipper_config"] = None
+                fact["klipper_config_error"] = (
+                    "the printer did not answer in time"
+                    if isinstance(exc, concurrent.futures.TimeoutError)
+                    else "the printer could not be asked"
+                )
+            finally:
+                pool.shutdown(wait=False)
+        printers.append(fact)
+    return {
+        "read_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "printers": printers,
+    }, None
+
+
+#: Steps that MAKE a file (sent up, named by a token)...
 _STEPS: dict[str, Callable[[str, dict[str, Any]], tuple[str | None, dict[str, Any] | None]]] = {
     "slice": _slice,
+}
+#: ...and steps that READ facts (sent with the next call as they are).
+_READS: dict[str, Callable[[str, dict[str, Any]], tuple[dict[str, Any] | None, dict[str, Any] | None]]] = {
+    "printer_facts": _printer_facts,
 }
 
 
@@ -157,8 +230,10 @@ def carry_out(
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Do *steps* and send each result up with *send* (a file -> token).
 
-    Returns ``({step id: {"token": ...}}, None)``, or ``({}, refusal)`` at
-    the first step that is not allowed, fails, or cannot be sent.
+    Returns ``({step id: {"token": ...} | {"data": {...}}}, None)`` -- a
+    token for a step that made a file, the facts themselves for a step that
+    read something -- or ``({}, refusal)`` at the first step that is not
+    allowed, fails, or cannot be sent.
     """
     if not steps or len(steps) > MAX_STEPS:
         return {}, _refusal(
@@ -170,7 +245,15 @@ def carry_out(
     for step in steps:
         kind, step_id = step.get("kind"), step.get("id")
         do = _STEPS.get(kind) if isinstance(kind, str) else None
-        if do is None or not isinstance(step_id, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,40}", step_id):
+        read = _READS.get(kind) if isinstance(kind, str) else None
+        plain_id = isinstance(step_id, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,40}", step_id)
+        if read is not None and plain_id:
+            facts, refusal = read(tool, step)
+            if refusal is not None or facts is None:
+                return {}, refusal
+            results[step_id] = {"data": facts}
+            continue
+        if do is None or not plain_id:
             return {}, _refusal(
                 tool, "LOCAL_STEP_REFUSED",
                 f"{tool} asked this computer to do something this version "

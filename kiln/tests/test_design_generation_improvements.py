@@ -3506,164 +3506,6 @@ class TestEstimatePrintTimeEdgeCases:
 
 
 # ---------------------------------------------------------------------------
-# Geometry-level mesh repair: thicken, fillet, chamfer
-# ---------------------------------------------------------------------------
-
-
-class TestAddFillet:
-    """Tests for add_fillet() — round sharp edges."""
-
-    def test_basic_fillet(self, tmp_path):
-        from kiln.generation.validation import add_fillet
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-        out = str(tmp_path / "filleted.stl")
-
-        result = add_fillet(stl, radius_mm=1.0, output_path=out)
-
-        assert result["path"] == out
-        assert result["radius_mm"] == 1.0
-        assert result["angle_threshold_deg"] == 60.0
-        assert os.path.isfile(out)
-
-    def test_cube_has_sharp_edges(self, tmp_path):
-        from kiln.generation.validation import add_fillet
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-
-        result = add_fillet(stl, radius_mm=0.5)
-        # A cube has 12 edges, all at 90 degrees — should find sharp edges
-        assert result["sharp_edges_found"] > 0
-        assert result["fillet_triangles_added"] > 0
-        assert result["triangle_count"] > 12  # Original + fillet tris
-
-    def test_filleted_file_is_valid_stl(self, tmp_path):
-        from kiln.generation.validation import add_fillet, validate_mesh
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-        out = str(tmp_path / "filleted.stl")
-
-        add_fillet(stl, radius_mm=0.5, output_path=out)
-        val = validate_mesh(out)
-        assert val.valid
-        assert val.triangle_count > 12
-
-    def test_default_output_path(self, tmp_path):
-        from kiln.generation.validation import add_fillet
-
-        stl = str(tmp_path / "bracket.stl")
-        _write_cube_stl(stl, 10.0)
-
-        result = add_fillet(stl, radius_mm=1.0)
-        assert result["path"].endswith("_filleted.stl")
-
-    def test_zero_radius_raises(self, tmp_path):
-        from kiln.generation.validation import add_fillet
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-
-        with pytest.raises(ValueError, match="positive"):
-            add_fillet(stl, radius_mm=0)
-
-    def test_invalid_angle_raises(self, tmp_path):
-        from kiln.generation.validation import add_fillet
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-
-        with pytest.raises(ValueError, match="between 0 and 180"):
-            add_fillet(stl, angle_threshold_deg=0)
-
-        with pytest.raises(ValueError, match="between 0 and 180"):
-            add_fillet(stl, angle_threshold_deg=180)
-
-    def test_high_threshold_finds_no_edges(self, tmp_path):
-        from kiln.generation.validation import add_fillet
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-
-        # 170 degrees — almost flat, should find no sharp edges on a cube
-        result = add_fillet(stl, angle_threshold_deg=170.0)
-        # Cube edges are at 90 degrees (cos=0), only edges sharper than
-        # 170 degrees (cos(170)≈-0.985) would be detected — cube doesn't have those
-        assert result["triangle_count"] == 12  # No fillets added
-
-
-class TestAddChamfer:
-    """Tests for add_chamfer() — flat bevel at sharp edges."""
-
-    def test_basic_chamfer(self, tmp_path):
-        from kiln.generation.validation import add_chamfer
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-        out = str(tmp_path / "chamfered.stl")
-
-        result = add_chamfer(stl, distance_mm=0.5, output_path=out)
-
-        assert result["path"] == out
-        assert result["distance_mm"] == 0.5
-        assert result["angle_threshold_deg"] == 60.0
-        assert os.path.isfile(out)
-
-    def test_cube_has_sharp_edges(self, tmp_path):
-        from kiln.generation.validation import add_chamfer
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-
-        result = add_chamfer(stl, distance_mm=0.3)
-        assert result["sharp_edges_found"] > 0
-        assert result["chamfer_triangles_added"] > 0
-        assert result["triangle_count"] > 12
-
-    def test_chamfered_file_is_valid_stl(self, tmp_path):
-        from kiln.generation.validation import add_chamfer, validate_mesh
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-        out = str(tmp_path / "chamfered.stl")
-
-        add_chamfer(stl, distance_mm=0.5, output_path=out)
-        val = validate_mesh(out)
-        assert val.valid
-        assert val.triangle_count > 12
-
-    def test_default_output_path(self, tmp_path):
-        from kiln.generation.validation import add_chamfer
-
-        stl = str(tmp_path / "part.stl")
-        _write_cube_stl(stl, 10.0)
-
-        result = add_chamfer(stl, distance_mm=0.5)
-        assert result["path"].endswith("_chamfered.stl")
-
-    def test_zero_distance_raises(self, tmp_path):
-        from kiln.generation.validation import add_chamfer
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-
-        with pytest.raises(ValueError, match="positive"):
-            add_chamfer(stl, distance_mm=0)
-
-    def test_chamfer_adds_two_tris_per_edge(self, tmp_path):
-        from kiln.generation.validation import add_chamfer
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-
-        result = add_chamfer(stl, distance_mm=0.3)
-        # Each sharp edge gets 2 chamfer triangles
-        assert result["chamfer_triangles_added"] == result["sharp_edges_found"] * 2
-
-
-# ---------------------------------------------------------------------------
 # Boolean mesh operations (via OpenSCAD)
 # ---------------------------------------------------------------------------
 
@@ -4464,7 +4306,7 @@ class TestApplyReinforcements:
             str(stl)
         )
         calls = []
-        real = dr._apply_fillet
+        real = dr._apply_edge_finish
 
         def counted(*args):
             calls.append(args)
@@ -4472,13 +4314,14 @@ class TestApplyReinforcements:
 
         asked = [r for r in dr.generate_improvement_plan(str(stl)).reinforcements if r.reinforcement_type == "fillet"]
         assert len(asked) > 1  # several corners ask for the one edit
-        with patch.object(dr, "_apply_fillet", counted):
+        with patch.object(dr, "_apply_edge_finish", counted):
             result = dr.apply_reinforcements(str(stl), output_path=str(tmp_path / "out.stl"))
 
         fillets = [e for e in result.applied + result.skipped if e["type"] == "fillet"]
         assert len(fillets) == 1
         assert len(calls) == 1
-        assert calls[0][3] == dr._SHARP_ANGLE_THRESHOLD_DEG_PUBLIC
+        _part, _work_dir, kind, _size, angle_deg, _printer, _choose = calls[0]
+        assert (kind, angle_deg) == ("fillet", dr._SHARP_ANGLE_THRESHOLD_DEG_PUBLIC)
         assert "could not run" not in fillets[0].get("reason", "")
         assert {fillets[0]["addresses"], *fillets[0].get("also_addresses", [])} == {r.addresses_risk for r in asked}
 

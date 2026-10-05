@@ -97,6 +97,18 @@ SUBPROCESS_TIMEOUT_S: int = 300
 #: twice as fast.  Nobody should download a gigabyte to open one STEP file.
 PIP_BACKEND = "cadquery-ocp-novtk"
 
+#: The kernel versions Kiln's own kernel code has been RUN against, oldest to
+#: the ceiling: CI's cad-kernel job runs the kernel tests on both ends.  A
+#: kernel major renames calls (8.0 did, 2026-09-22), and code written against
+#: one version stops at its first import on the next -- so the install is
+#: held to what has been run, and the ceiling moves when CI is green on the
+#: version above it.  ``pyproject.toml``'s ``step`` extra states the same
+#: range; a test holds the two together.
+KERNEL_RANGE = ">=7.9,<8.1"
+
+#: What ``kiln install-step-backend`` and the printed remedy install.
+PIP_REQUIREMENT = f"{PIP_BACKEND}{KERNEL_RANGE}"
+
 #: The one command that fixes a local install.
 INSTALL_COMMAND = "kiln install-step-backend"
 
@@ -105,7 +117,7 @@ INSTALL_COMMAND = "kiln install-step-backend"
 #: exists in a release that ships it, so telling a user on any earlier
 #: version to install it hands them an instruction that fails.  This one is
 #: true on every version, including the one they already have.
-PIP_INSTALL_COMMAND = f'pip install "{PIP_BACKEND}"'
+PIP_INSTALL_COMMAND = f'pip install "{PIP_REQUIREMENT}"'
 
 _LOCAL_INSTALL_HELP = (
     "No STEP import backend found on this machine.\n"
@@ -766,6 +778,35 @@ def step_converted_from(mesh_path: str) -> str | None:
     return None
 
 
+def keep_step_beside(scratch_step: str, mesh_path: str, source: str) -> tuple[str | None, str]:
+    """Put the CAD an edit produced beside the mesh it produced, under the same name.
+
+    The forward half of :func:`step_converted_from`: same name, same folder,
+    and the mesh marked as Kiln's conversion of that CAD, so the next edit of
+    the mesh finds its CAD again.  A file already at that name is replaced
+    only when Kiln wrote it (:func:`kiln.cad_kernel.step_made_by_kiln`);
+    anything else -- the caller's own CAD, *source* itself when the output
+    was named after it -- is left alone and the CAD goes beside it as
+    ``<name>.kiln.step``.  Returns the CAD's path (``None`` when the edit
+    wrote none) and a sentence about a file left alone, or ``""``.
+    """
+    from kiln.cad_kernel import step_made_by_kiln
+
+    if not os.path.isfile(scratch_step):
+        return None, ""
+    target = Path(mesh_path).with_suffix(".step")
+    note = ""
+    is_the_source = target.exists() and os.path.samefile(target, source)
+    if target.exists() and (is_the_source or not step_made_by_kiln(str(target))):
+        kept = target
+        target = target.with_name(f"{target.stem}{_BESIDE}.step")
+        note = f" {kept.name} was already there and is not a file Kiln made, so the finished CAD is {target.name}."
+    else:
+        _stamp_binary_stl(Path(mesh_path))
+    _move_into(Path(scratch_step), target)
+    return str(target), note
+
+
 def _move_into(src: Path, dest: Path) -> None:
     """Move *src* onto *dest*, atomically even across filesystems."""
     try:
@@ -794,6 +835,12 @@ def _publish_outputs(
             continue
         base = stem if len(outputs) == 1 else f"{stem}_{src.stem}"
         dest, note = _claim_output_name(out_dir, base, src.suffix or ".stl")
+        # Whichever backend wrote it: the kernel's mesher leaves facets with
+        # no area at the pole of every ball-rounded corner, and a mesh that
+        # carries them reads as an open surface.
+        from kiln.cad_kernel import drop_collapsed_facets
+
+        drop_collapsed_facets(str(src))
         _stamp_binary_stl(src)
         _move_into(src, dest)
         published.append(str(dest))
@@ -1783,6 +1830,11 @@ def _write_3mf(
     build_items: list[str] = []
     for obj_index, part in enumerate(parts):
         obj_id = obj_index + 2  # id 1 is the basematerials group
+        # The same cleanup every published STL gets (_publish_outputs): a
+        # coloured part's rounded corner is closed too.
+        from kiln.cad_kernel import drop_collapsed_facets
+
+        drop_collapsed_facets(part["stl_path"])
         triangles = _read_binary_stl(part["stl_path"])
 
         vertex_ids: dict[tuple[float, float, float], int] = {}
@@ -2179,6 +2231,69 @@ def surface_model_note(topology: SourceTopology | None) -> str | None:
     )
 
 
+#: A mesh past this many triangles is not read to see whether it is closed.
+#: The read holds every edge at once: measured 2026-10-05, 150 MB at 284k
+#: triangles, 289 MB at 626k, 468 MB at 1.1M -- on a server with 2 GB for
+#: everything, in the server's own process.
+_CLOSED_CHECK_MAX_TRIANGLES = 500_000
+
+
+def _mesh_is_closed(stl_path: str) -> bool | None:
+    """Whether every edge of a binary STL is shared by exactly two facets.
+
+    ``None`` when Kiln did not look: not a binary STL, unreadable, or past
+    :data:`_CLOSED_CHECK_MAX_TRIANGLES`.  Corners are matched by their exact
+    stored numbers, which is how one converter's own output joins up.
+    """
+    try:
+        import numpy as np
+
+        with open(stl_path, "rb") as fh:
+            header = fh.read(84)
+            if len(header) < 84:
+                return None
+            count = int.from_bytes(header[80:84], "little")
+            if count == 0 or count > _CLOSED_CHECK_MAX_TRIANGLES:
+                return None
+            if os.path.getsize(stl_path) != 84 + 50 * count:
+                return None
+            facets = np.frombuffer(fh.read(50 * count), dtype=np.dtype([("n", "<f4", 3), ("v", "<f4", (3, 3)), ("a", "<u2")]))
+        _, corner = np.unique(facets["v"].reshape(-1, 3), axis=0, return_inverse=True)
+        corner = corner.reshape(-1, 3)
+        edges = np.concatenate([corner[:, [0, 1]], corner[:, [1, 2]], corner[:, [2, 0]]])
+        edges.sort(axis=1)
+        _, shared = np.unique(edges, axis=0, return_counts=True)
+        return bool((shared == 2).all())
+    except Exception:  # noqa: BLE001 -- a check that cannot run says nothing, it never fails a conversion
+        logger.debug("could not read %s to see whether it is closed", stl_path, exc_info=True)
+        return None
+
+
+def open_mesh_note(topology: SourceTopology | None, mesh_paths: Sequence[str]) -> str | None:
+    """What Kiln says when a CAD file's solids became a mesh that is not closed.
+
+    ``None`` when there is nothing to say: the backend could not count the
+    file's solids, the file declared none (:func:`surface_model_note` speaks
+    to that), every mesh is closed, or a mesh was too large to read.
+
+    A solid is closed by definition, so an open mesh made from one is a fault
+    in the conversion, not a property of the part.  Left unsaid, every later
+    check reports it as the person's own file being broken.
+    """
+    if topology is None or topology.solids < 1:
+        return None
+    open_ones = [Path(p).name for p in mesh_paths if _mesh_is_closed(p) is False]
+    if not open_ones:
+        return None
+    return (
+        f"This CAD file declares {topology.solids} solid "
+        f"bod{'ies' if topology.solids != 1 else 'y'}, and the mesh Kiln made from it "
+        f"({', '.join(open_ones)}) is not a closed surface. That is a fault in the conversion, "
+        "not in your part: checks run on this mesh may wrongly call the part open or give it no "
+        "volume. Please report it with the file (report_issue), and judge the part from the CAD until it is fixed."
+    )
+
+
 def is_step_file(path: str) -> bool:
     """True if this path names a STEP file, by extension."""
     return Path(path).suffix.lower() in _VALID_EXTENSIONS
@@ -2303,7 +2418,12 @@ def ensure_mesh_path(
         # keeps the invalidation aimed: a machine with no gmsh on PATH
         # fingerprints to "" exactly as before and keeps every entry it has.
         f"gmsh@{_GMSH_CURVATURE_ELEMENTS}" if _find_gmsh_cmd() else "",
-        _ocp_available(),
+        # The kernel slot says what its meshes are free of, not merely that
+        # it is here: an entry written before collapsed facets were dropped
+        # (kiln.cad_kernel.drop_collapsed_facets) holds a rounded part that
+        # reads as an open surface, and a key that cannot tell the two apart
+        # would serve it for as long as the temp dir lives.
+        "occt-no-collapsed-facets" if _ocp_available() else False,
         _cadquery_available(),
     )
     key = hashlib.sha256(
@@ -2567,6 +2687,12 @@ def _convert_step_to_stl_via(
     outputs, left_alone = _publish_outputs(outputs, out_dir, validated_path.stem)
     warnings.extend(left_alone)
 
+    # Asked of the published mesh, the one every later check reads.
+    opened = open_mesh_note(conversion.source if conversion else None, outputs)
+    if opened is not None:
+        logger.warning("%s: %s", validated_path.name, opened)
+        warnings.append(opened)
+
     # Compute total file size.
     total_size = sum(Path(p).stat().st_size for p in outputs)
 
@@ -2692,6 +2818,10 @@ def _convert_step_colour_aware(
         if not published:
             raise StepImportError("Conversion produced no output files.")
         final = published[0]
+        opened = open_mesh_note(conversion.source, published)
+        if opened is not None:
+            logger.warning("%s: %s", validated_path.name, opened)
+            surface_warnings.append(opened)
         elapsed = time.monotonic() - t0
         return StepImportResult(
             output_path=final,
@@ -2713,6 +2843,10 @@ def _convert_step_colour_aware(
     # These names are already unique; the writer re-establishes that for
     # callers who did not, and returns what it wrote.
     _write_3mf(parts, out_3mf)
+    opened = open_mesh_note(conversion.source, [p["stl_path"] for p in parts])
+    if opened is not None:
+        logger.warning("%s: %s", validated_path.name, opened)
+        surface_warnings.append(opened)
     for p in parts:  # the per-part STLs were scaffolding, not output
         with contextlib.suppress(OSError):
             os.unlink(p["stl_path"])

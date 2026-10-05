@@ -4229,6 +4229,30 @@ def _material_wall_floor(
     return floor if floor > 0.0 else None
 
 
+def _tell_whoever_runs_this_machine(file_path: str, stopped: Exception) -> None:
+    """Pass a stopped hole check to the operator's alert, when one is installed.
+
+    A machine with an allowance is someone's server; they need to hear that
+    a model went past it, or the allowance quietly becomes a size limit
+    nobody chose.  Never raises: an alert that fails changes no answer.
+    """
+    try:
+        from kiln_pro.bridge import pro_features  # type: ignore[import-not-found]
+
+        tell = getattr(pro_features, "ops_alert", None)
+        if tell is not None:
+            tell(
+                "hole_check_stopped",
+                {
+                    "triangles": max(0, (Path(file_path).stat().st_size - 84) // 50),
+                    "held_mb": getattr(stopped, "held_mb", None),
+                    "allowed_mb": getattr(stopped, "allowed_mb", None),
+                },
+            )
+    except Exception:  # noqa: BLE001 -- see the docstring
+        logger.debug("no operator alert for a stopped hole check", exc_info=True)
+
+
 def analyze_printability(
     file_path: str,
     *,
@@ -4324,6 +4348,28 @@ def analyze_printability(
             raise ValueError(str(exc)) from exc
         except step_import.StepImportError as exc:
             raise ValueError(f"Could not read that CAD file: {exc}") from exc
+
+    # Holes first, before this function holds the mesh itself: on a machine
+    # that gives the hole check an allowance (kiln.hole_check) the check runs
+    # in a process of its own, and the two are then never held at once.
+    # A hole-detection failure must never break the wider printability
+    # path; an empty list is the documented degraded output.  A check the
+    # machine stopped is a different thing from no holes, and is said.
+    holes: list[dict[str, Any]] = []
+    hole_diagnostics: dict[str, int] = {}
+    holes_not_checked: str | None = None
+    if include_hole_detection:
+        from kiln.hole_check import HoleCheckStopped, find_holes
+
+        try:
+            holes = find_holes(file_path, diagnostics=hole_diagnostics)
+        except (ValueError, OSError) as exc:
+            # A path that cannot be read is the parser's to refuse, just below.
+            logger.debug("detect_holes failed silently on %s: %s", file_path, exc)
+        except HoleCheckStopped as exc:
+            holes_not_checked = str(exc)
+            logger.warning("hole check stopped on %s: %s", Path(file_path).name, exc)
+            _tell_whoever_runs_this_machine(file_path, exc)
 
     triangles, vertices = _parse_mesh(file_path)
     # Membranes must go BEFORE winding normalization: a zero-thickness
@@ -4587,24 +4633,6 @@ def analyze_printability(
         overhangs, max_free_air_overhang_deg=round(_free_air_max_deg, 1),
     )
 
-    # Detect cylindrical-hole features.  Wrapped in try/except — a
-    # malformed mesh or coarse triangulation can raise inside the
-    # detector, but a hole-detection failure must never break the
-    # wider printability path.  Empty list is the documented degraded
-    # output, matching the contract the kiln-pro overlay engine
-    # expects when reading ``report["holes"]``.
-    holes: list[dict[str, Any]] = []
-    hole_diagnostics: dict[str, int] = {}
-    if include_hole_detection:
-        from kiln.generation.validation import detect_holes
-        try:
-            holes = detect_holes(file_path, diagnostics=hole_diagnostics)
-        except (ValueError, FileNotFoundError) as exc:
-            logger.debug(
-                "detect_holes failed silently on %s: %s",
-                file_path, exc,
-            )
-
     warping = _analyze_warping(
         triangles, vertices, bbox, material=material, overlay=judgment_overlay,
     )
@@ -4674,6 +4702,14 @@ def analyze_printability(
             f"without supports — no action needed.  Force-enable supports "
             f"in your slicer if the underside is a show surface and you "
             f"want a smoother finish."
+        )
+
+    if holes_not_checked is not None:
+        recommendations.append(
+            f"Kiln did not check this model's holes: {len(triangles):,} triangles is more than the "
+            "hole check is given on this machine, so no hole here has been counted or sized. "
+            "Everything else in this report stands. To have the holes checked, run it with Kiln "
+            "installed on your own computer, where the check has no limit."
         )
 
     # Hole-detection diagnostic notices: surface features the detector

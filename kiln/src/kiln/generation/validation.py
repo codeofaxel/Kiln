@@ -5540,334 +5540,6 @@ def extract_plate_object_gcode(
     }
 
 
-# ---------------------------------------------------------------------------
-# Edge finishing on a mesh: fillet, chamfer.  Never called bare: kiln.edge_finish
-# measures every result and refuses one worse than the part it was given.
-# ---------------------------------------------------------------------------
-
-
-def add_fillet(
-    file_path: str,
-    *,
-    radius_mm: float = 1.0,
-    angle_threshold_deg: float = 60.0,
-    output_path: str | None = None,
-) -> dict[str, Any]:
-    """Add fillets (rounded transitions) at sharp edges.
-
-    Detects edges where adjacent faces meet at an angle sharper than
-    ``angle_threshold_deg`` and inserts intermediate triangles to
-    approximate a smooth fillet of the given radius.  The original
-    sharp edge is replaced by a chamfered bevel subdivided into
-    fillet segments.
-
-    This strengthens parts by reducing stress concentrations at
-    corners and improves print quality by eliminating sharp overhangs.
-
-    Args:
-        file_path: Path to the STL file.
-        radius_mm: Fillet radius in mm (default 1.0).
-        angle_threshold_deg: Edges sharper than this get filleted
-            (default 60 degrees — catches most stress risers).
-        output_path: Output path.  Defaults to ``<name>_filleted.stl``.
-
-    Returns:
-        Dict with fillet statistics.
-
-    Raises:
-        ValueError: If the STL is invalid or parameters are invalid.
-    """
-    import math
-
-    if radius_mm <= 0:
-        raise ValueError("radius_mm must be positive")
-    if angle_threshold_deg <= 0 or angle_threshold_deg >= 180:
-        raise ValueError("angle_threshold_deg must be between 0 and 180")
-
-    path = Path(file_path)
-    errors: list[str] = []
-    triangles, vertices = _parse_stl(path, errors)
-    if errors:
-        raise ValueError(f"Failed to parse STL: {'; '.join(errors)}")
-    if not triangles:
-        raise ValueError("STL contains no geometry.")
-
-    cos_threshold = math.cos(math.radians(angle_threshold_deg))
-
-    # Build edge → face normals map
-    # An edge is a pair of vertex tuples; each edge maps to the normals
-    # of the two faces sharing it.
-    edge_faces: dict[
-        tuple[tuple[float, ...], tuple[float, ...]],
-        list[tuple[float, float, float]],
-    ] = {}
-
-    face_normals: list[tuple[float, float, float]] = []
-    for tri in triangles:
-        v0, v1, v2 = tri
-        e1 = (v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2])
-        e2 = (v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2])
-        nx = e1[1] * e2[2] - e1[2] * e2[1]
-        ny = e1[2] * e2[0] - e1[0] * e2[2]
-        nz = e1[0] * e2[1] - e1[1] * e2[0]
-        mag = math.sqrt(nx * nx + ny * ny + nz * nz)
-        if mag > 1e-12:
-            fn = (nx / mag, ny / mag, nz / mag)
-        else:
-            fn = (0.0, 0.0, 1.0)
-        face_normals.append(fn)
-
-        for i in range(3):
-            va = tri[i]
-            vb = tri[(i + 1) % 3]
-            edge = (min(va, vb), max(va, vb))
-            if edge not in edge_faces:
-                edge_faces[edge] = []
-            edge_faces[edge].append(fn)
-
-    # Find sharp edges
-    sharp_edges: list[tuple[tuple[float, ...], tuple[float, ...]]] = []
-    for edge, normals in edge_faces.items():
-        if len(normals) != 2:
-            continue
-        n1, n2 = normals[0], normals[1]
-        dot = n1[0] * n2[0] + n1[1] * n2[1] + n1[2] * n2[2]
-        if dot < cos_threshold:
-            sharp_edges.append(edge)
-
-    if not sharp_edges:
-        if output_path is None:
-            output_path = str(path.with_name(f"{path.stem}_filleted.stl"))
-        _write_binary_stl(triangles, output_path)
-        return {
-            "path": output_path,
-            "sharp_edges_found": 0,
-            "fillet_triangles_added": 0,
-            "triangle_count": len(triangles),
-            "radius_mm": radius_mm,
-        }
-
-    # Generate fillet geometry at each sharp edge.
-    # Strategy: for each sharp edge, compute the bisector direction
-    # and add a strip of triangles that bridges the gap with a
-    # curved profile.
-    fillet_tris: list[tuple[tuple[float, ...], ...]] = []
-    segments = max(2, min(6, int(radius_mm * 3)))
-
-    for edge in sharp_edges:
-        va, vb = edge
-        normals = edge_faces[edge]
-        if len(normals) != 2:
-            continue
-        n1, n2 = normals[0], normals[1]
-
-        # Bisector normal (average of the two face normals)
-        bx = (n1[0] + n2[0]) / 2.0
-        by = (n1[1] + n2[1]) / 2.0
-        bz = (n1[2] + n2[2]) / 2.0
-        bmag = math.sqrt(bx * bx + by * by + bz * bz)
-        if bmag < 1e-12:
-            continue
-        bx /= bmag
-        by /= bmag
-        bz /= bmag
-
-        # Generate offset points along the edge for the fillet strip
-        for seg in range(segments):
-            t0 = seg / segments
-            t1 = (seg + 1) / segments
-            # Interpolate between n1 and bisector direction
-            offset0 = radius_mm * t0
-            offset1 = radius_mm * t1
-
-            # Points on fillet surface at va
-            pa0 = (
-                va[0] + bx * offset0,
-                va[1] + by * offset0,
-                va[2] + bz * offset0,
-            )
-            pa1 = (
-                va[0] + bx * offset1,
-                va[1] + by * offset1,
-                va[2] + bz * offset1,
-            )
-            # Points on fillet surface at vb
-            pb0 = (
-                vb[0] + bx * offset0,
-                vb[1] + by * offset0,
-                vb[2] + bz * offset0,
-            )
-            pb1 = (
-                vb[0] + bx * offset1,
-                vb[1] + by * offset1,
-                vb[2] + bz * offset1,
-            )
-
-            # Two triangles per segment (quad strip)
-            fillet_tris.append((pa0, pb0, pa1))
-            fillet_tris.append((pa1, pb0, pb1))
-
-    combined = list(triangles) + fillet_tris
-
-    if output_path is None:
-        output_path = str(path.with_name(f"{path.stem}_filleted.stl"))
-
-    _write_binary_stl(combined, output_path)
-
-    return {
-        "path": output_path,
-        "sharp_edges_found": len(sharp_edges),
-        "fillet_triangles_added": len(fillet_tris),
-        "triangle_count": len(combined),
-        "radius_mm": radius_mm,
-        "angle_threshold_deg": angle_threshold_deg,
-    }
-
-
-def add_chamfer(
-    file_path: str,
-    *,
-    distance_mm: float = 0.5,
-    angle_threshold_deg: float = 60.0,
-    output_path: str | None = None,
-) -> dict[str, Any]:
-    """Add chamfers (flat bevels) at sharp edges.
-
-    Detects edges where adjacent faces meet at an angle sharper than
-    ``angle_threshold_deg`` and bevels them by inserting a flat
-    transition face.  Chamfers are faster to print than fillets and
-    reduce stress concentration at sharp corners.
-
-    Args:
-        file_path: Path to the STL file.
-        distance_mm: Chamfer distance from edge in mm (default 0.5).
-        angle_threshold_deg: Edges sharper than this get chamfered
-            (default 60 degrees).
-        output_path: Output path.  Defaults to ``<name>_chamfered.stl``.
-
-    Returns:
-        Dict with chamfer statistics.
-
-    Raises:
-        ValueError: If the STL is invalid or parameters are invalid.
-    """
-    import math
-
-    if distance_mm <= 0:
-        raise ValueError("distance_mm must be positive")
-    if angle_threshold_deg <= 0 or angle_threshold_deg >= 180:
-        raise ValueError("angle_threshold_deg must be between 0 and 180")
-
-    path = Path(file_path)
-    errors: list[str] = []
-    triangles, vertices = _parse_stl(path, errors)
-    if errors:
-        raise ValueError(f"Failed to parse STL: {'; '.join(errors)}")
-    if not triangles:
-        raise ValueError("STL contains no geometry.")
-
-    cos_threshold = math.cos(math.radians(angle_threshold_deg))
-
-    # Build edge → face normals map (same as add_fillet)
-    edge_faces: dict[
-        tuple[tuple[float, ...], tuple[float, ...]],
-        list[tuple[float, float, float]],
-    ] = {}
-
-    for tri in triangles:
-        v0, v1, v2 = tri
-        e1 = (v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2])
-        e2 = (v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2])
-        nx = e1[1] * e2[2] - e1[2] * e2[1]
-        ny = e1[2] * e2[0] - e1[0] * e2[2]
-        nz = e1[0] * e2[1] - e1[1] * e2[0]
-        mag = math.sqrt(nx * nx + ny * ny + nz * nz)
-        fn = (nx / mag, ny / mag, nz / mag) if mag > 1e-12 else (0.0, 0.0, 1.0)
-
-        for i in range(3):
-            va = tri[i]
-            vb = tri[(i + 1) % 3]
-            edge = (min(va, vb), max(va, vb))
-            if edge not in edge_faces:
-                edge_faces[edge] = []
-            edge_faces[edge].append(fn)
-
-    # Find sharp edges
-    sharp_edges: list[tuple[tuple[float, ...], tuple[float, ...]]] = []
-    for edge, normals in edge_faces.items():
-        if len(normals) != 2:
-            continue
-        n1, n2 = normals[0], normals[1]
-        dot = n1[0] * n2[0] + n1[1] * n2[1] + n1[2] * n2[2]
-        if dot < cos_threshold:
-            sharp_edges.append(edge)
-
-    if not sharp_edges:
-        if output_path is None:
-            output_path = str(path.with_name(f"{path.stem}_chamfered.stl"))
-        _write_binary_stl(triangles, output_path)
-        return {
-            "path": output_path,
-            "sharp_edges_found": 0,
-            "chamfer_triangles_added": 0,
-            "triangle_count": len(triangles),
-            "distance_mm": distance_mm,
-        }
-
-    # Generate chamfer geometry: for each sharp edge, add a flat bevel
-    # strip offset along both face normals.
-    chamfer_tris: list[tuple[tuple[float, ...], ...]] = []
-
-    for edge in sharp_edges:
-        va, vb = edge
-        normals = edge_faces[edge]
-        if len(normals) != 2:
-            continue
-        n1, n2 = normals[0], normals[1]
-
-        # Offset points along each face normal
-        va_off1 = (
-            va[0] + n1[0] * distance_mm,
-            va[1] + n1[1] * distance_mm,
-            va[2] + n1[2] * distance_mm,
-        )
-        va_off2 = (
-            va[0] + n2[0] * distance_mm,
-            va[1] + n2[1] * distance_mm,
-            va[2] + n2[2] * distance_mm,
-        )
-        vb_off1 = (
-            vb[0] + n1[0] * distance_mm,
-            vb[1] + n1[1] * distance_mm,
-            vb[2] + n1[2] * distance_mm,
-        )
-        vb_off2 = (
-            vb[0] + n2[0] * distance_mm,
-            vb[1] + n2[1] * distance_mm,
-            vb[2] + n2[2] * distance_mm,
-        )
-
-        # Two triangles forming the chamfer quad
-        chamfer_tris.append((va_off1, vb_off1, va_off2))
-        chamfer_tris.append((va_off2, vb_off1, vb_off2))
-
-    combined = list(triangles) + chamfer_tris
-
-    if output_path is None:
-        output_path = str(path.with_name(f"{path.stem}_chamfered.stl"))
-
-    _write_binary_stl(combined, output_path)
-
-    return {
-        "path": output_path,
-        "sharp_edges_found": len(sharp_edges),
-        "chamfer_triangles_added": len(chamfer_tris),
-        "triangle_count": len(combined),
-        "distance_mm": distance_mm,
-        "angle_threshold_deg": angle_threshold_deg,
-    }
-
-
 def detect_mesh_pockets(
     file_path: str,
     *,
@@ -6111,6 +5783,12 @@ def detect_holes(
     3. Project triangle centroids into the plane perpendicular to that
        axis and run the radius-bounds, octant-coverage, circularity,
        and inward-normal gates against the (u, v) coordinates.
+    4. A cluster no axis reads as one hole may hold several: a bevel or
+       a round at a bore's mouth joins its wall to the face it opens
+       in, and through that face to every other wall the face meets.
+       Each wall in such a cluster is found by the creases its own
+       facets fold along (``_prismatic_walls``) and put through the
+       same gates on its own.
 
     The detector is intentionally conservative — partial rings,
     elliptical relief cuts, and chamfered hole entries do not register
@@ -6289,11 +5967,13 @@ def detect_holes(
     # adjacent flat face has cos 0.5), which would re-introduce the
     # cluster-contamination problem we solve via the per-cluster
     # axis-perpendicularity filter inside ``_cluster_circular_holes``.
+    edge_table: dict[Any, list[int]] = {}
     raw_clusters = _bfs_cluster_by_normal_cohesion(
         candidate_idx,
         triangles,
         tri_normals,
-        cos_threshold=0.45,
+        cos_threshold=_HOLE_COHESION_COS,
+        edge_table=edge_table,
     )
 
     holes: list[dict[str, Any]] = []
@@ -6302,7 +5982,7 @@ def detect_holes(
     for cluster in raw_clusters:
         if len(cluster) < 3:
             continue
-        result = _cluster_circular_holes(
+        holes.extend(_cluster_circular_holes(
             cluster,
             tri_normals,
             tri_centroids,
@@ -6314,11 +5994,15 @@ def detect_holes(
             axis_perp_tolerance=axis_normal_tolerance,
             mesh_extent_xyz=mesh_extent_xyz,
             diagnostics=diagnostics,
-        )
-        if result is not None:
-            holes.append(result)
+            edge_table=edge_table,
+        ))
 
     return holes
+
+
+# Two adjacent triangles are one surface, to the hole detector, when the
+# cosine between their normals is at least this (see ``detect_holes``).
+_HOLE_COHESION_COS: float = 0.45
 
 
 # Edge adjacency in ``_cluster_circular_holes`` keys on the (snapped)
@@ -6358,8 +6042,12 @@ def _bfs_cluster_by_normal_cohesion(
     tri_normals: list[tuple[float, float, float]],
     *,
     cos_threshold: float,
+    edge_table: dict[Any, list[int]] | None = None,
 ) -> list[list[int]]:
     """Edge-adjacency flood fill with a normal-cohesion gate.
+
+    *edge_table*, when given, is filled with the triangles on each
+    snapped edge, for a caller that needs the same adjacency afterwards.
 
     Two adjacent candidate triangles join the same cluster only when
     the cosine between their (unit) face normals is ≥
@@ -6371,9 +6059,7 @@ def _bfs_cluster_by_normal_cohesion(
     — no per-axis filter required.
     """
     candidate_set = set(candidate_idx)
-    edge_to_tris: dict[
-        tuple[tuple[int, int, int], tuple[int, int, int]], list[int]
-    ] = {}
+    edge_to_tris: dict[Any, list[int]] = {} if edge_table is None else edge_table
     for ti in candidate_idx:
         tri = triangles[ti]
         for i in range(3):
@@ -6586,8 +6272,9 @@ def _cluster_circular_holes(
     axis_perp_tolerance: float,
     mesh_extent_xyz: tuple[float, float, float],
     diagnostics: dict[str, int] | None = None,
-) -> dict[str, Any] | None:
-    """Validate one cohesion-BFS cluster as a cylindrical hole.
+    edge_table: dict[Any, list[int]] | None = None,
+) -> list[dict[str, Any]]:
+    """The cylindrical holes in one cohesion-BFS cluster.
 
     Cohesion BFS at threshold 0.45 occasionally pulls a chamfered hole
     entry or an annular cap into the cylinder wall's cluster — the
@@ -6607,10 +6294,15 @@ def _cluster_circular_holes(
     eigenvector (axis lies in the null-space of the normal covariance);
     for a chamfered/annulus-dominated cluster it's the largest.
 
-    Diagnostic counters fire only when EVERY candidate axis fails —
-    bumping them on the first attempt would spuriously flag a
-    chamfered hole as a non-circular feature in the user-facing
-    recommendations.
+    When no axis reads the cluster as one hole it may hold several
+    walls — two bevelled bores in one face, or a bore on a part whose
+    edges are all rounded, where the whole skin is one cluster.  Each
+    wall is then found on its own (``_holes_among_walls``).
+
+    Diagnostic counters fire only when EVERY candidate axis fails and
+    no wall inside the cluster is a hole either — bumping them on the
+    first attempt would spuriously flag a chamfered hole as a
+    non-circular feature in the user-facing recommendations.
 
     Validation gates (run once per candidate axis):
 
@@ -6645,8 +6337,6 @@ def _cluster_circular_holes(
     m12 *= n_inv
     m22 *= n_inv
     candidates = _all_eigvecs_3x3(m00, m01, m02, m11, m12, m22)
-    if not candidates:
-        return None
 
     # Diagnostics policy: a cluster that succeeds on ANY candidate axis
     # is a real hole — bumping diagnostics on the failed attempts would
@@ -6676,11 +6366,308 @@ def _cluster_circular_holes(
             diagnostics=diag_target,
         )
         if result is not None:
-            return result
+            return [result]
+
+    said: dict[str, int] = {}
+    found = _holes_among_walls(
+        cluster,
+        tri_normals,
+        tri_centroids,
+        triangles,
+        min_radius=min_radius,
+        max_radius=max_radius,
+        circular_tol=circular_tol,
+        min_depth_mm=min_depth_mm,
+        axis_perp_tolerance=axis_perp_tolerance,
+        mesh_extent_xyz=mesh_extent_xyz,
+        said=said,
+        edge_table=edge_table,
+    )
     if diagnostics is not None:
-        for key, count in first_attempt_diag.items():
+        # What the walls said stands in for the whole-cluster verdict;
+        # a cluster with nothing to say for itself keeps that verdict.
+        for key, count in (said if found or said else first_attempt_diag).items():
             diagnostics[key] = diagnostics.get(key, 0) + count
-    return None
+    return found
+
+
+# ---------------------------------------------------------------------------
+# Walls inside a shared cluster
+# ---------------------------------------------------------------------------
+#
+# A cylinder's wall is facets that meet only along lines parallel to its
+# axis.  That is true of the wall whatever the cohesion BFS swept in with
+# it: a bevel's facets meet along lines that turn with the bevel, a
+# round's along lines that turn with the round, and a face's facets do
+# not fold at all.  So a wall can be lifted out of any cluster by its own
+# creases, with no guess at the axis from the cluster as a whole.
+
+#: Two facets closer to parallel than this are one flat, not a fold
+#: (0.08 degrees).  The two halves of one wall facet differ by float
+#: noise, around 1e-10.
+_FLAT_COS: float = 1.0 - 1e-6
+
+#: Creases within one degree of each other are one wall's.  A wall's own
+#: creases agree to float noise; the creases of a bevel twelve segments
+#: round are thirty degrees apart.
+_PARALLEL_COS: float = math.cos(math.radians(1.0))
+
+#: The octant gate wants six directions round the axis, so a wall of
+#: fewer facets can never be a hole.
+_MIN_WALL_FACETS: int = 6
+
+#: The surface runs on smoothly past a wall's end when it turns less
+#: than this there (26 degrees): a round does, a 45 degree bevel does not.
+_SMOOTH_RIM_COS: float = 0.9
+
+#: A wall the surface runs on smoothly past at both ends must be this
+#: many times as deep as the facets it runs into.  A bore with rounded
+#: mouths is far deeper than one facet of its rounds; the row of facets
+#: that happens to stand upright at the throat of a flared opening, or
+#: round the inside of a hollow ball, is as deep as its neighbours.
+_BAND_DEPTH_RATIO: float = 3.0
+
+#: Rejections the printability notices speak of (``printability.py``).
+_SPOKEN_REJECTS: tuple[str, ...] = (
+    "sub_floor_clusters",
+    "sub_floor_polygonal_clusters",
+    "non_circular_clusters",
+)
+
+# One entry per edge of a triangle, in edge order: the triangle across it
+# (``None`` when there is none, or more than one) and the cosine between
+# the two normals.  Kept this small on purpose: on a part rounded all
+# over the whole skin is one cluster, and this is held for every facet.
+_Across = tuple[tuple[int | None, float], tuple[int | None, float], tuple[int | None, float]]
+
+_NOTHING_ACROSS: tuple[None, float] = (None, 0.0)
+
+
+def _what_lies_across(
+    cluster: list[int],
+    triangles: list[tuple[tuple[float, ...], ...]],
+    tri_normals: list[tuple[float, float, float]],
+    edge_table: dict[Any, list[int]] | None = None,
+) -> dict[int, _Across]:
+    """For each triangle of the cluster, what lies across each of its edges.
+
+    *edge_table* is the adjacency the clustering built; without it one is
+    built here for the cluster alone.
+    """
+
+    def edge_keys(ti: int) -> tuple[Any, Any, Any]:
+        a, b, c = (_snap_vertex(v) for v in triangles[ti])
+        return ((a, b) if a <= b else (b, a), (b, c) if b <= c else (c, b), (c, a) if c <= a else (a, c))
+
+    if edge_table is None:
+        edge_table = {}
+        for ti in cluster:
+            for key in edge_keys(ti):
+                edge_table.setdefault(key, []).append(ti)
+
+    across: dict[int, _Across] = {}
+    for ti in cluster:
+        n_a = tri_normals[ti]
+        entries = []
+        for key in edge_keys(ti):
+            pair = edge_table[key]
+            if len(pair) != 2:
+                entries.append(_NOTHING_ACROSS)
+                continue
+            other = pair[0] if pair[1] == ti else pair[1]
+            n_b = tri_normals[other]
+            entries.append((other, n_a[0] * n_b[0] + n_a[1] * n_b[1] + n_a[2] * n_b[2]))
+        across[ti] = (entries[0], entries[1], entries[2])
+    return across
+
+
+def _prismatic_walls(
+    cluster: list[int],
+    across: dict[int, _Across],
+    triangles: list[tuple[tuple[float, ...], ...]],
+    *,
+    cos_threshold: float,
+) -> list[tuple[tuple[float, float, float], list[int]]]:
+    """Every wall in the cluster whose facets fold along one direction.
+
+    Each crease between two facets is tried once as a wall's axis.  The
+    wall grows across every crease parallel to it, and across a flat
+    edge into a facet that itself folds along the axis — the other half
+    of a wall facet, never the open face beyond a mouth.  Walls too
+    small to be a hole are dropped here.
+
+    :returns: ``(axis, triangle indices)`` per wall.
+    """
+
+    def is_fold(cos_ab: float) -> bool:
+        return cos_threshold <= cos_ab < _FLAT_COS
+
+    def direction(ti: int, i: int) -> tuple[float, float, float]:
+        pa, pb = triangles[ti][i], triangles[ti][(i + 1) % 3]
+        dx, dy, dz = pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]
+        length = math.sqrt(dx * dx + dy * dy + dz * dz)
+        return (dx / length, dy / length, dz / length) if length > 0.0 else (0.0, 0.0, 0.0)
+
+    def folds_along(ti: int, i: int, axis: tuple[float, float, float]) -> bool:
+        d = direction(ti, i)
+        return abs(d[0] * axis[0] + d[1] * axis[1] + d[2] * axis[2]) >= _PARALLEL_COS
+
+    tried: set[tuple[int, int]] = set()
+    walls: list[tuple[tuple[float, float, float], list[int]]] = []
+    for seed in cluster:
+        for i, (other, cos_ab) in enumerate(across[seed]):
+            if other is None or other not in across or not is_fold(cos_ab):
+                continue
+            crease = (seed, other) if seed < other else (other, seed)
+            if crease in tried:
+                continue
+            tried.add(crease)
+            axis = direction(seed, i)
+            wall = {seed, other}
+            stack = [seed, other]
+            while stack:
+                at = stack.pop()
+                for j, (nxt, cos_n) in enumerate(across[at]):
+                    if nxt is None or nxt not in across:
+                        continue
+                    if is_fold(cos_n):
+                        if not folds_along(at, j, axis):
+                            continue
+                        tried.add((at, nxt) if at < nxt else (nxt, at))
+                    elif cos_n < _FLAT_COS or not any(
+                        o is not None and is_fold(c) and folds_along(nxt, k, axis)
+                        for k, (o, c) in enumerate(across[nxt])
+                    ):
+                        continue
+                    if nxt not in wall:
+                        wall.add(nxt)
+                        stack.append(nxt)
+            if len(wall) >= _MIN_WALL_FACETS:
+                walls.append((axis, sorted(wall)))
+    return walls
+
+
+def _goes_all_the_way_round(
+    wall: list[int],
+    axis: tuple[float, float, float],
+    tri_normals: list[tuple[float, float, float]],
+) -> bool:
+    """Whether the wall's facets face every way round its axis.
+
+    A bore's do, and a slot's.  A patch of a gently curved surface whose
+    creases happen to run parallel faces one way, however far it spreads.
+    """
+    u_hat, v_hat = _basis_perpendicular_to(axis)
+    facing = [0] * 8
+    for ti in wall:
+        n = tri_normals[ti]
+        angle = math.atan2(
+            n[0] * v_hat[0] + n[1] * v_hat[1] + n[2] * v_hat[2],
+            n[0] * u_hat[0] + n[1] * u_hat[1] + n[2] * u_hat[2],
+        )
+        facing[int((angle + math.pi) / (math.pi / 4.0)) % 8] = 1
+    return sum(facing) >= 6
+
+
+def _is_a_band_of_a_curved_surface(
+    wall: list[int],
+    axis: tuple[float, float, float],
+    across: dict[int, _Across],
+    triangles: list[tuple[tuple[float, ...], ...]],
+) -> bool:
+    """Whether *wall* is one upright row of a surface that curves on past it.
+
+    True when the surface runs on smoothly past both ends of the wall
+    and the wall is less than ``_BAND_DEPTH_RATIO`` times as deep as
+    the facets it runs into.  An end the surface stops at — a floor, a
+    bevel, a face — makes it a bore whatever its depth.
+    """
+
+    def height(point: tuple[float, ...]) -> float:
+        return point[0] * axis[0] + point[1] * axis[1] + point[2] * axis[2]
+
+    members = set(wall)
+    heights = [height(v) for ti in wall for v in triangles[ti]]
+    low, high = min(heights), max(heights)
+    middle = 0.5 * (low + high)
+    reach = {True: 0.0, False: 0.0}
+    met = {True: False, False: False}
+    for ti in wall:
+        tri = triangles[ti]
+        for i, (other, cos_ab) in enumerate(across[ti]):
+            if other in members:
+                continue
+            if other is None or cos_ab < _SMOOTH_RIM_COS:
+                return False
+            upper = 0.5 * (height(tri[i]) + height(tri[(i + 1) % 3])) > middle
+            beyond = [height(v) for v in triangles[other]]
+            reach[upper] = max(reach[upper], max(beyond) - min(beyond))
+            met[upper] = True
+    if not (met[True] and met[False]):
+        return False
+    return (high - low) < _BAND_DEPTH_RATIO * max(reach[True], reach[False])
+
+
+def _holes_among_walls(
+    cluster: list[int],
+    tri_normals: list[tuple[float, float, float]],
+    tri_centroids: list[tuple[float, float, float]],
+    triangles: list[tuple[tuple[float, ...], ...]],
+    *,
+    min_radius: float,
+    max_radius: float,
+    circular_tol: float,
+    min_depth_mm: float,
+    axis_perp_tolerance: float,
+    mesh_extent_xyz: tuple[float, float, float],
+    said: dict[str, int],
+    edge_table: dict[Any, list[int]] | None = None,
+) -> list[dict[str, Any]]:
+    """The holes among the walls of a cluster that is not one hole itself.
+
+    Each wall goes through the gates a cluster of its own would.  A wall
+    turned away for its size or its roundness alone — a hole in every
+    other way — is counted in *said* under the gate that turned it
+    away, so the caller hears of a bore too small to print, or a slot,
+    as it would had the feature stood alone.
+    """
+    across = _what_lies_across(cluster, triangles, tri_normals, edge_table)
+
+    def judged(wall: list[int], axis: tuple[float, float, float], why: dict[str, int] | None, **relaxed: float) -> dict[str, Any] | None:
+        gates = {"min_radius": min_radius, "circular_tol": circular_tol, **relaxed}
+        return _validate_cluster_against_axis(
+            wall,
+            axis,
+            tri_normals,
+            tri_centroids,
+            triangles,
+            max_radius=max_radius,
+            min_depth_mm=min_depth_mm,
+            axis_perp_tolerance=axis_perp_tolerance,
+            mesh_extent_xyz=mesh_extent_xyz,
+            diagnostics=why,
+            **gates,
+        )
+
+    # The cohesion threshold the cluster was grown with: a crease the
+    # BFS would not cross is not one a wall folds along.
+    found: list[dict[str, Any]] = []
+    for axis, wall in _prismatic_walls(cluster, across, triangles, cos_threshold=_HOLE_COHESION_COS):
+        if not _goes_all_the_way_round(wall, axis, tri_normals):
+            continue
+        why: dict[str, int] = {}
+        hole = judged(wall, axis, why)
+        if hole is None:
+            spoken = next((key for key in _SPOKEN_REJECTS if why.get(key)), None)
+            if spoken is None or judged(wall, axis, None, min_radius=0.0, circular_tol=math.inf) is None:
+                continue
+        if _is_a_band_of_a_curved_surface(wall, axis, across, triangles):
+            continue
+        if hole is None:
+            said[spoken] = said.get(spoken, 0) + 1
+        else:
+            found.append(hole)
+    return found
 
 
 def _validate_cluster_against_axis(

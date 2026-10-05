@@ -68,19 +68,37 @@ def thicken_part(
     promise = {"grows_by_mm": amount_mm, "wall_grows_by_mm": amount_mm, "holes_keep_size": keep_hole_size}
     cad_failure = ""
     if source is not None:
-        from kiln.cad_offset import CadOffsetError, offset_step
+        import shutil
+        import tempfile
 
+        from kiln.cad_offset import CadOffsetError, offset_step
+        from kiln.step_import import keep_step_beside
+
+        scratch_dir = tempfile.mkdtemp(prefix="kiln_thicken_")
+        scratch_step = os.path.join(scratch_dir, "thickened.step")
         try:
             reply = guarded_edit(
                 mesh_in, output_path,
-                lambda scratch: offset_step(source, scratch, amount_mm=amount_mm, keep_hole_size=keep_hole_size),
+                lambda scratch: offset_step(
+                    source, scratch, amount_mm=amount_mm, keep_hole_size=keep_hole_size, output_step=scratch_step,
+                ),
                 edit="thicken the walls", instead=_INSTEAD_FROM_CAD, **promise,
             )
         except CadOffsetError as exc:
             cad_failure = str(exc)
         else:
             reply.update(method="cad", cad_source=source)
+            if reply.get("success") and Path(output_path).suffix.lower() == ".stl":
+                # The thickened CAD beside the thickened mesh: the next edit
+                # of this part starts from CAD again.
+                reply["step_path"], beside = keep_step_beside(scratch_step, output_path, source)
+                reply = _worded(reply, amount_mm, keep_hole_size)
+                if reply["step_path"]:
+                    reply["note"] += f" The thickened CAD is {os.path.basename(reply['step_path'])}, beside the mesh.{beside}"
+                return reply
             return _worded(reply, amount_mm, keep_hole_size)
+        finally:
+            shutil.rmtree(scratch_dir, ignore_errors=True)
 
     from kiln.mesh_offset import MeshOffsetError, offset_mesh
 

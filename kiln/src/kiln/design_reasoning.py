@@ -119,7 +119,7 @@ class ReinforcementRecommendation:
     priority: str  # "high", "medium", "low"
     location_mm: tuple[float, float, float]
     description: str  # what to do and why
-    estimated_strength_gain: str  # "2-3x", "30-50%", etc.
+    estimated_strength_gain: str  # what the change does for the part, in words; no figure Kiln cannot source
     addresses_risk: str  # which risk_type this fixes
 
     def to_dict(self) -> dict[str, Any]:
@@ -895,7 +895,7 @@ def _generate_reinforcements(
                         f"Use thicken_mesh_walls() to add material, or redesign "
                         f"with a minimum {math.sqrt(min_cross_section_mm2):.1f} mm dimension."
                     ),
-                    estimated_strength_gain="2-5x at the constriction",
+                    estimated_strength_gain="More material where the part is thinnest",
                     addresses_risk="thin_neck",
                 )
             )
@@ -912,7 +912,7 @@ def _generate_reinforcements(
                         f"sections. A smooth transition distributes stress over a larger area. "
                         f"Use add_mesh_fillet() with radius_mm=2-4."
                     ),
-                    estimated_strength_gain="30-60% at the transition",
+                    estimated_strength_gain="Spreads the load where the section changes",
                     addresses_risk="stress_concentration",
                 )
             )
@@ -930,7 +930,7 @@ def _generate_reinforcements(
                         f"overhanging section down to the main body, reducing deflection "
                         f"and preventing snap-off."
                     ),
-                    estimated_strength_gain="3-10x for cantilevered loads",
+                    estimated_strength_gain="Braces the overhang at its root",
                     addresses_risk="cantilever",
                 )
             )
@@ -944,10 +944,10 @@ def _generate_reinforcements(
                     description=(
                         f"Add fillets to the {int(risk.metric_value)} sharp edges "
                         f"near ({risk.location_mm[0]:.0f}, {risk.location_mm[1]:.0f}, "
-                        f"{risk.location_mm[2]:.0f}). A 1-2 mm radius fillet eliminates "
+                        f"{risk.location_mm[2]:.0f}). A 1-2 mm radius fillet reduces "
                         f"stress concentration at concave corners. Use add_mesh_fillet()."
                     ),
-                    estimated_strength_gain="20-40% at corner joints",
+                    estimated_strength_gain="Rounds the corner so load isn't focused there",
                     addresses_risk="sharp_corner",
                 )
             )
@@ -993,11 +993,11 @@ def _generate_reinforcements(
                     location_mm=risk.location_mm,
                     description=(
                         "Re-orient the part so that load-bearing surfaces are parallel "
-                        "to the print layers, not perpendicular. FDM layers are 3-5x "
+                        "to the print layers, not perpendicular. FDM parts are "
                         "weaker across layers than along them. Use optimize_print_orientation() "
                         "for structural strength, not just overhang minimization."
                     ),
-                    estimated_strength_gain="3-5x in layer-perpendicular loading",
+                    estimated_strength_gain="Puts the load along the layers, not across them",
                     addresses_risk="weak_layer_adhesion",
                 )
             )
@@ -1126,7 +1126,7 @@ def _analyze_load_bearing(
             )
 
     layer_concern = (
-        "FDM layers create anisotropic strength: parts are 3-5x weaker across "
+        "FDM layers create anisotropic strength: parts are weaker across "
         "layer boundaries than along them. Orient the part so primary loads "
         "compress layers together (perpendicular to build plate), never pull "
         "layers apart (parallel to build plate)."
@@ -1439,6 +1439,11 @@ class ReinforcementResult:
     before_grade: str = ""
     after_grade: str = ""
     summary: str = ""
+    #: The reinforced part as CAD, beside ``output_path``, when every edit
+    #: applied was made on the part's CAD file.
+    step_path: str | None = None
+    #: What the edge finishing did, or would do, about how the part prints.
+    print_aware: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1451,6 +1456,8 @@ class ReinforcementResult:
             "before_grade": self.before_grade,
             "after_grade": self.after_grade,
             "summary": self.summary,
+            **({"step_path": self.step_path} if self.step_path else {}),
+            **({"print_aware": self.print_aware} if self.print_aware else {}),
         }
 
 
@@ -1497,8 +1504,13 @@ def apply_reinforcements(
     fillet_radius_mm: float = 1.5,
     wall_thicken_mm: float = 0.6,
     base_height_mm: float = 2.0,
+    printer_id: str | None = None,
+    nozzle_mm: float | None = None,
+    layer_height_mm: float | None = None,
+    material: str | None = None,
+    fastener: str | None = None,
 ) -> ReinforcementResult:
-    """Analyze a mesh, then auto-apply structural reinforcements.
+    """Analyze a part, then auto-apply structural reinforcements.
 
     Runs the full improvement plan, then applies fixable reinforcements
     in sequence:
@@ -1506,10 +1518,15 @@ def apply_reinforcements(
     1. **thicken_wall** → :func:`kiln.wall_thicken.thicken_part` (the CAD file when
        there is one, a measured mesh offset otherwise)
     2. **fillet** / **chamfer** → :func:`kiln.edge_finish.fillet_part` /
-       ``chamfer_part``, at the angle the plan found the sharp edges at;
-       refused when it would damage the part
+       ``chamfer_part``, on the part's CAD file, at the angle the plan found
+       the sharp edges at and sized for the printer it prints on
     3. **add_base** → unions a wider base plate via OpenSCAD boolean
     4. **gusset** → unions triangular gusset ribs at cantilever bases
+
+    The edits that work on the part's CAD file run first and hand the CAD
+    on to each other; the base plate and gussets are unions on the mesh, so
+    they run after.  When every edit applied was a CAD one, the result
+    carries ``step_path``: the reinforced part as CAD.
 
     Thickening, rounding and bevelling act on the whole part, so each runs
     once: its one entry names the first risk it ``addresses`` and lists the
@@ -1517,22 +1534,38 @@ def apply_reinforcements(
     auto-applied (like ``reorient``) are listed in ``skipped`` with guidance
     for the agent.
 
-    :param file_path: Path to the input STL file.
+    Edge finishing is literal by default -- the radius asked, on every sharp
+    edge -- and its entry lists what will print badly.  kiln-pro
+    (https://kiln3d.com) may choose the finish edge by edge for the printer
+    and material instead; ``print_aware`` says which happened.
+
+    :param file_path: Path to the part: an STL, or its STEP file.
     :param output_path: Output path (defaults to ``<name>_reinforced.stl``).
     :param min_cross_section_mm2: Minimum safe cross-section area.
     :param sharp_angle_threshold_deg: Angle for sharp edge detection.
     :param fillet_radius_mm: Fillet radius for sharp corners.
     :param wall_thicken_mm: Amount to thicken thin walls.
     :param base_height_mm: Height of stabilizing base plate.
+    :param printer_id: The printer the part is for; sizes the edge finishing.
+    :param nozzle_mm: Its nozzle, when it differs from the one on record.
+    :param layer_height_mm: The layer height it will print at.
+    :param material: The material it will print in.
+    :param fastener: The fastener the part's holes take, when the user named
+        one; nothing reads the geometry to guess it.
     :returns: :class:`ReinforcementResult` with before/after scores.
     """
+    from kiln.step_import import ensure_mesh_path, is_step_file
+
     path = Path(file_path)
     if not path.is_file():
         raise ValueError(f"File not found: {file_path}")
+    # The analysis reads a mesh; a STEP is read as Kiln's mesh of it, and
+    # stays the file the CAD edits start from.
+    mesh_path = ensure_mesh_path(file_path)[0] if is_step_file(file_path) else file_path
 
     # Step 1: Get the improvement plan (before state)
     plan = generate_improvement_plan(
-        file_path,
+        mesh_path,
         min_cross_section_mm2=min_cross_section_mm2,
         sharp_angle_threshold_deg=sharp_angle_threshold_deg,
     )
@@ -1541,7 +1574,7 @@ def apply_reinforcements(
         out = output_path or str(path)
         if output_path and output_path != file_path:
             import shutil
-            shutil.copy2(file_path, output_path)
+            shutil.copy2(mesh_path, output_path)
         return ReinforcementResult(
             output_path=out,
             original_path=file_path,
@@ -1561,20 +1594,28 @@ def apply_reinforcements(
     applied: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
 
-    # Work on a temp copy so we can chain operations
     import shutil
     import tempfile
 
     work_dir = tempfile.mkdtemp(prefix="kiln_reinforce_")
-    current_path = str(Path(work_dir) / "working.stl")
-    shutil.copy2(file_path, current_path)
+    # The CAD edits start from the file as given, so its CAD is found: a
+    # STEP, or a mesh Kiln converted with its STEP still beside it.  Nothing
+    # below writes to it.
+    current_path = file_path
+    current_step: str | None = None
 
-    # Sort by priority: high first
+    # CAD-capable edits first, then by priority: a union on the mesh ahead
+    # of them would leave no CAD to round.
     priority_order = {"high": 0, "medium": 1, "low": 2}
+    cad_capable = ("thicken_wall", "fillet", "chamfer")
     sorted_recs = sorted(
         plan.reinforcements,
-        key=lambda r: priority_order.get(r.priority, 3),
+        key=lambda r: (r.reinforcement_type not in cad_capable, priority_order.get(r.priority, 3)),
     )
+
+    printer = {"printer_id": printer_id, "nozzle_mm": nozzle_mm, "layer_height_mm": layer_height_mm, "material": material}
+    policy = _edge_policy(material, fastener)
+    edge_notes: list[str] = []
 
     # Thickening, rounding and bevelling act on the WHOLE part, not on the
     # spot a recommendation names: each runs once, and every later
@@ -1586,11 +1627,18 @@ def apply_reinforcements(
             lambda p: _apply_thicken(p, work_dir, wall_thicken_mm), {"amount_mm": wall_thicken_mm},
         ),
         "fillet": (
-            lambda p: _apply_fillet(p, work_dir, fillet_radius_mm, edge_angle_deg), {"radius_mm": fillet_radius_mm},
+            lambda p: _apply_edge_finish(p, work_dir, "fillet", fillet_radius_mm, edge_angle_deg, printer, policy),
+            {"radius_mm": fillet_radius_mm},
         ),
-        "chamfer": (lambda p: _apply_chamfer(p, work_dir, edge_angle_deg), {}),
+        "chamfer": (
+            lambda p: _apply_edge_finish(p, work_dir, "chamfer", _CHAMFER_MM, edge_angle_deg, printer, policy),
+            {"distance_mm": _CHAMFER_MM},
+        ),
     }
     answered: dict[str, dict[str, Any]] = {}
+
+    def as_mesh(p: str) -> str:
+        return ensure_mesh_path(p)[0] if is_step_file(p) else p
 
     for rec in sorted_recs:
         try:
@@ -1602,21 +1650,26 @@ def apply_reinforcements(
 
             elif kind in whole_part:
                 edit, settings = whole_part[kind]
-                result, why_not = edit(current_path)
-                if result:
-                    current_path = result
+                reply = edit(current_path)
+                if reply.get("success"):
+                    current_path, current_step = reply["path"], reply.get("step_path")
                     answered[kind] = {"type": kind, **settings, "addresses": rec.addresses_risk}
+                    if reply.get("edges"):
+                        answered[kind]["edges"] = reply["edges"]
+                        edge_notes.append(_print_aware_note(reply, policy is not None))
                     applied.append(answered[kind])
                 else:
-                    answered[kind] = {"type": kind, "reason": why_not, "addresses": rec.addresses_risk}
+                    answered[kind] = {"type": kind, "reason": reply["message"], "addresses": rec.addresses_risk}
+                    if reply.get("edges"):
+                        answered[kind]["edges"] = reply["edges"]
                     skipped.append(answered[kind])
 
             elif rec.reinforcement_type == "add_base":
                 result = _apply_base(
-                    current_path, work_dir, base_height_mm,
+                    as_mesh(current_path), work_dir, base_height_mm,
                 )
                 if result:
-                    current_path = result
+                    current_path, current_step = result, None
                     applied.append({
                         "type": "add_base",
                         "height_mm": base_height_mm,
@@ -1631,10 +1684,10 @@ def apply_reinforcements(
 
             elif rec.reinforcement_type == "gusset":
                 result = _apply_gusset(
-                    current_path, work_dir, rec.location_mm,
+                    as_mesh(current_path), work_dir, rec.location_mm,
                 )
                 if result:
-                    current_path = result
+                    current_path, current_step = result, None
                     applied.append({
                         "type": "gusset",
                         "location_mm": list(rec.location_mm),
@@ -1681,7 +1734,14 @@ def apply_reinforcements(
         stem = path.stem
         output_path = str(path.parent / f"{stem}_reinforced.stl")
 
-    shutil.copy2(current_path, output_path)
+    shutil.copy2(as_mesh(current_path), output_path)
+    step_path = None
+    if current_step and Path(output_path).suffix.lower() == ".stl":
+        from kiln.step_import import keep_step_beside
+
+        scratch_step = str(Path(work_dir) / "reinforced_out.step")
+        shutil.copy2(current_step, scratch_step)
+        step_path, _ = keep_step_beside(scratch_step, output_path, file_path)
 
     # Step 4: Re-score the reinforced mesh
     after_plan = generate_improvement_plan(
@@ -1728,59 +1788,82 @@ def apply_reinforcements(
         before_grade=plan.structural_grade,
         after_grade=after_plan.structural_grade,
         summary=" ".join(summary_parts),
+        step_path=step_path,
+        print_aware=" ".join(n for n in edge_notes if n),
+    )
+
+
+#: The bevel a ``chamfer`` recommendation gets, mm: the door's own default.
+_CHAMFER_MM = 0.5
+
+
+def _edge_policy(material: str | None, fastener: str | None = None) -> Any:
+    """kiln-pro's choice of finish for each edge, when the caller has it; else ``None``.
+
+    The contract: ``choose_finishes(chains, frame, material=..., fastener=...)``
+    answers a :data:`kiln.edge_plan.Choice` per chain.  See https://kiln3d.com.
+    """
+    try:
+        from kiln_pro.bridge import pro_features
+    except ImportError:
+        return None
+    try:
+        if not pro_features.is_available("edge_intelligence"):
+            return None
+        choose = pro_features.edge_intelligence.choose_finishes
+    except Exception:  # noqa: BLE001 -- no policy is the literal finish, never a failed reinforcement
+        return None
+    return lambda chains, frame: choose(chains, frame, material=material, fastener=fastener)
+
+
+def _print_aware_note(reply: dict[str, Any], chosen_per_edge: bool) -> str:
+    """One sentence on how the finished edges will print."""
+    cautions = len(reply["edges"]["cautions"])
+    if chosen_per_edge:
+        return "Each edge's finish was chosen for how it prints on this printer."
+    if not cautions:
+        return ""
+    from kiln.tiers_and_terms import upgrade_link
+
+    return (
+        f"{cautions} of the finished edges will print badly as asked; each entry's edges.cautions says how. "
+        f"Kiln Pro chooses the finish edge by edge for your printer and material: {upgrade_link('apply_design_reinforcements')}"
     )
 
 
 def _apply_thicken(
-    stl_path: str,
+    part_path: str,
     work_dir: str,
     amount_mm: float,
-) -> tuple[str | None, str]:
-    """Thicken through the one measured door; the new path, or None and why."""
+) -> dict[str, Any]:
+    """Thicken through the one measured door; its reply, success or not."""
     try:
         from kiln.wall_thicken import thicken_part
 
-        reply = thicken_part(stl_path, amount_mm=amount_mm, output_path=str(Path(work_dir) / "thickened.stl"))
+        return thicken_part(part_path, amount_mm=amount_mm, output_path=str(Path(work_dir) / "thickened.stl"))
     except Exception as exc:  # noqa: BLE001 -- a reinforcement that cannot run is skipped, and says why
-        return None, f"Wall thickening could not run: {exc}"
-    return (reply["path"], "") if reply.get("success") else (None, reply["message"])
+        return {"success": False, "message": f"Wall thickening could not run: {exc}"}
 
 
-def _apply_fillet(
-    stl_path: str,
+def _apply_edge_finish(
+    part_path: str,
     work_dir: str,
-    radius_mm: float,
+    kind: str,
+    size_mm: float,
     angle_deg: float,
-) -> tuple[str | None, str]:
-    """Round edges through the one measured door; the new path, or None and why."""
+    printer: dict[str, Any],
+    choose: Any,
+) -> dict[str, Any]:
+    """Round or bevel through the one door; its reply, success or not."""
     try:
-        from kiln.edge_finish import fillet_part
+        from kiln.edge_finish import finish_part
 
-        reply = fillet_part(
-            stl_path, radius_mm=radius_mm, angle_threshold_deg=angle_deg,
-            output_path=str(Path(work_dir) / "filleted.stl"),
+        return finish_part(
+            part_path, kind=kind, size_mm=size_mm, angle_threshold_deg=angle_deg,
+            output_path=str(Path(work_dir) / f"{kind}ed.stl"), choose=choose, **printer,
         )
     except Exception as exc:  # noqa: BLE001
-        return None, f"Edge rounding could not run: {exc}"
-    return (reply["path"], "") if reply.get("success") else (None, reply["message"])
-
-
-def _apply_chamfer(
-    stl_path: str,
-    work_dir: str,
-    angle_deg: float,
-) -> tuple[str | None, str]:
-    """Bevel edges through the one measured door; the new path, or None and why."""
-    try:
-        from kiln.edge_finish import chamfer_part
-
-        reply = chamfer_part(
-            stl_path, distance_mm=0.5, angle_threshold_deg=angle_deg,
-            output_path=str(Path(work_dir) / "chamfered.stl"),
-        )
-    except Exception as exc:  # noqa: BLE001
-        return None, f"Edge bevelling could not run: {exc}"
-    return (reply["path"], "") if reply.get("success") else (None, reply["message"])
+        return {"success": False, "message": f"Edge finishing could not run: {exc}"}
 
 
 def _apply_base(

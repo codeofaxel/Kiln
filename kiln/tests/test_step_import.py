@@ -1054,6 +1054,42 @@ def test_pip_backend_is_the_vtk_free_kernel():
     assert PIP_BACKEND == "cadquery-ocp-novtk"
 
 
+def test_the_kernel_kiln_installs_is_held_to_the_versions_ci_runs():
+    """A kernel major renames calls: 8.0 did, and code written on 7.9 stopped
+    at its first import on it (2026-09-22 for the STEP census, 2026-10-04 for
+    the thickening child, which nothing had run on 8.0).  So the install is a
+    range, stated once, and CI's cad-kernel job runs Kiln's kernel tests on a
+    version at each end of it.  The three statements are held together here:
+    the code's range, the package extra's, and the versions CI installs."""
+    import re
+    from pathlib import Path
+
+    from packaging.specifiers import SpecifierSet
+    from packaging.version import Version
+
+    from kiln.step_import import KERNEL_RANGE, PIP_BACKEND, PIP_INSTALL_COMMAND, PIP_REQUIREMENT
+
+    assert f"{PIP_BACKEND}{KERNEL_RANGE}" == PIP_REQUIREMENT
+    assert PIP_REQUIREMENT in PIP_INSTALL_COMMAND
+    package_root = Path(__file__).resolve().parents[1]
+    assert f'step = ["{PIP_REQUIREMENT}"]' in (package_root / "pyproject.toml").read_text(encoding="utf-8")
+
+    workflow = package_root.parent / ".github" / "workflows" / "ci.yml"
+    if not workflow.is_file():
+        pytest.skip("not run from a repository checkout: there is no CI workflow to read")
+    listed = re.search(r"kernel: \[([^\]]+)\]", workflow.read_text(encoding="utf-8"))
+    assert listed, "CI's cad-kernel job no longer lists the kernel versions it runs"
+    versions = [Version(v.strip().strip('"')) for v in listed.group(1).split(",")]
+    allowed = SpecifierSet(KERNEL_RANGE)
+    assert all(v in allowed for v in versions), (versions, KERNEL_RANGE)
+    # Both ends: the oldest release line the range admits, and the newest.
+    floor = Version(re.search(r">=([0-9.]+)", KERNEL_RANGE).group(1))
+    ceiling = Version(re.search(r"<([0-9.]+)", KERNEL_RANGE).group(1))
+    lines = {(v.major, v.minor) for v in versions}
+    assert (floor.major, floor.minor) in lines
+    assert max(lines) < (ceiling.major, ceiling.minor) and max(lines) >= (ceiling.major, ceiling.minor - 1)
+
+
 @patch("kiln.step_import._find_freecad_cmd", return_value=None)
 @patch("kiln.step_import._find_gmsh_cmd", return_value=None)
 @patch("kiln.step_import._ocp_available", return_value=True)

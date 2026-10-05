@@ -34,6 +34,52 @@ _SAME_MM = 0.05
 _HOLE_SAME_MM = 0.1
 
 
+#: The most triangles an edit check reads.  The measuring is done in the
+#: calling process, and what it costs grows with the mesh -- measured
+#: 2026-10-04 (macOS, peak resident memory of one :func:`measure_mesh`):
+#: 117,000 triangles 0.7 GB in 15 s; 284,000 1.0 GB; 626,000 1.8 GB;
+#: 1,106,000 2.9 GB; 2,477,000 5.3 GB in 163 s.  The smallest machine Kiln
+#: runs on has 2 GB for the whole server, so a mesh past this is refused
+#: before it is read rather than measured at the server's expense.
+MAX_CHECK_TRIANGLES = 250_000
+_MAX_CHECK_TRIANGLES_ENV = "KILN_EDIT_CHECK_MAX_TRIANGLES"
+
+
+class MeshTooLarge(ValueError):
+    """The mesh has more triangles than an edit check reads; ``triangles`` and ``limit`` say how many."""
+
+    def __init__(self, triangles: int, limit: int) -> None:
+        super().__init__(f"{triangles:,} triangles, where the check every edit is graded by reads up to {limit:,}")
+        self.triangles = triangles
+        self.limit = limit
+
+
+def max_check_triangles() -> int:
+    """:data:`MAX_CHECK_TRIANGLES`, or the override a bigger machine sets."""
+    import os
+
+    try:
+        return int(os.environ.get(_MAX_CHECK_TRIANGLES_ENV, "").strip() or MAX_CHECK_TRIANGLES)
+    except ValueError:
+        return MAX_CHECK_TRIANGLES
+
+
+def binary_stl_triangles(path: str) -> int | None:
+    """How many triangles the binary STL at *path* declares, read from its header; ``None`` for anything else."""
+    import os
+
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as fh:
+            head = fh.read(84)
+    except OSError:
+        return None
+    if len(head) < 84:
+        return None
+    count = int.from_bytes(head[80:84], "little")
+    return count if size == 84 + 50 * count else None
+
+
 @dataclass(frozen=True)
 class MeshMeasure:
     """What a mesh edit is judged on."""
@@ -55,9 +101,17 @@ class MeshMeasure:
 
 
 def measure_mesh(path: str) -> MeshMeasure:
-    """Measure *path* the way every edit is judged.  Raises on an unreadable mesh."""
+    """Measure *path* the way every edit is judged.
+
+    Raises on an unreadable mesh, and :class:`MeshTooLarge` on one past
+    :func:`max_check_triangles` -- before reading it.
+    """
     from kiln.mesh_frame import load_mesh
     from kiln.printability import analyze_printability
+
+    triangles, limit = binary_stl_triangles(path), max_check_triangles()
+    if triangles is not None and triangles > limit:
+        raise MeshTooLarge(triangles, limit)
 
     # Kiln's frame, as every other reader of the same file sees it: a glTF
     # measured raw lies on its side, and its extents disagree with the
@@ -113,6 +167,7 @@ def judge_edit(
     grows_by_mm: float = 0.0,
     wall_grows_by_mm: float | None = None,
     holes_keep_size: bool = True,
+    judge_holes: bool = True,
 ) -> EditVerdict:
     """Name every way *after* is worse than the edit promised.
 
@@ -121,7 +176,9 @@ def judge_edit(
     part may grow by at most twice it across.  *wall_grows_by_mm* is the
     least the thinnest wall must gain, when the edit is meant to thicken.
     *holes_keep_size* ``False`` lets holes change size -- an offset that was
-    told to leave them -- but never lets one disappear.
+    told to leave them -- but never lets one disappear.  *judge_holes*
+    ``False`` leaves holes out of the verdict: for an edit whose engine
+    counts the holes itself, exactly, and refuses on its own count.
     """
     problems: list[str] = []
     if before.watertight and not after.watertight:
@@ -135,7 +192,9 @@ def judge_edit(
         else:
             problems.append(f"it grew {growth:.2f} mm across, and this edit only ever takes material away")
 
-    if holes_keep_size:
+    if not judge_holes:
+        pass
+    elif holes_keep_size:
         for d in _unmatched_holes(before.hole_diameters_mm, after.hole_diameters_mm):
             problems.append(f"the {d:.1f} mm hole is gone or no longer {d:.1f} mm")
     elif len(after.hole_diameters_mm) < len(before.hole_diameters_mm):
@@ -162,6 +221,8 @@ def refusal_sentence(edit: str, verdict: EditVerdict, *, instead: str) -> str:
 
 #: The code a refused edit carries, whichever tool refused it.
 EDIT_REFUSED = "EDIT_WOULD_DAMAGE"
+#: The part, or the edit's result, is a bigger mesh than the check reads.
+TOO_LARGE_TO_CHECK = "MESH_TOO_LARGE_TO_CHECK"
 
 
 def guarded_edit(
@@ -174,6 +235,7 @@ def guarded_edit(
     grows_by_mm: float = 0.0,
     wall_grows_by_mm: float | None = None,
     holes_keep_size: bool = True,
+    judge_holes: bool = True,
 ) -> dict[str, Any]:
     """Run *engine* into a scratch file and hand the result back only if it kept its promise.
 
@@ -187,17 +249,37 @@ def guarded_edit(
     import shutil
     import tempfile
 
-    before = measure_mesh(file_path)
+    try:
+        before = measure_mesh(file_path)
+    except MeshTooLarge as exc:
+        return {
+            "success": False,
+            "code": TOO_LARGE_TO_CHECK,
+            "message": f"Kiln did not {edit}: the part's mesh has {exc}. Your file is unchanged.",
+        }
     fd, scratch = tempfile.mkstemp(suffix=os.path.splitext(output_path)[1] or ".stl")
     os.close(fd)
     try:
         stats = engine(scratch)
+        try:
+            after = measure_mesh(scratch)
+        except MeshTooLarge as exc:
+            return {
+                "success": False,
+                "code": TOO_LARGE_TO_CHECK,
+                "message": (
+                    f"Kiln did not {edit}: the result came to {exc}, so it could not be checked and is not handed "
+                    "back. Your file is unchanged."
+                ),
+                **({"engine": stats} if stats else {}),
+            }
         verdict = judge_edit(
             before,
-            measure_mesh(scratch),
+            after,
             grows_by_mm=grows_by_mm,
             wall_grows_by_mm=wall_grows_by_mm,
             holes_keep_size=holes_keep_size,
+            judge_holes=judge_holes,
         )
         if not verdict.ok:
             return {
