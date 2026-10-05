@@ -1,0 +1,191 @@
+"""Steps a served tool asks this computer to do for it.
+
+A served tool runs on Kiln's servers, which have no slicer and no printer.
+When one needs a single thing only this computer can do, it answers
+``status: "needs_local_step"`` with a ``local_steps`` list, and the same
+tool is called again with what was done (``step_results``).  Nothing is
+kept on the servers in between.
+
+This module is the allow-list.  A step is carried out only when its kind is
+one named here and everything about it passes that kind's own checks; a
+kind this build does not know, or a step that asks for more than its kind
+allows, is refused and nothing runs.  No step here commands a printer.
+
+``slice``: slice one model that the servers handed back with the answer,
+with a slicer flag list checked flag by flag against what a placement
+needs.  The servers decide where the part goes; this computer's slicer
+makes the toolpath; the servers then judge the result.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+import subprocess
+import tempfile
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+#: What a served tool answers when it needs a step done first.
+NEEDS_LOCAL_STEP = "needs_local_step"
+#: The most steps carried out for one answer.
+MAX_STEPS = 2
+_SLICE_TIMEOUT_S = 300
+
+_NUMBER = r"\d+(?:\.\d+)?"
+#: Slicer flags a placement may carry, each with the shape its value must
+#: have (``None``: the flag takes no value).  Nothing that names a file, a
+#: script or an output place is here, so a step cannot make the slicer
+#: read, write or run anything but the model it was handed.
+_SLICE_FLAGS: dict[str, str | None] = {
+    "--dont-arrange": None,
+    "--bed-shape": rf"{_NUMBER}x{_NUMBER}(?:,{_NUMBER}x{_NUMBER}){{3}}",
+    "--skirts": r"\d{1,2}",
+    "--brim-type": r"no_brim",
+    "--first-layer-height": _NUMBER,
+}
+
+
+def _refusal(tool: str, code: str, message: str) -> dict[str, Any]:
+    return {
+        "success": False, "status": "error", "code": code, "tool": tool,
+        "error": message, "why": "refused",
+    }
+
+
+def _checked_slicer_args(args: Any) -> list[str] | None:
+    """*args* when every flag is an allowed one with a well-formed value."""
+    if not isinstance(args, list) or len(args) > 16:
+        return None
+    out: list[str] = []
+    i = 0
+    while i < len(args):
+        flag = args[i]
+        if not isinstance(flag, str) or flag not in _SLICE_FLAGS:
+            return None
+        shape = _SLICE_FLAGS[flag]
+        out.append(flag)
+        i += 1
+        if shape is None:
+            continue
+        if i >= len(args) or not isinstance(args[i], str) or not re.fullmatch(shape, args[i]):
+            return None
+        out.append(args[i])
+        i += 1
+    return out
+
+
+def _slice(tool: str, step: dict[str, Any]) -> tuple[str | None, dict[str, Any] | None]:
+    """Slice the model a step names; ``(G-code path, None)`` or a refusal."""
+    from kiln import served_makes
+    from kiln.slicer import _CLI_BAMBU, SlicerNotFoundError, find_slicer, slicer_cli_family
+
+    args = _checked_slicer_args(step.get("slicer_args"))
+    if args is None:
+        return None, _refusal(
+            tool, "LOCAL_STEP_REFUSED",
+            f"{tool} asked this computer's slicer for something Kiln does "
+            "not allow a served tool to ask. Nothing was run.",
+        )
+    model = Path(str(step.get("model_path") or ""))
+    try:
+        inside = model.resolve().is_relative_to(served_makes.files_dir().resolve())
+    except Exception:  # noqa: BLE001
+        inside = False
+    if not inside or model.suffix.lower() != ".stl" or not model.is_file():
+        # Only a model the servers handed back with this answer, which
+        # arrival saved here; never a path the answer merely names.
+        return None, _refusal(
+            tool, "LOCAL_STEP_REFUSED",
+            f"{tool} asked for a slice of a model it did not hand over. "
+            "Nothing was run.",
+        )
+    try:
+        slicer = find_slicer()
+    except SlicerNotFoundError:
+        slicer = None
+    except Exception:  # noqa: BLE001
+        slicer = None
+    if slicer is None or slicer_cli_family(slicer) == _CLI_BAMBU:
+        return None, _refusal(
+            tool, "SLICER_NEEDED",
+            f"{tool} needs the added part sliced on this computer, with "
+            "PrusaSlicer. Install PrusaSlicer (it is free) and call this "
+            "again. Nothing was changed.",
+        )
+    out = Path(tempfile.mkdtemp(prefix="kiln_step_")) / "slice.gcode"
+    cmd = [slicer.path, "--export-gcode", str(model), "--output", str(out), *args]
+    try:
+        run = subprocess.run(  # noqa: S603 — argv built above from checked parts
+            cmd, capture_output=True, text=True, timeout=_SLICE_TIMEOUT_S,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return None, _refusal(
+            tool, "LOCAL_STEP_FAILED",
+            f"This computer's slicer could not slice the added part: {exc}",
+        )
+    if run.returncode != 0 or not out.is_file():
+        said = ((run.stderr or "").strip() or (run.stdout or "").strip())[:300]
+        return None, _refusal(
+            tool, "LOCAL_STEP_FAILED",
+            "This computer's slicer could not slice the added part"
+            + (f": {said}" if said else "."),
+        )
+    return str(out), None
+
+
+_STEPS: dict[str, Callable[[str, dict[str, Any]], tuple[str | None, dict[str, Any] | None]]] = {
+    "slice": _slice,
+}
+
+
+def wanted(answer: Any) -> list[dict[str, Any]]:
+    """The steps *answer* asks for, or ``[]`` when it asks for none."""
+    if not isinstance(answer, dict) or answer.get("status") != NEEDS_LOCAL_STEP:
+        return []
+    steps = answer.get("local_steps")
+    return [s for s in steps if isinstance(s, dict)] if isinstance(steps, list) else []
+
+
+def carry_out(
+    tool: str,
+    steps: list[dict[str, Any]],
+    send: Callable[[Path], tuple[str | None, str]],
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Do *steps* and send each result up with *send* (a file -> token).
+
+    Returns ``({step id: {"token": ...}}, None)``, or ``({}, refusal)`` at
+    the first step that is not allowed, fails, or cannot be sent.
+    """
+    if not steps or len(steps) > MAX_STEPS:
+        return {}, _refusal(
+            tool, "LOCAL_STEP_REFUSED",
+            f"{tool} asked this computer for more than Kiln allows a served "
+            "tool to ask. Nothing was run.",
+        )
+    results: dict[str, Any] = {}
+    for step in steps:
+        kind, step_id = step.get("kind"), step.get("id")
+        do = _STEPS.get(kind) if isinstance(kind, str) else None
+        if do is None or not isinstance(step_id, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,40}", step_id):
+            return {}, _refusal(
+                tool, "LOCAL_STEP_REFUSED",
+                f"{tool} asked this computer to do something this version "
+                "of Kiln does not carry out for a served tool. Nothing was "
+                "run. Updating Kiln may add it.",
+            )
+        made, refusal = do(tool, step)
+        if refusal is not None or made is None:
+            return {}, refusal
+        token, said = send(Path(made))
+        if token is None:
+            return {}, _refusal(
+                tool, "FILE_NOT_SENT",
+                f"{tool} needs what this computer just made sent to Kiln's "
+                f"servers, which did not work: {said}",
+            )
+        results[step_id] = {"token": token}
+    return results, None

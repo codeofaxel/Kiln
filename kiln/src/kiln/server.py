@@ -18539,6 +18539,8 @@ def _pro_api_call(
         headers[_SERVED_JOB_HEADER] = "1"
         # This install saves the files an answer names (kiln.served_makes).
         headers[_SERVED_FILES_HEADER] = "1"
+        # ...and carries out the steps a tool may ask of it (kiln.served_steps).
+        headers[_SERVED_STEPS_HEADER] = "1"
         req = urllib.request.Request(
             f"{api_url.rstrip('/')}/api/tools/{tool_name}",
             data=json.dumps(kwargs).encode() if kwargs else None,
@@ -18588,6 +18590,7 @@ def _pro_api_call(
 #: other tool).
 _SERVED_JOB_HEADER = "X-Kiln-Tool-Async"
 _SERVED_FILES_HEADER = "X-Kiln-Result-Files"
+_SERVED_STEPS_HEADER = "X-Kiln-Local-Steps"
 #: How long a job is waited for: the servers stop one at fifteen minutes.
 _SERVED_JOB_WAIT_S = 15 * 60 + 30
 _SERVED_JOB_POLL_S = 3.0
@@ -18847,12 +18850,42 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                 # Likewise a blade-status request carries this install's
                 # recent fault codes: the hosted side has no event log.
                 call = with_recent_faults(_name, with_local_reading(_name, kwargs))
-                if trip.get("files_sent"):
-                    # A tool handed files works through them before it
-                    # answers, whatever kind of answer it gives.
-                    answer = _pro_api_call(_name, _timeout=_SERVED_MAKE_WAIT_S, **call)
-                else:
-                    answer = _pro_api_call(_name, **call)
+
+                def ask(**more):
+                    if trip.get("files_sent") or more:
+                        # A tool handed files works through them before it
+                        # answers, whatever kind of answer it gives.
+                        return _pro_api_call(
+                            _name, _timeout=_SERVED_MAKE_WAIT_S, **call, **more,
+                        )
+                    return _pro_api_call(_name, **call)
+
+                answer = ask()
+                # The tool may need one thing only this computer can do
+                # (slice a part with this computer's slicer).  It is done
+                # here, from an allow-list, and the same call is made again
+                # with the result.  Once: a tool that asks twice is told no.
+                from kiln import served_steps
+
+                steps = served_steps.wanted(answer)
+                if steps:
+                    # What a step works on is saved in Kiln's own folder,
+                    # never where the call asked for its OUTPUT: it is not
+                    # the person's file, and a step runs only on a file
+                    # that is there.
+                    answer = served_makes.arrive(_name, answer)
+                    done, refused = served_steps.carry_out(
+                        _name, served_steps.wanted(answer), served_makes._upload_file,
+                    )
+                    if refused is not None:
+                        return refused
+                    answer = ask(step_results=done)
+                    if served_steps.wanted(answer):
+                        return served_steps._refusal(
+                            _name, "LOCAL_STEP_REFUSED",
+                            f"{_name} asked this computer for the same thing "
+                            "twice. Nothing more was run.",
+                        )
                 if _name in ("set_nozzle_state", "record_nozzle_replacement"):
                     # The record just changed: a check must not answer from
                     # the size it remembered a moment ago.
