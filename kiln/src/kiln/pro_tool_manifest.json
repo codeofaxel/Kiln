@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-05T03:53:13.359661+00:00",
+  "generated": "2026-10-05T04:25:50.063733+00:00",
   "tool_count": 437,
   "categories": {
     "product_generators": {
@@ -223,7 +223,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "action"
-      }
+      },
+      "served": false
     },
     {
       "name": "auto_generate_manual_for_print",
@@ -13925,7 +13926,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      }
+      },
+      "served": false
     },
     {
       "name": "decorate_during_print_fleet",
@@ -14103,7 +14105,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "action"
-      }
+      },
+      "served": false
     },
     {
       "name": "fleet_colour_match",
@@ -14228,7 +14231,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "action"
-      }
+      },
+      "served": false
     },
     {
       "name": "fleet_resume",
@@ -14265,7 +14269,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "action"
-      }
+      },
+      "served": false
     },
     {
       "name": "fleet_set_speed",
@@ -14289,7 +14294,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "action"
-      }
+      },
+      "served": false
     },
     {
       "name": "fleet_skip_objects",
@@ -14317,7 +14323,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "action"
-      }
+      },
+      "served": false
     },
     {
       "name": "fleet_thermal_posture",
@@ -14553,6 +14560,7 @@
         "schema_version": 1,
         "kind": "action"
       },
+      "served": false,
       "inputs": {
         "outputs": {
           "output_dir": "folder"
@@ -15186,6 +15194,7 @@
         "schema_version": 1,
         "kind": "action"
       },
+      "served": false,
       "inputs": {
         "files": {
           "original_gcode_path": "one"
@@ -16020,7 +16029,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
-      }
+      },
+      "served": false
     },
     {
       "name": "cancel_auto_recover",
@@ -16049,7 +16059,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "check_assembly_stands",
@@ -16349,7 +16360,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "cutter_wear_status",
@@ -16833,7 +16845,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "get_auto_tuned_settings",
@@ -18746,6 +18759,7 @@
         "schema_version": 1,
         "kind": "action"
       },
+      "served": false,
       "inputs": {
         "outputs": {
           "output_dir": "folder"
@@ -21473,7 +21487,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "get_speed_schedule",
@@ -21489,7 +21504,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "set_speed_percent",
@@ -21525,7 +21541,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "set_speed_schedule",
@@ -21565,7 +21582,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "report_issue",
