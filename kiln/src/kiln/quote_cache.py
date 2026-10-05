@@ -280,16 +280,28 @@ class QuoteCache:
         service_type: str,
         material: str,
         quantity: int,
+        quote_id: str = "",
     ) -> str:
-        """Generate a deterministic cache key from quote parameters.
+        """Generate a deterministic cache key for one quote.
+
+        The key names the QUOTE, not the request that produced it.  Two
+        quotes for the same provider, material and quantity are different
+        quotes (a different file, a different person, a later price), and an
+        order names the one it wants by id.  Keyed on the request alone, the
+        second quote replaced the first, and the order placed against the
+        first then found nothing.
 
         :param provider: Provider name.
         :param service_type: Printing service type.
         :param material: Material identifier.
         :param quantity: Part quantity.
+        :param quote_id: The quote's own id.
         :returns: SHA-256 hex digest of the normalised concatenation.
         """
-        raw = f"{provider.lower().strip()}|{service_type.lower().strip()}|{material.lower().strip()}|{quantity}"
+        raw = (
+            f"{provider.lower().strip()}|{service_type.lower().strip()}|{material.lower().strip()}"
+            f"|{quantity}|{quote_id}"
+        )
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def _get_ttl(self, provider: str, service_type: str) -> int:
@@ -353,12 +365,13 @@ class QuoteCache:
             Kiln generates a local cache identifier.
         :returns: The newly cached :class:`CachedQuote`.
         """
-        cache_key = self._make_cache_key(provider, service_type, material, quantity)
+        quote_id = quote_id or str(uuid.uuid4())
+        cache_key = self._make_cache_key(provider, service_type, material, quantity, quote_id)
         ttl = self._get_ttl(provider, service_type)
         now = time.time()
 
         quote = CachedQuote(
-            quote_id=quote_id or str(uuid.uuid4()),
+            quote_id=quote_id,
             provider_name=provider,
             service_type=service_type,
             material=material,
@@ -397,8 +410,9 @@ class QuoteCache:
     ) -> CachedQuote | None:
         """Retrieve a cached quote if it exists and has not expired.
 
-        Returns ``None`` if no matching quote is found or if the
-        cached entry has expired (expired entries are auto-cleaned).
+        Several quotes may match one request; the newest that has not
+        expired is returned.  Returns ``None`` if none matches (expired
+        matches are auto-cleaned).
 
         :param provider: Provider name.
         :param service_type: Printing service type.
@@ -406,20 +420,32 @@ class QuoteCache:
         :param quantity: Part quantity.
         :returns: The cached quote, or ``None``.
         """
-        cache_key = self._make_cache_key(provider, service_type, material, quantity)
+        wanted = (provider.lower().strip(), service_type.lower().strip(), material.lower().strip(), quantity)
 
         with self._lock:
-            quote = self._cache.get(cache_key)
-            if quote is None:
-                self._misses += 1
-                return None
-            if quote.is_expired:
-                del self._cache[cache_key]
-                self._delete_from_db(cache_key)
+            matches = [
+                (key, quote)
+                for key, quote in self._cache.items()
+                if (
+                    quote.provider_name.lower().strip(),
+                    quote.service_type.lower().strip(),
+                    quote.material.lower().strip(),
+                    quote.quantity,
+                )
+                == wanted
+            ]
+            live = []
+            for key, quote in matches:
+                if quote.is_expired:
+                    del self._cache[key]
+                    self._delete_from_db(key)
+                else:
+                    live.append(quote)
+            if not live:
                 self._misses += 1
                 return None
             self._hits += 1
-            return quote
+            return max(live, key=lambda quote: quote.cached_at)
 
     def get_all_for_printer(self, service_type: str) -> list[CachedQuote]:
         """Return all non-expired cached quotes for a service type.
