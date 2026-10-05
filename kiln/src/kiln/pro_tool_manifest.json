@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-05T16:44:53.963351+00:00",
-  "tool_count": 432,
+  "generated": "2026-10-05T19:10:23.389838+00:00",
+  "tool_count": 429,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -3091,32 +3091,6 @@
       }
     },
     {
-      "name": "list_brand_assets",
-      "description": "List all registered brand assets (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "decoration",
-      "parameters": {
-        "properties": {
-          "arguments": {
-            "additionalProperties": true,
-            "title": "Arguments",
-            "type": "object"
-          }
-        },
-        "required": [
-          "arguments"
-        ],
-        "title": "list_brand_assetsArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "read"
-      },
-      "served": false
-    },
-    {
       "name": "paint_mesh_regions",
       "description": "Paint mesh regions by name or id and write a painted 3MF. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).",
       "tier": "free",
@@ -3197,58 +3171,6 @@
       "inputs": {
         "mesh": "input_path"
       }
-    },
-    {
-      "name": "register_brand_asset",
-      "description": "Register a logo/image as a named brand asset (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "decoration",
-      "parameters": {
-        "properties": {
-          "arguments": {
-            "additionalProperties": true,
-            "title": "Arguments",
-            "type": "object"
-          }
-        },
-        "required": [
-          "arguments"
-        ],
-        "title": "register_brand_assetArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "record"
-      },
-      "served": false
-    },
-    {
-      "name": "remove_brand_asset",
-      "description": "Remove a registered brand asset (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "decoration",
-      "parameters": {
-        "properties": {
-          "arguments": {
-            "additionalProperties": true,
-            "title": "Arguments",
-            "type": "object"
-          }
-        },
-        "required": [
-          "arguments"
-        ],
-        "title": "remove_brand_assetArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "record"
-      },
-      "served": false
     },
     {
       "name": "resolve_template_decoration",
