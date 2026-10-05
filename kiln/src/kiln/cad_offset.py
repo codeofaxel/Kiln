@@ -32,7 +32,9 @@ somewhere, and the honest answer names where.
 The kernel runs in a child interpreter (:mod:`kiln.child_interpreter`), as
 Kiln's STEP conversion does: a C++ call cannot be timed out from Python, and a
 pathological solid must not take the server's memory with it.  This file is
-that child's script too, so the part below the line imports nothing of Kiln.
+that child's script too; the kernel calls it shares with the other kernel
+children, under names every supported kernel version answers to, are
+:mod:`kiln.cad_kernel`'s.
 """
 
 from __future__ import annotations
@@ -70,8 +72,10 @@ def offset_step(
     *,
     amount_mm: float,
     keep_hole_size: bool = True,
+    output_step: str | None = None,
 ) -> dict[str, Any]:
-    """Thicken the solid in *step_path* by *amount_mm* per surface; write *output_stl*.
+    """Thicken the solid in *step_path* by *amount_mm* per surface; write *output_stl*
+    (and the thickened CAD to *output_step*).
 
     Returns the kernel's own account: holes held and re-cut (diameters, mm),
     the growth of each axis, whether the result is a valid solid.  Raises
@@ -84,6 +88,7 @@ def offset_step(
     request = {
         "step": os.path.abspath(step_path),
         "out": os.path.abspath(output_stl),
+        "out_step": os.path.abspath(output_step) if output_step else None,
         "amount": float(amount_mm),
         "keep_holes": bool(keep_hole_size),
         "linear": _OCP_LINEAR_DEFLECTION,
@@ -93,40 +98,29 @@ def offset_step(
 
 
 # ---------------------------------------------------------------------------
-# The child: everything below runs in its own interpreter, OpenCascade only.
+# The child: everything below runs in its own interpreter.
 # ---------------------------------------------------------------------------
 
 
 def _child(request: dict[str, Any]) -> dict[str, Any]:
     from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
     from OCP.BRepCheck import BRepCheck_Analyzer
-    from OCP.BRepMesh import BRepMesh_IncrementalMesh
     from OCP.BRepOffset import BRepOffset_MakeOffset, BRepOffset_Skin
     from OCP.BRepPrimAPI import BRepPrimAPI_MakeCylinder
     from OCP.GeomAbs import GeomAbs_Intersection
     from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt, gp_Vec
-    from OCP.IFSelect import IFSelect_RetDone
-    from OCP.STEPControl import STEPControl_Reader
-    from OCP.StlAPI import StlAPI_Writer
-    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_SOLID
+    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE
     from OCP.TopExp import TopExp
-    from OCP.TopoDS import TopoDS
-    from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape, TopTools_IndexedMapOfShape
 
-    reader = STEPControl_Reader()
-    if reader.ReadFile(request["step"]) != IFSelect_RetDone:
-        return {"refused": "the STEP file could not be read"}
-    reader.TransferRoots()
-    shape = reader.OneShape()
-    solids = TopTools_IndexedMapOfShape()
-    TopExp.MapShapes_s(shape, TopAbs_SOLID, solids)
-    if solids.Extent() != 1:
-        return {"refused": f"the file holds {solids.Extent()} solids; Kiln thickens one part at a time"}
-    solid = TopoDS.Solid_s(solids.FindKey(1))
+    from kiln import cad_kernel as k
+
+    solid, why_not = k.read_one_solid(request["step"], verb="thickens")
+    if solid is None:
+        return {"refused": why_not}
 
     amount = request["amount"]
-    holes = _find_holes(solid) if request["keep_holes"] else []
-    edges_to_faces = TopTools_IndexedDataMapOfShapeListOfShape()
+    holes = k.full_cylinders(solid, concave=True) if request["keep_holes"] else []
+    edges_to_faces = k.ancestor_map()
     TopExp.MapShapesAndAncestors_s(solid, TopAbs_EDGE, TopAbs_FACE, edges_to_faces)
     held = [h for h in holes if _rims_are_sharp(h, edges_to_faces)]
     recut = [h for h in holes if h not in held]
@@ -167,11 +161,10 @@ def _child(request: dict[str, Any]) -> dict[str, Any]:
     lift.SetTranslation(gp_Vec(0.0, 0.0, before[2] - after[2]))
     result = BRepBuilderAPI_Transform(result, lift, True).Shape()
 
-    BRepMesh_IncrementalMesh(result, request["linear"], False, request["angular"], True)
-    writer = StlAPI_Writer()
-    writer.ASCIIMode = False
-    if not writer.Write(result, request["out"]):
+    if not k.write_stl(result, request["out"], linear=request["linear"], angular=request["angular"]):
         return {"refused": "the thickened part could not be written"}
+    if request.get("out_step"):
+        k.write_step(result, request["out_step"])
     return {
         "holes_held_mm": sorted(round(2 * h["radius"], 3) for h in held),
         "holes_recut_mm": sorted(round(2 * h["radius"], 3) for h in recut),
@@ -181,85 +174,9 @@ def _child(request: dict[str, Any]) -> dict[str, Any]:
 
 
 def _box(shape: Any) -> tuple[float, ...]:
-    from OCP.Bnd import Bnd_Box
-    from OCP.BRepBndLib import BRepBndLib
+    from kiln import cad_kernel as k
 
-    box = Bnd_Box()
-    BRepBndLib.AddOptimal_s(shape, box, False, False)
-    # The two corners, not Get(): kernel 8.0 returns Get() as a struct its
-    # bindings cannot hand to Python (the same fix step_import carries).
-    lo, hi = box.CornerMin(), box.CornerMax()
-    return lo.X(), lo.Y(), lo.Z(), hi.X(), hi.Y(), hi.Z()
-
-
-def _faces(shape: Any) -> list[Any]:
-    from OCP.TopAbs import TopAbs_FACE
-    from OCP.TopExp import TopExp
-    from OCP.TopoDS import TopoDS
-    from OCP.TopTools import TopTools_IndexedMapOfShape
-
-    found = TopTools_IndexedMapOfShape()
-    TopExp.MapShapes_s(shape, TopAbs_FACE, found)
-    return [TopoDS.Face_s(found.FindKey(i)) for i in range(1, found.Extent() + 1)]
-
-
-def _outward_normal(face: Any, u: float, v: float) -> tuple[Any, Any]:
-    from OCP.BRepGProp import BRepGProp_Face
-    from OCP.gp import gp_Pnt, gp_Vec
-
-    point, normal = gp_Pnt(), gp_Vec()
-    BRepGProp_Face(face).Normal(u, v, point, normal)  # the face's orientation is applied
-    if normal.Magnitude() > 0:
-        normal.Normalize()
-    return point, normal
-
-
-def _find_holes(solid: Any) -> list[dict[str, Any]]:
-    """Concave cylinders whose faces close a full circle around one axis line.
-
-    Concave: the outward normal points at the axis, as a bore's does and a
-    boss's does not.  A partial concave arc -- an inner-corner rounding, the
-    end of a slot -- is not a hole: holding it while its tangent neighbours
-    move would tear the surface.
-    """
-    from OCP.BRepAdaptor import BRepAdaptor_Surface
-    from OCP.GeomAbs import GeomAbs_Cylinder
-    from OCP.gp import gp_Vec
-
-    groups: dict[tuple, list[tuple[Any, dict[str, Any]]]] = {}
-    for face in _faces(solid):
-        surface = BRepAdaptor_Surface(face)
-        if surface.GetType() != GeomAbs_Cylinder:
-            continue
-        cylinder = surface.Cylinder()
-        origin, axis = cylinder.Axis().Location(), cylinder.Axis().Direction()
-        u0, u1 = surface.FirstUParameter(), surface.LastUParameter()
-        v0, v1 = surface.FirstVParameter(), surface.LastVParameter()
-        point, normal = _outward_normal(face, 0.5 * (u0 + u1), 0.5 * (v0 + v1))
-        to_point = gp_Vec(origin, point)
-        along = gp_Vec(axis)
-        radial = to_point - along.Multiplied(to_point.Dot(along))
-        if radial.Magnitude() == 0 or normal.Dot(radial) >= 0:
-            continue  # convex: a boss, not a bore
-        d = (axis.X(), axis.Y(), axis.Z())
-        if d < (0.0, 0.0, 0.0):
-            d = (-d[0], -d[1], -d[2])
-        o = gp_Vec(origin.X(), origin.Y(), origin.Z())
-        dv = gp_Vec(*d)
-        foot = o - dv.Multiplied(o.Dot(dv))
-        key = (*(round(c, 4) for c in d), round(foot.X(), 3), round(foot.Y(), 3), round(foot.Z(), 3),
-               round(cylinder.Radius(), 4))
-        groups.setdefault(key, []).append((face, {
-            "radius": cylinder.Radius(),
-            "origin": (origin.X(), origin.Y(), origin.Z()),
-            "axis": d,
-            "span": math.degrees(u1 - u0),
-        }))
-    return [
-        {"faces": [f for f, _ in members], **members[0][1]}
-        for members in groups.values()
-        if sum(info["span"] for _, info in members) >= 359.0
-    ]
+    return k.box(shape)
 
 
 def _rims_are_sharp(hole: dict[str, Any], edges_to_faces: Any, tangent_deg: float = 2.0) -> bool:
@@ -267,24 +184,19 @@ def _rims_are_sharp(hole: dict[str, Any], edges_to_faces: Any, tangent_deg: floa
     from OCP.BRep import BRep_Tool
     from OCP.BRepAdaptor import BRepAdaptor_Curve
     from OCP.GeomAPI import GeomAPI_ProjectPointOnSurf
-    from OCP.TopAbs import TopAbs_EDGE
-    from OCP.TopExp import TopExp
-    from OCP.TopoDS import TopoDS
-    from OCP.TopTools import TopTools_IndexedMapOfShape
+
+    from kiln import cad_kernel as k
 
     def normal_at(face: Any, point: Any) -> Any:
         u, v = GeomAPI_ProjectPointOnSurf(point, BRep_Tool.Surface_s(face)).LowerDistanceParameters()
-        return _outward_normal(face, u, v)[1]
+        return k.outward_normal(face, u, v)[1]
 
     for face in hole["faces"]:
-        edges = TopTools_IndexedMapOfShape()
-        TopExp.MapShapes_s(face, TopAbs_EDGE, edges)
-        for i in range(1, edges.Extent() + 1):
-            edge = TopoDS.Edge_s(edges.FindKey(i))
+        for edge in k.subshapes(face, "edge"):
             if BRep_Tool.Degenerated_s(edge):
                 continue
             others = [
-                TopoDS.Face_s(f) for f in edges_to_faces.FindFromKey(edge)
+                k.as_face(f) for f in edges_to_faces.FindFromKey(edge)
                 if not any(f.IsSame(h) for h in hole["faces"])
             ]
             curve = BRepAdaptor_Curve(edge)

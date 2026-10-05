@@ -286,16 +286,36 @@ class _DesignReasoningToolsPlugin:
             fillet_radius_mm: float = 1.5,
             wall_thicken_mm: float = 0.6,
             base_height_mm: float = 2.0,
+            printer_id: str = "",
+            nozzle_mm: float | None = None,
+            layer_height_mm: float | None = None,
+            material: str = "",
+            fastener: str = "",
         ) -> dict:
-            """Analyze a mesh for structural risks, then auto-apply fixes.
+            """Analyze a part for structural risks, then auto-apply fixes.
 
             This is the **one-step design hardening tool** — it runs the full
             structural analysis pipeline, then applies every applicable fix:
 
             - **Thin necks** → thickened walls (+material at narrow sections)
-            - **Sharp corners** → filleted edges (stress concentration eliminated)
+            - **Sharp corners** → rounded edges (stress concentration reduced at inside corners)
             - **Insufficient base** → wider base plate (stabilizing geometry added)
             - **Cantilevers** → triangular gusset ribs (deflection reduced 3-10x)
+
+            Thickening and edge rounding are done on the part's CAD file, so
+            pass its STEP file when there is one (or a mesh Kiln converted
+            from one that still sits beside it).  When every fix applied was
+            a CAD one the result carries ``step_path``, the reinforced part as
+            CAD.  On a mesh with no CAD file, edge rounding is skipped with
+            the reason.
+
+            Edge rounding is sized for the printer: name it (or the nozzle,
+            layer height and material) and each rounded edge keeps one nozzle
+            width of flat beside it.  Each rounded entry's ``edges`` lists
+            what was finished, what stayed sharp and why, and ``cautions``
+            for edges that will print badly; ``print_aware`` sums it up.
+            Choosing the finish edge by edge for the printer and material is
+            a Kiln Pro feature (https://kiln3d.com/pricing).
 
             Returns a before/after structural score so agents can see the
             improvement.  Reinforcements that can't be auto-applied (like
@@ -303,11 +323,23 @@ class _DesignReasoningToolsPlugin:
 
             Requires OpenSCAD for base plate and gusset operations.
 
-            :param file_path: Path to the STL file to reinforce.
+            AGENT DISPLAY CONTRACT: a result carries a before|after self-check
+            of the part.  Look at it and write what changed before calling
+            the job done.
+
+            :param file_path: The part: an STL, or its STEP file.
             :param output_path: Output path (defaults to ``<name>_reinforced.stl``).
             :param fillet_radius_mm: Fillet radius for sharp corners (default 1.5).
             :param wall_thicken_mm: Amount to add to thin walls (default 0.6).
             :param base_height_mm: Height of stabilizing base plate (default 2.0).
+            :param printer_id: The printer the part is for.
+            :param nozzle_mm: The nozzle size, when it differs from the one
+                Kiln has for the printer.
+            :param layer_height_mm: The layer height it will print at.
+            :param material: The material it will print in.
+            :param fastener: The fastener the part's holes take, e.g.
+                ``"M3"`` — pass only if the user actually named one.  Kiln
+                does not read the part looking for screw holes.
             :returns: Dict with before/after scores, applied/skipped reinforcements.
             """
             if err := _srv._check_auth("generate"):
@@ -321,6 +353,11 @@ class _DesignReasoningToolsPlugin:
                     fillet_radius_mm=fillet_radius_mm,
                     wall_thicken_mm=wall_thicken_mm,
                     base_height_mm=base_height_mm,
+                    printer_id=printer_id or None,
+                    nozzle_mm=nozzle_mm,
+                    layer_height_mm=layer_height_mm,
+                    material=material or None,
+                    fastener=fastener.strip() or None,
                 )
                 response = {"success": True, **result.to_dict()}
                 try:
@@ -328,7 +365,12 @@ class _DesignReasoningToolsPlugin:
                         attach_inspect_bundle,
                     )
 
-                    return attach_inspect_bundle(response, level="quick", self_check_before=file_path)
+                    from kiln.step_import import ensure_mesh_path
+
+                    # A STEP input is graded against Kiln's mesh of it.
+                    return attach_inspect_bundle(
+                        response, level="quick", self_check_before=ensure_mesh_path(file_path)[0],
+                    )
                 except ImportError:
                     return response
             except ValueError as exc:

@@ -92,6 +92,49 @@ def _edge_census_sentence(
     )
 
 
+#: What a refused edge finish carries besides its message, when it has it.
+_EDGE_REFUSAL_KEYS = ("measured", "method", "cad_source", "edges", "sized_for", "nozzle", "script", "volume_mm3")
+
+
+def _finish_edges_tool(kind: str, file_path: str, size_mm: float, **options: Any) -> dict:
+    """The body ``add_mesh_fillet`` and ``add_mesh_chamfer`` share."""
+    from kiln.server import _check_auth, _error_dict
+
+    if err := _check_auth("generate"):
+        return err
+    what = "Fillet" if kind == "fillet" else "Chamfer"
+    try:
+        from kiln.edge_finish import finish_part
+
+        reply = finish_part(
+            file_path, kind=kind, size_mm=size_mm,
+            **{key: (value if value not in ("", None) else None) for key, value in options.items() if key != "plan_only"},
+            plan_only=bool(options.get("plan_only")),
+        )
+    except ValueError as exc:
+        return _error_dict(f"{what} failed: {exc}", code="INVALID_ARGS")
+    except Exception as exc:
+        return _error_dict(f"{what} failed: {exc}")
+    if not reply.get("success"):
+        return _error_dict(
+            reply["message"], code=reply["code"], extra={k: reply[k] for k in _EDGE_REFUSAL_KEYS if k in reply},
+        )
+    if reply.get("plan_only"):
+        return reply
+    try:
+        from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
+
+        from kiln.step_import import ensure_mesh_path
+
+        # A STEP input is graded against Kiln's mesh of it.
+        return attach_inspect_bundle(
+            reply, level="quick", stl_keys=("path",),
+            self_check_before=ensure_mesh_path(file_path)[0],
+        )
+    except ImportError:
+        return reply
+
+
 class _MeshToolsPlugin:
     """Mesh manipulation, analysis, and transformation tools.
 
@@ -941,55 +984,75 @@ class _MeshToolsPlugin:
             radius_mm: float = 1.0,
             angle_threshold_deg: float = 60.0,
             output_path: str = "",
+            edges: str = "",
+            printer_id: str = "",
+            nozzle_mm: float | None = None,
+            layer_height_mm: float | None = None,
+            material: str = "",
+            plan_only: bool = False,
         ) -> dict:
-            """Round sharp edges -- handed back only if the result measures better.
+            """Round a part's edges, exactly, on its CAD file.
 
-            The edge-rounding runs on the mesh, and its result is MEASURED
-            against the part: the surface must stay closed, the part must not
-            grow (rounding only takes material away), no hole may be lost and
-            the thinnest wall must not shrink.  A result that fails is refused
-            with the measurements and your file is left as it was; round the
-            edges in the design (OpenSCAD source or CAD) instead.
+            Pass the part's STEP file (or a mesh Kiln converted from one that
+            still sits beside it).  The CAD kernel rebuilds each face, so the
+            result is a closed solid of the size geometry gives; it comes back
+            as a mesh (``path``) and as CAD beside it (``step_path``), so the
+            next edit starts from CAD again.
+
+            Literal: it rounds the edges you select at the radius you give.
+            Two things can change that, and the reply says so each time:
+
+            * an edge on a narrow face gets a smaller radius (the face keeps
+              one nozzle width of flat), or stays sharp when what is left
+              would not show in a print;
+            * a hole's rim stays sharp unless you select it.
+
+            ``edges.left_sharp`` lists every selected edge left sharp, with
+            its reason.  ``edges.cautions`` says what will print badly as
+            asked: a finish on the bed or facing down whose surface overhangs
+            past what the printer bridges, and by how much.
+
+            A mesh with no CAD file behind it is refused: rounding on a mesh
+            left an open surface and a bigger part on every part measured.  A
+            part made from an OpenSCAD script is rounded in its script; the
+            refusal names it.
 
             AGENT DISPLAY CONTRACT: a result carries a before|after self-check
             of the part.  Look at it and write what changed before calling
             the job done.
 
-            :param file_path: The part: a mesh (STL/OBJ/3MF) or a STEP file.
+            :param file_path: The part: a STEP file, or a mesh converted from one.
             :param radius_mm: Fillet radius in mm (default 1.0).
-            :param angle_threshold_deg: Edges sharper than this get filleted (default 60).
-            :param output_path: Output path (defaults to ``<name>_filleted.stl``).
-            :returns: ``path`` and the measurements before and after, or a
-                refusal saying why the result was worse than the part.
+            :param angle_threshold_deg: An edge is sharp when the surface
+                turns at least this much across it (default 60).
+            :param output_path: Output ``.stl`` path (defaults to
+                ``<name>_filleted.stl``); the CAD is written beside it.
+            :param edges: Which edges.  Empty or ``all``: every sharp edge.
+                Words narrow it -- where the edge sits as the part prints
+                (``vertical``, ``top``, ``bottom``, ``under``, ``sloped``) and
+                which way the corner goes (``outside``, ``inside``);
+                ``holes`` selects hole rims.  Combine with commas:
+                ``top,outside``.  Or name edges by id: ``e12,e15`` (ids come
+                from ``plan_only``).
+            :param printer_id: The printer the part is for; sizes are limited
+                by its nozzle and layer height.
+            :param nozzle_mm: The nozzle size, when it differs from the one
+                Kiln has for the printer.
+            :param layer_height_mm: The layer height it will print at.
+            :param material: The material it will print in.
+            :param plan_only: Return the plan and every edge's id without
+                building anything.
+            :returns: ``path``, ``step_path``, ``edges`` (finished, left
+                sharp, cautions), ``sized_for``, ``volume_mm3`` and the
+                measurements before and after; or a refusal saying why.
             """
-            from kiln.server import _check_auth, _error_dict
+            from kiln.edge_plan import FILLET
 
-            if err := _check_auth("generate"):
-                return err
-            try:
-                from kiln.edge_finish import fillet_part
-
-                reply = fillet_part(
-                    file_path, radius_mm=radius_mm, angle_threshold_deg=angle_threshold_deg,
-                    output_path=output_path or None,
-                )
-            except Exception as exc:
-                return _error_dict(f"Fillet failed: {exc}")
-            if not reply.get("success"):
-                return _error_dict(reply["message"], code=reply["code"], extra={"measured": reply["measured"]})
-            try:
-                from kiln_pro.plugins.git_render_tools import (
-                    attach_inspect_bundle,
-                )
-
-                from kiln.step_import import ensure_mesh_path
-
-                return attach_inspect_bundle(
-                    reply, level="quick", stl_keys=("path",),
-                    self_check_before=ensure_mesh_path(file_path)[0],
-                )
-            except ImportError:
-                return reply
+            return _finish_edges_tool(
+                FILLET, file_path, radius_mm, angle_threshold_deg=angle_threshold_deg, output_path=output_path,
+                edges=edges, printer_id=printer_id, nozzle_mm=nozzle_mm, layer_height_mm=layer_height_mm,
+                material=material, plan_only=plan_only,
+            )
 
         @mcp.tool()
         def add_mesh_chamfer(
@@ -997,54 +1060,56 @@ class _MeshToolsPlugin:
             distance_mm: float = 0.5,
             angle_threshold_deg: float = 60.0,
             output_path: str = "",
+            edges: str = "",
+            printer_id: str = "",
+            nozzle_mm: float | None = None,
+            layer_height_mm: float | None = None,
+            material: str = "",
+            plan_only: bool = False,
         ) -> dict:
-            """Bevel sharp edges -- handed back only if the result measures better.
+            """Bevel a part's edges, exactly, on its CAD file.
 
-            Measured like ``add_mesh_fillet``: the surface must stay closed,
-            the part must not grow, no hole may be lost and the thinnest wall
-            must not shrink.  A result that fails is refused with the
-            measurements and your file is left as it was; bevel the edges in
-            the design instead.
+            The flat-faced twin of ``add_mesh_fillet``: same CAD route, same
+            edge selection, same reply.
+
+            Literal: it bevels the edges you select at the distance you give
+            (measured along each face from the edge).  An edge on a narrow
+            face gets a smaller bevel or stays sharp, a hole's rim stays sharp
+            unless selected, and ``edges.left_sharp`` gives every reason.
+
+            A mesh with no CAD file behind it is refused, and a part made
+            from an OpenSCAD script is bevelled in its script; each refusal
+            says which.
 
             AGENT DISPLAY CONTRACT: a result carries a before|after self-check
             of the part.  Look at it and write what changed before calling
             the job done.
 
-            :param file_path: The part: a mesh (STL/OBJ/3MF) or a STEP file.
-            :param distance_mm: Chamfer distance from edge in mm (default 0.5).
-            :param angle_threshold_deg: Edges sharper than this get chamfered (default 60).
-            :param output_path: Output path (defaults to ``<name>_chamfered.stl``).
-            :returns: ``path`` and the measurements before and after, or a
-                refusal saying why the result was worse than the part.
+            :param file_path: The part: a STEP file, or a mesh converted from one.
+            :param distance_mm: Bevel distance from the edge in mm (default 0.5).
+            :param angle_threshold_deg: An edge is sharp when the surface
+                turns at least this much across it (default 60).
+            :param output_path: Output ``.stl`` path (defaults to
+                ``<name>_chamfered.stl``); the CAD is written beside it.
+            :param edges: Which edges; see ``add_mesh_fillet``.
+            :param printer_id: The printer the part is for.
+            :param nozzle_mm: The nozzle size, when it differs from the one
+                Kiln has for the printer.
+            :param layer_height_mm: The layer height it will print at.
+            :param material: The material it will print in.
+            :param plan_only: Return the plan and every edge's id without
+                building anything.
+            :returns: ``path``, ``step_path``, ``edges`` (finished, left
+                sharp, cautions), ``sized_for``, ``volume_mm3`` and the
+                measurements before and after; or a refusal saying why.
             """
-            from kiln.server import _check_auth, _error_dict
+            from kiln.edge_plan import CHAMFER
 
-            if err := _check_auth("generate"):
-                return err
-            try:
-                from kiln.edge_finish import chamfer_part
-
-                reply = chamfer_part(
-                    file_path, distance_mm=distance_mm, angle_threshold_deg=angle_threshold_deg,
-                    output_path=output_path or None,
-                )
-            except Exception as exc:
-                return _error_dict(f"Chamfer failed: {exc}")
-            if not reply.get("success"):
-                return _error_dict(reply["message"], code=reply["code"], extra={"measured": reply["measured"]})
-            try:
-                from kiln_pro.plugins.git_render_tools import (
-                    attach_inspect_bundle,
-                )
-
-                from kiln.step_import import ensure_mesh_path
-
-                return attach_inspect_bundle(
-                    reply, level="quick", stl_keys=("path",),
-                    self_check_before=ensure_mesh_path(file_path)[0],
-                )
-            except ImportError:
-                return reply
+            return _finish_edges_tool(
+                CHAMFER, file_path, distance_mm, angle_threshold_deg=angle_threshold_deg, output_path=output_path,
+                edges=edges, printer_id=printer_id, nozzle_mm=nozzle_mm, layer_height_mm=layer_height_mm,
+                material=material, plan_only=plan_only,
+            )
 
         @mcp.tool()
         def scale_mesh_to_fit(

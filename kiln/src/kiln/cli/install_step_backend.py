@@ -93,7 +93,7 @@ def install_step_backend(force: bool) -> None:
     to a mesh so the rest of the pipeline (diagnose, slice, print) can work
     on it, and that conversion needs a CAD kernel.  This installs one.
     """
-    from kiln.step_import import PIP_BACKEND
+    from kiln.step_import import PIP_BACKEND, PIP_REQUIREMENT
 
     available, backend = _probe()
     if available and not force:
@@ -111,7 +111,9 @@ def install_step_backend(force: bool) -> None:
             "~68 MB download, ~228 MB on disk)…"
         )
 
-    cmd = [sys.executable, "-m", "pip", "install", "--upgrade", PIP_BACKEND]
+    # The range Kiln's kernel code has been run against, not the newest
+    # kernel there is: the next major renames calls.
+    cmd = [sys.executable, "-m", "pip", "install", "--upgrade", PIP_REQUIREMENT]
     click.echo(f"  $ {' '.join(cmd)}")
     ok, note = _run(cmd)
 

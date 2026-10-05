@@ -121,6 +121,70 @@ jobs:
           pip install build
           python3 scripts/audit_wheel_inventory.py
 
+  # The CAD kernel.  The matrix below installs no kernel, so every test that
+  # needs one SKIPS there -- and until 2026-10-04 nothing else ran them, on
+  # any kernel version.  Two defects sat in that gap: the thickening child
+  # named calls kernel 8.0 had renamed, and stopped at its first import on
+  # every machine with the newer kernel; and the STEP conversion wrote
+  # zero-area facets at every ball-rounded corner, so a rounded CAD part read
+  # as "not closed".  Neither showed on a developer's machine, which has the
+  # older kernel and converts with FreeCAD.  A runner has neither FreeCAD nor
+  # gmsh, so this job converts on the kernel alone -- the path a server takes.
+  #
+  # Both ends of the supported range (kiln.step_import.KERNEL_RANGE), so a
+  # call only one version has fails here rather than on a user's machine.
+  cad-kernel:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        kernel: ["7.9.3.1.1", "8.0.1"]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install kiln with locked dev deps and CAD kernel ${{ matrix.kernel }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r kiln/requirements-lock.txt
+          pip install -e "./kiln[dev,bambu]" --no-deps
+          pip install "cadquery-ocp-novtk==${{ matrix.kernel }}"
+
+      # A missing kernel FAILS here.  Past this step a kernel test that
+      # skips is indistinguishable from the rot this job exists to end.
+      - name: Kernel preflight
+        run: |
+          python - <<'EOF'
+          import OCP
+          from kiln.step_import import _ocp_available
+          assert _ocp_available(), "the CAD kernel did not come up"
+          print("CAD kernel", OCP.__version__)
+          EOF
+
+      # Every test file that names the kernel, found rather than listed: a
+      # list would be one more thing to forget when the next kernel test
+      # lands.
+      - name: Run the kernel tests
+        working-directory: kiln
+        run: |
+          set -o pipefail
+          FILES=$(grep -lE "OCP|needs_cad_kernel|_ocp_available" tests/test_*.py)
+          echo "$FILES"
+          python -m pytest $FILES -q -rs -p no:cacheprovider | tee kernel-tests.log
+          # A test that skipped for want of the kernel did not run.  (One
+          # that wants FreeCAD beside the kernel may skip: a runner has none.)
+          if grep -iE "^SKIPPED.*kernel" kernel-tests.log | grep -v FreeCAD; then
+            echo "::error::a kernel test skipped with the kernel installed"
+            exit 1
+          fi
+
   test:
     needs: changes
     if: needs.changes.outputs.code == 'true'

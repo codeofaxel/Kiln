@@ -97,6 +97,18 @@ SUBPROCESS_TIMEOUT_S: int = 300
 #: twice as fast.  Nobody should download a gigabyte to open one STEP file.
 PIP_BACKEND = "cadquery-ocp-novtk"
 
+#: The kernel versions Kiln's own kernel code has been RUN against, oldest to
+#: the ceiling: CI's cad-kernel job runs the kernel tests on both ends.  A
+#: kernel major renames calls (8.0 did, 2026-09-22), and code written against
+#: one version stops at its first import on the next -- so the install is
+#: held to what has been run, and the ceiling moves when CI is green on the
+#: version above it.  ``pyproject.toml``'s ``step`` extra states the same
+#: range; a test holds the two together.
+KERNEL_RANGE = ">=7.9,<8.1"
+
+#: What ``kiln install-step-backend`` and the printed remedy install.
+PIP_REQUIREMENT = f"{PIP_BACKEND}{KERNEL_RANGE}"
+
 #: The one command that fixes a local install.
 INSTALL_COMMAND = "kiln install-step-backend"
 
@@ -105,7 +117,7 @@ INSTALL_COMMAND = "kiln install-step-backend"
 #: exists in a release that ships it, so telling a user on any earlier
 #: version to install it hands them an instruction that fails.  This one is
 #: true on every version, including the one they already have.
-PIP_INSTALL_COMMAND = f'pip install "{PIP_BACKEND}"'
+PIP_INSTALL_COMMAND = f'pip install "{PIP_REQUIREMENT}"'
 
 _LOCAL_INSTALL_HELP = (
     "No STEP import backend found on this machine.\n"
@@ -766,6 +778,35 @@ def step_converted_from(mesh_path: str) -> str | None:
     return None
 
 
+def keep_step_beside(scratch_step: str, mesh_path: str, source: str) -> tuple[str | None, str]:
+    """Put the CAD an edit produced beside the mesh it produced, under the same name.
+
+    The forward half of :func:`step_converted_from`: same name, same folder,
+    and the mesh marked as Kiln's conversion of that CAD, so the next edit of
+    the mesh finds its CAD again.  A file already at that name is replaced
+    only when Kiln wrote it (:func:`kiln.cad_kernel.step_made_by_kiln`);
+    anything else -- the caller's own CAD, *source* itself when the output
+    was named after it -- is left alone and the CAD goes beside it as
+    ``<name>.kiln.step``.  Returns the CAD's path (``None`` when the edit
+    wrote none) and a sentence about a file left alone, or ``""``.
+    """
+    from kiln.cad_kernel import step_made_by_kiln
+
+    if not os.path.isfile(scratch_step):
+        return None, ""
+    target = Path(mesh_path).with_suffix(".step")
+    note = ""
+    is_the_source = target.exists() and os.path.samefile(target, source)
+    if target.exists() and (is_the_source or not step_made_by_kiln(str(target))):
+        kept = target
+        target = target.with_name(f"{target.stem}{_BESIDE}.step")
+        note = f" {kept.name} was already there and is not a file Kiln made, so the finished CAD is {target.name}."
+    else:
+        _stamp_binary_stl(Path(mesh_path))
+    _move_into(Path(scratch_step), target)
+    return str(target), note
+
+
 def _move_into(src: Path, dest: Path) -> None:
     """Move *src* onto *dest*, atomically even across filesystems."""
     try:
@@ -794,6 +835,12 @@ def _publish_outputs(
             continue
         base = stem if len(outputs) == 1 else f"{stem}_{src.stem}"
         dest, note = _claim_output_name(out_dir, base, src.suffix or ".stl")
+        # Whichever backend wrote it: the kernel's mesher leaves facets with
+        # no area at the pole of every ball-rounded corner, and a mesh that
+        # carries them reads as an open surface.
+        from kiln.cad_kernel import drop_collapsed_facets
+
+        drop_collapsed_facets(str(src))
         _stamp_binary_stl(src)
         _move_into(src, dest)
         published.append(str(dest))
@@ -1783,6 +1830,11 @@ def _write_3mf(
     build_items: list[str] = []
     for obj_index, part in enumerate(parts):
         obj_id = obj_index + 2  # id 1 is the basematerials group
+        # The same cleanup every published STL gets (_publish_outputs): a
+        # coloured part's rounded corner is closed too.
+        from kiln.cad_kernel import drop_collapsed_facets
+
+        drop_collapsed_facets(part["stl_path"])
         triangles = _read_binary_stl(part["stl_path"])
 
         vertex_ids: dict[tuple[float, float, float], int] = {}
@@ -2303,7 +2355,12 @@ def ensure_mesh_path(
         # keeps the invalidation aimed: a machine with no gmsh on PATH
         # fingerprints to "" exactly as before and keeps every entry it has.
         f"gmsh@{_GMSH_CURVATURE_ELEMENTS}" if _find_gmsh_cmd() else "",
-        _ocp_available(),
+        # The kernel slot says what its meshes are free of, not merely that
+        # it is here: an entry written before collapsed facets were dropped
+        # (kiln.cad_kernel.drop_collapsed_facets) holds a rounded part that
+        # reads as an open surface, and a key that cannot tell the two apart
+        # would serve it for as long as the temp dir lives.
+        "occt-no-collapsed-facets" if _ocp_available() else False,
         _cadquery_available(),
     )
     key = hashlib.sha256(

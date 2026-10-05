@@ -6,7 +6,8 @@ eight screw holes): ``thicken_mesh_walls(0.4)`` left its thinnest wall at
 and reported success.  Its seven tests checked that a file was written, that
 the triangle count was unchanged and that a negative amount raised; none
 measured a wall.  ``add_mesh_fillet`` and ``add_mesh_chamfer``, from the same
-commit, opened the surface of a plain cube and made it BIGGER.
+commit, opened the surface of a plain cube and made it BIGGER (their tests
+are test_edge_finish.py's now).
 
 So these tests build real parts -- a block with a through-hole as CAD and as a
 mesh, a thin open box with a hole in its floor -- run the real engines, and
@@ -199,9 +200,9 @@ def test_the_reinforcement_step_says_why_it_did_not_thicken(tmp_path, monkeypatc
         wt, "thicken_part",
         lambda *a, **k: {"success": False, "code": EDIT_REFUSED, "message": "Kiln did not thicken the walls: x"},
     )
-    path, why = _apply_thicken(str(tmp_path / "p.stl"), str(tmp_path), 0.4)
-    assert path is None
-    assert why == "Kiln did not thicken the walls: x"
+    reply = _apply_thicken(str(tmp_path / "p.stl"), str(tmp_path), 0.4)
+    assert reply["success"] is False
+    assert reply["message"] == "Kiln did not thicken the walls: x"
 
 
 # ---------------------------------------------------------------------------
@@ -303,37 +304,3 @@ def test_the_tool_thickens_a_step_part_and_grades_it_against_its_mesh(tools, tmp
     before = tools["_bundle"]["self_check_before"]
     assert before.endswith(".stl")
     assert measure_mesh(before).extents_mm == pytest.approx((30.0, 20.0, 10.0), abs=0.01)
-
-
-@needs_cad_kernel
-@pytest.mark.parametrize(("tool", "says"), [("add_mesh_fillet", "round the edges"), ("add_mesh_chamfer", "bevel the edges")])
-def test_an_edge_finish_on_a_step_part_is_judged_as_its_mesh(tools, tmp_path, tool, says):
-    """A STEP reaches the same measured refusal as its mesh, not a mesh
-    reader's complaint about the file format."""
-    step = _step_block_with_hole(tmp_path / "block.step")
-    reply = tools[tool](file_path=step, output_path=str(tmp_path / "out.stl"))
-    assert reply["success"] is False
-    assert reply["error"]["code"] == EDIT_REFUSED
-    assert f"Kiln did not {says}" in reply["error"]["message"]
-    assert reply["measured"]["before"]["size_mm"] == [30.0, 20.0, 10.0]
-
-
-# ---------------------------------------------------------------------------
-# Fillet and chamfer: refused where they damage the part
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("finish", ["fillet_part", "chamfer_part"])
-def test_an_edge_finish_that_opens_and_grows_a_cube_is_refused(tmp_path, finish):
-    """Measured 2026-10-01: both mesh engines open a cube's surface and make
-    it bigger (the fillet by 1.41 mm, the chamfer by 1.0) -- and the tools
-    reported success."""
-    import kiln.edge_finish as ef
-
-    cube = tmp_path / "cube.stl"
-    trimesh.creation.box((20.0, 20.0, 20.0)).export(str(cube))
-    out = tmp_path / "out.stl"
-    reply = getattr(ef, finish)(str(cube), output_path=str(out))
-    assert reply["success"] is False
-    assert reply["code"] == EDIT_REFUSED
-    assert not out.exists()

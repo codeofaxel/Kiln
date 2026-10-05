@@ -1026,47 +1026,62 @@ class TestThickenMeshWalls:
 
 
 # ---------------------------------------------------------------------------
-# TestAddMeshFillet
+# TestAddMeshFillet / TestAddMeshChamfer
 # ---------------------------------------------------------------------------
+
+_EDGE_DEFAULTS = {
+    "angle_threshold_deg": 60.0, "output_path": None, "edges": None, "printer_id": None,
+    "nozzle_mm": None, "layer_height_mm": None, "material": None, "plan_only": False,
+}
 
 
 class TestAddMeshFillet:
-    """The add_mesh_fillet tool hands its work to kiln.edge_finish.fillet_part."""
+    """The add_mesh_fillet tool hands its work to kiln.edge_finish.finish_part."""
 
     @patch("kiln.server._check_auth", return_value=None)
-    @patch("kiln.edge_finish.fillet_part")
-    def test_happy_path(self, mock_fillet, _auth, mesh_tools) -> None:
-        mock_fillet.return_value = {"success": True, "path": "/tmp/model_filleted.stl"}
-        result = mesh_tools["add_mesh_fillet"](file_path="/tmp/model.stl")
+    @patch("kiln.edge_finish.finish_part")
+    def test_happy_path(self, mock_finish, _auth, mesh_tools) -> None:
+        mock_finish.return_value = {"success": True, "plan_only": True}
+        result = mesh_tools["add_mesh_fillet"](file_path="/tmp/model.step")
 
         assert result["success"] is True
-        mock_fillet.assert_called_once_with(
-            "/tmp/model.stl", radius_mm=1.0, angle_threshold_deg=60.0, output_path=None,
-        )
+        mock_finish.assert_called_once_with("/tmp/model.step", kind="fillet", size_mm=1.0, **_EDGE_DEFAULTS)
 
     @patch("kiln.server._check_auth", return_value=None)
-    @patch("kiln.edge_finish.fillet_part")
-    def test_custom_params(self, mock_fillet, _auth, mesh_tools) -> None:
-        mock_fillet.return_value = {"success": True, "path": "/tmp/out.stl"}
+    @patch("kiln.edge_finish.finish_part")
+    def test_every_option_reaches_the_door(self, mock_finish, _auth, mesh_tools) -> None:
+        mock_finish.return_value = {"success": True, "plan_only": True}
         mesh_tools["add_mesh_fillet"](
-            file_path="/tmp/m.stl", radius_mm=2.5, angle_threshold_deg=45.0, output_path="/tmp/out.stl",
+            file_path="/tmp/model.step", radius_mm=2.0, angle_threshold_deg=45.0, output_path="/tmp/out.stl",
+            edges="top,outside", printer_id="bambu_a1", nozzle_mm=0.6, layer_height_mm=0.3, material="PETG",
+            plan_only=True,
         )
-
-        mock_fillet.assert_called_once_with(
-            "/tmp/m.stl", radius_mm=2.5, angle_threshold_deg=45.0, output_path="/tmp/out.stl",
+        mock_finish.assert_called_once_with(
+            "/tmp/model.step", kind="fillet", size_mm=2.0, angle_threshold_deg=45.0, output_path="/tmp/out.stl",
+            edges="top,outside", printer_id="bambu_a1", nozzle_mm=0.6, layer_height_mm=0.3, material="PETG",
+            plan_only=True,
         )
 
     @patch("kiln.server._check_auth", return_value=None)
-    @patch("kiln.edge_finish.fillet_part")
-    def test_a_refused_edit_is_an_error_with_its_measurements(self, mock_fillet, _auth, mesh_tools) -> None:
-        mock_fillet.return_value = {
+    @patch("kiln.edge_finish.finish_part")
+    def test_a_refusal_is_an_error_carrying_what_the_door_said(self, mock_finish, _auth, mesh_tools) -> None:
+        mock_finish.return_value = {
             "success": False, "code": "EDIT_WOULD_DAMAGE", "message": "Kiln did not round the edges: ...",
-            "measured": {"ok": False},
+            "measured": {"ok": False}, "edges": {"left_sharp": []},
         }
-        result = mesh_tools["add_mesh_fillet"](file_path="/tmp/m.stl")
+        result = mesh_tools["add_mesh_fillet"](file_path="/tmp/m.step")
 
         assert result["error"]["code"] == "EDIT_WOULD_DAMAGE"
         assert result["measured"] == {"ok": False}
+        assert result["edges"] == {"left_sharp": []}
+
+    @patch("kiln.server._check_auth", return_value=None)
+    @patch("kiln.edge_finish.finish_part", side_effect=ValueError("'sideways' is not an edge selection"))
+    def test_a_selection_it_cannot_read_is_invalid_args(self, _finish, _auth, mesh_tools) -> None:
+        result = mesh_tools["add_mesh_fillet"](file_path="/tmp/m.step", edges="sideways")
+
+        assert result["error"]["code"] == "INVALID_ARGS"
+        assert "sideways" in result["error"]["message"]
 
     def test_auth_failure(self, mesh_tools) -> None:
         with patch("kiln.server._check_auth", return_value=_auth_error()):
@@ -1076,43 +1091,34 @@ class TestAddMeshFillet:
         assert result["error"]["code"] == "AUTH_ERROR"
 
     @patch("kiln.server._check_auth", return_value=None)
-    @patch("kiln.edge_finish.fillet_part", side_effect=RuntimeError("fillet geometry error"))
-    def test_exception(self, _fillet, _auth, mesh_tools) -> None:
+    @patch("kiln.edge_finish.finish_part", side_effect=RuntimeError("fillet geometry error"))
+    def test_exception(self, _finish, _auth, mesh_tools) -> None:
         result = mesh_tools["add_mesh_fillet"](file_path="/tmp/m.stl")
 
         assert result["success"] is False
         assert "fillet geometry error" in result["error"]["message"]
 
 
-# ---------------------------------------------------------------------------
-# TestAddMeshChamfer
-# ---------------------------------------------------------------------------
-
-
 class TestAddMeshChamfer:
-    """The add_mesh_chamfer tool hands its work to kiln.edge_finish.chamfer_part."""
+    """The add_mesh_chamfer tool hands its work to kiln.edge_finish.finish_part."""
 
     @patch("kiln.server._check_auth", return_value=None)
-    @patch("kiln.edge_finish.chamfer_part")
-    def test_happy_path(self, mock_chamfer, _auth, mesh_tools) -> None:
-        mock_chamfer.return_value = {"success": True, "path": "/tmp/model_chamfered.stl"}
-        result = mesh_tools["add_mesh_chamfer"](file_path="/tmp/model.stl")
+    @patch("kiln.edge_finish.finish_part")
+    def test_happy_path(self, mock_finish, _auth, mesh_tools) -> None:
+        mock_finish.return_value = {"success": True, "plan_only": True}
+        result = mesh_tools["add_mesh_chamfer"](file_path="/tmp/model.step")
 
         assert result["success"] is True
-        mock_chamfer.assert_called_once_with(
-            "/tmp/model.stl", distance_mm=0.5, angle_threshold_deg=60.0, output_path=None,
-        )
+        mock_finish.assert_called_once_with("/tmp/model.step", kind="chamfer", size_mm=0.5, **_EDGE_DEFAULTS)
 
     @patch("kiln.server._check_auth", return_value=None)
-    @patch("kiln.edge_finish.chamfer_part")
-    def test_custom_params(self, mock_chamfer, _auth, mesh_tools) -> None:
-        mock_chamfer.return_value = {"success": True, "path": "/tmp/out.stl"}
-        mesh_tools["add_mesh_chamfer"](
-            file_path="/tmp/m.stl", distance_mm=1.0, angle_threshold_deg=30.0, output_path="/tmp/out.stl",
-        )
+    @patch("kiln.edge_finish.finish_part")
+    def test_custom_params(self, mock_finish, _auth, mesh_tools) -> None:
+        mock_finish.return_value = {"success": True, "plan_only": True}
+        mesh_tools["add_mesh_chamfer"](file_path="/tmp/m.step", distance_mm=1.5, edges="bottom")
 
-        mock_chamfer.assert_called_once_with(
-            "/tmp/m.stl", distance_mm=1.0, angle_threshold_deg=30.0, output_path="/tmp/out.stl",
+        mock_finish.assert_called_once_with(
+            "/tmp/m.step", kind="chamfer", size_mm=1.5, **{**_EDGE_DEFAULTS, "edges": "bottom"},
         )
 
     def test_auth_failure(self, mesh_tools) -> None:
@@ -1123,8 +1129,8 @@ class TestAddMeshChamfer:
         assert result["error"]["code"] == "AUTH_ERROR"
 
     @patch("kiln.server._check_auth", return_value=None)
-    @patch("kiln.edge_finish.chamfer_part", side_effect=RuntimeError("chamfer error"))
-    def test_exception(self, _chamfer, _auth, mesh_tools) -> None:
+    @patch("kiln.edge_finish.finish_part", side_effect=RuntimeError("chamfer error"))
+    def test_exception(self, _finish, _auth, mesh_tools) -> None:
         result = mesh_tools["add_mesh_chamfer"](file_path="/tmp/m.stl")
 
         assert result["success"] is False
