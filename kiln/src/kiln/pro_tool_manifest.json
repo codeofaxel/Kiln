@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-05T08:24:54.871394+00:00",
-  "tool_count": 437,
+  "generated": "2026-10-05T16:44:53.963351+00:00",
+  "tool_count": 432,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -1446,167 +1446,6 @@
         "schema_version": 1,
         "kind": "verdict"
       }
-    },
-    {
-      "name": "kiln_spend_caps_confirm_change",
-      "description": "Confirm a cap-change challenge by passing the user's TOTP code.",
-      "tier": "free",
-      "access": "free",
-      "category": "billing",
-      "parameters": {
-        "properties": {
-          "challenge_id": {
-            "title": "Challenge Id",
-            "type": "string"
-          },
-          "totp_code": {
-            "title": "Totp Code",
-            "type": "string"
-          }
-        },
-        "required": [
-          "challenge_id",
-          "totp_code"
-        ],
-        "title": "kiln_spend_caps_confirm_changeArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "record"
-      },
-      "served": false
-    },
-    {
-      "name": "kiln_spend_caps_confirm_order_approval",
-      "description": "Confirm a one-shot order approval with the user's TOTP code.",
-      "tier": "free",
-      "access": "free",
-      "category": "billing",
-      "parameters": {
-        "properties": {
-          "challenge_id": {
-            "title": "Challenge Id",
-            "type": "string"
-          },
-          "totp_code": {
-            "title": "Totp Code",
-            "type": "string"
-          }
-        },
-        "required": [
-          "challenge_id",
-          "totp_code"
-        ],
-        "title": "kiln_spend_caps_confirm_order_approvalArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "record"
-      },
-      "served": false
-    },
-    {
-      "name": "kiln_spend_caps_request_change",
-      "description": "Request to raise the per-order and/or monthly spend cap.",
-      "tier": "free",
-      "access": "free",
-      "category": "billing",
-      "parameters": {
-        "properties": {
-          "per_order_dollars": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Per Order Dollars"
-          },
-          "monthly_dollars": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Monthly Dollars"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Reason"
-          }
-        },
-        "title": "kiln_spend_caps_request_changeArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "record"
-      },
-      "served": false
-    },
-    {
-      "name": "kiln_spend_caps_request_order_approval",
-      "description": "Request a one-shot approval for an over-cap order.",
-      "tier": "free",
-      "access": "free",
-      "category": "billing",
-      "parameters": {
-        "properties": {
-          "order_id": {
-            "title": "Order Id",
-            "type": "string"
-          },
-          "max_dollars": {
-            "title": "Max Dollars",
-            "type": "number"
-          }
-        },
-        "required": [
-          "order_id",
-          "max_dollars"
-        ],
-        "title": "kiln_spend_caps_request_order_approvalArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "record"
-      },
-      "served": false
-    },
-    {
-      "name": "kiln_spend_caps_show",
-      "description": "Show your current Kiln spend caps + opt-in status.",
-      "tier": "free",
-      "access": "free",
-      "category": "billing",
-      "parameters": {
-        "properties": {},
-        "title": "kiln_spend_caps_showArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "record"
-      },
-      "served": false
     },
     {
       "name": "license_status_live",
@@ -10166,8 +10005,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
-      },
-      "served": false
+      }
     },
     {
       "name": "assess_calibration_status",
@@ -10583,8 +10421,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      },
-      "served": false
+      }
     },
     {
       "name": "get_calibration_health_recommendations",
@@ -10615,8 +10452,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      },
-      "served": false
+      }
     },
     {
       "name": "get_parser_health_summary",
@@ -10632,8 +10468,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      },
-      "served": false
+      }
     },
     {
       "name": "get_provenance_history",
@@ -10685,8 +10520,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      },
-      "served": false
+      }
     },
     {
       "name": "import_third_party_calibration",
@@ -10775,8 +10609,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      },
-      "served": false
+      }
     },
     {
       "name": "query_per_machine_offset",
@@ -10824,8 +10657,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      },
-      "served": false
+      }
     },
     {
       "name": "recommend_running_clearance",
@@ -10972,8 +10804,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      },
-      "served": false
+      }
     },
     {
       "name": "request_calibration_test_print",
@@ -11032,8 +10863,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "action"
-      },
-      "served": false
+      }
     },
     {
       "name": "tolerance_stack_analysis",
@@ -11150,8 +10980,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      },
-      "served": false
+      }
     },
     {
       "name": "assess_bom_sourcing_risk",
@@ -16913,8 +16742,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      },
-      "served": false
+      }
     },
     {
       "name": "get_community_wear_baseline",
@@ -16981,8 +16809,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      },
-      "served": false
+      }
     },
     {
       "name": "get_material_success_rates",
@@ -17006,8 +16833,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      },
-      "served": false
+      }
     },
     {
       "name": "get_material_warnings",
@@ -17169,8 +16995,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      },
-      "served": false
+      }
     },
     {
       "name": "get_print_confidence",
@@ -17226,8 +17051,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      },
-      "served": false
+      }
     },
     {
       "name": "get_print_learning_summary",
@@ -17280,8 +17104,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      },
-      "served": false
+      }
     },
     {
       "name": "get_printer_melt_rate",
