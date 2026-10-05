@@ -21,6 +21,12 @@ connection kind and model, and when asked, a Klipper printer's own
 configuration -- with the time they were read.  Never an address, a serial
 number or a credential: a served tool needs to know WHAT the printer is,
 and nothing here tells it where the printer is or how to reach it.
+
+``print_history``: this install's own recent print records, for a served
+tool that learns from them -- which printer and material, how the print
+went, and the settings and conditions it ran under.  Never a file's name or
+fingerprint, a note, or who recorded it.  They go with the one call that
+asked and the servers keep none of it.
 """
 
 from __future__ import annotations
@@ -205,6 +211,59 @@ def _printer_facts(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | No
     }, None
 
 
+#: What one print record carries to a served tool: what was printed in, how
+#: it went, and the settings and conditions it ran under.  Never which file
+#: it was, its name, its notes or who recorded it.
+_HISTORY_FIELDS = (
+    "printer_name", "material_type", "outcome", "failure_mode",
+    "quality_grade", "settings", "environment", "created_at",
+)
+#: The most recent records sent, and the most they may weigh as JSON (the
+#: servers refuse a reading step over a megabyte).
+_HISTORY_RECORDS = 400
+_HISTORY_BYTES = 900_000
+
+
+def _print_history(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """This install's own print records, for a served tool that learns from
+    them.  They are read here and sent with the one call that asked; the
+    servers keep none of it."""
+    import json
+    from datetime import datetime, timezone
+
+    import kiln.server as server
+    from kiln.persistence import get_db
+
+    asked = str(step.get("printer_name") or "").strip()
+    target = asked
+    if asked.lower() in _UNNAMED:
+        try:
+            target = str(server._resolve_effective_printer_name(None) or "")
+        except Exception:  # noqa: BLE001 — an install with no printer set up
+            target = ""
+    try:
+        rows = get_db().list_print_outcomes(limit=_HISTORY_RECORDS + 1)
+    except Exception:  # noqa: BLE001 — said, never guessed
+        return None, _refusal(
+            tool, "PRINT_HISTORY_NOT_READ",
+            f"{tool} learns from your print history, and this computer could "
+            "not read its own record of it. Nothing was sent.",
+        )
+    complete = len(rows) <= _HISTORY_RECORDS
+    sent = [{k: row.get(k) for k in _HISTORY_FIELDS} for row in rows[:_HISTORY_RECORDS]]
+    while sent and len(json.dumps(sent, default=str)) > _HISTORY_BYTES:
+        # Oldest first: the list is newest-first, and recent prints say the
+        # most about the printer as it is now.
+        sent = sent[: max(1, len(sent) * 3 // 4)] if len(sent) > 1 else []
+        complete = False
+    return {
+        "read_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "printer_name": target,
+        "outcomes": sent,
+        "complete": complete,
+    }, None
+
+
 #: Steps that MAKE a file (sent up, named by a token)...
 _STEPS: dict[str, Callable[[str, dict[str, Any]], tuple[str | None, dict[str, Any] | None]]] = {
     "slice": _slice,
@@ -212,6 +271,7 @@ _STEPS: dict[str, Callable[[str, dict[str, Any]], tuple[str | None, dict[str, An
 #: ...and steps that READ facts (sent with the next call as they are).
 _READS: dict[str, Callable[[str, dict[str, Any]], tuple[dict[str, Any] | None, dict[str, Any] | None]]] = {
     "printer_facts": _printer_facts,
+    "print_history": _print_history,
 }
 
 

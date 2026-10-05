@@ -151,10 +151,10 @@ class TestTheFence:
         assert slicer == []
 
     def test_no_step_kind_commands_a_printer(self):
-        """One kind makes a file, one reads facts.  Adding a kind that ACTS
-        on a printer is a decision, and this is where it is recorded."""
+        """One kind makes a file, two read.  Adding a kind that ACTS on a
+        printer is a decision, and this is where it is recorded."""
         assert set(served_steps._STEPS) == {"slice"}
-        assert set(served_steps._READS) == {"printer_facts"}
+        assert set(served_steps._READS) == {"printer_facts", "print_history"}
 
     def test_a_tool_cannot_ask_for_many_steps(self, slicer, handed_model):
         steps = [_step(handed_model, id=f"s{i}") for i in range(served_steps.MAX_STEPS + 1)]
@@ -364,3 +364,99 @@ class TestPrinterFacts:
         monkeypatch.setattr(server, "_read_config_printers", lambda: {})
         done, refused = self._read(printer_name="default", want=[])
         assert refused is None and done["printer_facts"]["data"]["printers"] == []
+
+
+class TestPrintHistoryStep:
+    """A served tool that learns from past prints is sent this install's own
+    records: what the engine reads, and nothing that names a file or a
+    person."""
+
+    @pytest.fixture
+    def history(self, tmp_path, monkeypatch):
+        import kiln.persistence as persistence
+        import kiln.server as server
+
+        db = persistence.KilnDB(db_path=str(tmp_path / "prints.db"))
+        for i in range(5):
+            db.save_print_outcome({
+                "job_id": f"job-{i}", "printer_name": "garage" if i < 4 else "office",
+                "file_name": f"private-name-{i}.gcode", "file_hash": f"fingerprint-{i}",
+                "material_type": "PLA", "outcome": "success" if i % 2 == 0 else "failed",
+                "quality_grade": "good" if i % 2 == 0 else None,
+                "failure_mode": None if i % 2 == 0 else "warping",
+                "settings": {"temp_tool": 210 + i}, "environment": {"ambient_c": 21},
+                "notes": "a private note", "agent_id": "someone", "determined_by": "observed",
+                "created_at": 1_700_000_000.0 + i,
+            })
+        db.save_print_outcome({"job_id": "open", "printer_name": "garage", "outcome": "pending"})
+        monkeypatch.setattr(persistence, "get_db", lambda: db)
+        monkeypatch.setattr(server, "_resolve_effective_printer_name", lambda name=None: "garage")
+        yield db
+        db.close()
+
+    def _read(self, **step):
+        return served_steps.carry_out(
+            "get_optimal_settings",
+            [{"kind": "print_history", "id": "print_history", **step}],
+            lambda p: (_ for _ in ()).throw(AssertionError("a read sends no file")),
+        )
+
+    def test_it_sends_the_decided_prints_newest_first_with_when_it_read_them(self, history):
+        done, refused = self._read(printer_name="garage")
+        assert refused is None
+        facts = done["print_history"]["data"]
+        assert facts["read_at"].endswith("+00:00") and facts["complete"] is True
+        assert facts["printer_name"] == "garage"
+        # Every printer this install has printed on; the print still running
+        # is not a verdict and is not sent.
+        assert [r["created_at"] for r in facts["outcomes"]] == [1_700_000_004.0 - i for i in range(5)]
+        assert {r["printer_name"] for r in facts["outcomes"]} == {"garage", "office"}
+        assert facts["outcomes"][0]["settings"] == {"temp_tool": 214}
+
+    def test_nothing_that_names_a_file_or_a_person_leaves(self, history):
+        done, _ = self._read(printer_name="garage")
+        facts = done["print_history"]["data"]
+        assert set(facts) == {"read_at", "printer_name", "outcomes", "complete"}
+        for record in facts["outcomes"]:
+            assert set(record) == set(served_steps._HISTORY_FIELDS)
+        sent = json.dumps(facts)
+        for private in ("private-name", "fingerprint-", "a private note", "someone", "job-"):
+            assert private not in sent
+
+    @pytest.mark.parametrize("asked", ["default", "", "active"])
+    def test_my_printer_is_named_for_the_server(self, history, asked):
+        done, _ = self._read(printer_name=asked)
+        assert done["print_history"]["data"]["printer_name"] == "garage"
+
+    def test_more_history_than_is_sent_is_said(self, history, monkeypatch):
+        monkeypatch.setattr(served_steps, "_HISTORY_RECORDS", 3)
+        facts = self._read(printer_name="garage")[0]["print_history"]["data"]
+        assert len(facts["outcomes"]) == 3 and facts["complete"] is False
+        assert facts["outcomes"][0]["created_at"] == 1_700_000_004.0
+
+    def test_it_is_cut_to_what_the_servers_accept_keeping_the_newest(self, history, monkeypatch):
+        monkeypatch.setattr(served_steps, "_HISTORY_BYTES", 600)
+        facts = self._read(printer_name="garage")[0]["print_history"]["data"]
+        assert 1 <= len(facts["outcomes"]) < 5 and facts["complete"] is False
+        assert facts["outcomes"][0]["created_at"] == 1_700_000_004.0
+        assert len(json.dumps(facts["outcomes"])) <= 600
+
+    def test_a_record_that_cannot_be_read_sends_nothing(self, monkeypatch):
+        import kiln.persistence as persistence
+
+        def broken():
+            raise OSError("disk")
+
+        monkeypatch.setattr(persistence, "get_db", broken)
+        done, refused = self._read(printer_name="garage")
+        assert done == {} and refused["code"] == "PRINT_HISTORY_NOT_READ"
+        assert "Nothing was sent" in refused["error"]
+
+    def test_an_install_that_never_printed_sends_an_empty_history(self, tmp_path, monkeypatch):
+        import kiln.persistence as persistence
+
+        db = persistence.KilnDB(db_path=str(tmp_path / "empty.db"))
+        monkeypatch.setattr(persistence, "get_db", lambda: db)
+        facts = self._read(printer_name="garage")[0]["print_history"]["data"]
+        assert facts["outcomes"] == [] and facts["complete"] is True
+        db.close()
