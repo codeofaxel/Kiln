@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-05T07:36:01.332029+00:00",
+  "generated": "2026-10-05T08:24:54.871394+00:00",
   "tool_count": 437,
   "categories": {
     "product_generators": {
@@ -11750,6 +11750,18 @@
             "default": "consumer_product",
             "title": "Application Class",
             "type": "string"
+          },
+          "screw_through_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Screw Through Mm"
           }
         },
         "required": [
@@ -13201,6 +13213,18 @@
             "default": "consumer_product",
             "title": "Application Class",
             "type": "string"
+          },
+          "screw_through_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Screw Through Mm"
           }
         },
         "title": "recommend_heat_set_insertArguments",
@@ -13278,6 +13302,12 @@
           },
           "hole_purpose": {
             "default": "clearance",
+            "enum": [
+              "clearance",
+              "self_thread",
+              "self_tap",
+              "counterbore"
+            ],
             "title": "Hole Purpose",
             "type": "string"
           },
@@ -19132,6 +19162,14 @@
           },
           "joint_method": {
             "default": "auto",
+            "enum": [
+              "auto",
+              "pins",
+              "adhesive",
+              "screws",
+              "magnets",
+              "none"
+            ],
             "title": "Joint Method",
             "type": "string"
           },
