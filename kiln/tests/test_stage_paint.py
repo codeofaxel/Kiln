@@ -599,7 +599,9 @@ def test_render_memory_stays_bounded(probe: str, tmp_path: Path) -> None:
         timeout=180, env=env,
     )
     assert out.returncode == 0, out.stderr[-1000:]
-    peak_mb = int(out.stdout.strip().splitlines()[-1]) / (1024 * 1024)
+    peak = int(out.stdout.strip().splitlines()[-1])
+    # ru_maxrss is bytes on macOS and kilobytes on Linux.
+    peak_mb = peak / (1024 * 1024) if sys.platform == "darwin" else peak / 1024
     assert peak_mb < 2000, f"render peaked at {peak_mb:.0f} MB"
 
 

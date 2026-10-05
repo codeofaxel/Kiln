@@ -1475,7 +1475,7 @@ class TestHolesThatShareOneSurface:
         face = {i for i in cluster if normals[i][2] > 0.99}
         assert len(face) == 4 * _CAP_SEGMENTS
         across = validation._what_lies_across(cluster, tris, normals)
-        walls = validation._prismatic_walls(cluster, across, cos_threshold=validation._HOLE_COHESION_COS)
+        walls = validation._prismatic_walls(cluster, across, tris, cos_threshold=validation._HOLE_COHESION_COS)
         assert all(not face.intersection(wall) for _, wall in walls), [len(w) for _, w in walls]
 
     def test_one_bevelled_hole_alone_reads_as_it_did(self, tmp_path: Path) -> None:
