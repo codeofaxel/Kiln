@@ -18537,6 +18537,10 @@ def _pro_api_call(
         # than one request stays open.  The servers accept such a tool as a
         # job when asked this way and answer every other tool as usual.
         headers[_SERVED_JOB_HEADER] = "1"
+        # This install saves the files an answer names (kiln.served_makes).
+        headers[_SERVED_FILES_HEADER] = "1"
+        # ...and carries out the steps a tool may ask of it (kiln.served_steps).
+        headers[_SERVED_STEPS_HEADER] = "1"
         req = urllib.request.Request(
             f"{api_url.rstrip('/')}/api/tools/{tool_name}",
             data=json.dumps(kwargs).encode() if kwargs else None,
@@ -18585,6 +18589,8 @@ def _pro_api_call(
 #: Asks the servers to run a heavy tool as a job (they ignore it for any
 #: other tool).
 _SERVED_JOB_HEADER = "X-Kiln-Tool-Async"
+_SERVED_FILES_HEADER = "X-Kiln-Result-Files"
+_SERVED_STEPS_HEADER = "X-Kiln-Local-Steps"
 #: How long a job is waited for: the servers stop one at fifteen minutes.
 _SERVED_JOB_WAIT_S = 15 * 60 + 30
 _SERVED_JOB_POLL_S = 3.0
@@ -18658,6 +18664,42 @@ def _await_served_job(
     # the person needs to hear is that the make ran out of time, not that a
     # minute's wait will fix it.
     return envelope_for_http(tool_name, 504, too_long, kind=kind)
+
+
+_UNNAMED_PRINTER = frozenset({"", "default", "active"})
+
+
+def _with_local_printer(kwargs: dict, inputs: dict | None) -> dict:
+    """*kwargs* naming this install's printer, when the tool builds a file
+    for one and the call left it unnamed.
+
+    Kiln's servers have no printer.  A served tool that writes a file for a
+    machine (a resume file) has to be told which kind, and "default" tells
+    them nothing: only this process knows what that is.  The manifest names
+    the parameter (``inputs["printer"]``); it is filled with the printer's
+    model when Kiln knows it, else its connection type.  A call that named a
+    printer is left as it was.
+    """
+    param = (inputs or {}).get("printer")
+    if not isinstance(param, str) or not param:
+        return kwargs
+    said = kwargs.get(param)
+    if isinstance(said, str) and said.strip().lower() not in _UNNAMED_PRINTER:
+        return kwargs
+    try:
+        known = _resolve_printer_model_live(None)
+        if not known and (_PRINTER_HOST or _read_config_printers()):
+            # A connected printer whose model Kiln was never told: its
+            # connection type still says which kind of file it takes.  With
+            # no printer set up at all there is nothing to say, and the
+            # type's built-in default must not be passed off as one.
+            known = _PRINTER_TYPE
+    except Exception:
+        known = ""
+    known = str(known or "").strip()
+    if not known:
+        return kwargs
+    return {**kwargs, param: known}
 
 
 def _register_pro_tool_stubs(mcp_instance) -> None:
@@ -18788,9 +18830,15 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
             def _stub(**kwargs):
                 from kiln import served_makes
 
-                # A model or image on this computer goes up first, and a
-                # make still on the servers is named by its token.
-                kwargs, cannot_send = served_makes.send_inputs(_name, kwargs, _inputs)
+                # The printer a file is being made for is one only this
+                # computer can name.
+                kwargs = _with_local_printer(kwargs, _inputs)
+                # Every file the call names on this computer goes up first,
+                # and a make still on the servers is named by its token.
+                trip: dict = {}
+                kwargs, cannot_send = served_makes.send_inputs(
+                    _name, kwargs, _inputs, trip,
+                )
                 if cannot_send is not None:
                     return cannot_send
                 # A nozzle tool is about a printer only this process can
@@ -18801,9 +18849,43 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
 
                 # Likewise a blade-status request carries this install's
                 # recent fault codes: the hosted side has no event log.
-                answer = _pro_api_call(
-                    _name, **with_recent_faults(_name, with_local_reading(_name, kwargs))
-                )
+                call = with_recent_faults(_name, with_local_reading(_name, kwargs))
+
+                def ask(**more):
+                    if trip.get("files_sent") or more:
+                        # A tool handed files works through them before it
+                        # answers, whatever kind of answer it gives.
+                        return _pro_api_call(
+                            _name, _timeout=_SERVED_MAKE_WAIT_S, **call, **more,
+                        )
+                    return _pro_api_call(_name, **call)
+
+                answer = ask()
+                # The tool may need one thing only this computer can do
+                # (slice a part with this computer's slicer).  It is done
+                # here, from an allow-list, and the same call is made again
+                # with the result.  Once: a tool that asks twice is told no.
+                from kiln import served_steps
+
+                steps = served_steps.wanted(answer)
+                if steps:
+                    # What a step works on is saved in Kiln's own folder,
+                    # never where the call asked for its OUTPUT: it is not
+                    # the person's file, and a step runs only on a file
+                    # that is there.
+                    answer = served_makes.arrive(_name, answer)
+                    done, refused = served_steps.carry_out(
+                        _name, served_steps.wanted(answer), served_makes._upload_file,
+                    )
+                    if refused is not None:
+                        return refused
+                    answer = ask(step_results=done)
+                    if served_steps.wanted(answer):
+                        return served_steps._refusal(
+                            _name, "LOCAL_STEP_REFUSED",
+                            f"{_name} asked this computer for the same thing "
+                            "twice. Nothing more was run.",
+                        )
                 if _name in ("set_nozzle_state", "record_nozzle_replacement"):
                     # The record just changed: a check must not answer from
                     # the size it remembered a moment ago.
@@ -18813,7 +18895,7 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                 # A make was built on the servers: its paths are there, not
                 # here.  Say so, and fetch its look for the stage.
                 return served_makes.arrive(
-                    _name, answer, allowance=_PRO_TOOL_QUOTA.get(_name),
+                    _name, answer, allowance=_PRO_TOOL_QUOTA.get(_name), trip=trip,
                 )
             return _stub
 
