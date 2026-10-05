@@ -613,3 +613,56 @@ class TestAnEmptySpoolIsNotOffered:
         row = get_db().get_spool_charge("workshop")
         assert row["state"] == "open"
         assert [(c["grams"], c["taken"]) for c in row["charges"]] == [(12.5, 12.5)]
+
+
+class TestACountThatMissesSaysWhy:
+    """A count that never lands leaves the spool list unchanged, which says
+    nothing; the log says which of the three ways it missed."""
+
+    def test_a_count_that_fails_is_logged(self, machine, tmp_path, monkeypatch, caplog):
+        _add("PLA", "red")
+
+        def _unreadable(file_name):
+            raise OSError("the sliced file went away")
+
+        monkeypatch.setattr(spool_usage, "_file_usage", _unreadable)
+        with caplog.at_level("WARNING", logger="kiln.spool_usage"):
+            _start(machine, _sliced(tmp_path))
+        said = [r for r in caplog.records if "spool count for workshop not taken" in r.getMessage()]
+        assert len(said) == 1 and "the sliced file went away" in said[0].exc_text
+
+    def test_a_count_still_running_at_settle_is_logged_with_where_it_stands(self, machine, tmp_path, caplog):
+        import threading
+
+        _add("PLA", "red")
+        release = threading.Event()
+        reading = _unit(_tray(0, _RED), _tray(1, _WHITE))
+
+        def _printer_that_does_not_answer():
+            release.wait(5)
+            return reading
+
+        machine.get_ams_status = _printer_that_does_not_answer
+        assert machine.start_print(_sliced(tmp_path)).success
+        try:
+            with caplog.at_level("WARNING", logger="kiln.spool_usage"):
+                finished = spool_usage.settle(timeout=0.2)
+        finally:
+            release.set()
+        assert finished is False
+        said = [r.getMessage() for r in caplog.records if "spool count still running" in r.getMessage()]
+        assert len(said) == 1
+        assert "kiln-spool-usage" in said[0] and "_printer_that_does_not_answer" in said[0]
+        assert spool_usage.settle() is True
+
+    def test_a_unit_that_cannot_be_read_is_logged(self, machine, tmp_path, caplog):
+        _add("PLA", "red")
+
+        def _no_answer():
+            raise TimeoutError("the printer did not answer")
+
+        machine.get_multi_material_status = _no_answer
+        with caplog.at_level("INFO", logger="kiln.spool_usage"):
+            _start(machine, _sliced(tmp_path))
+        said = [r.getMessage() for r in caplog.records if "spool count for workshop skipped" in r.getMessage()]
+        assert len(said) == 1 and "the printer did not answer" in said[0]

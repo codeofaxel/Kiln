@@ -181,7 +181,7 @@ def charge_print(adapter: Any, file_name: str | None, kwargs: dict[str, Any] | N
             _workers[printer] = worker
         worker.start()
     except Exception:  # noqa: BLE001 -- a count never breaks or delays a start
-        logger.debug("spool count not started", exc_info=True)
+        logger.warning("spool count not started", exc_info=True)
 
 
 def _charge_worker(adapter: Any, printer: str, file_name: str, kwargs: dict[str, Any]) -> None:
@@ -193,20 +193,47 @@ def _charge_worker(adapter: Any, printer: str, file_name: str, kwargs: dict[str,
             if charges:
                 _db().save_spool_charge(printer, file_name, charges, state=_OPEN)
     except Exception:  # noqa: BLE001 -- a count that fails is a count that missed
-        logger.debug("spool count not taken", exc_info=True)
+        logger.warning("spool count for %s not taken", printer, exc_info=True)
     finally:
         with _workers_lock:
             if _workers.get(printer) is threading.current_thread():
                 del _workers[printer]
 
 
-def settle(timeout: float = _WORK_TIMEOUT_S) -> None:
+def settle(timeout: float = _WORK_TIMEOUT_S) -> bool:
     """Wait for every count still being taken.  For a caller that reads the
-    spool list straight after a start, and for tests."""
+    spool list straight after a start, and for tests.
+
+    Returns whether every count finished.  One that did not is logged with
+    where each of this module's threads stands, since a count that never
+    lands is otherwise silent: the spool list simply reads as unchanged.
+    """
     with _workers_lock:
         pending = list(_workers.values())
     for worker in pending:
         worker.join(timeout)
+    stuck = [worker for worker in pending if worker.is_alive()]
+    if stuck:
+        logger.warning(
+            "spool count still running after %.1f s (%s)\n%s",
+            timeout, ", ".join(worker.name for worker in stuck), _where_spool_threads_stand(),
+        )
+    return not stuck
+
+
+def _where_spool_threads_stand() -> str:
+    """The current stack of every live thread this module started."""
+    import traceback
+
+    frames = sys._current_frames()
+    lines: list[str] = []
+    for thread in threading.enumerate():
+        frame = frames.get(thread.ident) if thread.ident is not None else None
+        if frame is None or not thread.name.startswith("kiln-spool"):
+            continue
+        lines.append(f"-- {thread.name} (id {thread.ident}):")
+        lines.extend(line.rstrip() for line in traceback.format_stack(frame))
+    return "\n".join(lines) or "-- no spool thread is running"
 
 
 def _take(adapter: Any, printer: str, usage: _Usage, kwargs: dict[str, Any]) -> list[dict[str, Any]]:
@@ -222,6 +249,7 @@ def _take(adapter: Any, printer: str, usage: _Usage, kwargs: dict[str, Any]) -> 
     status = multi_material_status(adapter)
     if status.kind == KIND_UNKNOWN:
         # The unit could not be read, so which spool feeds is not known.
+        logger.info("spool count for %s skipped: the unit could not be read (%s)", printer, "; ".join(status.warnings))
         return []
     if not status.detected:
         return _take_from_tools(tracker, labels, printer, usage)
