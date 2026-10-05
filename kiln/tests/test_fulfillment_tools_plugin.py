@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
-try:
-    import kiln.fulfillment  # noqa: F401
-
-    _has_fulfillment = True
-except ImportError:
-    _has_fulfillment = False
+from tests import _order_service as order_service
 
 ADDRESS = {
     "first_name": "Ada",
@@ -151,10 +148,8 @@ def test_issue_shipping_confirmation_token_can_save_after_user_decision(
     assert "123 Main St" not in result["saved_profile"]["summary"]
 
 
-@pytest.mark.skipif(not _has_fulfillment, reason="kiln-pro fulfillment module not available")
 def test_fulfillment_quote_caches_provider_quote_id(registered_tools, tmp_path, monkeypatch):
-    from kiln.fulfillment import Quote, ShippingOption
-
+    order_service.provide(monkeypatch)
     import kiln.server as server
     from kiln.quote_cache import get_cached_quote_by_id, get_quote_cache
 
@@ -166,24 +161,21 @@ def test_fulfillment_quote_caches_provider_quote_id(registered_tools, tmp_path, 
         name = "craftcloud"
 
         def get_quote(self, request):
-            return Quote(
-                quote_id="provider-quote-1",
-                provider="craftcloud",
-                material=request.material_id,
-                quantity=request.quantity,
-                unit_price=3.04,
-                total_price=3.04,
-                currency="USD",
-                lead_time_days=5,
-                shipping_options=[
-                    ShippingOption(
-                        id="ship-1",
-                        name="FedEx",
-                        price=21.42,
-                        currency="USD",
-                        estimated_days=5,
-                    )
-                ],
+            shipping = {"id": "ship-1", "name": "FedEx", "price": 21.42, "currency": "USD", "estimated_days": 5}
+            quote = {
+                "quote_id": "provider-quote-1",
+                "provider": "craftcloud",
+                "material": request.material_id,
+                "quantity": request.quantity,
+                "unit_price": 3.04,
+                "total_price": 3.04,
+                "currency": "USD",
+                "lead_time_days": 5,
+            }
+            return SimpleNamespace(
+                **quote,
+                shipping_options=[SimpleNamespace(**shipping, to_dict=lambda: dict(shipping))],
+                to_dict=lambda: {**quote, "shipping_options": [dict(shipping)]},
             )
 
     class MockBilling:
@@ -217,8 +209,8 @@ def test_fulfillment_quote_caches_provider_quote_id(registered_tools, tmp_path, 
     assert get_cached_quote_by_id("provider-quote-1") is not None
 
 
-@pytest.mark.skipif(not _has_fulfillment, reason="kiln-pro fulfillment module not available")
-def test_fulfillment_order_requires_preview_confirmation(registered_tools):
+def test_fulfillment_order_requires_preview_confirmation(registered_tools, monkeypatch):
+    order_service.provide(monkeypatch)
     result = registered_tools["fulfillment_order"](
         quote_id="quote-1",
         shipping_option_id="ship-1",
@@ -230,8 +222,8 @@ def test_fulfillment_order_requires_preview_confirmation(registered_tools):
     assert result["error"]["code"] == "PREVIEW_NOT_CONFIRMED"
 
 
-@pytest.mark.skipif(not _has_fulfillment, reason="kiln-pro fulfillment module not available")
-def test_fulfillment_order_requires_shipping_confirmation(registered_tools, tmp_path):
+def test_fulfillment_order_requires_shipping_confirmation(registered_tools, tmp_path, monkeypatch):
+    order_service.provide(monkeypatch)
     from kiln.preview_gate import get_preview_gate
 
     preview_file = tmp_path / "model.stl"
@@ -248,3 +240,37 @@ def test_fulfillment_order_requires_shipping_confirmation(registered_tools, tmp_
 
     assert result["success"] is False
     assert result["error"]["code"] == "SHIPPING_NOT_CONFIRMED"
+
+
+def _must_not_reach(*_args, **_kwargs):
+    raise AssertionError("an order tool reached for a print-service provider")
+
+
+@pytest.mark.parametrize(
+    "tool, kwargs",
+    [
+        ("fulfillment_materials", {}),
+        ("fulfillment_quote", {"file_path": "model.stl", "material_id": "pla-white"}),
+        ("fulfillment_order", {"quote_id": "quote-1"}),
+        ("fulfillment_order_status", {"order_id": "ord-1"}),
+        ("fulfillment_cancel", {"order_id": "ord-1"}),
+        ("fulfillment_alerts", {}),
+    ],
+)
+def test_without_the_order_service_each_order_tool_says_where_ordering_lives(
+    registered_tools, monkeypatch, tool, kwargs,
+):
+    order_service.remove(monkeypatch)
+    import kiln.server as server
+
+    monkeypatch.setattr(server, "_get_fulfillment", _must_not_reach)
+    monkeypatch.setattr(server, "_get_fulfillment_monitor", _must_not_reach)
+
+    result = registered_tools[tool](**kwargs)
+
+    assert result["success"] is False
+    assert result["error"]["code"] == "NOT_AVAILABLE"
+    message = result["error"]["message"]
+    assert "https://kiln3d.com/docs/connector" in message
+    assert "nothing was sent" in message
+    assert "kiln-pro" not in message

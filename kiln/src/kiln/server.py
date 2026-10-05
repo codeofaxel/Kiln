@@ -5540,13 +5540,17 @@ def _validate_quote_for_order(
     *,
     provider_name: str | None = None,
 ) -> Any:
-    """Validate a cached fulfillment quote before order placement."""
-    try:
-        from kiln.fulfillment.intelligence import validate_quote_for_order
-    except ImportError:
-        from kiln_pro.fulfillment.intelligence import validate_quote_for_order
+    """Validate a cached fulfillment quote before order placement.
 
-    return validate_quote_for_order(
+    Reached only from the ordering tool, which has already asked
+    :func:`kiln.fulfillment_service.order_service` for the order service.
+    """
+    from kiln.fulfillment_service import NOT_INCLUDED, order_service
+
+    service = order_service()
+    if service is None:
+        raise RuntimeError(NOT_INCLUDED)
+    return service.validate_quote_for_order(
         quote_id,
         provider_name=provider_name,
     )
@@ -15153,7 +15157,11 @@ def compare_print_options(
     # --- Fulfillment quote ------------------------------------------------
     fulfillment_quote_data = None
     fulfillment_error = None
-    if fulfillment_material_id:
+    from kiln.fulfillment_service import NOT_INCLUDED, order_service
+
+    if fulfillment_material_id and order_service() is None:
+        fulfillment_error = NOT_INCLUDED
+    elif fulfillment_material_id:
         try:
             provider = _get_fulfillment()
             quote = provider.get_quote(

@@ -755,6 +755,8 @@ def format_order(
             table.add_row("Payment", payment_url)
         if order.get("estimated_delivery"):
             table.add_row("Delivery", order["estimated_delivery"])
+        for warning in order.get("warnings") or []:
+            table.add_row("Warning", Text(warning, style="yellow"))
 
         return _render(Panel(table, title="Order", border_style="blue"))
 
@@ -783,6 +785,8 @@ def format_order(
     payment_url = order.get("payment_url")
     if payment_url and payment_url != order.get("checkout_url"):
         lines.append(f"Payment:  {payment_url}")
+    for warning in order.get("warnings") or []:
+        lines.append(f"Warning:  {warning}")
     return "\n".join(lines)
 
 

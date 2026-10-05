@@ -35,9 +35,17 @@ from kiln.fulfillment_profiles import (
 from kiln.fulfillment_profiles import (
     validate_shipping_confirmation_token as _validate_shipping_confirmation_token,
 )
+from kiln.fulfillment_service import NOT_INCLUDED, NOT_INCLUDED_CODE, order_service
 from kiln.preview_gate import get_preview_gate
 
 _logger = logging.getLogger(__name__)
+
+
+def _not_included() -> dict[str, Any]:
+    """Every order tool's answer on an install without the order service."""
+    import kiln.server as _srv
+
+    return _srv._error_dict(NOT_INCLUDED, code=NOT_INCLUDED_CODE)
 
 
 def _resolve_shipping_address(
@@ -142,13 +150,11 @@ class _FulfillmentToolsPlugin:
             import re
 
             import kiln.server as _srv
-            try:
-                from kiln.fulfillment import FulfillmentError
-            except ImportError:
-                return _srv._error_dict(
-                    "Fulfillment module is not available (kiln-pro required).",
-                    code="NOT_AVAILABLE",
-                )
+
+            service = order_service()
+            if service is None:
+                return _not_included()
+            FulfillmentError = service.FulfillmentError
 
             try:
                 provider = _srv._get_fulfillment()
@@ -216,13 +222,12 @@ class _FulfillmentToolsPlugin:
             order.
             """
             import kiln.server as _srv
-            try:
-                from kiln.fulfillment import FulfillmentError, QuoteRequest
-            except ImportError:
-                return _srv._error_dict(
-                    "Fulfillment module is not available (kiln-pro required).",
-                    code="NOT_AVAILABLE",
-                )
+
+            service = order_service()
+            if service is None:
+                return _not_included()
+            FulfillmentError = service.FulfillmentError
+            QuoteRequest = service.QuoteRequest
             try:
                 from kiln_pro.payments.base import PaymentError
             except ImportError:
@@ -582,14 +587,12 @@ class _FulfillmentToolsPlugin:
             Use ``fulfillment_order_status`` to track progress after placing.
             """
             import kiln.server as _srv
-            try:
-                from kiln.fulfillment import FulfillmentError, OrderRequest
-                from kiln.fulfillment.intelligence import QuoteValidation
-            except ImportError:
-                return _srv._error_dict(
-                    "Fulfillment module is not available (kiln-pro required).",
-                    code="NOT_AVAILABLE",
-                )
+
+            service = order_service()
+            if service is None:
+                return _not_included()
+            FulfillmentError = service.FulfillmentError
+            OrderRequest = service.OrderRequest
             try:
                 from kiln.licensing import LicenseTier
             except ImportError:
@@ -662,7 +665,7 @@ class _FulfillmentToolsPlugin:
                         }
 
                 # 0. Validate quote is still valid
-                quote_validation: QuoteValidation | None = None
+                quote_validation: Any = None
                 try:
                     quote_validation = _srv._validate_quote_for_order(
                         quote_id,
@@ -896,13 +899,11 @@ class _FulfillmentToolsPlugin:
             Returns current order state, tracking info, and estimated delivery.
             """
             import kiln.server as _srv
-            try:
-                from kiln.fulfillment import FulfillmentError
-            except ImportError:
-                return _srv._error_dict(
-                    "Fulfillment module is not available (kiln-pro required).",
-                    code="NOT_AVAILABLE",
-                )
+
+            service = order_service()
+            if service is None:
+                return _not_included()
+            FulfillmentError = service.FulfillmentError
 
             try:
                 provider = _srv._get_fulfillment()
@@ -938,13 +939,11 @@ class _FulfillmentToolsPlugin:
             Only orders that have not yet shipped can be cancelled.
             """
             import kiln.server as _srv
-            try:
-                from kiln.fulfillment import FulfillmentError
-            except ImportError:
-                return _srv._error_dict(
-                    "Fulfillment module is not available (kiln-pro required).",
-                    code="NOT_AVAILABLE",
-                )
+
+            service = order_service()
+            if service is None:
+                return _not_included()
+            FulfillmentError = service.FulfillmentError
             try:
                 from kiln.licensing import LicenseTier, check_tier
             except ImportError:
@@ -1003,13 +1002,12 @@ class _FulfillmentToolsPlugin:
             """
             import kiln.server as _srv
 
+            if order_service() is None:
+                return _not_included()
             try:
                 monitor = _srv._get_fulfillment_monitor()
                 if monitor is None:
-                    return _srv._error_dict(
-                        "Fulfillment monitor is not available (kiln-pro required).",
-                        code="NOT_AVAILABLE",
-                    )
+                    return _not_included()
                 alerts = monitor.get_alerts()
                 return {"success": True, "alerts": alerts, "count": len(alerts)}
             except Exception as exc:

@@ -5396,16 +5396,30 @@ def order() -> None:
     """
 
 
-def _get_fulfillment_provider():
+def _require_order_service(json_mode: bool) -> Any:
+    """The order service for an ordering command.
+
+    On an install without one (:mod:`kiln.fulfillment_service`), says so in
+    the sentence every ordering door shares and exits before anything is
+    sent.
+    """
+    from kiln.fulfillment_service import NOT_INCLUDED, NOT_INCLUDED_CODE, order_service
+
+    service = order_service()
+    if service is None:
+        click.echo(format_error(NOT_INCLUDED, code=NOT_INCLUDED_CODE, json_mode=json_mode))
+        sys.exit(1)
+    return service
+
+
+def _get_fulfillment_provider(service: Any) -> Any:
     """Create a fulfillment provider from env config.
 
-    Uses the provider registry to select the right provider based on
-    ``KILN_FULFILLMENT_PROVIDER`` or auto-detect from API key env vars.
+    Uses the order service's provider registry to select the right provider
+    based on ``KILN_FULFILLMENT_PROVIDER`` or auto-detect from API key env vars.
     """
-    from kiln.fulfillment import get_provider
-
     try:
-        return get_provider()
+        return service.get_provider()
     except (KeyError, RuntimeError, ValueError) as exc:
         raise click.ClickException(
             f"Fulfillment provider not configured: {exc}. "
@@ -5417,8 +5431,9 @@ def _get_fulfillment_provider():
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def order_materials(json_mode: bool) -> None:
     """List available materials from fulfillment services."""
+    service = _require_order_service(json_mode)
     try:
-        provider = _get_fulfillment_provider()
+        provider = _get_fulfillment_provider(service)
         materials = provider.list_materials()
         click.echo(format_materials([m.to_dict() for m in materials], json_mode=json_mode))
     except click.ClickException:
@@ -5453,16 +5468,16 @@ def order_quote(file_path: str, material: str, quantity: int, country: str, json
     Upload a model file (STL, 3MF, OBJ) and receive pricing, lead time,
     and shipping options from Craftcloud's network of 150+ print services.
     """
+    service = _require_order_service(json_mode)
     try:
         from kiln.billing import BillingLedger
     except ImportError:
         BillingLedger = None
-    from kiln.fulfillment import QuoteRequest
 
     try:
-        provider = _get_fulfillment_provider()
+        provider = _get_fulfillment_provider(service)
         quote = provider.get_quote(
-            QuoteRequest(
+            service.QuoteRequest(
                 file_path=file_path,
                 material_id=material,
                 quantity=quantity,
@@ -5626,6 +5641,80 @@ def _resolve_shipping_profile_save_step(
     _save_shipping_profile_from_cli(shipping_address, profile_name)
 
 
+def _order_fee_tools() -> tuple[Any, Any, type[Exception]]:
+    """The fee ledger, payment manager and payment error that settle Kiln's
+    fee on an order, resolved before the order is placed.
+
+    The fee is settled after the print service accepts the order, so a piece
+    missing here refuses the order while nothing has been sent, instead of
+    failing once an order exists.
+    """
+    try:
+        from kiln_pro.payments.base import PaymentError
+        from kiln_pro.payments.manager import PaymentManager
+
+        from kiln.billing import BillingLedger
+    except ImportError as exc:
+        raise click.ClickException(
+            "Kiln can't record its fee for an order on this install, so the order "
+            "was not placed and nothing was sent to the print service."
+        ) from exc
+    from kiln.persistence import get_db
+
+    try:
+        ledger = BillingLedger(db=get_db())
+    except Exception as exc:
+        raise click.ClickException(
+            f"Kiln couldn't open its fee ledger ({exc}), so the order was not "
+            "placed and nothing was sent to the print service."
+        ) from exc
+    return ledger, PaymentManager, PaymentError
+
+
+def _settle_order_fee(
+    order_data: dict[str, Any],
+    result: Any,
+    ledger: Any,
+    payment_manager_cls: Any,
+    payment_error_cls: type[Exception],
+) -> None:
+    """Settle Kiln's fee on an order the print service has accepted.
+
+    The order exists by now, so nothing here may report it as failed: a fee
+    step that cannot finish leaves the order reported as placed, with a
+    warning that says the fee was not recorded.
+    """
+    try:
+        fee_calc = ledger.calculate_fee(
+            result.total_price,
+            currency=result.currency,
+        )
+        try:
+            mgr = payment_manager_cls()
+            if mgr.available_rails:
+                pay_result = mgr.charge_fee(result.order_id, fee_calc)
+                order_data["payment"] = pay_result.to_dict()
+            else:
+                ledger.record_charge(result.order_id, fee_calc)
+                order_data["payment"] = {"status": "no_payment_method"}
+        except payment_error_cls:
+            ledger.record_charge(
+                result.order_id,
+                fee_calc,
+                payment_status="failed",
+            )
+            order_data["payment"] = {"status": "failed"}
+        order_data["kiln_fee"] = fee_calc.to_dict()
+        order_data["total_with_fee"] = float(fee_calc.total_cost)
+    except Exception as exc:
+        logger.warning("Order %s was placed but its fee was not recorded: %s", result.order_id, exc)
+        order_data.setdefault("payment", {"status": "not_recorded"})
+        order_data.setdefault("warnings", []).append(
+            f"Order {result.order_id} was placed, but Kiln couldn't finish recording its fee ({exc}). "
+            f"Don't place it again; check it with: kiln order status {result.order_id}"
+        )
+
+
 @order.command("place")
 @click.argument("quote_id")
 @click.option("--shipping", "-s", "shipping_id", default="", help="Shipping option ID (from quote).")
@@ -5675,20 +5764,7 @@ def order_place(
 
     Requires a quote ID from 'kiln order quote'.
     """
-    try:
-        from kiln.billing import BillingLedger
-    except ImportError:
-        BillingLedger = None
-    from kiln.fulfillment import OrderRequest
-    try:
-        from kiln_pro.payments.base import PaymentError
-    except ImportError:
-        PaymentError = None
-    try:
-        from kiln_pro.payments.manager import PaymentManager
-    except ImportError:
-        PaymentManager = None
-    from kiln.persistence import get_db
+    service = _require_order_service(json_mode)
 
     try:
         manual_shipping_fields = any(
@@ -5759,9 +5835,10 @@ def order_place(
             do_not_save=do_not_save_shipping_profile,
             json_mode=json_mode,
         )
-        provider = _get_fulfillment_provider()
+        fee_tools = _order_fee_tools()
+        provider = _get_fulfillment_provider(service)
         result = provider.place_order(
-            OrderRequest(
+            service.OrderRequest(
                 quote_id=quote_id,
                 shipping_option_id=shipping_id,
                 shipping_address=shipping_address,
@@ -5769,31 +5846,6 @@ def order_place(
                 shipping_confirmed=True,
             )
         )
-        order_data = result.to_dict()
-        if result.total_price and result.total_price > 0:
-            ledger = BillingLedger(db=get_db())
-            fee_calc = ledger.calculate_fee(
-                result.total_price,
-                currency=result.currency,
-            )
-            try:
-                mgr = PaymentManager()
-                if mgr.available_rails:
-                    pay_result = mgr.charge_fee(result.order_id, fee_calc)
-                    order_data["payment"] = pay_result.to_dict()
-                else:
-                    ledger.record_charge(result.order_id, fee_calc)
-                    order_data["payment"] = {"status": "no_payment_method"}
-            except PaymentError:
-                ledger.record_charge(
-                    result.order_id,
-                    fee_calc,
-                    payment_status="failed",
-                )
-                order_data["payment"] = {"status": "failed"}
-            order_data["kiln_fee"] = fee_calc.to_dict()
-            order_data["total_with_fee"] = float(fee_calc.total_cost)
-        click.echo(format_order(order_data, json_mode=json_mode))
     except click.ClickException:
         raise
     except FulfillmentError as exc:
@@ -5813,14 +5865,22 @@ def order_place(
         )
         sys.exit(1)
 
+    # The print service has the order now.  Nothing below may report it as
+    # failed: an order that reads as failed gets placed, and paid for, twice.
+    order_data = result.to_dict()
+    if result.total_price and result.total_price > 0:
+        _settle_order_fee(order_data, result, *fee_tools)
+    click.echo(format_order(order_data, json_mode=json_mode))
+
 
 @order.command("status")
 @click.argument("order_id")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def order_status(order_id: str, json_mode: bool) -> None:
     """Check the status of a fulfillment order."""
+    service = _require_order_service(json_mode)
     try:
-        provider = _get_fulfillment_provider()
+        provider = _get_fulfillment_provider(service)
         result = provider.get_order_status(order_id)
         click.echo(format_order(result.to_dict(), json_mode=json_mode))
     except click.ClickException:
@@ -5848,8 +5908,9 @@ def order_status(order_id: str, json_mode: bool) -> None:
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def order_cancel(order_id: str, json_mode: bool) -> None:
     """Cancel a fulfillment order (if still cancellable)."""
+    service = _require_order_service(json_mode)
     try:
-        provider = _get_fulfillment_provider()
+        provider = _get_fulfillment_provider(service)
         result = provider.cancel_order(order_id)
         click.echo(format_order(result.to_dict(), json_mode=json_mode))
     except click.ClickException:
@@ -6079,9 +6140,8 @@ def order_validate_address(
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def order_history(limit: int, provider: str, json_mode: bool) -> None:
     """View past fulfillment orders."""
-    from kiln.fulfillment.intelligence import get_order_history
-
-    history = get_order_history()
+    service = _require_order_service(json_mode)
+    history = service.get_order_history()
     orders = history.list_orders(limit=limit, provider=provider or None)
     data = [o.to_dict() for o in orders]
     if json_mode:
@@ -6104,9 +6164,8 @@ def order_insurance(order_value: float, json_mode: bool) -> None:
 
     ORDER_VALUE: Total order value in USD.
     """
-    from kiln.fulfillment.intelligence import get_insurance_options
-
-    options = get_insurance_options(order_value)
+    service = _require_order_service(json_mode)
+    options = service.get_insurance_options(order_value)
     data = [o.to_dict() for o in options]
     if json_mode:
         click.echo(json.dumps({"status": "success", "data": data}, indent=2))
@@ -7501,6 +7560,7 @@ def compare_cost(
     import json as _json
 
     from kiln.cost_estimator import CostEstimator
+    from kiln.fulfillment_service import NOT_INCLUDED, order_service
 
     result: dict = {}
 
@@ -7524,10 +7584,13 @@ def compare_cost(
         result["local"] = {"available": False, "error": str(exc)}
 
     # Fulfillment quote (optional)
-    if fulfillment_material:
+    service = order_service() if fulfillment_material else None
+    if fulfillment_material and service is None:
+        result["fulfillment"] = {"available": False, "error": NOT_INCLUDED}
+    elif fulfillment_material:
         try:
-            from kiln.fulfillment import QuoteRequest as QR
-            from kiln.fulfillment import get_provider
+            QR = service.QuoteRequest
+            get_provider = service.get_provider
 
             # Use explicit provider, or auto-detect, or fall back to
             # craftcloud (which works without any API key for quotes).
@@ -7547,7 +7610,7 @@ def compare_cost(
                 # Looks like a simple name, not a UUID — resolve it
                 try:
                     resolved_material = _resolve_fulfillment_material(
-                        fulfillment_material, provider_name=provider
+                        service, fulfillment_material, provider_name=provider
                     )
                     if not json_mode:
                         click.echo(f"  Resolved material {fulfillment_material!r} → {resolved_material}")
@@ -7646,6 +7709,7 @@ _MATERIAL_ALIASES: dict[str, list[str]] = {
 
 
 def _resolve_fulfillment_material(
+    service: Any,
     simple_name: str,
     provider_name: str | None = None,
 ) -> str:
@@ -7654,12 +7718,13 @@ def _resolve_fulfillment_material(
     Fetches the provider's material catalog, searches for matches by name,
     and returns the best matching material config ID.
 
+    :param service: The order service (:func:`kiln.fulfillment_service.order_service`).
     :param simple_name: Simple material name like "PLA", "Nylon", etc.
     :param provider_name: Fulfillment provider name (default: auto-detect).
     :returns: The material config ID string (e.g., a UUID for Craftcloud).
     :raises click.ClickException: If no matching material is found.
     """
-    from kiln.fulfillment import get_provider
+    get_provider = service.get_provider
 
     try:
         prov = get_provider(provider_name)
@@ -7755,8 +7820,9 @@ def fulfillment_materials(
     """
     import json
 
-    from kiln.fulfillment import get_provider
-    from kiln.fulfillment.base import FulfillmentError
+    service = _require_order_service(json_mode)
+    get_provider = service.get_provider
+    FulfillmentError = service.FulfillmentError
 
     try:
         try:

@@ -43,6 +43,7 @@ kiln_pro.nozzle_intelligence.store_resolver
 kiln_pro.nozzle_intelligence.verdicts
 kiln_pro.payments
 kiln_pro.payments.base
+kiln_pro.payments.manager
 kiln_pro.payments.manager.PaymentManager
 kiln_pro.payments.stripe_provider
 kiln_pro.payments.stripe_provider.StripeProvider

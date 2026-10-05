@@ -1,8 +1,8 @@
 """Backstop for the import-target check (``scripts/audit_import_targets.py``).
 
-On 2026-03-20 the ordering code moved to the private package and twelve
-``kiln order`` terminal commands kept importing it, inside their bodies, with
-no guard.  Every plain install crashed on them for six months and nothing
+On 2026-03-20 the ordering code moved to the private package and seven of
+the twelve ``kiln order`` terminal commands kept importing it, inside their
+bodies, with no guard.  Every plain install crashed on them for six months and nothing
 noticed: importing the CLI and collecting the tests both succeed, and the
 commands' tests skip whenever the module is absent.  The check reads every
 first-party import instead of waiting for someone to run the line.

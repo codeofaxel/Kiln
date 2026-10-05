@@ -2,8 +2,9 @@
 """Every import of Kiln's own code names something that exists.
 
 The 2026-03-20 change that moved the ordering code out of public Kiln left
-twelve ``kiln order`` terminal commands importing ``kiln.fulfillment``, a
-package no tree has held since.  Nothing noticed for six months, and both
+seven of the twelve ``kiln order`` terminal commands, and ``kiln
+fulfillment-materials``, importing ``kiln.fulfillment``, a package no tree
+has held since.  Nothing noticed for six months, and both
 reasons are general:
 
 * The imports sit inside the command bodies.  Importing the CLI and
@@ -59,15 +60,6 @@ PUBLIC_TESTS = REPO / "kiln" / "tests"
 #: ``(path relative to its tree's parent, module, name)``; ``name`` is ``""``
 #: for a missing module.  Shrink only.
 KNOWN: frozenset[tuple[str, str, str]] = frozenset({
-    # The ``kiln order`` commands, ``kiln fulfillment-materials`` and the
-    # provider half of ``kiln compare-cost``: the ordering code moved to the
-    # private package on 2026-03-20 (f1368ea8) and these crash on every plain
-    # install.  Being fixed or removed separately.
-    ("kiln/src/kiln/cli/main.py", "kiln.fulfillment", ""),
-    ("kiln/src/kiln/cli/main.py", "kiln.fulfillment.intelligence", ""),
-    ("kiln/src/kiln/cli/main.py", "kiln.fulfillment.base", ""),
-    # The fallback half of a quote check reached only by the ordering tools.
-    ("kiln/src/kiln/server.py", "kiln_pro.fulfillment.intelligence", ""),
     # Routing a print across printers (the fleet router moved to the private
     # package); reached from the print command's routing option.
     ("kiln/src/kiln/cli/main.py", "kiln.job_router", ""),
