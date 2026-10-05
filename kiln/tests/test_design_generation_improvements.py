@@ -4648,6 +4648,43 @@ class TestSmartGenerateFromTemplate:
         assert "fastener_advice" not in result
 
     @patch("kiln.server._check_auth", return_value=None)
+    def test_the_reinforcements_are_made_for_the_printer_and_material_named(
+        self, mock_auth, tmp_path,
+    ):
+        """The reinforcement step is sized for a printer and a material; this
+        door hands it the ones the caller named instead of leaving it to guess."""
+        smart_generate_from_template = _get_plugin_tool(
+            "generation_ai_tools", "smart_generate_from_template",
+        )
+        stl_path = str(tmp_path / "part.stl")
+        _write_cube_stl(stl_path, 20.0)
+        reinforced = MagicMock()
+        reinforced.output_path = stl_path
+        reinforced.to_dict.return_value = {"applied": []}
+
+        with patch(
+            "kiln.server.generate_from_template",
+            return_value={
+                "success": True,
+                "parameters_used": {},
+                "result": {"local_path": stl_path},
+                "dimensions": None,
+            },
+        ), patch(
+            "kiln.design_reasoning.generate_improvement_plan",
+            return_value=MagicMock(reinforcements=[object()], to_dict=MagicMock(return_value={})),
+        ), patch(
+            "kiln.design_reasoning.apply_reinforcements", return_value=reinforced,
+        ) as apply:
+            smart_generate_from_template(
+                "shelf_bracket", material="PETG", auto_reinforce=True, printer_id="bambu_a1",
+            )
+
+        apply.assert_called_once()
+        assert apply.call_args.kwargs["material"] == "PETG"
+        assert apply.call_args.kwargs["printer_id"] == "bambu_a1"
+
+    @patch("kiln.server._check_auth", return_value=None)
     def test_invalid_template_returns_error(self, mock_auth):
         smart_generate_from_template = _get_plugin_tool("generation_ai_tools", "smart_generate_from_template")
 

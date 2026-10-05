@@ -1092,6 +1092,7 @@ class _GenerationAIToolsPlugin:
             parameters: dict | None = None,
             material: str = "PLA",
             auto_reinforce: bool = False,
+            printer_id: str | None = None,
         ) -> dict:
             """Generate from template + structural analysis + print settings (recommended for functional parts).
 
@@ -1109,8 +1110,11 @@ class _GenerationAIToolsPlugin:
 
             :param template_id: Template ID from ``list_design_templates``.
             :param parameters: Parameter overrides (e.g., ``{"phone_width": 80}``).
-            :param material: Filament type for settings inference (PLA, PETG, ABS, etc.).
+            :param material: Filament type for settings inference and for the
+                reinforcements (PLA, PETG, ABS, etc.).
             :param auto_reinforce: If True, auto-apply structural reinforcements.
+            :param printer_id: The printer the part is for, so the reinforcements
+                are sized for its nozzle and layer height.
             :returns: Dict with STL path, structural grade, reinforcements, and print settings.
             """
             if err := _srv._check_auth("generate"):
@@ -1136,7 +1140,7 @@ class _GenerationAIToolsPlugin:
                 if auto_reinforce and plan.reinforcements:
                     from kiln.design_reasoning import apply_reinforcements
 
-                    reinf = apply_reinforcements(stl_path)
+                    reinf = apply_reinforcements(stl_path, printer_id=printer_id, material=material)
                     stl_path = reinf.output_path
                     reinforcement_result = reinf.to_dict()
 
