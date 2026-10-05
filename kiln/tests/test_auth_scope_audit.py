@@ -101,6 +101,8 @@ def _scopes_used(body: str) -> set[str]:
 # ---------------------------------------------------------------------------
 
 READ_ONLY_TOOLS: set[str] = {
+    # Reads the signed-in account's spend caps; changes nothing.
+    "kiln_spend_caps_show",
     # Printer status / info (read-only queries)
     "printer_status",
     "printer_files",
