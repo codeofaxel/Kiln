@@ -17,18 +17,28 @@ A keep is where a free monthly allowance is spent; the server decides and
 charges, and answers with the full-fidelity file, which is written here and
 named in the answer.  Iterating stays free.
 
-**Send.**  A served tool that works on the caller's own model or image
-cannot read this computer's disk.  :func:`send_inputs` uploads the file the
-call names and hands the tool a token for it; a make that is still on the
-servers is named by its ``artifact_token`` and nothing is uploaded at all.
+**Send.**  A served tool that works on the caller's own files cannot read
+this computer's disk.  :func:`send_inputs` uploads each file the call names
+and hands the tool a token for it; a make that is still on the servers is
+named by its ``artifact_token`` and nothing is uploaded at all.  One model
+and one image go by their own doors; every other file (a G-code, a second
+model, a list of parts, a PDF) goes by one door for all of them, a G-code
+compressed on the way.
 
-Which parameter takes a model and which an image comes from the manifest
-entry (``inputs``), written by the side that fills them.
+**Bring.**  A served tool's answer names the files it wrote (a resume
+file, a jointed part, a page picture) on the servers' disk.  The servers
+hand each one over under a token; :func:`arrive` saves it here -- where the
+call asked for its output, else under ``~/.kiln/served/files`` -- and puts
+the real path where the servers' path was.
+
+Which parameters take which files, and which say where a tool writes, come
+from the manifest entry (``inputs``), written by the side that fills them.
 """
 
 from __future__ import annotations
 
 import contextlib
+import gzip
 import hashlib
 import json
 import logging
@@ -51,8 +61,30 @@ _SENDABLE_MODEL_TYPES = frozenset({".stl", ".3mf", ".obj"})
 _SENDABLE_IMAGE_TYPES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".svg"})
 _KIND_SUFFIX = {"stl": ".stl", "3mf": ".3mf", "obj": ".obj", "step": ".step"}
 
+#: Every kind of file the servers take for a tool to read.  They decide
+#: what a file is by its content; this only says which files on this
+#: computer are worth sending at all.
+_SENDABLE_FILE_TYPES = (
+    _SENDABLE_MODEL_TYPES
+    | _SENDABLE_IMAGE_TYPES
+    | frozenset({".gcode", ".gco", ".g", ".step", ".stp", ".pdf", ".dxf", ".mtl", ".json"})
+)
+_GCODE_TYPES = frozenset({".gcode", ".gco", ".g"})
+#: The largest G-code sent, before compressing, and the most of anything
+#: that goes over the wire in one upload (the servers' own ceilings).
+MAX_GCODE_BYTES = 256 * 1024 * 1024
+MAX_UPLOAD_BYTES = 64 * 1024 * 1024
+#: The most files one call brings.
+MAX_FILES_PER_CALL = 32
+#: Where a text parameter's file goes once it has been sent.
+_INLINE_FILE_MARK = "{file}"
+_INLINE_PREFIX = re.compile(r"^\s*[A-Za-z][A-Za-z0-9_]{0,31}:(?!//)")
+
 _FETCH_TIMEOUT_S = 30.0
 _UPLOAD_TIMEOUT_S = 60.0
+#: A sliced file on a home uplink takes longer than a picture does.
+_FILE_UPLOAD_TIMEOUT_S = 300.0
+_FILE_FETCH_TIMEOUT_S = 300.0
 
 #: How many makes the record remembers.
 _RECORD_MAX = 256
@@ -85,6 +117,12 @@ def kept_dir() -> Path:
 def documents_dir() -> Path:
     """Where documents a served tool made (a drawing, a manual) are saved."""
     return _served_home() / "documents"
+
+
+def files_dir() -> Path:
+    """Where the other files a served tool wrote (a resume file, a jointed
+    part) are saved when the call named no place for them."""
+    return _served_home() / "files"
 
 
 def _record_path() -> Path:
@@ -324,6 +362,134 @@ def _bring_documents(answer: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Files
+# ---------------------------------------------------------------------------
+
+#: The largest file saved (the servers' own ceiling for one).
+MAX_FILE_BYTES = 256 * 1024 * 1024
+_FILE_SUFFIX = {
+    "gcode": ".gcode", "3mf": ".3mf", "stl": ".stl", "obj": ".obj",
+    "png": ".png", "json": ".json",
+}
+_GZIP_MAGIC = b"\x1f\x8b"
+
+
+def _inflated(data: bytes, limit: int) -> bytes | None:
+    """*data* with its gzip undone, or ``None`` past *limit*."""
+    import zlib
+
+    inflater = zlib.decompressobj(wbits=31)
+    try:
+        out = inflater.decompress(data, limit + 1)
+    except zlib.error:
+        return None
+    if len(out) > limit or inflater.unconsumed_tail:
+        return None
+    return out
+
+
+def _plain_name(name: Any, kind: str) -> str:
+    """The servers' name for a file, with nothing in it but plain
+    characters and the suffix its kind has."""
+    suffix = _FILE_SUFFIX[kind]
+    stem = Path(str(name or "file")).stem
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip("-.") or "file"
+    return f"{stem[:80]}{suffix}"
+
+
+def _slot(answer: dict, where: Any) -> tuple[Any, Any] | None:
+    """The container and key *where* leads to in *answer*, or ``None``."""
+    if not isinstance(where, list) or not where:
+        return None
+    block: Any = answer
+    for key in where[:-1]:
+        if isinstance(block, dict) and isinstance(key, str):
+            block = block.get(key)
+        elif isinstance(block, list) and isinstance(key, int) and 0 <= key < len(block):
+            block = block[key]
+        else:
+            return None
+    last = where[-1]
+    if isinstance(block, dict) and isinstance(last, str) and last in block:
+        return block, last
+    if isinstance(block, list) and isinstance(last, int) and 0 <= last < len(block):
+        return block, last
+    return None
+
+
+def _bring_files(answer: dict, trip: dict | None) -> None:
+    """Save each file the answer hands over to this computer and put its
+    path where the servers' path was.
+
+    The servers name each one (``files``: where it sits in the answer, its
+    format, a token, and the output parameter it was written for when there
+    was one).  It is the product of a tool the plan already let run, so
+    there is no keep: it is fetched now.  A file the call named a place for
+    is saved exactly there; one written while the call named a folder goes
+    into that folder; the rest go under :func:`files_dir`.  One that cannot
+    be fetched keeps its entry and says so.  Never raises.
+    """
+    files = answer.get("files")
+    if not isinstance(files, list) or not files:
+        return
+    bearer = _bearer()
+    wanted_files = dict((trip or {}).get("output_files") or {})
+    wanted_folder = next(iter(((trip or {}).get("output_folders") or {}).values()), None)
+    import httpx
+
+    for item in files:
+        if not isinstance(item, dict):
+            continue
+        token = str(item.get("artifact_token") or "")
+        kind = str(item.get("format") or "").lower()
+        param = item.get("param")
+        item["on_this_computer"] = False
+        if not bearer or not _TOKEN_SHAPE.match(token) or kind not in _FILE_SUFFIX:
+            continue
+        try:
+            resp = httpx.get(
+                f"{_api_base()}/api/artifact/{token}",
+                headers={"Authorization": f"Bearer {bearer}"},
+                timeout=_FILE_FETCH_TIMEOUT_S,
+            )
+            if resp.status_code != 200 or not resp.content:
+                continue
+            data = resp.content
+            if kind == "gcode" and data.startswith(_GZIP_MAGIC):
+                data = _inflated(data, MAX_FILE_BYTES)
+            if data is None or len(data) > MAX_FILE_BYTES:
+                continue
+            name = _plain_name(item.get("filename"), kind)
+            if isinstance(param, str) and wanted_files.get(param):
+                path = Path(wanted_files[param]).expanduser()
+            elif wanted_folder:
+                path = Path(wanted_folder).expanduser() / name
+            else:
+                path = files_dir() / f"{Path(name).stem}-{token[:6]}{_FILE_SUFFIX[kind]}"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        except Exception:  # noqa: BLE001 — one file must not cost the answer
+            logger.debug("served makes: file not fetched", exc_info=True)
+            continue
+        slot = _slot(answer, item.get("at"))
+        if slot is not None:
+            block, key = slot
+            theirs = block[key]
+            block[key] = str(path)
+            # The servers name a file once, however often the answer
+            # repeats its path (the file to upload is also "the resume
+            # file"); every repeat is this same file.
+            if isinstance(theirs, str) and theirs:
+                _replace_everywhere(answer, theirs, str(path))
+        elif isinstance(param, str) and param not in answer:
+            # The tool wrote it and did not say where: the answer does now.
+            answer[param] = str(path)
+        item["path"] = str(path)
+        item["on_this_computer"] = True
+        item.pop("artifact_token", None)
+
+
+# ---------------------------------------------------------------------------
 # Arrival
 # ---------------------------------------------------------------------------
 
@@ -340,6 +506,38 @@ def _is_elsewhere(value: Any) -> bool:
     # working directory has none).
     scratch = value.startswith(("/tmp/", "/var/tmp/", "/private/tmp/"))
     return (bool(path.suffix) or scratch) and not path.exists()
+
+
+#: Blocks this module writes or reads by its own rules.
+_OWN_BLOCKS = frozenset({
+    "artifact", "documents", "files", "made_on_kiln_servers", "files_on_kiln_servers",
+})
+
+
+def _scrub_nested(value: Any, depth: int = 0) -> None:
+    """Below the top level of an answer, take out every path that is not on
+    this computer: a key holding one goes, and one in a list is left as its
+    file name.  The top level is the caller's to word (what was removed is
+    said there); deeper, a server's path is only ever a dead end."""
+    if depth > 6:
+        return
+    if isinstance(value, dict):
+        for key in [k for k, item in value.items() if _is_elsewhere(item)]:
+            del value[key]
+        for item in value.values():
+            _scrub_nested(item, depth + 1)
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            if _is_elsewhere(item):
+                value[index] = Path(item).name
+            else:
+                _scrub_nested(item, depth + 1)
+
+
+def _scrub_below_the_top(answer: dict) -> None:
+    for key, item in answer.items():
+        if key not in _OWN_BLOCKS and isinstance(item, (dict, list)):
+            _scrub_nested(item)
 
 
 def _made_a_model(answer: dict) -> bool:
@@ -390,8 +588,13 @@ def _without_server_files(answer: dict) -> dict:
     return answer
 
 
-def arrive(tool: str, answer: Any, *, allowance: dict | None = None) -> Any:
+def arrive(
+    tool: str, answer: Any, *, allowance: dict | None = None, trip: dict | None = None,
+) -> Any:
     """*answer* from a served tool, made true for this computer.
+
+    *trip* is what :func:`send_inputs` noted on the way out: where the call
+    asked for its outputs.
 
     An answer that made nothing (no ``artifact`` block, or an error) comes
     back untouched.  One that did has its server-side paths removed, gains a
@@ -406,6 +609,8 @@ def arrive(tool: str, answer: Any, *, allowance: dict | None = None) -> Any:
         # Documents first: once saved here their paths are real, and the
         # sweep for server-only paths below leaves them alone.
         _bring_documents(answer)
+        _bring_files(answer, trip)
+        _scrub_below_the_top(answer)
         artifact = answer.get("artifact")
         token = (
             str(artifact.get("artifact_token") or "").strip()
@@ -656,16 +861,266 @@ def _as_local_file(value: Any, suffixes: frozenset[str]) -> Path | None:
     return None
 
 
+def _upload_file(local: Path) -> tuple[str | None, str]:
+    """Send one file a tool reads; ``(token, "")`` or ``(None, sentence)``.
+
+    A G-code goes compressed: it is text, and a long print's is tens of
+    megabytes.  The servers decide what the file is from its content.
+    """
+    import httpx
+
+    bearer = _bearer()
+    if not bearer:
+        from kiln.tiers_and_terms import signed_out_message
+
+        return None, signed_out_message()
+    try:
+        size = local.stat().st_size
+        if local.suffix.lower() in _GCODE_TYPES:
+            if size > MAX_GCODE_BYTES:
+                return None, (
+                    f"{local.name} is over {MAX_GCODE_BYTES // (1024 * 1024)} MB, "
+                    "more than Kiln's servers take."
+                )
+            payload: Any = gzip.compress(local.read_bytes(), compresslevel=6)
+            size = len(payload)
+        else:
+            payload = None
+        if size > MAX_UPLOAD_BYTES:
+            return None, (
+                f"{local.name} is over {MAX_UPLOAD_BYTES // (1024 * 1024)} MB "
+                "to send, more than Kiln's servers take."
+            )
+        with contextlib.ExitStack() as stack:
+            body = payload if payload is not None else stack.enter_context(local.open("rb"))
+            resp = httpx.post(
+                f"{_api_base()}/api/tool-inputs",
+                headers={"Authorization": f"Bearer {bearer}"},
+                files={"file": (local.name, body, "application/octet-stream")},
+                timeout=_FILE_UPLOAD_TIMEOUT_S,
+            )
+    except Exception:  # noqa: BLE001
+        logger.debug("served makes: file upload failed", exc_info=True)
+        return None, "Kiln's servers could not be reached to receive the file."
+    try:
+        answer = resp.json()
+    except Exception:  # noqa: BLE001
+        answer = {}
+    token = str((answer or {}).get("file_token") or "")
+    if resp.status_code == 200 and token:
+        return token, ""
+    said = str((answer or {}).get("error") or "").strip()
+    return None, said or f"Kiln's servers did not accept the file (HTTP {resp.status_code})."
+
+
+def _names_a_path(text: str) -> bool:
+    """Whether *text* is written like a file's path, whether or not the
+    file is there."""
+    if len(text) > 4096 or "\n" in text:
+        return False
+    return (
+        text.startswith(("/", "~", "./", "../"))
+        or os.sep in text
+        or Path(text).suffix.lower() in _SENDABLE_FILE_TYPES
+    )
+
+
+def _beside_an_obj(obj: Path) -> list[Path]:
+    """The files an OBJ needs next to it to carry its colours: the material
+    libraries it names, and the pictures those name.  Only plain names in
+    the OBJ's own folder; an OBJ with none is sent alone."""
+    found: list[Path] = []
+
+    def named(path: Path, keys: tuple[str, ...], limit: int) -> list[str]:
+        out: list[str] = []
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as fh:
+                for line in fh.read(limit).splitlines():
+                    head, _, rest = line.strip().partition(" ")
+                    if head.lower() in keys and rest.strip():
+                        out.append(rest.strip().split()[-1])
+        except OSError:
+            pass
+        return out
+
+    for name in named(obj, ("mtllib",), 256 * 1024):
+        library = obj.parent / name
+        if Path(name).name != name or not library.is_file() or library in found:
+            continue
+        found.append(library)
+        for picture_name in named(
+            library, ("map_kd", "map_ka", "map_d", "map_bump", "bump"), 1024 * 1024,
+        ):
+            picture = obj.parent / picture_name
+            if (
+                Path(picture_name).name == picture_name
+                and picture.suffix.lower() in _SENDABLE_IMAGE_TYPES
+                and picture.is_file()
+                and picture not in found
+            ):
+                found.append(picture)
+    return found[:8]
+
+
+class _Sending:
+    """The files one call brings: each uploaded once, and counted."""
+
+    def __init__(self, tool: str) -> None:
+        self.tool = tool
+        self.tokens: dict[str, str] = {}
+
+    def entry(self, local: Path) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """``({"token", "name"}, None)`` for *local*, or ``(None, refusal)``."""
+        key = str(local.resolve())
+        token = self.tokens.get(key)
+        if token is None:
+            if len(self.tokens) >= MAX_FILES_PER_CALL:
+                return None, _refusal(
+                    self.tool, "TOO_MANY_FILES",
+                    f"{self.tool} was handed more than {MAX_FILES_PER_CALL} files, "
+                    "more than one call to Kiln's servers carries.",
+                )
+            token, said = _upload_file(local)
+            if token is None:
+                return None, _refusal(
+                    self.tool, "FILE_NOT_SENT",
+                    f"{self.tool} runs on Kiln's servers and needs {local.name} "
+                    f"sent there first, which did not work: {said}",
+                )
+            self.tokens[key] = token
+        return {"token": token, "name": local.name}, None
+
+    def one(self, value: Any) -> tuple[Any, dict[str, Any] | None]:
+        """What to send for one value of a file parameter: an entry, or the
+        value itself when it names no file on this computer."""
+        if not isinstance(value, str) or not value.strip():
+            return None, None
+        text = value.strip()
+        if _TOKEN_SHAPE.match(text) and not Path(text).exists():
+            # A make still on the servers, named by its token.
+            return {"token": text}, None
+        local = _as_local_file(text, _SENDABLE_FILE_TYPES)
+        if local is None:
+            try:
+                there = Path(text).expanduser().is_file()
+            except Exception:  # noqa: BLE001
+                there = False
+            if there:
+                return None, _refusal(
+                    self.tool, "FILE_KIND_NOT_SENT",
+                    f"{self.tool} runs on Kiln's servers, which do not take "
+                    f"{Path(text).suffix or 'that kind of'} files, so "
+                    f"{Path(text).name} was not sent.",
+                )
+            if _names_a_path(text):
+                return None, _refusal(
+                    self.tool, "FILE_NOT_FOUND",
+                    f"{self.tool} runs on Kiln's servers and needs the file "
+                    f"{text!r} sent there, and no such file is on this computer.",
+                )
+            return None, None
+        entry, refusal = self.entry(local)
+        if refusal is not None or entry is None:
+            return None, refusal
+        if local.suffix.lower() == ".obj":
+            beside = []
+            for companion in _beside_an_obj(local):
+                extra, refusal = self.entry(companion)
+                if refusal is not None:
+                    return None, refusal
+                beside.append(extra)
+            if beside:
+                entry = {**entry, "with": beside}
+        return entry, None
+
+
+def _send_files(
+    tool: str, kwargs: dict[str, Any], files: dict[str, str],
+) -> tuple[int, dict[str, Any] | None]:
+    """Upload every file the call names in a ``files`` parameter and swap
+    the parameter for its token(s).  ``(how many were sent, refusal)``."""
+    sending = _Sending(tool)
+    tokens: dict[str, Any] = {}
+    for param, how in files.items():
+        value = kwargs.get(param)
+        if how == "inline":
+            if not isinstance(value, str) or not value.strip():
+                continue
+            # Words that may name one file: "photo:/Users/me/logo.png".
+            prefix = ""
+            local = _as_local_file(value.strip(), _SENDABLE_FILE_TYPES)
+            if local is None:
+                found = _INLINE_PREFIX.match(value)
+                if found:
+                    prefix = value[: found.end()]
+                    local = _as_local_file(value[found.end():].strip(), _SENDABLE_FILE_TYPES)
+            if local is None:
+                continue
+            entry, refusal = sending.entry(local)
+            if refusal is not None:
+                return len(sending.tokens), refusal
+            kwargs[param] = prefix + _INLINE_FILE_MARK
+            tokens[param] = entry
+            continue
+        many = isinstance(value, (list, tuple))
+        entries = []
+        for item in (value if many else [value]):
+            entry, refusal = sending.one(item)
+            if refusal is not None:
+                return len(sending.tokens), refusal
+            if entry is None:
+                entries = []
+                break
+            entries.append(entry)
+        if not entries:
+            continue
+        kwargs.pop(param, None)
+        tokens[param] = entries if (many or how == "many") else entries[0]
+    if tokens:
+        kwargs["file_tokens"] = tokens
+    return len(tokens), None
+
+
+def _set_outputs_aside(
+    kwargs: dict[str, Any], outputs: dict[str, str], trip: dict | None,
+) -> None:
+    """Take the places the call asked a tool to write out of the request,
+    and remember them.  They are places on this computer, which the servers
+    cannot write to; the files come back and are saved there on arrival."""
+    names: dict[str, str] = {}
+    for param, how in outputs.items():
+        value = kwargs.get(param)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        kwargs.pop(param, None)
+        if how == "file":
+            names[param] = Path(value).name
+            if trip is not None:
+                trip.setdefault("output_files", {})[param] = value
+        elif trip is not None:
+            trip.setdefault("output_folders", {})[param] = value
+    if names:
+        kwargs["output_names"] = names
+
+
 def send_inputs(
-    tool: str, kwargs: dict[str, Any], inputs: dict[str, str] | None
+    tool: str,
+    kwargs: dict[str, Any],
+    inputs: dict[str, Any] | None,
+    trip: dict | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    """Make the call's model and image reachable by the servers.
+    """Make the files a call names reachable by the servers.
 
     Returns ``(kwargs, None)`` to go ahead, or ``(kwargs, refusal)`` when a
     file the call names could not be sent.  The model parameter may name a
     make on the servers (its ``artifact_token``), the kept copy of one, or
     any model on this computer; the image parameter, an image on this
-    computer.  Anything else is left for the servers to answer.
+    computer; each ``files`` parameter, a file (or a list of them) on this
+    computer or a make's token.  Anything else is left for the servers to
+    answer.
+
+    *trip*, when given, is filled with what :func:`arrive` needs on the way
+    back: where the call asked for its outputs, and how many files it sent.
     """
     if not inputs:
         return kwargs, None
@@ -722,5 +1177,17 @@ def send_inputs(
             )
         kwargs.pop(image_param, None)
         kwargs["image_token"] = token
+
+    files = inputs.get("files")
+    if isinstance(files, dict) and files:
+        sent, refusal = _send_files(tool, kwargs, files)
+        if refusal is not None:
+            return kwargs, refusal
+        if trip is not None and sent:
+            trip["files_sent"] = sent
+
+    outputs = inputs.get("outputs")
+    if isinstance(outputs, dict) and outputs:
+        _set_outputs_aside(kwargs, outputs, trip)
 
     return kwargs, None
