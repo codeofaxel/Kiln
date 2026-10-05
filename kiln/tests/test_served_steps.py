@@ -151,7 +151,10 @@ class TestTheFence:
         assert slicer == []
 
     def test_no_step_kind_commands_a_printer(self):
+        """One kind makes a file, one reads facts.  Adding a kind that ACTS
+        on a printer is a decision, and this is where it is recorded."""
         assert set(served_steps._STEPS) == {"slice"}
+        assert set(served_steps._READS) == {"printer_facts"}
 
     def test_a_tool_cannot_ask_for_many_steps(self, slicer, handed_model):
         steps = [_step(handed_model, id=f"s{i}") for i in range(served_steps.MAX_STEPS + 1)]
@@ -268,3 +271,96 @@ class TestThroughTheStub:
         answer = tool(feature=hat, gcode_path=gcode, current_layer=40)
         assert answer["code"] == "LOCAL_STEP_REFUSED"
         assert len(calls) == 1 and slicer == []
+
+
+class TestPrinterFacts:
+    """What this install tells a served tool about its printers: what each
+    one IS.  Never where it is or how to reach it."""
+
+    CONFIG = {
+        "default": {"type": "bambu", "printer_model": "bambu_a1", "host": "192.168.1.50",
+                    "access_code": "12345678", "serial": "01P00A123456789"},
+        "voron": {"type": "moonraker", "printer_model": "voron_2", "host": "voron.local",
+                  "api_key": "SECRET-KEY-abcdef"},
+    }
+
+    @pytest.fixture
+    def printers(self, monkeypatch):
+        import kiln.server as server
+
+        asked: list[str] = []
+
+        class _Adapter:
+            def get_printer_config(self):
+                asked.append("voron")
+                return {"printer": {"kinematics": "corexy"}}
+
+        class _Registry:
+            def get(self, name):
+                return _Adapter()
+
+        monkeypatch.setattr(server, "_read_config_printers", lambda: dict(self.CONFIG))
+        monkeypatch.setattr(server, "_resolve_effective_printer_name", lambda name=None: "default")
+        monkeypatch.setattr(server, "_get_registry", lambda: _Registry())
+        return asked
+
+    def _read(self, **step):
+        done, refused = served_steps.carry_out(
+            "check_power_loss_recovery",
+            [{"kind": "printer_facts", "id": "printer_facts", **step}],
+            lambda p: (_ for _ in ()).throw(AssertionError("a read sends no file")),
+        )
+        return done, refused
+
+    def test_each_printer_is_named_by_kind_and_model_with_when_it_was_read(self, printers):
+        done, refused = self._read(printer_name="default", want=[])
+        assert refused is None
+        facts = done["printer_facts"]["data"]
+        assert facts["read_at"].endswith("+00:00")
+        assert facts["printers"] == [
+            {"name": "default", "type": "bambu", "model": "bambu_a1", "is_default": True},
+            {"name": "voron", "type": "moonraker", "model": "voron_2", "is_default": False},
+        ]
+        assert printers == []  # nothing was asked of any printer
+
+    def test_no_address_serial_or_credential_ever_leaves(self, printers):
+        done, _ = self._read(printer_name="voron", want=["klipper_config"])
+        sent = json.dumps(done)
+        for secret in ("192.168.1.50", "voron.local", "12345678", "01P00A123456789", "SECRET-KEY-abcdef"):
+            assert secret not in sent
+        assert "host" not in sent and "api_key" not in sent and "access_code" not in sent
+
+    def test_a_klipper_configuration_is_read_only_when_asked_and_only_for_that_printer(self, printers):
+        done, _ = self._read(printer_name="voron", want=["klipper_config"])
+        by_name = {p["name"]: p for p in done["printer_facts"]["data"]["printers"]}
+        assert by_name["voron"]["klipper_config"] == {"printer": {"kinematics": "corexy"}}
+        assert "klipper_config" not in by_name["default"]
+        assert printers == ["voron"]
+
+    def test_a_printer_that_cannot_be_asked_is_said_not_guessed(self, printers, monkeypatch):
+        import kiln.server as server
+
+        class _Down:
+            def get(self, name):
+                raise RuntimeError("connection refused to voron.local")
+
+        monkeypatch.setattr(server, "_get_registry", lambda: _Down())
+        done, refused = self._read(printer_name="voron", want=["klipper_config"])
+        assert refused is None
+        voron = [p for p in done["printer_facts"]["data"]["printers"] if p["name"] == "voron"][0]
+        assert voron["klipper_config"] is None
+        assert voron["klipper_config_error"] == "the printer could not be asked"
+        assert "voron.local" not in json.dumps(done)  # not even in the error
+
+    @pytest.mark.parametrize("want", [["access_code"], ["host"], ["klipper_config", "serial"], "klipper_config", [1]])
+    def test_asking_for_anything_else_about_a_printer_sends_nothing(self, printers, want):
+        done, refused = self._read(printer_name="default", want=want)
+        assert done == {} and refused["code"] == "LOCAL_STEP_REFUSED"
+        assert printers == []
+
+    def test_an_install_with_no_printer_says_so_as_an_empty_list(self, monkeypatch):
+        import kiln.server as server
+
+        monkeypatch.setattr(server, "_read_config_printers", lambda: {})
+        done, refused = self._read(printer_name="default", want=[])
+        assert refused is None and done["printer_facts"]["data"]["printers"] == []
