@@ -167,7 +167,6 @@ from kiln.generation import (
     validate_mesh,
 )
 from kiln.heater_watchdog import HeaterWatchdog
-from kiln.tool_results import unwrap_tool_result
 
 # The plan gates read.  ``kiln.licensing`` is kiln-pro's licensing module when
 # kiln-pro is installed, and otherwise the signed-in account's plan
@@ -182,7 +181,6 @@ from kiln.licensing import (  # noqa: F401 — plugins read these off this modul
     max_printers_for_tier,
     requires_tier,
 )
-
 from kiln.log_config import configure_logging as _configure_log_rotation
 from kiln.marketplaces import (
     Cults3DAdapter,
@@ -196,6 +194,7 @@ from kiln.marketplaces import (
     MarketplaceNotFoundError as MktNotFoundError,
 )
 from kiln.materials import MaterialTracker
+from kiln.tool_results import unwrap_tool_result
 
 try:
     from kiln_pro.payments.base import PaymentError

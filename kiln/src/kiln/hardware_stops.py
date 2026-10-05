@@ -741,8 +741,8 @@ def alert_phone(adapter: Any, state: Any, job: Any) -> None:
         note = observe(adapter, state, job, announce="phone")
         if not note or not note.get("new") or note.get("stage") not in PHONE_MOMENTS:
             return
-        from kiln.printers.base import outcome_printer_name
         from kiln.plate_state import pretty_job_name
+        from kiln.printers.base import outcome_printer_name
 
         model = ""
         with contextlib.suppress(Exception):

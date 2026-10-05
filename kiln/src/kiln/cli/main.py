@@ -4856,9 +4856,13 @@ def wait(ctx: click.Context, interval: float, max_timeout: float, json_mode: boo
                 else:
                     click.echo("\n" + "\n".join(_hardware_lines(hardware)))
                 sys.exit(3)
-            if hardware and hardware["new"] and hardware["stage"] in ("coming_up", "missed", "passed_unseen"):
-                if not json_mode:
-                    click.echo("\n" + "\n".join(_hardware_lines(hardware)))
+            if (
+                hardware
+                and hardware["new"]
+                and hardware["stage"] in ("coming_up", "missed", "passed_unseen")
+                and not json_mode
+            ):
+                click.echo("\n" + "\n".join(_hardware_lines(hardware)))
 
             # Terminal states
             if state.confirmed_state == PrinterStatus.IDLE:
