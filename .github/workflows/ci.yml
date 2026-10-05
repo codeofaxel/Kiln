@@ -293,6 +293,15 @@ jobs:
         # existing gate stayed green.  Exit 2 = leak.
         run: python3 scripts/audit_moat_comment_leak.py
 
+      - name: Every import of Kiln's own code exists on a plain install
+        # A public file that imports, without a guard, code only the private
+        # package provides crashes every plain install when that line runs.
+        # Twelve `kiln order` commands did that for six months after the
+        # ordering code moved out on 2026-03-20: importing the CLI and
+        # collecting the tests both succeed, so nothing went red.  Exit 2 =
+        # a new finding, or a known one that was fixed (delete its entry).
+        run: python3 scripts/audit_import_targets.py
+
       # Parallel, and quiet.  The suite is ~14.4k tests; run serially with
       # per-test output it took 24 minutes a job.  `-n auto` spreads it over
       # the runner's cores, and coverage is measured on ONE version because

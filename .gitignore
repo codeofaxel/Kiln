@@ -68,6 +68,10 @@ scripts/*
 # reference — a NEW path fails the gate until it is added here on purpose.
 !scripts/public_tests_kiln_pro_paths.txt
 !scripts/public_source_pins.txt
+# …and for the import-target gate, which a CI-collected test runs so a public
+# import of code only the private package provides cannot crash every plain
+# install unnoticed (kiln-pro runs the same file over both trees).
+!scripts/audit_import_targets.py
 # …and for the public SME-table leak gate, which is run by a CI-collected
 # test so public source can never ship a curated cross-vendor capability /
 # SME table (curated depth belongs in the private tier or a pro overlay).
