@@ -7,6 +7,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Round or bevel the edges of a CAD part.** Kiln edits the CAD itself and tells you any edge it left sharp.
+
+- **Kiln picks the right finish for each edge (Pro+).** See https://kiln3d.com/pricing.
+
 - **Check that a hinge opens before you print it.**
 
 - **Texture just one part of a model, and painted models keep their colours.** Different textures on different parts is Pro+. See https://kiln3d.com/pricing.
@@ -309,6 +313,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   https://kiln3d.com/pricing.
 
 ### Fixed
+
+- **Rounded CAD parts no longer show as "not closed".**
+
+- **Holes with bevelled or rounded rims are now found.**
 
 - **A GLB model, downloaded or generated, now opens on the 3D stage and slices.** Kiln saves an STL copy beside the original and never overwrites a file the listing came with.
 
