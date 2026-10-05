@@ -163,10 +163,10 @@ class _DesignReasoningToolsPlugin:
             """Recommend specific reinforcements for an STL mesh.
 
             Analyzes geometry to find structural risks, then generates actionable
-            recommendations with **specific locations** and **estimated strength gains**:
-            - **gusset**: triangular support at cantilever bases (3-10x stronger)
-            - **fillet**: smooth transitions at stress concentrations (30-60% gain)
-            - **thicken_wall**: add material at thin necks (2-5x gain)
+            recommendations with **specific locations** and what each one does for the part:
+            - **gusset**: triangular support at cantilever bases
+            - **fillet**: smooth transitions at stress concentrations
+            - **thicken_wall**: add material at thin necks
             - **add_base**: widen the base for stability
             - **reorient**: change print orientation for layer strength
 
@@ -249,7 +249,7 @@ class _DesignReasoningToolsPlugin:
 
             The plan includes:
             1. **Risks**: all structural weak points with locations and severity
-            2. **Reinforcements**: specific fixes with estimated strength gains
+            2. **Reinforcements**: specific fixes and what each does for the part
             3. **Load analysis**: how the part handles forces, best print orientation
             4. **Score**: overall structural grade with summary
 
@@ -300,7 +300,7 @@ class _DesignReasoningToolsPlugin:
             - **Thin necks** → thickened walls (+material at narrow sections)
             - **Sharp corners** → rounded edges (stress concentration reduced at inside corners)
             - **Insufficient base** → wider base plate (stabilizing geometry added)
-            - **Cantilevers** → triangular gusset ribs (deflection reduced 3-10x)
+            - **Cantilevers** → triangular gusset ribs
 
             Thickening and edge rounding are done on the part's CAD file, so
             pass its STEP file when there is one (or a mesh Kiln converted

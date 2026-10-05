@@ -119,7 +119,7 @@ class ReinforcementRecommendation:
     priority: str  # "high", "medium", "low"
     location_mm: tuple[float, float, float]
     description: str  # what to do and why
-    estimated_strength_gain: str  # "2-3x", "30-50%", etc.
+    estimated_strength_gain: str  # what the change does for the part, in words; no figure Kiln cannot source
     addresses_risk: str  # which risk_type this fixes
 
     def to_dict(self) -> dict[str, Any]:
@@ -895,7 +895,7 @@ def _generate_reinforcements(
                         f"Use thicken_mesh_walls() to add material, or redesign "
                         f"with a minimum {math.sqrt(min_cross_section_mm2):.1f} mm dimension."
                     ),
-                    estimated_strength_gain="2-5x at the constriction",
+                    estimated_strength_gain="More material where the part is thinnest",
                     addresses_risk="thin_neck",
                 )
             )
@@ -912,7 +912,7 @@ def _generate_reinforcements(
                         f"sections. A smooth transition distributes stress over a larger area. "
                         f"Use add_mesh_fillet() with radius_mm=2-4."
                     ),
-                    estimated_strength_gain="30-60% at the transition",
+                    estimated_strength_gain="Spreads the load where the section changes",
                     addresses_risk="stress_concentration",
                 )
             )
@@ -930,7 +930,7 @@ def _generate_reinforcements(
                         f"overhanging section down to the main body, reducing deflection "
                         f"and preventing snap-off."
                     ),
-                    estimated_strength_gain="3-10x for cantilevered loads",
+                    estimated_strength_gain="Braces the overhang at its root",
                     addresses_risk="cantilever",
                 )
             )
@@ -947,7 +947,7 @@ def _generate_reinforcements(
                         f"{risk.location_mm[2]:.0f}). A 1-2 mm radius fillet reduces "
                         f"stress concentration at concave corners. Use add_mesh_fillet()."
                     ),
-                    estimated_strength_gain="20-40% at corner joints",
+                    estimated_strength_gain="Rounds the corner so load isn't focused there",
                     addresses_risk="sharp_corner",
                 )
             )
@@ -993,11 +993,11 @@ def _generate_reinforcements(
                     location_mm=risk.location_mm,
                     description=(
                         "Re-orient the part so that load-bearing surfaces are parallel "
-                        "to the print layers, not perpendicular. FDM layers are 3-5x "
+                        "to the print layers, not perpendicular. FDM parts are "
                         "weaker across layers than along them. Use optimize_print_orientation() "
                         "for structural strength, not just overhang minimization."
                     ),
-                    estimated_strength_gain="3-5x in layer-perpendicular loading",
+                    estimated_strength_gain="Puts the load along the layers, not across them",
                     addresses_risk="weak_layer_adhesion",
                 )
             )
@@ -1126,7 +1126,7 @@ def _analyze_load_bearing(
             )
 
     layer_concern = (
-        "FDM layers create anisotropic strength: parts are 3-5x weaker across "
+        "FDM layers create anisotropic strength: parts are weaker across "
         "layer boundaries than along them. Orient the part so primary loads "
         "compress layers together (perpendicular to build plate), never pull "
         "layers apart (parallel to build plate)."
