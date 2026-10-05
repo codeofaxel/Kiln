@@ -1183,3 +1183,305 @@ class TestNonCircularFeatureDetection:
             f"expected non_circular_clusters ≥ 1 for a rotated slot; "
             f"got diagnostics: {diagnostics!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Holes that share one smooth surface
+# ---------------------------------------------------------------------------
+#
+# A bevel or a round at a hole's mouth joins the bore wall to the face it
+# opens in, and through that face to every other wall the face runs into.
+# The fixtures below are surfaces of revolution laid on one shared top face.
+
+_CAP_SEGMENTS = 24
+
+
+def _revolved(
+    cx: float,
+    cy: float,
+    profile: list[tuple[float, float]],
+    *,
+    segments: int = _CAP_SEGMENTS,
+) -> list[tuple[tuple[float, ...], ...]]:
+    """The surface swept by *profile* -- ``(radius, z)`` points -- around a Z axis at (cx, cy).
+
+    The surface faces the left of the profile as it is walked: a profile
+    going up a bore and out along the top face is a hole, one coming down
+    a post and out along the face is a pillar.  The rings start half a
+    segment round, so the last ring's polygon has an edge square to +X
+    and to -X for a neighbour to share.
+    """
+    phase = math.pi / segments
+    tris: list[tuple[tuple[float, ...], ...]] = []
+    for (r0, z0), (r1, z1) in zip(profile, profile[1:], strict=False):
+        for i in range(segments):
+            a0 = phase + 2.0 * math.pi * i / segments
+            a1 = phase + 2.0 * math.pi * (i + 1) / segments
+            p00 = (cx + r0 * math.cos(a0), cy + r0 * math.sin(a0), z0)
+            p01 = (cx + r0 * math.cos(a1), cy + r0 * math.sin(a1), z0)
+            p10 = (cx + r1 * math.cos(a0), cy + r1 * math.sin(a0), z1)
+            p11 = (cx + r1 * math.cos(a1), cy + r1 * math.sin(a1), z1)
+            tris.append((p00, p11, p01))
+            tris.append((p00, p10, p11))
+    return tris
+
+
+def _bevelled_bore(radius: float, depth: float, bevel: float, cap: float) -> list[tuple[float, float]]:
+    """A bore *depth* deep below z=0, its mouth bevelled at 45 degrees, in a face out to *cap*."""
+    return [(radius, -depth), (radius, -bevel), (radius + bevel, 0.0), (cap, 0.0)]
+
+
+def _rounded_bore(radius: float, depth: float, round_mm: float, cap: float, steps: int = 6) -> list[tuple[float, float]]:
+    """The same bore with its mouth rounded at *round_mm*."""
+    arc = [
+        (radius + round_mm * (1.0 - math.cos(t)), -round_mm + round_mm * math.sin(t))
+        for t in (0.5 * math.pi * k / steps for k in range(steps + 1))
+    ]
+    return [(radius, -depth), *arc, (cap, 0.0)]
+
+
+def _through_bore_rounded_at_both_mouths(
+    radius: float, thickness: float, round_mm: float, cap: float, steps: int = 6,
+) -> list[tuple[float, float]]:
+    """A bore through a plate *thickness* thick, rounded where it meets each face."""
+    quarter = [0.5 * math.pi * k / steps for k in range(steps + 1)]
+    lower = [(radius + round_mm * (1.0 - math.cos(t)), -thickness + round_mm - round_mm * math.sin(t)) for t in reversed(quarter)]
+    upper = [(radius + round_mm * (1.0 - math.cos(t)), -round_mm + round_mm * math.sin(t)) for t in quarter]
+    return [(cap, -thickness), *lower, *upper, (cap, 0.0)]
+
+
+def _flared_throat(radius: float, flare: float, cap: float, rows: int = 12) -> list[tuple[float, float]]:
+    """An opening that flares both ways from its narrowest point, like the hole of a ring.
+
+    The profile is an arc of radius *flare*; one row of facets stands
+    upright across the narrowest point, as deep as the rows beside it.
+    """
+    step = math.pi / rows
+    arc = [
+        (radius + flare * (1.0 - math.cos(t)), flare * math.sin(t))
+        for t in ((k + 0.5) * step for k in range(-rows // 2, rows // 2))
+    ]
+    return [*arc, (cap, arc[-1][1])]
+
+
+def _post_with_rounded_foot(radius: float, height: float, foot: float, cap: float, steps: int = 6) -> list[tuple[float, float]]:
+    """A post standing *height* above z=0, a round of *foot* where it meets the face."""
+    arc = [
+        (radius + foot * (1.0 - math.cos(t)), foot - foot * math.sin(t))
+        for t in (0.5 * math.pi * k / steps for k in range(steps + 1))
+    ]
+    return [(radius, height), *arc, (cap, 0.0)]
+
+
+def _side_by_side(cap: float, *profiles: list[tuple[float, float]]) -> list[tuple[tuple[float, ...], ...]]:
+    """Each profile swept about its own axis, the caps laid edge to edge along X.
+
+    Coordinates are rounded to a micron so the edge two caps share is the
+    same numbers in both -- one face, as a CAD export writes it.
+    """
+    pitch = 2.0 * cap * math.cos(math.pi / _CAP_SEGMENTS)
+    tris: list[tuple[tuple[float, ...], ...]] = []
+    for k, profile in enumerate(profiles):
+        tris.extend(_revolved(20.0 + k * pitch, 20.0, profile))
+    return [tuple(tuple(round(c, 6) for c in v) for v in tri) for tri in tris]
+
+
+def _turned(
+    tris: list[tuple[tuple[float, ...], ...]], about_x_deg: float, about_z_deg: float,
+) -> list[tuple[tuple[float, ...], ...]]:
+    cx, sx = math.cos(math.radians(about_x_deg)), math.sin(math.radians(about_x_deg))
+    cz, sz = math.cos(math.radians(about_z_deg)), math.sin(math.radians(about_z_deg))
+
+    def turn(v: tuple[float, ...]) -> tuple[float, float, float]:
+        x, y, z = v[0], v[1] * cx - v[2] * sx, v[1] * sx + v[2] * cx
+        return (x * cz - y * sz, x * sz + y * cz, z)
+
+    return [tuple(turn(v) for v in tri) for tri in tris]
+
+
+def _diameters(holes: list[dict]) -> list[float]:
+    return sorted(round(h["diameter_mm"], 1) for h in holes)
+
+
+class TestHolesThatShareOneSurface:
+    """A hole is found whatever else its mouth joins it to."""
+
+    def test_two_bevelled_holes_in_one_face_are_both_found(self, tmp_path: Path) -> None:
+        """Two bores with bevelled mouths in the same top face.
+
+        Each bevel joins its bore to the face, so both bores and the face
+        are one connected surface.  Both are holes, each at its own size.
+        """
+        stl = tmp_path / "two_bevelled.stl"
+        _write_binary_stl(
+            _side_by_side(8.0, _bevelled_bore(1.5, 6.0, 0.4, 8.0), _bevelled_bore(2.0, 6.0, 0.4, 8.0)), str(stl),
+        )
+        diagnostics: dict[str, int] = {}
+        holes = detect_holes(str(stl), diagnostics=diagnostics)
+        assert _diameters(holes) == [3.0, 4.0], (holes, diagnostics)
+        assert all(h["axis"] == "z" for h in holes)
+        assert all(h["depth_mm"] == pytest.approx(5.6, abs=0.01) for h in holes)
+        assert diagnostics.get("non_circular_clusters", 0) == 0, diagnostics
+        assert diagnostics.get("partial_arc_clusters", 0) == 0, diagnostics
+
+    def test_two_holes_with_rounded_mouths_are_both_found(self, tmp_path: Path) -> None:
+        """A rounded mouth runs smoothly from the bore into the face: no crease at all."""
+        stl = tmp_path / "two_rounded.stl"
+        _write_binary_stl(
+            _side_by_side(8.0, _rounded_bore(1.5, 6.0, 0.6, 8.0), _rounded_bore(2.5, 6.0, 0.6, 8.0)), str(stl),
+        )
+        diagnostics: dict[str, int] = {}
+        holes = detect_holes(str(stl), diagnostics=diagnostics)
+        assert _diameters(holes) == [3.0, 5.0], (holes, diagnostics)
+        assert diagnostics.get("non_circular_clusters", 0) == 0, diagnostics
+
+    def test_they_are_found_however_the_part_is_turned(self, tmp_path: Path) -> None:
+        """The same two bevelled holes, the part turned off every world axis."""
+        stl = tmp_path / "two_bevelled_turned.stl"
+        tris = _side_by_side(8.0, _bevelled_bore(1.5, 6.0, 0.4, 8.0), _bevelled_bore(2.0, 6.0, 0.4, 8.0))
+        _write_binary_stl(_turned(tris, 31.0, 17.0), str(stl))
+        holes = detect_holes(str(stl))
+        assert _diameters(holes) == [3.0, 4.0], holes
+
+    def test_a_post_on_the_same_face_is_not_a_hole(self, tmp_path: Path) -> None:
+        """A bevelled hole beside a post whose foot is rounded into the face.
+
+        The round joins the post's wall to the face the hole opens in.  The
+        hole is a hole; the post, the same shape facing outward, is not.
+        """
+        stl = tmp_path / "hole_and_post.stl"
+        _write_binary_stl(
+            _side_by_side(8.0, _bevelled_bore(1.5, 6.0, 0.4, 8.0), _post_with_rounded_foot(2.0, 6.0, 1.0, 8.0)),
+            str(stl),
+        )
+        holes = detect_holes(str(stl))
+        assert _diameters(holes) == [3.0], holes
+
+    def test_a_hole_too_small_to_print_among_others_is_still_said(self, tmp_path: Path) -> None:
+        """A 0.5 mm bore and a 3 mm bore, both bevelled, in one face.
+
+        The 3 mm one is a hole.  The 0.5 mm one is below what prints, and
+        the caller is told so, as it is when the small bore stands alone.
+        """
+        stl = tmp_path / "small_and_large.stl"
+        _write_binary_stl(
+            _side_by_side(8.0, _bevelled_bore(1.5, 6.0, 0.4, 8.0), _bevelled_bore(0.25, 6.0, 0.2, 8.0)), str(stl),
+        )
+        diagnostics: dict[str, int] = {}
+        holes = detect_holes(str(stl), diagnostics=diagnostics)
+        assert _diameters(holes) == [3.0], holes
+        assert diagnostics.get("sub_floor_clusters", 0) == 1, diagnostics
+
+    def test_a_thin_pin_is_not_spoken_of_as_a_small_bore(self, tmp_path: Path) -> None:
+        """A 0.5 mm pin, its foot rounded into the face a bevelled hole opens in.
+
+        The pin is as thin as a bore too small to print, and it is not a
+        bore: nothing is said of it.
+        """
+        stl = tmp_path / "hole_and_pin.stl"
+        _write_binary_stl(
+            _side_by_side(8.0, _bevelled_bore(1.5, 6.0, 0.4, 8.0), _post_with_rounded_foot(0.25, 4.0, 0.5, 8.0)),
+            str(stl),
+        )
+        diagnostics: dict[str, int] = {}
+        holes = detect_holes(str(stl), diagnostics=diagnostics)
+        assert _diameters(holes) == [3.0], holes
+        assert diagnostics.get("sub_floor_clusters", 0) == 0, diagnostics
+
+    def test_two_through_holes_rounded_at_both_mouths_are_found(self, tmp_path: Path) -> None:
+        """Both faces of the plate run smoothly into each bore; the bores are still bores."""
+        stl = tmp_path / "two_through_rounded.stl"
+        _write_binary_stl(
+            _side_by_side(
+                8.0,
+                _through_bore_rounded_at_both_mouths(1.5, 5.0, 0.5, 8.0),
+                _through_bore_rounded_at_both_mouths(2.0, 5.0, 0.5, 8.0),
+            ),
+            str(stl),
+        )
+        holes = detect_holes(str(stl))
+        assert _diameters(holes) == [3.0, 4.0], holes
+        assert all(h["depth_mm"] == pytest.approx(4.0, abs=0.01) for h in holes)
+
+    def test_the_throat_of_a_flared_opening_is_not_a_bore(self, tmp_path: Path) -> None:
+        """Two openings that flare both ways, like the hole of a ring, in one face.
+
+        Each has one row of facets standing upright at its narrowest
+        point: 0.78 mm tall, a full inward ring.  It is a row of a
+        curved surface, as deep as the rows beside it, not a drilled wall.
+        """
+        stl = tmp_path / "flared.stl"
+        _write_binary_stl(_side_by_side(9.0, _flared_throat(2.0, 3.0, 9.0), _flared_throat(2.5, 3.0, 9.0)), str(stl))
+        diagnostics: dict[str, int] = {}
+        assert detect_holes(str(stl), diagnostics=diagnostics) == [], diagnostics
+
+    def test_a_scallop_is_not_spoken_of_as_a_slot(self) -> None:
+        """A finger scallop: a quarter-round channel, its facets folding along one line.
+
+        Seen from its own middle it lies all around, and it faces inward,
+        so every gate but roundness lets it by.  Its facets face barely a
+        quarter turn apart: it does not go round anything, it is no wall,
+        and nothing is said of it.
+        """
+        from kiln.generation import validation
+
+        strips, radius, length = 12, 6.0, 10.0
+        tris = []
+        for i in range(strips):
+            a0 = math.radians(-50.0 + 100.0 * i / strips)
+            a1 = math.radians(-50.0 + 100.0 * (i + 1) / strips)
+            p00 = (radius * math.sin(a0), 0.0, -radius * math.cos(a0))
+            p01 = (radius * math.sin(a1), 0.0, -radius * math.cos(a1))
+            p10 = (radius * math.sin(a0), length, -radius * math.cos(a0))
+            p11 = (radius * math.sin(a1), length, -radius * math.cos(a1))
+            tris.extend([(p00, p01, p11), (p00, p11, p10)])
+        normals, centroids = [], []
+        for v0, v1, v2 in tris:
+            e1 = [v1[k] - v0[k] for k in range(3)]
+            e2 = [v2[k] - v0[k] for k in range(3)]
+            n = (e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0])
+            size = math.sqrt(sum(c * c for c in n))
+            normals.append(tuple(c / size for c in n))
+            centroids.append(tuple((v0[k] + v1[k] + v2[k]) / 3.0 for k in range(3)))
+        assert all(n[2] > 0.6 for n in normals), "the scallop faces up, toward its own axis"
+
+        said: dict[str, int] = {}
+        found = validation._holes_among_walls(
+            list(range(len(tris))), normals, centroids, tris,
+            min_radius=0.4, max_radius=25.0, circular_tol=0.25, min_depth_mm=0.5,
+            axis_perp_tolerance=0.15, mesh_extent_xyz=(200.0, 200.0, 200.0), said=said,
+        )
+        assert found == []
+        assert said == {}
+
+    def test_the_search_for_walls_does_not_spread_over_the_open_face(self) -> None:
+        """No wall takes in the face the holes open in.
+
+        A flat edge leads only into a facet that itself folds along the
+        wall's axis.  Without that, every crease round every mouth would
+        spread across the whole face, once per crease.
+        """
+        from kiln.generation import validation
+
+        tris = _side_by_side(8.0, _bevelled_bore(1.5, 6.0, 0.4, 8.0), _bevelled_bore(2.0, 6.0, 0.4, 8.0))
+        normals = []
+        for v0, v1, v2 in tris:
+            e1 = [v1[k] - v0[k] for k in range(3)]
+            e2 = [v2[k] - v0[k] for k in range(3)]
+            n = (e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0])
+            size = math.sqrt(sum(c * c for c in n))
+            normals.append(tuple(c / size for c in n))
+        cluster = list(range(len(tris)))
+        face = {i for i in cluster if normals[i][2] > 0.99}
+        assert len(face) == 4 * _CAP_SEGMENTS
+        across = validation._what_lies_across(cluster, tris, normals)
+        walls = validation._prismatic_walls(cluster, across, cos_threshold=validation._HOLE_COHESION_COS)
+        assert all(not face.intersection(wall) for _, wall in walls), [len(w) for _, w in walls]
+
+    def test_one_bevelled_hole_alone_reads_as_it_did(self, tmp_path: Path) -> None:
+        """The case that already worked: one bevelled bore in its own face."""
+        stl = tmp_path / "one_bevelled.stl"
+        _write_binary_stl(_side_by_side(8.0, _bevelled_bore(1.5, 6.0, 0.4, 8.0)), str(stl))
+        holes = detect_holes(str(stl))
+        assert _diameters(holes) == [3.0], holes
+        assert holes[0]["depth_mm"] == pytest.approx(5.6, abs=0.01)

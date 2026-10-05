@@ -97,11 +97,9 @@ _EDGE_REFUSAL_KEYS = ("measured", "method", "cad_source", "edges", "sized_for", 
 
 
 def _finish_edges_tool(kind: str, file_path: str, size_mm: float, **options: Any) -> dict:
-    """The body ``add_mesh_fillet`` and ``add_mesh_chamfer`` share."""
-    from kiln.server import _check_auth, _error_dict
+    """The body ``add_mesh_fillet`` and ``add_mesh_chamfer`` share, once each has checked its caller."""
+    from kiln.server import _error_dict
 
-    if err := _check_auth("generate"):
-        return err
     what = "Fillet" if kind == "fillet" else "Chamfer"
     try:
         from kiln.edge_finish import finish_part
@@ -1047,7 +1045,10 @@ class _MeshToolsPlugin:
                 measurements before and after; or a refusal saying why.
             """
             from kiln.edge_plan import FILLET
+            from kiln.server import _check_auth
 
+            if err := _check_auth("generate"):
+                return err
             return _finish_edges_tool(
                 FILLET, file_path, radius_mm, angle_threshold_deg=angle_threshold_deg, output_path=output_path,
                 edges=edges, printer_id=printer_id, nozzle_mm=nozzle_mm, layer_height_mm=layer_height_mm,
@@ -1104,7 +1105,10 @@ class _MeshToolsPlugin:
                 measurements before and after; or a refusal saying why.
             """
             from kiln.edge_plan import CHAMFER
+            from kiln.server import _check_auth
 
+            if err := _check_auth("generate"):
+                return err
             return _finish_edges_tool(
                 CHAMFER, file_path, distance_mm, angle_threshold_deg=angle_threshold_deg, output_path=output_path,
                 edges=edges, printer_id=printer_id, nozzle_mm=nozzle_mm, layer_height_mm=layer_height_mm,

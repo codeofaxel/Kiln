@@ -2231,6 +2231,69 @@ def surface_model_note(topology: SourceTopology | None) -> str | None:
     )
 
 
+#: A mesh past this many triangles is not read to see whether it is closed.
+#: The read holds every edge at once: measured 2026-10-05, 150 MB at 284k
+#: triangles, 289 MB at 626k, 468 MB at 1.1M -- on a server with 2 GB for
+#: everything, in the server's own process.
+_CLOSED_CHECK_MAX_TRIANGLES = 500_000
+
+
+def _mesh_is_closed(stl_path: str) -> bool | None:
+    """Whether every edge of a binary STL is shared by exactly two facets.
+
+    ``None`` when Kiln did not look: not a binary STL, unreadable, or past
+    :data:`_CLOSED_CHECK_MAX_TRIANGLES`.  Corners are matched by their exact
+    stored numbers, which is how one converter's own output joins up.
+    """
+    try:
+        import numpy as np
+
+        with open(stl_path, "rb") as fh:
+            header = fh.read(84)
+            if len(header) < 84:
+                return None
+            count = int.from_bytes(header[80:84], "little")
+            if count == 0 or count > _CLOSED_CHECK_MAX_TRIANGLES:
+                return None
+            if os.path.getsize(stl_path) != 84 + 50 * count:
+                return None
+            facets = np.frombuffer(fh.read(50 * count), dtype=np.dtype([("n", "<f4", 3), ("v", "<f4", (3, 3)), ("a", "<u2")]))
+        _, corner = np.unique(facets["v"].reshape(-1, 3), axis=0, return_inverse=True)
+        corner = corner.reshape(-1, 3)
+        edges = np.concatenate([corner[:, [0, 1]], corner[:, [1, 2]], corner[:, [2, 0]]])
+        edges.sort(axis=1)
+        _, shared = np.unique(edges, axis=0, return_counts=True)
+        return bool((shared == 2).all())
+    except Exception:  # noqa: BLE001 -- a check that cannot run says nothing, it never fails a conversion
+        logger.debug("could not read %s to see whether it is closed", stl_path, exc_info=True)
+        return None
+
+
+def open_mesh_note(topology: SourceTopology | None, mesh_paths: Sequence[str]) -> str | None:
+    """What Kiln says when a CAD file's solids became a mesh that is not closed.
+
+    ``None`` when there is nothing to say: the backend could not count the
+    file's solids, the file declared none (:func:`surface_model_note` speaks
+    to that), every mesh is closed, or a mesh was too large to read.
+
+    A solid is closed by definition, so an open mesh made from one is a fault
+    in the conversion, not a property of the part.  Left unsaid, every later
+    check reports it as the person's own file being broken.
+    """
+    if topology is None or topology.solids < 1:
+        return None
+    open_ones = [Path(p).name for p in mesh_paths if _mesh_is_closed(p) is False]
+    if not open_ones:
+        return None
+    return (
+        f"This CAD file declares {topology.solids} solid "
+        f"bod{'ies' if topology.solids != 1 else 'y'}, and the mesh Kiln made from it "
+        f"({', '.join(open_ones)}) is not a closed surface. That is a fault in the conversion, "
+        "not in your part: checks run on this mesh may wrongly call the part open or give it no "
+        "volume. Please report it with the file (report_issue), and judge the part from the CAD until it is fixed."
+    )
+
+
 def is_step_file(path: str) -> bool:
     """True if this path names a STEP file, by extension."""
     return Path(path).suffix.lower() in _VALID_EXTENSIONS
@@ -2624,6 +2687,12 @@ def _convert_step_to_stl_via(
     outputs, left_alone = _publish_outputs(outputs, out_dir, validated_path.stem)
     warnings.extend(left_alone)
 
+    # Asked of the published mesh, the one every later check reads.
+    opened = open_mesh_note(conversion.source if conversion else None, outputs)
+    if opened is not None:
+        logger.warning("%s: %s", validated_path.name, opened)
+        warnings.append(opened)
+
     # Compute total file size.
     total_size = sum(Path(p).stat().st_size for p in outputs)
 
@@ -2749,6 +2818,10 @@ def _convert_step_colour_aware(
         if not published:
             raise StepImportError("Conversion produced no output files.")
         final = published[0]
+        opened = open_mesh_note(conversion.source, published)
+        if opened is not None:
+            logger.warning("%s: %s", validated_path.name, opened)
+            surface_warnings.append(opened)
         elapsed = time.monotonic() - t0
         return StepImportResult(
             output_path=final,
@@ -2770,6 +2843,10 @@ def _convert_step_colour_aware(
     # These names are already unique; the writer re-establishes that for
     # callers who did not, and returns what it wrote.
     _write_3mf(parts, out_3mf)
+    opened = open_mesh_note(conversion.source, [p["stl_path"] for p in parts])
+    if opened is not None:
+        logger.warning("%s: %s", validated_path.name, opened)
+        surface_warnings.append(opened)
     for p in parts:  # the per-part STLs were scaffolding, not output
         with contextlib.suppress(OSError):
             os.unlink(p["stl_path"])

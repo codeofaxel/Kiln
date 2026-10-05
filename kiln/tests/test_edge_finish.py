@@ -398,6 +398,70 @@ def test_collapsed_facets_are_dropped_and_real_ones_kept(tmp_path):
     assert drop_collapsed_facets(path) == 0
 
 
+_TETRA = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)]
+_TETRA_FACETS = [(0, 2, 1), (0, 1, 3), (1, 2, 3), (2, 0, 3)]
+
+
+def _tetra(path: Path, *, facets: int = 4) -> str:
+    return _stl(path, [_facet(*(_TETRA[i] for i in f)) for f in _TETRA_FACETS[:facets]])
+
+
+def test_a_mesh_is_closed_when_every_edge_has_two_facets(tmp_path, monkeypatch):
+    import kiln.step_import as si
+
+    assert si._mesh_is_closed(_tetra(tmp_path / "closed.stl")) is True
+    assert si._mesh_is_closed(_tetra(tmp_path / "open.stl", facets=3)) is False
+    text = tmp_path / "ascii.stl"
+    text.write_text("solid x\nendsolid x\n")
+    assert si._mesh_is_closed(str(text)) is None
+    monkeypatch.setattr(si, "_CLOSED_CHECK_MAX_TRIANGLES", 3)
+    assert si._mesh_is_closed(str(tmp_path / "closed.stl")) is None
+
+
+def test_an_open_mesh_made_from_a_solid_is_said_and_nothing_else_is(tmp_path):
+    from kiln.step_import import SourceTopology, open_mesh_note
+
+    solid = SourceTopology(solids=1, shells=1, faces=4)
+    closed, opened = _tetra(tmp_path / "closed.stl"), _tetra(tmp_path / "open.stl", facets=3)
+    note = open_mesh_note(solid, [closed, opened])
+    assert note is not None and "open.stl" in note and "closed.stl" not in note
+    assert "not a closed surface" in note and "fault in the conversion" in note
+    assert open_mesh_note(solid, [closed]) is None
+    assert open_mesh_note(None, [opened]) is None  # a backend that could not count solids
+    assert open_mesh_note(SourceTopology(solids=0, shells=4, faces=4), [opened]) is None  # surfaces: its own note
+
+
+@needs_cad_kernel
+def test_a_conversion_that_opens_a_solid_says_so(tmp_path, monkeypatch):
+    """The 2026-10-04 fault, put back: collapsed facets left in a rounded part's mesh.
+
+    The file declares one solid and the mesh made from it is open.  Until
+    this warning that read, everywhere downstream, as the person's own part
+    being broken.  With the facets dropped, as they now are, nothing is said.
+    """
+    import kiln.cad_kernel
+    import kiln.step_import as si
+    from kiln.cad_edge import finish_step, survey_step
+
+    step = block(tmp_path / "block.step")
+    rounded = tmp_path / "rounded.step"
+    finish_step(
+        step, str(tmp_path / "scratch.stl"), treatments=_plan(survey_step(step), FILLET, 2.0).treatments,
+        output_step=str(rounded),
+    )
+    monkeypatch.setattr(si, "_find_freecad_cmd", lambda: None)
+    monkeypatch.setattr(si, "_find_gmsh_cmd", lambda: None)
+
+    sound = si.convert_step_to_stl(str(rounded), str(tmp_path / "sound"))
+    assert sound.conversion.backend == "occt" and sound.conversion.source.solids == 1
+    assert not [w for w in sound.warnings if "not a closed surface" in w]
+
+    monkeypatch.setattr(kiln.cad_kernel, "drop_collapsed_facets", lambda path: 0)
+    faulty = si.convert_step_to_stl(str(rounded), str(tmp_path / "faulty"))
+    said = [w for w in faulty.warnings if "not a closed surface" in w]
+    assert len(said) == 1 and "declares 1 solid body" in said[0], faulty.warnings
+
+
 def test_a_file_that_is_not_a_binary_stl_is_left_as_it_is(tmp_path):
     from kiln.cad_kernel import drop_collapsed_facets
 
@@ -797,6 +861,32 @@ def test_a_bevelled_hole_rim_keeps_its_hole_on_the_cad(tmp_path):
     assert reply["success"] is True, reply
     assert reply["holes_mm"] == {"before": [2.2], "after": [2.2]}
     assert len(reply["edges"]["finished"]) == 1
+
+
+@needs_cad_kernel
+def test_two_bevelled_holes_in_one_face_are_both_measured_on_the_mesh(tmp_path):
+    """The mesh the kernel writes is read by the mesh hole detector, and it finds both holes."""
+    from kiln.edge_finish import chamfer_part
+
+    plate = _cut(_cut(_box(0, 0, 0, 40, 30, 6), _cyl(12, 15, 2, 1.5, 10)), _cyl(28, 15, 2, 1.5, 10))
+    reply = chamfer_part(_write_step(plate, tmp_path / "plate.step"), distance_mm=0.4, edges="holes")
+    assert reply["success"] is True, reply
+    assert reply["holes_mm"]["after"] == [3.0, 3.0]
+    assert reply["measured"]["before"]["holes_mm"] == [3.0, 3.0]
+    assert reply["measured"]["after"]["holes_mm"] == [3.0, 3.0]
+
+
+@needs_cad_kernel
+def test_a_bevelled_hole_on_a_part_rounded_all_over_is_measured_on_the_mesh(tmp_path):
+    """Every edge rounded, then the hole's mouth bevelled: the whole skin is one smooth surface."""
+    from kiln.edge_finish import chamfer_part, fillet_part
+
+    rounded = fillet_part(post_with_blind_hole(tmp_path / "post.step"), radius_mm=1.0)
+    assert rounded["success"] is True, rounded
+    reply = chamfer_part(rounded["step_path"], distance_mm=0.3, edges="holes")
+    assert reply["success"] is True, reply
+    assert reply["holes_mm"]["after"] == [2.2]
+    assert reply["measured"]["after"]["holes_mm"] == [2.2]
 
 
 @needs_cad_kernel
