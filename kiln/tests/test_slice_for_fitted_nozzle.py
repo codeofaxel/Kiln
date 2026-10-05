@@ -640,10 +640,10 @@ class TestTheSlicingToolsSayIt:
         import json
 
         from kiln import server
+        from kiln.mcp_compat import tool_result_blocks
 
         out = asyncio.run(server.mcp.call_tool(name, arguments))
-        content = out[0] if isinstance(out, tuple) else out
-        return json.loads(content[0].text)
+        return json.loads(tool_result_blocks(out)[0].text)
 
     def test_slice_model_slices_for_the_recorded_nozzle_and_names_it(self, monkeypatch, tmp_path):
         from kiln.nozzle_size_check import file_nozzle_mm
