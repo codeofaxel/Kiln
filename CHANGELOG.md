@@ -33,6 +33,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Screw seams on split parts now use a standard screw you can buy (Pro).** See https://kiln3d.com/pricing.
+
 - **A session that has run out says so everywhere, and signing back in restores your plan.** Your plan stays on your account; this machine just needs you to sign in again before anything that uses Kiln's servers.
 
 - **Name a screw or insert the way you'd say it and get the right hole first time (Pro+).** See https://kiln3d.com/pricing.
