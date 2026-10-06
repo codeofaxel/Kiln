@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-05T19:10:23.389838+00:00",
+  "generated": "2026-10-06T07:06:05.188360+00:00",
   "tool_count": 429,
   "categories": {
     "product_generators": {
@@ -14013,7 +14013,18 @@
         "schema_version": 1,
         "kind": "action"
       },
-      "served": false
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "every_job"
+            ]
+          }
+        ],
+        "acts": true
+      }
     },
     {
       "name": "fleet_resume",
@@ -14051,7 +14062,18 @@
         "schema_version": 1,
         "kind": "action"
       },
-      "served": false
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "every_job"
+            ]
+          }
+        ],
+        "acts": true
+      }
     },
     {
       "name": "fleet_set_speed",
@@ -14975,7 +14997,18 @@
         "schema_version": 1,
         "kind": "action"
       },
-      "served": false,
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "job"
+            ]
+          }
+        ],
+        "acts": true
+      },
       "inputs": {
         "files": {
           "original_gcode_path": "one"
@@ -18524,6 +18557,21 @@
             "default": "",
             "title": "Output Dir",
             "type": "string"
+          },
+          "gcode_path": {
+            "default": "",
+            "title": "Gcode Path",
+            "type": "string"
+          },
+          "failed_layer": {
+            "default": 0,
+            "title": "Failed Layer",
+            "type": "integer"
+          },
+          "material_type": {
+            "default": "PLA",
+            "title": "Material Type",
+            "type": "string"
           }
         },
         "title": "recover_power_loss_printArguments",
@@ -18533,11 +18581,26 @@
         "schema_version": 1,
         "kind": "action"
       },
-      "served": false,
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "klipper_config"
+            ]
+          }
+        ],
+        "acts": true
+      },
       "inputs": {
+        "files": {
+          "gcode_path": "one"
+        },
         "outputs": {
           "output_dir": "folder"
-        }
+        },
+        "printer": "printer_name"
       }
     },
     {
@@ -21324,7 +21387,16 @@
         "schema_version": 1,
         "kind": "record"
       },
-      "served": false
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": []
+          }
+        ],
+        "acts": true
+      }
     },
     {
       "name": "set_speed_schedule",

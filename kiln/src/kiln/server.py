@@ -10487,13 +10487,15 @@ def cfs_status() -> dict:
 
 
 @mcp.tool()
-def set_speed_profile(profile: str) -> dict:
+def set_speed_profile(profile: str, printer_name: str | None = None) -> dict:
     """Set the printer speed profile (Bambu Lab printers only).
 
     Args:
         profile: Speed profile name — one of ``"silent"`` (50% speed,
             quiet), ``"standard"`` (100%, default), ``"sport"`` (124%,
             faster), or ``"ludicrous"`` (166%, maximum speed).
+        printer_name: Which printer to set.  Omit for the default printer,
+            which is what this did before it could be aimed.
 
     Sport and Ludicrous modes automatically increase nozzle temperature
     to prevent under-extrusion at higher flow rates.
@@ -10520,14 +10522,17 @@ def set_speed_profile(profile: str) -> dict:
     if err := _check_rate_limit("set_speed_profile"):
         return err
     try:
-        adapter = _get_adapter()
+        try:
+            adapter = _resolve_adapter(printer_name)
+        except PrinterNotFoundError:
+            return _unknown_printer_error(printer_name, "set the speed profile on")
         if not hasattr(adapter, "set_speed_profile"):
             return _error_dict(
                 "Speed profile control is only available on Bambu Lab printers.",
                 code="UNSUPPORTED",
             )
         verdict = CommandVerdict.coerce(adapter.set_speed_profile(profile), what="speed profile")
-        _audit("set_speed_profile", "executed", details={"profile": profile})
+        _audit("set_speed_profile", "executed", details={"profile": profile, "printer": printer_name})
         return {
             "success": verdict.ok,
             "profile": profile.strip().lower(),
@@ -18593,6 +18598,10 @@ def _pro_api_call(
         )
 
 
+#: The version of a manifest entry's ``local_steps`` block this build reads
+#: (what a served tool needs read here first, and whether it may ask this
+#: computer to act on the printer).
+_LOCAL_STEPS_SCHEMA_VERSION = 1
 #: Asks the servers to run a heavy tool as a job (they ignore it for any
 #: other tool).
 _SERVED_JOB_HEADER = "X-Kiln-Tool-Async"
@@ -18830,13 +18839,44 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
         served_inputs = tool_def.get("inputs")
         if not isinstance(served_inputs, dict):
             served_inputs = None
+        # What the tool needs read on this computer before it is asked at
+        # all, and whether it may ask this computer to ACT on the printer
+        # (kiln.served_steps).  Read only from a block of the version this
+        # build understands; anything else leaves the tool as it was.
+        local_steps_def = tool_def.get("local_steps")
+        reads_first: list = []
+        may_act = False
+        if (
+            isinstance(local_steps_def, dict)
+            and local_steps_def.get("schema_version") == _LOCAL_STEPS_SCHEMA_VERSION
+        ):
+            reads_first = [r for r in (local_steps_def.get("reads_first") or []) if isinstance(r, dict)]
+            may_act = local_steps_def.get("acts") is True
 
         # Build the stub function.  Closures capture `name` by reference,
         # so we use a factory to freeze the value.
-        def _make_stub(_name: str, _inputs: dict | None):
+        def _make_stub(_name: str, _inputs: dict | None, _reads: list, _may_act: bool):
             def _stub(**kwargs):
-                from kiln import served_makes
+                from kiln import served_makes, served_steps
 
+                # Whether the user's agent has seen the actions this tool
+                # wants done on the printer and said to run them.  The
+                # stub's own switch, never forwarded.
+                run_actions = bool(kwargs.pop("run_actions", False)) if _may_act else False
+                # The printer the call is about, as the person named it,
+                # before the model name goes in its place below.
+                _printer_param = (_inputs or {}).get("printer")
+                asked_printer = kwargs.get(_printer_param) if isinstance(_printer_param, str) else None
+                # What the tool needs read here before it can answer: the
+                # servers have no printer, so which one a speed is for is
+                # read on this computer and sent with the request.
+                pre_read: dict = {}
+                if _reads:
+                    pre_read, not_read = served_steps.read_first(
+                        _name, _reads, printer_name=str(asked_printer or ""),
+                    )
+                    if not_read is not None:
+                        return not_read
                 # The printer a file is being made for is one only this
                 # computer can name.
                 kwargs = _with_local_printer(kwargs, _inputs)
@@ -18859,6 +18899,8 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                 call = with_recent_faults(_name, with_local_reading(_name, kwargs))
 
                 def ask(**more):
+                    if pre_read:
+                        more = {**more, "step_results": {**pre_read, **more.get("step_results", {})}}
                     if trip.get("files_sent") or more:
                         # A tool handed files works through them before it
                         # answers, whatever kind of answer it gives.
@@ -18869,11 +18911,10 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
 
                 answer = ask()
                 # The tool may need one thing only this computer can do
-                # (slice a part with this computer's slicer).  It is done
-                # here, from an allow-list, and the same call is made again
-                # with the result.  Once: a tool that asks twice is told no.
-                from kiln import served_steps
-
+                # (slice a part with this computer's slicer, start the
+                # resume file it built).  It is done here, from an
+                # allow-list, and the same call is made again with the
+                # result.  Once: a tool that asks twice is told no.
                 steps = served_steps.wanted(answer)
                 if steps:
                     # What a step works on is saved in Kiln's own folder,
@@ -18881,8 +18922,13 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                     # the person's file, and a step runs only on a file
                     # that is there.
                     answer = served_makes.arrive(_name, answer)
+                    steps = served_steps.wanted(answer)
+                    if served_steps.actions_in(steps) and not run_actions:
+                        # An action on the printer runs only once the
+                        # user's agent has seen it: show it, run nothing.
+                        return served_steps.propose(_name, steps)
                     done, refused = served_steps.carry_out(
-                        _name, served_steps.wanted(answer), served_makes._upload_file,
+                        _name, steps, served_makes._upload_file, act=run_actions,
                     )
                     if refused is not None:
                         return refused
@@ -18906,12 +18952,24 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                 )
             return _stub
 
-        stub = _make_stub(name, served_inputs)
+        stub = _make_stub(name, served_inputs, reads_first, may_act)
 
         # Reconstruct a typed Python signature from the JSON Schema so
         # that FastMCP generates the correct tool schema for clients.
-        properties = params_schema.get("properties", {})
+        properties = dict(params_schema.get("properties", {}))
         required_set = set(params_schema.get("required", []))
+        if may_act and "run_actions" not in properties:
+            # The switch the agent flips once it has seen what the tool
+            # wants done on the printer (kiln.served_steps.propose).
+            properties["run_actions"] = {"type": "boolean", "default": False}
+            description = (
+                f"{description}\n\nThis tool may ask this computer to act on "
+                "your printer (upload, start, pause, resume, set a speed "
+                "preset). It first answers with the actions it wants and "
+                "why, and runs nothing; call it again with run_actions=true "
+                "to carry them out through Kiln's own tools here, with every "
+                "check those tools make."
+            )
 
         sig_params = []
         for pname, pschema in properties.items():

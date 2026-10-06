@@ -150,11 +150,17 @@ class TestTheFence:
         assert done == {} and refused["code"] == "LOCAL_STEP_REFUSED"
         assert slicer == []
 
-    def test_no_step_kind_commands_a_printer(self):
-        """One kind makes a file, two read.  Adding a kind that ACTS on a
-        printer is a decision, and this is where it is recorded."""
+    def test_the_kinds_are_the_decided_ones(self):
+        """One kind makes a file, two read, and one ACTS -- through the
+        allow-list in ``ACT_TOOLS`` and nothing else (its fence is held by
+        test_served_act_steps.py).  Adding a kind, or a tool a server may
+        run on a printer, is a decision, and this is where it is recorded."""
         assert set(served_steps._STEPS) == {"slice"}
         assert set(served_steps._READS) == {"printer_facts", "print_history"}
+        assert served_steps.ACT_KIND == "act"
+        assert set(served_steps.ACT_TOOLS) == {
+            "upload_file", "start_print", "pause_print", "resume_print", "set_speed_profile",
+        }
 
     def test_a_tool_cannot_ask_for_many_steps(self, slicer, handed_model):
         steps = [_step(handed_model, id=f"s{i}") for i in range(served_steps.MAX_STEPS + 1)]

@@ -70,6 +70,38 @@ def _no_room_refusal(plates: dict[str, dict[str, Any]]) -> dict[str, Any] | None
     return resp
 
 
+def _printer_utilization(registry: Any) -> dict[str, Any]:
+    """How busy the fleet is, read from the registry alone: the counts the
+    orchestrator's own report carries for printers, with no job figures,
+    said as such.  The same state buckets, so the two answers agree."""
+    from kiln.printers.base import PrinterStatus
+
+    counts = {"total_printers": 0, "idle_printers": 0, "busy_printers": 0,
+              "offline_printers": 0, "error_printers": 0}
+    for entry in registry.get_fleet_status():
+        counts["total_printers"] += 1
+        status = entry.get("status", "unknown")
+        if status == PrinterStatus.IDLE.value:
+            counts["idle_printers"] += 1
+        elif status == PrinterStatus.OFFLINE.value:
+            counts["offline_printers"] += 1
+        elif status == PrinterStatus.ERROR.value:
+            counts["error_printers"] += 1
+        else:
+            # printing, busy, paused, cancelling, unknown: busy for
+            # utilization purposes.
+            counts["busy_printers"] += 1
+    reachable = counts["total_printers"] - counts["offline_printers"]
+    counts["utilization_pct"] = round(100.0 * counts["busy_printers"] / reachable, 1) if reachable else 0.0
+    counts["job_metrics"] = None
+    counts["note"] = (
+        "Printer counts from this install's own registry. Job figures (queued, "
+        "running, completed, failed) come with kiln-pro's fleet orchestrator, "
+        "which is not installed here."
+    )
+    return counts
+
+
 class _FleetToolsPlugin:
     """Fleet analytics, site grouping, routing, and orchestration tools.
 
@@ -599,12 +631,19 @@ class _FleetToolsPlugin:
             Lightweight overview of fleet capacity. For full printer details, use
             ``fleet_status``. For historical analytics, use ``fleet_analytics``.
             """
+            # kiln-pro's orchestrator adds the job figures (queued, running,
+            # completed, failed) on top of the printer counts.  Without it the
+            # printer half is read here, from this install's own registry,
+            # and says so: a plain install still learns how busy its fleet is.
             try:
                 from kiln.fleet_orchestrator import get_fleet_orchestrator
-
-                orch = get_fleet_orchestrator()
-                util = orch.get_fleet_utilization()
-                return {"success": True, "utilization": util}
+            except ImportError:
+                get_fleet_orchestrator = None
+            try:
+                if get_fleet_orchestrator is not None:
+                    util = get_fleet_orchestrator().get_fleet_utilization()
+                    return {"success": True, "utilization": util}
+                return {"success": True, "utilization": _printer_utilization(_srv._get_registry())}
             except Exception as exc:
                 _logger.exception("Error in fleet_utilization")
                 return _srv._error_dict(f"Failed to get fleet utilization: {exc}", code="FLEET_ERROR")
