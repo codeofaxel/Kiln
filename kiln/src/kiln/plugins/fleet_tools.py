@@ -49,6 +49,82 @@ def _survey_plates(
     return (dict(plates) if isinstance(plates, dict) else {}), None
 
 
+#: The served fleet router (kiln-pro, https://kiln3d.com): this machine's
+#: reading of each candidate's plate goes in, the ranked plan comes back.
+_ROUTE_TOOL = "plan_fleet_route"
+
+
+def _served_route(
+    file_path: str, material: str, candidates: list[dict[str, Any]], adapters: dict[str, Any],
+    *, quality_priority: int, speed_priority: int,
+) -> dict[str, Any]:
+    """Route through Kiln's servers when the router is not installed here.
+
+    The question is the same one the local engine answers; the facts it
+    needs are read HERE and sent: the candidates as the registry reads them
+    (``collect_routing_candidates`` -- model, state, queue depth, materials,
+    never an address or a credential), one plate reading per machine
+    (:func:`kiln._pro_placement_bridge.fleet_readings`), and the job's own
+    sliced file once.  The server judges the plates, scores the machines
+    and answers the plan or the refusal in this door's own shape, and it
+    is relayed as it is.  A call that got no answer is said in the shared
+    voice (:mod:`kiln.served_answer`), and nothing is routed.
+    """
+    import kiln.server as _srv
+    from kiln import _pro_placement_bridge as bridge
+    from kiln import served_answer
+
+    job = bridge.job_envelope(file_path)
+    names = [str(c["printer_id"]) for c in candidates]
+    readings = bridge.fleet_readings(job, names, adapters, wire=True)
+    sliced = job.get("sliced_gcode_path")
+    sliced_wire = bridge.hosted_form({"sliced_gcode": {"path": sliced}})["sliced_gcode"] if sliced else None
+    try:
+        answer = _srv._pro_api_call(
+            _ROUTE_TOOL,
+            material=material,
+            candidates=candidates,
+            plates=readings,
+            sliced_gcode=sliced_wire,
+            quality_priority=quality_priority,
+            speed_priority=speed_priority,
+        )
+    except Exception as exc:  # noqa: BLE001 -- the network is a miss to word, never a traceback
+        _logger.debug("%s request failed", _ROUTE_TOOL, exc_info=True)
+        return _route_miss(served_answer.classify_transport_error(exc, host=getattr(_srv, "_HOSTED_KILN_API_URL", None)))
+    if isinstance(answer, dict) and (
+        (answer.get("success") is True and isinstance(answer.get("routing"), dict))
+        # The server's own ruling, built for this call in this door's shape
+        # (``NO_ROOM`` with each machine's sentence, a request it could not
+        # read, a router fault), or the fleet survey's tier gate -- relayed
+        # as it is, one gate, the way the local survey's is.
+        or (isinstance(answer.get("error"), dict) and answer["error"].get("code"))
+        or answer.get("required_tier")
+    ):
+        return answer
+    miss = served_answer.classify_answer(answer)
+    return _route_miss(miss or served_answer.Miss("unanswered", detail="no plan in the answer"))
+
+
+def _route_miss(miss: Any) -> dict[str, Any]:
+    """The refusal when the route could not be planned: what Kiln could not
+    do, why, and that nothing was routed."""
+    import kiln.server as _srv
+    from kiln import served_answer
+
+    text = served_answer.sentence(
+        miss,
+        feature="fleet routing",
+        on_the_line="Routing picks which of your printers takes this print",
+        cannot="ask Kiln's servers which machine should take it",
+        wont="won't route it anywhere",
+        safe_remedy="name the printer yourself with start_print or fleet_submit_job",
+    )
+    out = _srv._error_dict(text, code="ROUTING_UNAVAILABLE", retryable=miss.cause != "refused")
+    out.update(served_answer.fields(miss))
+    return out
+
+
 def _no_room_refusal(plates: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
     """The refusal when no surveyed plate has room, with each machine's own
     sentences; ``None`` when at least one does."""
@@ -349,32 +425,23 @@ class _FleetToolsPlugin:
             # must not be reported as "kiln-pro is missing".
             from kiln.routing_candidates import collect_routing_candidates
 
-            # kiln.job_router is provided by kiln-pro.  Imported outside
-            # the main try so its absence gets a clear answer rather than
-            # a laundered ImportError, and so the handler names below
-            # still resolve.
+            # The router and the plate survey are kiln-pro's.  Installed
+            # here, they run here; on a plain install the same question
+            # goes to Kiln's servers (``_served_route`` below) with what
+            # this machine read of its own printers.  Imported outside the
+            # main try so a failure is told apart from a laundered
+            # ImportError, and so the handler names below still resolve.
             try:
                 from kiln.job_router import (
                     RoutingCriteria,
                     RoutingValidationError,
                     get_job_router,
                 )
-            except ImportError:
-                return _srv._error_dict(
-                    "Fleet routing requires kiln-pro, which is not installed "
-                    "on this server.",
-                    code="ROUTING_UNAVAILABLE",
-                )
-            # The same rule for the plate survey: kiln-pro's, or an honest
-            # refusal.  Never a routing answer that ignored the plates.
-            try:
                 import kiln.placement_fleet  # noqa: F401
+                engine_here = True
             except ImportError:
-                return _srv._error_dict(
-                    "Fleet routing requires kiln-pro, which is not installed "
-                    "on this server or is older than this Kiln release.",
-                    code="ROUTING_UNAVAILABLE",
-                )
+                engine_here = False
+                RoutingValidationError = ValueError  # noqa: N806 -- never raised on this path
 
             try:
                 import os
@@ -413,6 +480,23 @@ class _FleetToolsPlugin:
                         code="NO_ELIGIBLE_PRINTERS",
                     )
 
+                # quality picks how much the score favours reliability;
+                # priority picks how much it favours getting started fast.
+                # Both map onto the router's 1-5 weight knobs, defaulting
+                # to its neutral 3.
+                quality_priority = {"draft": 1, "standard": 3, "fine": 5}.get(
+                    (quality or "standard").lower(), 3
+                )
+                speed_priority = {"low": 1, "normal": 3, "high": 5}.get(
+                    (priority or "normal").lower(), 3
+                )
+
+                if not engine_here:
+                    return _served_route(
+                        file_path, material.strip(), candidates, adapters,
+                        quality_priority=quality_priority, speed_priority=speed_priority,
+                    )
+
                 # Each candidate's plate, as it stands: the fleet survey is
                 # kiln-pro's, and the router reads the block it writes.
                 plates, plate_err = _survey_plates(
@@ -423,18 +507,10 @@ class _FleetToolsPlugin:
                 for candidate in candidates:
                     candidate["plate"] = (plates or {}).get(str(candidate["printer_id"]))
 
-                # quality picks how much the score favours reliability;
-                # priority picks how much it favours getting started fast.
-                # Both map onto the router's 1-5 weight knobs, defaulting
-                # to its neutral 3.
                 criteria = RoutingCriteria(
                     material=material.strip(),
-                    quality_priority={"draft": 1, "standard": 3, "fine": 5}.get(
-                        (quality or "standard").lower(), 3
-                    ),
-                    speed_priority={"low": 1, "normal": 3, "high": 5}.get(
-                        (priority or "normal").lower(), 3
-                    ),
+                    quality_priority=quality_priority,
+                    speed_priority=speed_priority,
                 )
                 result = get_job_router().route_job(criteria, candidates)
                 return {"success": True, "routing": result.to_dict()}

@@ -108,7 +108,7 @@ import base64
 import gzip
 import logging
 import os
-from typing import Any
+from typing import Any, Iterable, Mapping
 
 from kiln import served_answer
 from kiln.plate_state import OCCUPANCY_KIND
@@ -118,7 +118,10 @@ logger = logging.getLogger(__name__)
 SCHEMA = "placement_verdict/1"
 REQUEST_SCHEMA = "placement_request/1"
 TOOL = "placement_plan"
-__all__ = ["OCCUPANCY_KIND", "REQUEST_SCHEMA", "SCHEMA", "TOOL", "ask", "hosted_form", "job_envelope", "request_for", "verdict_for"]
+__all__ = [
+    "OCCUPANCY_KIND", "READING_SCHEMA", "REQUEST_SCHEMA", "SCHEMA", "TOOL", "ask", "fleet_readings", "hosted_form",
+    "job_envelope", "plate_reading", "request_for", "verdict_for",
+]
 
 #: Why no verdict came back: the causes a miss can have, in the shared
 #: voice's own words (:data:`kiln.served_answer.CAUSES`).  Decided in ONE
@@ -265,10 +268,28 @@ def hosted_form(request: dict[str, Any]) -> dict[str, Any]:
     """
     out = dict(request)
     for field in _GCODE_FIELDS:
-        entry = out.get(field)
-        if isinstance(entry, dict) and "path" in entry and "gz_b64" not in entry:
-            out[field] = _gz_entry(str(entry.get("path") or ""))
+        out[field] = _wire_ref(out.get(field))
+    # Every part on the plate carries its own file too (``plate.jobs[].gcode``);
+    # the engine refuses a path on the hosted service, so each one travels
+    # the same way or not at all.
+    plate = out.get("plate")
+    if isinstance(plate, dict) and isinstance(plate.get("jobs"), list):
+        out["plate"] = {
+            **plate,
+            "jobs": [
+                {**job, "gcode": _wire_ref(job.get("gcode"))} if isinstance(job, dict) else job
+                for job in plate["jobs"]
+            ],
+        }
     return out
+
+
+def _wire_ref(entry: Any) -> Any:
+    """A G-code reference in its wire form: a local path becomes the gzipped
+    body (or ``null`` when it cannot travel); anything else is left as it is."""
+    if isinstance(entry, dict) and "path" in entry and "gz_b64" not in entry:
+        return _gz_entry(str(entry.get("path") or ""))
+    return entry
 
 
 def _gz_entry(path: str) -> dict[str, str] | None:
@@ -447,3 +468,109 @@ def job_envelope(file_path: str) -> dict[str, Any]:
         logger.debug("job envelope of %s not derivable", path, exc_info=True)
         part = None
     return {"file": name, "part": part, "sliced_gcode_path": sliced}
+
+
+# ---------------------------------------------------------------------------
+# The plate reading a fleet survey judges
+# ---------------------------------------------------------------------------
+
+#: One machine's plate, read here for a fleet survey to judge.  The survey
+#: itself -- which plate has room, how a print there would start, which
+#: machine the fleet should take -- is kiln-pro's (https://kiln3d.com), on
+#: a local install or served; this side only reads what it holds.
+READING_SCHEMA = "plate_reading/1"
+
+
+def plate_reading(name: str, adapter: Any, job: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Everything a fleet survey needs to judge *name*'s plate for *job*, read here.
+
+    ::
+
+        {"schema": "plate_reading/1",
+         "request": <placement_request/1 for the job on this plate> | null,
+         "file_name": str,
+         "camera": "user_supplied" | "printer" | null,
+         "camera_clause": str | null,
+         "contract": {"planned_for_plate", ...} | null,
+         "machine_matches": bool,
+         "unreadable": str | null,
+         "unknowns": [str]}
+
+    ``request`` is :func:`request_for` with ``placement="auto"`` -- the plate
+    record, the occupant's file, the part's size or the sliced file.
+    ``camera`` says which camera could settle an unknown plate and
+    ``camera_clause`` is the sentence that offers it.  A sliced file's
+    quiet-start ``contract`` names the plate it was sliced beside, and
+    ``machine_matches`` says whether the machine it names is THIS one --
+    the identity itself is left out, because it can carry a host address.  Read under ``internal_read`` --
+    Kiln asking itself, never a command on the machine.  Never raises: a
+    plate that cannot be read is a reading with no request and the reason
+    in ``unreadable``, so the survey's row for it says so instead of being
+    missing (a fleet answer over a partial fleet is a confident answer
+    about the wrong fleet).
+    """
+    job = dict(job or {})
+    part = job.get("part") if isinstance(job.get("part"), dict) else None
+    sliced = job.get("sliced_gcode_path") if isinstance(job.get("sliced_gcode_path"), str) else None
+    file_name = str(job.get("file") or (os.path.basename(sliced) if sliced else "") or "the file")
+    reading: dict[str, Any] = {
+        "schema": READING_SCHEMA, "request": None, "file_name": file_name, "camera": None,
+        "camera_clause": None, "contract": None, "machine_matches": True, "unreadable": None, "unknowns": [],
+    }
+    if adapter is None:
+        reading["unreadable"] = f"{name} is not a registered printer, so Kiln cannot see its plate"
+        reading["unknowns"] = ["printer"]
+        return reading
+    try:
+        from kiln import plate_state
+        from kiln.printers.engagement import internal_read
+        from kiln.printers.print_gate import same_bed_machine_id
+
+        with internal_read():
+            # The declared camera only, never a frame: a survey of twenty
+            # machines must not pull twenty JPEGs.
+            reading["camera"] = plate_state.camera_of(adapter)
+            reading["camera_clause"] = plate_state.camera_could_settle(adapter)
+            printer_id = plate_state.declared_model_of(adapter)
+            reading["request"] = request_for(
+                adapter, printer_id, placement="auto", part=part, sliced_gcode_path=sliced,
+            )
+            if sliced:
+                contract = plate_state.quiet_start_contract_for(file_name, local_path=sliced)
+                if isinstance(contract, dict):
+                    # The machine the file was sliced beside is compared HERE,
+                    # where both identities are held, and the answer travels
+                    # as a bool: the identity can carry a host address.
+                    machine = str(same_bed_machine_id(adapter) or "")
+                    planned = str(contract.get("planned_for_machine") or "")
+                    reading["machine_matches"] = not machine or planned == machine
+                    reading["contract"] = {k: v for k, v in contract.items() if k != "planned_for_machine"}
+    except Exception:  # noqa: BLE001 -- one machine's fault is one row that says so
+        logger.warning("plate reading: %s could not be read", name, exc_info=True)
+        reading["request"] = None
+        reading["unreadable"] = f"Kiln could not read {name}'s plate, so it will not route this print there"
+        reading["unknowns"] = ["plate record"]
+    return reading
+
+
+def fleet_readings(
+    job: Mapping[str, Any] | None, names: Iterable[str], adapters: Mapping[str, Any] | None = None, *, wire: bool = False,
+) -> dict[str, dict[str, Any]]:
+    """One :func:`plate_reading` per name: ``{name: reading}``, in the order given.
+
+    *adapters* is the registry's name -> adapter map; a name not in it is
+    read as a plate Kiln cannot see.  With *wire* the readings are in the
+    form the hosted service takes: each request through :func:`hosted_form`
+    with the job's own sliced file left OUT of every request -- the job is
+    one file and travels once, beside the readings, so twenty machines do
+    not carry twenty copies of it.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for raw in names:
+        name = str(raw)
+        reading = plate_reading(name, (adapters or {}).get(name), job)
+        if wire and isinstance(reading.get("request"), dict):
+            reading["request"] = hosted_form({**reading["request"], "sliced_gcode": None})
+        out[name] = reading
+    return out
+
