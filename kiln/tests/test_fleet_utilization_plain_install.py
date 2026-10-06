@@ -3,7 +3,7 @@ registry, says the job figures are missing, and refuses nothing.
 
 The Business tool imported kiln-pro's orchestrator unguarded, so a plain
 install got "Failed to get fleet utilization: No module named
-'kiln.fleet_orchestrator'" at every tier (sold-reachable gate, 2026-10-06).
+'kiln.fleet_orchestrator'" at every tier (2026-10-06).
 """
 
 from __future__ import annotations

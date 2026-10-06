@@ -2,8 +2,8 @@
 
 ``encryption_status`` imports the encryption module, which is not part of
 a plain install.  It used to answer ``INTERNAL_ERROR`` ("No module named
-...") at every tier, Enterprise included, so the pricing page sold a
-status check no buyer with a plain install could run.  Encryption at rest
+...") at every tier, so a person could not even read whether their files were
+encrypted.  Encryption at rest
 is applied by the machine that stores the files, so the honest answer here
 is local and certain: it is not active on this machine.  These tests pin:
 

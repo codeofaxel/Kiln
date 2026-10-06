@@ -1,9 +1,8 @@
 """``route_print_job`` on an install without kiln-pro asks Kiln's servers, with what it read here.
 
 The router and the plate survey are kiln-pro's.  A plain install used to
-answer ``ROUTING_UNAVAILABLE`` at every tier (sold-reachable gate,
-2026-10-06: the Business card sold fleet routing and no buyer with a plain
-install could run it).  Now the door reads what only this machine can read
+answer ``ROUTING_UNAVAILABLE`` at every tier (2026-10-06: a Business account
+on a plain install could not route a print at all).  Now the door reads what only this machine can read
 -- its printers as the registry sees them, each plate as it stands, the
 job's own file -- and asks the served route (``plan_fleet_route``) for the
 plan.  These tests pin the door's side of that wire with the server stood
