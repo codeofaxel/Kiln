@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-06T07:06:05.188360+00:00",
+  "generated": "2026-10-06T18:31:49.676262+00:00",
   "tool_count": 429,
   "categories": {
     "product_generators": {
@@ -21400,9 +21400,9 @@
     },
     {
       "name": "set_speed_schedule",
-      "description": "Set layer-based speed schedule with automatic adjustments (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
+      "description": "Set layer-based speed schedule with automatic adjustments (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "access": "pro",
       "category": "speed_control",
       "parameters": {
         "properties": {
@@ -21437,7 +21437,16 @@
         "schema_version": 1,
         "kind": "record"
       },
-      "served": false
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": []
+          }
+        ],
+        "acts": true
+      }
     },
     {
       "name": "report_issue",

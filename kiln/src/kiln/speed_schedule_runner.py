@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 POLL_INTERVAL_S = 5.0
 #: Presets a Bambu printer takes, by the percentage each stands for.
 _BAMBU_PRESETS = ((50, "silent"), (100, "standard"), (124, "sport"), (166, "ludicrous"))
+PRESET_PERCENT = {name: pct for pct, name in _BAMBU_PRESETS}
 #: States in which there is no print to pace.
 _ENDED = frozenset({"idle", "error", "offline", "cancelling"})
 
@@ -110,15 +111,21 @@ def nearest_preset(percent: int) -> str:
     return min(_BAMBU_PRESETS, key=lambda p: abs(p[0] - percent))[1]
 
 
+def takes_presets(adapter: Any) -> bool:
+    """Whether *adapter* takes a speed only as one of its presets (a Bambu:
+    its firmware ignores the feedrate command)."""
+    if not hasattr(adapter, "set_speed_profile"):
+        return False
+    if not getattr(getattr(adapter, "capabilities", None), "can_send_gcode", True):
+        return True
+    return type(adapter).__name__.lower().startswith("bambu")
+
+
 def set_speed(adapter: Any, percent: int) -> Any:
     """Send *percent* to the printer the one way it takes a speed: a preset
     on a printer that only has presets, else the standard feedrate command.
     Returns the adapter's own verdict."""
-    if hasattr(adapter, "set_speed_profile") and not getattr(
-        getattr(adapter, "capabilities", None), "can_send_gcode", True,
-    ):
-        return adapter.set_speed_profile(nearest_preset(percent))
-    if hasattr(adapter, "set_speed_profile") and type(adapter).__name__.lower().startswith("bambu"):
+    if takes_presets(adapter):
         return adapter.set_speed_profile(nearest_preset(percent))
     return adapter.send_gcode([f"M220 S{percent}"])
 
@@ -218,6 +225,7 @@ def stop(run: RunState, *, timeout_s: float = 10.0) -> None:
 
 __all__ = [
     "POLL_INTERVAL_S",
+    "PRESET_PERCENT",
     "RunState",
     "ScheduleRefused",
     "Segment",
@@ -227,4 +235,5 @@ __all__ = [
     "set_speed",
     "start",
     "stop",
+    "takes_presets",
 ]

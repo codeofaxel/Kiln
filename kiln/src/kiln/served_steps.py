@@ -451,6 +451,12 @@ ACT_TOOLS: dict[str, dict[str, Any]] = {
         "profile": ("silent", "standard", "sport", "ludicrous"),
         "printer_name": "name",
     },
+    "set_print_speed": {"percent": "percent", "printer_name": "name"},
+    "run_speed_schedule": {
+        "schedule": "segments",
+        "printer_name": "name",
+        "action": ("run", "stop"),
+    },
 }
 #: A name an action takes from an earlier action's answer: the file a
 #: start names is the one the upload before it answered with, which the
@@ -461,6 +467,7 @@ _FROM_STEP_FIELDS = frozenset({"file_name"})
 _ACT_RESULT_KEYS = (
     "success", "status", "code", "error", "message", "outcome", "print_start",
     "accepted", "file_name", "confirmation_required", "token", "profile",
+    "percent", "percent_actual", "preset", "active",
 )
 _ACT_TEXT_LIMIT = 400
 
@@ -523,6 +530,16 @@ def _checked_act_args(shape: dict[str, Any], args: Any) -> dict[str, Any] | None
                 not isinstance(value, list) or len(value) > 16
                 or any(isinstance(v, bool) or not isinstance(v, int) or not -1 <= v <= 255 for v in value)
             ):
+                return None
+        elif want == "percent":
+            if isinstance(value, bool) or not isinstance(value, int) or not 10 <= value <= 300:
+                return None
+        elif want == "segments":
+            from kiln.speed_schedule_runner import ScheduleRefused, parse_segments
+
+            try:
+                parse_segments(value)
+            except ScheduleRefused:
                 return None
         else:  # pragma: no cover — a shape this module does not define
             return None

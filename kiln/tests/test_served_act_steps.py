@@ -79,6 +79,7 @@ class TestTheFence:
         this is where it is recorded."""
         assert set(served_steps.ACT_TOOLS) == {
             "upload_file", "start_print", "pause_print", "resume_print", "set_speed_profile",
+            "set_print_speed", "run_speed_schedule",
         }
         for forbidden in ("send_gcode", "set_temperature", "update_printer_firmware",
                           "emergency_stop", "cancel_print", "register_printer", "confirm_action"):
@@ -124,6 +125,15 @@ class TestTheFence:
             _act("pause_print", "p", keep_temps="yes"),
             _act("pause_print", "p", printer_name="a\nb"),
             {"kind": "act", "id": "p", "tool": "pause_print", "args": ["voron"]},
+            _act("set_print_speed", "v", percent=400),
+            _act("set_print_speed", "v", percent=5),
+            _act("set_print_speed", "v", percent="115"),
+            _act("set_print_speed", "v", percent=True),
+            _act("run_speed_schedule", "r", schedule=[{"from_layer": 1, "to_layer": 5, "speed_percent": 100},
+                                                      {"from_layer": 3, "to_layer": 8, "speed_percent": 100}]),
+            _act("run_speed_schedule", "r", schedule=[{"from_layer": 1, "to_layer": 5, "speed_percent": 900}]),
+            _act("run_speed_schedule", "r", schedule="fast"),
+            _act("run_speed_schedule", "r", schedule=[{"from_layer": 1, "to_layer": 5, "speed_percent": 100}], action="status"),
         ],
     )
     def test_an_argument_outside_the_tools_shape_runs_nothing(self, doors, step):
@@ -179,6 +189,24 @@ class TestTheFence:
 
 
 class TestThroughTheDoor:
+    def test_a_checked_speed_and_a_checked_schedule_reach_their_doors(self, doors, monkeypatch):
+        import kiln.server as server
+
+        calls, _ = doors
+        monkeypatch.setattr(server, "set_print_speed", lambda **kw: calls.append(("set_print_speed", kw)) or {"success": True, "percent": 115, "outcome": "accepted"})
+        monkeypatch.setattr(server, "run_speed_schedule", lambda **kw: calls.append(("run_speed_schedule", kw)) or {"success": True, "active": True})
+        segments = [{"from_layer": 1, "to_layer": 5, "speed_percent": 100}, {"from_layer": 6, "to_layer": 9, "speed_percent": 140}]
+        done, refused = served_steps.carry_out("t", [
+            _act("set_print_speed", "speed", percent=115, printer_name="voron"),
+            _act("run_speed_schedule", "sched", schedule=segments, printer_name="voron", action="run"),
+        ], _send, act=True)
+        assert refused is None
+        assert calls == [
+            ("set_print_speed", {"percent": 115, "printer_name": "voron"}),
+            ("run_speed_schedule", {"schedule": segments, "printer_name": "voron", "action": "run"}),
+        ]
+        assert done["speed"]["data"]["percent"] == 115 and done["sched"]["data"]["active"] is True
+
     def test_an_action_runs_the_tool_with_exactly_the_checked_arguments(self, doors, handed_file):
         calls, _ = doors
         done, refused = served_steps.carry_out(

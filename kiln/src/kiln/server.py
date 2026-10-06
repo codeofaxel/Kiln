@@ -4468,6 +4468,7 @@ def _local_copy_of(file_name: str | None) -> str | None:
 # Read-only tools have no limits.  Physically-dangerous tools get cooldowns.
 _TOOL_RATE_LIMITS: dict[str, tuple[int, int]] = {
     "set_temperature": (2000, 10),
+    "set_print_speed": (2000, 10),
     "send_gcode": (500, 30),
     "emergency_stop": (5000, 3),
     "emergency_trip_input": (1000, 20),
@@ -10543,6 +10544,147 @@ def set_speed_profile(profile: str, printer_name: str | None = None) -> dict:
     except Exception as exc:
         logger.exception("Unexpected error in set_speed_profile")
         return _error_dict(f"Unexpected error in set_speed_profile: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def set_print_speed(percent: int, printer_name: str | None = None) -> dict:
+    """Set the print speed as a percentage of the speed the file was sliced at.
+
+    The feedrate override every FDM firmware has (100 is the sliced speed;
+    10 to 300 is accepted).  A Bambu takes only its four presets, so the
+    nearest one is set and the answer says which (``preset``,
+    ``percent_actual``).  Nothing here judges whether a speed suits THIS
+    printer or THIS layer: Kiln's served ``set_speed_percent`` and
+    ``set_speed_schedule`` do that and hand the checked value here.
+
+    Args:
+        percent: The speed, as a percentage of the sliced speed.
+        printer_name: Which printer.  Omit for the default printer.
+
+    Branch on ``outcome`` as for ``set_speed_profile``: ``confirmed``,
+    ``accepted`` or ``failed``.
+    """
+    if err := _check_auth("printer_control"):
+        return err
+    if err := _check_rate_limit("set_print_speed"):
+        return err
+    if isinstance(percent, bool) or not isinstance(percent, int):
+        try:
+            percent = int(percent)
+        except (TypeError, ValueError):
+            return _error_dict("percent must be a whole number.", code="VALIDATION_ERROR")
+    if not 10 <= percent <= 300:
+        return _error_dict(
+            f"percent must be between 10 and 300, got {percent}.", code="VALIDATION_ERROR",
+        )
+    try:
+        try:
+            adapter, target_name = _resolve_control_target(printer_name)
+        except PrinterNotFoundError:
+            return _unknown_printer_error(printer_name, "set the speed on")
+        from kiln.speed_schedule_runner import PRESET_PERCENT, nearest_preset, set_speed, takes_presets
+
+        verdict = CommandVerdict.coerce(set_speed(adapter, percent), what="speed")
+        _audit("set_print_speed", "executed", details={"percent": percent, "printer": target_name})
+        out: dict[str, Any] = {"success": verdict.ok, "percent": percent, **verdict.to_dict()}
+        if takes_presets(adapter):
+            preset = nearest_preset(percent)
+            out["preset"] = preset
+            out["percent_actual"] = PRESET_PERCENT[preset]
+            out["message"] = (
+                f"This printer takes only its presets: {percent}% was set as "
+                f"{preset} ({PRESET_PERCENT[preset]}%)."
+            )
+        return out
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(f"Failed to set the speed: {exc}")
+    except Exception as exc:
+        logger.exception("Unexpected error in set_print_speed")
+        return _error_dict(f"Unexpected error in set_print_speed: {exc}", code="INTERNAL_ERROR")
+
+
+#: The speed schedule running for each printer, by its lifecycle name.
+#: Written only once a printer resolved on this process; the hosted server
+#: resolves none (kiln_pro's registry switch), so it never holds one.
+_speed_schedule_runs: dict[str, Any] = {}
+
+
+@mcp.tool()
+def run_speed_schedule(
+    schedule: list[dict] | None = None,
+    printer_name: str | None = None,
+    action: str = "run",
+) -> dict:
+    """Run, report or stop a layer-based speed schedule on this computer.
+
+    A schedule is a list of ``{"from_layer", "to_layer", "speed_percent"}``
+    segments.  With ``action="run"`` it starts on the printer that is
+    printing now, replacing a schedule already running for that printer:
+    the printer is asked which layer it is on every few seconds and each
+    segment's speed is set once, as the print reaches it.  It stops on its
+    own when the print ends, when the printer is found running a different
+    print, or on ``action="stop"`` (the printer stays at the last speed set).
+    ``action="status"`` reports what has been applied so far.
+
+    Only the schedule's shape is checked here.  Which speeds suit this
+    printer and which layers a speed is unsafe on is decided by Kiln's
+    served ``set_speed_schedule``, which hands the checked schedule here.
+
+    Args:
+        schedule: The segments to run (``action="run"`` only).
+        printer_name: Which printer.  Omit for the default printer.
+        action: ``"run"`` (default), ``"status"`` or ``"stop"``.
+    """
+    if err := _check_auth("printer_control"):
+        return err
+    if action not in ("run", "status", "stop"):
+        return _error_dict(f"action must be run, status or stop, got {action!r}.", code="VALIDATION_ERROR")
+    from kiln import speed_schedule_runner as runner
+
+    try:
+        try:
+            _adapter, target_name = _resolve_control_target(printer_name)
+        except PrinterNotFoundError:
+            return _unknown_printer_error(printer_name, "run a speed schedule on")
+        run = _speed_schedule_runs.get(target_name)
+        if action == "status":
+            if run is None:
+                return {"success": True, "active": False, "printer_name": target_name,
+                        "message": "No speed schedule is running on this printer."}
+            return {"success": True, "active": run.to_dict()["running"], **run.to_dict()}
+        if action == "stop":
+            if run is None:
+                return {"success": True, "active": False, "printer_name": target_name,
+                        "message": "No speed schedule is running on this printer."}
+            runner.stop(run)
+            _speed_schedule_runs.pop(target_name, None)
+            _audit("run_speed_schedule", "stopped", details={"printer": target_name})
+            return {"success": True, "active": False, **run.to_dict(),
+                    "message": "Speed schedule stopped. The printer stays at the last speed set."}
+        if run is not None:
+            runner.stop(run)
+            _speed_schedule_runs.pop(target_name, None)
+        try:
+            started = runner.start(
+                schedule, lambda: _resolve_control_target(printer_name)[0], printer_name=target_name,
+            )
+        except runner.ScheduleRefused as exc:
+            return _error_dict(str(exc), code="VALIDATION_ERROR")
+        _speed_schedule_runs[target_name] = started
+        _audit("run_speed_schedule", "started", details={"printer": target_name, "segments": len(started.segments)})
+        return {
+            "success": True, "active": True, **started.to_dict(),
+            "message": (
+                f"Speed schedule running on {target_name}: {len(started.segments)} segment(s), "
+                f"the layer checked every {runner.POLL_INTERVAL_S:g}s. It stops on its own when "
+                "the print ends or another print starts; run_speed_schedule(action=\"stop\") stops it."
+            ),
+        }
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(f"Speed schedule failed: {exc}")
+    except Exception as exc:
+        logger.exception("Unexpected error in run_speed_schedule")
+        return _error_dict(f"Unexpected error in run_speed_schedule: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
