@@ -20,6 +20,36 @@ from kiln.tool_args import parse_json_object
 _logger = logging.getLogger(__name__)
 
 
+_ENCRYPTION_KEY_ENV = "KILN_ENCRYPTION_KEY"
+
+
+def _encryption_not_installed() -> dict[str, Any]:
+    """The answer to ``encryption_status`` where encryption at rest is not
+    installed: the same keys the full answer carries, every one of them
+    true of this machine, and a sentence saying what that means.
+
+    Encryption is applied by the machine that stores the G-code, so there
+    is nothing to ask anywhere else: a file written here is not encrypted.
+    """
+    import importlib.util
+
+    key_set = bool(os.environ.get(_ENCRYPTION_KEY_ENV, "").strip())
+    message = "G-code encryption at rest is not installed on this machine, so G-code files here are stored unencrypted."
+    if key_set:
+        message += f" {_ENCRYPTION_KEY_ENV} is set, but nothing on this machine uses it."
+    message += " Encryption at rest is part of Kiln Enterprise: https://kiln3d.com/pricing"
+    return {
+        "success": True,
+        "encryption": {
+            "available": False,
+            "key_configured": key_set,
+            "library_installed": importlib.util.find_spec("cryptography") is not None,
+            "supports_rotation": False,
+        },
+        "message": message,
+    }
+
+
 class _EnterpriseToolsPlugin:
     """Enterprise administration and compliance tools.
 
@@ -311,12 +341,18 @@ class _EnterpriseToolsPlugin:
 
             Enterprise feature. Reports whether encryption is active,
             whether the encryption key is configured, and whether the
-            cryptography library is installed.
+            cryptography library is installed.  On a machine where
+            encryption at rest is not installed, it answers that
+            encryption is not active here, in the same shape, and says
+            what enables it.
             """
             if err := _srv._check_auth("read"):
                 return err
             try:
-                from kiln.gcode_encryption import get_gcode_encryption
+                try:
+                    from kiln.gcode_encryption import get_gcode_encryption
+                except ImportError:
+                    return _encryption_not_installed()
 
                 enc = get_gcode_encryption()
                 return {
