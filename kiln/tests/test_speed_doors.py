@@ -1,7 +1,8 @@
 """The two speed doors a served tool may ask this computer to run.
 
-``set_print_speed`` is the feedrate override every FDM firmware has, with a
-Bambu's presets standing in where that is all the firmware takes.
+``set_speed_profile(percent=)`` is the feedrate override every FDM firmware
+has, with a Bambu's presets standing in where that is all the firmware
+takes; ``set_speed_profile(profile=)`` names a preset outright.
 ``run_speed_schedule`` starts, reports and stops the layer-speed runner for
 one printer.  Neither judges a speed: that is the served tools' part.
 """
@@ -52,9 +53,9 @@ def printer(monkeypatch):
     return p
 
 
-class TestSetPrintSpeed:
+class TestSetSpeedProfile:
     def test_a_percentage_goes_out_as_the_feedrate_command(self, printer):
-        answer = server.set_print_speed(115, printer_name="voron")
+        answer = server.set_speed_profile(percent=115, printer_name="voron")
         assert answer["success"] is True and answer["percent"] == 115
         assert printer.sent == ["M220 S115"] and "preset" not in answer
 
@@ -63,15 +64,33 @@ class TestSetPrintSpeed:
         monkeypatch.setattr(server, "_resolve_control_target", lambda name: (p, "default"))
         monkeypatch.setattr(server, "_check_auth", lambda scope: None)
         monkeypatch.setattr(server, "_check_rate_limit", lambda name: None)
-        answer = server.set_print_speed(115)
+        answer = server.set_speed_profile(percent=115)
         assert p.presets == ["sport"] and p.sent == []
         assert answer["preset"] == "sport" and answer["percent_actual"] == 124
 
     @pytest.mark.parametrize("percent", [5, 400, "fast", True])
     def test_out_of_bounds_is_refused_before_the_printer_is_reached(self, printer, percent):
-        answer = server.set_print_speed(percent)
+        answer = server.set_speed_profile(percent=percent)
         assert answer["success"] is False and answer["error"]["code"] == "VALIDATION_ERROR"
         assert printer.sent == []
+
+    def test_a_preset_by_name_still_works(self, monkeypatch):
+        p = BambuPrinter()
+        monkeypatch.setattr(server, "_resolve_adapter", lambda name: p)
+        monkeypatch.setattr(server, "_check_auth", lambda scope: None)
+        monkeypatch.setattr(server, "_check_rate_limit", lambda name: None)
+        answer = server.set_speed_profile(profile="sport")
+        assert p.presets == ["sport"] and answer["profile"] == "sport" and "percent" not in answer
+
+    def test_a_preset_on_a_printer_without_presets_points_at_percent(self, printer, monkeypatch):
+        monkeypatch.setattr(server, "_resolve_adapter", lambda name: printer)
+        answer = server.set_speed_profile(profile="sport")
+        assert answer["error"]["code"] == "UNSUPPORTED" and "percent" in answer["error"]["message"]
+
+    @pytest.mark.parametrize("kwargs", [{}, {"profile": "sport", "percent": 115}, {"profile": ""}])
+    def test_exactly_one_of_profile_or_percent(self, printer, kwargs):
+        answer = server.set_speed_profile(**kwargs)
+        assert answer["error"]["code"] == "VALIDATION_ERROR" and printer.sent == []
 
 
 class TestRunSpeedSchedule:

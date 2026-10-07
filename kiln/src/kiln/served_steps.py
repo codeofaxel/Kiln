@@ -449,9 +449,9 @@ ACT_TOOLS: dict[str, dict[str, Any]] = {
     "resume_print": {"printer_name": "name", "force": bool},
     "set_speed_profile": {
         "profile": ("silent", "standard", "sport", "ludicrous"),
+        "percent": "percent",
         "printer_name": "name",
     },
-    "set_print_speed": {"percent": "percent", "printer_name": "name"},
     "run_speed_schedule": {
         "schedule": "segments",
         "printer_name": "name",

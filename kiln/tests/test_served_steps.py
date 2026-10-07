@@ -160,7 +160,7 @@ class TestTheFence:
         assert served_steps.ACT_KIND == "act"
         assert set(served_steps.ACT_TOOLS) == {
             "upload_file", "start_print", "pause_print", "resume_print", "set_speed_profile",
-            "set_print_speed", "run_speed_schedule",
+            "run_speed_schedule",
         }
 
     def test_a_tool_cannot_ask_for_many_steps(self, slicer, handed_model):

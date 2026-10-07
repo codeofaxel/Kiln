@@ -4468,7 +4468,7 @@ def _local_copy_of(file_name: str | None) -> str | None:
 # Read-only tools have no limits.  Physically-dangerous tools get cooldowns.
 _TOOL_RATE_LIMITS: dict[str, tuple[int, int]] = {
     "set_temperature": (2000, 10),
-    "set_print_speed": (2000, 10),
+    "set_speed_profile": (2000, 10),
     "send_gcode": (500, 30),
     "emergency_stop": (5000, 3),
     "emergency_trip_input": (1000, 20),
@@ -10488,21 +10488,29 @@ def cfs_status() -> dict:
 
 
 @mcp.tool()
-def set_speed_profile(profile: str, printer_name: str | None = None) -> dict:
-    """Set the printer speed profile (Bambu Lab printers only).
+def set_speed_profile(
+    profile: str | None = None, percent: int | None = None, printer_name: str | None = None,
+) -> dict:
+    """Set the print speed: a preset by name, or a percentage of the sliced speed.
+
+    One door for both ways a printer takes a speed.  Give exactly one of:
 
     Args:
-        profile: Speed profile name — one of ``"silent"`` (50% speed,
-            quiet), ``"standard"`` (100%, default), ``"sport"`` (124%,
-            faster), or ``"ludicrous"`` (166%, maximum speed).
-        printer_name: Which printer to set.  Omit for the default printer,
-            which is what this did before it could be aimed.
+        profile: A preset — ``"silent"`` (50%), ``"standard"`` (100%),
+            ``"sport"`` (124%) or ``"ludicrous"`` (166%).  Bambu Lab
+            printers only; sport and ludicrous raise the nozzle
+            temperature to keep up with the flow.
+        percent: The speed as a percentage of the speed the file was
+            sliced at — the feedrate override every FDM firmware has (100
+            is the sliced speed; 10 to 300 is accepted).  A Bambu takes
+            only its four presets, so the nearest one is set and the
+            answer says which (``preset``, ``percent_actual``).
+        printer_name: Which printer.  Omit for the default printer.
 
-    Sport and Ludicrous modes automatically increase nozzle temperature
-    to prevent under-extrusion at higher flow rates.
-
-    Use ``printer_status()`` to see the current speed profile in the
-    response's ``printer.speed_profile`` field.
+    Nothing here judges whether a speed suits THIS printer or THIS layer:
+    Kiln's served ``set_speed_percent`` and ``set_speed_schedule`` do that
+    and hand the checked value here.  Use ``printer_status()`` to see the
+    current speed profile in ``printer.speed_profile``.
 
     Branch on ``outcome`` — one field, three values, the same shape
     ``start_print`` uses for ``print_start``:
@@ -10522,6 +10530,19 @@ def set_speed_profile(profile: str, printer_name: str | None = None) -> dict:
         return err
     if err := _check_rate_limit("set_speed_profile"):
         return err
+    has_profile = isinstance(profile, str) and bool(profile.strip())
+    if has_profile == (percent is not None):
+        return _error_dict(
+            "Give exactly one of profile (a preset name) or percent (10 to 300).",
+            code="VALIDATION_ERROR",
+        )
+    if has_profile:
+        return _set_speed_preset(profile, printer_name)
+    return _set_speed_percent(percent, printer_name)
+
+
+def _set_speed_preset(profile: str, printer_name: str | None) -> dict:
+    """The preset half of :func:`set_speed_profile`."""
     try:
         try:
             adapter = _resolve_adapter(printer_name)
@@ -10529,7 +10550,8 @@ def set_speed_profile(profile: str, printer_name: str | None = None) -> dict:
             return _unknown_printer_error(printer_name, "set the speed profile on")
         if not hasattr(adapter, "set_speed_profile"):
             return _error_dict(
-                "Speed profile control is only available on Bambu Lab printers.",
+                "Speed presets are only available on Bambu Lab printers; "
+                "pass percent instead.",
                 code="UNSUPPORTED",
             )
         verdict = CommandVerdict.coerce(adapter.set_speed_profile(profile), what="speed profile")
@@ -10546,28 +10568,8 @@ def set_speed_profile(profile: str, printer_name: str | None = None) -> dict:
         return _error_dict(f"Unexpected error in set_speed_profile: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
-def set_print_speed(percent: int, printer_name: str | None = None) -> dict:
-    """Set the print speed as a percentage of the speed the file was sliced at.
-
-    The feedrate override every FDM firmware has (100 is the sliced speed;
-    10 to 300 is accepted).  A Bambu takes only its four presets, so the
-    nearest one is set and the answer says which (``preset``,
-    ``percent_actual``).  Nothing here judges whether a speed suits THIS
-    printer or THIS layer: Kiln's served ``set_speed_percent`` and
-    ``set_speed_schedule`` do that and hand the checked value here.
-
-    Args:
-        percent: The speed, as a percentage of the sliced speed.
-        printer_name: Which printer.  Omit for the default printer.
-
-    Branch on ``outcome`` as for ``set_speed_profile``: ``confirmed``,
-    ``accepted`` or ``failed``.
-    """
-    if err := _check_auth("printer_control"):
-        return err
-    if err := _check_rate_limit("set_print_speed"):
-        return err
+def _set_speed_percent(percent: Any, printer_name: str | None) -> dict:
+    """The percentage half of :func:`set_speed_profile`."""
     if isinstance(percent, bool) or not isinstance(percent, int):
         try:
             percent = int(percent)
@@ -10585,7 +10587,7 @@ def set_print_speed(percent: int, printer_name: str | None = None) -> dict:
         from kiln.speed_schedule_runner import PRESET_PERCENT, nearest_preset, set_speed, takes_presets
 
         verdict = CommandVerdict.coerce(set_speed(adapter, percent), what="speed")
-        _audit("set_print_speed", "executed", details={"percent": percent, "printer": target_name})
+        _audit("set_speed_profile", "executed", details={"percent": percent, "printer": target_name})
         out: dict[str, Any] = {"success": verdict.ok, "percent": percent, **verdict.to_dict()}
         if takes_presets(adapter):
             preset = nearest_preset(percent)
@@ -10599,8 +10601,8 @@ def set_print_speed(percent: int, printer_name: str | None = None) -> dict:
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to set the speed: {exc}")
     except Exception as exc:
-        logger.exception("Unexpected error in set_print_speed")
-        return _error_dict(f"Unexpected error in set_print_speed: {exc}", code="INTERNAL_ERROR")
+        logger.exception("Unexpected error in set_speed_profile")
+        return _error_dict(f"Unexpected error in set_speed_profile: {exc}", code="INTERNAL_ERROR")
 
 
 #: The speed schedule running for each printer, by its lifecycle name.

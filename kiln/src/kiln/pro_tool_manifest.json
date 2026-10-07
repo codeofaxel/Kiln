@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-07T03:14:29.880285+00:00",
-  "tool_count": 430,
+  "generated": "2026-10-07T19:04:57.491991+00:00",
+  "tool_count": 423,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -1842,6 +1842,75 @@
       }
     },
     {
+      "name": "cloud_documents",
+      "description": "Push your documents to your Kiln account, or pull them back to this computer.",
+      "tier": "free",
+      "access": "free",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
+          },
+          "intake_id": {
+            "default": "",
+            "title": "Intake Id",
+            "type": "string"
+          },
+          "remote": {
+            "default": "default",
+            "title": "Remote",
+            "type": "string"
+          },
+          "record_kind": {
+            "default": "",
+            "title": "Record Kind",
+            "type": "string"
+          },
+          "bundle_path": {
+            "default": "",
+            "title": "Bundle Path",
+            "type": "string"
+          },
+          "bundle_digest": {
+            "default": "",
+            "title": "Bundle Digest",
+            "type": "string"
+          },
+          "limit": {
+            "default": 0,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "action",
+          "kind"
+        ],
+        "title": "cloud_documentsArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "sync"
+      },
+      "inputs": {
+        "files": {
+          "bundle_path": "one"
+        }
+      }
+    },
+    {
       "name": "cloud_list_remote_branches",
       "description": "List branches on the remote for *design_id*.\n\nKiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -1974,82 +2043,6 @@
       }
     },
     {
-      "name": "cloud_pull_dfm_assessments",
-      "description": "Merge a drawing's remote manufacturability verdicts into local.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
-      "category": "cloud_sync",
-      "parameters": {
-        "properties": {
-          "intake_id": {
-            "title": "Intake Id",
-            "type": "string"
-          },
-          "design_id": {
-            "default": "",
-            "title": "Design Id",
-            "type": "string"
-          },
-          "remote": {
-            "default": "default",
-            "title": "Remote",
-            "type": "string"
-          },
-          "limit": {
-            "default": 50,
-            "title": "Limit",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "intake_id"
-        ],
-        "title": "cloud_pull_dfm_assessmentsArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "sync"
-      }
-    },
-    {
-      "name": "cloud_pull_fair_records",
-      "description": "Read First Article Inspection records back from the cloud.\n\nEnterprise adds SSO, RBAC, and audit export.\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "enterprise",
-      "access": "enterprise",
-      "category": "cloud_sync",
-      "parameters": {
-        "properties": {
-          "kind": {
-            "default": "",
-            "title": "Kind",
-            "type": "string"
-          },
-          "bundle_digest": {
-            "default": "",
-            "title": "Bundle Digest",
-            "type": "string"
-          },
-          "remote": {
-            "default": "default",
-            "title": "Remote",
-            "type": "string"
-          },
-          "limit": {
-            "default": 200,
-            "title": "Limit",
-            "type": "integer"
-          }
-        },
-        "title": "cloud_pull_fair_recordsArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "sync"
-      }
-    },
-    {
       "name": "cloud_pull_feature_branch",
       "description": "Pull one feature branch's new versions from a remote.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -2095,35 +2088,6 @@
           "feature_id"
         ],
         "title": "cloud_pull_feature_branchArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "sync"
-      }
-    },
-    {
-      "name": "cloud_pull_manual_history",
-      "description": "Bring a design's manuals back from a remote, PDFs included.",
-      "tier": "free",
-      "access": "free",
-      "category": "cloud_sync",
-      "parameters": {
-        "properties": {
-          "design_id": {
-            "title": "Design Id",
-            "type": "string"
-          },
-          "remote": {
-            "default": "default",
-            "title": "Remote",
-            "type": "string"
-          }
-        },
-        "required": [
-          "design_id"
-        ],
-        "title": "cloud_pull_manual_historyArguments",
         "type": "object"
       },
       "offline": {
@@ -2185,33 +2149,6 @@
       }
     },
     {
-      "name": "cloud_pull_technical_drawings",
-      "description": "Bring the account's technical drawings back to this computer.",
-      "tier": "free",
-      "access": "free",
-      "category": "cloud_sync",
-      "parameters": {
-        "properties": {
-          "design_id": {
-            "default": "",
-            "title": "Design Id",
-            "type": "string"
-          },
-          "remote": {
-            "default": "default",
-            "title": "Remote",
-            "type": "string"
-          }
-        },
-        "title": "cloud_pull_technical_drawingsArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "sync"
-      }
-    },
-    {
       "name": "cloud_push_branch",
       "description": "Push a local branch (+ its versions + sidecars) to a remote.\n\nKiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -2252,72 +2189,6 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
-      }
-    },
-    {
-      "name": "cloud_push_dfm_assessments",
-      "description": "Mirror a drawing's manufacturability verdicts to a remote.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
-      "category": "cloud_sync",
-      "parameters": {
-        "properties": {
-          "intake_id": {
-            "title": "Intake Id",
-            "type": "string"
-          },
-          "remote": {
-            "default": "default",
-            "title": "Remote",
-            "type": "string"
-          }
-        },
-        "required": [
-          "intake_id"
-        ],
-        "title": "cloud_push_dfm_assessmentsArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "sync"
-      }
-    },
-    {
-      "name": "cloud_push_fair_records",
-      "description": "Mirror First Article Inspection records to your cloud workspace.\n\nEnterprise adds SSO, RBAC, and audit export.\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "enterprise",
-      "access": "enterprise",
-      "category": "cloud_sync",
-      "parameters": {
-        "properties": {
-          "kind": {
-            "default": "",
-            "title": "Kind",
-            "type": "string"
-          },
-          "bundle_path": {
-            "default": "",
-            "title": "Bundle Path",
-            "type": "string"
-          },
-          "remote": {
-            "default": "default",
-            "title": "Remote",
-            "type": "string"
-          }
-        },
-        "title": "cloud_push_fair_recordsArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "sync"
-      },
-      "inputs": {
-        "files": {
-          "bundle_path": "one"
-        }
       }
     },
     {
@@ -2388,35 +2259,6 @@
           "release_id"
         ],
         "title": "cloud_push_feature_releaseArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "sync"
-      }
-    },
-    {
-      "name": "cloud_push_manual_history",
-      "description": "Push a design's assembly manuals, PDFs included, to a remote.",
-      "tier": "free",
-      "access": "free",
-      "category": "cloud_sync",
-      "parameters": {
-        "properties": {
-          "design_id": {
-            "title": "Design Id",
-            "type": "string"
-          },
-          "remote": {
-            "default": "default",
-            "title": "Remote",
-            "type": "string"
-          }
-        },
-        "required": [
-          "design_id"
-        ],
-        "title": "cloud_push_manual_historyArguments",
         "type": "object"
       },
       "offline": {
@@ -2528,33 +2370,6 @@
         "kind": "sync"
       },
       "served": false
-    },
-    {
-      "name": "cloud_push_technical_drawings",
-      "description": "Push this computer's technical drawings, files included, to a remote.",
-      "tier": "free",
-      "access": "free",
-      "category": "cloud_sync",
-      "parameters": {
-        "properties": {
-          "design_id": {
-            "default": "",
-            "title": "Design Id",
-            "type": "string"
-          },
-          "remote": {
-            "default": "default",
-            "title": "Remote",
-            "type": "string"
-          }
-        },
-        "title": "cloud_push_technical_drawingsArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "sync"
-      }
     },
     {
       "name": "cloud_remote_add",

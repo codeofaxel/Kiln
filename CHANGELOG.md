@@ -7,6 +7,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Paid printer tools now work with just the free install.** Kiln's servers do the thinking, and the Kiln on your computer does the step on your printer, after showing you each action and why. Fleet routing and material rule checks (food contact, REACH, RoHS, flame, UV) work the same way.
+
 - **Round or bevel the edges of a CAD part.** Kiln edits the CAD itself and tells you any edge it left sharp.
 
 - **Kiln picks the right finish for each edge (Pro+).** See https://kiln3d.com/pricing.
