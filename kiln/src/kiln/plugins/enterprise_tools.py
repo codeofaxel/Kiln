@@ -23,6 +23,17 @@ _logger = logging.getLogger(__name__)
 _ENCRYPTION_KEY_ENV = "KILN_ENCRYPTION_KEY"
 
 
+#: What is true of the files a person keeps in their Kiln account, on every
+#: install and at every tier: the server that stores them encrypts them, with
+#: a key the server holds.  This tool otherwise answers only about THIS
+#: computer, so the sentence is carried separately and never changes with
+#: the local key.
+_ACCOUNT_FILES_SENTENCE = (
+    "Print files you keep in your Kiln account are encrypted on Kiln's "
+    "servers with a key held there."
+)
+
+
 def _encryption_not_installed() -> dict[str, Any]:
     """The answer to ``encryption_status`` where encryption at rest is not
     installed: the same keys the full answer carries, every one of them
@@ -30,6 +41,8 @@ def _encryption_not_installed() -> dict[str, Any]:
 
     Encryption is applied by the machine that stores the G-code, so there
     is nothing to ask anywhere else: a file written here is not encrypted.
+    The files kept in the account are another machine's -- Kiln's servers
+    encrypt those -- and the answer says so beside the local verdict.
     """
     import importlib.util
 
@@ -37,6 +50,7 @@ def _encryption_not_installed() -> dict[str, Any]:
     message = "G-code encryption at rest is not installed on this machine, so G-code files here are stored unencrypted."
     if key_set:
         message += f" {_ENCRYPTION_KEY_ENV} is set, but nothing on this machine uses it."
+    message += f" {_ACCOUNT_FILES_SENTENCE}"
     message += " Encryption at rest is part of Kiln Enterprise: https://kiln3d.com/pricing"
     return {
         "success": True,
@@ -46,6 +60,7 @@ def _encryption_not_installed() -> dict[str, Any]:
             "library_installed": importlib.util.find_spec("cryptography") is not None,
             "supports_rotation": False,
         },
+        "account_files": _ACCOUNT_FILES_SENTENCE,
         "message": message,
     }
 
@@ -339,12 +354,16 @@ class _EnterpriseToolsPlugin:
         def encryption_status() -> dict:
             """Check G-code encryption status and configuration.
 
-            Enterprise feature. Reports whether encryption is active,
-            whether the encryption key is configured, and whether the
-            cryptography library is installed.  On a machine where
-            encryption at rest is not installed, it answers that
-            encryption is not active here, in the same shape, and says
-            what enables it.
+            Enterprise feature. Reports whether encryption is active on
+            this computer, whether the local encryption key is configured,
+            and whether the cryptography library is installed.  On a
+            machine where encryption at rest is not installed, it answers
+            that encryption is not active here, in the same shape, and
+            says what enables it.  ``account_files`` says, on every
+            install, what is true of the print files kept in the person's
+            Kiln account: Kiln's servers encrypt those with a key held
+            there.  Local files on this computer are encrypted only when
+            the local key is set and encryption is installed here.
             """
             if err := _srv._check_auth("read"):
                 return err
@@ -358,6 +377,7 @@ class _EnterpriseToolsPlugin:
                 return {
                     "success": True,
                     "encryption": enc.status(),
+                    "account_files": _ACCOUNT_FILES_SENTENCE,
                 }
             except Exception as exc:
                 _logger.exception("Error in encryption_status")

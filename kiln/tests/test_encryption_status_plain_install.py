@@ -12,6 +12,10 @@ is local and certain: it is not active on this machine.  These tests pin:
 * a key set in the environment is reported, and the sentence says nothing
   here uses it;
 * the answer names no internal module;
+* the answer says, beside the local verdict, that the print files kept in
+  the person's Kiln account are encrypted on Kiln's servers -- true on every
+  install, and the one thing about encryption a plain install cannot judge
+  for itself;
 * the Enterprise tier gate in front of the door is unchanged;
 * ``lock_safety_profile`` locks and is enforced with nothing beyond a plain
   install.
@@ -79,6 +83,29 @@ def test_encryption_status_answers_instead_of_refusing(plain_install):
     assert "not installed on this machine" in out["message"]
     assert "unencrypted" in out["message"]
     assert "kiln3d.com/pricing" in out["message"]
+    assert "encrypted on Kiln's servers" in out["account_files"]
+    assert out["account_files"] in out["message"]
+
+
+def test_the_account_files_sentence_rides_the_installed_answer_too(plain_install, monkeypatch):
+    """With encryption installed, the local block is the module's own
+    status and the account sentence is still beside it, unchanged."""
+    import types
+
+    class _Enc:
+        def status(self) -> dict[str, Any]:
+            return {"available": True, "key_configured": True,
+                    "library_installed": True, "supports_rotation": True}
+
+    fake = types.ModuleType("kiln.gcode_encryption")
+    fake.get_gcode_encryption = lambda: _Enc()  # type: ignore[attr-defined]
+    tools = plain_install(enterprise=True)
+    monkeypatch.setitem(sys.modules, "kiln.gcode_encryption", fake)
+    out = tools["encryption_status"]()
+
+    assert out["encryption"]["available"] is True
+    assert "encrypted on Kiln's servers" in out["account_files"]
+    assert "key held there" in out["account_files"]
 
 
 def test_a_key_in_the_environment_is_reported_and_said_to_be_unused(plain_install, monkeypatch):
