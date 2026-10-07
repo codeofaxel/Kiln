@@ -669,10 +669,42 @@ def describe_actions(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return shown
 
 
-def propose(tool: str, steps: list[dict[str, Any]]) -> dict[str, Any]:
+def actions_digest(steps: list[dict[str, Any]]) -> str:
+    """A short name for exactly these actions: every tool, argument, reason
+    and ordering, hashed.  The agent is shown it with the proposal and hands
+    it back to run them; the servers decide the actions again on that call,
+    and a list that came out different has a different name, so nothing
+    runs that the agent did not see.  Nothing is kept here between the two
+    calls: the name is recomputed from what each answer asks for."""
+    import hashlib
+    import json
+
+    canonical = [
+        {
+            "id": step.get("id"),
+            "tool": step.get("tool"),
+            "args": step.get("args") if isinstance(step.get("args"), dict) else {},
+            "why": str(step.get("why") or ""),
+            "needs": list(step.get("needs") or []),
+        }
+        for step in actions_in(steps)
+    ]
+    return hashlib.sha256(json.dumps(canonical, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
+#: What the agent passes to run the actions it was shown: the digest of
+#: that proposal.  Checked against the actions the servers decide on the
+#: call that runs them.
+ACTIONS_CHANGED = "ACTIONS_CHANGED"
+
+
+def propose(tool: str, steps: list[dict[str, Any]], *, changed: bool = False) -> dict[str, Any]:
     """The answer that shows the user's agent what a served tool wants this
-    computer to do on the printer, before any of it runs."""
+    computer to do on the printer, before any of it runs.  *changed*: the
+    agent passed a digest and the servers decided differently this time;
+    nothing ran, and this is the new list."""
     actions = describe_actions(steps)
+    digest = actions_digest(steps)
     lines = []
     for n, action in enumerate(actions, 1):
         said = ", ".join(f"{k}={v!r}" for k, v in action["args"].items())
@@ -682,19 +714,28 @@ def propose(tool: str, steps: list[dict[str, Any]]) -> dict[str, Any]:
         if not action["allowed"]:
             line += " [NOT ALLOWED: this version of Kiln will refuse it]"
         lines.append(line)
+    opening = (
+        f"Kiln's servers decided {tool}'s actions differently this time, so "
+        "the ones you approved were not run. The new list:"
+        if changed else
+        f"Kiln's servers worked out what {tool} should do and want this "
+        f"computer to do {len(actions)} thing(s) on your printer. Nothing "
+        "has run yet:"
+    )
     return {
         "success": False,
         "status": "actions_proposed",
-        "code": "ACTIONS_PROPOSED",
+        "code": ACTIONS_CHANGED if changed else "ACTIONS_PROPOSED",
         "tool": tool,
         "actions": actions,
+        "actions_digest": digest,
         "error": (
-            f"Kiln's servers worked out what {tool} should do and want this "
-            f"computer to do {len(actions)} thing(s) on your printer. Nothing "
-            "has run yet:\n" + "\n".join(lines) + "\n\nShow these to the user. "
+            opening + "\n" + "\n".join(lines) + "\n\nShow these to the user. "
             f"To carry them out, call {tool} again with the same arguments and "
-            "run_actions=true. Each one goes through Kiln's own tool on this "
-            "computer, with every check that tool makes (consent, the "
+            f"run_actions=\"{digest}\". That names exactly this list: if the "
+            "servers decide differently on that call, nothing runs and you are "
+            "shown the new list. Each action goes through Kiln's own tool on "
+            "this computer, with every check that tool makes (consent, the "
             "pre-flight, one printer at a time), exactly as if you had called "
             "it yourself."
         ),

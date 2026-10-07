@@ -319,8 +319,17 @@ class TestWhatTheAgentIsShown:
         assert [a["tool"] for a in shown["actions"]] == ["upload_file", "start_print"]
         assert shown["actions"][0]["args"] == {"file_path": "part_resume_L9-abc123.3mf", "printer_name": "voron"}
         assert shown["actions"][0]["why"] == "because upload"
-        assert "run_actions=true" in shown["error"] and "Nothing has run" in shown["error"]
+        assert f'run_actions="{shown["actions_digest"]}"' in shown["error"] and "Nothing has run" in shown["error"]
         assert str(served_makes.files_dir()) not in json.dumps(shown)
+
+    def test_the_digest_names_exactly_these_actions(self):
+        steps = [_act("pause_print", "p0", printer_name="voron", keep_temps=True)]
+        same = served_steps.actions_digest(steps)
+        assert same == served_steps.actions_digest([dict(steps[0])])
+        assert same != served_steps.actions_digest([_act("pause_print", "p0", printer_name="voron", keep_temps=False)])
+        assert same != served_steps.actions_digest([_act("pause_print", "p0", printer_name="mini", keep_temps=True)])
+        assert same != served_steps.actions_digest(steps + [_act("pause_print", "p1", printer_name="mini")])
+        assert served_steps.propose("t", steps)["actions_digest"] == same
 
     def test_a_proposed_action_outside_the_fence_is_marked(self):
         shown = served_steps.propose("t", [_act("send_gcode", "g", commands="G28")])
@@ -501,7 +510,7 @@ class TestThroughTheStub:
 
         _server, tool = stub
         assert "run_actions" in inspect.signature(tool).parameters
-        assert "run_actions=true" in tool.__doc__
+        assert "actions_digest" in tool.__doc__
 
     def test_what_the_tool_needs_read_goes_with_the_first_call(self, stub, doors, handed_file, monkeypatch, tmp_path):
         server, tool = stub
@@ -551,7 +560,10 @@ class TestThroughTheStub:
                     "stages": {"upload_file": results["upload"]["data"], "start_print": results["start"]["data"]}}
 
         monkeypatch.setattr(server, "_pro_api_call", forwarded)
-        answer = tool(original_gcode_path=self._gcode(tmp_path), run_actions=True)
+        shown = tool(original_gcode_path=self._gcode(tmp_path))
+        assert shown["code"] == "ACTIONS_PROPOSED" and door_calls == []
+        calls.clear()
+        answer = tool(original_gcode_path=self._gcode(tmp_path), run_actions=shown["actions_digest"])
         assert answer["status"] == "success" and answer["stages"]["start_print"]["print_start"] == "started"
         assert [c[0] for c in door_calls] == ["upload_file", "start_print"]
         assert len(calls) == 2
@@ -565,9 +577,39 @@ class TestThroughTheStub:
         server, tool = stub
         door_calls, _ = doors
         monkeypatch.setattr(server, "_pro_api_call", lambda name, **kw: self._asks(handed_file))
-        answer = tool(original_gcode_path=self._gcode(tmp_path), run_actions=True)
+        digest = tool(original_gcode_path=self._gcode(tmp_path))["actions_digest"]
+        answer = tool(original_gcode_path=self._gcode(tmp_path), run_actions=digest)
         assert answer["code"] == "LOCAL_STEP_REFUSED" and "twice" in answer["error"]
         assert [c[0] for c in door_calls] == ["upload_file", "start_print"]
+
+    def test_a_bare_true_is_not_approval(self, stub, doors, handed_file, monkeypatch, tmp_path):
+        """The switch names the list the agent saw; ``true`` names nothing,
+        so the actions are shown again and nothing runs."""
+        server, tool = stub
+        door_calls, _ = doors
+        monkeypatch.setattr(server, "_pro_api_call", lambda name, **kw: self._asks(handed_file))
+        answer = tool(original_gcode_path=self._gcode(tmp_path), run_actions=True)
+        assert answer["code"] == "ACTIONS_PROPOSED" and door_calls == []
+
+    def test_actions_the_servers_decided_differently_are_shown_not_run(self, stub, doors, handed_file, monkeypatch, tmp_path):
+        """The call that runs the actions re-decides them on the servers.  A
+        list that differs from the one the agent approved runs nothing and
+        is shown as the new list."""
+        server, tool = stub
+        door_calls, _ = doors
+        monkeypatch.setattr(server, "_pro_api_call", lambda name, **kw: self._asks(handed_file))
+        approved = tool(original_gcode_path=self._gcode(tmp_path))["actions_digest"]
+
+        def decided_differently(name, **kw):
+            asks = self._asks(handed_file)
+            asks["local_steps"][1]["args"]["resume_from_paused"] = False
+            return asks
+
+        monkeypatch.setattr(server, "_pro_api_call", decided_differently)
+        answer = tool(original_gcode_path=self._gcode(tmp_path), run_actions=approved)
+        assert answer["code"] == "ACTIONS_CHANGED" and door_calls == []
+        assert answer["actions_digest"] != approved and "differently" in answer["error"]
+        assert answer["actions"][1]["args"]["resume_from_paused"] is False
 
     def test_a_tool_not_listed_as_acting_cannot_be_told_to(self, stub, doors, handed_file, monkeypatch, tmp_path):
         """The switch exists only where the manifest says the tool acts: a

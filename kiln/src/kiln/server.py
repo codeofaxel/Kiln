@@ -19004,7 +19004,11 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                 # Whether the user's agent has seen the actions this tool
                 # wants done on the printer and said to run them.  The
                 # stub's own switch, never forwarded.
-                run_actions = bool(kwargs.pop("run_actions", False)) if _may_act else False
+                # The digest of the proposal the agent saw (served_steps.propose);
+                # the stub's own argument, never forwarded.  A bare ``true`` names
+                # no list and runs nothing.
+                run_actions = kwargs.pop("run_actions", None) if _may_act else None
+                approved = run_actions.strip() if isinstance(run_actions, str) else ""
                 # The printer the call is about, as the person named it,
                 # before the model name goes in its place below.
                 _printer_param = (_inputs or {}).get("printer")
@@ -19065,12 +19069,17 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                     # that is there.
                     answer = served_makes.arrive(_name, answer)
                     steps = served_steps.wanted(answer)
-                    if served_steps.actions_in(steps) and not run_actions:
+                    acting = bool(served_steps.actions_in(steps))
+                    if acting and not approved:
                         # An action on the printer runs only once the
                         # user's agent has seen it: show it, run nothing.
                         return served_steps.propose(_name, steps)
+                    if acting and approved != served_steps.actions_digest(steps):
+                        # The servers decided differently from what the agent
+                        # approved: run nothing, show the new list.
+                        return served_steps.propose(_name, steps, changed=True)
                     done, refused = served_steps.carry_out(
-                        _name, steps, served_makes._upload_file, act=run_actions,
+                        _name, steps, served_makes._upload_file, act=acting,
                     )
                     if refused is not None:
                         return refused
@@ -19103,13 +19112,14 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
         if may_act and "run_actions" not in properties:
             # The switch the agent flips once it has seen what the tool
             # wants done on the printer (kiln.served_steps.propose).
-            properties["run_actions"] = {"type": "boolean", "default": False}
+            properties["run_actions"] = {"type": "string", "default": ""}
             description = (
                 f"{description}\n\nThis tool may ask this computer to act on "
                 "your printer (upload, start, pause, resume, set a speed "
                 "preset). It first answers with the actions it wants and "
-                "why, and runs nothing; call it again with run_actions=true "
-                "to carry them out through Kiln's own tools here, with every "
+                "why, and runs nothing; call it again with run_actions set "
+                "to the actions_digest it answered with to carry out exactly "
+                "those actions through Kiln's own tools here, with every "
                 "check those tools make."
             )
 
