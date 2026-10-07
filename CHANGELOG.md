@@ -316,6 +316,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Manufacturing quotes work again.** Our print partner changed how it takes in a model; quotes and ordering are back.
+
 - **Rounded CAD parts no longer show as "not closed".**
 
 - **Holes with bevelled or rounded rims are now found.**

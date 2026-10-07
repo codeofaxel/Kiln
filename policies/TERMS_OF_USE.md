@@ -791,6 +791,7 @@ Act (17 U.S.C. §512) to our designated agent:
 
 **DMCA Agent, Hadron Labs Inc.**
 Email: [adam@kiln3d.com](mailto:adam@kiln3d.com)
+Phone: (213) 973-9532
 
 Your notice must include all elements required by §512(c)(3):
 
@@ -1400,7 +1401,7 @@ those rights granted to all other end users under these Terms.
 - **General support** — [adam@kiln3d.com](mailto:adam@kiln3d.com)
 - **Billing** — [adam@kiln3d.com](mailto:adam@kiln3d.com)
 - **Legal / agreements** — [adam@kiln3d.com](mailto:adam@kiln3d.com)
-- **DMCA notices** — [adam@kiln3d.com](mailto:adam@kiln3d.com)
+- **DMCA notices** — [adam@kiln3d.com](mailto:adam@kiln3d.com), Phone: (213) 973-9532
 - **Security** — [adam@kiln3d.com](mailto:adam@kiln3d.com)
 - **Privacy** — [adam@kiln3d.com](mailto:adam@kiln3d.com)
 - **Enterprise DPA** — [adam@kiln3d.com](mailto:adam@kiln3d.com)
