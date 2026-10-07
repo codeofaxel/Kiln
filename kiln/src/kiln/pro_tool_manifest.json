@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-06T18:31:49.676262+00:00",
-  "tool_count": 429,
+  "generated": "2026-10-06T22:32:05.465217+00:00",
+  "tool_count": 430,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -22453,6 +22453,45 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      }
+    },
+    {
+      "name": "require_recent_auth",
+      "description": "Step-up check: did the person behind this call sign in recently?\n\nEnterprise adds SSO, RBAC, and audit export.\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "enterprise",
+      "access": "enterprise",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "max_age_minutes": {
+            "default": 15,
+            "title": "Max Age Minutes",
+            "type": "integer"
+          },
+          "provider": {
+            "default": "github",
+            "title": "Provider",
+            "type": "string"
+          },
+          "tenant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tenant Id"
+          }
+        },
+        "title": "require_recent_authArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {

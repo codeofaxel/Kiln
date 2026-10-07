@@ -617,12 +617,26 @@ class _DesignToolsPlugin:
                 return {"success": False, "error": str(exc)}
 
         @mcp.tool()
-        def check_material_environment(material: str, environment: str) -> dict:
-            """Check whether a material is compatible with an environment.
+        def check_material_environment(
+            material: str,
+            environment: str,
+            requirements: list[str] | None = None,
+        ) -> dict:
+            """Check whether a material is compatible with an environment, and
+            optionally whether it meets the rules the part must meet.
 
             Args:
                 material: Material ID from the design knowledge base.
                 environment: Natural language environment description.
+                requirements: Optional rules to check the material against
+                    before printing: any of ``food_safe``, ``reach``,
+                    ``rohs``, ``flame_retardant``, ``uv``.  The answer comes
+                    back under ``rule_checks``: the material's warnings at
+                    every tier, and from Kiln Business a meets / does-not-meet
+                    verdict with the reason for each requirement
+                    (https://kiln3d.com/pricing).  When the check cannot be
+                    made, ``rule_checks.checked`` is false and no
+                    requirement is called met.
             """
             from kiln.design_intelligence import check_environment_compatibility
 
@@ -648,6 +662,10 @@ class _DesignToolsPlugin:
                     "curated verdicts are a kiln-pro feature — "
                     "https://kiln3d.com/pricing."
                 )
+                if requirements:
+                    from kiln._pro_material_rules_bridge import rule_checks
+
+                    result["rule_checks"] = rule_checks(material, list(requirements))
                 return result
             except Exception as exc:
                 _logger.error(
