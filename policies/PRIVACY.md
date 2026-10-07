@@ -1,6 +1,6 @@
 # Kiln Privacy Policy
 
-*Last updated: 2026-10-04 · Version 2.10*
+*Last updated: 2026-10-06 · Version 2.11*
 
 > **Plain-English summary** — Kiln is operated by **Hadron Labs Inc.**, a
 > Delaware C corporation headquartered in California. Most of Kiln runs
@@ -398,6 +398,12 @@ kept. If you create a Kiln account through that page's sign-in button, it
 adds one to the page's count of new accounts. We keep only the day, those
 labels and a count: no cookie, no IP address, nothing stored on your
 device, and nothing in the count that names your account.
+
+A "See where to buy" link opens the maker's own store through an affiliate
+network, which records the click and may set its own cookie, so the store can
+credit Kiln with a commission if you buy. Kiln adds nothing about you to the
+link. What the network and the store collect once you leave kiln3d.com is
+covered by their own privacy policies.
 
 The **web workshop** (`app.kiln3d.com`) uses:
 
