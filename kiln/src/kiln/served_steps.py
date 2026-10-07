@@ -18,9 +18,11 @@ makes the toolpath; the servers then judge the result.
 
 ``printer_facts``: say which printers this install has -- each one's name,
 connection kind and model, and when asked, a Klipper printer's own
-configuration -- with the time they were read.  Never an address, a serial
-number or a credential: a served tool needs to know WHAT the printer is,
-and nothing here tells it where the printer is or how to reach it.
+configuration, what a printer is doing, or the named printer's current
+reading (its state, temperatures and progress, as numbers and words) --
+with the time they were read.  Never an address, a serial number or a
+credential: a served tool needs to know WHAT the printer is and what it
+reads, and nothing here tells it where the printer is or how to reach it.
 
 ``print_history``: this install's own recent print records, for a served
 tool that learns from them -- which printer and material, how the print
@@ -175,9 +177,11 @@ def _slice(tool: str, step: dict[str, Any]) -> tuple[str | None, dict[str, Any] 
 #: What a ``printer_facts`` step may ask for beyond the basics: a Klipper
 #: printer's configuration; what the named printer is doing now (``job``);
 #: what every printer is doing now (``every_job``, for a fleet-wide
-#: action).  A job is its state and how far along it is -- never the
-#: file's name, for the same reason the print-history step sends none.
-_FACTS_EXTRAS = frozenset({"klipper_config", "job", "every_job"})
+#: action); the named printer's current reading (``telemetry``, for a
+#: served tool that judges it).  A job is its state and how far along it
+#: is -- never the file's name, for the same reason the print-history step
+#: sends none.  A reading is numbers and words (:func:`_telemetry_fact`).
+_FACTS_EXTRAS = frozenset({"klipper_config", "job", "every_job", "telemetry"})
 #: How long a printer is given to answer for its configuration or its job.
 _FACTS_DEADLINE_S = 8.0
 #: How many printers are asked at once for a fleet-wide read.
@@ -202,16 +206,78 @@ def _facts_target(asked: str, entries: dict[str, Any], default: str) -> str:
 def _job_fact(adapter: Any) -> dict[str, Any]:
     """What a printer is doing now, as a served tool may know it: its state
     and how far along the job is.  Never the file's name."""
+    return _status_facts(adapter, telemetry=False)[0]
+
+
+def _status_facts(adapter: Any, *, telemetry: bool) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """One read of a printer, as the job fact and (when *telemetry*) the
+    reading fact: the two come from the same moment, never two reads that
+    could disagree."""
     from kiln.printers.base import read_status
 
     state, job = read_status(adapter)
     status = getattr(state, "effective_state", None) or getattr(state, "state", None)
-    return {
-        "state": str(getattr(status, "value", status) or "unknown"),
+    job_fact = {
+        "state": _word(status) or "unknown",
         "has_job": bool(getattr(job, "file_name", None)),
         "current_layer": getattr(job, "current_layer", None),
         "total_layers": getattr(job, "total_layers", None),
         "completion": getattr(job, "completion", None),
+    }
+    return job_fact, (_telemetry_fact(state, job) if telemetry else None)
+
+
+def _word(value: Any) -> str | None:
+    """An enum's word, or a plain string; ``None`` for anything else."""
+    value = getattr(value, "value", value)
+    return value if isinstance(value, str) and value else None
+
+
+def _number(value: Any) -> float | None:
+    """A reading's number, or ``None``: a bool is not a number here."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _whole(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def _telemetry_fact(state: Any, job: Any) -> dict[str, Any]:
+    """The named printer's current reading, as a served tool may know it.
+
+    Numbers and words only, each read off the printer's own state and job
+    by name: what it is doing, whether it is connected, its temperatures
+    (actual and target), how far along the print is, and the fault code
+    its screen shows.  Nothing that locates or authenticates it -- no
+    address, serial, access code or camera -- and never the file's name.
+    A served tool judges this the way it would judge the same numbers
+    typed into its arguments: the caller's word about their own machine.
+    """
+    headline = _word(getattr(state, "state", None)) or "unknown"
+    doing = _word(getattr(state, "effective_state", None)) or headline
+    code = getattr(state, "print_error_code", None)
+    return {
+        "state": headline,
+        "doing": doing,
+        "connected": bool(getattr(state, "connected", False)),
+        "printing": doing == "printing",
+        "paused": doing == "paused",
+        "stale": headline == "stale",
+        "tool_temp_actual": _number(getattr(state, "tool_temp_actual", None)),
+        "tool_temp_target": _number(getattr(state, "tool_temp_target", None)),
+        "bed_temp_actual": _number(getattr(state, "bed_temp_actual", None)),
+        "bed_temp_target": _number(getattr(state, "bed_temp_target", None)),
+        "chamber_temp_actual": _number(getattr(state, "chamber_temp_actual", None)),
+        "chamber_temp_target": _number(getattr(state, "chamber_temp_target", None)),
+        "progress": _number(getattr(job, "completion", None)),
+        "current_layer": _whole(getattr(job, "current_layer", None)),
+        "total_layers": _whole(getattr(job, "total_layers", None)),
+        "fault_code": code if isinstance(code, str) and code else None,
+        "reading_age_s": _number(getattr(state, "state_age_seconds", None)),
     }
 
 
@@ -270,24 +336,35 @@ def _printer_facts(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | No
             finally:
                 pool.shutdown(wait=False)
         printers.append(fact)
-    if "every_job" in want or "job" in want:
+    jobs = "every_job" in want or "job" in want
+    if jobs or "telemetry" in want:
         asked_of = [
             f for f in printers if "every_job" in want or f["name"] == target
         ]
-        _read_jobs(server, asked_of)
+        _read_jobs(
+            server, asked_of, jobs=jobs,
+            telemetry_of=target if "telemetry" in want else None,
+        )
     return {
         "read_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "printers": printers,
     }, None
 
 
-def _read_jobs(server: Any, facts: list[dict[str, Any]]) -> None:
-    """Fill ``job`` on each of *facts* from the printer itself, every printer
-    asked at once and each given the deadline; one that does not answer
-    says so.  A fleet read also marks a name that is the same MACHINE as
-    an earlier one (the server registers the active printer under
-    ``"default"`` and its config name), so a fleet-wide action reaches each
-    machine once."""
+def _read_jobs(
+    server: Any,
+    facts: list[dict[str, Any]],
+    *,
+    jobs: bool = True,
+    telemetry_of: str | None = None,
+) -> None:
+    """Fill ``job`` on each of *facts* (when *jobs*) and ``telemetry`` on the
+    one named *telemetry_of*, from the printer itself: every printer asked
+    at once and each given the deadline, one read per printer.  A printer
+    that does not answer says so, for each thing it was asked for.  A fleet
+    read also marks a name that is the same MACHINE as an earlier one (the
+    server registers the active printer under ``"default"`` and its config
+    name), so a fleet-wide action reaches each machine once."""
     import concurrent.futures
 
     if not facts:
@@ -295,6 +372,14 @@ def _read_jobs(server: Any, facts: list[dict[str, Any]]) -> None:
 
     def resolve(name: str) -> Any:
         return server._resolve_adapter(name)
+
+    def missed(fact: dict[str, Any], why: str) -> None:
+        if jobs:
+            fact["job"] = None
+            fact["job_error"] = why
+        if fact["name"] == telemetry_of:
+            fact["telemetry"] = None
+            fact["telemetry_error"] = why
 
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=_FACTS_WORKERS)
     try:
@@ -308,23 +393,29 @@ def _read_jobs(server: Any, facts: list[dict[str, Any]]) -> None:
                     raise concurrent.futures.TimeoutError()
                 built[fact["name"]] = future.result()
             except Exception as exc:  # noqa: BLE001 — said, never guessed
-                fact["job"] = None
-                fact["job_error"] = _did_not_answer(exc)
+                missed(fact, _did_not_answer(exc))
         if len(facts) > 1:
             _mark_same_machines(facts, built)
-        jobs = {name: pool.submit(_job_fact, adapter) for name, adapter in built.items()}
-        concurrent.futures.wait(jobs.values(), timeout=_FACTS_DEADLINE_S)
+        reads = {
+            name: pool.submit(_status_facts, adapter, telemetry=name == telemetry_of)
+            for name, adapter in built.items()
+        }
+        concurrent.futures.wait(reads.values(), timeout=_FACTS_DEADLINE_S)
         for fact in facts:
-            future = jobs.get(fact["name"])
+            future = reads.get(fact["name"])
             if future is None:
                 continue
             try:
                 if not future.done():
                     raise concurrent.futures.TimeoutError()
-                fact["job"] = future.result()
+                job, reading = future.result()
             except Exception as exc:  # noqa: BLE001
-                fact["job"] = None
-                fact["job_error"] = _did_not_answer(exc)
+                missed(fact, _did_not_answer(exc))
+                continue
+            if jobs:
+                fact["job"] = job
+            if fact["name"] == telemetry_of:
+                fact["telemetry"] = reading
     finally:
         pool.shutdown(wait=False)
 
@@ -742,13 +833,35 @@ def propose(tool: str, steps: list[dict[str, Any]], *, changed: bool = False) ->
     }
 
 
+def _wanted_for(read: dict[str, Any], call: dict[str, Any] | None) -> list[str]:
+    """What a listed reading asks for on this call: its ``want``, plus the
+    ``want`` of each ``want_when`` entry whose argument the call set to one
+    of the values it names (``{"param": "retry_mode", "in": ["fleet"],
+    "want": ["every_job"]}`` reads every printer only for a call that asks
+    for the fleet).  Whatever it comes to is checked by the reading's own
+    allow-list, so a condition can never ask for more than a plain listing
+    could."""
+    want = list(read.get("want") or [])
+    for when in read.get("want_when") or []:
+        if not isinstance(when, dict) or not isinstance(call, dict):
+            continue
+        param, values, more = when.get("param"), when.get("in"), when.get("want")
+        if not isinstance(param, str) or not isinstance(values, list) or not isinstance(more, list):
+            continue
+        said = call.get(param)
+        if isinstance(said, str) and said.strip().lower() in {str(v).lower() for v in values}:
+            want += [w for w in more if w not in want]
+    return want
+
+
 def read_first(
-    tool: str, reads: Any, *, printer_name: str,
+    tool: str, reads: Any, *, printer_name: str, call: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Do the reading steps a served tool's listing says it needs before it
     can answer at all, so the one round its call gets can be the round
     that acts.  ``({step id: {"data": ...}}, None)`` or ``({}, refusal)``.
-    Only a reading kind is ever done this way."""
+    Only a reading kind is ever done this way.  *call* is the call's own
+    arguments, which a listing's ``want_when`` may read (:func:`_wanted_for`)."""
     if not isinstance(reads, list) or len(reads) > MAX_STEPS:
         return {}, _refusal(
             tool, "LOCAL_STEP_REFUSED",
@@ -770,7 +883,7 @@ def read_first(
             "kind": kind,
             "id": kind,
             "printer_name": printer_name,
-            "want": list(read.get("want") or []),
+            "want": _wanted_for(read, call),
         }
         facts, refusal = do(tool, step)
         if refusal is not None or facts is None:
