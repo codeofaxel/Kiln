@@ -19017,11 +19017,13 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                 asked_printer = kwargs.get(_printer_param) if isinstance(_printer_param, str) else None
                 # What the tool needs read here before it can answer: the
                 # servers have no printer, so which one a speed is for is
-                # read on this computer and sent with the request.
+                # read on this computer and sent with the request.  A
+                # listing may ask for more when the call's own arguments say
+                # so (every printer, for a recovery that may move the job).
                 pre_read: dict = {}
                 if _reads:
                     pre_read, not_read = served_steps.read_first(
-                        _name, _reads, printer_name=str(asked_printer or ""),
+                        _name, _reads, printer_name=str(asked_printer or ""), call=kwargs,
                     )
                     if not_read is not None:
                         return not_read

@@ -465,6 +465,153 @@ class TestTheJobFact:
         assert done == {} and refused["code"] == "LOCAL_STEP_REFUSED"
 
 
+class TestTheTelemetryFact:
+    """The named printer's current reading, for a served tool that judges it
+    (a failure recovery decided on Kiln's servers): numbers and words, read
+    in the same moment as the job, and never anything that locates or
+    authenticates the printer."""
+
+    #: What the install's own config holds about each printer, secrets and
+    #: addresses included -- none of it may reach the servers.
+    CONFIG = {
+        "default": {"type": "bambu", "printer_model": "bambu_a1", "host": "192.168.1.50",
+                    "access_code": "12345678", "serial": "01P00A123456789"},
+        "voron": {"type": "moonraker", "printer_model": "voron_2", "host": "voron.local",
+                  "api_key": "SECRET-KEY-abcdef"},
+    }
+
+    class _Adapter:
+        def __init__(self, entry, state=PrinterStatus.PRINTING, **reading):
+            self.host = entry.get("host")
+            self.serial = entry.get("serial", "")
+            self.access_code = entry.get("access_code", "")
+            self.api_key = entry.get("api_key", "")
+            self.name = "fake"
+            self._state = state
+            self._reading = reading
+            self.reads = 0
+
+        def get_state(self):
+            self.reads += 1
+            fields = {"tool_temp_actual": 231.5, "tool_temp_target": 230.0,
+                      "bed_temp_actual": 60.0, "bed_temp_target": 60.0, **self._reading}
+            return PrinterState(state=self._state, connected=True, **fields)
+
+        def get_job(self):
+            return JobProgress(file_name="private-name.3mf", completion=42.0, current_layer=40,
+                               total_layers=200)
+
+    @pytest.fixture
+    def fleet(self, monkeypatch):
+        import kiln.server as server
+
+        adapters = {
+            "default": self._Adapter(self.CONFIG["default"]),
+            "voron": self._Adapter(self.CONFIG["voron"], PrinterStatus.PAUSED),
+        }
+        monkeypatch.setattr(server, "_read_config_printers", lambda: {k: dict(v) for k, v in self.CONFIG.items()})
+        monkeypatch.setattr(server, "_resolve_effective_printer_name", lambda name=None: "default")
+        monkeypatch.setattr(server, "_resolve_adapter", lambda name=None: adapters[name])
+        return adapters
+
+    def _read(self, **step):
+        done, refused = served_steps.carry_out(
+            "auto_recover", [{"kind": "printer_facts", "id": "printer_facts", **step}], _send,
+        )
+        assert refused is None, refused
+        return {p["name"]: p for p in done["printer_facts"]["data"]["printers"]}, done
+
+    def test_the_named_printers_reading_is_numbers_and_words(self, fleet):
+        by_name, _ = self._read(printer_name="default", want=["telemetry"])
+        assert by_name["default"]["telemetry"] == {
+            "state": "printing", "doing": "printing", "connected": True,
+            "printing": True, "paused": False, "stale": False,
+            "tool_temp_actual": 231.5, "tool_temp_target": 230.0,
+            "bed_temp_actual": 60.0, "bed_temp_target": 60.0,
+            "chamber_temp_actual": None, "chamber_temp_target": None,
+            "progress": 42.0, "current_layer": 40, "total_layers": 200,
+            "fault_code": None, "reading_age_s": None,
+        }
+        # Only what was asked, and only for the printer the call is about.
+        assert "job" not in by_name["default"]
+        assert "telemetry" not in by_name["voron"] and fleet["voron"].reads == 0
+
+    def test_nothing_that_locates_or_authenticates_the_printer_leaves(self, fleet):
+        _by_name, done = self._read(printer_name="voron_2", want=["telemetry", "every_job"])
+        sent = json.dumps(done)
+        for entry in self.CONFIG.values():
+            for key, value in entry.items():
+                if key not in ("type", "printer_model"):
+                    assert value not in sent, f"{key} reached the servers"
+        for adapter in fleet.values():
+            for value in (adapter.host, adapter.serial, adapter.access_code, adapter.api_key):
+                if value:
+                    assert value not in sent
+        assert "private-name" not in sent
+        for key in ("host", "serial", "access_code", "api_key", "file_name"):
+            assert f'"{key}"' not in sent
+
+    def test_every_value_is_a_plain_number_word_or_flag(self, fleet):
+        by_name, _ = self._read(printer_name="default", want=["telemetry"])
+        for key, value in by_name["default"]["telemetry"].items():
+            assert value is None or isinstance(value, (bool, int, float, str)), key
+
+    def test_the_job_and_the_reading_come_from_one_read(self, fleet):
+        by_name, _ = self._read(printer_name="default", want=["job", "telemetry"])
+        assert by_name["default"]["job"]["current_layer"] == 40
+        assert by_name["default"]["telemetry"]["current_layer"] == 40
+        assert fleet["default"].reads == 1
+
+    def test_a_fleet_read_reads_every_job_and_only_the_named_printers_reading(self, fleet):
+        by_name, _ = self._read(printer_name="default", want=["every_job", "telemetry"])
+        assert by_name["default"]["job"]["state"] == "printing"
+        assert by_name["voron"]["job"]["state"] == "paused"
+        assert "telemetry" in by_name["default"] and "telemetry" not in by_name["voron"]
+
+    def test_a_stale_reading_says_so_and_carries_no_temperatures(self, fleet):
+        fleet["default"]._reading = {"state_age_seconds": 400.0, "state_stale_after_seconds": 60.0}
+        by_name, _ = self._read(printer_name="default", want=["telemetry"])
+        reading = by_name["default"]["telemetry"]
+        assert reading["state"] == "stale" and reading["stale"] is True
+        assert reading["doing"] == "printing"  # what it was last seen doing
+        assert reading["tool_temp_actual"] is None and reading["bed_temp_target"] is None
+        assert reading["reading_age_s"] == 400.0
+
+    def test_a_printer_that_cannot_be_read_says_so_never_guesses(self, fleet, monkeypatch):
+        import kiln.server as server
+
+        def resolve(name=None):
+            raise RuntimeError("connection refused to 192.168.1.50")
+
+        monkeypatch.setattr(server, "_resolve_adapter", resolve)
+        by_name, done = self._read(printer_name="default", want=["telemetry"])
+        assert by_name["default"]["telemetry"] is None
+        assert by_name["default"]["telemetry_error"] == "the printer could not be asked"
+        assert "192.168.1.50" not in json.dumps(done)
+
+    def test_a_listing_reads_every_printer_only_when_the_call_asks_for_the_fleet(self, fleet):
+        reads = [{"kind": "printer_facts", "want": ["job", "telemetry"],
+                  "want_when": [{"param": "retry_mode", "in": ["fleet", "auto"], "want": ["every_job"]}]}]
+        plain, refused = served_steps.read_first("auto_recover", reads, printer_name="default",
+                                                 call={"retry_mode": "off"})
+        assert refused is None
+        by_name = {p["name"]: p for p in plain["printer_facts"]["data"]["printers"]}
+        assert "job" in by_name["default"] and "job" not in by_name["voron"]
+        moved, refused = served_steps.read_first("auto_recover", reads, printer_name="default",
+                                                 call={"retry_mode": "Fleet"})
+        assert refused is None
+        by_name = {p["name"]: p for p in moved["printer_facts"]["data"]["printers"]}
+        assert by_name["voron"]["job"]["state"] == "paused"
+        assert "telemetry" in by_name["default"] and "telemetry" not in by_name["voron"]
+
+    def test_a_condition_never_asks_for_more_than_a_listing_could(self, fleet):
+        reads = [{"kind": "printer_facts", "want": [],
+                  "want_when": [{"param": "retry_mode", "in": ["fleet"], "want": ["host"]}]}]
+        done, refused = served_steps.read_first("auto_recover", reads, printer_name="default",
+                                                call={"retry_mode": "fleet"})
+        assert done == {} and refused["code"] == "LOCAL_STEP_REFUSED"
+
+
 class TestThroughTheStub:
     """The stub shows the agent what the servers want, runs it only on the
     agent's say-so, and reads first what the tool is listed as needing."""

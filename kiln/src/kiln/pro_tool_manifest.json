@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-07T19:04:57.491991+00:00",
+  "generated": "2026-10-07T22:56:52.759172+00:00",
   "tool_count": 423,
   "categories": {
     "product_generators": {
@@ -15646,6 +15646,21 @@
             "default": false,
             "title": "Allow Skip Failed Objects",
             "type": "boolean"
+          },
+          "gcode_path": {
+            "default": "",
+            "title": "Gcode Path",
+            "type": "string"
+          },
+          "snapshot_path": {
+            "default": "",
+            "title": "Snapshot Path",
+            "type": "string"
+          },
+          "baseline_snapshot_path": {
+            "default": "",
+            "title": "Baseline Snapshot Path",
+            "type": "string"
           }
         },
         "required": [
@@ -15656,9 +15671,41 @@
       },
       "offline": {
         "schema_version": 1,
-        "kind": "made"
+        "kind": "verdict"
       },
-      "served": false
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "job",
+              "telemetry"
+            ],
+            "want_when": [
+              {
+                "param": "retry_mode",
+                "in": [
+                  "fleet",
+                  "auto"
+                ],
+                "want": [
+                  "every_job"
+                ]
+              }
+            ]
+          }
+        ],
+        "acts": true
+      },
+      "inputs": {
+        "files": {
+          "gcode_path": "one",
+          "snapshot_path": "one",
+          "baseline_snapshot_path": "one"
+        },
+        "printer": "printer_name"
+      }
     },
     {
       "name": "cancel_auto_recover",
