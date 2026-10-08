@@ -1020,7 +1020,7 @@ class TestGetAdapter:
         # read the developer's real ~/.kiln/config.yaml.
         monkeypatch.setattr(mod, "_runtime_config_resolved", True)
 
-        with pytest.raises(RuntimeError, match="KILN_PRINTER_HOST"):
+        with pytest.raises(RuntimeError, match="No printer configured"):
             mod._get_adapter()
 
     def test_registry_default_answers_when_env_unset(self, monkeypatch):
@@ -1062,7 +1062,7 @@ class TestGetAdapter:
         assert mod._get_adapter() is adapter
 
     def test_empty_registry_still_raises_env_error(self, monkeypatch):
-        """No env host AND empty registry keeps the actionable env-var error."""
+        """No env host AND empty registry still raises the no-printer error."""
         import kiln.server as mod
 
         monkeypatch.setattr(mod, "_adapter", None)
@@ -1070,8 +1070,28 @@ class TestGetAdapter:
         monkeypatch.setattr(mod, "_registry", PrinterRegistry())
         monkeypatch.setattr(mod, "_runtime_config_resolved", True)  # see test_missing_host
 
-        with pytest.raises(RuntimeError, match="KILN_PRINTER_HOST"):
+        with pytest.raises(RuntimeError, match="No printer configured"):
             mod._get_adapter()
+
+    def test_a_printer_door_tells_a_person_how_to_add_one(self, monkeypatch):
+        """With nothing set up, a printer door's refusal names the two ways a
+        person adds a printer -- not environment variables, which only
+        someone embedding Kiln sets -- and keeps the words the print monitor
+        panels read to tell "nothing set up" from "printer offline"."""
+        import kiln.server as mod
+
+        monkeypatch.setattr(mod, "_adapter", None)
+        monkeypatch.setattr(mod, "_PRINTER_HOST", "")
+        monkeypatch.setattr(mod, "_registry", PrinterRegistry())
+        monkeypatch.setattr(mod, "_runtime_config_resolved", True)  # see test_missing_host
+
+        for door in (mod.printer_status, mod.pause_print):
+            result = door()
+            assert result["success"] is False, result
+            message = result["error"]["message"]
+            assert "no printer configured" in message.lower(), message
+            assert "register_printer" in message and "kiln setup" in message, message
+            assert "environment variable" not in message, message
 
     def test_missing_api_key_for_octoprint(self, monkeypatch):
         """Missing KILN_PRINTER_API_KEY raises RuntimeError for octoprint."""

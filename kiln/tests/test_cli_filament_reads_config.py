@@ -115,9 +115,9 @@ def test_an_unknown_name_is_still_refused_by_name(bare_process):
         bare_process._resolve_adapter("garage-x1c")
 
 
-def test_nothing_configured_anywhere_keeps_the_env_error(bare_process, tmp_path, monkeypatch):
+def test_nothing_configured_anywhere_keeps_the_no_printer_error(bare_process, tmp_path, monkeypatch):
     (tmp_path / "home" / ".kiln" / "config.yaml").unlink()
-    with pytest.raises(RuntimeError, match="KILN_PRINTER_HOST"):
+    with pytest.raises(RuntimeError, match="No printer configured"):
         bare_process._get_adapter()
 
 

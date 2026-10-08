@@ -1456,6 +1456,17 @@ _install_published_schema()
 
 _adapter: PrinterAdapter | None = None
 
+#: What every printer door says when no printer is set up anywhere (no
+#: environment, no config.yaml entry, an empty registry): the two ways a
+#: person actually adds one.  Every door embeds this sentence in its own
+#: refusal, so it is worded here once.  Keep the opening words: the print
+#: monitor panels tell "nothing set up" from "printer offline" by them.
+NO_PRINTER_CONFIGURED = (
+    "No printer configured in Kiln yet. Add one with register_printer "
+    "(discover_printers finds the printers on your network), or run "
+    "`kiln setup` in a terminal."
+)
+
 
 def _get_adapter() -> PrinterAdapter:
     """Return the lazily-initialised printer adapter.
@@ -1521,11 +1532,7 @@ def _get_adapter() -> PrinterAdapter:
             ensure_runtime_config()
             if _PRINTER_HOST:
                 return _get_adapter()
-        raise RuntimeError(
-            "No printer configured. Set KILN_PRINTER_HOST environment variable "
-            "to the printer URL (e.g. http://octopi.local). Also set "
-            "KILN_PRINTER_API_KEY and optionally KILN_PRINTER_TYPE."
-        )
+        raise RuntimeError(NO_PRINTER_CONFIGURED)
     if printer_type == "octoprint":
         if not api_key:
             raise RuntimeError(
