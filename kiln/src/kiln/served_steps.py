@@ -683,7 +683,7 @@ def actions_digest(steps: list[dict[str, Any]]) -> str:
         {
             "id": step.get("id"),
             "tool": step.get("tool"),
-            "args": step.get("args") if isinstance(step.get("args"), dict) else {},
+            "args": _digest_args(step.get("args") if isinstance(step.get("args"), dict) else {}),
             "why": str(step.get("why") or ""),
             "needs": list(step.get("needs") or []),
         }
@@ -692,19 +692,38 @@ def actions_digest(steps: list[dict[str, Any]]) -> str:
     return hashlib.sha256(json.dumps(canonical, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 
+def _digest_args(args: dict[str, Any]) -> dict[str, Any]:
+    """*args* as the digest sees them: a handed file by its NAME, never its
+    path.  The servers build the file again on the call that runs the
+    actions, in a fresh scratch folder, and this computer saves it under a
+    fresh token (:func:`kiln.served_makes._safe_filename`), so the path is
+    different every time while the file the servers named is the same.
+    Hashing the path made every upload-and-start proposal come back as a
+    changed list, forever (found 2026-10-07 by the served auto_recover,
+    and true of the served resume before it)."""
+    return {
+        key: (Path(value).name if key == "file_path" and isinstance(value, str) else value)
+        for key, value in args.items()
+    }
+
+
 #: What the agent passes to run the actions it was shown: the digest of
 #: that proposal.  Checked against the actions the servers decide on the
 #: call that runs them.
 ACTIONS_CHANGED = "ACTIONS_CHANGED"
 
 
-def propose(tool: str, steps: list[dict[str, Any]], *, changed: bool = False) -> dict[str, Any]:
+def propose(
+    tool: str, steps: list[dict[str, Any]], *, changed: bool = False, digest: str | None = None,
+) -> dict[str, Any]:
     """The answer that shows the user's agent what a served tool wants this
     computer to do on the printer, before any of it runs.  *changed*: the
     agent passed a digest and the servers decided differently this time;
-    nothing ran, and this is the new list."""
+    nothing ran, and this is the new list.  *digest*: the list's name as
+    computed over the servers' own answer, before this computer renamed
+    the files it saved (:func:`actions_digest`); computed here otherwise."""
     actions = describe_actions(steps)
-    digest = actions_digest(steps)
+    digest = digest or actions_digest(steps)
     lines = []
     for n, action in enumerate(actions, 1):
         said = ", ".join(f"{k}={v!r}" for k, v in action["args"].items())

@@ -331,6 +331,18 @@ class TestWhatTheAgentIsShown:
         assert same != served_steps.actions_digest(steps + [_act("pause_print", "p1", printer_name="mini")])
         assert served_steps.propose("t", steps)["actions_digest"] == same
 
+    def test_a_handed_file_is_named_by_its_name_not_its_path(self, handed_file):
+        """The servers build the file again on the call that runs the
+        actions, in a fresh scratch folder, and this computer saves it under
+        a fresh token: the path differs every call, the file's name does
+        not.  Before this, every upload-and-start proposal came back as a
+        changed list, forever."""
+        first = [_act("upload_file", "u", file_path="/srv/scratch/abc/part_resume_L9.3mf", printer_name="voron")]
+        second = [_act("upload_file", "u", file_path="/srv/scratch/xyz/part_resume_L9.3mf", printer_name="voron")]
+        other = [_act("upload_file", "u", file_path="/srv/scratch/xyz/part_resume_L12.3mf", printer_name="voron")]
+        assert served_steps.actions_digest(first) == served_steps.actions_digest(second)
+        assert served_steps.actions_digest(first) != served_steps.actions_digest(other)
+
     def test_a_proposed_action_outside_the_fence_is_marked(self):
         shown = served_steps.propose("t", [_act("send_gcode", "g", commands="G28")])
         assert shown["actions"][0]["allowed"] is False and "NOT ALLOWED" in shown["error"]
@@ -581,6 +593,44 @@ class TestThroughTheStub:
         answer = tool(original_gcode_path=self._gcode(tmp_path), run_actions=digest)
         assert answer["code"] == "LOCAL_STEP_REFUSED" and "twice" in answer["error"]
         assert [c[0] for c in door_calls] == ["upload_file", "start_print"]
+
+    def test_the_approval_survives_the_install_renaming_the_handed_file(self, stub, doors, handed_file, monkeypatch, tmp_path):
+        """What the servers hand back is saved here under a fresh token each
+        call (served_makes._safe_filename), so the local path the actions
+        carry differs between the proposal and the call that runs it.  The
+        digest is taken over the servers' own answer, before that renaming,
+        so the agent's approval still names the list that runs."""
+        server, tool = stub
+        door_calls, _ = doors
+        calls: list[dict] = []
+        brought: list[str] = []
+
+        def arrive_renaming(name, answer, **kw):
+            # Stand in for the real save-by-arrival: same server answer, a
+            # different local name every time a handed file is brought.
+            for step in served_steps.wanted(answer):
+                if step.get("tool") == "upload_file":
+                    local = str(Path(handed_file).with_name(f"part_resume_L9-{len(brought):06d}.3mf"))
+                    Path(local).write_bytes(b"PK\x03\x04resume")
+                    brought.append(local)
+                    step["args"]["file_path"] = local
+            return answer
+
+        def forwarded(name, **kwargs):
+            calls.append(kwargs)
+            results = kwargs.get("step_results") or {}
+            if "upload" not in results:
+                return self._asks("/srv/scratch/" + ("abc" if len(calls) == 1 else "xyz") + "/part_resume_L9.3mf")
+            return {"status": "success", "stages": {}}
+
+        monkeypatch.setattr(server, "_pro_api_call", forwarded)
+        monkeypatch.setattr(served_makes, "arrive", arrive_renaming)
+        shown = tool(original_gcode_path=self._gcode(tmp_path))
+        assert shown["code"] == "ACTIONS_PROPOSED" and door_calls == []
+        answer = tool(original_gcode_path=self._gcode(tmp_path), run_actions=shown["actions_digest"])
+        assert answer.get("code") != "ACTIONS_CHANGED", answer
+        assert [c[0] for c in door_calls] == ["upload_file", "start_print"]
+        assert len(set(brought)) == 2, "the stand-in must have renamed the file between the two calls"
 
     def test_a_bare_true_is_not_approval(self, stub, doors, handed_file, monkeypatch, tmp_path):
         """The switch names the list the agent saw; ``true`` names nothing,

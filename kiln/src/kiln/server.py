@@ -19065,6 +19065,12 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                 # result.  Once: a tool that asks twice is told no.
                 steps = served_steps.wanted(answer)
                 if steps:
+                    # The list's name is taken over the servers' own answer,
+                    # BEFORE arrive() saves the handed files under names of
+                    # this computer's choosing: those names carry a fresh
+                    # token per call, and a name that changes every call is
+                    # a digest that never matches.
+                    digest = served_steps.actions_digest(steps)
                     # What a step works on is saved in Kiln's own folder,
                     # never where the call asked for its OUTPUT: it is not
                     # the person's file, and a step runs only on a file
@@ -19075,11 +19081,11 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                     if acting and not approved:
                         # An action on the printer runs only once the
                         # user's agent has seen it: show it, run nothing.
-                        return served_steps.propose(_name, steps)
-                    if acting and approved != served_steps.actions_digest(steps):
+                        return served_steps.propose(_name, steps, digest=digest)
+                    if acting and approved != digest:
                         # The servers decided differently from what the agent
                         # approved: run nothing, show the new list.
-                        return served_steps.propose(_name, steps, changed=True)
+                        return served_steps.propose(_name, steps, changed=True, digest=digest)
                     done, refused = served_steps.carry_out(
                         _name, steps, served_makes._upload_file, act=acting,
                     )
