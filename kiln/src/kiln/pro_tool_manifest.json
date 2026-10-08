@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-07T22:56:52.759172+00:00",
+  "generated": "2026-10-08T22:35:24.300968+00:00",
   "tool_count": 423,
   "categories": {
     "product_generators": {
@@ -6473,8 +6473,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      },
-      "served": false
+      }
     },
     {
       "name": "list_designs",
@@ -8068,8 +8067,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      },
-      "served": false
+      }
     },
     {
       "name": "retire_feature_branch",
@@ -8738,8 +8736,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      },
-      "served": false
+      }
     },
     {
       "name": "sign_feature_release",
