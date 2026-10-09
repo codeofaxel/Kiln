@@ -10,10 +10,12 @@ registration step, not SDCP, and Kiln has no adapter for it yet.
 
 The adapter uses:
 
-* **WebSocket** on port 3030 for status, commands, and control.
+* **WebSocket** on TCP port 3030 for status, commands, and control.
 * **UDP** broadcast on port 3000 for printer discovery.
-* **HTTP file server** for file uploads (the printer fetches files from a
-  URL you provide — Kiln starts a temporary HTTP server).
+* **HTTP upload** to the printer's own ``:3030/uploadFile/upload`` (SDCP V3,
+  tried first).  Older SDCP V2 firmware instead fetches the file from a URL,
+  for which Kiln starts a temporary HTTP server (the fallback; see
+  :meth:`ElegooAdapter.upload_file`).
 
 .. note::
 

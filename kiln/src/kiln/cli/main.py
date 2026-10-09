@@ -10436,7 +10436,14 @@ def doctor_prusa(ctx: click.Context, json_mode: bool) -> None:
 
 @cli.command("doctor-creality")
 @click.option("--host", default=None, help="Printer IP/hostname/URL to probe without loading saved config.")
-@click.option("--api-key", default=None, help="Moonraker API key, if local auth is enabled.")
+@click.option(
+    "--api-key",
+    default=None,
+    help=(
+        "Moonraker API key. Needed only when this computer is outside the "
+        "printer's Moonraker trusted_clients list; Moonraker always checks."
+    ),
+)
 @click.option("--model", default=None, help="Printer model hint (e.g. k1_max) for capability guidance.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
@@ -10591,15 +10598,24 @@ def _deep_network_diagnostics(host: str, printer_cfg: dict) -> list[dict]:
     Tests ICMP reachability, TCP port connectivity, and provides
     actionable guidance based on failure patterns.
 
-    :param host: Printer IP address or hostname.
+    :param host: The printer's saved host.  For the HTTP backends that is a
+        URL (``http://octopi.local:5000``); the hostname is taken out of it
+        here, and a port the URL names is probed before any default.
     :param printer_cfg: Full printer config dict.
     :returns: List of check dicts for the doctor output.
     """
     import socket
     import subprocess
+    from urllib.parse import urlsplit
 
     checks: list[dict] = []
     printer_type = str(printer_cfg.get("type", "")).strip().lower()
+
+    # A saved HTTP host is a URL; ping and sockets want its hostname.
+    parts = urlsplit(host if "//" in host else f"//{host}")
+    host = parts.hostname or host
+    configured_port = parts.port
+    is_https = parts.scheme.lower() == "https"
 
     # --- 1. ICMP Ping ---
     ping_ok = False
@@ -10632,14 +10648,18 @@ def _deep_network_diagnostics(host: str, printer_cfg: dict) -> list[dict]:
         return checks
 
     # --- 2. TCP port scan ---
-    # Ports depend on printer type.
+    # Default ports per printer type.  The port the saved URL names (if
+    # any) comes first: it is the one Kiln itself will use.
+    from kiln.printers.elegoo import _WS_PORT as _ELEGOO_TCP_PORT
+
     port_map: dict[str, list[tuple[int, str]]] = {
         "bambu": [
             (8883, "MQTTS (control/status)"),
             (990, "FTPS (file upload)"),
         ],
         "octoprint": [
-            (80, "HTTP"),
+            (80, "HTTP (OctoPi / reverse proxy)"),
+            (5000, "OctoPrint's own port"),
             (443, "HTTPS"),
         ],
         "moonraker": [
@@ -10659,11 +10679,19 @@ def _deep_network_diagnostics(host: str, printer_cfg: dict) -> list[dict]:
             (80, "HTTP"),
             (443, "HTTPS"),
         ],
+        # The adapter's TCP service port; discovery is UDP and cannot be
+        # probed this way.
         "elegoo": [
-            (3000, "SDCP"),
+            (_ELEGOO_TCP_PORT, "SDCP (WebSocket + upload)"),
         ],
     }
-    ports_to_check = port_map.get(printer_type, [(80, "HTTP"), (443, "HTTPS")])
+    ports_to_check = list(port_map.get(printer_type, [(80, "HTTP"), (443, "HTTPS")]))
+    if is_https:
+        ports_to_check.sort(key=lambda entry: entry[0] != 443)
+    if configured_port is not None:
+        ports_to_check = [(configured_port, "the port your saved host names")] + [
+            entry for entry in ports_to_check if entry[0] != configured_port
+        ]
 
     any_port_open = False
     all_no_route = True

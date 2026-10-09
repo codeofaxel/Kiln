@@ -74,15 +74,17 @@ _MODEL_ALIASES: dict[str, str] = {
 _OFFICIAL_ROOT_SERVICE_MODELS: frozenset[str] = frozenset(
     {"k1", "k1_max", "k1c", "ender3_v3_ke", "cr10_se"}
 )
+# Models whose 2025 revision has no root path.  Kiln cannot tell a 2025 unit
+# from the profile key, so the note goes on every unit of the model.
+_UNROOTABLE_2025_REVISIONS: frozenset[str] = frozenset({"k1c", "k1_max"})
 # Models whose maker documents a stock Fluidd interface on port 4408, each
-# on the maker's own quick-start page for that model (never inferred from
-# a sibling): the Ender-3 V3 and the Ender-3 V3 Plus.
-_OFFICIAL_STOCK_FLUIDD_MODELS: frozenset[str] = frozenset({"ender3_v3", "ender3_v3_plus"})
-_COMMUNITY_FLUIDD_MODELS: frozenset[str] = frozenset(
-    {"k2", "k2_pro", "k2_plus", "creality_hi"}
+# for that model itself (never inferred from a sibling).
+_OFFICIAL_STOCK_FLUIDD_MODELS: frozenset[str] = frozenset(
+    {"ender3_v3", "ender3_v3_plus", "k2", "k2_pro", "k2_plus"}
 )
+_COMMUNITY_FLUIDD_MODELS: frozenset[str] = frozenset({"creality_hi"})
 _UNKNOWN_STOCK_MOONRAKER_MODELS: frozenset[str] = frozenset(
-    {"sparkx_i7", "k1_se", "k2_se", "ender3_v4", "ender5_max"}
+    {"k1_se", "k2_se", "ender3_v4", "ender5_max"}
 )
 _LEGACY_SERIAL_MODELS: frozenset[str] = frozenset(
     {"ender3", "ender3_v2", "ender3_s1", "ender3_s1_pro", "ender5", "cr10",
@@ -210,14 +212,25 @@ def _model_local_access_notes(model: str | None) -> list[str]:
             "Fluidd reachability is not enough for Kiln by itself; Kiln still needs a Moonraker /server/info response on a probed port.",
         ]
     if normalised in _OFFICIAL_ROOT_SERVICE_MODELS:
-        return [
+        notes = [
             "Official Creality firmware/Annex notes for this family point to a root or service-enabled Fluidd/Mainsail/Moonraker path, not a stock Moonraker guarantee.",
             "If Fluidd/Mainsail or Moonraker was installed, verify it after firmware updates because official notes say configuration files may be overwritten.",
         ]
+        if normalised in _UNROOTABLE_2025_REVISIONS:
+            notes.append(
+                "The 2025 revision of this model cannot be rooted, so on a 2025 unit this path is closed; use Creality Print or the printer's own app instead."
+            )
+        return notes
     if normalised in _COMMUNITY_FLUIDD_MODELS:
         return [
             "Official Creality sources confirm Klipper/LAN-capable firmware for this family, but Fluidd/Moonraker port behavior is community or third-party confirmed.",
             "Try http://<printer-ip>:4408 as a diagnostic hint, then save the printer only after /server/info returns Moonraker JSON.",
+        ]
+    if normalised == "sparkx_i7":
+        # No port is published, so Kiln still has to find Moonraker by probing.
+        return [
+            "From firmware 1.1.2.4 the i7 starts with root permission off, and its Fluidd backend is unavailable until root permission is turned on in the printer's settings.",
+            "Turn root permission on, then use the Creality adapter only if /server/info is reachable; Creality publishes no port for it.",
         ]
     if normalised in _UNKNOWN_STOCK_MOONRAKER_MODELS:
         return [
@@ -378,7 +391,7 @@ def _next_steps_for_failed_probe(
     _, _, _, next_steps = _classify_failed_probe(host, checks, model=model)
     if any(check.auth_required for check in checks):
         return [
-            "Moonraker answered but rejected the request. Pass --api-key or set KILN_PRINTER_API_KEY if auth is enabled.",
+            "Moonraker answered but rejected the request. This computer is outside the printer's Moonraker trusted_clients list, so pass --api-key or set KILN_PRINTER_API_KEY.",
             "Paste http://<printer-ip>:7125/server/info into a browser on the same LAN to confirm the printer prompts or responds.",
         ] + _model_local_access_notes(model)
     return next_steps

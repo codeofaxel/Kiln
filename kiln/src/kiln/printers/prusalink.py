@@ -51,6 +51,16 @@ _RETRYABLE_STATUS_CODES: frozenset[int] = frozenset({502, 503, 504})
 _FILE_ROOTS: tuple[str, ...] = ("usb", "local")
 _FILE_ROOT_FALLBACK_HTTP_CODES: tuple[int, ...] = (403, 404)
 
+#: What PrusaLink on a Raspberry Pi puts in the body of the HTTP 403 it
+#: answers a wrong or empty ``X-Api-Key`` with.  It is an authentication failure wearing a 403, so it must never be
+#: read as a storage-root or permission problem.
+_BAD_API_KEY_MARKER = "Bad X-Api-Key"
+
+
+class PrusaLinkAuthError(PrinterError):
+    """The printer refused Kiln's API key."""
+
+
 # Printer type codes reported in the ``printer`` field of GET /api/version
 # by PrusaLink on Buddy firmware (MINI / MK3.5 / MK3.9 / MK4 / XL / iX /
 # Core One).  Verified against Prusa-Firmware-Buddy
@@ -479,6 +489,16 @@ class PrusaLinkAdapter(PrinterAdapter):
                             f"with: kiln auth --name <name> --host {self._host} "
                             f"--type prusalink --api-key <YOUR_KEY>",
                         )
+                    if response.status_code == 403 and _BAD_API_KEY_MARKER in (response.text or ""):
+                        raise PrusaLinkAuthError(
+                            f"Prusa Link at {self._host} refused the API key (HTTP 403, "
+                            f"'{_BAD_API_KEY_MARKER}'). That is how PrusaLink on a Raspberry Pi "
+                            f"(MK3S/MK2.5) answers a wrong or empty key: its API key is separate from the login the setup "
+                            f"wizard made, is empty until you make one, and is made in PrusaLink's "
+                            f"web page under Settings, not on the printer's screen. Then update "
+                            f"with: kiln auth --name <name> --host {self._host} "
+                            f"--type prusalink --api-key <YOUR_KEY>",
+                        )
                     if response.status_code == 403:
                         endpoint_hint = (
                             " This endpoint is under /api/v1/files; if status/cancel work but "
@@ -583,6 +603,9 @@ class PrusaLinkAdapter(PrinterAdapter):
 
     @classmethod
     def _is_storage_fallback_error(cls, exc: PrinterError) -> bool:
+        if isinstance(exc, PrusaLinkAuthError):
+            # A refused key is the same on every storage root.
+            return False
         return any(cls._is_http_error(exc, code) for code in _FILE_ROOT_FALLBACK_HTTP_CODES)
 
     def _iter_file_roots(self, preferred: str | None = None) -> list[str]:
