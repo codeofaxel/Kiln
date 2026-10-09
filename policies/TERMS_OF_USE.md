@@ -1,6 +1,6 @@
 # Kiln Terms of Use
 
-*Last updated: 2026-06-15 · Version 3.0*
+*Last updated: 2026-10-08 · Version 3.1*
 
 > **Plain-English summary** — These terms govern your use of Kiln,
 > operated by Hadron Labs Inc. Kiln has two sides:
@@ -879,6 +879,9 @@ On termination, the following cascade applies:
   this 90-day retention period; the two are complementary — the
   export window is when you can pull a copy, the retention period
   is how long the data remains before permanent deletion.)
+- If you choose **Erase now** when you delete your account, these
+  are erased immediately instead, and there is nothing left to
+  reinstate.
 
 **Org-owned designs (where you contributed):**
 
