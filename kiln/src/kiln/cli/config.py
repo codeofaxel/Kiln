@@ -28,6 +28,8 @@ from kiln.printer_backends import (
     DEFAULT_SERIAL_BAUDRATE,
     PRINTER_TYPES,
     format_printer_types,
+    missing_needs,
+    needs_sentence,
 )
 
 logger = logging.getLogger(__name__)
@@ -573,14 +575,10 @@ def validate_printer_config(cfg: dict[str, Any]) -> tuple[bool, str | None]:
     if not host:
         return False, "host is required"
 
-    if ptype == "octoprint" and not cfg.get("api_key"):
-        return False, "api_key is required for OctoPrint printers"
-
-    if ptype == "bambu":
-        if not cfg.get("access_code"):
-            return False, "access_code is required for Bambu printers"
-        if not cfg.get("serial"):
-            return False, "serial is required for Bambu printers"
+    gaps = missing_needs(ptype, cfg)
+    if gaps:
+        keys = " and ".join(need.key for need in gaps)
+        return False, f"{needs_sentence(ptype, gaps)} In config.yaml it goes under {keys}."
 
     return True, None
 

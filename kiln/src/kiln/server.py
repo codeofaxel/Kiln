@@ -231,7 +231,13 @@ from kiln.pipelines import (
 from kiln.plugin_loader import register_all_plugins
 from kiln.plugins import PluginContext, PluginManager
 from kiln.print_start_verdict import resolve_print_start
-from kiln.printer_backends import DEFAULT_SERIAL_BAUDRATE, format_printer_types
+from kiln.printer_backends import (
+    DEFAULT_SERIAL_BAUDRATE,
+    format_printer_types,
+    missing_needs,
+    needs_sentence,
+    setup_summary,
+)
 from kiln.printer_intelligence import (
     diagnose_issue,
     extract_codes,
@@ -1456,15 +1462,35 @@ _install_published_schema()
 
 _adapter: PrinterAdapter | None = None
 
-#: What every printer door says when no printer is set up anywhere (no
-#: environment, no config.yaml entry, an empty registry): the two ways a
-#: person actually adds one.  Every door embeds this sentence in its own
-#: refusal, so it is worded here once.  Keep the opening words: the print
-#: monitor panels tell "nothing set up" from "printer offline" by them.
-NO_PRINTER_CONFIGURED = (
-    "No printer configured in Kiln yet. Add one with register_printer "
-    "(discover_printers finds the printers on your network), or run "
-    "`kiln setup` in a terminal."
+#: What the default-printer lookup raises when no printer is set up anywhere
+#: (no environment, no config.yaml entry, an empty registry).  A terminal
+#: prints it as it is, so it names the terminal's way to add one.  A tool
+#: reply never shows it: :func:`_error_dict` rebuilds any refusal carrying
+#: it into :func:`_no_printer_refusal`.
+NO_PRINTER_CONFIGURED = "No printer is set up in Kiln yet. Run `kiln setup` to add one."
+
+#: The one sentence a person reads when a printer tool finds none set up.
+#: No tool names: what to do next is the agent's to offer.
+NO_PRINTER_MESSAGE = "No printer is set up in Kiln yet."
+
+#: What the agent is asked to do about it, on a computer that can reach one.
+_NO_PRINTER_AGENT_HINT = (
+    "Offer to set the person's printer up now, in plain words. Ask which "
+    "printer they have (make and model), then look for it on their network "
+    "with discover_printers: each printer it finds says what it still needs, "
+    "where the person finds it, and anything to switch on in the printer "
+    "first. Ask the person only for those, add the printer with "
+    "register_printer, and retry what they asked for. Never show them tool "
+    "names. For a printer discover_printers cannot find, this is what each "
+    "kind needs:\n" + setup_summary()
+)
+
+#: The same refusal on Kiln's hosted server, which connects to no printer.
+_NO_PRINTER_HOSTED_HINT = (
+    "This is Kiln's hosted server, which connects to no printer. A printer is "
+    "set up in Kiln installed on a computer on the same network as the "
+    "printer (https://kiln3d.com/install); offer to walk the person through "
+    "that, in plain words."
 )
 
 
@@ -5830,6 +5856,23 @@ def _check_disk_space(path: str, required_mb: int = 100) -> dict[str, Any] | Non
     return None
 
 
+def _no_printer_refusal() -> dict[str, Any]:
+    """A printer door's answer when no printer is set up: one sentence for
+    the person, the setup conversation for the agent, and the code the
+    print monitor panels read to show setup rather than "printer offline"."""
+    hint = _NO_PRINTER_AGENT_HINT
+    with contextlib.suppress(Exception):
+        from kiln.runtime_env import is_hosted_multitenant
+
+        if is_hosted_multitenant():
+            hint = _NO_PRINTER_HOSTED_HINT
+    return {
+        "success": False,
+        "error": {"code": "NO_PRINTER_CONFIGURED", "message": NO_PRINTER_MESSAGE, "retryable": False},
+        "agent_hint": hint,
+    }
+
+
 def _error_dict(
     message: str,
     code: str = "ERROR",
@@ -5847,7 +5890,15 @@ def _error_dict(
     carry an agent-addressed field next to the human-readable ``message``
     (``**signin_hint_fields()``).  It cannot reach inside ``error``, so the
     envelope every existing caller depends on keeps its exact shape.
+
+    A message carrying :data:`NO_PRINTER_CONFIGURED` becomes
+    :func:`_no_printer_refusal` whatever the door wrapped around it: every
+    printer door puts the lookup's error inside its own "Failed to ..." and
+    adds a hint meant for a different fault, so it is rebuilt here, once,
+    and no door has to remember it.
     """
+    if isinstance(message, str) and NO_PRINTER_CONFIGURED in message:
+        return _no_printer_refusal()
     if retryable is None:
         retryable = code in _RETRYABLE_CODES
     payload: dict[str, Any] = {
@@ -12569,10 +12620,12 @@ def register_printer(
             "serial" is accepted as a legacy alias for "usb".
         host: Base URL or IP address of the printer.  For USB printers,
             this is the port path (e.g. "/dev/ttyUSB0", "COM3").
-        api_key: API key (required for OctoPrint and Bambu, optional for
-            Moonraker/Creality, unused for USB).  For Bambu printers
-            this is the LAN Access Code.
-        serial: Printer serial number (required for Bambu printers).
+        api_key: The printer's credential: an API key (OctoPrint, Prusa
+            Link, a Moonraker or Creality printer with its login turned
+            on), a Bambu Lab printer's LAN access code, or a Duet's
+            machine password.
+        serial: A Bambu Lab printer's serial number (``discover_printers``
+            reads it off the network).
         verify_ssl: Whether to verify SSL certificates (default True).
             Set to False for printers using self-signed certificates.
             For Bambu, True maps to TLS pin mode and False maps to
@@ -12598,6 +12651,10 @@ def register_printer(
             camera are what Kiln looks at; they do not switch on the
             printer's own failure detection, which runs on the printer
             against its own cameras.
+
+    When something this kind of printer needs is missing, the refusal
+    names it and says where the person finds it; ``discover_printers``
+    says the same for each printer it finds, before anything is asked.
 
     Once registered the printer can be targeted by name — ``printer_status``,
     ``monitor_print``, ``cancel_print``, ``pause_print`` and ``resume_print``
@@ -12653,12 +12710,15 @@ def register_printer(
                 code="INVALID_ARGS",
             )
 
+        # What this kind of printer needs is one list every setup door reads
+        # (kiln.printer_backends); the refusal says what is missing and where
+        # the person finds it.
+        gaps = missing_needs(printer_type, {"api_key": api_key, "serial": serial}, by_argument=True)
+        if gaps:
+            arguments = " and ".join(need.argument for need in gaps)
+            return _error_dict(f"{needs_sentence(printer_type, gaps)} Pass it as {arguments}.", code="INVALID_ARGS")
+
         if printer_type == "octoprint":
-            if not api_key:
-                return _error_dict(
-                    "api_key is required for OctoPrint printers.",
-                    code="INVALID_ARGS",
-                )
             adapter = OctoPrintAdapter(host=host, api_key=api_key, verify_ssl=verify_ssl)
         elif printer_type == "moonraker":
             adapter = MoonrakerAdapter(host=host, api_key=api_key or None, verify_ssl=verify_ssl)
@@ -12680,16 +12740,6 @@ def register_printer(
                 return _error_dict(
                     "Bambu support requires paho-mqtt.  Install it with: pip install paho-mqtt",
                     code="MISSING_DEPENDENCY",
-                )
-            if not api_key:
-                return _error_dict(
-                    "api_key (LAN Access Code) is required for Bambu printers.",
-                    code="INVALID_ARGS",
-                )
-            if not serial:
-                return _error_dict(
-                    "serial is required for Bambu printers.",
-                    code="INVALID_ARGS",
                 )
             adapter = BambuAdapter(
                 host=host,

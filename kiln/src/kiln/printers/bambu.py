@@ -49,6 +49,7 @@ from kiln.bambu_trays import read_tray_id as _read_tray_id
 from kiln.bambu_trays import tray_id as _bambu_tray_id
 from kiln.bambu_trays import tray_name as _bambu_tray_name
 from kiln.bambu_trays import unit_name as _bambu_unit_name
+from kiln.printer_backends import need_where
 from kiln.printer_intelligence import chamber_sensor_for_model
 from kiln.printers.bambu_hms_text import (
     device_type_from_serial,
@@ -281,6 +282,10 @@ _SPEED_PROFILES: dict[str, int] = {
 }
 _SPEED_PROFILE_NAMES: dict[int, str] = {v: k for k, v in _SPEED_PROFILES.items()}
 
+#: Where a person finds the access code, read from the one list every setup
+#: door reads, so a recovery message sends them where setup did.
+_ACCESS_CODE_WHERE = need_where("bambu", "access_code")
+
 # Known Bambu firmware error codes with actionable messages.
 # Error codes appear in the ``print_error`` field of MQTT push_status.
 # Hex format: 0502-4007 → decimal 84033543.
@@ -288,8 +293,8 @@ _KNOWN_PRINT_ERRORS: dict[int, str] = {
     84033543: (
         "Printer rejected the command (error 0502-4007: authentication expired). "
         "This happens when the printer is restarted — the access code becomes stale. "
-        "FIX: On the printer touchscreen, go to Settings → Network → "
-        "turn LAN Only Mode OFF then ON, then toggle Developer Mode OFF and ON. "
+        f"FIX: Find the access code {_ACCESS_CODE_WHERE}, turn LAN Only Mode "
+        "OFF then ON, then toggle Developer Mode OFF and ON. "
         "Copy the NEW access code and update your Kiln config "
         "(kiln config set access_code <new_code>). "
         "The old access code will NOT work even if it looks the same — "
@@ -1710,8 +1715,9 @@ class BambuAdapter(PrinterAdapter):
     Args:
         host: IP address or hostname of the Bambu printer on the LAN.
         access_code: LAN Access Code from the printer's LCD.
-        serial: Printer serial number (used in MQTT topics).  Found on the
-            printer's LCD under Device Info.
+        serial: Printer serial number (used in MQTT topics).  Network
+            discovery reads it; where it is on the printer's screen is in
+            :mod:`kiln.printer_backends`.
         timeout: Timeout in seconds for MQTT operations and FTP connections.
         tls_mode: TLS verification mode: ``"pin"`` (default, TOFU pinning),
             ``"ca"`` (strict CA/hostname validation), or ``"insecure"``
@@ -2414,8 +2420,10 @@ class BambuAdapter(PrinterAdapter):
                         "or another machine using the printer, then try "
                         "again.\n"
                         "  If that's not it: check the printer is powered "
-                        "on and on this network, and that LAN Mode is on "
-                        "(printer screen → Settings → Network).  A refused "
+                        "on and on this network, and that LAN Only Mode is "
+                        # Never the words "access code" here: they read as a
+                        # refused login (reads_as_credentials_refusal).
+                        f"on -- the switch is {_ACCESS_CODE_WHERE}.  A refused "
                         "login is reported separately, not as this."
                     )
 
@@ -2552,8 +2560,8 @@ class BambuAdapter(PrinterAdapter):
         if code in _CONNACK_CREDENTIAL_REFUSALS:
             return (
                 f"The printer at {self._host} answered and refused Kiln's "
-                f"access code ({reason}).  On the printer's screen open "
-                "Settings → Network, copy the current access code, and update "
+                f"access code ({reason}).  Copy the current access code "
+                f"({_ACCESS_CODE_WHERE}) and update "
                 "it in Kiln's config -- a restarted printer can issue a new one "
                 "that looks the same."
             )
@@ -3620,7 +3628,7 @@ class BambuAdapter(PrinterAdapter):
                 detail = (
                     f"FTPS authentication to {self._host}:{_FTPS_PORT} failed. "
                     "Access code may be wrong or stale.\n"
-                    "  1) Check printer -> Settings -> LAN for the current access code\n"
+                    f"  1) Find the current access code {_ACCESS_CODE_WHERE}\n"
                     "  2) Toggle LAN Only Mode off/on to regenerate the code\n"
                 )
             elif isinstance(exc, ConnectionRefusedError) or "connection refused" in exc_lower:

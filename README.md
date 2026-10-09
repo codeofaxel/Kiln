@@ -186,13 +186,13 @@ Tool tiers auto-match model capability: **essential** (15 tools) for smaller mod
 | Printer | `--type` | What you need |
 |---------|----------|---------------|
 | **Prusa MK4/XL/Mini+** | `prusalink` | IP + API key (Settings › Network › PrusaLink on the LCD) |
-| **OctoPrint** (any printer) | `octoprint` | OctoPrint URL + API key (Settings › API) |
+| **OctoPrint** (any printer) | `octoprint` | OctoPrint URL + API key (User Settings › Application Keys) |
 | **Klipper/Moonraker** | `moonraker` | Moonraker URL (usually `http://<ip>:7125`) |
 | **Creality K1/K2/Hi/Ender V4/V3 KE** | `creality` | IP + `printer_model` (e.g. `creality_k1_max`); probes local Moonraker ports |
-| **Bambu Lab** | `bambu` | IP + LAN access code + serial number (all on the LCD) |
+| **Bambu Lab** | `bambu` | IP + serial number + LAN access code, all on the printer's screen; LAN Only Mode and Developer Mode on to start and control prints |
 | **Elegoo** (SDCP) | `elegoo` | IP only — no auth. Neptune 4 / OrangeStorm Giga use `moonraker`. |
 | **Duet / RepRapFirmware** | `duet` | IP only, plus the machine password if one is set (`M551` in `config.g`). |
-| **Direct USB** (Marlin) | `serial` | USB cable only — no network. Ender 3, Prusa MK3, CR-10, any Marlin/RepRap printer. |
+| **Direct USB** (Marlin) | `usb` | USB cable only — no network. Ender 3, Prusa MK3, CR-10, any Marlin/RepRap printer. |
 
 Kiln only needs IP reachability on your LAN. Ethernet-only printers are fully supported.
 

@@ -57,16 +57,29 @@ class _PrinterManagementToolsPlugin:
                 timeout: Maximum scan duration in seconds (default 5).
 
             Returns a list of discovered printers with host, port, type, and
-            whether the API is reachable.  Use ``register_printer`` to add
-            discovered printers to the fleet.
+            whether the API is reachable.  Each one also carries
+            ``to_connect``: what the person still has to supply and where
+            they find it (``still_needed``), and anything to switch on in
+            the printer first (``first``).  Ask for exactly those, in plain
+            words, then add the printer with ``register_printer``.
             """
             try:
                 from kiln.discovery import discover_printers as _discover
+                from kiln.printer_backends import connection_guide
 
                 results = _discover(timeout=timeout)
+                printers = []
+                for found in results:
+                    entry = found.to_dict()
+                    entry["to_connect"] = connection_guide(
+                        found.printer_type,
+                        found={"host": found.host, "serial": found.serial},
+                        discovered=True,
+                    )
+                    printers.append(entry)
                 return {
                     "success": True,
-                    "printers": [p.to_dict() for p in results],
+                    "printers": printers,
                     "count": len(results),
                     "message": f"Found {len(results)} printer(s) on the network.",
                 }

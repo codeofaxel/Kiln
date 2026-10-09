@@ -25,6 +25,7 @@ import asyncio
 import importlib.util
 import json
 import os
+import re
 import struct
 import sys
 import tempfile
@@ -1020,7 +1021,7 @@ class TestGetAdapter:
         # read the developer's real ~/.kiln/config.yaml.
         monkeypatch.setattr(mod, "_runtime_config_resolved", True)
 
-        with pytest.raises(RuntimeError, match="No printer configured"):
+        with pytest.raises(RuntimeError, match=re.escape(mod.NO_PRINTER_CONFIGURED)):
             mod._get_adapter()
 
     def test_registry_default_answers_when_env_unset(self, monkeypatch):
@@ -1070,14 +1071,16 @@ class TestGetAdapter:
         monkeypatch.setattr(mod, "_registry", PrinterRegistry())
         monkeypatch.setattr(mod, "_runtime_config_resolved", True)  # see test_missing_host
 
-        with pytest.raises(RuntimeError, match="No printer configured"):
+        with pytest.raises(RuntimeError, match=re.escape(mod.NO_PRINTER_CONFIGURED)):
             mod._get_adapter()
 
-    def test_a_printer_door_tells_a_person_how_to_add_one(self, monkeypatch):
-        """With nothing set up, a printer door's refusal names the two ways a
-        person adds a printer -- not environment variables, which only
-        someone embedding Kiln sets -- and keeps the words the print monitor
-        panels read to tell "nothing set up" from "printer offline"."""
+    def test_a_printer_door_with_no_printer_hands_setup_to_the_agent(self, monkeypatch):
+        """With nothing set up, every printer door gives the same refusal:
+        one plain sentence for the person (no tool names, none of the door's
+        own "Failed to ..." or a hint meant for another fault, no
+        environment variables), the setup conversation in ``agent_hint``,
+        and the code the print monitor panels read to show setup rather
+        than "printer offline"."""
         import kiln.server as mod
 
         monkeypatch.setattr(mod, "_adapter", None)
@@ -1085,13 +1088,30 @@ class TestGetAdapter:
         monkeypatch.setattr(mod, "_registry", PrinterRegistry())
         monkeypatch.setattr(mod, "_runtime_config_resolved", True)  # see test_missing_host
 
-        for door in (mod.printer_status, mod.pause_print):
+        for door in (mod.printer_status, mod.pause_print, mod.preflight_check):
             result = door()
             assert result["success"] is False, result
-            message = result["error"]["message"]
-            assert "no printer configured" in message.lower(), message
-            assert "register_printer" in message and "kiln setup" in message, message
-            assert "environment variable" not in message, message
+            assert result["error"]["code"] == "NO_PRINTER_CONFIGURED", result
+            assert result["error"]["message"] == mod.NO_PRINTER_MESSAGE, result
+            assert "register_printer" in result["agent_hint"], result
+            assert "make and model" in result["agent_hint"], result
+
+    def test_the_hosted_server_says_it_reaches_no_printer(self, monkeypatch):
+        """On Kiln's hosted server the same refusal points the agent at a
+        local install instead of a setup this server cannot do."""
+        import kiln.runtime_env
+        import kiln.server as mod
+
+        monkeypatch.setattr(mod, "_adapter", None)
+        monkeypatch.setattr(mod, "_PRINTER_HOST", "")
+        monkeypatch.setattr(mod, "_registry", PrinterRegistry())
+        monkeypatch.setattr(mod, "_runtime_config_resolved", True)  # see test_missing_host
+        monkeypatch.setattr(kiln.runtime_env, "is_hosted_multitenant", lambda: True)
+
+        result = mod.printer_status()
+        assert result["error"]["code"] == "NO_PRINTER_CONFIGURED", result
+        assert "kiln3d.com/install" in result["agent_hint"], result
+        assert "register_printer" not in result["agent_hint"], result
 
     def test_missing_api_key_for_octoprint(self, monkeypatch):
         """Missing KILN_PRINTER_API_KEY raises RuntimeError for octoprint."""

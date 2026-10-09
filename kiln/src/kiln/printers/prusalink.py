@@ -25,6 +25,7 @@ import requests
 from requests.exceptions import ConnectionError as ReqConnectionError
 from requests.exceptions import RequestException, Timeout
 
+from kiln.printer_backends import need_where
 from kiln.printers.base import (
     FilamentHandlingUnsupported,
     FilamentOpPlan,
@@ -473,8 +474,8 @@ class PrusaLinkAdapter(PrinterAdapter):
                     if response.status_code == 401:
                         raise PrinterError(
                             f"Authentication failed (HTTP 401) for Prusa Link at {self._host}. "
-                            f"Your API key is invalid or missing. Find the correct key in "
-                            f"Settings > Network > PrusaLink on your printer's LCD, then update "
+                            f"Your API key is invalid or missing. The key is the PrusaLink "
+                            f"password, {need_where('prusalink', 'api_key')}. Then update "
                             f"with: kiln auth --name <name> --host {self._host} "
                             f"--type prusalink --api-key <YOUR_KEY>",
                         )
@@ -490,8 +491,8 @@ class PrusaLinkAdapter(PrinterAdapter):
                             f"Access forbidden (HTTP 403) for Prusa Link at {self._host} "
                             f"on {method} {path}. Your API key may lack required permissions, "
                             f"or this firmware may reject the requested operation/path. "
-                            f"Check the key in Settings > Network > PrusaLink on your printer's "
-                            f"LCD.{endpoint_hint}",
+                            f"Check the key: it is the PrusaLink password, "
+                            f"{need_where('prusalink', 'api_key')}.{endpoint_hint}",
                         )
                     if response.status_code == 404:
                         raise PrinterError(

@@ -23,6 +23,7 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, ClassVar
 
+from kiln.printer_backends import need_where
 from kiln.printers.command_verdict import CommandVerdict
 
 logger = logging.getLogger(__name__)
@@ -1701,8 +1702,8 @@ def diagnose_read_failure(
             state=PrinterStatus.UNAUTHORIZED,
             cause=CAUSE_WRONG_ACCESS_CODE,
             remedy=(
-                "The printer answered and refused Kiln's access code. On the "
-                "printer's screen go to Settings → Network, turn LAN Only "
+                "The printer answered and refused Kiln's access code. Find "
+                f"it {need_where('bambu', 'access_code')}, turn LAN Only "
                 "Mode off and on, then Developer Mode off and on, and copy "
                 "the NEW code — a restarted printer issues a fresh one even "
                 "though it looks the same. Then run "

@@ -35,7 +35,9 @@ from kiln.printer_backends import (
     NETWORK_PRINTER_TYPES,
     PRINTER_TYPE_LABELS,
     PRINTER_TYPES,
+    backend_for,
     format_printer_types,
+    need_where,
 )
 from kiln.printer_setup import CLI_REMEDY
 from kiln.printers.base import PrinterError
@@ -619,7 +621,9 @@ def _make_bare_adapter(cfg: dict[str, Any]):
                 "Elegoo support requires websocket-client. "
                 "Install it with: uv pip install 'kiln3d[elegoo]' or pip install websocket-client"
             )
-        return ElegooAdapter(host=host, mainboard_id=cfg.get("serial") or "")
+        # save_printer writes the ID as ``mainboard_id`` (the key the MCP
+        # server reads too); ``serial`` is what older configs carried.
+        return ElegooAdapter(host=host, mainboard_id=cfg.get("mainboard_id") or cfg.get("serial") or "")
     elif ptype == "prusalink":
         return PrusaLinkAdapter(
             host=host,
@@ -1928,6 +1932,16 @@ def auth(
             "--baudrate applies to --type usb only; "
             f"{printer_type} printers are reached over the network."
         )
+    # Saving replaces the printer's whole entry, so it has to carry what this
+    # kind of printer needs -- one list every setup door reads.
+    from kiln.printer_backends import missing_needs, needs_sentence
+
+    gaps = missing_needs(
+        printer_type, {"api_key": api_key, "access_code": access_code, "serial": serial}
+    )
+    if gaps:
+        flags = ", ".join("--" + need.key.replace("_", "-") for need in gaps)
+        raise click.UsageError(f"{needs_sentence(printer_type, gaps)} Pass it with {flags}.")
     from kiln.printers.base import validate_external_camera_url
 
     for _label, _url in (
@@ -8762,34 +8776,19 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
     name = name.strip().lower().replace(" ", "-")
 
     # -- Credentials -------------------------------------------------------
-    api_key = None
-    access_code = None
-    serial = None
+    # What this kind of printer needs, and where the person finds each, is
+    # one list every setup door reads (kiln.printer_backends).  A value
+    # discovery read off the printer (a Bambu serial) is said back, not asked.
+    from kiln.cli.connection_prompt import ask_connection_needs
 
-    if printer_type in ("octoprint", "moonraker", "creality", "prusalink", "duet"):
-        # RepRapFirmware authenticates with a machine password (set by M551),
-        # not an API key -- asking for the wrong thing by name sends people
-        # hunting for a key their printer never issues.
-        credential = "Machine password" if printer_type == "duet" else "API key"
-        api_key = click.prompt(
-            f"  {credential} for {PRINTER_TYPE_LABELS.get(printer_type, printer_type)}",
-            default="",
-            show_default=False,
-        )
-        if not api_key:
-            api_key = None
-    elif printer_type == "bambu":
-        access_code = click.prompt("  LAN access code (from printer screen)")
-        serial = click.prompt("  Printer serial number")
-    elif printer_type == "elegoo":
-        click.echo("  Elegoo SDCP printers require no authentication.")
-        serial = click.prompt(
-            "  Mainboard ID (optional, auto-discovered if blank)",
-            default="",
-            show_default=False,
-        )
-        if not serial:
-            serial = None
+    creds = ask_connection_needs(
+        printer_type,
+        found={"serial": getattr(selected, "serial", "") if selected is not None else ""},
+        discovered=selected is not None,
+    )
+    api_key = creds.get("api_key")
+    access_code = creds.get("access_code")
+    serial = creds.get("serial")
 
     # -- printer_model (activates safety stack) ----------------------------
     # Incident #0 (2026-04-15) exposed that setup never asked for this
@@ -9081,11 +9080,18 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
         if first.printer_type == "bambu":
             serial_hint = getattr(first, "serial", None) or ""
             auto_model = suggest_bambu_model(serial_hint)
+        # What discovery read off the printer is kept, and what it still
+        # needs is named from the one list every setup door reads.
+        from kiln.printer_backends import missing_needs, needs_sentence
+
+        found_serial = getattr(first, "serial", None) or None
+        still_needed = missing_needs(first.printer_type, {"host": first.host, "serial": found_serial})
         try:
             save_printer(
                 printer_name,
                 first.printer_type,
                 first.host,
+                serial=found_serial,
                 printer_model=auto_model,
                 set_active=True,
             )
@@ -9095,6 +9101,7 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
                 "host": first.host,
                 "type": first.printer_type,
                 "printer_model": auto_model,
+                "still_needed": [need.name for need in still_needed],
             }
             if not json_mode:
                 click.echo(f"    Auto-configured: {printer_name} [{first.printer_type}] at {first.host}")
@@ -9110,7 +9117,12 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
                         "      `kiln setup` for the interactive flow that asks for it.",
                         fg="yellow",
                     ))
-                click.echo("    Note: You may need to add an API key with 'kiln auth'.")
+                if still_needed:
+                    click.echo(click.style(
+                        f"    {needs_sentence(first.printer_type, still_needed)} "
+                        "Run `kiln setup` to add it.",
+                        fg="yellow",
+                    ))
         except OSError as exc:
             results["setup"] = {"action": "failed", "error": str(exc)}
             if not json_mode:
@@ -10612,7 +10624,7 @@ def _deep_network_diagnostics(host: str, printer_cfg: dict) -> list[dict]:
                 "detail": (
                     f"{host} does not respond to ping. "
                     "Check: is the printer powered on and connected to WiFi? "
-                    "Verify the IP address in printer Settings > Network."
+                    "Verify the IP address in the printer's network settings."
                 ),
             }
         )
@@ -10709,8 +10721,8 @@ def _deep_network_diagnostics(host: str, printer_cfg: dict) -> list[dict]:
                     "name": "bambu_lan_check",
                     "ok": False,
                     "detail": (
-                        "Bambu printers require LAN Only Mode enabled on the "
-                        "touchscreen (Settings > Network). After enabling, "
+                        f"{' '.join(backend_for('bambu').first)} The access code "
+                        f"is {need_where('bambu', 'access_code')}. After enabling, "
                         "wait 30-60 seconds for MQTT to start. If it still "
                         "fails, power cycle the printer with LAN mode OFF, "
                         "let it fully boot, then enable LAN Only Mode."

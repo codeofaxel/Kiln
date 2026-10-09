@@ -302,8 +302,9 @@ def _parse_ssdp_headers(text: str) -> dict[str, str]:
 def _try_ssdp(timeout: float) -> list[DiscoveredPrinter]:
     """Discover Bambu Lab printers via their SSDP broadcast (UDP 2021).
 
-    Bambu printers in LAN / Developer Mode broadcast an SSDP ``NOTIFY``
-    to ``239.255.255.250:2021`` carrying the device IP (``Location``),
+    Bambu printers broadcast an SSDP ``NOTIFY`` to ``239.255.255.250:2021``
+    -- in cloud mode as well as LAN Only Mode, per Bambu's own network-ports
+    page -- carrying the device IP (``Location``),
     serial (``USN``), model and name.  They answer neither the mDNS
     service types we browse nor a TCP/HTTP port scan (the MQTT port is
     filtered to raw connects), so SSDP is the only reliable LAN

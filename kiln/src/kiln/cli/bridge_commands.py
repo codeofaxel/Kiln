@@ -780,32 +780,16 @@ def _discovered_host(found: object) -> str:
 
 
 def _credential_prompts(printer_type: str, discovered_serial: str) -> dict:
-    """Ask only for what this backend actually needs, nothing else."""
-    extras: dict = {}
-    if printer_type == "octoprint":
-        extras["api_key"] = click.prompt(
-            "  OctoPrint API key (OctoPrint → Settings → API)", default="", show_default=False
-        ).strip() or None
-    elif printer_type == "prusalink":
-        extras["api_key"] = click.prompt(
-            "  PrusaLink password (printer screen → Settings → Network)",
-            default="", show_default=False,
-        ).strip() or None
-    elif printer_type == "duet":
-        extras["api_key"] = click.prompt(
-            "  Machine password (Enter if you never set one)", default="", show_default=False
-        ).strip() or None
-    elif printer_type == "bambu":
-        extras["access_code"] = click.prompt(
-            "  LAN access code (printer screen → Settings → WLAN)", default="", show_default=False
-        ).strip() or None
-        serial = click.prompt(
-            "  Serial number", default=discovered_serial or "", show_default=bool(discovered_serial)
-        ).strip()
-        extras["serial"] = serial or None
-    elif printer_type == "elegoo" and discovered_serial:
-        extras["serial"] = discovered_serial
-    return extras
+    """Ask only for what this backend actually needs, nothing else.
+
+    The printer was found on the network, so its optional credentials are
+    not asked for; what each kind needs is the one list every setup door
+    reads (kiln.printer_backends).
+    """
+    from kiln.cli.connection_prompt import ask_connection_needs
+
+    answers = ask_connection_needs(printer_type, found={"serial": discovered_serial}, discovered=True)
+    return {key: value for key, value in answers.items() if value}
 
 
 def _offer_first_printer() -> None:
