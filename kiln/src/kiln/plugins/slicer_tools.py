@@ -10,11 +10,14 @@ no manual imports needed.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import math
 import os
 import re
+import shutil
+import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -1095,6 +1098,268 @@ def _attach_placement(response: dict, info: dict | None) -> None:
         refused = response.get("error") if response.get("success") is False else None
         own = refused.get("message") if isinstance(refused, dict) else None
         response["start"] = {"allowed": False, "why": own or state.start_refusal_sentence()}
+
+
+# ---------------------------------------------------------------------------
+# Hardware that goes into the part while it prints
+# ---------------------------------------------------------------------------
+
+#: The served tool that plans bought hardware (nuts, magnets, bearings,
+#: inserts) into a print.  It is reached through the tool registry, whatever
+#: that holds under this name: Kiln's discovery stub, which sends the part and
+#: the sliced file to Kiln's servers and brings the written file back to this
+#: computer, or the tool itself where kiln-pro is installed.
+_HARDWARE_PLANNER = "plan_hardware_insertion"
+
+#: What of the planner's answer the person is told.
+_HARDWARE_BLOCK_KEYS = ("placements", "safety_floor", "stops", "after_print", "written_note")
+
+#: The last sentence of every refusal below.
+_NOTHING_SENT = "Nothing was sent to the printer."
+
+
+def _hardware_phrases(hardware: Any) -> list[str]:
+    """The hardware the person named, as trimmed phrases; none when blank."""
+    if isinstance(hardware, str):
+        hardware = [hardware]
+    if not isinstance(hardware, (list, tuple)):
+        return []
+    return [item.strip() for item in hardware if isinstance(item, str) and item.strip()]
+
+
+def _sentences(*parts: Any) -> str:
+    """*parts* as running prose: each one a full sentence, the empty ones gone."""
+    out = []
+    for part in parts:
+        words = " ".join(str(part or "").split())
+        if words:
+            out.append(words if words[-1] in ".!?" else words + ".")
+    return " ".join(out)
+
+
+def _because(head: str, why: Any) -> str:
+    """*head* with the reason after a colon, when there is one."""
+    reason = " ".join(str(why or "").split()).rstrip(".")
+    return f"{head}: {reason}" if reason else head
+
+
+def _hardware_block(answer: dict[str, Any]) -> dict[str, Any]:
+    """What the planner said about the hardware, for the person: what goes in,
+    where, when, and the safety lines that go with it."""
+    return {key: answer[key] for key in _HARDWARE_BLOCK_KEYS if answer.get(key)}
+
+
+def _hardware_refusal(
+    reason: str,
+    *,
+    code: str,
+    answer: Any = None,
+    retryable: bool = False,
+    miss: Any = None,
+) -> dict[str, Any]:
+    """The refusal for a print that must not go on without its hardware plan.
+
+    What the planner did answer rides with it: where each part goes and when
+    is worth telling the person even when the print does not start, and an
+    upgrade block is the planner's own words, handed on unchanged.
+    """
+    import kiln.server as _srv
+
+    extra: dict[str, Any] = {}
+    if isinstance(answer, dict):
+        if block := _hardware_block(answer):
+            extra["hardware"] = block
+        if answer.get("upgrade"):
+            extra["upgrade"] = answer["upgrade"]
+    if miss is not None:
+        from kiln import served_answer
+
+        extra.update(served_answer.fields(miss))
+        if miss.cause == "signed_out":
+            from kiln.tiers_and_terms import signin_hint_fields
+
+            extra.update(signin_hint_fields())
+    return _srv._error_dict(
+        _sentences(reason, _NOTHING_SENT), code=code, retryable=retryable, extra=extra,
+    )
+
+
+def _target_model_name(printer_name: str | None) -> str:
+    """The model of the machine a call is aimed at, as Kiln knows it, or
+    ``""``.  The planner is told a printer by name only when Kiln has one:
+    a name it can only guess is never written."""
+    import kiln.server as _srv
+
+    try:
+        return str(_srv._resolve_target_printer_model(printer_name) or "")
+    except Exception:  # noqa: BLE001 -- an unknown printer is a blank, not a failure
+        return ""
+
+
+def _ask_hardware_planner(**kwargs: Any) -> Any:
+    """Ask the planner through the tool registry.
+
+    Raises ``LookupError`` on an install whose registry does not hold it.
+    """
+    import kiln.server as _srv
+
+    tool = _srv.mcp._tool_manager._tools.get(_HARDWARE_PLANNER)
+    if tool is None:
+        raise LookupError(_HARDWARE_PLANNER)
+    return tool.fn(**kwargs)
+
+
+def _swap_in_written_file(written: str, upload_path: str) -> None:
+    """Put the bytes of *written* at *upload_path*, in one step.
+
+    The name stays: the print ledgers, the monitor and the stop alerts all find
+    a print by the name of the file the printer was sent.  The new bytes are
+    staged beside the old file and moved over it, so a failure at any point
+    leaves the old file whole and nothing behind.  Once it is in place the
+    written copy goes: it was only ever on its way here, and a sliced file can
+    run to tens of megabytes, every print.  Raises ``OSError``.
+    """
+    if os.path.exists(upload_path) and os.path.samefile(written, upload_path):
+        return
+    staged_fd, staged = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(upload_path)), prefix=".kiln-hardware-")
+    os.close(staged_fd)
+    try:
+        shutil.copyfile(written, staged)
+        with contextlib.suppress(OSError):
+            shutil.copymode(upload_path, staged)
+        os.replace(staged, upload_path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(staged)
+        raise
+    with contextlib.suppress(OSError):
+        os.unlink(written)
+
+
+def _plan_hardware_into_print(
+    phrases: list[str],
+    *,
+    model_path: str,
+    upload_path: str,
+    printer: str,
+    material: str,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Plan *phrases* into the file that is about to be uploaded.
+
+    ``(block, None)`` says go on and print *upload_path*: its bytes are the
+    planner's written file when it wrote one, else the file as it was sliced
+    (every part goes in after the print), and *block* is what the person is
+    told.  ``(None, refusal)`` says print nothing.
+
+    A part that needs a pause is never printed from a file without one: the
+    cavity would be covered over with nothing in it.  So everything short of a
+    plan that covers the whole part is a refusal: no answer, a file the
+    planner could not read or that is not this part's, a seat it could not
+    place a pause for, hardware it found no seat for, and a pause it did not
+    write or that never reached this computer.
+    """
+    from kiln import served_answer
+
+    try:
+        answer = _ask_hardware_planner(
+            model_path=model_path, hardware=phrases, gcode_path=upload_path,
+            printer=printer, material=material, write_pauses=True,
+        )
+    except LookupError:
+        return None, _hardware_refusal(
+            "Kiln's hardware planner is not on this install, so Kiln cannot tell whether this part needs a "
+            "pause. Update Kiln and try again.",
+            code="HARDWARE_PLAN_UNAVAILABLE",
+        )
+    except Exception:  # noqa: BLE001 -- any failure to plan is a refusal, never a print without the plan
+        _logger.exception("The hardware planner failed")
+        return None, _hardware_refusal(
+            "Kiln could not plan the hardware for this print, so it did not start it.",
+            code="HARDWARE_PLAN_UNAVAILABLE",
+        )
+
+    miss = served_answer.classify_answer(answer)
+    if miss is not None:
+        reason = served_answer.sentence(
+            miss,
+            feature="hardware planner",
+            on_the_line="Putting hardware into this print needs a plan for where the pause goes",
+            cannot="plan the hardware",
+            wont="did not start the print",
+        )
+        return None, _hardware_refusal(
+            reason, code="HARDWARE_PLAN_UNAVAILABLE", answer=answer, miss=miss,
+            retryable=miss.cause in ("offline", "unanswered"),
+        )
+
+    def refuse(reason: str, code: str = "HARDWARE_NOT_PLANNED", **more: Any) -> tuple[None, dict[str, Any]]:
+        return None, _hardware_refusal(reason, code=code, answer=answer, **more)
+
+    facts = answer.get("file") if isinstance(answer.get("file"), dict) else {}
+    if facts.get("readable") is False:
+        return refuse(_sentences(_because("Kiln could not read the sliced file to place the pause for the hardware", facts.get("why"))))
+    if facts.get("matches_model") is False:
+        return refuse(_sentences(_because("The sliced file is not the part the hardware was planned for", facts.get("why"))))
+    if facts.get("warning"):
+        return refuse(_sentences("The pause for the hardware cannot go in this file", facts["warning"]))
+    if problems := answer.get("problems"):
+        return refuse(_sentences(
+            "Kiln could not place a pause for every piece of hardware, so a cavity would print over with nothing in it",
+            *problems,
+        ))
+    if unplaced := answer.get("unplaced"):
+        return refuse(_sentences("Kiln could not find a place in this part for all of the hardware", *unplaced))
+    placements = [p for p in (answer.get("placements") or []) if isinstance(p, dict)]
+    if not placements:
+        return refuse(_sentences(
+            "Kiln found nothing in this part to plan the hardware into", answer.get("note"), answer.get("next"),
+        ))
+
+    block = _hardware_block(answer)
+    written = answer.get("written_file")
+    if written:
+        if not (isinstance(written, str) and os.path.isfile(written)):
+            return refuse(
+                "Kiln wrote the file with the pause in it, but it did not reach this computer. Try again.",
+                "HARDWARE_PAUSE_NOT_WRITTEN", retryable=True,
+            )
+        if written.lower().endswith(".3mf") != upload_path.lower().endswith(".3mf"):
+            return refuse(
+                "The file Kiln wrote is not the kind of file this printer takes.", "HARDWARE_PAUSE_NOT_WRITTEN",
+            )
+        try:
+            _swap_in_written_file(written, upload_path)
+        except OSError:
+            _logger.warning("Could not put the written hardware file in place", exc_info=True)
+            return refuse(
+                "Kiln could not put the file with the pause in it in place.", "HARDWARE_PAUSE_NOT_WRITTEN",
+            )
+        return block, None
+
+    stops = [s for s in (answer.get("stops") or []) if isinstance(s, dict)]
+    if stops and all(s.get("already_in_file") for s in stops):
+        # The sliced file already pauses before every layer a part needs: the
+        # planner checked each one against this printer and wrote nothing, so
+        # the file prints as it is.
+        return block, None
+
+    if any(p.get("when") == "pause" for p in placements):
+        if any(isinstance(f, dict) and f.get("on_this_computer") is False for f in answer.get("files") or []):
+            return refuse(
+                "Kiln wrote the file with the pause in it, but it did not reach this computer. Try again.",
+                "HARDWARE_PAUSE_NOT_WRITTEN", retryable=True,
+            )
+        printer_note = answer.get("printer")
+        return refuse(
+            _sentences(
+                "This part needs a pause so its hardware can go in before the print covers it, and Kiln could "
+                "not write one",
+                answer.get("written_note"),
+                printer_note.get("why") if isinstance(printer_note, dict) else None,
+            ),
+            "HARDWARE_PAUSE_NOT_WRITTEN",
+        )
+    return block, None
 
 
 def _placed_slice(
@@ -2624,6 +2889,7 @@ class _SlicerToolsPlugin:
             skip_validation: bool = False,
             preview_token: str | None = None,
             placement: str | list[float] | None = None,
+            hardware: list[str] | None = None,
         ) -> dict:
             """Slice a 3D model (STL/3MF) + upload + print in one step (basic pipeline).
 
@@ -2689,6 +2955,15 @@ class _SlicerToolsPlugin:
                     before upload.  The clearance verdict is free; placing
                     and starting a second print on an occupied plate is a
                     kiln-pro feature (https://kiln3d.com/pricing).
+                hardware: Bought parts that go into the part while it
+                    prints, as short phrases such as ``["4x 6x3 magnet",
+                    "2x M3 nut"]``.  The file that prints carries the pause
+                    Kiln's servers wrote into it, and the response's
+                    ``hardware`` block says what goes in and when; a part
+                    that needs a pause that cannot be written is refused
+                    before anything is sent to the printer.  Writing the
+                    pause is a kiln-pro feature
+                    (https://kiln3d.com/pricing).
 
             Combines ``slice_model``, ``upload_file``, and ``start_print`` into
             a single action.
@@ -2997,6 +3272,27 @@ class _SlicerToolsPlugin:
                     quiet_start=quiet_plan,
                     lift_floor_mm=sinfo.get("lift_floor_mm"),
                 )
+
+                # Hardware that goes in while the part prints.  Planned against
+                # the file as the printer will get it, wrapped or not, so the
+                # plan travels in the file the printer reads; the file with the
+                # pause written into it then takes this one's place, under the
+                # same name.  A part that needs a pause is never printed
+                # without one, so a plan that does not cover it ends here.
+                hardware_block: dict[str, Any] | None = None
+                if hardware_phrases := _hardware_phrases(hardware):
+                    hardware_block, hardware_refusal = _plan_hardware_into_print(
+                        hardware_phrases,
+                        model_path=effective_input,
+                        upload_path=upload_path,
+                        printer=effective_printer_id or _target_model_name(printer_name),
+                        material=material or "",
+                    )
+                    if hardware_refusal is not None:
+                        hardware_refusal["slice"] = result.to_dict()
+                        _attach_placement(hardware_refusal, place_info)
+                        return hardware_refusal
+
                 if quiet_plan is not None and (
                     block := _plate_state.start_refusal(adapter, file_name=os.path.basename(upload_path), local_path=upload_path)
                 ):
@@ -3207,6 +3503,8 @@ class _SlicerToolsPlugin:
                 # turned it, turned Kiln's mesh of a STEP), as slice_model says it.
                 _attach_bed_fit(resp, sinfo.get("bed_fit"))
                 _attach_placement(resp, place_info)
+                if hardware_block:
+                    resp["hardware"] = hardware_block
 
                 # Multicolor-flatten advisory — same wire as slice_model.
                 # The print already started (warn, never block); the user
