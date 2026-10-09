@@ -765,7 +765,7 @@ def _discovered_line(found: object) -> str:
     return f"{label} — {address} ({found.printer_type})"
 
 
-def _credential_prompts(printer_type: str, discovered_serial: str) -> dict:
+def _credential_prompts(printer_type: str, discovered_serial: str, host: str = "") -> dict:
     """Ask only for what this backend actually needs, nothing else.
 
     The printer was found on the network, so its optional credentials are
@@ -774,7 +774,9 @@ def _credential_prompts(printer_type: str, discovered_serial: str) -> dict:
     """
     from kiln.cli.connection_prompt import ask_connection_needs
 
-    answers = ask_connection_needs(printer_type, found={"serial": discovered_serial}, discovered=True)
+    answers = ask_connection_needs(
+        printer_type, found={"serial": discovered_serial}, discovered=True, host=host
+    )
     return {key: value for key, value in answers.items() if value}
 
 
@@ -831,7 +833,9 @@ def _offer_first_printer() -> None:
             return
         chosen = found[int(raw) - 1]
 
-    extras = _credential_prompts(chosen.printer_type, getattr(chosen, "serial", "") or "")
+    extras = _credential_prompts(
+        chosen.printer_type, getattr(chosen, "serial", "") or "", host=chosen.address
+    )
 
     # The model key turns on the safety stack (bed-fit, temperature limits);
     # skippable so a shy answer never strands the setup, and the prompt itself

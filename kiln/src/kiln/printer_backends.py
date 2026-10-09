@@ -43,6 +43,10 @@ class ConnectionNeed:
     #: answers a status probe either way but will not take a print without
     #: it, so setup asks even for a printer it found.
     skip_if_found: bool = True
+    #: A way Kiln can get it from the printer's own software instead, which
+    #: the person approves there (a key in :data:`REQUEST_OFFERS`); empty
+    #: when the person has to copy it.  The setup doors try this first.
+    request: str = ""
 
     @property
     def argument(self) -> str:
@@ -86,6 +90,16 @@ _MOONRAKER_KEY = ConnectionNeed(
     "~/moonraker/scripts/fetch-apikey.sh on the printer",
     required=False,
 )
+
+#: What a person is told about each way Kiln can get a need for them, by
+#: the ``request`` a need names.  :mod:`kiln.credential_requests` runs them.
+REQUEST_OFFERS: dict[str, str] = {
+    "octoprint_appkeys": (
+        "Kiln can also ask OctoPrint for one while setting the printer up, and you "
+        "click Allow in OctoPrint"
+    ),
+}
+
 
 #: Where PrusaLink running on a Raspberry Pi (an MK3S or MK2.5) has its API
 #: key made.  Unlike the built-in PrusaLink, that key is not the login the
@@ -169,6 +183,7 @@ PRINTER_BACKENDS: tuple[PrinterBackend, ...] = (
                 "OctoPrint API key",
                 "in OctoPrint under User Settings > Application Keys, where you can make "
                 "one for Kiln (the older key under Settings > API also works for now)",
+                request="octoprint_appkeys",
             ),
         ),
     ),
@@ -286,7 +301,8 @@ def needs_to_ask(
 
 
 def _need_clause(need: ConnectionNeed) -> str:
-    return f"its {need.name} ({need.where})"
+    offer = REQUEST_OFFERS.get(need.request)
+    return f"its {need.name} ({need.where}; {offer})" if offer else f"its {need.name} ({need.where})"
 
 
 def needs_sentence(slug: str, needs: Sequence[ConnectionNeed]) -> str:
@@ -315,7 +331,12 @@ def connection_guide(
         return {"still_needed": [], "first": []}
     return {
         "still_needed": [
-            {"name": need.name, "where": need.where, "required": need.required}
+            {
+                "name": need.name,
+                "where": need.where,
+                "required": need.required,
+                **({"kiln_can_request": REQUEST_OFFERS[need.request]} if need.request else {}),
+            }
             for need in needs_to_ask(slug, found=found, discovered=discovered)
         ],
         "first": list(backend.first),
@@ -327,7 +348,10 @@ def setup_summary() -> str:
     agent helping someone set up a printer Kiln could not find."""
     lines = []
     for backend in PRINTER_BACKENDS:
-        parts = [f"{need.name}: {need.where}" for need in backend.needs]
+        parts = [
+            f"{need.name}: {need.where}" + (f"; {REQUEST_OFFERS[need.request]}" if need.request else "")
+            for need in backend.needs
+        ]
         needs = "; ".join(parts) if parts else "nothing beyond its address"
         first = f" First: {' '.join(backend.first)}" if backend.first else ""
         lines.append(f"- {backend.label}: {needs}.{first}")

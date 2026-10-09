@@ -12626,7 +12626,11 @@ def register_printer(
         api_key: The printer's credential: an API key (OctoPrint, Prusa
             Link, a Moonraker or Creality printer with its login turned
             on), a Bambu Lab printer's LAN access code, or a Duet's
-            machine password.
+            machine password.  For OctoPrint it can be left out: Kiln asks
+            OctoPrint for a key and the reply (code ``AWAITING_APPROVAL``)
+            carries ``approve_url``, a page where the person clicks Allow.
+            Give them that link, then call again with the same arguments;
+            the request stays open for ten minutes.
         serial: A Bambu Lab printer's serial number (``discover_printers``
             reads it off the network).
         verify_ssl: Whether to verify SSL certificates (default True).
@@ -12717,9 +12721,35 @@ def register_printer(
         # (kiln.printer_backends); the refusal says what is missing and where
         # the person finds it.
         gaps = missing_needs(printer_type, {"api_key": api_key, "serial": serial}, by_argument=True)
+        request_note = ""
+        if len(gaps) == 1 and gaps[0].request:
+            # The printer's own software can hand the credential over once the
+            # person approves it there: ask it, rather than send them to copy it.
+            from kiln.credential_requests import for_agent
+
+            asked = for_agent(gaps[0], host) or {}
+            state = asked.get("state")
+            if state == "granted" and asked.get("api_key"):
+                api_key, gaps = str(asked["api_key"]), []
+            elif state == "pending":
+                return _error_dict(
+                    f"Kiln asked the printer at {host} for its {gaps[0].name}. Ask the person to "
+                    f"{asked.get('how')}, then call register_printer again with the same arguments. "
+                    "The request stays open for ten minutes.",
+                    code="AWAITING_APPROVAL",
+                    retryable=True,
+                    extra={"approve_url": asked.get("approve_url")},
+                )
+            elif state == "refused":
+                request_note = " The request Kiln sent was denied or ran out, so the key has to be copied instead."
+            elif state == "error" and asked.get("detail"):
+                request_note = f" Kiln could not ask the printer for it: {asked['detail']}"
         if gaps:
             arguments = " and ".join(need.argument for need in gaps)
-            return _error_dict(f"{needs_sentence(printer_type, gaps)} Pass it as {arguments}.", code="INVALID_ARGS")
+            return _error_dict(
+                f"{needs_sentence(printer_type, gaps)} Pass it as {arguments}.{request_note}",
+                code="INVALID_ARGS",
+            )
 
         if printer_type == "octoprint":
             adapter = OctoPrintAdapter(host=host, api_key=api_key, verify_ssl=verify_ssl)

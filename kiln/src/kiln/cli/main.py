@@ -8785,6 +8785,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
         printer_type,
         found={"serial": getattr(selected, "serial", "") if selected is not None else ""},
         discovered=selected is not None,
+        host=host,
     )
     api_key = creds.get("api_key")
     access_code = creds.get("access_code")

@@ -26,6 +26,7 @@ def ask_connection_needs(
     *,
     found: Mapping[str, object] | None = None,
     discovered: bool,
+    host: str = "",
 ) -> dict[str, str | None]:
     """Prompt for what *printer_type* still needs; return it by config key.
 
@@ -33,7 +34,10 @@ def ask_connection_needs(
     said back to the person rather than asked for, and returned with the
     answers.  A required need is asked until it is answered; an optional
     one is asked only for a printer whose address was typed by hand (see
-    :func:`~kiln.printer_backends.needs_to_ask`), and Enter skips it.
+    :func:`~kiln.printer_backends.needs_to_ask`), and Enter skips it.  A need
+    the printer's own software can hand over is asked of it first, with the
+    person approving there (*host* is where to ask); if that does not work
+    the person is asked as before.
     """
     found = found or {}
     answers: dict[str, str | None] = {}
@@ -46,6 +50,13 @@ def ask_connection_needs(
             click.echo(f"  {_sentence_case(need.name)}: {value} (read from the printer)")
             answers[need.key] = value
     for need in needs_to_ask(printer_type, found=found, discovered=discovered):
+        if need.request and host:
+            from kiln.credential_requests import in_terminal
+
+            got = in_terminal(need, host)
+            if got:
+                answers[need.key] = got
+                continue
         label = f"  {_sentence_case(need.name)} ({need.where})"
         if need.required:
             answer = click.prompt(label)
