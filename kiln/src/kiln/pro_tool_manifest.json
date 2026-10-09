@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-09T21:47:23.488557+00:00",
+  "generated": "2026-10-09T22:10:04.843217+00:00",
   "tool_count": 425,
   "categories": {
     "product_generators": {
@@ -17310,7 +17310,7 @@
     },
     {
       "name": "plan_hardware_insertion",
-      "description": "Plan nuts, magnets, bearings and inserts into a printed part: where, when, how.\n\nFree door, tiered answer \u2014 Free: Safety checks \u2014 always free \u00b7 Pro: The layer, the pause written for your printer, and a phone alert when it\u2019s time \u00b7 Business: + A board of every printer waiting for hands, and a record of who put what into which part \u00b7 Enterprise: + A board of every printer waiting for hands, and a record of who put what into which part.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Plan nuts, magnets, bearings and inserts into a printed part: where, when, how.\n\nFree door, tiered answer \u2014 Free: Safety checks \u2014 always free \u00b7 Pro: The layer, the pause written for your printer, and a phone alert when it\u2019s time \u00b7 Business: + A board of every printer waiting for hands, and a record of who put what into which part \u00b7 Enterprise: + Each insertion cited in the part\u2019s First Article Inspection draft.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "print_intelligence",
@@ -17367,7 +17367,7 @@
         "free": "Safety checks \u2014 always free",
         "pro": "The layer, the pause written for your printer, and a phone alert when it\u2019s time",
         "business": "+ A board of every printer waiting for hands, and a record of who put what into which part",
-        "enterprise": "+ A board of every printer waiting for hands, and a record of who put what into which part"
+        "enterprise": "+ Each insertion cited in the part\u2019s First Article Inspection draft"
       },
       "offline": {
         "schema_version": 1,
