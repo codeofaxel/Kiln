@@ -1112,7 +1112,7 @@ def _attach_placement(response: dict, info: dict | None) -> None:
 _HARDWARE_PLANNER = "plan_hardware_insertion"
 
 #: What of the planner's answer the person is told.
-_HARDWARE_BLOCK_KEYS = ("placements", "safety_floor", "stops", "after_print", "written_note")
+_HARDWARE_BLOCK_KEYS = ("placements", "sealed_pockets", "safety_floor", "stops", "after_print", "written_note")
 
 #: The last sentence of every refusal below.
 _NOTHING_SENT = "Nothing was sent to the printer."
@@ -1332,12 +1332,22 @@ def _plan_hardware_into_print(
     if unplaced := answer.get("unplaced"):
         return refuse(_sentences("Kiln could not find a place in this part for all of the hardware", *unplaced))
     placements = [p for p in (answer.get("placements") or []) if isinstance(p, dict)]
-    if not placements:
+    # A free answer carries no placements: it says which pockets the print
+    # will seal and hands over its own upgrade block.  A sealed pocket with
+    # no written pause is refused below like any other; a part with none
+    # prints, with the planner's own sentence for what the paid half adds.
+    sealed = [s for s in (answer.get("sealed_pockets") or []) if isinstance(s, dict)]
+    rope = answer.get("upgrade") if isinstance(answer.get("upgrade"), dict) else None
+    if not placements and not sealed and rope is None:
         return refuse(_sentences(
             "Kiln found nothing in this part to plan the hardware into", answer.get("note"), answer.get("next"),
         ))
 
     block = _hardware_block(answer)
+    if rope and not placements and not sealed:
+        block["note"] = _sentences(
+            "Nothing in this part needs a pause", rope.get("message") or rope.get("headline"),
+        )
     written = answer.get("written_file")
     if written:
         if not (isinstance(written, str) and os.path.isfile(written)):
@@ -1365,7 +1375,7 @@ def _plan_hardware_into_print(
         # the file prints as it is.
         return block, None
 
-    if any(p.get("when") == "pause" for p in placements):
+    if sealed or any(p.get("when") == "pause" for p in placements):
         if any(isinstance(f, dict) and f.get("on_this_computer") is False for f in answer.get("files") or []):
             return refuse(
                 "Kiln wrote the file with the pause in it, but it did not reach this computer. Try again.",

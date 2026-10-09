@@ -369,7 +369,11 @@ def test_a_free_caller_is_refused_before_upload_and_gets_the_planners_own_upgrad
     slicer_tools, tmp_path, monkeypatch,
 ):
     printer = _Printer()
-    planner = _Planner(_answer(your_tier="free", upgrade=FREE_UPGRADE, stops=None))
+    # A free answer: no placements, the pocket the print will seal, and the rope.
+    sealed = [{"seat": "S1", "where": "the pocket in the top face",
+               "what_happens": "closed inside the print; whatever goes in it goes in during a pause"}]
+    planner = _Planner(_answer(your_tier="free", upgrade=FREE_UPGRADE, stops=None, placements=None,
+                               sealed_pockets=sealed))
     resp = _run(slicer_tools, tmp_path, monkeypatch, printer, planner)
 
     assert resp["success"] is False
@@ -382,9 +386,25 @@ def test_a_free_caller_is_refused_before_upload_and_gets_the_planners_own_upgrad
     assert resp["upgrade"] == FREE_UPGRADE
     assert "$" not in message and "kiln3d.com" not in message
     # What the free answer does know still reaches the person.
-    assert resp["hardware"]["placements"][0]["when"] == "pause"
+    assert resp["hardware"]["sealed_pockets"] == sealed and "placements" not in resp["hardware"]
     assert resp["hardware"]["safety_floor"]
     assert resp["slice"]["output_path"].endswith("out.gcode")
+
+
+def test_a_free_caller_whose_pockets_all_open_on_a_face_prints_with_the_planners_sentence(
+    slicer_tools, tmp_path, monkeypatch,
+):
+    """A free answer that names no sealed pocket has nothing a pause is owed
+    for: the print goes, and the block carries the planner's own line."""
+    printer = _Printer()
+    planner = _Planner(_answer(your_tier="free", upgrade={**FREE_UPGRADE, "message": "Pro plans the inserts."},
+                               stops=None, placements=None, sealed_pockets=[]))
+    resp = _run(slicer_tools, tmp_path, monkeypatch, printer, planner, hardware=("4x M3 heat-set insert",))
+
+    assert resp["success"] is True
+    assert printer.uploads == [("out.gcode", SLICE)]
+    assert resp["hardware"]["note"] == "Nothing in this part needs a pause. Pro plans the inserts."
+    assert "upgrade" not in resp
 
 
 def test_a_printer_whose_stop_is_unknown_is_refused_with_the_planners_reason(
