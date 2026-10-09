@@ -316,6 +316,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Cancelling a print on an older USB-connected printer no longer claims it stopped when it didn't.** Kiln pauses it, turns the heaters off, and tells you to press Stop on the printer.
+
 - **Manufacturing quotes work again.** Our print partner changed how it takes in a model; quotes and ordering are back.
 
 - **Rounded CAD parts no longer show as "not closed".**
