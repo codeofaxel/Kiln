@@ -25,7 +25,7 @@ import requests
 from requests.exceptions import ConnectionError as ReqConnectionError
 from requests.exceptions import RequestException, Timeout
 
-from kiln.printer_backends import need_where
+from kiln.printer_backends import PRUSALINK_PI_KEY_WHERE, need_where
 from kiln.printers.base import (
     FilamentHandlingUnsupported,
     FilamentOpPlan,
@@ -493,9 +493,9 @@ class PrusaLinkAdapter(PrinterAdapter):
                         raise PrusaLinkAuthError(
                             f"Prusa Link at {self._host} refused the API key (HTTP 403, "
                             f"'{_BAD_API_KEY_MARKER}'). That is how PrusaLink on a Raspberry Pi "
-                            f"(MK3S/MK2.5) answers a wrong or empty key: its API key is separate from the login the setup "
-                            f"wizard made, is empty until you make one, and is made in PrusaLink's "
-                            f"web page under Settings, not on the printer's screen. Then update "
+                            f"(MK3S/MK2.5) answers a wrong or empty key. Its API key is not the "
+                            f"login the setup wizard made and is empty until you make one, "
+                            f"{PRUSALINK_PI_KEY_WHERE}, not on the printer's screen. Then update "
                             f"with: kiln auth --name <name> --host {self._host} "
                             f"--type prusalink --api-key <YOUR_KEY>",
                         )

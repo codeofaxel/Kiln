@@ -87,13 +87,19 @@ _MOONRAKER_KEY = ConnectionNeed(
     required=False,
 )
 
+#: Where PrusaLink running on a Raspberry Pi (an MK3S or MK2.5) has its API
+#: key made.  Unlike the built-in PrusaLink, that key is not the login the
+#: setup wizard made, and it is empty until someone makes it.  The adapter's
+#: refusal for a rejected key on such a printer reads this too.
+PRUSALINK_PI_KEY_WHERE = "in PrusaLink's web page, under Settings"
+
+
 PRINTER_BACKENDS: tuple[PrinterBackend, ...] = (
     PrinterBackend(
         "bambu",
         "Bambu Lab",
-        # Menu paths are Bambu's own (wiki.bambulab.com: enable-lan-mode,
-        # enable-developer-mode, find-sn), by the maker's model families.
-        # An X1 on firmware before 01.09.00.00 still shows its older menus.
+        # Menu paths are Bambu's own, by the maker's model families.  An X1
+        # on firmware before 01.09.00.00 still shows its older menus.
         needs=(
             ConnectionNeed(
                 "serial",
@@ -135,7 +141,7 @@ PRINTER_BACKENDS: tuple[PrinterBackend, ...] = (
         "Prusa Link",
         needs=(
             # Prusa's firmware uses the PrusaLink password as the API key
-            # (Prusa-Firmware-Buddy, lib/WUI/nhttp/req_parser.cpp).  Optional
+            # (the firmware's own source).  Optional
             # for loading a config, so no saved printer stops loading; asked
             # even for a printer discovery found, which answers a status
             # probe either way but takes no print without it.
@@ -143,8 +149,8 @@ PRINTER_BACKENDS: tuple[PrinterBackend, ...] = (
                 "api_key",
                 "PrusaLink password",
                 "on the printer's screen under Settings > Network > PrusaLink; an "
-                "MK3S running PrusaLink on a Raspberry Pi makes its key in PrusaLink's "
-                "web page instead, under Settings",
+                "MK3S running PrusaLink on a Raspberry Pi makes its key instead "
+                f"{PRUSALINK_PI_KEY_WHERE}",
                 required=False,
                 skip_if_found=False,
             ),
@@ -193,9 +199,10 @@ NETWORK_PRINTER_TYPES: tuple[str, ...] = tuple(
 #: Printer type -> display label.
 PRINTER_TYPE_LABELS: dict[str, str] = {b.slug: b.label for b in PRINTER_BACKENDS}
 
-#: Baud rate assumed for a USB printer that does not declare one.  Standard
-#: for most Marlin builds; boards flashed for 250000 must say so, which is
-#: why every door that creates a serial adapter has to carry the setting
+#: Baud rate assumed for a USB printer that does not declare one.  It is the
+#: rate Prusa and Creality ship their Marlin builds at; upstream Marlin's own
+#: default is 250000, so a board built from stock Marlin must say so, which
+#: is why every door that creates a serial adapter has to carry the setting
 #: rather than assume this.
 DEFAULT_SERIAL_BAUDRATE = 115200
 
