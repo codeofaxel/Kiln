@@ -62,8 +62,11 @@ The rules, in plain language
    third-party repository, a line pinned into someone else's source in
    any spelling (``file.cpp:12``, ``file.cpp L12``, ``lines 12-14``; a
    line into one of Kiln's own files is a cross-reference and passes), a
-   vendor or community page path, a community account or client name, or
-   a fetch date.  A public catalogue note has never been allowed
+   C or C++ source file named without a line (Kiln has none of its own;
+   the note contract refuses Python, JSON and INI names too, but in code
+   those are almost always Kiln's own files), a vendor or community page
+   path or the site named without one, a community account or client
+   name, or a fetch date.  A public catalogue note has never been allowed
    to carry these (``kiln.data_note_contract``); a code comment is the
    same page with a different door, and it read as a research trail a
    copycat can follow.  Kiln's own hosts (``kiln3d.com``, its GitHub) are
@@ -538,6 +541,19 @@ _RESEARCH_PINS: tuple[tuple[str, re.Pattern[str]], ...] = (
         ),
     ),
     (
+        # The same trail without a line number.  Kiln carries no C or C++ of
+        # its own, so a C or C++ file named in prose is someone else's: a
+        # path, or a bare name with a C++ or header extension (a bare
+        # ``x.c`` is too easily something else, so plain C needs a path).
+        "a third-party source file",
+        re.compile(r"\b(?:[\w.-]+/)*[\w-]+\.(?:cpp|hpp|cc|h)\b|\b(?:[\w.-]+/)+[\w-]+\.c\b"),
+    ),
+    (
+        # The wiki or forum a fact was read on, named without a page path.
+        "a vendor or community site",
+        re.compile(r"\b(?:wiki|forum|forums|community|discuss)\.[\w-]+(?:\.[\w-]+)*\.(?:com|org|io|net|dev|cn)\b(?!/)"),
+    ),
+    (
         "a community account or client",
         re.compile(_note_contract_pattern(
             "COMMUNITY_ACCOUNTS",
@@ -552,7 +568,7 @@ _RESEARCH_PINS: tuple[tuple[str, re.Pattern[str]], ...] = (
 _PIN_PREFILTER = re.compile(
     r"github\.com|githubusercontent|gitlab\.com|\.(?:cpp|hpp|cc|c|h)\b|reddit\.com/r/|"
     r"\.(?:py|vue|js|tsx?)\b`{0,2}\s*\(?\s*(?:L\d|lines?\s+\d|:\d)|"
-    r"(?:wiki|forum|forums|community|discuss)\.[\w.-]+\.(?:com|org|io|net|dev|cn)/|read 20\d\d-|"
+    r"(?:wiki|forum|forums|community|discuss)\.[\w.-]+\.(?:com|org|io|net|dev|cn)\b|read 20\d\d-|"
     r"pellcorp|Guilouz|TheFeralEngineer|artillery3dlab|fpnewton|Doridian|OpenBambuAPI|open-bamboo|ha-bambulab|"
     r"pybambu|bambuddy|bambino|OpenCentauri",
     re.IGNORECASE,
@@ -800,10 +816,16 @@ def _research_pins(block: str, *, prose_only: bool = True, repos: bool = True) -
             text = m.group(0)
             if any(own in text for own in _OWN_HOSTS):
                 continue
-            if rule == "a source file:line pin" and _is_our_file(text):
+            if rule in ("a source file:line pin", "a third-party source file") and _is_our_file(text):
                 continue
             found.append((rule, text))
-    return found
+    # A pinned line is also a named file: report the citation once.
+    pinned = [text for rule, text in found if rule == "a source file:line pin"]
+    return [
+        (rule, text)
+        for rule, text in found
+        if not (rule == "a third-party source file" and any(text in pin for pin in pinned))
+    ]
 
 
 _OUR_FILES: list[tuple[frozenset[str], frozenset[str]]] = []
@@ -1147,9 +1169,11 @@ def _freeze_pins(content: list[tuple[str, bytes]]) -> int:
         "# docstrings (a third-party repository, a source file:line pin, a vendor\n"
         "# or community page, an account or client name, a fetch date), keyed\n"
         "# `path :: matched text`.  Read by scripts/audit_moat_comment_leak.py: a\n"
-        "# pin not listed here fails the gate.  These pre-date the rule and are\n"
-        "# to be scrubbed or moved to the private evidence; this list may only\n"
-        "# shrink.  Regenerate with\n"
+        "# pin not listed here fails the gate.  These pre-date the rule (the\n"
+        "# source-file and site entries pre-date its 2026-10-09 widening) and\n"
+        "# are to be scrubbed or moved to the private evidence, or kept as an\n"
+        "# integration target's own reference by a reviewed decision; this list\n"
+        "# may only shrink.  Regenerate with\n"
         "#     python3 scripts/audit_moat_comment_leak.py --freeze-source-pins\n"
         "# and commit the diff.\n"
     )
