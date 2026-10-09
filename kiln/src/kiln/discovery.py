@@ -316,9 +316,14 @@ def _parse_ssdp_headers(text: str) -> dict[str, str]:
 def _try_ssdp(timeout: float) -> list[DiscoveredPrinter]:
     """Discover Bambu Lab printers via their SSDP broadcast (UDP 2021).
 
-    Bambu printers broadcast an SSDP ``NOTIFY`` to ``239.255.255.250:2021``
-    -- in cloud mode as well as LAN Only Mode, per Bambu's own network-ports
-    page -- carrying the device IP (``Location``),
+    Bambu printers announce themselves with an SSDP ``NOTIFY`` -- in cloud
+    mode as well as LAN Only Mode, per Bambu's own network-ports page --
+    either multicast to ``239.255.255.250`` on port 1990 or broadcast to
+    ``255.255.255.255`` on port 2021.  Kiln listens on 2021 (and joins the
+    group there), so it hears the broadcast; a printer that sent only the
+    1990 multicast would be missed.  None is known to, and listening on
+    1990 too could hold the port Bambu Studio uses on the same computer.
+    The NOTIFY carries the device IP (``Location``),
     serial (``USN``), model and name.  They answer neither the mDNS
     service types we browse nor a TCP/HTTP port scan (the MQTT port is
     filtered to raw connects), so SSDP is the only reliable LAN
@@ -343,8 +348,9 @@ def _try_ssdp(timeout: float) -> list[DiscoveredPrinter]:
         except OSError:
             logger.debug("SSDP multicast join failed; listening for broadcasts only")
 
-        # Bambu re-broadcasts its NOTIFY roughly every 10 s and ignores
-        # active M-SEARCH, so the window must exceed one broadcast interval.
+        # Observed on Kiln's own test printers (Bambu publishes neither):
+        # the NOTIFY repeats roughly every 10 s and an active M-SEARCH gets
+        # no answer, so the window must exceed one broadcast interval.
         deadline = time.monotonic() + min(timeout, 12.0)
         while time.monotonic() < deadline:
             sock.settimeout(max(0.2, deadline - time.monotonic()))

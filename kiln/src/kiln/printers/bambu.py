@@ -8,9 +8,10 @@ Bambu printers expose:
 * **MQTT** on port 8883 (TLS) for status, commands, and G-code.
 * **FTPS** on port 990 (implicit TLS) for file upload/download/delete.
 
-Authentication uses the printer's **LAN Access Code** (found on the
-printer's LCD under Network settings) as both the MQTT password and
-the FTPS password.  The username is always ``"bblp"``.
+Authentication uses the printer's **LAN Access Code** as both the MQTT
+password and the FTPS password; where each model shows it is the one list
+every setup door reads (:mod:`kiln.printer_backends`).  The username is
+always ``"bblp"``.
 
 The adapter mirrors the retry and error-handling patterns established by
 the OctoPrint and Moonraker adapters.
