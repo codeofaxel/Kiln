@@ -111,6 +111,40 @@ class PrinterError(Exception):
         self.cause = cause
 
 
+class UnsupportedCommand(PrinterError):
+    """The firmware answered a command with "I do not know that one".
+
+    Marlin does not refuse an unknown command with an error: it prints an
+    ``echo:Unknown command`` line and then a plain ``ok``, so a reader that
+    waits for ``ok`` takes the refusal for success.  An adapter that sees that
+    line raises this instead, carrying the command, so the caller can choose
+    what to do about a printer that cannot do the thing.  A subclass of
+    :class:`PrinterError` so every existing caller still renders it as a
+    message.
+    """
+
+    def __init__(self, command: str, *, cause: Exception | None = None) -> None:
+        super().__init__(f"The printer's firmware does not know the command {command!r}.", cause=cause)
+        self.command = command
+
+
+class WaitingForUser(PrinterError):
+    """The printer is parked waiting for a person, and reads no commands.
+
+    A pause the G-code file asked for stops the firmware's command queue
+    until someone clicks on the printer; the only sign on the wire is the
+    keepalive line it prints meanwhile.  Raised by an adapter that sees that
+    line, instead of letting the silence read as a printer that is gone.
+    """
+
+    def __init__(self, command: str = "", *, cause: Exception | None = None) -> None:
+        super().__init__(
+            "The printer is waiting for a click on the printer itself and is not reading commands.",
+            cause=cause,
+        )
+        self.command = command
+
+
 class PrinterEngagementError(PrinterError):
     """Refused because Kiln is already working with a different machine.
 
@@ -1604,6 +1638,10 @@ CAUSE_POWERED_OFF = "powered_off_or_off_network"
 CAUSE_WRONG_ACCESS_CODE = "wrong_access_code"
 CAUSE_CONNECTION_LIMIT = "connection_limit"
 CAUSE_SILENT = "reachable_but_silent"
+# Not a read failure: the printer is reachable and paused, waiting for a
+# person to click on it.  Rides the same cause/remedy pair so a poller that
+# already shows those two fields shows this without a new one.
+CAUSE_WAITING_FOR_USER = "waiting_for_user"
 
 
 def probe_tcp(host: str, port: int, timeout: float = 2.0) -> bool | None:
@@ -1869,6 +1907,18 @@ class HardwareStopRefusal(PrintResult):
 
     code: str = "HARDWARE_NOT_CONFIRMED"
     hardware: dict[str, Any] | None = None
+
+
+@dataclass
+class CodedPrintResult(PrintResult):
+    """A print-control result carrying a stable code an agent can branch on.
+
+    For the outcomes the person must hear about in words AND the caller must
+    be able to recognise without parsing them: a cancel the firmware could
+    not carry out, a resume only the printer's own controls can perform.
+    """
+
+    code: str = ""
 
 
 # ---------------------------------------------------------------------------

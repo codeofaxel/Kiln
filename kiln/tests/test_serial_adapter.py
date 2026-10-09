@@ -17,7 +17,7 @@ Covers:
 - upload_file() FileNotFoundError and PermissionError
 - delete_file() M30
 - start_print() M23+M24 sequence
-- cancel_print() M524 with M0 fallback
+- cancel_print() M524 (the unknown-command case lives in test_serial_cancel_and_user_wait.py)
 - pause_print() M25
 - resume_print() M24
 - emergency_stop() M112 without waiting for ok
@@ -837,7 +837,7 @@ class TestStartPrint:
 # ---------------------------------------------------------------------------
 
 class TestCancelPrint:
-    """Tests for cancel_print() with M524 and M0 fallback."""
+    """Tests for cancel_print() with M524."""
 
     def test_cancel_via_m524(self):
         mock_ser = _make_mock_serial(readline_responses=[b"ok\n"])
@@ -847,24 +847,22 @@ class TestCancelPrint:
         assert result.success is True
         assert adapter._current_file is None
 
-    def test_cancel_fallback_to_m0(self):
-        """When M524 fails, cancel_print falls back to M0."""
+    def test_cancel_failure_never_falls_back_to_m0(self):
+        """M0 is a wait for a click, not a cancel, so a failed M524 propagates."""
         mock_ser = _make_mock_serial()
         adapter = _build_adapter(mock_ser)
         adapter._current_file = "BENCHY.GCO"
 
-        call_count = [0]
+        sent: list[str] = []
 
         def _selective_send(cmd, **kwargs):
-            call_count[0] += 1
-            if "M524" in cmd:
-                raise PrinterError("Unknown command")
-            return "ok"
+            sent.append(cmd)
+            raise PrinterError("Firmware error for 'M524'")
 
-        with patch.object(adapter, "_send_command", side_effect=_selective_send):
-            result = adapter.cancel_print()
-            assert result.success is True
-            assert call_count[0] == 2  # M524 tried, then M0
+        with patch.object(adapter, "_send_command", side_effect=_selective_send), pytest.raises(PrinterError):
+            adapter.cancel_print()
+        assert sent == ["M524"]
+        assert adapter._current_file == "BENCHY.GCO"
 
 
 # ---------------------------------------------------------------------------

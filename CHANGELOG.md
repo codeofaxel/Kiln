@@ -7,6 +7,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Connect an OctoPrint printer without copying a key.** Kiln asks OctoPrint for one, and you click Allow there. OctoPrint versions without this still take a pasted key.
+
 - **Paid printer tools now work with just the free install.** Kiln's servers do the thinking, and the Kiln on your computer does the step on your printer, after showing you each action and why. Fleet routing and material rule checks (food contact, REACH, RoHS, flame, UV) work the same way.
 
 - **Round or bevel the edges of a CAD part.** Kiln edits the CAD itself and tells you any edge it left sharp.
@@ -315,6 +317,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   https://kiln3d.com/pricing.
 
 ### Fixed
+
+- **Cancelling a print on an older USB-connected printer no longer claims it stopped when it didn't.** Kiln pauses it, turns the heaters off, and tells you to press Stop on the printer.
+
+- **A printer Kiln finds on your network is saved at the port it answered on.**
+
+- **Kiln's printer network check now works for OctoPrint, Prusa Link, Klipper and Duet printers.**
 
 - **Manufacturing quotes work again.** Our print partner changed how it takes in a model; quotes and ordering are back.
 

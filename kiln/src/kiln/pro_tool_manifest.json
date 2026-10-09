@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-08T22:35:24.300968+00:00",
-  "tool_count": 423,
+  "generated": "2026-10-09T21:47:23.488557+00:00",
+  "tool_count": 425,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -13757,6 +13757,51 @@
       "served": false
     },
     {
+      "name": "fleet_hardware_stops",
+      "description": "Every printer waiting for a nut, magnet or bearing, in the order to walk the floor (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "printer_names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Names"
+          }
+        },
+        "title": "fleet_hardware_stopsArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
+      },
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "every_job",
+              "hardware"
+            ]
+          }
+        ],
+        "acts": false
+      }
+    },
+    {
       "name": "fleet_nozzle_agreement",
       "description": "Which registered machines disagree with Kiln's nozzle record, and which matter first (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
@@ -17265,7 +17310,7 @@
     },
     {
       "name": "plan_hardware_insertion",
-      "description": "Plan nuts, magnets, bearings and inserts into a printed part: where, when, how.\n\nFree door, tiered answer \u2014 Free: Safety checks \u2014 always free \u00b7 Pro: The layer, the pause written for your printer, and a phone alert when it\u2019s time \u00b7 Business: The layer, the pause written for your printer, and a phone alert when it\u2019s time \u00b7 Enterprise: The layer, the pause written for your printer, and a phone alert when it\u2019s time.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Plan nuts, magnets, bearings and inserts into a printed part: where, when, how.\n\nFree door, tiered answer \u2014 Free: Safety checks \u2014 always free \u00b7 Pro: The layer, the pause written for your printer, and a phone alert when it\u2019s time \u00b7 Business: + A board of every printer waiting for hands, and a record of who put what into which part \u00b7 Enterprise: + A board of every printer waiting for hands, and a record of who put what into which part.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "print_intelligence",
@@ -17321,8 +17366,8 @@
         "domain": "hardware_insertion",
         "free": "Safety checks \u2014 always free",
         "pro": "The layer, the pause written for your printer, and a phone alert when it\u2019s time",
-        "business": "The layer, the pause written for your printer, and a phone alert when it\u2019s time",
-        "enterprise": "The layer, the pause written for your printer, and a phone alert when it\u2019s time"
+        "business": "+ A board of every printer waiting for hands, and a record of who put what into which part",
+        "enterprise": "+ A board of every printer waiting for hands, and a record of who put what into which part"
       },
       "offline": {
         "schema_version": 1,
@@ -18159,6 +18204,107 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      }
+    },
+    {
+      "name": "record_hardware_insertion",
+      "description": "Record what went into which part, when and by whom -- or list those records (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_name": {
+            "default": "",
+            "title": "Printer Name",
+            "type": "string"
+          },
+          "stop": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Stop"
+          },
+          "hardware": {
+            "default": "",
+            "title": "Hardware",
+            "type": "string"
+          },
+          "operator": {
+            "default": "",
+            "title": "Operator",
+            "type": "string"
+          },
+          "serial": {
+            "default": "",
+            "title": "Serial",
+            "type": "string"
+          },
+          "lot": {
+            "default": "",
+            "title": "Lot",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          },
+          "photo_path": {
+            "default": "",
+            "title": "Photo Path",
+            "type": "string"
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
+          },
+          "version_id": {
+            "default": "",
+            "title": "Version Id",
+            "type": "string"
+          },
+          "list_records": {
+            "default": false,
+            "title": "List Records",
+            "type": "boolean"
+          },
+          "limit": {
+            "default": 50,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "record_hardware_insertionArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
+      },
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "job",
+              "hardware"
+            ]
+          }
+        ],
+        "acts": false
+      },
+      "inputs": {
+        "image": "photo_path",
+        "printer": "printer_name"
       }
     },
     {

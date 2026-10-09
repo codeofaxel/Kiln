@@ -301,6 +301,25 @@ def has_plan(adapter: Any) -> bool:
         return False
 
 
+def record_for(adapter: Any) -> dict[str, Any] | None:
+    """A copy of what is on record for *adapter*'s machine, or ``None``.
+
+    ``{"file", "started_at", "plan", "stops", ...}``: the plan filed when the
+    print started and what Kiln has seen at each stop since (``paused_at``,
+    ``confirmed_at``, ``done``, ``passed_how`` per stop number).  For a
+    reader that binds something to a stop -- a record of what went in --
+    and must not re-derive the plan.  Read only; never raises.
+    """
+    try:
+        if not _store_path().is_file():
+            return None
+        with _LOCK:
+            record = _read_store().get(machine_key(adapter))
+        return json.loads(json.dumps(record)) if isinstance(record, dict) else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def stage(adapter: Any, file_name: str, path: str | None) -> None:
     """Remember the plan in the file the start gate is judging.
 
