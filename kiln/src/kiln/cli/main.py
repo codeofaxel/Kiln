@@ -8730,7 +8730,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
 
     # -- Manual entry (or refine selected) ---------------------------------
     if selected is not None:
-        host = selected.host
+        host = selected.address
         printer_type = selected.printer_type
         if printer_type == "unknown":
             printer_type = click.prompt(
@@ -9085,12 +9085,12 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
         from kiln.printer_backends import missing_needs, needs_sentence
 
         found_serial = getattr(first, "serial", None) or None
-        still_needed = missing_needs(first.printer_type, {"host": first.host, "serial": found_serial})
+        still_needed = missing_needs(first.printer_type, {"host": first.address, "serial": found_serial})
         try:
             save_printer(
                 printer_name,
                 first.printer_type,
-                first.host,
+                first.address,
                 serial=found_serial,
                 printer_model=auto_model,
                 set_active=True,
@@ -9098,13 +9098,13 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
             results["setup"] = {
                 "action": "auto_configured",
                 "printer": printer_name,
-                "host": first.host,
+                "host": first.address,
                 "type": first.printer_type,
                 "printer_model": auto_model,
                 "still_needed": [need.name for need in still_needed],
             }
             if not json_mode:
-                click.echo(f"    Auto-configured: {printer_name} [{first.printer_type}] at {first.host}")
+                click.echo(f"    Auto-configured: {printer_name} [{first.printer_type}] at {first.address}")
                 if auto_model:
                     click.echo(click.style(
                         f"    ✓ printer_model suggested from serial: {auto_model}",

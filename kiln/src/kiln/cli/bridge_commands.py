@@ -765,20 +765,6 @@ def _discovered_line(found: object) -> str:
     return f"{label} — {address} ({found.printer_type})"
 
 
-def _discovered_host(found: object) -> str:
-    """The host string ``save_printer`` wants for this discovery result.
-
-    HTTP backends keep their discovered port (Moonraker answers on 7125,
-    4408, or 80 depending on the machine); Bambu and Elegoo speak
-    MQTT/SDCP on fixed ports their adapters own, so they get the bare
-    address — ``_normalize_host`` strips any scheme for them anyway.
-    """
-    if found.printer_type in ("bambu", "elegoo"):
-        return found.host
-    port = getattr(found, "port", 0) or 0
-    return found.host if port in (0, 80) else f"{found.host}:{port}"
-
-
 def _credential_prompts(printer_type: str, discovered_serial: str) -> dict:
     """Ask only for what this backend actually needs, nothing else.
 
@@ -862,7 +848,7 @@ def _offer_first_printer() -> None:
         save_printer(
             name,
             chosen.printer_type,
-            _discovered_host(chosen),
+            chosen.address,
             printer_model=model,
             **extras,
         )

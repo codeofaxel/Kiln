@@ -58,10 +58,12 @@ class _PrinterManagementToolsPlugin:
 
             Returns a list of discovered printers with host, port, type, and
             whether the API is reachable.  Each one also carries
-            ``to_connect``: what the person still has to supply and where
-            they find it (``still_needed``), and anything to switch on in
-            the printer first (``first``).  Ask for exactly those, in plain
-            words, then add the printer with ``register_printer``.
+            ``address`` -- pass it as ``register_printer``'s ``host``; it
+            keeps the port the printer answered on -- and ``to_connect``:
+            what the person still has to supply and where they find it
+            (``still_needed``), and anything to switch on in the printer
+            first (``first``).  Ask for exactly those, in plain words, then
+            add the printer with ``register_printer``.
             """
             try:
                 from kiln.discovery import discover_printers as _discover
@@ -71,6 +73,7 @@ class _PrinterManagementToolsPlugin:
                 printers = []
                 for found in results:
                     entry = found.to_dict()
+                    entry["address"] = found.address
                     entry["to_connect"] = connection_guide(
                         found.printer_type,
                         found={"host": found.host, "serial": found.serial},

@@ -50,6 +50,20 @@ class DiscoveredPrinter:
     discovery_method: str = ""  # "mdns", "http_probe", "manual"
     trusted: bool = False
 
+    @property
+    def address(self) -> str:
+        """The host a saved config wants for this printer.
+
+        HTTP backends keep the port they answered on (OctoPrint on 80 or
+        5000, Moonraker on 7125, 4408 or 80, PrusaLink on 80 or 8080), or the
+        saved printer is looked for on port 80.  Bambu and Elegoo speak
+        MQTT / SDCP on fixed ports their adapters own, so they get the bare
+        address.
+        """
+        if self.printer_type in ("bambu", "elegoo"):
+            return self.host
+        return self.host if self.port in (0, 80) else f"{self.host}:{self.port}"
+
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
