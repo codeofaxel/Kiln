@@ -9207,6 +9207,27 @@ def _cancel_print_on(
 
     result = adapter.cancel_print()
 
+    if not result.success:
+        # The print did not end: the adapter says so (a firmware with no
+        # abort command, paused instead).  Everything below assumes an
+        # ended print -- a recorded cancel, no watchdogs, targets restored
+        # -- and each of those is wrong while the job has not finished, so
+        # the ending bookkeeping is undone and the rest skipped.
+        # The pause keep-alive stays stopped: the firmware holds its own
+        # targets through this pause, and the adapter already said what the
+        # heaters are doing.
+        try:
+            from kiln.auto_record_hook import clear_cancel_intent
+            from kiln.printers.base import outcome_printer_name
+
+            clear_cancel_intent(outcome_printer_name(adapter))
+        except Exception as exc:  # pragma: no cover -- best-effort
+            logger.debug("cancel_print: intent withdrawal failed: %s", exc)
+        _audit("cancel_print", f"not cancelled on {target_name}: {result.message}")
+        out = result.to_dict()
+        out["printer_name"] = target_name
+        return out
+
     # The heater watchdog is a single process-wide instance bound to
     # ``_get_adapter()`` — it only ever watches the default printer.
     # Telling it "the print ended" after cancelling a DIFFERENT machine

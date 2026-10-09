@@ -24,9 +24,11 @@ import time
 from typing import Any, ClassVar
 
 from kiln.printers.base import (
+    CAUSE_WAITING_FOR_USER,
     DEFAULT_LOAD_LENGTH_MM,
     DEFAULT_PURGE_LENGTH_MM,
     DEFAULT_UNLOAD_LENGTH_MM,
+    CodedPrintResult,
     FilamentOpPlan,
     FilamentOpResult,
     FirmwareComponent,
@@ -42,7 +44,9 @@ from kiln.printers.base import (
     PrinterState,
     PrinterStatus,
     PrintResult,
+    UnsupportedCommand,
     UploadResult,
+    WaitingForUser,
     canonical_model_key,
     hardware_stop_waiting,
 )
@@ -85,6 +89,25 @@ _MACHINE_TYPE_RE = re.compile(
 # builds that set CUSTOM_MACHINE_NAME report a real model.
 _GENERIC_MACHINE_TYPES = frozenset({"3d printer", "marlin", "unknown", "reprap"})
 
+
+# Marlin's own words for the three things a reply line can say besides data.
+# Lower-case, because the match is made on the lower-cased line.
+#
+# "Unknown command:" is how Marlin refuses a command it has no case for: an
+# ``echo:`` line, then a plain ``ok`` -- so the ``ok`` alone cannot be taken
+# for success.
+_UNKNOWN_COMMAND_MARK = "unknown command:"
+# The host keepalive.  While the firmware waits at an M0/M1 for a person it
+# prints one of these every few seconds and reads no commands at all.
+_WAITING_FOR_USER_MARKS = ("busy: paused for user", "busy: paused for input")
+# The same keepalive during a long move or heat-up: the printer is working,
+# not silent, so it earns more time rather than a timeout.
+_BUSY_PROCESSING_MARK = "busy: processing"
+
+_WAITING_FOR_USER_REMEDY = (
+    "The printer is waiting for a click on the printer: the file told it to "
+    "stop here. Press the knob or Resume on the printer to continue."
+)
 
 # ---------------------------------------------------------------------------
 # Adapter
@@ -153,6 +176,12 @@ class SerialPrinterAdapter(PrinterAdapter):
 
         # Track pause state (Marlin M27 doesn't distinguish paused from printing).
         self._paused: bool = False
+
+        # True from the moment the printer last answered with the "paused for
+        # user" keepalive until the next command it answers with ``ok``.  A
+        # printer in that state reads no commands, so this is what tells a
+        # resume that M24 would only queue behind the wait.
+        self._waiting_for_user: bool = False
 
         # MACHINE_TYPE from the connect-time M115 exchange (None until
         # captured; vendor builds report their model, stock Marlin
@@ -429,6 +458,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         old_timeout = self._serial.timeout
         self._serial.timeout = timeout
         deadline = time.monotonic() + timeout
+        refused_as_unknown = False
 
         try:
             while time.monotonic() < deadline:
@@ -450,15 +480,38 @@ class SerialPrinterAdapter(PrinterAdapter):
                     continue
 
                 logger.debug("RX: %s", line)
+                lower = line.lower()
+
+                # Keepalive lines say how the printer is, not what it was
+                # asked, so they never join the reply a caller parses.
+                if _BUSY_PROCESSING_MARK in lower:
+                    deadline = time.monotonic() + timeout
+                    continue
+                if any(mark in lower for mark in _WAITING_FOR_USER_MARKS):
+                    self._waiting_for_user = True
+                    raise WaitingForUser(command.strip())
+
                 response_lines.append(line)
 
-                lower = line.lower()
+                if _UNKNOWN_COMMAND_MARK in lower:
+                    # Keep reading: the ok that follows belongs to this
+                    # command, and leaving it behind would answer the next.
+                    refused_as_unknown = True
+                    continue
                 if lower.startswith("ok"):
+                    self._waiting_for_user = False
+                    if refused_as_unknown:
+                        raise UnsupportedCommand(command.strip())
                     return "\n".join(response_lines)
                 if lower.startswith("error:") or lower.startswith("error"):
                     raise PrinterError(f"Firmware error for '{command}': {line}")
         finally:
             self._serial.timeout = old_timeout
+
+        if refused_as_unknown:
+            # The firmware said it does not know the command; the missing ok
+            # does not change that.
+            raise UnsupportedCommand(command.strip())
 
         # Timeout exhausted without "ok".
         raise PrinterError(
@@ -547,6 +600,17 @@ class SerialPrinterAdapter(PrinterAdapter):
 
         try:
             temp_response = self._send_command("M105")
+        except WaitingForUser:
+            # Parked at a pause the file asked for: the printer is here and
+            # holding the print, it just reads no commands until someone
+            # clicks.  Reporting it offline sent people to check a cable.
+            # The temperatures are not read, so none are claimed.
+            return PrinterState(
+                connected=True,
+                state=PrinterStatus.PAUSED,
+                cause=CAUSE_WAITING_FOR_USER,
+                remedy=_WAITING_FOR_USER_REMEDY,
+            )
         except PrinterError as exc:
             # Distinguish unreachable (OFFLINE) from firmware error (ERROR).
             msg = str(exc).lower()
@@ -832,24 +896,72 @@ class SerialPrinterAdapter(PrinterAdapter):
     def cancel_print(self) -> PrintResult:
         """Cancel the currently running SD print.
 
-        Sends ``M524`` (abort SD print).  Falls back to ``M0`` if the
-        printer does not support M524.
+        Sends ``M524`` (abort SD print).  Firmware without it answers that it
+        does not know the command; there is no other abort over this link
+        (``M0`` starts a wait for a click, it does not stop anything), so
+        :meth:`_stop_without_abort` does the most that is honest and says what
+        it did.
 
         Raises:
             PrinterError: If the cancellation fails.
         """
         try:
             self._send_command("M524")
-        except PrinterError:
-            # M524 not supported on all firmware -- fall back to M0.
-            logger.debug("M524 not supported; falling back to M0")
-            self._send_command("M0")
+        except UnsupportedCommand:
+            return self._stop_without_abort()
 
         self._current_file = None
         self._paused = False
         return PrintResult(
             success=True,
             message="Print cancelled.",
+        )
+
+    def _stop_without_abort(self) -> PrintResult:
+        """Hold a print this firmware cannot abort: pause it, heaters off.
+
+        Never reports success, because the job is still on the card and a
+        person still has to end it at the printer.  If the pause itself does
+        not land, nothing has stopped and the result says exactly that.
+        """
+        try:
+            self._send_command("M25")
+        except PrinterError:
+            return CodedPrintResult(
+                success=False,
+                message=(
+                    "This printer's firmware cannot abort a print over USB, and Kiln could not pause it "
+                    "either, so the print may still be printing. Press Stop print on the printer's screen, "
+                    "or switch the printer off if that is not safe to wait for."
+                ),
+                code="CANCEL_UNSUPPORTED_NOT_PAUSED",
+            )
+        # The job is held: still loaded, still the current one.
+        self._paused = True
+
+        stuck = []
+        for command, heater in (("M104 S0", "hotend"), ("M140 S0", "bed")):
+            try:
+                self._send_command(command)
+            except PrinterError:
+                stuck.append(heater)
+        if stuck:
+            return CodedPrintResult(
+                success=False,
+                message=(
+                    "This printer's firmware cannot abort a print over USB. Kiln paused it, but switching "
+                    f"the {' and '.join(stuck)} heater off failed, so the heaters may still be on; turn "
+                    "them off at the printer and press Stop print on the printer's screen to end it."
+                ),
+                code="CANCEL_UNSUPPORTED_PAUSED_INSTEAD",
+            )
+        return CodedPrintResult(
+            success=False,
+            message=(
+                "This printer's firmware cannot abort a print over USB. Kiln paused it and switched the "
+                "heaters off; press Stop print on the printer's screen to end it."
+            ),
+            code="CANCEL_UNSUPPORTED_PAUSED_INSTEAD",
         )
 
     def pause_print(self) -> PrintResult:
@@ -892,6 +1004,10 @@ class SerialPrinterAdapter(PrinterAdapter):
             from kiln.hardware_stops import refusal_message
 
             return HardwareStopRefusal(success=False, message=refusal_message(waiting), hardware=waiting)
+        if self._waiting_for_user:
+            still_waiting = self._refusal_while_waiting_for_user()
+            if still_waiting is not None:
+                return still_waiting
         if not (self._paused or force):
             return self._no_paused_print_result()
         result = self._resume_print_impl()
@@ -900,6 +1016,29 @@ class SerialPrinterAdapter(PrinterAdapter):
 
             note_resumed(self, waiting)
         return result
+
+    def _refusal_while_waiting_for_user(self) -> PrintResult | None:
+        """The refusal to give while the printer waits for a click, or ``None``.
+
+        The flag is only as fresh as the last command, and the person may have
+        pressed the knob since, so the printer is asked once more.  If it
+        answers, the wait is over and the resume goes ahead on the ordinary
+        path.  If it is still parked, ``M24`` would only queue behind the
+        wait and report success for nothing, so nothing is sent.
+        """
+        try:
+            self._send_command("M105")
+        except WaitingForUser:
+            return CodedPrintResult(
+                success=False,
+                message=(
+                    "Kiln cannot release this wait over USB: the file told the printer to stop and wait "
+                    "for a click, and it reads no commands until it gets one. Press the knob or Resume "
+                    "on the printer to continue the print."
+                ),
+                code="WAITING_FOR_CLICK_ON_PRINTER",
+            )
+        return None
 
     def _resume_print_impl(self) -> PrintResult:
         """Resume a previously paused SD print.
