@@ -48,8 +48,8 @@ personal information across every surface of the product:
 - the **web workshop** at `app.kiln3d.com` and the marketing site at
   `kiln3d.com`;
 - the **REST API** at `api.kiln3d.com`;
-- **paid tier** accounts (Pro, Business, Enterprise) and the Stripe
-  billing surface;
+- **Kiln accounts**, free and paid (Pro, Business, Enterprise), and
+  the Stripe billing surface;
 - **fulfillment orders** routed through manufacturing partners; and
 - any other service we offer under the Kiln brand.
 
@@ -59,43 +59,48 @@ when you **use** Kiln, not when you merely read its code.
 
 ## 3. What we collect — at a glance
 
-**First and most important: free users never sign up for an
-account.** Kiln's free tier runs entirely on your machine as local
-software (CLI + MCP server). It talks to your printers directly
+**First and most important: you don't need an account to use Kiln.**
+Kiln's local software (CLI + MCP server) runs entirely on your
+machine. It talks to your printers directly
 over your local network, slices your models in-process, and the
 only thing it sends to our servers is a single anonymous "usage
 heartbeat" once per UTC day (described in §3.1). The heartbeat is
 keyed by a random UUID stored at `~/.kiln/installation_id` plus a
 salted one-way hash of your OS-level machine ID — never your name,
 email, IP, or any user identifier. It is on by default and
-opt-out with `KILN_TELEMETRY=false`. Beyond the heartbeat, free
-users have no account, no OAuth identity, no email on file, no
-per-person tracking, no cookies — we cannot identify you, contact
-you, or link your activity to a person.
+opt-out with `KILN_TELEMETRY=false`. If you use Kiln without
+signing in, you have no account, no OAuth identity, no email on
+file, no per-person tracking, no cookies — we cannot identify you,
+contact you, or link your activity to a person.
 
-The table below applies **only to users who explicitly chose
-to create a paid-tier account** (Pro / Business / Enterprise) by
-signing in through Google, Apple, or GitHub OAuth — plus two
-rows that apply to everyone (local product data, which stays on
-your machine by design; and support interactions, which exist
-only if you write to us).
+Signing in is optional at every tier, Free included. The table
+below applies **only to people who chose to create a Kiln
+account** — free or paid (Pro / Business / Enterprise) — by
+signing in through Google, Apple, GitHub or their company's
+single sign-on, except the rows marked as applying to every
+install, to everyone (local product data, which stays on your
+machine by design), or to anyone who writes to us.
 
 | Category | Applies to | Examples | Where it's stored | Legal basis (GDPR) |
 |---|---|---|---|---|
-| **Account identity** | Paid users only | Email address from OAuth (Google / Apple / GitHub), verified auth UID, display name, avatar URL, OAuth provider | Supabase Auth (managed), EU or US regions | Contract (§6(1)(b)) |
+| **Account identity** | Anyone with a Kiln account (free or paid) | Email address from OAuth (Google / Apple / GitHub), verified auth UID, display name, avatar URL, OAuth provider; a one-way hash of your email, kept so a restored backup can be matched back to your account; the coarse way you reached sign-in (§3.2) | Supabase Auth (managed), EU or US regions; Supabase DB (`kiln_cloud_identity_bridge`, `kiln_cloud_oauth_identities`, `kiln_cloud_free_signups`) | Contract (§6(1)(b)) |
 | **Entitlement metadata** | Paid users only | Tier (pro / business / enterprise), token ID (JTI), issue + expiry timestamps, hashed email, status, activation counts | Supabase DB (`pilot_entitlements` table) | Contract (§6(1)(b)) |
 | **Payment data** | Paid users only | Stripe customer ID, subscription ID, invoice history, payment method fingerprint (never the card number itself) | Stripe (PCI-DSS certified); we see only references | Contract + legal obligation (§6(1)(b), (c)) |
-| **Workshop content (git-for-3D)** | Paid users who push to the cloud | Designs you upload or generate, branch commits, version snapshots, release tags, PR-style change proposals, comments on PRs, reflog entries, cherry-picks, features + presets in your libraries | Supabase DB (`kiln_cloud_designs`, `kiln_cloud_branches`, `kiln_cloud_versions`, `kiln_cloud_meshes`, `kiln_cloud_feature_*`, `kiln_cloud_preset_*`, `kiln_cloud_releases`, `kiln_cloud_version_comments`, `kiln_cloud_reflog`) | Contract (§6(1)(b)) |
-| **Rendered previews** | Paid users who push to the cloud | Auto-generated thumbnails + preview images of your designs so you can browse your library visually | Supabase Storage (`kiln_cloud_meshes` blob storage) | Contract (§6(1)(b)) |
-| **Org + team data** | Paid users on Business / Enterprise who create or join orgs | Org names, membership rosters, team assignments, role grants, email addresses of people you invite to your org (before they accept) | Supabase DB (`kiln_cloud_orgs`, `kiln_cloud_org_memberships`, `kiln_cloud_memberships`, `kiln_cloud_team_memberships`, `kiln_cloud_org_teams`) | Contract (§6(1)(b)) |
-| **Workshop access logs** | Paid users who push to the cloud | Who pushed / pulled / viewed / cloned which design + when, for audit trail + collaboration accountability | Supabase DB (`kiln_cloud_reflog`) | Legitimate interest — collaborative-work audit (§6(1)(f)) |
+| **Workshop content (git-for-3D)** | Account holders who save designs to their library or push to the cloud | Designs you upload or generate, branch commits, version snapshots, release tags, PR-style change proposals, comments on PRs, reflog entries, cherry-picks, features + presets in your libraries; models you make on the web (kept so you can view and download them); the goals you set for a design and the answers that shape it; technical drawings and assembly manuals; saved palettes and texture recipes; inspection packages and supplier documents; material datasheets you import; signed receipts for what you saved and released; your library settings (such as keeping every make automatically); and, only if you choose one, a public creator handle | Supabase DB (`kiln_cloud_designs`, `kiln_cloud_branches`, `kiln_cloud_versions`, `kiln_cloud_meshes`, `kiln_cloud_artifact_tokens`, `kiln_cloud_features`, `kiln_cloud_feature_*`, `kiln_cloud_presets`, `kiln_cloud_preset_*`, `kiln_cloud_releases`, `kiln_cloud_receipts`, `kiln_cloud_artifact_attestations`, `kiln_cloud_user_prefs`, `kiln_cloud_version_comments`, `kiln_cloud_reflog`, `kiln_cloud_design_briefs`, `kiln_cloud_technical_drawings`, `kiln_cloud_manual_revisions`, `kiln_cloud_custom_palettes`, `kiln_cloud_texture_recipes`, `kiln_cloud_drawing_*`, `kiln_cloud_fair_*`, `kiln_cloud_supplier_evidence`, `kiln_cloud_ingested_materials`, `kiln_cloud_creator_*`) | Contract (§6(1)(b)) |
+| **Rendered previews** | Account holders who save designs to their library or push to the cloud | Auto-generated thumbnails + preview images of your designs so you can browse your library visually | Supabase Storage (`kiln_cloud_meshes` blob storage) | Contract (§6(1)(b)) |
+| **Org + team data** | Paid users on Business / Enterprise who create or join orgs | Org names, membership rosters, team assignments, role grants, email addresses of people you invite to your org (before they accept); the webhook addresses you register and a log of deliveries to them; and the user mappings your identity provider sends if your company provisions accounts automatically | Supabase DB (`kiln_cloud_orgs`, `kiln_cloud_org_memberships`, `kiln_cloud_memberships`, `kiln_cloud_team_memberships`, `kiln_cloud_org_teams`, `kiln_cloud_permission_scopes`, `kiln_cloud_webhook_*`, `kiln_cloud_scim_user_mappings`) | Contract (§6(1)(b)) |
+| **Workshop access logs** | Account holders who save designs to their library or push to the cloud | Who pushed / pulled / viewed / cloned which design + when, for audit trail + collaboration accountability; and a record of what was permanently deleted | Supabase DB (`kiln_cloud_reflog`, `kiln_cloud_purge_log`) | Legitimate interest — collaborative-work audit (§6(1)(f)) |
+| **Account activity records** | Anyone with a Kiln account (free or paid) | Per day: which Kiln tools your account used and how many times (including those your signed-in local Kiln reports, and which of your signed-in computers used them), which ways you used Kiln that day (the web, the command line, an AI app), which signed-in workshop pages you opened, how often you reached a plan limit or saw or clicked an upgrade message, how much of your monthly allowances you have used, and short-term rate-limit counts. Names and counts only — never what you asked a tool, what it made, or your files | Supabase DB (`kiln_user_tool_calls_daily`, `kiln_user_local_tool_calls_daily`, `kiln_tenant_presence_daily`, `kiln_web_page_views_daily`, `kiln_user_paywall_hits_daily`, `kiln_user_nudge_impressions_daily`, `kiln_user_nudge_clicks_daily`, `kiln_cloud_quota_usage`, `kiln_cloud_rate_counters`) | Legitimate interest — running allowances, product improvement (§6(1)(f)) |
+| **Sign-in and request log** | Anyone with a Kiln account (free or paid) | For each sign-in, session check and tool request to our servers: the time, your account ID, what kind of request it was and whether it succeeded, a one-way fingerprint of the request (never its content), your rough network location (your IP address with its last part removed; entries written before 9 October 2026 hold the full address), and the user-agent string of your browser or app. Kept in a tamper-evident log | Supabase DB (`kiln_cloud_api_events`) | Legitimate interest — security, abuse prevention, audit (§6(1)(f)) |
+| **Account security records** | Anyone with a Kiln account (free or paid) | Your Terms of Use acceptances (which version, how and when); when each session started, was last active and passed two-factor; two-factor recovery codes, stored only as one-way hashes, with the rough network location a code was used from; and the one-time codes that connect a computer or AI app to your account, with the email, rough network location and browser of whoever approved it, the name given to that computer, and the sign-in session handed to it | Supabase DB (`kiln_cloud_terms_acceptances`, `kiln_cloud_terms_accept_tokens`, `kiln_cloud_session_events`, `kiln_mfa_recovery_codes`, `kiln_device_auth_codes`) | Contract + legitimate interest — keeping your account secure (§6(1)(b), (f)) |
+| **Printer records in your account** | Signed-in users who connect a printer or approve prints through Kiln's servers | Whether your account has paired the printer bridge and which of our servers it is connected to; print requests waiting for your approval (the file's name and fingerprint, a picture of the plate, the printer, and the network addresses your approval is checked against) and the approvals you gave; the browsers you allowed to show print notifications (their push address and user-agent string); calibration Kiln learned about your printer; nozzle and cutter wear; feature sizes you measured; and, if you take part in community learning, the print, fit, joint and warning outcomes your Kiln shares, stored under your account so they are deleted with it | Supabase DB (`kiln_cloud_bridge_*`, `kiln_cloud_print_pendings`, `kiln_cloud_print_authority`, `kiln_cloud_push_subscriptions`, `kiln_cloud_calibration_*`, `kiln_cloud_nozzle_*`, `kiln_cloud_cutter_*`, `kiln_cloud_machine_capability`, `kiln_cloud_filament_colour_observations`, `kiln_cloud_print_outcomes`, `kiln_cloud_dimensional_outcomes`, `kiln_cloud_joint_outcomes`, `kiln_cloud_warning_dismissals`) | Contract + legitimate interest (§6(1)(b), (f)) |
 | **Usage heartbeats** | All Kiln installs (free + paid) | One row per install per UTC day. Anonymous installation UUID (random, generated locally at `~/.kiln/installation_id`, never derived from user identity) + a salted SHA-256 hash of the OS-level machine ID for unique-device counting. Records: Kiln version, printer model(s) of registered printers (names only — never printer ids, addresses, or serials) + adapter type + count, daily counts (prints / generations / decorations / textures / slices / downloads / print-hours), `pro_installed` flag, OS platform, paywall-denial counts, live-video outcome categories (never an address). **No email, no IP, no hostname, no MAC, no file paths, no design content, no G-code.** Default ON; opt out with `KILN_TELEMETRY=false`. See §3.1 for full disclosure. Under the same switch, the motion part of each registered Klipper-family printer's settings (§3.1) is sent once a day, and again with a print-beside request, and kept (`printer_motion_settings`); and what the guided `printer_bench` session observed a printer do, as numbers only (§3.1), kept in `printer_motion_observations`. | Supabase DB (`usage_heartbeats`, `printer_motion_settings`, `printer_motion_observations`) | Legitimate interest — product improvement, paywall integrity (§6(1)(f)) |
-| **Local product data** | **Every user — free and paid** | Print job history, printer configuration, billing records, event logs — everything you do with physical printers | **On your machine only**, in `~/.kiln/`. We cannot see it and cannot retrieve it. The exceptions are the motion part of a Klipper-family printer's settings (§3.1), sent once a day and with a print-beside request, and the numbers the guided `printer_bench` session observed (§3.1). | Not applicable — we can't see it |
+| **Local product data** | **Every user — free and paid** | Print job history, printer configuration, billing records, event logs — everything you do with physical printers | **On your machine only**, in `~/.kiln/`. We cannot see it and cannot retrieve it. The exceptions are the motion part of a Klipper-family printer's settings (§3.1), sent once a day and with a print-beside request, the numbers the guided `printer_bench` session observed (§3.1), and, when you're signed in, the records described under **Printer records in your account**. | Not applicable — we can't see it |
 | **Support interactions** | Anyone who emails us | Email you send to us, support ticket content | Our email provider + internal tooling | Legitimate interest (§6(1)(f)) |
-| **Security telemetry** | Paid users (free users never hit authed endpoints) | Coarse IP bucket hash, hashed device fingerprint, client version, timestamped security event type — all cryptographically hashed before storage | Supabase (`license_security_events` table) | Legitimate interest — fraud + abuse prevention (§6(1)(f)) |
-| **Cookies (workshop)** | Visitors to `app.kiln3d.com` (paid-tier web workshop) | Supabase auth session cookie, CSRF token | Your browser | Consent for non-essential (§6(1)(a)); contract for session cookies |
+| **Security telemetry** | Paid users who use a license key | Coarse IP bucket hash, hashed device fingerprint, client version, timestamped security event type — all cryptographically hashed before storage | Supabase (`license_security_events` table) | Legitimate interest — fraud + abuse prevention (§6(1)(f)) |
+| **Cookies (workshop)** | Visitors to `app.kiln3d.com` (the web workshop) | Supabase auth session cookie, CSRF token | Your browser | Consent for non-essential (§6(1)(a)); contract for session cookies |
 | **Cookies (marketing site)** | Visitors to `kiln3d.com` who explicitly grant consent via the cookie banner — only present if we're running paid acquisition campaigns and you've opted in | Consent record (`kiln_consent`); when granted, optional analytics + advertising cookies (see §3.2) | Your browser | Consent (§6(1)(a)) — opt-in; no strictly-necessary cookies on the marketing site |
-| **Fulfillment orders** | Paid users who route through Craftcloud | Ship-to address, model file, material + finish choice | Passed through to Craftcloud; not retained by us beyond the order record | Contract (§6(1)(b)) |
+| **Fulfillment orders** | Paid users who route through Craftcloud | Ship-to address, model file, material + finish choice; the quote while you place the order; the spending limits and order approvals you set, with the email, rough network location and user-agent string of whoever changed a limit or approved an order | Passed through to Craftcloud; not retained by us beyond the order record, the quote, and your spending limits (`kiln_cloud_fulfillment_*`, `kiln_spend_cap_*`, `kiln_user_spend_cap_settings`) | Contract (§6(1)(b)) |
 | **Anonymous community learning** | All Kiln installs (free + paid) | Anonymized print + recovery outcome records — printer model, material, settings hash, success/fail outcome, recovery strategy — never your email, auth_user_id, tenant_id, file names, or geometry. Default ON; opt out with `KILN_COMMUNITY_OPT_IN=false`. | Supabase DB (`community_prints`, `community_recoveries`) | Legitimate interest — collective product improvement (§6(1)(f)) |
 
 **What we deliberately do NOT collect:** browsing history outside
@@ -220,6 +225,17 @@ or not you consent, because they are not browser tracking: no
 script loads, nothing is stored on your device, and nothing is
 joined to your browsing anywhere.
 
+When you create a Kiln account, we also note, once, how you reached
+the sign-in, as one word from a fixed list: X, GitHub, PyPI, a search
+engine, another website, no referring website, the Kiln command line,
+or an AI app's Kiln connector. Your browser works that word out from
+the name of the website that sent you to the sign-in page (never the
+page's address) or the campaign tag on the link you followed, and we
+keep only the word, on your account's sign-up record. Nothing is
+stored on your device to do this, the word is not sent to Google,
+Meta or anyone else, and it is deleted with your account. Accounts
+created before version 2.12 of this policy carry no such word.
+
 **What gets shared (when active):**
 
 - **Meta Pixel:** page views and standard events (e.g.
@@ -251,7 +267,7 @@ flags to Google.
 Every piece of data above maps to one of these narrow purposes:
 
 1. **Running your account** — authenticating you via OAuth, resolving
-   your tier, binding your OAuth identity to your paid entitlement.
+   your tier, binding your OAuth identity to your plan.
 2. **Cloud storage + version control for your designs** — the web
    workshop is a git-style layer for 3D designs. To make that work
    we store the designs you push, the branches you create, every
@@ -358,6 +374,10 @@ emailing adam@kiln3d.com.
 | **Comments you posted on others' PRs** | Remain visible on the host design's history (to preserve review context, like GitHub) but the author name can be anonymized on request (your name becomes "a former collaborator"). |
 | **Org + team data** | Retained while the org exists. When the last member of an org leaves, we notify the admins + give 30 days to wind down before deleting org data. Pending invites that are never accepted are purged after 30 days. |
 | **Workshop access logs (reflog)** | 365 days rolling, then automatic purge. Auditors can request longer retention under a DPA. |
+| **Account activity records** | While your account is active; deleted with your account. |
+| **Sign-in and request log** | Kept indefinitely, including after your account is deleted: the log is tamper-evident, so its rows cannot be removed one by one. |
+| **Account security records** | While your account is active; deleted with your account, except your Terms of Use acceptances, which are kept as the record of what you agreed to. |
+| **Printer records in your account** | While your account is active; deleted with your account, except the record of print approvals, which is a tamper-evident log and is kept. |
 | **Usage heartbeats** | Daily rows stay in the live database for 60 days, then move to a secured, tamper-evident archive kept for 7 years (audit and compliance). Separately, a minimal anonymous record per install — a random installation ID, the first and last dates it checked in, the last app version + OS platform, and a few facts about how it started (the app version and OS platform on its first day, whether it was first used from the command line or through an AI app, the kind of printer connection it first set up and on which day, the first day it reported a full day's activity, and the first day it sliced, printed, made or decorated a model) — is kept indefinitely so we can count installs over time and see which starts lead people to keep using Kiln. Every one of those facts comes from the daily check-in described in §3.1. The installation ID is generated locally, is never sent with a signed-in request, and is not linked to any account — including if you create one later. Daily totals (installs that checked in, the activity they reported, and the printer models and connection types, app versions and platforms in use) are kept indefinitely too, with no installation ID or device fingerprint in them. Opting out of telemetry (`KILN_TELEMETRY=false`) stops all three from then on. |
 | **Anonymous community learning** | Retained indefinitely as anonymous data. You can't delete a specific contribution once it's aggregated (we strip the auth_user_id on ingestion, so we can't trace records back to you). Opt out anytime with `KILN_COMMUNITY_OPT_IN=false` — future contributions stop; past ones can't be pulled back out. |
 | Security telemetry (hashed) | 90 days rolling — then automatic purge |
