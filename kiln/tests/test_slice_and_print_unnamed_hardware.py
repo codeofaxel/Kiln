@@ -66,6 +66,8 @@ def _proposals(*, needs_pause: bool | None = True, enclosed: bool = True, upgrad
         "seats": [{"id": "S1", "size_mm": 5.7, "enclosed": enclosed,
                    "narrowest_opening_mm": 0.0 if enclosed else "face"}],
         "proposed_hardware": [proposal], "hardware_to_confirm": ["1x M3 nut in S1"],
+        "sealed_pockets": [{"seat": "S1", "where": "5.7 mm hex closed cavity, 2.6 mm deep",
+                            "what_happens": "sealed inside the print"}] if enclosed else [],
     }
     if upgrade:
         answer["upgrade"] = {"headline": "Plan this hardware with a paid plan.", "upgrade_url": "https://kiln3d.com/pricing"}
@@ -107,12 +109,49 @@ def test_pockets_that_open_on_a_face_print_with_a_note(slicer_tools, tmp_path, m
 
 
 @pytest.mark.parametrize("word", [["none"], ["No hardware"], "nothing", ["empty"]])
-def test_saying_none_prints_every_pocket_empty_and_asks_nobody(slicer_tools, tmp_path, monkeypatch, pockets, word):
-    printer, planner = _Printer(), _Proposer(_proposals())
+def test_saying_none_prints_every_pocket_empty_when_the_file_agrees(slicer_tools, tmp_path, monkeypatch, pockets, word):
+    """Their word is taken: the planner is asked only whether the file contradicts it."""
+    printer, planner = _Printer(), _Proposer(_proposals())  # pockets, but no pause in the file
     resp = _run(slicer_tools, tmp_path, monkeypatch, printer, planner, hardware=word)
 
-    assert resp["success"] is True and planner.calls == []
+    assert resp["success"] is True
     assert resp["hardware"]["declared"] == "none"
+    assert printer.uploads == [("out.gcode", SLICE)]
+    (call,) = planner.calls
+    assert "hardware" not in call and call["gcode_path"].endswith("out.gcode")
+
+
+def test_none_with_a_pause_already_over_a_sealed_pocket_is_a_contradiction_not_a_print(
+    slicer_tools, tmp_path, monkeypatch, pockets,
+):
+    answer = _proposals()
+    answer["stops_in_file"] = [{"word": "M601", "before_layer": 29, "stops_this_printer": "stops"}]
+    printer = _Printer()
+    resp = _run(slicer_tools, tmp_path, monkeypatch, printer, _Proposer(answer), hardware=["none"])
+
+    assert resp["success"] is False and resp["error"]["code"] == "HARDWARE_NONE_BUT_PAUSED"
+    message = resp["error"]["message"]
+    assert "You said nothing goes in" in message and "before layer 29" in message and "Nothing was sent to the printer." in message
+    assert resp["hardware"]["pauses_in_file"][0]["before_layer"] == 29
+    _sent_nothing(printer)
+
+
+def test_none_with_a_pause_but_no_sealed_pocket_prints(slicer_tools, tmp_path, monkeypatch, pockets):
+    """A pause over pockets that open on a face contradicts nothing: a colour change, say."""
+    answer = _proposals(needs_pause=False, enclosed=False)
+    answer["sealed_pockets"] = []
+    answer["stops_in_file"] = [{"word": "M601", "before_layer": 12, "stops_this_printer": "stops"}]
+    printer = _Printer()
+    resp = _run(slicer_tools, tmp_path, monkeypatch, printer, _Proposer(answer), hardware=["none"])
+
+    assert resp["success"] is True and resp["hardware"]["declared"] == "none"
+    assert printer.uploads == [("out.gcode", SLICE)]
+
+
+def test_none_when_the_planner_cannot_answer_takes_their_word(slicer_tools, tmp_path, monkeypatch, pockets):
+    printer = _Printer()
+    resp = _run(slicer_tools, tmp_path, monkeypatch, printer, _Proposer(RuntimeError("down")), hardware=["none"])
+    assert resp["success"] is True and resp["hardware"]["declared"] == "none"
     assert printer.uploads == [("out.gcode", SLICE)]
 
 

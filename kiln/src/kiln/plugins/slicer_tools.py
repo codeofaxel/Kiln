@@ -1494,6 +1494,58 @@ def _propose_unnamed_hardware(
     )
 
 
+def _check_declared_none(
+    *,
+    model_path: str,
+    upload_path: str,
+    printer: str,
+    material: str,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """The person said nothing goes in.  Their word is taken -- unless their
+    own file says otherwise: a pause already in it, over a pocket the print
+    will seal, is a pause for something, and printing that blind is how a
+    cavity closes over a nut nobody planned.  Then the start is refused with
+    the contradiction, never with a guess at what the pause is for.
+
+    A planner that cannot answer takes the person at their word and says so.
+    """
+    from kiln import served_answer
+
+    block: dict[str, Any] = {"declared": "none", "note": "Printed with every pocket empty, as you said."}
+    if _part_has_pockets(model_path) is False:
+        return block, None
+    try:
+        answer = _ask_hardware_planner(model_path=model_path, gcode_path=upload_path, printer=printer, material=material)
+    except LookupError:
+        return block, None
+    except Exception:  # noqa: BLE001 -- their word stands when Kiln cannot read the file
+        _logger.debug("The hardware planner failed on the declared-none check", exc_info=True)
+        return block, None
+    if served_answer.classify_answer(answer) is not None:
+        return block, None
+    sealed = [s for s in (answer.get("sealed_pockets") or []) if isinstance(s, dict)]
+    pauses = [s for s in (answer.get("stops_in_file") or []) if isinstance(s, dict)]
+    if not sealed or not pauses:
+        return block, None
+    import kiln.server as _srv
+
+    layers = ", ".join(
+        f"before layer {p['before_layer']}" if p.get("before_layer") is not None else f"with {p.get('word', 'a pause')}"
+        for p in pauses
+    )
+    pockets = "; ".join(str(s.get("where") or s.get("seat")) for s in sealed)
+    return block, _srv._error_dict(
+        _sentences(
+            f"You said nothing goes in, but the sliced file already pauses {layers}, and this part has a pocket "
+            f"that will be sealed inside the print ({pockets})",
+            "Name what goes in and Kiln plans the pause for it, or remove the pause from the file and say none again",
+            _NOTHING_SENT,
+        ),
+        code="HARDWARE_NONE_BUT_PAUSED",
+        extra={"hardware": {"declared": "none", "pauses_in_file": pauses, "sealed_pockets": sealed}},
+    )
+
+
 def _placed_slice(
     input_path: str,
     *,
@@ -3099,8 +3151,11 @@ class _SlicerToolsPlugin:
                     planner's question for each pocket ("this hex pocket
                     takes an M3 nut -- right?"): ask the person, then call
                     again with what they said, or ``["none"]`` to print
-                    every pocket empty on their word.  Writing the pause is
-                    a kiln-pro feature (https://kiln3d.com/pricing).
+                    every pocket empty on their word.  ``["none"]`` with a
+                    pause already in the sliced file over a sealed pocket
+                    is refused as a contradiction (``HARDWARE_NONE_BUT_PAUSED``).
+                    Writing the pause is a kiln-pro feature
+                    (https://kiln3d.com/pricing).
 
             Combines ``slice_model``, ``upload_file``, and ``start_print`` into
             a single action.
@@ -3430,7 +3485,12 @@ class _SlicerToolsPlugin:
                         material=material or "",
                     )
                 elif _declared_no_hardware(_raw_phrases(hardware)):
-                    hardware_block = {"declared": "none", "note": "Printed with every pocket empty, as you said."}
+                    hardware_block, hardware_refusal = _check_declared_none(
+                        model_path=effective_input,
+                        upload_path=upload_path,
+                        printer=effective_printer_id or _target_model_name(printer_name),
+                        material=material or "",
+                    )
                 else:
                     hardware_block, hardware_refusal = _propose_unnamed_hardware(
                         model_path=effective_input,
