@@ -776,6 +776,9 @@ def _build_instructions() -> str:
 
         if not _read_tokens().get("access_token"):
             parts.append(f"ACCOUNT: {AGENT_ACCOUNT_NUDGE}")
+            from kiln.daily_stats import record_account_nudge
+
+            record_account_nudge("offered_connect")
     except Exception:  # noqa: BLE001 -- nudge is best-effort, never fatal
         pass
 

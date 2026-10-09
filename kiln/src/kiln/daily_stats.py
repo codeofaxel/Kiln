@@ -309,6 +309,13 @@ def _empty_day() -> dict[str, Any]:
         # machine (a managed venv, a system Python).  Same fix bucket,
         # opposite fixes.
         "update_nudge": {},        # {"shown_tool_result": 1, "upgrade_ok": 1}
+        # Sign-in funnel: stage -> count today, over the CLOSED vocabulary
+        # _ACCOUNT_NUDGE_STAGES.  Where an account was offered (at connect,
+        # in get_started, on a reply a sign-in would fix), whether a
+        # sign-in was started and through which door, and how it ended.
+        # Every stage happens on this machine; the server sees a device
+        # code being made and claimed, never the offer that led to it.
+        "account_nudge": {},       # {"offered_connect": 1, "started_chat": 1}
         # Per-tool call counts: tool_name → times called today.  Counts
         # EVERY local tool dispatch (not just the six outcome events),
         # so the anonymous heartbeat can finally show what unsigned
@@ -398,7 +405,7 @@ _ROLLOVER_COUNTERS = (
 # these are a different shape answering a different question.
 _ROLLOVER_MAPS = (
     "tier_denials", "account_wall", "tool_calls", "tool_failures",
-    "update_nudge",
+    "update_nudge", "account_nudge",
     "texture_names", "decoration_types", "slicer_profiles",
     "marketplace_sources", "template_uses",
     "generation_providers", "marketplace_searches",
@@ -976,6 +983,50 @@ _UPDATE_NUDGE_STAGES = frozenset({
 })
 
 
+# The sign-in funnel's stages.  A CLOSED set for the same reason as the
+# upgrade funnel's: our own words, so an unknown one is a bug, never a row.
+_ACCOUNT_NUDGE_STAGES = frozenset({
+    # Offers.  The agent was told a free account exists ...
+    "offered_connect",       # ... in the MCP instructions at connect
+    "offered_get_started",   # ... in get_started's account block
+    "offered_hint",          # ... on a reply a sign-in would fix
+    "offered_resignin",      # the same reply, to a machine whose stored
+                             # session lapsed: a returning account, not a
+                             # new one, so it never inflates the first count
+    # A sign-in began: a device code was issued, by door.
+    "started_chat",          # kiln_signin, from inside an agent chat
+    "started_cli",           # `kiln signin` in a terminal
+    "start_failed",          # the start itself failed (offline, server)
+    # How it ended.
+    "completed_chat",
+    "completed_cli",
+    "completed_pair",        # `kiln pair <code>`, a code made on the web
+    "completed_other",       # a door this list does not name yet
+    "completed_returning",   # ALSO counted under its door: the machine
+                             # still held a session, so this was signing
+                             # back in, not a first account
+    "denied",                # cancelled in the browser
+    "expired",               # the code ran out before anyone finished
+    "timed_out",             # the terminal stopped waiting first
+})
+
+
+def record_account_nudge(stage: str) -> None:
+    """Count one stage of the sign-in funnel for today.  Never raises.
+
+    The account has been offered on three surfaces, and the server sees
+    only the far end: 197 sign-ins started in the 30 days to 2026-10-09,
+    157 of them expired unfinished, and nothing said where they came from
+    or whether anyone had been asked.  Each stage fails differently: an
+    offer with no start is an agent that never relayed it; a start with no
+    finish is a sign-in flow people give up on.
+    """
+    name = (stage or "").strip()
+    if name not in _ACCOUNT_NUDGE_STAGES:
+        return
+    _record_name_count("account_nudge", name)
+
+
 def record_update_nudge(stage: str) -> None:
     """Count one stage of the upgrade-nudge funnel for today.
 
@@ -1460,6 +1511,7 @@ def get_daily_stats() -> dict[str, Any]:
         # P2S install fails at start_print" said nothing instead.
         "tool_failures": data.get("tool_failures", {}),
         "update_nudge": data.get("update_nudge", {}),
+        "account_nudge": data.get("account_nudge", {}),
         # Returned here from the start.  A map recorded but not returned
         # reads {} in every heartbeat forever — exactly how tool_failures
         # shipped nothing on 1,000 production rows.

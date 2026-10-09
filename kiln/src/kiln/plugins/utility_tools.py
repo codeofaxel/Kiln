@@ -705,6 +705,12 @@ class _UtilityToolsPlugin:
             else:
                 from kiln.tiers_and_terms import AGENT_ACCOUNT_NUDGE
 
+                try:
+                    from kiln.daily_stats import record_account_nudge
+
+                    record_account_nudge("offered_get_started")
+                except Exception:  # noqa: BLE001 — telemetry never breaks onboarding
+                    pass
                 _account = {
                     "signed_in": False,
                     "tool": "kiln_signin",

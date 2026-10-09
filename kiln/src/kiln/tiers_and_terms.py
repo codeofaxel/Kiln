@@ -206,6 +206,22 @@ def signin_hint_fields() -> dict[str, str]:
     free to mutate, and a shared literal would be one aliasing bug away from
     rewriting the constant for the whole process.
     """
+    # Every reply that offers a sign-in comes through here, so the offer is
+    # counted at the one place no new door can skip.  A machine still holding
+    # a session is being asked to sign BACK in, which is a different question
+    # from "will a stranger make an account".  Never raises.
+    try:
+        from kiln.auth_session import _read_tokens
+        from kiln.daily_stats import record_account_nudge
+
+        held = _read_tokens()
+        record_account_nudge(
+            "offered_resignin"
+            if held.get("access_token") or held.get("refresh_token")
+            else "offered_hint"
+        )
+    except Exception:  # noqa: BLE001
+        pass
     return {"agent_hint": AGENT_SIGNIN_HINT, "setup_hint": SIGNIN_COMMAND}
 
 

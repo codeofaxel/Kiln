@@ -663,6 +663,11 @@ def _send_heartbeat() -> None:
                 # attempt and the outcome all happen on the user's own
                 # machine and never touch a server.
                 "update_nudge": stats.get("update_nudge", {}),
+                # Sign-in funnel -- {stage: count_today} over the closed
+                # vocabulary in kiln.daily_stats (_ACCOUNT_NUDGE_STAGES).
+                # Where an account was offered and how a sign-in went;
+                # never which account, never an email or a code.
+                "account_nudge": stats.get("account_nudge", {}),
                 # Which parametric design templates got built —
                 # {template_id: count_today}.  The library is free and
                 # reachable only through the MCP tools, so no server
