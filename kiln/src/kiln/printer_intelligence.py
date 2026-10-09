@@ -40,7 +40,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from kiln.motion_facts import MotionFacts, load_motion_facts
+from kiln.motion_facts import MotionFacts, firmware_label, load_motion_facts
 
 logger = logging.getLogger(__name__)
 
@@ -440,7 +440,7 @@ def _build_profiles(raw: dict[str, Any]) -> dict[str, PrinterIntel]:
             profiles[key] = PrinterIntel(
                 id=key,
                 display_name=data.get("display_name", key),
-                firmware=data.get("firmware", "marlin"),
+                firmware=firmware_label(data) or "marlin",
                 extruder_type=data.get("extruder_type", "direct_drive"),
                 hotend_type=data.get("hotend_type", "all_metal"),
                 has_enclosure=bool(data.get("has_enclosure", False)),
@@ -1156,7 +1156,7 @@ def _resolve_caps(printer_id: str) -> dict[str, Any] | None:
         # legacy entry that predates the field.
         has_is = raw.get("has_input_shaping")
         if has_is is None:
-            has_is = raw.get("firmware") in ("bambu", "klipper")
+            has_is = firmware_label(raw) in ("bambu", "klipper")
         return {
             "max_speed": int(raw["max_speed_mm_s"]),
             "max_accel": int(raw.get("max_acceleration_mm_s2", 5000)),

@@ -76,6 +76,46 @@ FIRMWARE_FAMILIES: frozenset[str] = frozenset(
         "klipper_vendor_fork", "reprapfirmware", "bambu", "proprietary",
     }
 )
+#: The catalogue's coarse top-level ``firmware`` label each cited family
+#: comes to.  The label is kept because the printer pages and the page-note
+#: audit read it as the way Kiln connects; it is never allowed to say
+#: something the cited family contradicts (``label_agrees_with_family``),
+#: and a row that states only the family gets its label from here.
+FIRMWARE_LABEL_OF_FAMILY: dict[str, str] = {
+    "marlin_1": "marlin",
+    "marlin_2": "marlin",
+    "prusa_firmware": "marlin",
+    "prusa_buddy": "marlin",
+    "klipper": "klipper",
+    "klipper_vendor_fork": "klipper",
+    "reprapfirmware": "reprapfirmware",
+    "bambu": "bambu",
+    "proprietary": "proprietary",
+}
+#: Labels that name the protocol Kiln speaks to a machine rather than its
+#: firmware, and the family that protocol runs on: an Elegoo Centauri Carbon
+#: runs Elegoo's own firmware and Kiln reaches it over SDCP.
+PROTOCOL_LABELS: dict[str, str] = {"sdcp": "proprietary"}
+
+
+def label_agrees_with_family(label: object, family: str) -> bool:
+    """Whether a stored coarse *label* says what the cited *family* says."""
+    if not isinstance(label, str) or not label:
+        return True  # nothing stored; the label is derived
+    return FIRMWARE_LABEL_OF_FAMILY.get(family) == label or PROTOCOL_LABELS.get(label) == family
+
+
+def firmware_label(row: dict[str, Any]) -> str | None:
+    """A catalogue row's coarse firmware label: the one it states, else the
+    one its cited ``motion.firmware_family`` comes to, else ``None``."""
+    stored = row.get("firmware")
+    if isinstance(stored, str) and stored:
+        return stored
+    motion = row.get("motion")
+    family = motion.get("firmware_family") if isinstance(motion, dict) else None
+    return FIRMWARE_LABEL_OF_FAMILY.get(family) if isinstance(family, str) else None
+
+
 UNHOMED_MOVE_POLICIES: frozenset[str] = frozenset({"refused", "clamped", "unclamped"})
 Z_TRAVEL_LIMIT_KINDS: frozenset[str] = frozenset(
     {"firmware_config", "vendor_prose_reach", "firmware_default_user_adjustable"}
