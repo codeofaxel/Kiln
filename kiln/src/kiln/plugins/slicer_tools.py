@@ -1118,13 +1118,35 @@ _HARDWARE_BLOCK_KEYS = ("placements", "safety_floor", "stops", "after_print", "w
 _NOTHING_SENT = "Nothing was sent to the printer."
 
 
+#: Saying one of these as the whole hardware list means "nothing goes in;
+#: print every pocket empty" -- the person's word, so Kiln neither plans nor
+#: asks.  Said on purpose, never inferred from a blank.
+_NO_HARDWARE_WORDS = frozenset({"none", "nothing", "no hardware", "empty", "no"})
+
+
 def _hardware_phrases(hardware: Any) -> list[str]:
-    """The hardware the person named, as trimmed phrases; none when blank."""
+    """The hardware the person named, as trimmed phrases; none when blank or
+    when the whole list says nothing goes in (:func:`_declared_no_hardware`)."""
+    if isinstance(hardware, str):
+        hardware = [hardware]
+    if not isinstance(hardware, (list, tuple)):
+        return []
+    phrases = _raw_phrases(hardware)
+    return [] if _declared_no_hardware(phrases) else phrases
+
+
+def _raw_phrases(hardware: Any) -> list[str]:
+    """The trimmed phrases as given, "none" included."""
     if isinstance(hardware, str):
         hardware = [hardware]
     if not isinstance(hardware, (list, tuple)):
         return []
     return [item.strip() for item in hardware if isinstance(item, str) and item.strip()]
+
+
+def _declared_no_hardware(phrases: list[str]) -> bool:
+    """True when the person said, in so many words, that nothing goes in."""
+    return bool(phrases) and all(item.lower().rstrip(".") in _NO_HARDWARE_WORDS for item in phrases)
 
 
 def _sentences(*parts: Any) -> str:
@@ -1360,6 +1382,106 @@ def _plan_hardware_into_print(
             "HARDWARE_PAUSE_NOT_WRITTEN",
         )
     return block, None
+
+
+def _part_has_pockets(model_path: str) -> bool | None:
+    """Whether the part has a hole or cavity bought hardware could sit in,
+    read on this computer, so the planner is asked only for a part that
+    could need it.  ``None`` when the model could not be read."""
+    try:
+        from kiln.generation.validation import detect_holes
+
+        return bool(detect_holes(model_path))
+    except Exception:  # noqa: BLE001 -- an unreadable model is "could not look", never "no pockets"
+        _logger.debug("hardware: could not look for pockets in %s", model_path, exc_info=True)
+        return None
+
+
+def _needs_pause(proposal: dict[str, Any], seats: dict[str, dict[str, Any]]) -> bool:
+    """Whether a proposed part would be sealed inside the print: the planner
+    says so (``needs_pause``); an older planner is read from its seats -- a
+    cavity closed on both sides, or one whose way out is narrower than it."""
+    if "needs_pause" in proposal:
+        return bool(proposal["needs_pause"])
+    if proposal.get("kind") == "heat_set_insert":
+        return False
+    for seat_id in proposal.get("seats") or ():
+        seat = seats.get(seat_id) or {}
+        opening = seat.get("narrowest_opening_mm")
+        if seat.get("enclosed") or (isinstance(opening, (int, float)) and opening < float(seat.get("size_mm") or 0)):
+            return True
+    return False
+
+
+def _propose_unnamed_hardware(
+    *,
+    model_path: str,
+    printer: str,
+    material: str,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """A part with pockets and no hardware named: ask the planner what each
+    pocket looks cut for, before anything is sent to the printer.
+
+    ``(block, None)`` says print; *block* (or ``None``) is what the person is
+    told.  ``(None, refusal)`` says print nothing: a pocket that would be
+    sealed inside the print looks cut for something, and nobody has said
+    whether it goes in.  The refusal carries the planner's own questions and
+    the list to hand back once answered; saying ``hardware=["none"]`` prints
+    every pocket empty on the person's word.
+
+    This is a question, not a verdict, so every way the planner cannot answer
+    -- not on this install, signed out, offline, the servers said no -- lets
+    the print go on and says so in the block.  The planner reads the model
+    only; the sliced file is not sent for a question about pockets.
+    """
+    from kiln import served_answer
+
+    has_pockets = _part_has_pockets(model_path)
+    if has_pockets is False:
+        return None, None
+    try:
+        answer = _ask_hardware_planner(model_path=model_path, printer=printer, material=material)
+    except LookupError:
+        return {"unchecked": "Kiln's hardware planner is not on this install, so this part's pockets were not read."}, None
+    except Exception:  # noqa: BLE001 -- a question that cannot be asked never stops a print
+        _logger.debug("The hardware planner failed on the unnamed-hardware check", exc_info=True)
+        return {"unchecked": "Kiln could not read this part's pockets, so nothing was proposed for them."}, None
+
+    miss = served_answer.classify_answer(answer)
+    if miss is not None:
+        return {"unchecked": served_answer.sentence(
+            miss, feature="hardware planner",
+            on_the_line="Reading this part's pockets for hardware nobody named",
+            cannot="read the pockets", wont="printed the part as sliced",
+        )}, None
+    proposals = [p for p in (answer.get("proposed_hardware") or []) if isinstance(p, dict)]
+    if not proposals:
+        return None, None
+    seats = {s.get("id"): s for s in (answer.get("seats") or []) if isinstance(s, dict)}
+    sealed = [p for p in proposals if _needs_pause(p, seats)]
+    asks = [str(p.get("ask") or p.get("item")) for p in proposals]
+    block: dict[str, Any] = {"proposed": asks, "to_confirm": list(answer.get("hardware_to_confirm") or [])}
+    if not sealed:
+        block["note"] = ("These pockets open on a face, so whatever goes in them goes in after the print; "
+                         "name them to have Kiln plan it.")
+        return block, None
+    import kiln.server as _srv
+
+    extra: dict[str, Any] = {"hardware": block}
+    if answer.get("upgrade"):
+        extra["upgrade"] = answer["upgrade"]
+    sealed_asks = [str(p.get("ask") or p.get("item")) for p in sealed]
+    return None, _srv._error_dict(
+        _sentences(
+            "This part has a pocket that will be sealed inside the print, and nothing was named for it",
+            *sealed_asks,
+            'Ask the person, then call slice_and_print again with hardware set to what they said (the planner\'s '
+            'hardware_to_confirm, edited), or hardware=["none"] to print every pocket empty',
+            _NOTHING_SENT,
+        ),
+        code="HARDWARE_UNNAMED",
+        extra=extra,
+    )
 
 
 def _placed_slice(
@@ -2961,9 +3083,14 @@ class _SlicerToolsPlugin:
                     Kiln's servers wrote into it, and the response's
                     ``hardware`` block says what goes in and when; a part
                     that needs a pause that cannot be written is refused
-                    before anything is sent to the printer.  Writing the
-                    pause is a kiln-pro feature
-                    (https://kiln3d.com/pricing).
+                    before anything is sent to the printer.  Left out, a
+                    part with a pocket that would be sealed inside the
+                    print is refused with ``HARDWARE_UNNAMED`` and the
+                    planner's question for each pocket ("this hex pocket
+                    takes an M3 nut -- right?"): ask the person, then call
+                    again with what they said, or ``["none"]`` to print
+                    every pocket empty on their word.  Writing the pause is
+                    a kiln-pro feature (https://kiln3d.com/pricing).
 
             Combines ``slice_model``, ``upload_file``, and ``start_print`` into
             a single action.
@@ -3279,7 +3406,11 @@ class _SlicerToolsPlugin:
                 # pause written into it then takes this one's place, under the
                 # same name.  A part that needs a pause is never printed
                 # without one, so a plan that does not cover it ends here.
+                # Nothing named: a pocket that would be sealed inside the
+                # print is asked about, never printed over on a blank; the
+                # person's "none" prints it empty on their word.
                 hardware_block: dict[str, Any] | None = None
+                hardware_refusal: dict[str, Any] | None = None
                 if hardware_phrases := _hardware_phrases(hardware):
                     hardware_block, hardware_refusal = _plan_hardware_into_print(
                         hardware_phrases,
@@ -3288,10 +3419,18 @@ class _SlicerToolsPlugin:
                         printer=effective_printer_id or _target_model_name(printer_name),
                         material=material or "",
                     )
-                    if hardware_refusal is not None:
-                        hardware_refusal["slice"] = result.to_dict()
-                        _attach_placement(hardware_refusal, place_info)
-                        return hardware_refusal
+                elif _declared_no_hardware(_raw_phrases(hardware)):
+                    hardware_block = {"declared": "none", "note": "Printed with every pocket empty, as you said."}
+                else:
+                    hardware_block, hardware_refusal = _propose_unnamed_hardware(
+                        model_path=effective_input,
+                        printer=effective_printer_id or _target_model_name(printer_name),
+                        material=material or "",
+                    )
+                if hardware_refusal is not None:
+                    hardware_refusal["slice"] = result.to_dict()
+                    _attach_placement(hardware_refusal, place_info)
+                    return hardware_refusal
 
                 if quiet_plan is not None and (
                     block := _plate_state.start_refusal(adapter, file_name=os.path.basename(upload_path), local_path=upload_path)
