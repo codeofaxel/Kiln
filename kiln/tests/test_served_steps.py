@@ -372,6 +372,67 @@ class TestPrinterFacts:
         done, refused = self._read(printer_name="default", want=[])
         assert refused is None and done["printer_facts"]["data"]["printers"] == []
 
+    @pytest.fixture
+    def reading_printers(self, printers, monkeypatch):
+        """Adapters that answer a status read, so a job (and the hardware
+        moment filed for it) can be read for every printer."""
+        import kiln.server as server
+        from kiln.printers.base import JobProgress, PrinterState, PrinterStatus
+
+        class _Printing:
+            def get_state(self):
+                return PrinterState(connected=True, state=PrinterStatus.PAUSED)
+
+            def get_job(self):
+                return JobProgress(file_name="bracket-hardware-stops.gcode", current_layer=29)
+
+        class _Down:
+            def get_state(self):
+                raise RuntimeError("connection refused to voron.local")
+
+            def get_job(self):
+                raise AssertionError("never reached")
+
+        monkeypatch.setattr(server, "_resolve_adapter", lambda name: _Printing() if name == "default" else _Down())
+        return printers
+
+    def test_the_hardware_moment_rides_with_the_job_when_asked_and_only_then(self, reading_printers, monkeypatch):
+        """A served board of every machine waiting for hands reads what this
+        install's own hardware_stops answers for each printer -- the same
+        words its status gives -- and nothing is sent for a tool that did
+        not ask (2026-10-09)."""
+        import kiln.hardware_stops as hs
+
+        seen = []
+
+        def observe(adapter, state, job, **kw):
+            seen.append(job.file_name)
+            return {"stage": "now", "stop": 1, "of": 2, "insert": "2x M3 nut", "say": "Now is the time."}
+
+        monkeypatch.setattr(hs, "observe", observe)
+        done, refused = self._read(printer_name="default", want=["every_job", "hardware"])
+        assert refused is None
+        by_name = {p["name"]: p for p in done["printer_facts"]["data"]["printers"]}
+        assert by_name["default"]["job"]["state"] == "paused"
+        assert by_name["default"]["hardware"] == {
+            "stage": "now", "stop": 1, "of": 2, "insert": "2x M3 nut", "say": "Now is the time.",
+        }
+        assert by_name["voron"]["hardware"] is None
+        assert by_name["voron"]["hardware_error"] == "the printer could not be asked"
+        assert "voron.local" not in json.dumps(done)
+        assert seen == ["bracket-hardware-stops.gcode"]  # observed once, from the same read as the job
+
+        done, _ = self._read(printer_name="default", want=["every_job"])
+        assert all("hardware" not in p for p in done["printer_facts"]["data"]["printers"])
+
+    def test_an_ordinary_print_has_no_hardware_moment(self, reading_printers, monkeypatch):
+        import kiln.hardware_stops as hs
+
+        monkeypatch.setattr(hs, "observe", lambda *a, **k: None)
+        done, _ = self._read(printer_name="default", want=["job", "hardware"])
+        default = [p for p in done["printer_facts"]["data"]["printers"] if p["name"] == "default"][0]
+        assert "hardware" in default and default["hardware"] is None and "hardware_error" not in default
+
 
 class TestPrintHistoryStep:
     """A served tool that learns from past prints is sent this install's own

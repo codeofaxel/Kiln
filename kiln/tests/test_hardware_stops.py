@@ -539,3 +539,25 @@ class TestTheDoors:
             result = CliRunner().invoke(cli, ["resume", "--hardware-in", "--json"])
         assert result.exit_code == 0, result.output
         get.return_value.resume_print.assert_called_once_with(force=False, hardware_confirmed=True)
+
+def test_the_record_for_a_machine_is_a_copy_of_the_plan_and_its_marks(machine):
+    """What a reader binding to a stop reads: the filed plan and the marks,
+    as a copy a caller cannot use to change the record."""
+    assert hs.record_for(_Machine()) is not None  # the same bench machine
+    machine.status = PrinterStatus.PAUSED
+    machine.layer = 29
+    hs.observe(machine, machine.get_state(), machine.get_job())
+    record = hs.record_for(machine)
+    assert record["file"] == JOB and record["plan"]["stops"][0]["insert"] == "2x M3 nut in S1, S2"
+    assert record["stops"]["1"]["paused_at"] is not None
+    record["plan"]["stops"] = []
+    assert hs.record_for(machine)["plan"]["stops"], "the copy reached back into the record"
+
+
+def test_no_record_reads_as_none(tmp_path):
+    class _Other(_Machine):
+        @property
+        def name(self) -> str:
+            return "never-started"
+
+    assert hs.record_for(_Other()) is None

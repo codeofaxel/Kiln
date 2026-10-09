@@ -178,10 +178,14 @@ def _slice(tool: str, step: dict[str, Any]) -> tuple[str | None, dict[str, Any] 
 #: printer's configuration; what the named printer is doing now (``job``);
 #: what every printer is doing now (``every_job``, for a fleet-wide
 #: action); the named printer's current reading (``telemetry``, for a
-#: served tool that judges it).  A job is its state and how far along it
-#: is -- never the file's name, for the same reason the print-history step
-#: sends none.  A reading is numbers and words (:func:`_telemetry_fact`).
-_FACTS_EXTRAS = frozenset({"klipper_config", "job", "every_job", "telemetry"})
+#: served tool that judges it); the hardware moment this install has filed
+#: for each printer asked about (``hardware``: what :mod:`kiln.hardware_stops`
+#: answers for it -- a stop ahead, close, reached or passed, or ``None`` for
+#: an ordinary print -- for a served board of every machine waiting for
+#: hands).  A job is its state and how far along it is -- never the file's
+#: name, for the same reason the print-history step sends none.  A reading
+#: is numbers and words (:func:`_telemetry_fact`).
+_FACTS_EXTRAS = frozenset({"klipper_config", "job", "every_job", "telemetry", "hardware"})
 #: How long a printer is given to answer for its configuration or its job.
 _FACTS_DEADLINE_S = 8.0
 #: How many printers are asked at once for a fleet-wide read.
@@ -209,10 +213,18 @@ def _job_fact(adapter: Any) -> dict[str, Any]:
     return _status_facts(adapter, telemetry=False)[0]
 
 
-def _status_facts(adapter: Any, *, telemetry: bool) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    """One read of a printer, as the job fact and (when *telemetry*) the
-    reading fact: the two come from the same moment, never two reads that
-    could disagree."""
+def _status_facts(
+    adapter: Any, *, telemetry: bool, hardware: bool = False,
+) -> tuple[dict[str, Any], dict[str, Any] | None, dict[str, Any] | None]:
+    """One read of a printer, as the job fact, (when *telemetry*) the
+    reading fact and (when *hardware*) the hardware moment: all from the
+    same moment, never reads that could disagree.
+
+    The hardware moment is what :func:`kiln.hardware_stops.observe` answers
+    for this reading -- the same words the printer's own status gives, and a
+    status read, so the chat and the phone keep their own once-only
+    announcements.  ``None`` for an ordinary print.
+    """
     from kiln.printers.base import read_status
 
     state, job = read_status(adapter)
@@ -224,7 +236,12 @@ def _status_facts(adapter: Any, *, telemetry: bool) -> tuple[dict[str, Any], dic
         "total_layers": getattr(job, "total_layers", None),
         "completion": getattr(job, "completion", None),
     }
-    return job_fact, (_telemetry_fact(state, job) if telemetry else None)
+    moment = None
+    if hardware:
+        from kiln.hardware_stops import observe
+
+        moment = observe(adapter, state, job)
+    return job_fact, (_telemetry_fact(state, job) if telemetry else None), moment
 
 
 def _word(value: Any) -> str | None:
@@ -337,12 +354,13 @@ def _printer_facts(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | No
                 pool.shutdown(wait=False)
         printers.append(fact)
     jobs = "every_job" in want or "job" in want
-    if jobs or "telemetry" in want:
+    hardware = "hardware" in want
+    if jobs or hardware or "telemetry" in want:
         asked_of = [
             f for f in printers if "every_job" in want or f["name"] == target
         ]
         _read_jobs(
-            server, asked_of, jobs=jobs,
+            server, asked_of, jobs=jobs, hardware=hardware,
             telemetry_of=target if "telemetry" in want else None,
         )
     return {
@@ -356,9 +374,11 @@ def _read_jobs(
     facts: list[dict[str, Any]],
     *,
     jobs: bool = True,
+    hardware: bool = False,
     telemetry_of: str | None = None,
 ) -> None:
-    """Fill ``job`` on each of *facts* (when *jobs*) and ``telemetry`` on the
+    """Fill ``job`` on each of *facts* (when *jobs*), ``hardware`` on each
+    (when *hardware*) and ``telemetry`` on the
     one named *telemetry_of*, from the printer itself: every printer asked
     at once and each given the deadline, one read per printer.  A printer
     that does not answer says so, for each thing it was asked for.  A fleet
@@ -377,6 +397,9 @@ def _read_jobs(
         if jobs:
             fact["job"] = None
             fact["job_error"] = why
+        if hardware:
+            fact["hardware"] = None
+            fact["hardware_error"] = why
         if fact["name"] == telemetry_of:
             fact["telemetry"] = None
             fact["telemetry_error"] = why
@@ -397,7 +420,7 @@ def _read_jobs(
         if len(facts) > 1:
             _mark_same_machines(facts, built)
         reads = {
-            name: pool.submit(_status_facts, adapter, telemetry=name == telemetry_of)
+            name: pool.submit(_status_facts, adapter, telemetry=name == telemetry_of, hardware=hardware)
             for name, adapter in built.items()
         }
         concurrent.futures.wait(reads.values(), timeout=_FACTS_DEADLINE_S)
@@ -408,12 +431,14 @@ def _read_jobs(
             try:
                 if not future.done():
                     raise concurrent.futures.TimeoutError()
-                job, reading = future.result()
+                job, reading, moment = future.result()
             except Exception as exc:  # noqa: BLE001
                 missed(fact, _did_not_answer(exc))
                 continue
             if jobs:
                 fact["job"] = job
+            if hardware:
+                fact["hardware"] = moment
             if fact["name"] == telemetry_of:
                 fact["telemetry"] = reading
     finally:
