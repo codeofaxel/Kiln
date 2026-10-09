@@ -838,6 +838,69 @@ def refusal_message(note: dict[str, Any]) -> str:
             "resume on the printer itself.")
 
 
+# ---------------------------------------------------------------------------
+# A refusal that names a machine waiting at a stop
+# ---------------------------------------------------------------------------
+
+
+#: How long a refusal about one printer waits to learn whether ANOTHER printer
+#: is waiting at a stop.  A command must never stall on a different machine;
+#: a printer that does not answer in time keeps the refusal's usual words.
+PEER_LOOK_TIMEOUT_S = 5.0
+
+
+def waiting_elsewhere(adapter: Any, *, timeout_s: float | None = None) -> dict[str, Any] | None:
+    """The ``now`` note when *adapter* is a DIFFERENT machine, paused at a planned stop.
+
+    Asked by the refusals that name a busy machine -- the start gate's one
+    printer at a time and the engagement gate -- so a printer waiting for the
+    person's hands is not called printing.  The same reading as
+    :func:`stop_awaiting_hands`, taken as Kiln's own look rather than a command
+    the engagement gate judges, and bounded by *timeout_s* (default
+    :data:`PEER_LOOK_TIMEOUT_S`).  Every uncertainty
+    answers ``None`` and the refusal keeps its usual words.  Words only: what
+    the caller allows or refuses never depends on this.
+    """
+    if not has_plan(adapter):
+        return None  # the common case: nothing on record, no thread, no read
+    answer: list[dict[str, Any]] = []
+
+    def _look() -> None:
+        try:
+            from kiln.printers.engagement import internal_read
+
+            with internal_read():
+                note = stop_awaiting_hands(adapter)
+            if note:
+                answer.append(note)
+        except Exception:  # noqa: BLE001 -- a refusal's words never fail it
+            logger.debug("could not tell whether a printer waits at a stop", exc_info=True)
+
+    # A daemon thread joined with a timeout, the same shape as the engagement
+    # gate's own peer check: a silent printer costs at most *timeout_s*.
+    worker = threading.Thread(target=_look, name="kiln-hardware-stop-peer-look", daemon=True)
+    worker.start()
+    worker.join(PEER_LOOK_TIMEOUT_S if timeout_s is None else timeout_s)
+    return answer[0] if answer and not worker.is_alive() else None
+
+
+def waiting_elsewhere_words(label: str, note: dict[str, Any]) -> tuple[str, str]:
+    """``(waiting, way_on)``: what *label* is waiting for, and how to tend to it.
+
+    The two sentences every refusal naming a machine at a stop shares.  Says
+    the machine is hot, because a paused printer is a hot, unattended one.
+    """
+    if note.get("certain"):
+        waiting = (f"At a planned hardware stop, {label} has paused, still hot, "
+                   f"waiting for you to put in {note['insert']}.")
+    else:
+        waiting = (f"With a planned hardware stop due, {label} has paused, still hot, "
+                   f"most likely waiting for you to put in {note['insert']}.")
+    way_on = (f"Once the parts are in, resume {label} with "
+              f"resume_print(printer_name=\"{label}\", hardware_confirmed=true), or cancel that print.")
+    return waiting, way_on
+
+
 def forget_process_state() -> None:
     """Forget what this process staged and watched (a fresh process; tests)."""
     with _LOCK:

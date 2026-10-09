@@ -732,6 +732,23 @@ def _starts_sentence(name: str) -> str:
     return name[:1].upper() + name[1:] if name else name
 
 
+def _waiting_at_a_stop(engagement: Engagement) -> dict[str, Any] | None:
+    """The ``now`` note when the engaged machine is paused at a planned stop.
+
+    Read by :mod:`kiln.hardware_stops`, within the same bound as every other
+    look this module takes at a different printer; anything unknown is ``None``.
+    """
+    try:
+        peer = _peer_for(engagement.machine)
+        if peer is None:
+            return None
+        from kiln.hardware_stops import waiting_elsewhere
+
+        return waiting_elsewhere(peer, timeout_s=_PEER_VERIFY_TIMEOUT_S)
+    except Exception:  # noqa: BLE001 -- the words never break the gate
+        return None
+
+
 def _refusal(
     engagement: Engagement, action: str, machine: str, adapter: Any = None,
 ) -> dict[str, Any]:
@@ -768,6 +785,16 @@ def _refusal(
 
     not_watching = f"Kiln is not watching {this_one}. Nothing here is keeping an eye on it."
 
+    # The machine Kiln is working with may be paused at a planned hardware
+    # stop, waiting hot for the person's hands.  Say so first, and how to tend
+    # to it.  Words only: the refusal is already decided.
+    waiting_line = way_on = ""
+    note = _waiting_at_a_stop(engagement)
+    if note is not None:
+        from kiln.hardware_stops import waiting_elsewhere_words
+
+        waiting_line, way_on = waiting_elsewhere_words(other, note)
+
     if action == "emergency_stop":
         # The one moment where self-help comes first: a person who wants a
         # machine stopped needs the fastest real answer in the first sentence,
@@ -794,12 +821,12 @@ def _refusal(
     verdict: dict[str, Any] = {
         "blocked": True,
         "code": "TIER_SINGLE_PRINTER_LIMIT",
-        "reason": f"{headline} {not_watching}",
+        "reason": " ".join(part for part in (waiting_line, headline, not_watching) if part),
         "engaged_with": other,
         "engaged_since": engagement.since,
         "action": action,
         "returns_left": 0 if spent else max(0, _RETURNS_PER_JOB - _returns_used(store, machine)),
-        "suggestions": [free_included],
+        "suggestions": [free_included, *([way_on] if way_on else [])],
     }
     verdict["upgrade_nudge"] = upgrade_nudge_block(
         variant="single_printer_engagement",
@@ -810,7 +837,7 @@ def _refusal(
             "Kiln Business drives every printer at the same time, so status, "
             "pause and stop reach all of them without handing anything back."
         ),
-        free_included=free_included,
+        free_included=" ".join(part for part in (free_included, way_on) if part),
         moment="resource_threshold",
         context={"action": action, "plan": _plan_phrase()},
     )

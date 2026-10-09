@@ -578,14 +578,34 @@ def _concurrent_fleet_verdict(adapter: Any) -> dict[str, Any] | None:
             return None
 
         others = ", ".join(sorted(busy)[:3])
+        reason = (
+            f"Kiln runs one printer at a time on this plan, and "
+            f"{others} is already printing."
+        )
+        free_path = "Wait for it to finish, or start it after this one."
+        headline = "Coordinate this job with the printer that is already running."
+        free_included = "The job has not started; wait and run it next."
+        # A busy machine that is paused at a planned hardware stop is not
+        # printing: it is waiting, hot, for the person's hands.  Words only --
+        # the refusal above is already decided and nothing below changes it.
+        waiting = _waiting_at_a_stop(registry, busy)
+        if waiting is not None:
+            label, note = waiting
+            from kiln.hardware_stops import waiting_elsewhere_words
+
+            waiting_line, way_on = waiting_elsewhere_words(label, note)
+            reason = (
+                f"{waiting_line} Kiln runs one printer at a time on this plan, so "
+                f"this print can start once {label}'s print is finished or cancelled."
+            )
+            free_path = way_on
+            headline = "Coordinate this job with the printer that is waiting for you."
+            free_included = f"The job has not started. {waiting_line} {way_on}"
         verdict = {
             "blocked": True,
-            "reason": (
-                f"Kiln runs one printer at a time on this plan, and "
-                f"{others} is already printing."
-            ),
+            "reason": reason,
             "override_hint": (
-                "Wait for it to finish, or start it after this one. "
+                f"{free_path} "
                 "Kiln Business runs your printers in parallel — "
                 "https://kiln3d.com/pricing"
             ),
@@ -602,17 +622,12 @@ def _concurrent_fleet_verdict(adapter: Any) -> dict[str, Any] | None:
                 variant="concurrent_queue",
                 tier="business",
                 feature="Coordinated multi-printer queue",
-                headline=(
-                    "Coordinate this job with the printer that is already "
-                    "running."
-                ),
+                headline=headline,
                 outcome_preview=(
                     "Kiln Business would route the queue across the available "
                     "machines and start eligible work in parallel."
                 ),
-                free_included=(
-                    "The job has not started; wait and run it next."
-                ),
+                free_included=free_included,
                 moment="resource_threshold",
             ),
         )
@@ -620,6 +635,24 @@ def _concurrent_fleet_verdict(adapter: Any) -> dict[str, Any] | None:
     except Exception:  # noqa: BLE001 — a licensing check never breaks a print
         _logger.debug("concurrent-fleet gate soft-passed", exc_info=True)
         return None
+
+
+def _waiting_at_a_stop(registry: Any, busy: list[str]) -> tuple[str, dict[str, Any]] | None:
+    """``(name, note)`` when the ONE busy machine is paused at a planned stop.
+
+    Only for a single busy machine: with two, tending to one would not free
+    this start, and words saying it would are wrong.  The reading belongs to
+    :mod:`kiln.hardware_stops`; anything it cannot tell answers ``None``.
+    """
+    if len(busy) != 1:
+        return None
+    try:
+        from kiln.hardware_stops import waiting_elsewhere
+
+        note = waiting_elsewhere(registry.get(busy[0]))
+    except Exception:  # noqa: BLE001 -- the words never break the gate
+        return None
+    return (busy[0], note) if note else None
 
 
 def _machine_id(adapter: Any) -> str:
