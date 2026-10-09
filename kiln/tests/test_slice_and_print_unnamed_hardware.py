@@ -148,6 +148,18 @@ def test_none_with_a_pause_but_no_sealed_pocket_prints(slicer_tools, tmp_path, m
     assert printer.uploads == [("out.gcode", SLICE)]
 
 
+def test_none_with_a_colour_change_over_a_sealed_pocket_prints(slicer_tools, tmp_path, monkeypatch, pockets):
+    """A filament change is a pause for colour, not for hardware: no contradiction."""
+    answer = _proposals()
+    answer["stops_in_file"] = [{"word": "M600", "before_layer": 29, "stops_this_printer": "stops",
+                                "purpose": "filament_change"}]
+    printer = _Printer()
+    resp = _run(slicer_tools, tmp_path, monkeypatch, printer, _Proposer(answer), hardware=["none"])
+
+    assert resp["success"] is True and resp["hardware"]["declared"] == "none"
+    assert printer.uploads == [("out.gcode", SLICE)]
+
+
 def test_none_when_the_planner_cannot_answer_takes_their_word(slicer_tools, tmp_path, monkeypatch, pockets):
     printer = _Printer()
     resp = _run(slicer_tools, tmp_path, monkeypatch, printer, _Proposer(RuntimeError("down")), hardware=["none"])

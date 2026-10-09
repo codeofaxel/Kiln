@@ -1524,7 +1524,10 @@ def _check_declared_none(
     if served_answer.classify_answer(answer) is not None:
         return block, None
     sealed = [s for s in (answer.get("sealed_pockets") or []) if isinstance(s, dict)]
-    pauses = [s for s in (answer.get("stops_in_file") or []) if isinstance(s, dict)]
+    # A filament change (a colour change, in the planner's words) is a pause
+    # with its own purpose; it contradicts nothing about hardware.
+    pauses = [s for s in (answer.get("stops_in_file") or [])
+              if isinstance(s, dict) and s.get("purpose") != "filament_change"]
     if not sealed or not pauses:
         return block, None
     import kiln.server as _srv
