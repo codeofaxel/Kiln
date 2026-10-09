@@ -271,7 +271,9 @@ from kiln.printers import (
     status_is_unreachable,
     stuck_job_note,
 )
+from kiln.printers.base import PrinterEngagementError
 from kiln.printers.command_verdict import CommandVerdict
+from kiln.printers.engagement import refusal_words as engagement_refusal_words
 from kiln.queue import JobNotFoundError, JobStatus, PrintQueue
 from kiln.registry import PrinterNotFoundError, PrinterRegistry
 from kiln.safety_profiles import export_profile as _export_profile
@@ -8748,15 +8750,21 @@ def start_print(
 
                 detail_text = "\n".join(remediation_lines) if remediation_lines else ""
                 summary = pf.get("summary", "Pre-flight checks failed")
-                full_message = (
-                    (
-                        f"{summary}\n\nFailed checks:\n{detail_text}\n\n"
-                        "Resolve the issues above and retry. To bypass pre-flight "
-                        "checks (advanced users only), set KILN_SKIP_PREFLIGHT=1."
+                if pf.get("refusal"):
+                    # Kiln is working with another printer: a rule, not a
+                    # failed check, so there is nothing to bypass.  Its own
+                    # words, unchanged.
+                    full_message = summary
+                else:
+                    full_message = (
+                        (
+                            f"{summary}\n\nFailed checks:\n{detail_text}\n\n"
+                            "Resolve the issues above and retry. To bypass pre-flight "
+                            "checks (advanced users only), set KILN_SKIP_PREFLIGHT=1."
+                        )
+                        if detail_text
+                        else (f"{summary}\n\nTo bypass pre-flight checks (advanced users only), set KILN_SKIP_PREFLIGHT=1.")
                     )
-                    if detail_text
-                    else (f"{summary}\n\nTo bypass pre-flight checks (advanced users only), set KILN_SKIP_PREFLIGHT=1.")
-                )
 
                 _audit(
                     "start_print",
@@ -12100,6 +12108,18 @@ def preflight_check(
         except ImportError:
             return result
 
+    except PrinterEngagementError as exc:
+        # Not a fault with the printer: below the fleet tier Kiln works with
+        # one machine at a time and this is a different one.  The refusal's
+        # own words go back whole -- what Kiln is doing, what the person can
+        # do now, the tier once -- rather than "check the printer is online",
+        # and every door that prints a pre-flight ``summary`` carries them.
+        words = engagement_refusal_words(exc.verdict)
+        return _error_dict(
+            words,
+            code=str(exc.verdict.get("code") or "TIER_SINGLE_PRINTER_LIMIT"),
+            extra={"ready": False, "summary": words, "refusal": exc.verdict},
+        )
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(
             f"Failed to run preflight check: {exc}. Check that the printer is online and KILN_PRINTER_HOST is correct."

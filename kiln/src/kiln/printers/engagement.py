@@ -842,3 +842,17 @@ def _refusal(
         context={"action": action, "plan": _plan_phrase()},
     )
     return verdict
+
+
+def refusal_words(verdict: dict[str, Any]) -> str:
+    """The whole refusal as one message, for a surface that prints text.
+
+    What happened, what the person can do now without paying anything, and
+    the tier that lifts the rule last and once -- the same order the
+    structured verdict carries for a surface that renders.
+    """
+    nudge = verdict.get("upgrade_nudge") or {}
+    parts = [str(verdict.get("reason") or "").strip()]
+    parts.extend(str(s).strip() for s in verdict.get("suggestions") or ())
+    parts.append(str(nudge.get("display_text") or "").strip())
+    return " ".join(part for part in parts if part)
