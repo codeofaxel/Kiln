@@ -423,6 +423,47 @@ def _is_pro_installed() -> bool:
         return False
 
 
+#: The words ``account`` can carry.  A closed vocabulary, read by the
+#: dashboard as a whitelist: a value outside it reads as ``unknown``.
+_ACCOUNT_STATES = ("signed_in", "signed_out", "needs_signin", "license", "unknown")
+
+
+def _account_state() -> str:
+    """Whether this install is signed in to a Kiln account, as one word.
+
+    The one fact the dashboard cannot otherwise learn: a signed-in install
+    that only slices and prints locally never makes a hosted request, so
+    the server sees nothing of it, and the install is read as "no account"
+    when it has one.  A word, never an identity: which account is on this
+    machine is not sent, and the installation id is still never sent with
+    a signed-in request.
+
+    Read from the session file alone -- no clock judgement, no refresh,
+    no network -- because a heartbeat must never cost a sign-in exchange.
+    A stored session whose access token has lapsed is still ``signed_in``:
+    the next call refreshes it.  Only a session the server has refused for
+    good reads ``needs_signin``.  An operator licence key (``KILN_LICENSE_KEY``)
+    is ``license``: a paid machine credential, not a person's sign-in.
+    """
+    try:
+        if os.environ.get("KILN_LICENSE_KEY", "").strip():
+            return "license"
+        from kiln import auth_session
+
+        stored = auth_session._read_tokens()
+        if not stored:
+            return "signed_out"
+        if auth_session.session_rejected(stored):
+            return "needs_signin"
+        has_token = bool(
+            str(stored.get("access_token") or "").strip()
+            or str(stored.get("refresh_token") or "").strip()
+        )
+        return "signed_in" if has_token else "signed_out"
+    except Exception:
+        return "unknown"
+
+
 def _bridge_running() -> bool | None:
     """Whether a persistent bridge is running on this machine, or ``None``.
 
@@ -524,6 +565,11 @@ def _send_heartbeat() -> None:
                 # the install can ever notice endings its chat sessions
                 # outlive — the reason prints_hours_reported exists.
                 "bridge_running": _bridge_running(),
+                # Whether this install is signed in to a Kiln account, as one
+                # word from _ACCOUNT_STATES -- never which account.  The
+                # dashboard's only way to tell an install with an account
+                # that works offline from one with no account at all.
+                "account": _account_state(),
                 "texture_names": stats.get("texture_names", {}),
                 "decoration_types": stats.get("decoration_types", {}),
                 "slicer_profiles": stats.get("slicer_profiles", {}),
