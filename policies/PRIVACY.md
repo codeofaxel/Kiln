@@ -1,6 +1,6 @@
 # Kiln Privacy Policy
 
-*Last updated: 2026-10-06 · Version 2.11*
+*Last updated: 2026-10-08 · Version 2.12*
 
 > **Plain-English summary** — Kiln is operated by **Hadron Labs Inc.**, a
 > Delaware C corporation headquartered in California. Most of Kiln runs
@@ -140,6 +140,7 @@ runs don't inflate user-count estimates).
 - daily activity counts: prints, generations, decorations, textures, slices, downloads, print-hours
 - `pro_installed` boolean (is `kiln-pro` installed alongside?)
 - OS platform string (`darwin`, `linux`, `windows`)
+- whether Kiln was started from the command line or by an AI app, as a count of starts each day, with the day's activity counts split the same way — never what was run
 - aggregate counts of textures used, decoration types, slicer profiles, marketplace sources, paywall denials — always counts, never user-attributable details
 - which generation provider and which model marketplace a request was sent to — the service's name only, never your prompt, search terms, the model or file, or your API key
 - whether live video from a printer's camera worked, as categories only: the kind of camera feed, whether pictures arrived, a frame-rate range and the kind of refusal; for a video address you point Kiln at on the printer itself, its port number and the general shape of its path; and the category of result of any camera check you ask Kiln to run — never an address, a path or a picture
@@ -357,7 +358,7 @@ emailing adam@kiln3d.com.
 | **Comments you posted on others' PRs** | Remain visible on the host design's history (to preserve review context, like GitHub) but the author name can be anonymized on request (your name becomes "a former collaborator"). |
 | **Org + team data** | Retained while the org exists. When the last member of an org leaves, we notify the admins + give 30 days to wind down before deleting org data. Pending invites that are never accepted are purged after 30 days. |
 | **Workshop access logs (reflog)** | 365 days rolling, then automatic purge. Auditors can request longer retention under a DPA. |
-| **Usage heartbeats** | Daily rows stay in the live database for 60 days, then move to a secured, tamper-evident archive kept for 7 years (audit and compliance). Separately, a minimal anonymous record per install — a random installation ID, the first and last dates it checked in, and the last app version + OS platform — is kept indefinitely so we can count installs over time. The installation ID is generated locally, is never sent with a signed-in request, and is not linked to any account — including if you create one later. Daily totals (installs that checked in, the activity they reported, and the printer models and connection types, app versions and platforms in use) are kept indefinitely too, with no installation ID or device fingerprint in them. Opting out of telemetry (`KILN_TELEMETRY=false`) stops all three from then on. |
+| **Usage heartbeats** | Daily rows stay in the live database for 60 days, then move to a secured, tamper-evident archive kept for 7 years (audit and compliance). Separately, a minimal anonymous record per install — a random installation ID, the first and last dates it checked in, the last app version + OS platform, and a few facts about how it started (the app version and OS platform on its first day, whether it was first used from the command line or through an AI app, the kind of printer connection it first set up and on which day, the first day it reported a full day's activity, and the first day it sliced, printed, made or decorated a model) — is kept indefinitely so we can count installs over time and see which starts lead people to keep using Kiln. Every one of those facts comes from the daily check-in described in §3.1. The installation ID is generated locally, is never sent with a signed-in request, and is not linked to any account — including if you create one later. Daily totals (installs that checked in, the activity they reported, and the printer models and connection types, app versions and platforms in use) are kept indefinitely too, with no installation ID or device fingerprint in them. Opting out of telemetry (`KILN_TELEMETRY=false`) stops all three from then on. |
 | **Anonymous community learning** | Retained indefinitely as anonymous data. You can't delete a specific contribution once it's aggregated (we strip the auth_user_id on ingestion, so we can't trace records back to you). Opt out anytime with `KILN_COMMUNITY_OPT_IN=false` — future contributions stop; past ones can't be pulled back out. |
 | Security telemetry (hashed) | 90 days rolling — then automatic purge |
 | Email support threads | 2 years from last reply, then deletion |
