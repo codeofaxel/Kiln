@@ -47,6 +47,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import tempfile
 import time
 from dataclasses import dataclass
@@ -856,3 +857,31 @@ def refusal_words(verdict: dict[str, Any]) -> str:
     parts.extend(str(s).strip() for s in verdict.get("suggestions") or ())
     parts.append(str(nudge.get("display_text") or "").strip())
     return " ".join(part for part in parts if part)
+
+
+def refusal_in_flight(exc: BaseException | None = None) -> dict[str, Any] | None:
+    """The one-printer refusal behind a failure, or ``None``.
+
+    *exc* defaults to the exception being handled right now, which is what
+    lets an error envelope built inside an ``except`` block answer with the
+    refusal's own words without the door that caught it passing anything.
+    Every printer door wraps its failures as "Failed to ...: <error>. Check
+    that the printer is online"; for this one failure that advice is wrong,
+    and the envelope is the one place every door already goes through.
+
+    Follows the causes a failure names (``raise ... from``, a
+    ``PrinterError``'s ``cause``), so an adapter that re-wraps the refusal
+    still answers with it.  Not the implicit context: a different fault
+    raised while a refusal was being handled is that fault.
+    """
+    from kiln.printers.base import PrinterEngagementError
+
+    if exc is None:
+        exc = sys.exc_info()[1]
+    seen: set[int] = set()
+    while isinstance(exc, BaseException) and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, PrinterEngagementError) and isinstance(exc.verdict, dict):
+            return exc.verdict
+        exc = exc.__cause__ or getattr(exc, "cause", None)
+    return None

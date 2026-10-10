@@ -273,6 +273,7 @@ from kiln.printers import (
 )
 from kiln.printers.base import PrinterEngagementError
 from kiln.printers.command_verdict import CommandVerdict
+from kiln.printers.engagement import refusal_in_flight as engagement_refusal_in_flight
 from kiln.printers.engagement import refusal_words as engagement_refusal_words
 from kiln.queue import JobNotFoundError, JobStatus, PrintQueue
 from kiln.registry import PrinterNotFoundError, PrinterRegistry
@@ -5901,9 +5902,22 @@ def _error_dict(
     printer door puts the lookup's error inside its own "Failed to ..." and
     adds a hint meant for a different fault, so it is rebuilt here, once,
     and no door has to remember it.
+
+    The one-printer refusal is the same case for the same reason.  Built
+    inside an ``except`` block whose exception is Kiln declining a second
+    machine (:func:`kiln.printers.engagement.refusal_in_flight`), the answer
+    is the refusal's own words and code, with the structured verdict under
+    ``refusal`` -- never the door's "check that the printer is online".
+    Any other failure keeps the door's message exactly.
     """
     if isinstance(message, str) and NO_PRINTER_CONFIGURED in message:
         return _no_printer_refusal()
+    refusal = engagement_refusal_in_flight()
+    if refusal is not None:
+        message = engagement_refusal_words(refusal)
+        code = str(refusal.get("code") or "TIER_SINGLE_PRINTER_LIMIT")
+        retryable = False
+        extra = {**(extra or {}), "refusal": refusal}
     if retryable is None:
         retryable = code in _RETRYABLE_CODES
     payload: dict[str, Any] = {
@@ -6574,7 +6588,14 @@ def printer_status(
         # access code need different fixes, and laundering the second into
         # the first sends someone to check a power switch for a
         # credentials problem.
-        if isinstance(exc, PrinterError) and not _reads_as_auth_failure(str(exc)):
+        # Kiln declining to read a second machine is not a state of that
+        # machine either: it goes back as the refusal, below, never as
+        # "offline -- check it is powered on".
+        if (
+            isinstance(exc, PrinterError)
+            and not _reads_as_auth_failure(str(exc))
+            and engagement_refusal_in_flight() is None
+        ):
             # Which KIND of unreachable, from the same classifier the adapter
             # layer uses, so the tool and the adapter cannot name different
             # causes — or different fixes — for one silent printer.

@@ -164,12 +164,28 @@ def format_error(
     *,
     json_mode: bool = False,
 ) -> str:
-    """Shortcut for a standard error response."""
-    return format_response(
-        "error",
-        error={"code": code, "message": message},
-        json_mode=json_mode,
-    )
+    """Shortcut for a standard error response.
+
+    Called while Kiln's one-printer refusal is the exception being handled,
+    it answers with the refusal's own words and code rather than the
+    command's "verify the printer is online" -- the same rule the MCP
+    tools' error envelope follows (see
+    :func:`kiln.printers.engagement.refusal_in_flight`).
+    """
+    error: dict[str, Any] = {"code": code, "message": message}
+    try:
+        from kiln.printers.engagement import refusal_in_flight, refusal_words
+
+        refusal = refusal_in_flight()
+    except Exception:  # noqa: BLE001 -- an error message never fails to print
+        refusal = None
+    if refusal is not None:
+        error = {
+            "code": str(refusal.get("code") or "TIER_SINGLE_PRINTER_LIMIT"),
+            "message": refusal_words(refusal),
+            "refusal": refusal,
+        }
+    return format_response("error", error=error, json_mode=json_mode)
 
 
 # ---------------------------------------------------------------------------
