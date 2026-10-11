@@ -748,6 +748,43 @@ def _isolate_print_watchers():
 
 
 @pytest.fixture(autouse=True)
+def _printer_addresses_do_not_answer(monkeypatch):
+    """A printer address off this machine does not answer, and says so at once.
+
+    Registering or saving an HTTP printer asks its address with a HEAD
+    request (``kiln.cli.config._check_printer_url``, 5 s timeout).  Tests
+    register printers at addresses where no printer lives -- the reserved
+    192.0.2.x range, ``*.local`` names, a LAN address -- so the real
+    request could only time out or fail to resolve, and each one held its
+    test for up to 5 s.  Off this machine the HEAD fails immediately with the
+    same ``ConnectionError`` the network would eventually give; a loopback
+    address is still asked for real, since a test may serve one.  A test
+    that needs the address to answer patches ``requests.head`` itself, which
+    overrides this.
+    """
+    try:
+        import requests
+    except ImportError:
+        return
+    real_head = requests.head
+
+    def head(url, *args, **kwargs):
+        import ipaddress
+        from urllib.parse import urlsplit
+
+        host = urlsplit(str(url)).hostname or ""
+        try:
+            loopback = host == "localhost" or ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            loopback = False
+        if loopback:
+            return real_head(url, *args, **kwargs)
+        raise requests.ConnectionError(f"unit tests do not reach {host or url}")
+
+    monkeypatch.setattr(requests, "head", head)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_printer_registry():
     """No test may inherit printers registered by an earlier test.
 

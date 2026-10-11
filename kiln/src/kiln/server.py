@@ -126,7 +126,7 @@ try:
     from kiln.billing_alerts import BillingAlertManager
 except ImportError:
     BillingAlertManager = None  # Available in kiln-pro
-from kiln.cli.config import _normalize_printer_type, _validate_printer_url, save_printer
+from kiln.cli.config import _check_printer_url, _normalize_printer_type, save_printer
 from kiln.cloud_sync import CloudSyncManager, SyncConfig
 from kiln.cost_estimator import (
     BUILTIN_MATERIALS,
@@ -12778,8 +12778,11 @@ def register_printer(
         # the tool honours the same aliases config.yaml and the env var do.
         printer_type = _normalize_printer_type(printer_type)
 
-        # Validate and clean the printer URL
-        host, url_warnings = _validate_printer_url(host, printer_type=printer_type)
+        # Validate and clean the printer URL.  Asked over the network once,
+        # here: the save below reuses the answer, and so does the bench
+        # offer, which talks to the printer and would otherwise wait out
+        # the adapter's retries on an address that already did not answer.
+        host, url_warnings, url_answered = _check_printer_url(host, printer_type=printer_type)
         if not host:
             return _error_dict(
                 "Invalid printer URL: " + "; ".join(url_warnings),
@@ -12923,6 +12926,7 @@ def register_printer(
                     camera_snapshot_url=camera_snapshot_url,
                     camera_stream_url=camera_stream_url,
                     set_active=True,
+                    probe=False,
                 )
                 persisted_path = str(persisted)
             except Exception as exc:
@@ -12989,15 +12993,20 @@ def register_printer(
             result["config_path"] = persisted_path
 
         # Once, for a model whose motion record has blanks: the offer of the
-        # short session that fills them (kiln.bench).  Never twice.
-        try:
-            from kiln.bench import offer_after_registration
+        # short session that fills them (kiln.bench).  Never twice.  Not for
+        # an address that just failed to answer: the offer reads the printer's
+        # own settings, which there means waiting out every retry (3 x 30 s on
+        # Moonraker) to learn nothing, and offline is not a reason to nag --
+        # the offer stays unspent for a registration the printer answers.
+        if url_answered is not False:
+            try:
+                from kiln.bench import offer_after_registration
 
-            _offer = offer_after_registration(adapter, name)
-            if _offer is not None:
-                result["bench_offer"] = _offer
-        except Exception:
-            logger.debug("bench offer after registration skipped", exc_info=True)
+                _offer = offer_after_registration(adapter, name)
+                if _offer is not None:
+                    result["bench_offer"] = _offer
+            except Exception:
+                logger.debug("bench offer after registration skipped", exc_info=True)
 
         if printer_type == "bambu" and verify_connection:
             try:

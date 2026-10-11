@@ -109,7 +109,7 @@ def _normalize_host(host: str, printer_type: str = "octoprint") -> str:
     return host.rstrip("/")
 
 
-def _validate_printer_url(url: str, *, printer_type: str = "octoprint") -> tuple[str, list[str]]:
+def _validate_printer_url(url: str, *, printer_type: str = "octoprint", probe: bool = True) -> tuple[str, list[str]]:
     """Validate and clean a printer host URL.
 
     Performs the following checks:
@@ -118,37 +118,55 @@ def _validate_printer_url(url: str, *, printer_type: str = "octoprint") -> tuple
     2. Ensures URL has an ``http://`` or ``https://`` scheme (for HTTP
        backends).  Bambu printers use raw hostnames — no scheme is added.
     3. Ensures URL does not end with a path separator.
-    4. Attempts a basic HTTP HEAD request (5 s timeout) to verify
-       reachability.  A failure produces a warning but does **not** block
-       registration.
+    4. When *probe* is on, attempts a basic HTTP HEAD request (5 s
+       timeout) to verify reachability.  A failure produces a warning but
+       does not refuse the URL; it does hold the caller for up to 5 s.
     5. Returns warnings for any malformed-looking URLs.
 
     :param url: Raw printer URL or hostname.
     :param printer_type: Backend type (``"octoprint"``, ``"moonraker"``,
         ``"creality"``, ``"bambu"``, ``"prusalink"``, ``"duet"``).
+    :param probe: Ask the address over the network.  Off for a caller that
+        has already asked (see :func:`_check_printer_url`).
     :returns: ``(cleaned_url, warnings)`` where *warnings* is a list of
         human-readable strings (empty if everything looks good).
+    """
+    cleaned, warnings, _answered = _check_printer_url(url, printer_type=printer_type, probe=probe)
+    return cleaned, warnings
+
+
+def _check_printer_url(
+    url: str, *, printer_type: str = "octoprint", probe: bool = True
+) -> tuple[str, list[str], bool | None]:
+    """:func:`_validate_printer_url`, plus whether the address answered.
+
+    The third value is ``True`` when the HEAD request got any answer,
+    ``False`` when it failed, and ``None`` when nothing was asked: *probe*
+    off, a backend that is not spoken to over HTTP (Bambu, Elegoo, USB),
+    an address too malformed to clean, or ``requests`` not installed.  A
+    caller that goes on to talk to the printer reads it, so an address
+    that did not answer is not asked again at 30 s a try.
     """
     warnings: list[str] = []
 
     if not url or not url.strip():
-        return "", ["URL is empty"]
+        return "", ["URL is empty"], None
 
     cleaned = _normalize_host(url, printer_type)
 
     if not cleaned:
-        return "", ["URL is empty after normalization"]
+        return "", ["URL is empty after normalization"], None
 
     # Bambu and Elegoo printers use raw hostnames -- skip HTTP scheme checks.
     if printer_type in ("bambu", "elegoo"):
         # Basic hostname sanity check
         if " " in cleaned:
             warnings.append(f"Hostname contains spaces: {cleaned!r}")
-        return cleaned, warnings
+        return cleaned, warnings, None
 
     # USB printers use port paths -- skip all HTTP/URL validation.
     if printer_type == "usb":
-        return cleaned, warnings
+        return cleaned, warnings, None
 
     # Scheme check (already handled by _normalize_host, but be explicit)
     if not re.match(r"^https?://", cleaned, re.IGNORECASE):
@@ -170,20 +188,23 @@ def _validate_printer_url(url: str, *, printer_type: str = "octoprint") -> tuple
     if ".." in authority:
         warnings.append(f"URL contains '..' traversal: {cleaned!r}")
 
-    # Connectivity check (best-effort, does not block)
+    # Connectivity check (best-effort: a miss warns, never refuses)
+    if not probe:
+        return cleaned, warnings, None
     try:
         import requests
-
-        requests.head(cleaned, timeout=5, allow_redirects=True)
     except ImportError:
-        pass  # requests not available in this context
+        return cleaned, warnings, None  # requests not available in this context
+    try:
+        requests.head(cleaned, timeout=5, allow_redirects=True)
     except Exception as exc:
         warnings.append(
             f"Could not reach {cleaned} (HEAD request failed: {exc}). "
             "The printer may be offline or the URL may be incorrect."
         )
+        return cleaned, warnings, False
 
-    return cleaned, warnings
+    return cleaned, warnings, True
 
 
 # ---------------------------------------------------------------------------
@@ -388,6 +409,7 @@ def save_printer(
     camera_stream_url: str | None = None,
     set_active: bool = True,
     config_path: Path | None = None,
+    probe: bool = True,
 ) -> Path:
     """Add or update a printer in the config file.
 
@@ -401,6 +423,9 @@ def save_printer(
     same trust — and are read back through
     :func:`kiln.printers.base.apply_external_camera`.
 
+    *probe* asks the address over the network before saving it (up to 5 s
+    when nothing answers); a caller that has just asked passes ``False``.
+
     Returns the path to the config file.
     """
     path = config_path or get_config_path()
@@ -409,7 +434,7 @@ def save_printer(
     if not isinstance(printers, dict):
         raw["printers"] = printers = {}
 
-    cleaned_host, url_warnings = _validate_printer_url(host, printer_type=printer_type)
+    cleaned_host, url_warnings = _validate_printer_url(host, printer_type=printer_type, probe=probe)
 
     entry: dict[str, Any] = {
         "type": printer_type,

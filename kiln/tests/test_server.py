@@ -1818,8 +1818,8 @@ class TestRegisterPrinter:
         monkeypatch.setattr(mod, "CrealityAdapter", FakeCrealityAdapter)
         monkeypatch.setattr(
             mod,
-            "_validate_printer_url",
-            lambda host, printer_type: (f"http://{host}" if "://" not in host else host, []),
+            "_check_printer_url",
+            lambda host, printer_type: (f"http://{host}" if "://" not in host else host, [], None),
         )
 
         result = register_printer(
