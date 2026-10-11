@@ -327,7 +327,7 @@ def _read_manifest(slug: str) -> dict[str, Any] | None:
     if not p.exists():
         return None
     try:
-        return json.loads(p.read_text())
+        return json.loads(p.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None
 
@@ -335,7 +335,7 @@ def _read_manifest(slug: str) -> dict[str, Any] | None:
 def _write_manifest(slug: str, data: dict[str, Any]) -> None:
     p = _manifest_path(slug)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(data, indent=2))
+    p.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -458,7 +458,7 @@ def list_decorations(
         if not manifest.is_file():
             continue
         try:
-            data = json.loads(manifest.read_text())
+            data = json.loads(manifest.read_text(encoding="utf-8"))
             dec = Decoration.from_dict(data)
         except (json.JSONDecodeError, KeyError) as exc:
             _logger.debug("Skipping invalid manifest %s: %s", manifest, exc)
@@ -914,7 +914,7 @@ def rollback_decoration(
 
     # Load the archived version
     try:
-        archived_data = json.loads(archive_path.read_text())
+        archived_data = json.loads(archive_path.read_text(encoding="utf-8"))
         archived = Decoration.from_dict(archived_data)
     except (json.JSONDecodeError, KeyError) as exc:
         raise ValueError(f"Corrupt archive manifest.v{version}.json: {exc}") from exc
@@ -980,7 +980,7 @@ def decoration_history(name_or_slug: str) -> list[dict[str, Any]]:
             data = _read_manifest(slug)
         elif re.match(r"^manifest\.v\d+\.json$", child.name):
             try:
-                data = json.loads(child.read_text())
+                data = json.loads(child.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
                 continue
 

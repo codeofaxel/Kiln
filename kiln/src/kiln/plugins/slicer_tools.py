@@ -2352,7 +2352,7 @@ def _count_gcode_tools(gcode_path: str | None) -> tuple[int, int] | None:
         tools: set[int] = set()
         changes = 0
         active: int | None = None
-        with open(gcode_path, errors="replace") as fh:
+        with open(gcode_path, errors="replace", encoding="utf-8") as fh:
             for line in fh:
                 m = _GCODE_TOOL_RE.match(line)
                 if not m:

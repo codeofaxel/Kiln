@@ -443,7 +443,7 @@ def _load_design_templates() -> dict[str, Any]:
     """Load design_templates.json with ``@lru_cache``."""
     path = Path(__file__).resolve().parent / "data" / "design_knowledge" / "design_templates.json"
     try:
-        with open(path) as fh:
+        with open(path, encoding="utf-8") as fh:
             data: dict[str, Any] = json.load(fh)
         return {k: v for k, v in data.items() if not k.startswith("_")}
     except (OSError, json.JSONDecodeError):

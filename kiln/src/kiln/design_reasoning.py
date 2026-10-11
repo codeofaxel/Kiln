@@ -1963,7 +1963,7 @@ polygon(points=[
 """
         scad_path = str(Path(work_dir) / "gusset.scad")
         gusset_stl = str(Path(work_dir) / "gusset.stl")
-        Path(scad_path).write_text(scad_code)
+        Path(scad_path).write_text(scad_code, encoding="utf-8")
 
         from kiln.generation.openscad import _find_openscad as _find
 
@@ -2257,7 +2257,7 @@ def optimize_template_params(
     if not tpl_path.is_file():
         raise ValueError(f"Templates file not found: {tpl_path}")
 
-    with open(tpl_path) as fh:
+    with open(tpl_path, encoding="utf-8") as fh:
         data = json.load(fh)
 
     tpl = data.get(template_id)
@@ -2352,7 +2352,7 @@ def optimize_template_params(
         scad_path = str(Path(work_dir) / f"variant_{idx}.scad")
         stl_path = str(Path(work_dir) / f"variant_{idx}.stl")
 
-        Path(scad_path).write_text(scad_code)
+        Path(scad_path).write_text(scad_code, encoding="utf-8")
 
         # Compile to STL
         try:
@@ -3082,7 +3082,7 @@ def design_to_gcode(
 
     # Step 2: Load template and generate SCAD → STL
     templates_path = Path(__file__).parent / "data" / "design_templates.json"
-    with open(templates_path) as fh:
+    with open(templates_path, encoding="utf-8") as fh:
         templates = _json.load(fh)
 
     tmpl = templates.get(template_id)
@@ -3109,7 +3109,7 @@ def design_to_gcode(
         if isinstance(spec, dict) and spec.get("default") is not None
     }
     scad_code = render_template_scad(tmpl, params)
-    scad_path.write_text(scad_code)
+    scad_path.write_text(scad_code, encoding="utf-8")
     result.scad_file = str(scad_path)
     result.steps_completed.append("scad_generation")
 
@@ -3661,7 +3661,7 @@ def solve_constraints(
         result.notes.append("Templates file not found.")
         return result
 
-    with open(templates_path) as fh:
+    with open(templates_path, encoding="utf-8") as fh:
         data = _json.load(fh)
 
     if template_id not in data or template_id.startswith("_"):

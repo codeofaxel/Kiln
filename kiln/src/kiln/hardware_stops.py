@@ -247,7 +247,7 @@ def _store_path() -> Path:
 
 def _read_store() -> dict[str, Any]:
     try:
-        data = json.loads(_store_path().read_text())
+        data = json.loads(_store_path().read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError):
         return {}
     if not isinstance(data, dict) or data.get("version") != _SCHEMA_VERSION:

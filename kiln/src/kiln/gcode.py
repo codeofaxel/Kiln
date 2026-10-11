@@ -1119,7 +1119,7 @@ def detect_printer_from_header(file_path: str) -> str | None:
     Returns a matched safety profile ID if found, or ``None`` if no match.
     """
     try:
-        with open(file_path, errors="replace") as fh:
+        with open(file_path, errors="replace", encoding="utf-8") as fh:
             for i, line in enumerate(fh):
                 if i >= _MAX_HEADER_LINES:
                     break
@@ -1244,7 +1244,7 @@ def scan_gcode_file(
 
     result = GCodeValidationResult()
 
-    with open(abs_path, errors="replace") as fh:
+    with open(abs_path, errors="replace", encoding="utf-8") as fh:
         for raw_line in fh:
             if profile is not None:
                 cleaned = _validate_single_with_profile(

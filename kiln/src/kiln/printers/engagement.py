@@ -214,7 +214,7 @@ def _read_store() -> dict[str, Any]:
     locked out of their own printer.
     """
     try:
-        raw = _store_path().read_text()
+        raw = _store_path().read_text(encoding="utf-8")
     except (OSError, ValueError):
         return {}
     try:

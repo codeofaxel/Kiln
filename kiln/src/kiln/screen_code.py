@@ -642,7 +642,7 @@ def host_dialog_hook(client_name: str | None, *, server_name: str = "kiln", cwd:
     for raw in _HOOK_SETTINGS:
         path = Path(raw).expanduser() if raw.startswith("~") else base / raw
         try:
-            data = json.loads(path.read_text())
+            data = json.loads(path.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001 — absent or unreadable is no hook
             continue
         hooks = (data.get("hooks") or {}) if isinstance(data, dict) else {}

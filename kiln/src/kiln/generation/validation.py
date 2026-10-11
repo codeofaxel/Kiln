@@ -396,7 +396,7 @@ def _parse_stl_ascii(
     current_verts: list[tuple[float, ...]] = []
 
     try:
-        with open(path, errors="replace") as fh:
+        with open(path, errors="replace", encoding="utf-8") as fh:
             for line in fh:
                 stripped = line.strip()
                 if stripped.startswith("vertex"):
@@ -464,7 +464,7 @@ def _parse_obj(
     triangles: list[tuple[tuple[float, ...], ...]] = []
 
     try:
-        with open(path, errors="replace") as fh:
+        with open(path, errors="replace", encoding="utf-8") as fh:
             for line in fh:
                 stripped = line.strip()
                 if stripped.startswith("v "):

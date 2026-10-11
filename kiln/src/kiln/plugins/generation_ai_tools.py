@@ -1225,7 +1225,7 @@ class _GenerationAIToolsPlugin:
 
             try:
                 tpl_path = os.path.join(os.path.dirname(_srv.__file__), "data", "design_templates.json")
-                with open(tpl_path) as fh:
+                with open(tpl_path, encoding="utf-8") as fh:
                     templates = json.load(fh)
 
                 tpl = templates.get(template_id)

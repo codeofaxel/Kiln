@@ -63,7 +63,7 @@ def _load_printer_intelligence() -> dict[str, Any]:
     """Load printer_intelligence.json (cached)."""
     global _printer_intelligence_cache  # noqa: PLW0603
     if _printer_intelligence_cache is None:
-        with open(_PRINTER_INTELLIGENCE_PATH) as f:
+        with open(_PRINTER_INTELLIGENCE_PATH, encoding="utf-8") as f:
             _printer_intelligence_cache = json.load(f)
     return _printer_intelligence_cache
 

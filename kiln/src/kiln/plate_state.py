@@ -199,7 +199,7 @@ def _read_store() -> dict[str, Any]:
     module docstring), and an empty store is the reading that asks.
     """
     try:
-        raw = _store_path().read_text()
+        raw = _store_path().read_text(encoding="utf-8")
     except (OSError, ValueError):
         return {}
     try:

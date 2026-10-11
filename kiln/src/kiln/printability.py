@@ -3000,7 +3000,7 @@ def _load_materials_json() -> dict[str, Any]:
     """Load the materials.json knowledge base (cached)."""
     path = Path(__file__).resolve().parent / "data" / "design_knowledge" / "materials.json"
     try:
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             return json.load(f)
     except (OSError, json.JSONDecodeError):
         return {}

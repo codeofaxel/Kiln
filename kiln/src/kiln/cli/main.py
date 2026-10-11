@@ -12700,7 +12700,7 @@ def versions_save(design_id: str, file_path: str, notes: str, design_prompt: str
     try:
         from kiln.design_versions import DesignVersionStore
 
-        source = Path(file_path).read_text()
+        source = Path(file_path).read_text(encoding="utf-8")
         store = DesignVersionStore()
         try:
             version = store.save_version(design_id, source, notes=notes, prompt=design_prompt)

@@ -115,7 +115,7 @@ class _DecorationLibraryPlugin:
             recipe_path = os.path.join(model_dir, ".kiln_recipe.json")
             if os.path.isfile(recipe_path):
                 try:
-                    with open(recipe_path) as f:
+                    with open(recipe_path, encoding="utf-8") as f:
                         recipe_data = json.load(f)
                     _logger.debug("Loaded recipe sidecar: %s", recipe_path)
                 except (json.JSONDecodeError, OSError) as exc:

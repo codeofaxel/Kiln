@@ -74,7 +74,7 @@ def _get_catalog() -> dict[str, Component]:
         return _catalog
 
     try:
-        with open(catalog_path) as f:
+        with open(catalog_path, encoding="utf-8") as f:
             raw = json.load(f)
     except (json.JSONDecodeError, OSError) as exc:
         _logger.warning("Failed to load component catalog: %s", exc)

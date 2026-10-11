@@ -145,7 +145,7 @@ def _parse_ascii_stl(file_path: str) -> list[_Triangle]:
     normal: tuple[float, float, float] = (0.0, 0.0, 0.0)
     vertices: list[tuple[float, float, float]] = []
 
-    with open(file_path) as fh:
+    with open(file_path, encoding="utf-8", errors="replace") as fh:
         for line in fh:
             line = line.strip()
             if line.startswith("facet normal"):
@@ -1254,7 +1254,7 @@ def _parse_obj(obj_path: str) -> tuple[
     current_material = ""
 
     try:
-        with open(obj_path) as fh:
+        with open(obj_path, encoding="utf-8", errors="replace") as fh:
             for line in fh:
                 line = line.strip()
                 if not line or line.startswith("#"):
@@ -1306,7 +1306,7 @@ def _parse_mtl(mtl_path: str) -> dict[str, str]:
     current_name = ""
 
     try:
-        with open(mtl_path) as fh:
+        with open(mtl_path, encoding="utf-8", errors="replace") as fh:
             for line in fh:
                 line = line.strip()
                 if line.startswith("newmtl "):
@@ -1329,7 +1329,7 @@ def _find_mtl_path(obj_path: str) -> str | None:
     obj_dir = os.path.dirname(obj_path)
 
     try:
-        with open(obj_path) as fh:
+        with open(obj_path, encoding="utf-8", errors="replace") as fh:
             for line in fh:
                 line = line.strip()
                 if line.startswith("mtllib "):

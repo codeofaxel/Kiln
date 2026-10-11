@@ -74,7 +74,7 @@ def _write_tokens(data: dict[str, Any]) -> None:
     path = _tokens_path()
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2, sort_keys=True))
+    tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
     with contextlib.suppress(OSError):
         os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)  # 0600
     tmp.replace(path)
@@ -134,7 +134,7 @@ def _read_tokens() -> dict[str, Any]:
     if not path.exists():
         return {}
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return {}
 

@@ -522,7 +522,7 @@ def _detect_wsl_host_subnet() -> str | None:
     used to derive the subnet for printer discovery.
     """
     try:
-        with open("/etc/resolv.conf") as f:
+        with open("/etc/resolv.conf", encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.strip()
                 if line.startswith("nameserver"):

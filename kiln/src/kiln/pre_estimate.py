@@ -133,7 +133,7 @@ def _load_slicer_profiles() -> dict[str, dict[str, Any]]:
         os.path.dirname(__file__), "data", "slicer_profiles.json"
     )
     try:
-        with open(profiles_path) as fh:
+        with open(profiles_path, encoding="utf-8") as fh:
             _slicer_profiles_cache = json.load(fh)
     except Exception:
         _logger.debug("Could not load slicer_profiles.json, using defaults")
@@ -429,7 +429,7 @@ def _resolve_template_dimensions(
         os.path.dirname(__file__), "data", "design_templates.json"
     )
     try:
-        with open(templates_path) as fh:
+        with open(templates_path, encoding="utf-8") as fh:
             templates = json.load(fh)
     except Exception as exc:
         raise ValueError(f"Could not load design templates: {exc}") from exc

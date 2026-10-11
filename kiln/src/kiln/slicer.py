@@ -1366,7 +1366,7 @@ def _parse_gcode_estimates(gcode_path: str) -> dict[str, Any]:
     estimates: dict[str, Any] = {"gcode_path": gcode_path}
 
     try:
-        with open(gcode_path, errors="replace") as fh:
+        with open(gcode_path, errors="replace", encoding="utf-8") as fh:
             search_lines = [line for line in fh if line.startswith(";")]
     except OSError:
         return estimates
@@ -1589,7 +1589,7 @@ def slice_multicolor_copies(
             filament = result.filament
 
             # Read the gcode body
-            with open(result.output_path, errors="replace") as fh:
+            with open(result.output_path, errors="replace", encoding="utf-8") as fh:
                 gcode_bodies.append(fh.read())
 
             placed += 1
@@ -1602,7 +1602,7 @@ def slice_multicolor_copies(
     os.makedirs(out_dir, mode=0o700, exist_ok=True)
     stem = Path(input_path).stem
     merged_path = os.path.join(out_dir, f"{stem}_multicolor.gcode")
-    with open(merged_path, "w") as fh:
+    with open(merged_path, "w", encoding="utf-8") as fh:
         fh.write(_KILN_GCODE_HEADER + merged)
 
     return SliceResult(
@@ -1715,7 +1715,7 @@ def merge_multipart_gcode(
         if not os.path.isfile(gcode_path):
             raise ValueError(f"Gcode file not found: {gcode_path}")
 
-        with open(gcode_path) as f:
+        with open(gcode_path, encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
 
         header_lines: list[str] = []
@@ -1881,7 +1881,7 @@ def merge_multipart_gcode(
             "merged_multicolor.gcode",
         )
 
-    with open(output_path, "w") as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         f.write(_KILN_GCODE_HEADER + "".join(f"{line}\n" for line in merged_totals) + merged_body)
 
     return {

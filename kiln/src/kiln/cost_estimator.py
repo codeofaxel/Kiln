@@ -574,7 +574,7 @@ class CostEstimator:
             lines = _sliced_3mf_gcode_lines(file_path)
         else:
             _refuse_oversized(file_path)
-            with open(file_path, errors="replace") as f:
+            with open(file_path, errors="replace", encoding="utf-8") as f:
                 lines = f.readlines()
 
         return self.estimate_from_gcode(
@@ -931,7 +931,7 @@ class CostEstimator:
                 body = "".join(_sliced_3mf_gcode_lines(file_path))
             else:
                 _refuse_oversized(file_path)
-                with open(file_path, errors="replace") as fh:
+                with open(file_path, errors="replace", encoding="utf-8") as fh:
                     body = fh.read()
         except (OSError, ValueError):
             return None

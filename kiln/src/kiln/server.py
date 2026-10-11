@@ -7337,7 +7337,7 @@ def monitor_print(
                     _file_filaments = _get_cost_estimator().filament_pricing(_local)
                     from kiln.gcode import FIRST_PSEUDO_TOOL
 
-                    with open(_local, errors="replace") as _f:
+                    with open(_local, errors="replace", encoding="utf-8") as _f:
                         _seen = {
                             int(w[1:]) for w in (ln.split(";", 1)[0].strip() for ln in _f)
                             if len(w) > 1 and w[0] == "T" and w[1:].isdigit() and int(w[1:]) < FIRST_PSEUDO_TOOL
@@ -11731,7 +11731,7 @@ def preflight_check(
                 try:
                     from kiln.gcode import check_missing_temperatures
 
-                    with open(file_path, errors="replace") as _fh:
+                    with open(file_path, errors="replace", encoding="utf-8") as _fh:
                         gcode_content = _fh.read()
                     temp_warnings = check_missing_temperatures(gcode_content)
                     if temp_warnings:
@@ -16203,7 +16203,7 @@ def list_design_templates() -> dict:
         from pathlib import Path as _Path
 
         tpl_path = _Path(__file__).parent / "data" / "design_templates.json"
-        with open(tpl_path) as fh:
+        with open(tpl_path, encoding="utf-8") as fh:
             data = _json.load(fh)
 
         templates = []
@@ -16333,7 +16333,7 @@ def generate_from_template(
         from kiln.parametric import render_template_scad
 
         tpl_path = _Path(__file__).parent / "data" / "design_templates.json"
-        with open(tpl_path) as fh:
+        with open(tpl_path, encoding="utf-8") as fh:
             data = _json.load(fh)
 
         tpl = data.get(template_id)
@@ -19067,7 +19067,7 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
         return
 
     try:
-        manifest = json.loads(manifest_path.read_text())
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except Exception as exc:
         logger.warning("Failed to load pro tool manifest: %s", exc)
         return

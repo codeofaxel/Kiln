@@ -131,7 +131,7 @@ def is_newer(latest: str, current: str) -> bool:
 
 def _load_cache() -> dict[str, Any] | None:
     try:
-        with _cache_path().open() as f:
+        with _cache_path().open(encoding="utf-8") as f:
             data = json.load(f)
         return data if isinstance(data, dict) else None
     except (FileNotFoundError, json.JSONDecodeError, OSError):
@@ -146,7 +146,7 @@ def _write_cache(latest: str, highlights: list[str] | tuple[str, ...] = ()) -> N
     try:
         path = _cache_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("w") as f:
+        with path.open("w", encoding="utf-8") as f:
             json.dump(
                 {
                     "latest": latest,

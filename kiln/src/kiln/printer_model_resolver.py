@@ -252,7 +252,7 @@ def _load_yaml_config() -> dict[str, Any]:
         return {}
     try:
         import yaml
-        with open(_CONFIG_PATH) as fh:
+        with open(_CONFIG_PATH, encoding="utf-8") as fh:
             data = yaml.safe_load(fh) or {}
         return data if isinstance(data, dict) else {}
     except Exception as exc:

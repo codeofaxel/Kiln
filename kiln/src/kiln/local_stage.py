@@ -472,7 +472,7 @@ def _ledger_write(token: str, mesh_path: str) -> None:
         path = _token_ledger_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            entries = json.loads(path.read_text())
+            entries = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(entries, dict):
                 entries = {}
         except (OSError, ValueError):
@@ -497,7 +497,7 @@ def _ledger_write(token: str, mesh_path: str) -> None:
 def _ledger_read(token: str) -> str | None:
     """The ledger's answer for a token minted by any process, or ``None``."""
     try:
-        entries = json.loads(_token_ledger_path().read_text())
+        entries = json.loads(_token_ledger_path().read_text(encoding="utf-8"))
         value = entries.get(token) if isinstance(entries, dict) else None
         return value if isinstance(value, str) and value else None
     except Exception:  # noqa: BLE001

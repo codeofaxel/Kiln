@@ -487,7 +487,7 @@ class Window:
 
 def _read() -> list[Window]:
     try:
-        raw = json.loads(_path().read_text())
+        raw = json.loads(_path().read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001 — no file, or a corrupt one, is no windows
         return []
     rows = raw.get("windows") if isinstance(raw, dict) else None
