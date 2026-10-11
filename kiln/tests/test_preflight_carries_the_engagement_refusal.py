@@ -84,19 +84,45 @@ class TestPreflight:
         assert "refusal" not in pf
 
 
+@pytest.fixture
+def fired(monkeypatch):
+    """Every one-printer verdict handed out during the test, in order."""
+    from kiln.printers import engagement
+
+    seen: list[dict] = []
+    real = engagement.check_command
+
+    def _recording(adapter, action):
+        verdict = real(adapter, action)
+        if verdict is not None:
+            seen.append(verdict)
+        return verdict
+
+    monkeypatch.setattr(engagement, "check_command", _recording)
+    return seen
+
+
 class TestStartPrint:
-    def test_the_person_reads_the_refusal_through_the_tool(self, bench):
+    """A start on the second machine is refused by the one-printer rule FIRST
+    -- before pre-flight reads the machine, before its spools are read to
+    route the print -- so the refusal is the rule's own, worded for a start,
+    under its own code.  (Until 2026-10-11 the rule reached a start only
+    through whichever read of the machine happened first.)"""
+
+    def test_the_person_reads_the_refusal_through_the_tool(self, bench, fired):
         bench()
         result = _start()
         assert result["success"] is False
-        assert result["error"]["code"] == "PREFLIGHT_FAILED"
+        assert result["error"]["code"] == "TIER_SINGLE_PRINTER_LIMIT"
         message = result["error"]["message"]
         assert message.startswith("At a planned hardware stop, voron has paused, still hot")
         assert 'resume_print(printer_name="voron", hardware_confirmed=true)' in message
         assert "KILN_SKIP_PREFLIGHT" not in message
         assert "Pre-flight checks failed" not in message
         assert message.lower().count("business") == 1
-        assert result["preflight"]["refusal"]["code"] == "TIER_SINGLE_PRINTER_LIMIT"
+        assert "preflight" not in result
+        assert result["refusal"]["code"] == "TIER_SINGLE_PRINTER_LIMIT"
+        assert [v["action"] for v in fired] == ["start_print"]
 
     def test_without_a_plan_it_is_the_ordinary_engagement_refusal(self, bench):
         bench(plan=False)
@@ -118,13 +144,17 @@ class TestStartPrint:
             "Pre-flight checks failed\n\nTo bypass pre-flight checks (advanced users only), set KILN_SKIP_PREFLIGHT=1."
         )
 
-    def test_skipping_preflight_still_refuses_the_second_machine(self, bench, monkeypatch):
+    def test_skipping_preflight_still_refuses_the_second_machine(self, bench, monkeypatch, fired):
         bench()
         monkeypatch.setenv("KILN_SKIP_PREFLIGHT", "1")
         result = _start()
         assert result["success"] is False
         assert "preflight" not in result
-        assert "waiting for you to put in" in result["message"]  # the start gate's own words
+        assert result["error"]["code"] == "TIER_SINGLE_PRINTER_LIMIT"
+        message = result["error"]["message"]
+        assert message.startswith("At a planned hardware stop, voron has paused, still hot")
+        assert "hand_back_printer" in message
+        assert [v["action"] for v in fired] == ["start_print"]
 
 
 class TestTheOtherPreflightDoorsCarryTheSummary:

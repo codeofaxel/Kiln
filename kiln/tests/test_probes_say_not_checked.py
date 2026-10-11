@@ -1,7 +1,9 @@
 """Setup and diagnostic probes say "not checked" when the one-printer rule says no.
 
 ``kiln setup``, ``quickstart``, ``verify`` and ``health`` each read a printer
-to prove it is reachable.  When Kiln is driving another machine below the
+to prove it is reachable; ``register_printer`` reads a Bambu printer's spools
+to prove the connection; a design check reads the printer's own nozzle
+setting.  When Kiln is driving another machine below the
 fleet tier, that read is refused by the one-printer rule -- and each probe
 used to report it as a dead connection ("cannot reach", "check your
 credentials", "offline").  Nothing is wrong with that printer: Kiln was not
@@ -146,3 +148,92 @@ class TestSetup:
     def test_a_printer_that_is_down_still_asks_for_credentials(self):
         out = self._run(_Down())
         assert "Connection test failed" in out and "may need correct credentials" in out
+
+
+class TestRegisterPrinter:
+    """Registering a printer is free at every tier.  Registering a Bambu
+    printer while Kiln is driving another one: the printer is saved, its
+    spools are not checked, and nobody is sent after the access code."""
+
+    def _register(self, monkeypatch, tmp_path, ams):
+        from kiln import server
+
+        monkeypatch.setattr(server, "_check_auth", lambda *_a, **_k: None)
+        monkeypatch.setattr("kiln.cli.config.get_config_path", lambda: tmp_path / "config.yaml")
+        monkeypatch.setattr(server.BambuAdapter, "get_ams_status", ams, raising=False)
+        return server.register_printer(
+            name="x1c-two", printer_type="bambu", host="10.0.0.9",
+            api_key="12345678", serial="01P00A000000002", verify_connection=True,
+        )
+
+    def test_spools_are_not_checked_and_the_printer_is_still_registered(self, monkeypatch, tmp_path):
+        def refused(self):
+            raise PrinterEngagementError(VERDICT)
+
+        result = self._register(monkeypatch, tmp_path, refused)
+        assert result["success"] is True, result
+        assert "hand_back_printer" in result["ams_summary"]["not_checked"]
+        assert result["ams_summary"]["refusal"]["code"] == "TIER_SINGLE_PRINTER_LIMIT"
+        assert result.get("bambu_ready") is not False
+        assert any(w.startswith("Spools not checked: ") for w in result["warnings"])
+        assert not any("access code" in w for w in result["warnings"])
+
+    def test_a_printer_that_is_down_still_blames_the_connection(self, monkeypatch, tmp_path):
+        def down(self):
+            raise PrinterError("Connection refused")
+
+        result = self._register(monkeypatch, tmp_path, down)
+        assert result["success"] is True
+        assert result["bambu_ready"] is False
+        assert "error" in result["ams_summary"]
+        assert any("access code" in w for w in result["warnings"])
+
+
+class TestNozzleSetting:
+    """A design check for the second printer runs with the next size down the
+    ladder and SAYS the printer's own setting was not read, and why."""
+
+    @pytest.fixture(autouse=True)
+    def _clean(self, monkeypatch):
+        import kiln._pro_nozzle_bridge as bridge
+        import kiln.assumed_nozzle as assumed
+
+        monkeypatch.setattr(assumed, "_setting_memo", {})
+        monkeypatch.setattr(bridge, "_record_memo", {})
+        monkeypatch.setattr(bridge, "_service_down_until", 0.0)
+        monkeypatch.setattr(bridge, "consult_recorded_nozzle", lambda pid: {"diameter_mm": None, "answered": True})
+
+    def test_the_check_says_the_setting_was_not_read(self, monkeypatch):
+        from kiln.assumed_nozzle import assumed_nozzle
+
+        monkeypatch.setattr("kiln.printer_nozzle_reading.observe_printer_nozzle", lambda pid: None)
+        monkeypatch.setattr("kiln.printer_identity.resolve_machine", lambda pid: (object(), pid, "name"))
+        monkeypatch.setattr("kiln.printer_nozzle_reading.read_refused", lambda adapter: VERDICT | {"engaged_with": "voron"})
+        answer = assumed_nozzle("ender")
+        assert answer.source in ("stock", "default")
+        assert answer.setting_not_read == "voron"
+        assert "ender's own setting was not read: Kiln is working with voron" in answer.sentence()
+        assert "working with voron" in answer.to_dict()["note"]
+
+    def test_a_printer_kiln_may_read_says_nothing_of_the_rule(self, monkeypatch):
+        from kiln.assumed_nozzle import assumed_nozzle
+
+        monkeypatch.setattr("kiln.printer_nozzle_reading.observe_printer_nozzle", lambda pid: None)
+        monkeypatch.setattr("kiln.printer_identity.resolve_machine", lambda pid: (object(), pid, "name"))
+        monkeypatch.setattr("kiln.printer_nozzle_reading.read_refused", lambda adapter: None)
+        answer = assumed_nozzle("ender")
+        assert answer.setting_not_read is None
+        assert "was not read" not in answer.sentence()
+
+    def test_the_read_asks_the_rule_about_the_read_itself(self, monkeypatch):
+        """The rule is asked about ``read_nozzle_setting``, the command that
+        runs, so the refusal is worded for a read of a setting."""
+        from kiln import printer_nozzle_reading as reading
+
+        asked = []
+        monkeypatch.setattr(
+            "kiln.printers.engagement.check_command",
+            lambda adapter, action: asked.append(action) or {"code": "TIER_SINGLE_PRINTER_LIMIT"},
+        )
+        assert reading.read_refused(object()) is not None
+        assert asked == ["read_nozzle_setting"]

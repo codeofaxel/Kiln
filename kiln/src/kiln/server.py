@@ -273,6 +273,7 @@ from kiln.printers import (
 )
 from kiln.printers.base import PrinterEngagementError
 from kiln.printers.command_verdict import CommandVerdict
+from kiln.printers import engagement as _engagement
 from kiln.printers.engagement import refusal_in_flight as engagement_refusal_in_flight
 from kiln.printers.engagement import refusal_words as engagement_refusal_words
 from kiln.queue import JobNotFoundError, JobStatus, PrintQueue
@@ -8704,6 +8705,12 @@ def start_print(
 
         if block := start_refusal(adapter, resume=bool(resume_from_paused or is_resume_3mf), file_name=file_name):
             return block
+        # The one-printer rule, asked before this machine is read to prepare
+        # the start.  Below the fleet tier a start on a second machine is
+        # refused whole and in the rule's words -- not at the first spool
+        # the preparation reads, worded for a read of a spool.
+        if refused := _engagement.check_command(adapter, "start_print"):
+            raise PrinterEngagementError(refused)
         # A file planned beside a part on the plate opens with Kiln's own
         # prologue, not the vendor's start; the verdict below must not
         # describe moves that file will not make.
@@ -13021,15 +13028,30 @@ def register_printer(
                     "tray_tar": ams_info.get("tray_tar"),
                 }
             except Exception as exc:
-                result["bambu_ready"] = False
-                result["ams_summary"] = {
-                    "error": str(exc),
-                    "retryable": True,
-                }
-                warnings_out.append(
-                    "Bambu printer was registered, but the live AMS verification failed. "
-                    "Check LAN mode, host, serial, and access code, then call ams_status()."
-                )
+                refusal = engagement_refusal_in_flight(exc)
+                if refusal is not None:
+                    # Kiln is working with another printer and was not
+                    # allowed to look at this one's spools.  Nothing failed:
+                    # the printer is registered, and its spools were not
+                    # checked.  "Check LAN mode and the access code" would
+                    # send the person after a fault that is not there.
+                    result["ams_summary"] = {
+                        "not_checked": engagement_refusal_words(refusal),
+                        "refusal": refusal,
+                    }
+                    warnings_out.append(
+                        "Spools not checked: " + engagement_refusal_words(refusal)
+                    )
+                else:
+                    result["bambu_ready"] = False
+                    result["ams_summary"] = {
+                        "error": str(exc),
+                        "retryable": True,
+                    }
+                    warnings_out.append(
+                        "Bambu printer was registered, but the live AMS verification failed. "
+                        "Check LAN mode, host, serial, and access code, then call ams_status()."
+                    )
 
         if warnings_out:
             result["warnings"] = warnings_out

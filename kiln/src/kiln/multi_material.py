@@ -194,13 +194,21 @@ def unknown_status(source: str, why: str) -> MultiMaterialStatus:
 
 
 def multi_material_status(adapter: Any) -> MultiMaterialStatus:
-    """Ask *adapter* what it has.  Never raises; never answers "none" for a failed read.
+    """Ask *adapter* what it has.  Never raises on a failed read; never
+    answers "none" for one.
 
     An adapter without :meth:`get_multi_material_status` (or one whose
     default returns ``None``) is a printer Kiln knows no multi-material
     path for — ``kind="none"``.  A probe that raises is ``kind="unknown"``
     carrying the reason, so a door can say "could not read" instead of
     treating a network blip as an empty printer.
+
+    The one exception is the one-printer refusal
+    (:class:`~kiln.printers.base.PrinterEngagementError`): Kiln was not
+    allowed to look, which is a verdict and not a failed read, so it passes
+    through to the door, whose error envelope answers with the refusal's own
+    words.  Wrapped as "unknown" it reached people as "Kiln could not
+    determine whether this printer has a multi-material unit".
     """
     probe = getattr(adapter, "get_multi_material_status", None)
     status: MultiMaterialStatus | None = None
@@ -208,6 +216,7 @@ def multi_material_status(adapter: Any) -> MultiMaterialStatus:
         try:
             status = probe()
         except Exception as exc:  # a read must never take the door down
+            _reraise_refusal(exc)
             logger.debug("multi-material probe failed on %r: %s", adapter, exc)
             status = unknown_status(
                 f"{getattr(adapter, 'name', type(adapter).__name__)}:probe_failed",
@@ -224,6 +233,14 @@ def multi_material_status(adapter: Any) -> MultiMaterialStatus:
     return status
 
 
+def _reraise_refusal(exc: BaseException) -> None:
+    """Let the one-printer refusal through; everything else is a failed read."""
+    from kiln.printers.engagement import refusal_in_flight
+
+    if refusal_in_flight(exc) is not None:
+        raise exc
+
+
 def _legacy_ams_status(adapter: Any) -> MultiMaterialStatus:
     """The ``get_ams_status`` duck-type, as a status.  Never raises."""
     read = getattr(adapter, "get_ams_status", None)
@@ -233,6 +250,7 @@ def _legacy_ams_status(adapter: Any) -> MultiMaterialStatus:
     try:
         info = read()
     except Exception as exc:
+        _reraise_refusal(exc)
         logger.debug("AMS not readable on %r: %s", adapter, exc)
         return unknown_status(f"{label}:ams_unreadable", f"AMS not readable: {exc}")
     # Deliberately no printer_model: the only way to learn it here is

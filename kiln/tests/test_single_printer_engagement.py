@@ -105,9 +105,19 @@ class TestTheRuleItself:
 
     def test_registration_and_discovery_are_never_gated(self):
         """Owning printers is free; running them in parallel is the product."""
-        for never in ("register_printer", "list_printers", "discover_printers", "upload_file"):
+        for never in ("register_printer", "list_printers", "discover_printers"):
             assert never not in engagement.GATED_ACTIONS
-        assert not engagement.is_gated("upload_file")
+        assert not engagement.is_gated("get_printer_info")
+
+    def test_what_a_second_machine_holds_is_read_on_its_own_screen(self, two_printers):
+        """Files, spools and settings on the other machine are gated (2026-10-11):
+        its own screen shows them, and reading them through Kiln is the fleet
+        experience the fleet tier sells."""
+        a, b = two_printers
+        _engage(a, "a1")
+        for read in ("upload_file", "list_files", "get_ams_status", "get_filament_status",
+                     "read_nozzle_setting", "get_bed_mesh", "get_firmware_status"):
+            assert engagement.check_command(b, read) is not None, read
 
     def test_a_fleet_tier_lifts_the_rule(self, two_printers, monkeypatch):
         a, b = two_printers
@@ -277,7 +287,7 @@ class TestItRefusesToGuess:
     def test_an_ungated_action_passes_through(self, two_printers):
         a, b = two_printers
         _engage(a, "a1")
-        assert engagement.check_command(b, "list_files") is None
+        assert engagement.check_command(b, "get_printer_info") is None
 
 
 class TestWhatAPersonReads:

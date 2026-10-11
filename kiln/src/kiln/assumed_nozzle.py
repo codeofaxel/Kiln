@@ -37,7 +37,9 @@ DEFAULT_MM = 0.4
 #: check is asked many times in a row, and a printer that is switched off
 #: must not cost each of them the read's full deadline.
 _SETTING_MEMO_S = 60.0
-_setting_memo: dict[str, tuple[float, float | None]] = {}
+#: ``printer_id -> (asked at, size or None, the machine Kiln was working with
+#: when the rule refused the read, else None)``.
+_setting_memo: dict[str, tuple[float, float | None, str | None]] = {}
 
 _SOURCE_WORDS = {
     "stated": "the size it was given",
@@ -61,6 +63,9 @@ class AssumedNozzle:
     :param record_unreachable: The record could not be asked (offline,
         signed out), so a lower rung answered.
     :param inferred_printer: No printer was named and exactly one is known.
+    :param setting_not_read: The printer's own setting was not read because
+        Kiln is working with this other machine (the one-printer rule), so a
+        lower rung answered.
     """
 
     diameter_mm: float
@@ -69,6 +74,8 @@ class AssumedNozzle:
     record_unreachable: bool = False
     #: Nobody named the printer; it is the only one Kiln knows of.
     inferred_printer: bool = False
+    #: The machine Kiln was working with when it did not read this one's setting.
+    setting_not_read: str | None = None
 
     def sentence(self, verb: str = "Checked") -> str:
         where = _SOURCE_WORDS.get(self.source, self.source).format(printer=self.printer_id or "the printer")
@@ -79,6 +86,11 @@ class AssumedNozzle:
             said += " Name the printer, or pass the nozzle size, if yours differs."
         if self.record_unreachable:
             said += " Kiln could not reach its record of your nozzle."
+        if self.setting_not_read:
+            said += (
+                f" {self.printer_id or 'The printer'}'s own setting was not read: Kiln is "
+                f"working with {self.setting_not_read} right now, one printer at a time."
+            )
         return said
 
     def to_dict(self) -> dict[str, Any]:
@@ -98,26 +110,35 @@ def _valid(size: Any) -> float | None:
     return value if 0 < value <= 5 else None
 
 
-def _printer_setting_mm(printer_id: str) -> float | None:
+def _printer_setting_mm(printer_id: str) -> tuple[float | None, str | None]:
     """The printer's own setting when it can be read and is fresh, memoized
-    for :data:`_SETTING_MEMO_S` whether or not it could be."""
+    for :data:`_SETTING_MEMO_S` whether or not it could be -- and, when the
+    one-printer rule refused the read, the machine Kiln was working with."""
     now = time.monotonic()
     memo = _setting_memo.get(printer_id)
     if memo is not None and now - memo[0] < _SETTING_MEMO_S:
-        return memo[1]
+        return memo[1], memo[2]
     size: float | None = None
+    working_with: str | None = None
     try:
-        from kiln.printer_nozzle_reading import observe_printer_nozzle
+        from kiln.printer_nozzle_reading import observe_printer_nozzle, read_refused
 
         observed = observe_printer_nozzle(printer_id)
         if observed is not None:
             age, budget = observed.get("state_age_seconds"), observed.get("stale_after_seconds")
             stale = isinstance(age, (int, float)) and isinstance(budget, (int, float)) and age > budget
             size = None if stale else _valid(observed.get("nozzle_diameter_mm"))
+        else:
+            from kiln.printer_identity import resolve_machine
+
+            resolved = resolve_machine(printer_id)
+            refusal = read_refused(resolved[0]) if resolved is not None else None
+            if refusal is not None:
+                working_with = str(refusal.get("engaged_with") or "another printer")
     except Exception:  # noqa: BLE001 -- a read that fails is a rung that did not answer
         logger.debug("assumed nozzle: printer read failed", exc_info=True)
-    _setting_memo[printer_id] = (now, size)
-    return size
+    _setting_memo[printer_id] = (now, size, working_with)
+    return size, working_with
 
 
 def _key(name: str | None) -> str:
@@ -238,13 +259,13 @@ def assumed_nozzle(
     except Exception:  # noqa: BLE001 -- the record is one rung, never the check
         logger.debug("assumed nozzle: record lookup failed", exc_info=True)
 
-    setting = _printer_setting_mm(pid)
+    setting, not_read = _printer_setting_mm(pid)
     if setting is not None:
         return AssumedNozzle(setting, "printer_setting", pid, record_unreachable, inferred)
     stock = _stock_mm(pid)
     if stock is not None:
-        return AssumedNozzle(stock, "stock", pid, record_unreachable, inferred)
-    return AssumedNozzle(DEFAULT_MM, "default", pid, record_unreachable, inferred)
+        return AssumedNozzle(stock, "stock", pid, record_unreachable, inferred, not_read)
+    return AssumedNozzle(DEFAULT_MM, "default", pid, record_unreachable, inferred, not_read)
 
 
 def nozzle_for_profile(profile_id: str, printer_name: str | None = None) -> AssumedNozzle:

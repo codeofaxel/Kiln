@@ -83,42 +83,25 @@ _PEER_VERIFY_TTL_S = 30.0
 # and ``tests/test_one_printer_rule_covers_every_command.py`` fails on any
 # adapter method that is in neither list.
 #
-# What is gated: a command that ACTS on a machine, or WATCHES what it is doing
-# right now.  What is not: reading what the machine IS (identity, setup,
-# firmware, what is loaded, the files kept on it), Kiln's own plumbing, and a
-# method that only calls gated ones.
+# What is gated: everything Kiln asks a machine for -- what it is doing, what
+# it holds, what it is set to, the files kept on it -- and everything Kiln
+# tells it to do.  What is not: the identity read to register it (owning
+# printers is free at every tier, and always has been), facts from the
+# catalogue that touch no machine, Kiln's own connection and local settings,
+# and a method that only calls gated ones.  The second machine's own screen
+# shows its spools, its files and its settings; reading them through Kiln is
+# the fleet experience, which is what the fleet tier is.
 UNGATED_METHODS: dict[str, str] = {
-    # What the machine is -- read to register it, set it up, or plan for it.
-    # Owning printers is free at every tier, and always has been.
+    # Identity: read to register the printer.
     "get_printer_info": "identity, read to register the printer",
     "get_identity_channels": "identity, read to register the printer",
+    # Facts about the model, from the catalogue.  No machine is asked.
     "declared_printer_model": "the model the person told Kiln, not a reading",
     "motion_facts": "catalogue facts about the model",
     "camera_catalogue_model": "catalogue facts about the model",
-    "camera_probes": "addresses to try in a camera check the person asked for",
     "stream_capability": "what the camera can carry, from the model",
     "homed_axes_field": "a field name, not a reading",
     "purge_station": "where the model purges, from the catalogue",
-    "reported_firmware_version": "which firmware it runs",
-    "get_firmware_status": "which firmware it runs and whether an update exists",
-    "read_nozzle_setting": "the nozzle fitted, read to plan a print",
-    "read_nozzle_clumping_detection": "a setting on the machine, read to plan a print",
-    "get_printer_config": "the machine's configuration, read to plan a print",
-    "get_bed_mesh": "calibration the machine keeps",
-    "get_filament_status": "what is loaded, read to plan a print",
-    "get_ams_status": "what is loaded, read to plan a print",
-    "get_cfs_status": "what is loaded, read to plan a print",
-    "get_multi_material_status": "what is loaded, read to plan a print",
-    "active_filament_color": "what is loaded, read to plan a print",
-    "read_active_slot": "what is loaded, read to plan a print",
-    "homed_axes_now": "a safety read the start and move checks take on the machine they are "
-                      "about to command; the command itself is gated",
-    # The files kept on it.  Uploading prepares nothing that runs: whether a
-    # print STARTS is the start gate's question (print_gate).
-    "list_files": "the files kept on the printer",
-    "read_print_file": "the files kept on the printer",
-    "upload_file": "the files kept on the printer; starting one is gated at the start",
-    "delete_file": "the files kept on the printer",
     # Kiln's own plumbing: connections, credentials, local settings and files.
     "connect": "Kiln's own connection",
     "disconnect": "Kiln's own connection",
@@ -127,9 +110,8 @@ UNGATED_METHODS: dict[str, str] = {
     "set_external_camera": "a local setting",
     "enable_push_monitoring": "Kiln's own connection",
     "disable_push_monitoring": "Kiln's own connection",
-    "wrap_gcode_as_3mf": "a file on this computer",
-    # Gated elsewhere, or only through gated methods.
-    "start_print": "gated at the start, by print_gate (one print at a time)",
+    "wrap_gcode_as_3mf": "a file on this computer; the colour it asks the machine for is gated",
+    # Only through gated methods.
     "async_start_print": "calls start_print",
     "get_status": "calls get_state and get_job",
     "async_get_state": "calls get_state",
@@ -150,9 +132,31 @@ GATED_ACTIONS = frozenset(
         "get_stream_url",
         "frame_source",
         "camera_frame_source",
+        "camera_probes",
         "get_tool_position",
         "get_speed_profile",
-        # Acts on the machine.
+        # Reads what the machine holds and how it is set.
+        "list_files",
+        "read_print_file",
+        "get_filament_status",
+        "get_ams_status",
+        "get_cfs_status",
+        "get_multi_material_status",
+        "active_filament_color",
+        "read_active_slot",
+        "read_nozzle_setting",
+        "read_nozzle_clumping_detection",
+        "get_printer_config",
+        "get_bed_mesh",
+        "homed_axes_now",
+        "reported_firmware_version",
+        "get_firmware_status",
+        # Acts on the machine.  A start is refused here, whole, before the
+        # machine is read to prepare it; print_gate's concurrency check (one
+        # PRINT at a time, by what the peers are doing) is the other half.
+        "start_print",
+        "upload_file",
+        "delete_file",
         "pause_print",
         "resume_print",
         "cancel_print",
@@ -786,9 +790,30 @@ def check_command(adapter: Any, action: str) -> dict[str, Any] | None:
 # of the strings below mention a tier by name.
 # ---------------------------------------------------------------------------
 
-# The gated commands that only LOOK at the machine.  Every other gated
-# command acts on it, and its refusal says the other machine's own controls
-# still work.
+# The gated commands that only LOOK at the machine: what it is doing now
+# (``_WATCH_ACTIONS``) and what it holds or is set to (``_READ_ACTIONS``).
+# Every other gated command acts on it, and its refusal says the other
+# machine's own controls still work.
+_READ_ACTIONS = frozenset(
+    {
+        "list_files",
+        "read_print_file",
+        "get_filament_status",
+        "get_ams_status",
+        "get_cfs_status",
+        "get_multi_material_status",
+        "active_filament_color",
+        "read_active_slot",
+        "read_nozzle_setting",
+        "read_nozzle_clumping_detection",
+        "get_printer_config",
+        "get_bed_mesh",
+        "homed_axes_now",
+        "reported_firmware_version",
+        "get_firmware_status",
+    }
+)
+
 _WATCH_ACTIONS = frozenset(
     {
         "get_state",
@@ -911,6 +936,11 @@ def _refusal(
         )
         free_included = (
             f"{first} Kiln keeps full emergency stop on {other}, the machine it is running."
+        )
+    elif action in _READ_ACTIONS:
+        free_included = (
+            f"{_starts_sentence(this_one)}'s own screen still shows its spools, files and "
+            f"settings. To point Kiln at it instead, hand {other} back with hand_back_printer."
         )
     elif action not in _WATCH_ACTIONS:
         free_included = (

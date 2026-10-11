@@ -15,8 +15,14 @@ Pinned here, against the real adapter classes rather than a list:
   -- called on a bare instance whose own body would fail if it ever ran;
 * every ungated method really is reachable without the rule asking;
 * the refusal for a command that acts on a machine says that machine's own
-  controls still work, and the one for a camera or status read says it still
-  shows its own status.
+  controls still work; the one for a camera or status read says it still
+  shows its own status; the one for a read of what it holds -- files, spools,
+  settings -- says its own screen still shows them.
+
+Reads of a second machine are gated on purpose (2026-10-11): what it holds
+and how it is set show on its own screen, and reading them through Kiln is
+the fleet experience the fleet tier sells.  Only identity (to register it),
+catalogue facts and Kiln's own plumbing stay outside the rule.
 """
 
 from __future__ import annotations
@@ -112,7 +118,10 @@ def test_a_command_nobody_named_is_gated_by_default():
     """A command added tomorrow answers to the rule without anyone listing it."""
     assert engagement.is_gated("set_chamber_vent_tomorrow")
     assert not engagement.is_gated("_private_helper")
-    assert not engagement.is_gated("upload_file")
+    assert not engagement.is_gated("get_printer_info")  # registering a printer is free
+    for read in ("upload_file", "list_files", "get_ams_status", "get_filament_status",
+                 "read_nozzle_setting", "get_bed_mesh", "get_firmware_status", "get_printer_config"):
+        assert engagement.is_gated(read), read
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +196,8 @@ def test_the_sweep_has_cases():
     assert len(GATED_CASES) > 100
     swept = {param.values[1] for param in GATED_CASES}
     for name in ("set_fan", "set_light", "skip_objects", "set_speed_profile", "get_snapshot",
-                 "clear_error", "run_calibration", "update_firmware"):
+                 "clear_error", "run_calibration", "update_firmware",
+                 "upload_file", "list_files", "get_ams_status", "read_nozzle_setting"):
         assert name in swept, name
 
 
@@ -218,8 +228,12 @@ def test_an_ungated_command_is_never_asked_about(name, another_machine_is_driven
         ("set_fan", "own controls work as always"),
         ("set_light", "own controls work as always"),
         ("skip_objects", "own controls work as always"),
+        ("upload_file", "own controls work as always"),
         ("get_snapshot", "still shows its own status"),
         ("get_state", "still shows its own status"),
+        ("list_files", "own screen still shows its spools, files and settings"),
+        ("get_ams_status", "own screen still shows its spools, files and settings"),
+        ("read_nozzle_setting", "own screen still shows its spools, files and settings"),
     ],
 )
 def test_the_refusal_says_what_still_works_for_that_kind_of_command(action, says, another_machine_is_driven):
