@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-10T19:41:23.960246+00:00",
+  "generated": "2026-10-11T07:29:51.682547+00:00",
   "tool_count": 425,
   "categories": {
     "product_generators": {
@@ -17358,6 +17358,11 @@
           "write_pauses": {
             "default": false,
             "title": "Write Pauses",
+            "type": "boolean"
+          },
+          "confirm_unmeasured": {
+            "default": false,
+            "title": "Confirm Unmeasured",
             "type": "boolean"
           }
         },
