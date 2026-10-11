@@ -336,8 +336,8 @@ Designs aren't text, but they need version control. Kiln treats meshes, decorati
 Three things make this different from `git`:
 
 1. **Outcome-correlated branches.** Every branch is tagged with empirical print results — success rate, warp, adhesion, cost — so cross-branch A/B is automatic, not anecdotal.
-2. **3-way semantic mesh merge.** Z-level / pocket / bounding-box conflict zones rendered as visual diffs, not text patches. Manufacturing tolerance, not character offsets.
-3. **Signed releases with mesh re-fingerprinting.** Ed25519 signatures over a release manifest pinned to an exact mesh; verification re-computes the fingerprint to detect tamper after release.
+2. **3-way semantic mesh merge.** Conflicts are shown as visual diffs of the geometry, not text patches. Manufacturing tolerance, not character offsets.
+3. **Signed releases.** A release is cryptographically signed and pinned to its exact mesh, so anyone can verify the part they hold is the part that was released.
 
 Here's what `visualize_branch_tree("my-coaster")` actually emits — the same renderer the workshop, CLI, and your agent see (yellow = signed release, light blue = experiment, light red = branch with failed outcomes):
 
@@ -425,18 +425,18 @@ The Kiln MCP server (`kiln serve`) exposes **<!-- KILN_MCP_TOOL_COUNT:OLD --> 93
   - Stop a running print immediately
 - **purge_filament**
   - Heat the nozzle and push a short length through — the clog test, with `load_filament` and `unload_filament` beside it for a spool change
-  - Reports what the printer could actually tell: on a Bambu it reads the AMS and translates the printer's own fault code, and where a machine reports no flow signal it says so rather than claiming success
-  - Always says where the purge went: parked over the machine's own purge chute first where the model's own start-sequence position is served one plan at a time through Kiln's hosted service for a printer paired to your Kiln sign-in, free, and kept on your machine so it keeps working offline, or in place with the reason — never a guessed coordinate
+  - Reports what the printer could actually tell: where a machine reports no flow signal it says so rather than claiming success
+  - Always says where the purge went: over the machine's own purge chute where Kiln knows it for your model (served through Kiln's hosted service for a printer paired to your Kiln sign-in, free, and kept on your machine so it keeps working offline), or in place with the reason — never a guessed coordinate
 - **wipe_nozzle**
-  - Clean the nozzle tip on the printer's own wipe pad, running the pass its start sequence runs (served one plan at a time through Kiln's hosted service for a printer paired to your Kiln sign-in, free, and kept on your machine so it keeps working offline); refuses, and says what to use instead, on any model without a served pad position
-  - Run it in steps where the pass is new to a machine: `plan_only` describes every motion and sends nothing; `step=N` sends one motion, says what it left armed, and holds the heater-off finish until the last step. A wipe whose plan presses the plate — its Z datum is taken on the plate, or the head crosses the plate to reach the pad — asks for `plate_clear` on every call: a person's word, never inferred. A pass derived from a model's start file that no one has yet run on a real machine says so and runs in steps only
+  - Clean the nozzle tip on the printer's own wipe pad (served through Kiln's hosted service for a printer paired to your Kiln sign-in, free, and kept on your machine so it keeps working offline); refuses, and says what to use instead, on any model whose pad Kiln does not know
+  - Run it in steps where the pass is new to a machine: `plan_only` describes every motion and sends nothing; `step=N` sends one motion, says what it left armed, and holds the cool-down until the last step. A wipe that presses or crosses the plate asks for `plate_clear` on every call: a person's word, never inferred. Where a model's wipe has not yet been run on a real machine, Kiln says so and runs it in steps only
 - **home_axes**
-  - The Home button, from Kiln: the model's own start-sequence homing where it is served one plan at a time through Kiln's hosted service for a printer paired to your Kiln sign-in, free, and kept on your machine so it keeps working offline, the firmware's own routine elsewhere, a refusal that names the screen's jog controls where neither is safe
+  - The Home button, from Kiln: your model's own homing routine where Kiln has it (served through Kiln's hosted service for a printer paired to your Kiln sign-in, free, and kept on your machine so it keeps working offline), the firmware's own routine elsewhere, a refusal that names the screen's jog controls where neither is safe
   - Run it in steps the first time: `plan_only` describes every motion before anything moves; `step=N` sends one motion and says what it left armed
 - **park_head**
-  - Move the head somewhere safe, away from the plate, and leave it there — raise, home X, off-plate spot; never a Z touch, never heat
+  - Move the head to the model's own spot off the plate and leave it there; never a Z touch, never heat
 - **plate_status**
-  - What Kiln knows is on the build plate: the print that left a part there, how tall it is and how long ago, or that it is clear — a person's word (`kiln plate clear`, or `plate_clear` on home and park) or a look through the printer's camera (`look_at_plate`); nothing marks it clear on its own
+  - What Kiln knows is on the build plate: the print that left a part there and how long ago, or that it is clear — a person's word (`kiln plate clear`, or `plate_clear` on home and park) or a look through the printer's camera (`look_at_plate`); nothing marks it clear on its own
   - Home, park, slicing and starting a print refuse to cross a recorded part, and the refusal shows the plate through the camera where the printer has one, so an old record is checked rather than trusted
 - **diagnose_print_failure_live**
   - Diagnose a failing print from live printer state plus the model's own geometry
