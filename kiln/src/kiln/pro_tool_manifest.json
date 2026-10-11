@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-11T07:29:51.682547+00:00",
-  "tool_count": 425,
+  "generated": "2026-10-11T08:16:11.511193+00:00",
+  "tool_count": 427,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -11185,7 +11185,7 @@
     },
     {
       "name": "check_heat_set_insert_design",
-      "description": "Check a heat-set insert pocket that is already drawn.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Sizing for the hardware you bought \u00b7 Business: Sizing for the hardware you bought \u00b7 Enterprise: Sizing for the hardware you bought.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Check a heat-set insert pocket that is already drawn.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Sizing and fit for the hardware you bought \u00b7 Business: + Per-machine fit, validation tests and QC plans across your fleet \u00b7 Enterprise: + Child-safety & supplier vetting for magnets.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "engineering_intelligence",
@@ -11341,9 +11341,9 @@
       "band": {
         "domain": "heat_set_inserts",
         "free": "Warnings \u2014 always free",
-        "pro": "Sizing for the hardware you bought",
-        "business": "Sizing for the hardware you bought",
-        "enterprise": "Sizing for the hardware you bought"
+        "pro": "Sizing and fit for the hardware you bought",
+        "business": "+ Per-machine fit, validation tests and QC plans across your fleet",
+        "enterprise": "+ Child-safety & supplier vetting for magnets"
       },
       "offline": {
         "schema_version": 1,
@@ -11352,7 +11352,7 @@
     },
     {
       "name": "check_magnet_design",
-      "description": "Check a proposed printed magnet design for hidden failure modes.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Design guidance \u00b7 Business: + Validation tests & QC plans \u00b7 Enterprise: + Child-safety & supplier vetting.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Check a proposed printed magnet design for hidden failure modes.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Sizing and fit for the hardware you bought \u00b7 Business: + Per-machine fit, validation tests and QC plans across your fleet \u00b7 Enterprise: + Child-safety & supplier vetting for magnets.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "engineering_intelligence",
@@ -11439,9 +11439,9 @@
       "band": {
         "domain": "magnets",
         "free": "Warnings \u2014 always free",
-        "pro": "Design guidance",
-        "business": "+ Validation tests & QC plans",
-        "enterprise": "+ Child-safety & supplier vetting"
+        "pro": "Sizing and fit for the hardware you bought",
+        "business": "+ Per-machine fit, validation tests and QC plans across your fleet",
+        "enterprise": "+ Child-safety & supplier vetting for magnets"
       },
       "offline": {
         "schema_version": 1,
@@ -11579,7 +11579,7 @@
     },
     {
       "name": "generate_magnet_qc_plan",
-      "description": "Generate a Business-tier QC plan for a magnetized printed product.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Design guidance \u00b7 Business: + Validation tests & QC plans \u00b7 Enterprise: + Child-safety & supplier vetting.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a Business-tier QC plan for a magnetized printed product.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Sizing and fit for the hardware you bought \u00b7 Business: + Per-machine fit, validation tests and QC plans across your fleet \u00b7 Enterprise: + Child-safety & supplier vetting for magnets.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "engineering_intelligence",
@@ -11646,9 +11646,9 @@
       "band": {
         "domain": "magnets",
         "free": "Warnings \u2014 always free",
-        "pro": "Design guidance",
-        "business": "+ Validation tests & QC plans",
-        "enterprise": "+ Child-safety & supplier vetting"
+        "pro": "Sizing and fit for the hardware you bought",
+        "business": "+ Per-machine fit, validation tests and QC plans across your fleet",
+        "enterprise": "+ Child-safety & supplier vetting for magnets"
       },
       "offline": {
         "schema_version": 1,
@@ -11782,7 +11782,7 @@
     },
     {
       "name": "lookup_fastener",
-      "description": "Get the full spec for a screw, bolt, or threaded fastener.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Sizing for the hardware you bought \u00b7 Business: Sizing for the hardware you bought \u00b7 Enterprise: Sizing for the hardware you bought.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Get the full spec for a screw, bolt, or threaded fastener.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Sizing and fit for the hardware you bought \u00b7 Business: + Per-machine fit, validation tests and QC plans across your fleet \u00b7 Enterprise: + Child-safety & supplier vetting for magnets.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "engineering_intelligence",
@@ -11802,9 +11802,9 @@
       "band": {
         "domain": "heat_set_inserts",
         "free": "Warnings \u2014 always free",
-        "pro": "Sizing for the hardware you bought",
-        "business": "Sizing for the hardware you bought",
-        "enterprise": "Sizing for the hardware you bought"
+        "pro": "Sizing and fit for the hardware you bought",
+        "business": "+ Per-machine fit, validation tests and QC plans across your fleet",
+        "enterprise": "+ Child-safety & supplier vetting for magnets"
       },
       "offline": {
         "schema_version": 1,
@@ -12676,7 +12676,7 @@
     },
     {
       "name": "recommend_heat_set_insert",
-      "description": "Size a heat-set threaded insert for a 3D-printed part.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Sizing for the hardware you bought \u00b7 Business: Sizing for the hardware you bought \u00b7 Enterprise: Sizing for the hardware you bought.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Size a heat-set threaded insert for a 3D-printed part.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Sizing and fit for the hardware you bought \u00b7 Business: + Per-machine fit, validation tests and QC plans across your fleet \u00b7 Enterprise: + Child-safety & supplier vetting for magnets.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "engineering_intelligence",
@@ -12801,9 +12801,9 @@
       "band": {
         "domain": "heat_set_inserts",
         "free": "Warnings \u2014 always free",
-        "pro": "Sizing for the hardware you bought",
-        "business": "Sizing for the hardware you bought",
-        "enterprise": "Sizing for the hardware you bought"
+        "pro": "Sizing and fit for the hardware you bought",
+        "business": "+ Per-machine fit, validation tests and QC plans across your fleet",
+        "enterprise": "+ Child-safety & supplier vetting for magnets"
       },
       "offline": {
         "schema_version": 1,
@@ -12812,7 +12812,7 @@
     },
     {
       "name": "recommend_hole",
-      "description": "Tell me what size hole to drill for something to fit through.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Sizing for the hardware you bought \u00b7 Business: Sizing for the hardware you bought \u00b7 Enterprise: Sizing for the hardware you bought.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Tell me what size hole to drill for something to fit through.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Sizing and fit for the hardware you bought \u00b7 Business: + Per-machine fit, validation tests and QC plans across your fleet \u00b7 Enterprise: + Child-safety & supplier vetting for magnets.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "engineering_intelligence",
@@ -12891,9 +12891,9 @@
       "band": {
         "domain": "heat_set_inserts",
         "free": "Warnings \u2014 always free",
-        "pro": "Sizing for the hardware you bought",
-        "business": "Sizing for the hardware you bought",
-        "enterprise": "Sizing for the hardware you bought"
+        "pro": "Sizing and fit for the hardware you bought",
+        "business": "+ Per-machine fit, validation tests and QC plans across your fleet",
+        "enterprise": "+ Child-safety & supplier vetting for magnets"
       },
       "offline": {
         "schema_version": 1,
@@ -12963,7 +12963,7 @@
     },
     {
       "name": "recommend_magnet_for_product",
-      "description": "Recommend a magnet strategy for a printed product, with tier-gated depth.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Design guidance \u00b7 Business: + Validation tests & QC plans \u00b7 Enterprise: + Child-safety & supplier vetting.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Recommend a magnet strategy for a printed product, with tier-gated depth.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Sizing and fit for the hardware you bought \u00b7 Business: + Per-machine fit, validation tests and QC plans across your fleet \u00b7 Enterprise: + Child-safety & supplier vetting for magnets.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "engineering_intelligence",
@@ -13060,9 +13060,227 @@
       "band": {
         "domain": "magnets",
         "free": "Warnings \u2014 always free",
-        "pro": "Design guidance",
-        "business": "+ Validation tests & QC plans",
-        "enterprise": "+ Child-safety & supplier vetting"
+        "pro": "Sizing and fit for the hardware you bought",
+        "business": "+ Per-machine fit, validation tests and QC plans across your fleet",
+        "enterprise": "+ Child-safety & supplier vetting for magnets"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
+      }
+    },
+    {
+      "name": "recommend_nut_pocket",
+      "description": "Size a pocket for a nut in a 3D-printed part, and grade one already drawn.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Sizing and fit for the hardware you bought \u00b7 Business: + Per-machine fit, validation tests and QC plans across your fleet \u00b7 Enterprise: + Child-safety & supplier vetting for magnets.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "thread": {
+            "default": "",
+            "title": "Thread",
+            "type": "string"
+          },
+          "nut": {
+            "default": "hex",
+            "title": "Nut",
+            "type": "string"
+          },
+          "how": {
+            "default": "",
+            "title": "How",
+            "type": "string"
+          },
+          "entry": {
+            "default": "",
+            "title": "Entry",
+            "type": "string"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          },
+          "measured_flats_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Measured Flats Mm"
+          },
+          "measured_height_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Measured Height Mm"
+          },
+          "measured_hole_shrink_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Measured Hole Shrink Mm"
+          },
+          "cad_flats_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cad Flats Mm"
+          },
+          "cad_depth_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cad Depth Mm"
+          },
+          "cad_slot_thickness_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cad Slot Thickness Mm"
+          },
+          "wall_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Wall Mm"
+          },
+          "floor_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Floor Mm"
+          },
+          "roof_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Roof Mm"
+          },
+          "load_n": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Load N"
+          },
+          "nut_count": {
+            "default": 1,
+            "title": "Nut Count",
+            "type": "integer"
+          },
+          "torque_nm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Torque Nm"
+          },
+          "infill_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Infill Pct"
+          },
+          "application_class": {
+            "default": "consumer_product",
+            "title": "Application Class",
+            "type": "string"
+          },
+          "printers": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printers"
+          }
+        },
+        "title": "recommend_nut_pocketArguments",
+        "type": "object"
+      },
+      "band": {
+        "domain": "nut_pockets",
+        "free": "Warnings \u2014 always free",
+        "pro": "Sizing and fit for the hardware you bought",
+        "business": "+ Per-machine fit, validation tests and QC plans across your fleet",
+        "enterprise": "+ Child-safety & supplier vetting for magnets"
       },
       "offline": {
         "schema_version": 1,
@@ -13319,8 +13537,138 @@
       }
     },
     {
+      "name": "record_hardware_outcome",
+      "description": "Record how a piece of hardware in a printed part came out (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "access": "pro",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "hardware": {
+            "title": "Hardware",
+            "type": "string"
+          },
+          "result": {
+            "title": "Result",
+            "type": "string"
+          },
+          "how": {
+            "default": "after_print",
+            "title": "How",
+            "type": "string"
+          },
+          "material": {
+            "default": "",
+            "title": "Material",
+            "type": "string"
+          },
+          "entry": {
+            "default": "",
+            "title": "Entry",
+            "type": "string"
+          },
+          "fit": {
+            "default": "",
+            "title": "Fit",
+            "type": "string"
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
+          },
+          "version_id": {
+            "default": "",
+            "title": "Version Id",
+            "type": "string"
+          },
+          "stop": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Stop"
+          },
+          "seat_id": {
+            "default": "",
+            "title": "Seat Id",
+            "type": "string"
+          },
+          "layer": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Layer"
+          },
+          "cover_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cover Mm"
+          },
+          "grade": {
+            "default": "",
+            "title": "Grade",
+            "type": "string"
+          },
+          "predicted": {
+            "default": "",
+            "title": "Predicted",
+            "type": "string"
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string"
+          },
+          "printer_id": {
+            "default": "",
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "printer_model": {
+            "default": "",
+            "title": "Printer Model",
+            "type": "string"
+          },
+          "environment": {
+            "default": "",
+            "title": "Environment",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hardware",
+          "result"
+        ],
+        "title": "record_hardware_outcomeArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
+      }
+    },
+    {
       "name": "record_magnet_outcome",
-      "description": "Record whether a magnet actually held (Pro) \u2014 closes the recommender's feedback loop.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Record whether a magnet actually held (Pro). Prefer record_hardware_outcome.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "engineering_intelligence",
@@ -13379,7 +13727,7 @@
     },
     {
       "name": "review_magnet_supplier_packet",
-      "description": "Review a magnet supplier packet for Enterprise-grade evidence gaps.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Design guidance \u00b7 Business: + Validation tests & QC plans \u00b7 Enterprise: + Child-safety & supplier vetting.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Review a magnet supplier packet for Enterprise-grade evidence gaps.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Sizing and fit for the hardware you bought \u00b7 Business: + Per-machine fit, validation tests and QC plans across your fleet \u00b7 Enterprise: + Child-safety & supplier vetting for magnets.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "engineering_intelligence",
@@ -13417,9 +13765,9 @@
       "band": {
         "domain": "magnets",
         "free": "Warnings \u2014 always free",
-        "pro": "Design guidance",
-        "business": "+ Validation tests & QC plans",
-        "enterprise": "+ Child-safety & supplier vetting"
+        "pro": "Sizing and fit for the hardware you bought",
+        "business": "+ Per-machine fit, validation tests and QC plans across your fleet",
+        "enterprise": "+ Child-safety & supplier vetting for magnets"
       },
       "offline": {
         "schema_version": 1,
