@@ -793,6 +793,23 @@ def _isolate_printer_registry():
         except Exception:  # noqa: BLE001 - teardown must never mask a failure
             pass
 
+    # ``kiln.server._get_registry`` adopts whatever
+    # ``kiln.registry.get_printer_registry()`` returns on its FIRST call and
+    # never asks again.  A test that monkeypatches that accessor with a
+    # minimal fake (a ``_Registry`` carrying only ``list_machines``) and
+    # happens to be the first caller leaves the fake in ``server._registry``
+    # after monkeypatch has restored the accessor, and every later test in
+    # the process gets "'_Registry' object has no attribute 'list_names'".
+    # Forget any registry that is not the canonical singleton; the next call
+    # re-adopts the real one.
+    if srv is not None:
+        current = getattr(srv, "_registry", None)
+        if current is not None and current is not registry:
+            try:
+                srv._registry = None
+            except Exception:  # noqa: BLE001 - teardown must never mask a failure
+                pass
+
 
 @pytest.fixture(autouse=True)
 def _isolate_plate_record():
