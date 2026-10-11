@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-11T08:16:11.511193+00:00",
-  "tool_count": 427,
+  "generated": "2026-10-11T08:41:30.284828+00:00",
+  "tool_count": 425,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -11184,173 +11184,6 @@
       }
     },
     {
-      "name": "check_heat_set_insert_design",
-      "description": "Check a heat-set insert pocket that is already drawn.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Sizing and fit for the hardware you bought \u00b7 Business: + Per-machine fit, validation tests and QC plans across your fleet \u00b7 Enterprise: + Child-safety & supplier vetting for magnets.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "free",
-      "access": "free_banded",
-      "category": "engineering_intelligence",
-      "parameters": {
-        "properties": {
-          "cad_hole_mm": {
-            "title": "Cad Hole Mm",
-            "type": "number"
-          },
-          "thread": {
-            "default": "",
-            "title": "Thread",
-            "type": "string"
-          },
-          "insert": {
-            "default": "",
-            "title": "Insert",
-            "type": "string"
-          },
-          "measured_od_mm": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Measured Od Mm"
-          },
-          "pocket_depth_mm": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Pocket Depth Mm"
-          },
-          "wall_mm": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Wall Mm"
-          },
-          "floor_mm": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Floor Mm"
-          },
-          "through_hole": {
-            "default": false,
-            "title": "Through Hole",
-            "type": "boolean"
-          },
-          "orientation": {
-            "default": "vertical",
-            "title": "Orientation",
-            "type": "string"
-          },
-          "material": {
-            "default": "PLA",
-            "title": "Material",
-            "type": "string"
-          },
-          "measured_hole_shrink_mm": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Measured Hole Shrink Mm"
-          },
-          "infill_pct": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Infill Pct"
-          },
-          "load_n": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Load N"
-          },
-          "insert_count": {
-            "default": 1,
-            "title": "Insert Count",
-            "type": "integer"
-          },
-          "environment": {
-            "default": "",
-            "title": "Environment",
-            "type": "string"
-          },
-          "application_class": {
-            "default": "consumer_product",
-            "title": "Application Class",
-            "type": "string"
-          },
-          "screw_through_mm": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Screw Through Mm"
-          }
-        },
-        "required": [
-          "cad_hole_mm"
-        ],
-        "title": "check_heat_set_insert_designArguments",
-        "type": "object"
-      },
-      "band": {
-        "domain": "heat_set_inserts",
-        "free": "Warnings \u2014 always free",
-        "pro": "Sizing and fit for the hardware you bought",
-        "business": "+ Per-machine fit, validation tests and QC plans across your fleet",
-        "enterprise": "+ Child-safety & supplier vetting for magnets"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "verdict"
-      }
-    },
-    {
       "name": "check_magnet_design",
       "description": "Check a proposed printed magnet design for hidden failure modes.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Sizing and fit for the hardware you bought \u00b7 Business: + Per-machine fit, validation tests and QC plans across your fleet \u00b7 Enterprise: + Child-safety & supplier vetting for magnets.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
@@ -12675,41 +12508,33 @@
       }
     },
     {
-      "name": "recommend_heat_set_insert",
-      "description": "Size a heat-set threaded insert for a 3D-printed part.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Sizing and fit for the hardware you bought \u00b7 Business: + Per-machine fit, validation tests and QC plans across your fleet \u00b7 Enterprise: + Child-safety & supplier vetting for magnets.\nUpgrade: https://kiln3d.com/pricing",
+      "name": "recommend_hardware_pocket",
+      "description": "Size the pocket for a piece of hardware in a 3D-printed part, and grade one drawn.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Sizing and fit for the hardware you bought \u00b7 Business: + Per-machine fit, validation tests and QC plans across your fleet \u00b7 Enterprise: + Child-safety & supplier vetting for magnets.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "engineering_intelligence",
       "parameters": {
         "properties": {
-          "thread": {
-            "default": "",
-            "title": "Thread",
+          "hardware": {
+            "title": "Hardware",
             "type": "string"
-          },
-          "insert": {
-            "default": "",
-            "title": "Insert",
-            "type": "string"
-          },
-          "measured_od_mm": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Measured Od Mm"
           },
           "material": {
             "default": "PLA",
             "title": "Material",
             "type": "string"
           },
-          "print_temp_c": {
+          "how": {
+            "default": "",
+            "title": "How",
+            "type": "string"
+          },
+          "entry": {
+            "default": "",
+            "title": "Entry",
+            "type": "string"
+          },
+          "measured_size_mm": {
             "anyOf": [
               {
                 "type": "number"
@@ -12719,7 +12544,19 @@
               }
             ],
             "default": null,
-            "title": "Print Temp C"
+            "title": "Measured Size Mm"
+          },
+          "measured_height_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Measured Height Mm"
           },
           "measured_hole_shrink_mm": {
             "anyOf": [
@@ -12733,15 +12570,77 @@
             "default": null,
             "title": "Measured Hole Shrink Mm"
           },
-          "orientation": {
-            "default": "vertical",
-            "title": "Orientation",
-            "type": "string"
+          "cad_size_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cad Size Mm"
           },
-          "through_hole": {
-            "default": false,
-            "title": "Through Hole",
-            "type": "boolean"
+          "cad_depth_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cad Depth Mm"
+          },
+          "cad_slot_thickness_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cad Slot Thickness Mm"
+          },
+          "wall_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Wall Mm"
+          },
+          "floor_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Floor Mm"
+          },
+          "roof_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Roof Mm"
           },
           "load_n": {
             "anyOf": [
@@ -12755,10 +12654,22 @@
             "default": null,
             "title": "Load N"
           },
-          "insert_count": {
+          "count": {
             "default": 1,
-            "title": "Insert Count",
+            "title": "Count",
             "type": "integer"
+          },
+          "torque_nm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Torque Nm"
           },
           "infill_pct": {
             "anyOf": [
@@ -12782,6 +12693,11 @@
             "title": "Application Class",
             "type": "string"
           },
+          "through_hole": {
+            "default": false,
+            "title": "Through Hole",
+            "type": "boolean"
+          },
           "screw_through_mm": {
             "anyOf": [
               {
@@ -12793,9 +12709,27 @@
             ],
             "default": null,
             "title": "Screw Through Mm"
+          },
+          "printers": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printers"
           }
         },
-        "title": "recommend_heat_set_insertArguments",
+        "required": [
+          "hardware"
+        ],
+        "title": "recommend_hardware_pocketArguments",
         "type": "object"
       },
       "band": {
@@ -13059,224 +12993,6 @@
       },
       "band": {
         "domain": "magnets",
-        "free": "Warnings \u2014 always free",
-        "pro": "Sizing and fit for the hardware you bought",
-        "business": "+ Per-machine fit, validation tests and QC plans across your fleet",
-        "enterprise": "+ Child-safety & supplier vetting for magnets"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "verdict"
-      }
-    },
-    {
-      "name": "recommend_nut_pocket",
-      "description": "Size a pocket for a nut in a 3D-printed part, and grade one already drawn.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: Sizing and fit for the hardware you bought \u00b7 Business: + Per-machine fit, validation tests and QC plans across your fleet \u00b7 Enterprise: + Child-safety & supplier vetting for magnets.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "free",
-      "access": "free_banded",
-      "category": "engineering_intelligence",
-      "parameters": {
-        "properties": {
-          "thread": {
-            "default": "",
-            "title": "Thread",
-            "type": "string"
-          },
-          "nut": {
-            "default": "hex",
-            "title": "Nut",
-            "type": "string"
-          },
-          "how": {
-            "default": "",
-            "title": "How",
-            "type": "string"
-          },
-          "entry": {
-            "default": "",
-            "title": "Entry",
-            "type": "string"
-          },
-          "material": {
-            "default": "PLA",
-            "title": "Material",
-            "type": "string"
-          },
-          "measured_flats_mm": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Measured Flats Mm"
-          },
-          "measured_height_mm": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Measured Height Mm"
-          },
-          "measured_hole_shrink_mm": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Measured Hole Shrink Mm"
-          },
-          "cad_flats_mm": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Cad Flats Mm"
-          },
-          "cad_depth_mm": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Cad Depth Mm"
-          },
-          "cad_slot_thickness_mm": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Cad Slot Thickness Mm"
-          },
-          "wall_mm": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Wall Mm"
-          },
-          "floor_mm": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Floor Mm"
-          },
-          "roof_mm": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Roof Mm"
-          },
-          "load_n": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Load N"
-          },
-          "nut_count": {
-            "default": 1,
-            "title": "Nut Count",
-            "type": "integer"
-          },
-          "torque_nm": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Torque Nm"
-          },
-          "infill_pct": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Infill Pct"
-          },
-          "application_class": {
-            "default": "consumer_product",
-            "title": "Application Class",
-            "type": "string"
-          },
-          "printers": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Printers"
-          }
-        },
-        "title": "recommend_nut_pocketArguments",
-        "type": "object"
-      },
-      "band": {
-        "domain": "nut_pockets",
         "free": "Warnings \u2014 always free",
         "pro": "Sizing and fit for the hardware you bought",
         "business": "+ Per-machine fit, validation tests and QC plans across your fleet",
