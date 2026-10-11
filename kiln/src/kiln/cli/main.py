@@ -8614,6 +8614,26 @@ def donate(json_mode: bool) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _engaged_elsewhere(exc: BaseException) -> str | None:
+    """The one-printer rule's own words when *exc* is its refusal, else ``None``.
+
+    A connection probe that meets the rule has not failed to reach anything:
+    Kiln is working with another printer and was not allowed to look at this
+    one.  Reporting that as "cannot reach" or "check your credentials" sends
+    the person after a fault that is not there.
+    """
+    from kiln.printers.engagement import refusal_in_flight
+
+    verdict = refusal_in_flight(exc)
+    if verdict is None:
+        return None
+    parts = [str(verdict.get("reason") or "").strip()]
+    suggestions = verdict.get("suggestions") or []
+    if suggestions:
+        parts.append(str(suggestions[0]).strip())
+    return " ".join(part for part in parts if part) or None
+
+
 @cli.command()
 @click.option(
     "--skip-discovery",
@@ -8862,12 +8882,16 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
             except Exception as exc:
                 click.echo(click.style(f"  AMS check failed: {exc}", fg="yellow"))
     except PrinterError as exc:
-        click.echo(click.style(f"  Connection test failed: {exc}", fg="yellow"))
-        click.echo(
-            f"  The printer was saved but may need correct credentials.\n"
-            f"  Update with: kiln auth --name {name} --host {host} "
-            f"--type {printer_type} --api-key <key>"
-        )
+        if why := _engaged_elsewhere(exc):
+            click.echo(click.style(f"  Connection not tested: {why}", fg="yellow"))
+            click.echo("  The printer was saved.")
+        else:
+            click.echo(click.style(f"  Connection test failed: {exc}", fg="yellow"))
+            click.echo(
+                f"  The printer was saved but may need correct credentials.\n"
+                f"  Update with: kiln auth --name {name} --host {host} "
+                f"--type {printer_type} --api-key <key>"
+            )
     except Exception as exc:
         click.echo(click.style(f"  Connection test failed: {exc}", fg="yellow"))
         click.echo(
@@ -9167,9 +9191,16 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
         if not json_mode:
             click.echo(f"    No printer configured: {exc}")
     except PrinterError as exc:
-        results["status"] = {"error": str(exc), "connected": False}
-        if not json_mode:
-            click.echo(click.style(f"    Status check failed: {exc}", fg="yellow"))
+        if why := _engaged_elsewhere(exc):
+            # Not a failure: the rule did not let Kiln look.  ``connected`` is
+            # unknown, not False.
+            results["status"] = {"not_checked": why, "connected": None}
+            if not json_mode:
+                click.echo(click.style(f"    Status not checked: {why}", fg="yellow"))
+        else:
+            results["status"] = {"error": str(exc), "connected": False}
+            if not json_mode:
+                click.echo(click.style(f"    Status check failed: {exc}", fg="yellow"))
     except Exception as exc:
         results["status"] = {"error": str(exc), "connected": False}
         if not json_mode:
@@ -11268,11 +11299,13 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
                     checks.append({"name": "printer_reachable", "ok": False, "detail": f"{host} (offline)"})
             except Exception as exc:
                 logger.debug("Printer reachability check failed for %s: %s", host, exc)
+                why = _engaged_elsewhere(exc)
                 checks.append(
                     {
                         "name": "printer_reachable",
-                        "ok": False,
-                        "detail": f"cannot reach {host}: {exc}",
+                        # The rule not letting Kiln look is not a fault of this printer.
+                        "ok": why is not None,
+                        "detail": f"not checked: {why}" if why else f"cannot reach {host}: {exc}",
                     }
                 )
 
@@ -13059,8 +13092,13 @@ def health(ctx: click.Context, json_mode: bool) -> None:
             checks["printer_online"] = True
             checks["printer_state"] = state.status.value if hasattr(state.status, "value") else str(state.status)
         except (PrinterError, click.ClickException, Exception) as exc:
-            checks["printer_online"] = False
-            checks["printer_error"] = str(exc)
+            if why := _engaged_elsewhere(exc):
+                # Unknown, not offline: the rule did not let Kiln look.
+                checks["printer_online"] = None
+                checks["printer_not_checked"] = why
+            else:
+                checks["printer_online"] = False
+                checks["printer_error"] = str(exc)
 
         # Slicer availability
         try:
@@ -13129,7 +13167,8 @@ def health(ctx: click.Context, json_mode: bool) -> None:
             checks["mcp_clients_repaired"] = []
             checks["mcp_clients_error"] = str(exc)
 
-        healthy = checks.get("printer_online", False)
+        # A printer Kiln was not allowed to look at is not a fault.
+        healthy = checks.get("printer_online", False) is not False
         checks["healthy"] = healthy
 
         if json_mode:
@@ -13141,6 +13180,8 @@ def health(ctx: click.Context, json_mode: bool) -> None:
             # Printer
             if checks.get("printer_online"):
                 click.echo(f"  [{mark_ok}] Printer: online ({checks.get('printer_state', 'unknown')})")
+            elif checks.get("printer_online") is None and checks.get("printer_not_checked"):
+                click.echo(f"  [~] Printer: not checked ({checks['printer_not_checked']})")
             else:
                 click.echo(f"  [{mark_fail}] Printer: offline ({checks.get('printer_error', 'unknown')})")
             # Slicer

@@ -107,6 +107,7 @@ class TestTheRuleItself:
         """Owning printers is free; running them in parallel is the product."""
         for never in ("register_printer", "list_printers", "discover_printers", "upload_file"):
             assert never not in engagement.GATED_ACTIONS
+        assert not engagement.is_gated("upload_file")
 
     def test_a_fleet_tier_lifts_the_rule(self, two_printers, monkeypatch):
         a, b = two_printers
@@ -325,27 +326,18 @@ class TestTheAdapterChokepoint:
         assert err.verdict is verdict
         assert "a1" in str(err)
 
-    def test_every_control_method_is_covered(self):
-        """The list is the contract: a command absent here is ungated."""
-        assert engagement.GATED_ACTIONS == frozenset(
-            {
-                "get_state",
-                "get_job",
-                "pause_print",
-                "resume_print",
-                "cancel_print",
-                "emergency_stop",
-                "set_tool_temp",
-                "set_bed_temp",
-                "send_gcode",
-                "load_filament",
-                "unload_filament",
-                "purge_filament",
-                "wipe_nozzle",
-                "home_axes",
-                "park_head",
-            }
-        )
+    def test_the_commands_first_pinned_here_stay_gated(self):
+        """These fifteen were the whole rule until 2026-10-11.  Completeness --
+        every adapter command gated or named with a reason -- is pinned against
+        the real adapter classes in test_one_printer_rule_covers_every_command.py."""
+        first = {
+            "get_state", "get_job", "pause_print", "resume_print", "cancel_print",
+            "emergency_stop", "set_tool_temp", "set_bed_temp", "send_gcode",
+            "load_filament", "unload_filament", "purge_filament", "wipe_nozzle",
+            "home_axes", "park_head",
+        }
+        assert first <= engagement.GATED_ACTIONS
+        assert all(engagement.is_gated(action) for action in first)
 
 
 def _real_adapter_class():

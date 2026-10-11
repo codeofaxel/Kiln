@@ -2353,6 +2353,20 @@ class PrinterInfo:
 def _make_engagement_gated(action: str, original):
     """Wrap *original* so it consults the single-printer engagement first."""
     import functools
+    import inspect
+
+    if inspect.iscoroutinefunction(original):
+        @functools.wraps(original)
+        async def _gated_async(self, *args, **kwargs):
+            from kiln.printers.engagement import check_command
+
+            verdict = check_command(self, action)
+            if verdict is not None:
+                raise PrinterEngagementError(verdict)
+            return await original(self, *args, **kwargs)
+
+        _gated_async._kiln_engagement_wrapped = True  # type: ignore[attr-defined]
+        return _gated_async
 
     @functools.wraps(original)
     def _gated(self, *args, **kwargs):
@@ -2388,9 +2402,19 @@ def _install_engagement_gate(cls: type, *, own_methods_only: bool) -> None:
     overriding one is how the base safety gate gets bypassed.  Gating must not
     cost the suite its ability to see that.
     """
-    from kiln.printers.engagement import GATED_ACTIONS
+    import inspect
 
-    for action in sorted(GATED_ACTIONS):
+    from kiln.printers.engagement import is_gated
+
+    names = cls.__dict__ if own_methods_only else dir(cls)
+    for action in sorted(names):
+        if not is_gated(action):
+            continue
+        # Only plain methods.  A property, staticmethod or classmethod is not
+        # a command sent to one machine, and wrapping one would break it.
+        raw = inspect.getattr_static(cls, action, None)
+        if not inspect.isfunction(raw):
+            continue
         original = cls.__dict__.get(action) if own_methods_only else getattr(cls, action, None)
         if original is None or not callable(original):
             continue
