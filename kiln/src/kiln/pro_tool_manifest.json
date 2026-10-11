@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-11T08:41:30.284828+00:00",
-  "tool_count": 425,
+  "generated": "2026-10-11T16:41:43.848366+00:00",
+  "tool_count": 422,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -2516,103 +2516,6 @@
         "schema_version": 1,
         "kind": "sync"
       }
-    },
-    {
-      "name": "cloud_sync_devices",
-      "description": "List all devices connected to your Device Sync account.\n\nKiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "cloud_sync",
-      "parameters": {
-        "properties": {},
-        "title": "cloud_sync_devicesArguments",
-        "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "cloud_workspace_v1",
-        "variant": "cloud_workspace",
-        "feature": "Design library on every machine",
-        "headline": "Take this design library to every machine you use.",
-        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
-        "free_included": "Local files you already have stay on this machine and stay yours."
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "sync"
-      },
-      "served": false
-    },
-    {
-      "name": "cloud_sync_history",
-      "description": "View the sync operation log.\n\nKiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "cloud_sync",
-      "parameters": {
-        "properties": {
-          "limit": {
-            "default": 20,
-            "title": "Limit",
-            "type": "integer"
-          }
-        },
-        "title": "cloud_sync_historyArguments",
-        "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "cloud_workspace_v1",
-        "variant": "cloud_workspace",
-        "feature": "Design library on every machine",
-        "headline": "Take this design library to every machine you use.",
-        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
-        "free_included": "Local files you already have stay on this machine and stay yours."
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "sync"
-      },
-      "served": false
-    },
-    {
-      "name": "cloud_sync_resolve_conflict",
-      "description": "Manually resolve a sync conflict.\n\nKiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "cloud_sync",
-      "parameters": {
-        "properties": {
-          "conflict_id": {
-            "title": "Conflict Id",
-            "type": "string"
-          },
-          "resolution": {
-            "title": "Resolution",
-            "type": "string"
-          }
-        },
-        "required": [
-          "conflict_id",
-          "resolution"
-        ],
-        "title": "cloud_sync_resolve_conflictArguments",
-        "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "cloud_workspace_v1",
-        "variant": "cloud_workspace",
-        "feature": "Design library on every machine",
-        "headline": "Take this design library to every machine you use.",
-        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
-        "free_included": "Local files you already have stay on this machine and stay yours."
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "sync"
-      },
-      "served": false
     },
     {
       "name": "auto_add_rubber_feet",
