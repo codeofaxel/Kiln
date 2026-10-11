@@ -17,6 +17,7 @@ These tests pin the door's side of that wire with the server stood in
 
 from __future__ import annotations
 
+import errno
 import sys
 import urllib.error
 from typing import Any
@@ -144,7 +145,7 @@ class TestAMissJudgesNothing:
 
     def test_offline(self, door, served):
         _, answers = served
-        answers.append(urllib.error.URLError(OSError(101, "Network is unreachable")))
+        answers.append(urllib.error.URLError(OSError(errno.ENETUNREACH, "Network is unreachable")))
         out = door(material="abs", environment="indoors", requirements=["rohs"])
         self._assert_unjudged(out["rule_checks"], "offline")
 

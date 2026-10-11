@@ -26,6 +26,7 @@ in (public tests cannot import kiln-pro):
 from __future__ import annotations
 
 import base64
+import errno
 import gzip
 import json
 import struct
@@ -180,7 +181,7 @@ class TestWhatComesBack:
         assert door(_cube(tmp_path / "cube.stl"), material="PLA") == gate
 
     @pytest.mark.parametrize("answer, why", [
-        (urllib.error.URLError(OSError(101, "Network is unreachable")), "offline"),
+        (urllib.error.URLError(OSError(errno.ENETUNREACH, "Network is unreachable")), "offline"),
         ({"status": "error", "code": "KILN_ACCOUNT_NOT_PAIRED", "error": "pair first", "why": "signed_out"}, "signed_out"),
         ({"status": "error", "code": "SERVER_UNREACHABLE", "error": "timed out"}, "unanswered"),
         ({"detail": "Not Found"}, "refused"),

@@ -11,6 +11,7 @@ with no answer, and with each way an answer can fail to come.
 
 from __future__ import annotations
 
+import errno
 import sys
 import types
 from pathlib import Path
@@ -85,7 +86,7 @@ def test_no_figure_for_the_material_keeps_the_cautious_one_and_says_nothing_more
     [
         ({"answer": {"success": False, "code": "KILN_ACCOUNT_NOT_PAIRED", "why": "signed_out",
                      "error": "Sign in to Kiln."}}, "Kiln is signed out"),
-        ({"raise": OSError(51, "Network is unreachable")}, None),
+        ({"raise": OSError(errno.ENETUNREACH, "Network is unreachable")}, None),
     ],
 )
 def test_no_answer_keeps_the_cautious_figure_and_says_why(served, failure, says):
@@ -166,7 +167,7 @@ def test_a_refusal_is_not_remembered_as_an_answer(served):
 
 def test_an_unreachable_server_is_left_alone_for_a_while(served):
     calls, reply = served
-    reply["raise"] = OSError(51, "Network is unreachable")
+    reply["raise"] = OSError(errno.ENETUNREACH, "Network is unreachable")
     assert melt.printer_melt_rate("bambu_a1", 0.4, "tpu") is None
     assert melt.printer_melt_rate("k1_max", 0.4, "tpu") is None
     assert len(calls) == 1
