@@ -665,8 +665,13 @@ def _send_heartbeat() -> None:
                 "update_nudge": stats.get("update_nudge", {}),
                 # Sign-in funnel -- {stage: count_today} over the closed
                 # vocabulary in kiln.daily_stats (_ACCOUNT_NUDGE_STAGES).
-                # Where an account was offered and how a sign-in went;
-                # never which account, never an email or a code.
+                # Where an account was offered and how a sign-in went,
+                # including the setup-time limits nudge (offered_limits /
+                # offered_limits_unknown) and a sign-in that followed one
+                # within the day (completed_limits).  The whole map ships;
+                # a stage added to the vocabulary rides without a change
+                # here.  Never which account, never an email, a code or a
+                # printer's name.
                 "account_nudge": stats.get("account_nudge", {}),
                 # Which parametric design templates got built —
                 # {template_id: count_today}.  The library is free and

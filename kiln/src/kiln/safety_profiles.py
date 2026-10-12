@@ -993,6 +993,18 @@ def _catalogue_lists(candidates: list[str]) -> str | None:
     return names.get(mapped) if mapped else None
 
 
+def _count_limits_offer(stage: str, spelling: str) -> None:
+    """Count a signed-out limits nudge in the sign-in funnel, and leave the
+    marker the sign-in it leads to reads (``daily_stats``).  The one writer:
+    the nudge is minted here and nowhere else.  Never raises."""
+    try:
+        from kiln.daily_stats import record_limits_nudge_offer
+
+        record_limits_nudge_offer(stage, spelling)
+    except Exception:  # noqa: BLE001 -- a counter never costs a setup
+        logger.debug("limits nudge not counted", exc_info=True)
+
+
 def warm_profile(printer_id: str) -> str | None:
     """Fetch *printer_id*'s record now, at setup, and mint the one sentence an
     install that could not get it is owed.  Returns that sentence, or ``None``.
@@ -1014,6 +1026,11 @@ def warm_profile(printer_id: str) -> str | None:
     command that needs it, and the floor stands meanwhile with nothing to
     say to the person.  A process mints each printer's sentence once; the
     door that speaks it takes it with :func:`pending_limits_nudge`.
+
+    The two signed-out sentences are the sign-in funnel's ``offered_limits``
+    and ``offered_limits_unknown`` (``daily_stats.record_limits_nudge_offer``),
+    counted here, where they are minted, so no door that speaks one has to
+    remember to.  The third sentence asks for no sign-in and counts nothing.
     """
     spelling = str(printer_id or "").strip()
     if not spelling:
@@ -1041,6 +1058,7 @@ def warm_profile(printer_id: str) -> str | None:
             f"({hotend:g} C hotend, {bed:g} C bed) only because this install is signed out. "
             "Sign in free and Kiln works to that printer's real limits: hotend, bed and build volume."
         )
+        _count_limits_offer("offered_limits", spelling)
     elif cause == "signed_out":
         sentence = (
             f"Kiln doesn't know the {spelling!r} yet, so it holds it to generic limits "
@@ -1048,6 +1066,7 @@ def warm_profile(printer_id: str) -> str | None:
             "limits on the maker's own spec page (add_safety_profile) or you can enter them; you "
             "confirm them with a code on this screen, as a print start is."
         )
+        _count_limits_offer("offered_limits_unknown", spelling)
     else:
         sentence = (
             f"Kiln doesn't know the {spelling!r} yet, so it holds it to generic limits "

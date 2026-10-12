@@ -12,6 +12,7 @@ every day after the first for long-running servers).
 from __future__ import annotations
 
 import json
+import time
 from datetime import date as real_date
 from datetime import timedelta
 from unittest import mock
@@ -355,3 +356,85 @@ def test_every_map_the_heartbeat_reads_exists_in_daily_stats(pipeline):
             f"{key} rolls over locally but get_daily_stats never returns "
             "it — the heartbeat will transmit {} forever"
         )
+
+
+def test_a_limits_nudge_and_the_sign_in_it_led_to_reach_the_dashboard(
+    pipeline, tmp_path, monkeypatch,
+):
+    """The setup-time limits nudge, and whether a sign-in followed it.
+
+    The nudge is minted in the MCP server process at a printer's setup
+    (``safety_profiles.warm_profile``) and the sign-in it asks for usually
+    finishes in another one (``kiln signin`` in a terminal), so the chain
+    crosses a process boundary through a marker on disk as well as a day
+    boundary through the rollover.  Driven through the real chokepoints:
+    the one place the nudge is minted, and the one function every sign-in
+    door ends in.  A sign-in with no marker, and one a day late, count
+    nothing.
+    """
+    from kiln import _pro_catalogue_bridge as bridge
+    from kiln import printer_intelligence as pi
+    from kiln import safety_profiles as sp
+    from kiln.cli.auth_commands import _complete_signin
+
+    sent = pipeline
+    marker = tmp_path / "limits_nudge_pending.json"
+    monkeypatch.setattr(daily_stats, "_LIMITS_NUDGE_MARKER_PATH", marker)
+    monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
+    monkeypatch.setattr("kiln.terms.sync_to_account", lambda **k: None)
+    # The install public CI is: no kiln-pro here, and the session fixture
+    # seals the served door as signed out.
+    monkeypatch.setattr(bridge, "available", lambda: False)
+    monkeypatch.setattr(bridge, "KEEP_DIR", tmp_path / "printer_catalogue")
+
+    def reset() -> None:
+        sp._cache.clear()
+        sp._roster.clear()
+        sp._variant_data.clear()
+        sp._loaded = False
+        sp._nudged.clear()
+        sp._pending_nudges.clear()
+        pi._reset_caches()
+        bridge.forget()
+
+    reset()
+    try:
+        # Day N: two printers set up on a signed-out install -- one the
+        # catalogue has a record for, one it has no row for.
+        assert sp.warm_profile("kilntest_served")
+        assert sp.warm_profile("Acme Zed")
+        assert daily_stats.get_daily_stats()["account_nudge"] == {
+            "offered_limits": 1, "offered_limits_unknown": 1,
+        }
+        assert json.loads(marker.read_text())["stage"] == "offered_limits_unknown"
+
+        # Midnight passes; the person signs in from a terminal the next
+        # morning, well inside the day the nudge is good for.
+        _FakeDate._today = real_date(2026, 7, 26)
+        _complete_signin({"access_token": "tok", "refresh_token": "ref"}, door="cli")
+        assert not marker.exists(), "a consumed marker is removed"
+
+        heartbeat._send_heartbeat()
+        details = sent[0]["p_details"]
+        assert details["previous_day"]["date"] == "2026-07-25"
+        assert details["previous_day"]["account_nudge"] == {
+            "offered_limits": 1, "offered_limits_unknown": 1,
+        }
+        assert details["account_nudge"] == {"completed_cli": 1, "completed_limits": 1}
+        assert "Acme Zed" not in json.dumps(sent[0]), "the printer's name never ships"
+
+        # A second sign-in with no nudge before it is not a conversion.
+        _complete_signin({"access_token": "tok", "refresh_token": "ref"}, door="cli")
+        assert daily_stats.get_daily_stats()["account_nudge"]["completed_limits"] == 1
+
+        # A nudge shown 25 hours before the sign-in is nobody's: nothing
+        # counted, and the marker cleared all the same.
+        marker.write_text(json.dumps({
+            "shown_at": time.time() - 25 * 3600, "stage": "offered_limits",
+            "printer_model": "kilntest_served",
+        }))
+        _complete_signin({"access_token": "tok", "refresh_token": "ref"}, door="cli")
+        assert daily_stats.get_daily_stats()["account_nudge"]["completed_limits"] == 1
+        assert not marker.exists()
+    finally:
+        reset()
