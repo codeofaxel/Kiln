@@ -696,6 +696,15 @@ def saved_printer_for_update(
     *machine_identity* is what the door read off the machine, when it has
     one; a door that reads it after this call asks again with it, since a
     printer that moved is matched by that id and nothing else.
+
+    The id is read before any credential is proven at the new address, and
+    an id match carries the saved credential there.  That is the same trust
+    a stated serial has always carried, and the bound is accepted on
+    purpose: a backend whose id endpoint needs the credential (Prusa Link,
+    a Duet with a password) cannot report a saved id without it, and a
+    check that "proves" a key on a new host would hand the key to that
+    host just the same.  The alternative, asking for every credential
+    again on every address change, was weighed and declined.
     """
     raw = _read_config_file(config_path or get_config_path())
     saved = raw.get("printers")
