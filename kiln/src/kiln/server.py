@@ -13158,7 +13158,7 @@ def register_printer(
         # offline printer is not asked twice), and a camera the user supplied
         # always, since it is on its own host.  A camera that does not answer
         # is a warning, never a refusal: it may simply be off.
-        if url_answered is not False or adapter.external_camera is not None:
+        if url_answered is not False or getattr(adapter, "external_camera", None) is not None:
             from kiln.camera_check import camera_setup_line
 
             _handshake, _camera_line = camera_setup_line(adapter, door="tool")
