@@ -20,6 +20,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+#: A synthetic printer the session holds, with a 256 mm cube bed
+#: (tests/fixtures/printer_catalogue_test.json).  A real printer's bed is its
+#: catalogue record, which public CI does not hold; this one answers the same
+#: wherever the suite runs.
+_PRINTER_256 = "kilntest_enclosed"
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -403,7 +409,7 @@ class TestBedFitCheck:
             patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
             patch("kiln.safety_profiles.get_profile", return_value=mock_profile),
         ):
-            result = _invoke_tool(stl, printer_id="bambu_a1")
+            result = _invoke_tool(stl, printer_id=_PRINTER_256)
 
         bed_checks = [c for c in result["checks"] if c["name"] == "bed_fit"]
         assert len(bed_checks) == 1
@@ -431,7 +437,7 @@ class TestBedFitCheck:
             patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
             patch("kiln.safety_profiles.get_profile", return_value=mock_profile),
         ):
-            result = _invoke_tool(stl, printer_id="bambu_a1")
+            result = _invoke_tool(stl, printer_id=_PRINTER_256)
 
         bed_checks = [c for c in result["checks"] if c["name"] == "bed_fit"]
         assert len(bed_checks) == 1
@@ -825,7 +831,7 @@ class TestAllCheckNamesPresent:
             patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
             patch("kiln.safety_profiles.get_profile", return_value=mock_profile),
         ):
-            result = _invoke_tool(stl, printer_id="bambu_a1")
+            result = _invoke_tool(stl, printer_id=_PRINTER_256)
 
         check_names = {c["name"] for c in result["checks"]}
         expected = {"format", "mesh_geometry", "watertight", "repair", "printability", "structural", "bed_fit"}

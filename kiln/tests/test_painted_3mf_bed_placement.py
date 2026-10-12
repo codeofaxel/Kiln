@@ -92,6 +92,12 @@ def _off_bed_model_xml() -> str:
     )
 
 
+#: A synthetic printer the session holds, with a 256 mm cube bed
+#: (tests/fixtures/printer_catalogue_test.json).  A real printer's bed is its
+#: catalogue record, which public CI does not hold.
+_PRINTER_256 = "kilntest_enclosed"
+
+
 def _bambu_bed_ini(tmp_path: Path) -> str:
     ini = tmp_path / "bed.ini"
     ini.write_text(
@@ -154,7 +160,7 @@ class TestPaintedBedPlacement:
     def test_printer_id_resolves_build_volume(self, tmp_path):
         result = compose_painted_3mf(
             _NEG_TETRA, _COLORS, output_path=str(tmp_path / "p.3mf"),
-            plate_width=999.0, plate_depth=999.0, printer_id="bambu_a1",
+            plate_width=999.0, plate_depth=999.0, printer_id=_PRINTER_256,
         )
         assert result["success"], result
         tx, ty, _tz = _item_translation(result["output_path"])
@@ -567,7 +573,7 @@ class TestMeshBboxReadsPlaced3mf:
         from kiln.printers.bed_fit import validate_mesh_for_printer
 
         threemf = _write_3mf(tmp_path / "off.3mf", _off_bed_model_xml())
-        fit = validate_mesh_for_printer(threemf, "bambu_a1")
+        fit = validate_mesh_for_printer(threemf, _PRINTER_256)
         assert fit["error_code"] == "OFF_BED_GEOMETRY"
         assert fit["bbox"] is not None
         assert fit["bbox"]["x_min"] == pytest.approx(-30.0)
@@ -581,7 +587,7 @@ class TestMeshBboxReadsPlaced3mf:
             'transform="1 0 0 0 1 0 0 0 1 128 128 0"',
         )
         threemf = _write_3mf(tmp_path / "on.3mf", xml)
-        fit = validate_mesh_for_printer(threemf, "bambu_a1")
+        fit = validate_mesh_for_printer(threemf, _PRINTER_256)
         assert fit["ok"], fit
         assert fit["error_code"] is None
         assert fit["bbox"] is not None
@@ -597,6 +603,6 @@ class TestMeshBboxReadsPlaced3mf:
             '<?xml version="1.0"?><model xmlns="http://schemas.microsoft.com'
             '/3dmanufacturing/core/2015/02"><resources/><build/></model>',
         )
-        fit = validate_mesh_for_printer(threemf, "bambu_a1")
+        fit = validate_mesh_for_printer(threemf, _PRINTER_256)
         assert fit["ok"] is True
         assert fit["error_code"] == "BBOX_UNKNOWN"

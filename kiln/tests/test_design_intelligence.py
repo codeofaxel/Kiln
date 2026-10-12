@@ -1170,14 +1170,20 @@ class TestIntelDerivedDesignProfiles:
         assert _derive_manufacturer("mystery_9000", "Acme Rocket") == "Acme"
 
     def test_profile_derived_from_intelligence(self):
+        """Derived from a spec sheet this process holds.  ``_raw_cache`` holds
+        the full rows -- the generic row, the session's synthetic printers,
+        and any catalogue record a door has fetched -- never a roster row,
+        which carries no spec sheet; a real printer's is kiln-pro's
+        catalogue, which public CI does not hold."""
         from kiln import printer_intelligence as pi
         from kiln.design_intelligence import _design_profile_from_intel
         pi._load_raw()
-        raw = pi._raw_cache["ender3"]
-        prof = _design_profile_from_intel("ender3", raw)
-        assert prof.printer_id == "ender3"
-        assert prof.manufacturer == "Creality"
-        assert {"x", "y", "z"} <= set(prof.build_volume_mm)
+        raw = pi._raw_cache["kilntest_open"]
+        prof = _design_profile_from_intel("kilntest_open", raw)
+        assert prof.printer_id == "kilntest_open"
+        # No known maker prefix: the first word of the display name.
+        assert prof.manufacturer == "Kilntest"
+        assert prof.build_volume_mm == {"x": 220, "y": 220, "z": 250}
         assert prof.supported_materials == sorted(m.lower() for m in raw["materials"])
         assert prof.default_layer_heights_mm  # non-empty layer ladder
         assert prof.agent_notes == []  # curated notes come from the pro overlay

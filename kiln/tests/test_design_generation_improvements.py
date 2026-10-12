@@ -5441,13 +5441,16 @@ class TestArrangePartsOnPlateTool:
             summary="Arranged 1/1 parts.",
         )
 
-        result = arrange_parts_on_plate('["/tmp/a.stl"]', printer_id="Creality K1 Max")
+        # Named by its display name; a synthetic printer the session holds
+        # (a 350 x 350 bed).  A real printer's bed is its catalogue record,
+        # which public CI does not hold.
+        result = arrange_parts_on_plate('["/tmp/a.stl"]', printer_id="Kilntest Big 350")
 
         assert result["success"] is True
-        assert result["bed_size_model_id"] == "k1_max"
-        assert result["bed_dims_mm"] == [300.0, 300.0]
-        assert mock_arrange.call_args.kwargs["plate_width_mm"] == 300.0
-        assert mock_arrange.call_args.kwargs["plate_depth_mm"] == 300.0
+        assert result["bed_size_model_id"] == "kilntest_big"
+        assert result["bed_dims_mm"] == [350.0, 350.0]
+        assert mock_arrange.call_args.kwargs["plate_width_mm"] == 350.0
+        assert mock_arrange.call_args.kwargs["plate_depth_mm"] == 350.0
 
 
 # ---- Loop 14: Template search by description ----
