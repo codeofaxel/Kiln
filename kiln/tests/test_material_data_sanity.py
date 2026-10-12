@@ -492,18 +492,21 @@ def compat_data() -> dict:
 
 @pytest.fixture(scope="module")
 def printer_intel() -> dict:
-    """The public printer_intelligence records, keyed by printer id.
+    """The public printer_intelligence ROSTER, keyed by printer id.
 
-    Public file holds the spec sheet + per-material recipe numbers + the
-    structured has_input_shaping bool; quirks, calibration recipes,
-    failure_modes and per-material notes ship in the kiln-pro overlay
-    (Phase 2 split, 2026-05-17).  The cross-checks below are about which
-    printers exist and which materials they claim, so the public set is the
-    right one to read — and it is the same set at every tier.
+    Since 2026-10-12 the public file is a roster (id, display name, the
+    motion block); a printer's spec sheet and material recipes are served per
+    printer from kiln-pro's catalogue.  The cross-checks below are about
+    which printers exist, so the roster is the right thing to read -- the
+    same set at every tier -- and the session fixture's synthetic
+    ``kilntest_*`` rows (which exist in no other surface) are left out.
     """
-    from kiln.printer_intelligence import _load_raw, _raw_cache
-    _load_raw()     # ensure the raw cache is primed
-    return dict(_raw_cache)
+    from kiln.printer_intelligence import _read_public_json
+
+    return {
+        k: v for k, v in _read_public_json().items()
+        if not k.startswith("_") and not k.startswith("kilntest_")
+    }
 
 
 class TestCompatibilityMatrix:
