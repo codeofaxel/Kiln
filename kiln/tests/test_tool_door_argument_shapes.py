@@ -313,10 +313,19 @@ def test_check_printer_material_support_flags_a_default_answer():
     assert "profile_is_default" not in out
 
 
-def test_safety_profile_accepts_the_vendor_spelling():
+def test_safety_profile_accepts_the_vendor_spelling(monkeypatch):
+    """The vendor spelling and the catalogue id resolve to one profile, and
+    a record is only ever asked for under the catalogue's id -- so the
+    answer is the same whether the record is bundled, on this computer, or
+    (as in public CI) not held at all."""
+    from kiln import _pro_catalogue_bridge as bridge
     from kiln import safety_profiles
 
+    asked: list[str] = []
+    real = bridge.printer_record
+    monkeypatch.setattr(bridge, "printer_record", lambda key: asked.append(key) or real(key))
     assert safety_profiles.get_profile("Creality K1C").id == safety_profiles.get_profile("k1c").id
+    assert set(asked) <= {"k1c"}, asked
 
 
 # ---------------------------------------------------------------------------

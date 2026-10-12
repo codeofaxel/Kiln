@@ -34,11 +34,18 @@ from kiln.printers.base import PrinterState, PrinterStatus
 
 _UNKNOWN_PRINTER = "acme_workshop_9000"
 
+# The printers diagnosed: synthetic rows the session holds
+# (tests/fixtures/printer_catalogue_test.json).  Whether a real printer is
+# enclosed is its catalogue record, which public CI does not hold.
+_ENCLOSED = "kilntest_enclosed"
+_OPEN_FRAME = "kilntest_open"
+
 # Curated depth shaped like kiln-pro's printer_intelligence overlay.  The
-# stand-in's mode would match this diagnosis as well as the X1C's does, which
-# is what lets the unknown-printer test see it being withheld.
+# stand-in's mode would match this diagnosis as well as the enclosed
+# printer's does, which is what lets the unknown-printer test see it being
+# withheld.
 _CURATED = {
-    "bambu_x1c": {
+    _ENCLOSED: {
         "failure_modes": [
             {
                 "symptom": "Print failure partway up a tall ABS part: corners lift despite the enclosure",
@@ -47,7 +54,7 @@ _CURATED = {
             }
         ]
     },
-    "bambu_a1": {
+    _OPEN_FRAME: {
         "failure_modes": [
             {
                 "symptom": "Filament load fails at the purge step (step 6)",
@@ -143,15 +150,15 @@ def curated_depth(monkeypatch):
 
 
 def test_an_enclosed_printer_is_heard_and_its_failure_modes_reach_the_verdict(monkeypatch, curated_depth):
-    profile = get_printer_intel("bambu_x1c")
-    assert profile.id == "bambu_x1c" and profile.has_enclosure is True  # the catalogue's premise
+    profile = get_printer_intel(_ENCLOSED)
+    assert profile.id == _ENCLOSED and profile.has_enclosure is True  # the catalogue's premise
 
     _paused_printer(monkeypatch)
-    diagnosis = _diagnose(printer_id="bambu_x1c", material="ABS")
+    diagnosis = _diagnose(printer_id=_ENCLOSED, material="ABS")
 
     signals = diagnosis["signals"]
     assert signals["printer_has_enclosure"] is True
-    curated = _CURATED["bambu_x1c"]["failure_modes"][0]
+    curated = _CURATED[_ENCLOSED]["failure_modes"][0]
     assert curated["symptom"] in [m["symptom"] for m in signals["failure_modes_from_intel"]]
     # Nothing else explains this failure, so the printer's own playbook does.
     assert curated["cause"] in diagnosis["probable_causes"]
@@ -162,11 +169,11 @@ def test_an_enclosed_printer_is_heard_and_its_failure_modes_reach_the_verdict(mo
 
 
 def test_abs_on_an_open_frame_printer_gets_the_material_environment_verdict(monkeypatch, free_tier):
-    profile = get_printer_intel("bambu_a1")
-    assert profile.id == "bambu_a1" and profile.has_enclosure is False  # the catalogue's premise
+    profile = get_printer_intel(_OPEN_FRAME)
+    assert profile.id == _OPEN_FRAME and profile.has_enclosure is False  # the catalogue's premise
 
     _paused_printer(monkeypatch)
-    diagnosis = _diagnose(printer_id="bambu_a1", material="ABS")
+    diagnosis = _diagnose(printer_id=_OPEN_FRAME, material="ABS")
 
     # The enclosure is a public fact, so a free caller gets the verdict too.
     assert diagnosis["signals"]["printer_has_enclosure"] is False
@@ -179,14 +186,14 @@ def test_a_fault_code_reaches_the_printers_playbook_through_the_door(monkeypatch
     """Bambu's decimal print_error is turned into the screen's form before it
     is looked up -- a step that never ran while the profile read failed."""
     _paused_printer(monkeypatch, print_error=302022663)  # the screen's 1200-8007
-    diagnosis = _diagnose(printer_id="bambu_a1", material="PLA")
+    diagnosis = _diagnose(printer_id=_OPEN_FRAME, material="PLA")
 
     matched = [
         mode
         for mode in diagnosis["signals"]["failure_modes_from_intel"]
         if mode.get("matched_on") == "code"
     ]
-    assert [mode["symptom"] for mode in matched] == [_CURATED["bambu_a1"]["failure_modes"][0]["symptom"]]
+    assert [mode["symptom"] for mode in matched] == [_CURATED[_OPEN_FRAME]["failure_modes"][0]["symptom"]]
 
 
 def test_a_printer_the_catalogue_does_not_know_stays_unknown(monkeypatch, curated_depth):

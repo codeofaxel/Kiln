@@ -34,6 +34,13 @@ import pytest
 
 pytest.importorskip("manifold3d")  # trimesh's boolean backend builds the fixture
 
+#: The printers the verdicts are read for: synthetic rows the session holds
+#: (tests/fixtures/printer_catalogue_test.json), one open-frame and one
+#: enclosed.  Whether a real printer has an enclosure is its catalogue
+#: record, which public CI does not hold.
+_OPEN_FRAME = "kilntest_open"
+_ENCLOSED = "kilntest_enclosed"
+
 ENCLOSURE_WALL_FEATURES_MM = (1.2, 1.4, 1.5)
 STAND_IN_FLOOR_MM = 1.55
 STANDOFF_XY = [(sx * 25.0, sy * 15.0) for sx in (-1, 1) for sy in (-1, 1)]
@@ -282,7 +289,7 @@ class TestAnOverlayAddsFindingsNotAGrade:
 
         seen: list[dict] = []
         _install_pro_wall_floor(monkeypatch, None, enrich=self._answering(92, "A", True, seen))
-        report = analyze_printability(face_down, material="PLA", printer_id="bambu_a1")
+        report = analyze_printability(face_down, material="PLA", printer_id=_OPEN_FRAME)
         public = seen[0]
         assert public["score"] < 80, "the fixture has to be a part the public rubric marks down"
         assert (report.score, report.grade, report.printable) == (public["score"], public["grade"], public["printable"])
@@ -296,7 +303,7 @@ class TestAnOverlayAddsFindingsNotAGrade:
         seen: list[dict] = []
         # The overlay says 30 and, in the same breath, "A" and printable.
         _install_pro_wall_floor(monkeypatch, None, enrich=self._answering(30, "A", True, seen))
-        report = analyze_printability(enclosure, material="PLA", printer_id="bambu_a1")
+        report = analyze_printability(enclosure, material="PLA", printer_id=_OPEN_FRAME)
         assert seen[0]["score"] > 30 and seen[0]["printable"] is True
         assert _PRINTABLE_SCORE_MIN > 30
         assert (report.score, report.grade, report.printable) == (30, "F", False)
@@ -323,7 +330,7 @@ class TestOneBrimDecision:
     def test_no_other_block_prescribes_a_brim_the_decision_declined(self, enclosure, free_tier):
         from kiln.printability import analyze_printability
 
-        report = analyze_printability(enclosure, material="petg", printer_id="bambu_a1")
+        report = analyze_printability(enclosure, material="petg", printer_id=_OPEN_FRAME)
 
         assert report.warping is not None and report.warping.risk_level == "moderate"
         decision = report.adhesion
@@ -335,7 +342,7 @@ class TestOneBrimDecision:
     def test_a_high_warping_verdict_reaches_the_decision(self, enclosure, free_tier):
         from kiln.printability import analyze_printability
 
-        report = analyze_printability(enclosure, material="abs", printer_id="bambu_a1")
+        report = analyze_printability(enclosure, material="abs", printer_id=_OPEN_FRAME)
 
         assert report.warping.risk_level in ("high", "critical")
         assert report.adhesion.brim_width_mm >= 5
@@ -363,11 +370,13 @@ class TestOneBrimDecision:
         (or a printer nobody named) still wants one, and an enclosure does
         not."""
         from kiln.printability import analyze_printability
+        from kiln.printer_intelligence import get_printer_intel
 
         block = _box_stl(tmp_path / "block.stl", 20.0, 20.0, 10.0)
-        open_frame = analyze_printability(block, material="abs", printer_id="bambu_a1")
+        assert not get_printer_intel(_OPEN_FRAME).has_enclosure and get_printer_intel(_ENCLOSED).has_enclosure
+        open_frame = analyze_printability(block, material="abs", printer_id=_OPEN_FRAME)
         unnamed = analyze_printability(block, material="abs")
-        enclosed = analyze_printability(block, material="abs", printer_id="bambu_x1c")
+        enclosed = analyze_printability(block, material="abs", printer_id=_ENCLOSED)
 
         assert open_frame.warping.risk_level == "low"  # the premise
         assert open_frame.adhesion_force.risk_level == "secure"
@@ -382,9 +391,9 @@ class TestOneBrimDecision:
         from kiln.printability import analyze_printability
         from kiln.printer_intelligence import get_printer_intel
 
-        assert get_printer_intel("bambu_x1c").has_enclosure  # the premise
+        assert get_printer_intel(_ENCLOSED).has_enclosure  # the premise
         stilts = _stilts_stl(tmp_path / "stilts.stl")
-        enclosed = analyze_printability(stilts, material="pla", printer_id="bambu_x1c")
+        enclosed = analyze_printability(stilts, material="pla", printer_id=_ENCLOSED)
         open_frame = analyze_printability(stilts, material="pla")
 
         assert 2.0 <= enclosed.bed_adhesion.contact_percentage < 5.0
@@ -395,7 +404,7 @@ class TestOneBrimDecision:
 
         tool = _register(_EstimateToolsPlugin)["slice_and_estimate"]
         with patch("kiln.slicer.slice_file", _fake_slice(tmp_path, grams=29.93)):
-            resp = tool(input_path=enclosure, printer_id="bambu_a1", material="PETG")
+            resp = tool(input_path=enclosure, printer_id=_OPEN_FRAME, material="PETG")
 
         assert resp["success"], resp
         assert resp["adhesion"] == resp["printability"]["adhesion"]
@@ -423,7 +432,7 @@ class TestEveryThinFeature:
         # Any floor above the thickest feature (1.5 mm) will do; this one is
         # the stand-in's, not a material's.
         _install_pro_wall_floor(monkeypatch, STAND_IN_FLOOR_MM, calls)
-        walls = analyze_printability(enclosure, material="petg", printer_id="bambu_a1").thin_walls
+        walls = analyze_printability(enclosure, material="petg", printer_id=_OPEN_FRAME).thin_walls
 
         assert calls and calls[0]["material"] == "petg"
         assert walls.threshold_mm == pytest.approx(STAND_IN_FLOOR_MM)
@@ -500,7 +509,7 @@ class TestWeightsSayWhichIsWhich:
 
         tool = _register(_EstimateToolsPlugin)["slice_and_estimate"]
         with patch("kiln.slicer.slice_file", _fake_slice(tmp_path, grams=29.93)):
-            resp = tool(input_path=enclosure, printer_id="bambu_a1", material="PETG")
+            resp = tool(input_path=enclosure, printer_id=_OPEN_FRAME, material="PETG")
 
         assert resp["estimate"]["filament_used_grams"] == pytest.approx(29.93)
         assert resp["estimate"]["filament_source"] == "slicer_header"
@@ -621,9 +630,9 @@ class TestValidateAndPrepareScores:
         from kiln.printability import analyze_printability
 
         validate = _register(_ValidationPipelinePlugin)["validate_and_prepare"]
-        report = analyze_printability(enclosure, material="petg", printer_id="bambu_a1")
+        report = analyze_printability(enclosure, material="petg", printer_id=_OPEN_FRAME)
 
-        result = validate(input_path=enclosure, printer_id="bambu_a1", material="petg")
+        result = validate(input_path=enclosure, printer_id=_OPEN_FRAME, material="petg")
 
         assert (result["printability_score"], result["printability_grade"]) == (report.score, report.grade)
         assert isinstance(result["readiness_score"], int) and result["score_breakdown"] is not None
