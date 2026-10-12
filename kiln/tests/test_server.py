@@ -2111,7 +2111,7 @@ class TestRegisterPrinterReplacedName:
 
         monkeypatch.setattr(mod, "MoonrakerAdapter", FakeMoonrakerAdapter)
         save_printer(
-            "voron", "moonraker", "http://10.0.0.5", api_key="k",
+            "voron", "moonraker", "http://10.0.0.5", api_key="k", printer_model="voron_2",
             camera_stream_url="rtsp://user:secret@10.0.0.50/live",
             config_path=cfg, probe=False,
         )
@@ -2126,12 +2126,11 @@ class TestRegisterPrinterReplacedName:
         )
         assert result["success"] is True, result
         assert result["saved"] == "replaced"
-        assert "api_key, camera_stream_url" in result["notice"]
+        assert "api_key, printer_model, camera_stream_url" in result["notice"]
         assert "secret" not in json.dumps(result)
         assert built[0].camera is None
         entry = yaml.safe_load(cfg.read_text())["printers"]["voron"]
-        assert "api_key" not in entry
-        assert "camera_stream_url" not in entry
+        assert entry == {"type": "moonraker", "host": "http://10.0.0.9"}
         assert registry.get("voron") is built[0]
 
 

@@ -283,10 +283,10 @@ class TestSaveUnderASavedName:
         entry = _entry(cfg, "ender")
         assert entry["host"] == "http://10.0.0.9"
         assert entry["api_key"] == "k2"
-        assert entry["printer_model"] == "ender3"
+        assert "printer_model" not in entry
         assert result.outcome == "replaced"
         assert "(was at http://10.0.0.5)" in result.notice
-        assert "Kept printer_model" in result.notice
+        assert "api_key, printer_model" in result.notice
 
     def test_an_address_only_printer_at_the_same_address_is_updated(self, tmp_path):
         cfg = tmp_path / "config.yaml"
@@ -298,23 +298,21 @@ class TestSaveUnderASavedName:
         assert _entry(cfg, "ender")["printer_model"] == "ender3"
 
     def test_a_replaced_entry_drops_the_old_credentials_and_camera(self, tmp_path):
-        # A credential belongs to the machine it was issued for.  When the
-        # address changed and nothing proves this is that machine, the old
-        # key and the camera URL (which may embed a password) are not sent
-        # to the new address; the notice says what has to be re-entered.
+        # Everything saved under the name describes the machine at the old
+        # address: its key, its model's limits, its camera (whose URL may
+        # embed a password).  When the address changed and nothing proves
+        # this is that machine, none of it applies to the new address; the
+        # notice says what has to be stated again.
         cfg = tmp_path / "config.yaml"
         save_printer("ender", "octoprint", "http://10.0.0.5", api_key="k", printer_model="ender3",
                      camera_stream_url="rtsp://user:secret@10.0.0.50/live",
                      config_path=cfg, probe=False)
         result = save_printer("ender", "octoprint", "http://10.0.0.9", config_path=cfg, probe=False)
         entry = _entry(cfg, "ender")
-        assert entry["host"] == "http://10.0.0.9"
-        assert "api_key" not in entry
-        assert "camera_stream_url" not in entry
-        assert entry["printer_model"] == "ender3"
+        assert entry == {"type": "octoprint", "host": "http://10.0.0.9"}
         assert result.outcome == "replaced"
-        assert result.dropped == ("api_key", "camera_stream_url")
-        assert "api_key, camera_stream_url" in result.notice
+        assert result.dropped == ("api_key", "printer_model", "camera_stream_url")
+        assert "api_key, printer_model, camera_stream_url" in result.notice
         assert "secret" not in result.notice
 
     def test_a_serial_printer_saved_without_its_serial_at_a_new_address_is_refused(self, tmp_path):

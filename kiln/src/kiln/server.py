@@ -12677,7 +12677,7 @@ def _session_replace_notice(name: str, match: Any) -> str:
     if match.outcome == "updated":
         return f"Updated printer {name!r} for this session; it is not saved."
     was = f" (was at {match.previous_host})" if match.previous_host else ""
-    dropped = f" Not carried over: {', '.join(match.dropped)}." if match.dropped else ""
+    dropped = f" Nothing carried over: {', '.join(match.dropped)}." if match.dropped else ""
     return (
         f"Replaced printer {name!r} for this session{was}; it is not saved. Kiln cannot "
         f"tell from an address alone whether this is the same machine.{dropped}"
@@ -12821,7 +12821,7 @@ def register_printer(
         # registered, whether or not this registration persists.  An update
         # of the same machine keeps the model and camera stated before, so
         # the live adapter is built with them too; a replaced one inherits
-        # the model only, never the old address's credential or camera.
+        # nothing from the old address.
         session_entries = {n: e for n, e in _SESSION_PRINTERS.items() if n in _get_registry()}
         try:
             saved_match = saved_printer_for_update(

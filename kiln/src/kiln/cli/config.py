@@ -404,16 +404,6 @@ _IDENTITY_KEYS: tuple[str, ...] = ("serial", "mainboard_id")
 #: snapshot URL beside a kept stream URL could describe two cameras.
 _CAMERA_KEYS: tuple[str, ...] = ("camera_snapshot_url", "camera_stream_url")
 
-#: A credential is issued for one machine.  Kiln sends it to whatever
-#: address the entry names, so it never follows a name to an address that
-#: nothing proves belongs to the same machine.  A camera URL is in this
-#: set because a stream URL may embed a password.
-_BOUND_TO_MACHINE_KEYS: tuple[str, ...] = (
-    "api_key",
-    "access_code",
-    *_IDENTITY_KEYS,
-    *_CAMERA_KEYS,
-)
 
 
 class PrinterNameTaken(ValueError):
@@ -439,9 +429,9 @@ class PrinterSaveResult:
     changed, so Kiln cannot tell whether it is the same machine).
     ``kept`` names the saved fields the caller did not resend and that
     were carried over; ``dropped`` names the saved fields a ``"replaced"``
-    save left behind because they belong to the machine at the old
-    address (its credential, its serial, its camera).  Names only, never
-    values.
+    save left behind, because everything saved under the name -- its
+    credential, serial, model, camera -- describes the machine at the old
+    address.  Names only, never values.
     """
 
     path: Path
@@ -467,19 +457,14 @@ class PrinterSaveResult:
             return f"Updated existing printer {self.name!r}.{moved}{kept}"
         was = f" (was at {self.previous_host})" if self.previous_host else ""
         dropped = (
-            f" Not carried over: {', '.join(self.dropped)}; enter them again if this is "
-            "the same printer."
+            f" Nothing saved for it carried over: {', '.join(self.dropped)}. Enter them "
+            "again if it is the same printer, or save this one under another name."
             if self.dropped
-            else ""
-        )
-        check = (
-            " If this is a different machine, check those, or save it under another name."
-            if self.kept
             else ""
         )
         return (
             f"Replaced the saved entry for {self.name!r}{was}. Kiln cannot tell from an "
-            f"address alone whether this is the same machine.{dropped}{kept}{check}"
+            f"address alone whether this is the same machine.{dropped}"
         )
 
 
@@ -490,8 +475,8 @@ class SavedPrinterMatch:
     ``outcome`` is ``"updated"`` (the same machine, by serial or by an
     unchanged address) or ``"replaced"`` (no serial-style identity and the
     address changed).  ``entry`` is what the new entry inherits: a copy of
-    the saved one, less the fields a ``"replaced"`` save leaves behind,
-    which ``dropped`` names.
+    the saved one when updated, nothing when replaced -- ``dropped`` then
+    names what was left behind.
     """
 
     outcome: str
@@ -585,7 +570,11 @@ def _match_saved_printer(
     Raises :class:`PrinterNameTaken` when the saved entry names a machine
     by serial, this save names none, and the address changed: nothing
     shows it is that machine, so neither its serial nor its credential
-    may be carried to the new address.
+    may be carried to the new address.  With no serial on either side the
+    save is ``"replaced"`` and inherits nothing: a credential, a model's
+    temperature limits and bed size, a camera -- each is a fact about the
+    machine at the old address, and applying it to one that may be
+    different is wrong quietly.
     """
     old_host = str(existing.get("host") or "") or None
     old_identity = _printer_identity(existing)
@@ -602,9 +591,8 @@ def _match_saved_printer(
             name=name,
             suggested_name=suggestion,
         )
-    inherited = {k: v for k, v in existing.items() if k not in _BOUND_TO_MACHINE_KEYS}
-    dropped = tuple(k for k in _BOUND_TO_MACHINE_KEYS if k in existing)
-    return SavedPrinterMatch("replaced", inherited, old_host, dropped)
+    dropped = tuple(k for k in existing if k not in ("type", "host"))
+    return SavedPrinterMatch("replaced", {}, old_host, dropped)
 
 
 def saved_printer_for_update(
@@ -749,10 +737,9 @@ def save_printer(
     serial / mainboard id -- or a serial-bearing entry re-saved with no
     serial at a new address, which nothing shows to be the same machine.
     A printer with no serial-style id whose address changed is
-    ``"replaced"``: its model is kept, but its credential, serial and
-    camera stay with the old address rather than being sent to a machine
-    that may be a different one, and the result's ``notice`` names them.
-    Passing either camera URL replaces both saved camera URLs.
+    ``"replaced"``: the new entry holds only what this call passes, and
+    the result's ``notice`` names what the old one had.  Passing either
+    camera URL replaces both saved camera URLs.
 
     *baudrate* applies to serial printers only; omit it to let the adapter
     fall back to :data:`DEFAULT_SERIAL_BAUDRATE`.
