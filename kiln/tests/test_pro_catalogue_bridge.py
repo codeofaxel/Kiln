@@ -226,15 +226,17 @@ class TestSignedOut:
         assert sp.pending_limits_nudge() is None
         assert sp.warm_profile(SERVED_ID) is None
 
-    def test_an_unknown_printer_gets_the_other_sentence(self):
+    @pytest.mark.parametrize("signed_in", [False, True])
+    def test_an_unknown_printer_gets_the_other_sentence_with_no_sign_in_clause(self, signed_in, request):
+        """Signing in changes nothing for a printer Kiln has no row for today
+        (custom limits are a Business feature; a bed from a slicer file needs
+        no account), so the sentence asks for none."""
+        if signed_in:
+            request.getfixturevalue("served")
         sentence = sp.warm_profile("Acme Zed")
         assert sentence and "doesn't know the 'Acme Zed' yet" in sentence
-        assert "Sign in free" in sentence and "add_safety_profile" in sentence and "code" in sentence
-
-    def test_an_unknown_printer_signed_in_is_told_how_without_a_sign_in(self, served):
-        sentence = sp.warm_profile("Acme Zed")
-        assert sentence and "doesn't know the 'Acme Zed' yet" in sentence
-        assert "Sign in" not in sentence and "add_safety_profile" in sentence
+        assert "Sign in" not in sentence
+        assert "set_printer_model" in sentence and "add_safety_profile" in sentence and "code" in sentence
 
     def test_a_bundled_printer_gets_no_nudge(self):
         assert sp.warm_profile("kilntest_open") is None

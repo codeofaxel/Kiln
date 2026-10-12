@@ -308,12 +308,15 @@ class TestTheLimitsNudge:
         assert sp.warm_profile(_SERVED_ID) is None
         assert stats() == {"offered_limits": 1}
 
-    def test_an_unknown_printer_signed_out_is_offered_limits_unknown(self, stats, limits):
+    def test_an_unknown_printer_is_counted_as_shown_and_leaves_no_marker(self, stats, limits):
+        """The sentence for a printer Kiln has no row for asks for no
+        sign-in (signing in changes nothing for it today), so it is counted
+        as shown and a sign-in after it is not its doing."""
         from kiln import safety_profiles as sp
 
         assert sp.warm_profile("Acme Zed")
         assert stats() == {"offered_limits_unknown": 1}
-        assert json.loads(limits.read_text())["printer_model"] == "Acme Zed"
+        assert not limits.exists()
 
     def test_an_offline_miss_offers_nothing(self, stats, limits, monkeypatch):
         from kiln import _pro_catalogue_bridge as bridge
@@ -326,7 +329,7 @@ class TestTheLimitsNudge:
         assert sp.warm_profile(_SERVED_ID) is None
         assert stats() == {} and not limits.exists()
 
-    def test_an_unknown_printer_on_a_signed_in_install_offers_nothing(
+    def test_an_unknown_printer_on_a_signed_in_install_is_counted_the_same(
         self, stats, limits, monkeypatch,
     ):
         from kiln import _pro_catalogue_bridge as bridge
@@ -335,7 +338,7 @@ class TestTheLimitsNudge:
         monkeypatch.setattr(bridge, "_served", lambda key: (None, None))  # a settled "no row"
         sentence = sp.warm_profile("Acme Zed")
         assert sentence and "Sign in" not in sentence
-        assert stats() == {} and not limits.exists()
+        assert stats() == {"offered_limits_unknown": 1} and not limits.exists()
 
     def test_the_sign_in_that_follows_counts_once_and_clears_the_marker(
         self, stats, limits,

@@ -1052,8 +1052,11 @@ _LIMITS_NUDGE_FRESH_S = 24 * 3600
 _LIMITS_OFFER_STAGES = frozenset({"offered_limits", "offered_limits_unknown"})
 
 
-def record_limits_nudge_offer(stage: str, printer_model: str) -> None:
+def record_limits_nudge_offer(stage: str, printer_model: str, *, leads_to_signin: bool = True) -> None:
     """Count a setup-time limits nudge and leave the marker its sign-in reads.
+
+    ``leads_to_signin=False`` counts the nudge and leaves no marker: the
+    sentence asked for no sign-in, so a sign-in after it is not its doing.
 
     ``stage`` is ``offered_limits`` (a catalogued printer the install is
     signed out for) or ``offered_limits_unknown`` (a printer Kiln has no row
@@ -1073,7 +1076,7 @@ def record_limits_nudge_offer(stage: str, printer_model: str) -> None:
     if name not in _LIMITS_OFFER_STAGES:
         return
     record_account_nudge(name)
-    if _recording_suppressed():
+    if _recording_suppressed() or not leads_to_signin:
         return
     try:
         _LIMITS_NUDGE_MARKER_PATH.parent.mkdir(parents=True, exist_ok=True)
