@@ -639,6 +639,23 @@ def _clamp_to_curated(
     return _dc_replace(community, **replaced, **carry)
 
 
+def _clamp_override(
+    override: SafetyProfile, curated: SafetyProfile | None, clamp_to: SafetyProfile | None
+) -> SafetyProfile:
+    """Clamp *override* against *clamp_to* (see :func:`get_profile`), and say
+    so when that is the generic floor standing in for a record not held: the
+    profile is then not on a curated base, whatever its name."""
+    clamped = _clamp_to_curated(override, clamp_to)
+    if curated is None and clamp_to is not None:
+        logger.info(
+            "local printer override %r names a catalogue printer whose record is not held "
+            "right now; held to the generic floor until it is",
+            override.id,
+        )
+        return _dc_replace(clamped, curated_base=False)
+    return clamped
+
+
 def _curated_match(candidates: list[str]) -> SafetyProfile | None:
     """The curated profile these candidates resolve to, exact then fuzzy.
 
@@ -787,13 +804,27 @@ def get_profile(printer_id: str, *, variant: str | None = None) -> SafetyProfile
     # override is clamped against can never be different configurations.
     curated = _curated_resolved(candidates, variant)
 
+    # What an override is clamped against.  The curated record when it is
+    # held; and for a CATALOGUE NAME whose record is not held right now (a
+    # signed-out install, a kept record gone), the generic floor -- never
+    # nothing.  An override saved under a catalogue name was exempted from a
+    # person's confirmation on the strength of the record it would be
+    # clamped against (limits_above_floor), so the day the record cannot be
+    # had, that number has nothing of Kiln's underneath it, and standing it
+    # unclamped would hand a typed 500 C to the G-code validator through a
+    # door the save-time check could not see.  A name the roster does not
+    # list keeps today's rule: a person confirmed it, and it stands.
+    clamp_to = curated
+    if clamp_to is None and _catalogue_lists(candidates) is not None:
+        clamp_to = _cache.get("default")
+
     # Local overrides take precedence over bundled — but only in the SAFE
     # direction, and BOTH override doors go through the same clamp against
     # the same curated answer.  See _clamp_to_curated and _curated_resolved.
     for candidate in candidates:
         override = _local_override_cache.get(candidate)
         if override is not None:
-            return _clamp_to_curated(override, curated)
+            return _clamp_override(override, curated, clamp_to)
 
     # An EXACT curated match still beats a fuzzy override match, as it always
     # has.  `curated` is already this profile with the variant applied —
@@ -807,7 +838,7 @@ def get_profile(printer_id: str, *, variant: str | None = None) -> SafetyProfile
     for key in _local_override_cache:
         for candidate in candidates:
             if candidate.startswith(key) or key.startswith(candidate):
-                return _clamp_to_curated(_local_override_cache[key], curated)
+                return _clamp_override(_local_override_cache[key], curated, clamp_to)
 
     if curated is not None:
         return curated

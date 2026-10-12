@@ -66,6 +66,9 @@ def _reset_loaders() -> None:
     sp._roster.clear()
     sp._variant_data.clear()
     sp._loaded = False
+    sp._local_override_cache.clear()
+    sp._variant_selections.clear()
+    sp._local_overrides_loaded = False
     sp._nudged.clear()
     sp._pending_nudges.clear()
     pi._reset_caches()
@@ -248,6 +251,35 @@ class TestSignedOut:
         for _ in range(5):
             sp.get_profile(SERVED_ID)
         assert calls == [SERVED_ID]
+
+    def test_an_override_saved_under_a_catalogue_name_is_clamped_to_the_floor_without_the_record(
+        self, monkeypatch, tmp_path
+    ):
+        """State drift the save-time check cannot see: an override saved while
+        the record was held was exempt from a person's confirmation because
+        it would be clamped against that record.  In a process that cannot
+        get the record it must not stand unclamped (A/B: before the clamp
+        target fell back to the floor, this read 500)."""
+        monkeypatch.setattr(sp, "_LOCAL_OVERRIDE_FILE", tmp_path / "overrides.json")
+        monkeypatch.setattr(sp, "_LEGACY_OVERRIDE_FILE", tmp_path / "legacy.json")
+        monkeypatch.setattr(sp, "_LOCAL_DIR", tmp_path)
+        sp._local_override_cache.clear()
+        sp._local_overrides_loaded = False
+        sp.set_local_printer_override(
+            SERVED_ID,
+            {"max_hotend_temp": 500, "max_bed_temp": 150, "max_feedrate": 9000, "build_volume": [200, 200, 210]},
+            confirmed=True,
+        )
+        profile = sp.get_profile(SERVED_ID)
+        assert profile.max_hotend_temp == 240.0 and profile.max_bed_temp == 80.0
+        assert profile.curated_base is False
+        # An unknown name a person confirmed keeps standing, as it always has.
+        sp.set_local_printer_override(
+            "acme_zed",
+            {"max_hotend_temp": 320, "max_bed_temp": 110, "max_feedrate": 9000, "build_volume": [200, 200, 210]},
+            confirmed=True,
+        )
+        assert sp.get_profile("acme_zed").max_hotend_temp == 320.0
 
     def test_a_roster_name_with_no_record_is_held_to_the_floor_for_overrides(self):
         """A typed 500 C under a catalogue name stands unclamped only if the
