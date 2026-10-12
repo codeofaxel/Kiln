@@ -105,10 +105,15 @@ def _middle(span: list[int]) -> str:
 
 class TestTheResolver:
     def test_a_material_on_a_printer_takes_kilns_settings_for_that_printer(self):
+        """On a synthetic printer whose PETG figures are not the generic
+        row's, so the answer can only have come from the printer's own (a
+        real printer's table is kiln-pro's catalogue, not public CI's)."""
         from kiln.printer_intelligence import get_material_settings
 
-        tuned = get_material_settings("bambu_a1", "TPU")
-        values = material_needs("TPU", printer_id="bambu_a1").values()
+        tuned = get_material_settings("kilntest_enclosed", "PETG")
+        generic = get_material_settings("default", "PETG")
+        assert (tuned.hotend, tuned.bed, tuned.fan) != (generic.hotend, generic.bed, generic.fan)
+        values = material_needs("PETG", printer_id="kilntest_enclosed").values()
         assert values["temperature"] == values["first_layer_temperature"] == str(tuned.hotend)
         assert values["bed_temperature"] == values["first_layer_bed_temperature"] == str(tuned.bed)
         assert values["max_fan_speed"] == str(tuned.fan)
@@ -154,7 +159,8 @@ class TestTheResolver:
         assert all(n.held for n in needs.needs if n.concept in ("nozzle", "bed"))
 
     def test_a_printer_that_cannot_melt_it_refuses(self):
-        needs = material_needs("pei_1010", printer_id="bambu_a1")
+        # A synthetic all-metal printer rated to 250 C: below PEI's melt.
+        needs = material_needs("pei_1010", printer_id="kilntest_small")
         assert needs.refusal is not None
         assert needs.refusal["code"] == "MATERIAL_EXCEEDS_HOTEND"
 

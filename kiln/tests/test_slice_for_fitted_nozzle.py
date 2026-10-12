@@ -37,6 +37,32 @@ from kiln.slicer_profiles import (
 
 A1 = "bambu_a1"
 
+#: A hotend flow ceiling stated for the slices below, in mm3/s.  A1's slicer
+#: profile is bundled; its catalogue record (whose ceiling the slice would
+#: otherwise state) is kiln-pro's, served per printer and absent from public
+#: CI.  So the ceiling under test is stated here, through the one door for
+#: printer limits, and below the PLA profile's own limit (12), so it is the
+#: ceiling that binds and the slice has to be slowed to keep under it.
+#: Synthetic: no printer's number.
+_STATED_FLOW = 10.0
+
+
+def _state_a_flow_ceiling(patch) -> None:
+    """Have ``safety_profiles.get_profile`` state ``_STATED_FLOW`` for A1."""
+    import dataclasses
+
+    import kiln.safety_profiles as safety
+
+    real = safety.get_profile
+
+    def get_profile(printer_id, **kwargs):
+        profile = real(printer_id, **kwargs)
+        if safety._normalise(printer_id) == A1:
+            return dataclasses.replace(profile, max_volumetric_flow=_STATED_FLOW)
+        return profile
+
+    patch.setattr(safety, "get_profile", get_profile)
+
 
 @pytest.fixture(autouse=True)
 def _bench(monkeypatch) -> Iterator[None]:
@@ -183,10 +209,11 @@ class TestWhatFollowsFromTheSize:
         assert (low, high) == (round(0.4 * _MIN_LAYER_NOZZLE_RATIO, 2), round(0.4 * _MAX_LAYER_NOZZLE_RATIO, 2))
 
     def test_the_flow_ceiling_is_untouched(self, monkeypatch):
+        _state_a_flow_ceiling(monkeypatch)
         stock, _ = _resolved()
         _records(monkeypatch, **{A1: 0.8})
         wide, _ = _resolved()
-        assert wide["max_volumetric_speed"] == stock["max_volumetric_speed"]
+        assert wide["max_volumetric_speed"] == stock["max_volumetric_speed"] == f"{_STATED_FLOW:g}"
 
     def test_speeds_and_retraction_stay_the_profiles(self, monkeypatch):
         stock, _ = _resolved()
@@ -517,6 +544,7 @@ def slices(tmp_path_factory) -> dict[tuple[str, float], tuple[dict, str]]:
                 return []
 
         patch.setattr("kiln.registry.get_printer_registry", lambda: _Registry())
+        _state_a_flow_ceiling(patch)
         for name, binary in (("prusa", _PRUSA), ("orca", _ORCA)):
             if binary is None:
                 continue
@@ -602,10 +630,7 @@ class TestTheGcodeIsForTheFittedNozzle:
     @pytest.mark.parametrize("dialect", _dialects())
     @pytest.mark.parametrize("size", (0.6, 0.8))
     def test_a_wider_line_never_asks_the_hotend_for_more_than_its_ceiling(self, slices, dialect, size):
-        from kiln.safety_profiles import get_profile
-
-        ceiling = get_profile(A1).max_volumetric_flow
-        assert ceiling
+        ceiling = _STATED_FLOW
         peak = _peak_flow(slices[(dialect, size)][1])
         # 2% for E's own rounding on the shortest moves counted.
         assert 0 < peak <= ceiling * 1.02, f"{peak:.1f} mm3/s against a ceiling of {ceiling:g}"
