@@ -218,10 +218,17 @@ class _FulfillmentToolsPlugin:
             when the order is placed via ``fulfillment_order``, or released
             if the user doesn't proceed.
 
-            The reply carries ``provider_order_terms``: what the buyer agrees
-            to when they order (when they pay, what a change of mind costs,
-            when they get a full refund). Tell the person these with the
-            price, before they decide, and give them ``provider_terms_url``.
+            The quote's ``price_breakdown`` says what is printing, what is a
+            print shop's minimum order charge, and what is shipping, and its
+            ``price_notes`` say when more copies would cost little more. Show
+            the person the breakdown and every note with the price, before
+            they decide: a $16.58 production line can be $4.45 of printing
+            and the rest a shop's minimum that ten copies would share.
+
+            The reply also carries ``provider_order_terms``: what the buyer
+            agrees to when they order (when they pay, what a change of mind
+            costs, when they get a full refund). Tell the person these with
+            the price too, and give them ``provider_terms_url``.
 
             Use the returned ``quote_id`` with ``fulfillment_order`` to place the
             order.
