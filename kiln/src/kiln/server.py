@@ -128,6 +128,7 @@ except ImportError:
     BillingAlertManager = None  # Available in kiln-pro
 from kiln.cli.config import (
     PrinterNameTaken,
+    SavedPrinterMatch,
     _check_printer_url,
     _normalize_printer_type,
     save_printer,
@@ -12693,7 +12694,7 @@ def fleet_status() -> dict:
 _SESSION_PRINTERS: dict[str, dict[str, Any]] = {}
 
 
-def _session_replace_notice(name: str, match: Any) -> str:
+def _session_replace_notice(name: str, match: SavedPrinterMatch) -> str:
     """One sentence for a session-only registration under a name in use."""
     if match.outcome == "updated":
         return f"Updated printer {name!r} for this session; it is not saved."

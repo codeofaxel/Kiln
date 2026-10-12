@@ -1241,16 +1241,24 @@ def limits_above_floor(printer_model: str, profile: dict[str, Any]) -> tuple[str
     """The limit fields in *profile* that would stand ABOVE Kiln's floor with
     nothing of Kiln's underneath them.
 
-    Empty when a curated profile answers for this printer (an override can
-    only tighten it, so the number typed can never win), and empty when
-    every stated limit is at or below the generic profile's.  A field
-    named here is a ceiling a person typed that Kiln would then enforce as
-    its own -- which is why that takes a person, never only an agent.
+    Empty when a curated profile answers for this printer BY NAME (an
+    override can only tighten it, so the number typed can never win), and
+    empty when every stated limit is at or below the generic profile's.  A
+    field named here is a ceiling a person typed that Kiln would then
+    enforce as its own -- which is why that takes a person, never only an
+    agent.
+
+    The exemption is an exact match on purpose.  :func:`get_profile` also
+    reaches an override by prefix, and a request can match the override's
+    key without matching any curated key (``"enderx"`` reaches an override
+    saved as ``"ender"``, which no curated row answers), so a ceiling
+    exempted on a fuzzy curated hit would stand unclamped under that
+    request.  Exact match in, exact match out.
     """
     _load()
     normalised = _normalise(printer_model)
     candidates = [normalised] + [c for c in printer_key_candidates(printer_model) if c != normalised]
-    if _curated_match(candidates) is not None:
+    if any(candidate in _cache for candidate in candidates):
         return ()
     floor = _cache.get("default")
     if floor is None:

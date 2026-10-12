@@ -19,9 +19,9 @@ import re
 import stat
 import sys
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import yaml
@@ -418,7 +418,6 @@ _IDENTITY_KEYS: tuple[str, ...] = (*_STATED_IDENTITY_KEYS, *_MACHINE_ID_KEYS)
 _CAMERA_KEYS: tuple[str, ...] = ("camera_snapshot_url", "camera_stream_url")
 
 
-
 class PrinterNameTaken(ValueError):
     """A save would put a different machine under a name already saved.
 
@@ -606,7 +605,7 @@ def _judge_existing_printer(
             suggested_name=suggestion,
         )
     old_identity = _printer_identity(existing)
-    if identity and old_identity and _same_source(identity, old_identity) and identity != old_identity:
+    if identity and old_identity and identity.source == old_identity.source and identity != old_identity:
         if old_identity.stated:
             raise PrinterNameTaken(
                 f"A different printer is already saved as {name!r}: serial ending "
@@ -623,10 +622,6 @@ def _judge_existing_printer(
             suggested_name=suggestion,
         )
     return existing
-
-
-def _same_source(a: _Identity, b: _Identity) -> bool:
-    return a.source == b.source
 
 
 def _match_saved_printer(
@@ -799,7 +794,6 @@ def _printer_entry(
     if camera_stream_url:
         entry["camera_stream_url"] = camera_stream_url.strip()
     return entry
-
 
 
 def save_printer(

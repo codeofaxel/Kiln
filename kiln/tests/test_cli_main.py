@@ -910,6 +910,25 @@ class TestAuth:
         assert data["status"] == "success"
         assert data["data"]["name"] == "ender"
 
+    def test_auth_usb_never_opens_the_port_for_a_camera_line(self, runner):
+        # Building a USB adapter opens the serial port, and opening it resets
+        # many boards.  A serial port has no camera of its own, so the camera
+        # line after a USB auth must not build one.
+        def _opened(*_a, **_k):
+            raise AssertionError("a USB adapter was built, which opens the port")
+
+        with (
+            patch("kiln.cli.main.save_printer", return_value=PrinterSaveResult(Path("/tmp/config.yaml"), "p", "added")),
+            patch("kiln.cli.main._make_adapter", side_effect=_opened),
+        ):
+            result = runner.invoke(cli, [
+                "auth", "--name", "marlin", "--host", "/dev/ttyUSB0", "--type", "usb", "--json",
+            ])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)["data"]
+        assert data["name"] == "marlin"
+        assert "camera_check" not in data
+
     def test_auth_bambu(self, runner):
         with patch("kiln.cli.main.save_printer", return_value=PrinterSaveResult(Path("/tmp/config.yaml"), "p", "added")):
             result = runner.invoke(cli, [

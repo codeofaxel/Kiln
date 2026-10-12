@@ -2071,11 +2071,25 @@ def auth(
         )
         if not diagnostics_failed:
             try:
-                from kiln.camera_check import camera_setup_line
+                from kiln.camera_check import camera_setup_line, describe_handshake, handshake_external_camera
 
-                camera_handshake, camera_line = camera_setup_line(
-                    _make_adapter(load_printer_config(name)), door="cli"
-                )
+                if printer_type == "usb":
+                    # Building a USB adapter opens the port, and opening the
+                    # port resets many boards; a serial port has no camera of
+                    # its own, so only a camera the person supplied is asked,
+                    # and it is asked directly.
+                    if camera_snapshot_url or camera_stream_url:
+                        from kiln.printers.base import CAMERA_HANDSHAKE_ADDRESS_TIMEOUT, ExternalCamera
+
+                        camera_handshake = handshake_external_camera(
+                            ExternalCamera(snapshot_url=camera_snapshot_url, stream_url=camera_stream_url),
+                            timeout=CAMERA_HANDSHAKE_ADDRESS_TIMEOUT,
+                        )
+                        camera_line = describe_handshake(camera_handshake, door="cli")
+                else:
+                    camera_handshake, camera_line = camera_setup_line(
+                        _make_adapter(load_printer_config(name)), door="cli"
+                    )
             except Exception as exc:  # noqa: BLE001 — the save succeeded; a camera line must not undo it
                 logger.debug("camera handshake after auth skipped: %s", exc)
 

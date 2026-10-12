@@ -141,6 +141,22 @@ class TestWhatNeedsAPerson:
     def test_a_curated_printer_never_does_because_the_override_can_only_tighten(self):
         assert limits_above_floor("ender3", _foo_x2(max_hotend_temp=500.0)) == ()
 
+    def test_a_key_that_only_resembles_a_curated_one_still_needs_a_person(self):
+        # "ender" is a prefix of the curated "ender3", so the lookup's fuzzy
+        # rule would answer a request for "ender" with the Ender 3 -- but a
+        # request for "enderx" reaches an override saved as "ender" with no
+        # curated row underneath to clamp it.  So resembling a curated key
+        # exempts nothing; only being one does.
+        assert limits_above_floor("ender", _foo_x2(max_hotend_temp=500.0, max_bed_temp=200.0)) == (
+            "max_hotend_temp",
+            "max_bed_temp",
+        )
+
+    def test_the_engine_closes_the_prefix_route_an_unconfirmed_ceiling_could_take(self):
+        with pytest.raises(LimitsNeedAPerson):
+            set_local_printer_override("ender", _foo_x2(max_hotend_temp=500.0))
+        assert get_profile("enderx").max_hotend_temp == get_profile("default").max_hotend_temp
+
     def test_the_engine_refuses_an_unconfirmed_limit_above_the_floor(self):
         with pytest.raises(LimitsNeedAPerson) as info:
             set_local_printer_override("foo_x2", _foo_x2())
@@ -232,6 +248,37 @@ class TestAddSafetyProfileAsksThePerson:
         result = tools["add_safety_profile"]("foo_x2", _foo_x2(confirmed=True, notes="the person said yes"))
         assert result["success"] is False
         assert "foo_x2" not in sp.list_local_printer_overrides()
+
+    def test_a_print_code_is_not_a_limits_code_and_the_reverse(self, door):
+        # The two doors share the screen, the relay tool and the answer
+        # store; a code typed for one must not be spendable by the other.
+        tools, shown = door
+        tools["add_safety_profile"]("foo_x2", _foo_x2())
+        limits_code = shown[0]
+        tools["give_print_code"](limits_code.code)
+        assert screen_code.take_answer(limits_code.file_name, limits_code.printer_name) is None
+        assert screen_code.take_answer(
+            limits_code.file_name, limits_code.printer_name, tool=screen_code.LIMITS_TOOL
+        ) is not None
+
+        screen_code.issue(
+            tool="start_print", file_name="limits for foo_x2", file_sha256="", printer_name="foo_x2",
+        )
+        print_code = shown[-1]
+        assert print_code.tool == "start_print"
+        tools["give_print_code"](print_code.code)
+        result = tools["add_safety_profile"]("foo_x2", _foo_x2())
+        assert result["success"] is False
+        assert "foo_x2" not in sp.list_local_printer_overrides()
+        assert screen_code.take_answer("limits for foo_x2", "foo_x2") is not None
+
+    def test_a_limits_code_opens_no_print_window(self, door):
+        tools, shown = door
+        tools["add_safety_profile"]("foo_x2", _foo_x2())
+        relayed = tools["give_print_code"](f"{shown[0].code} today")
+        assert relayed["success"] is True, relayed
+        assert "standing_window" not in relayed
+        assert "phone_next_time" not in relayed
 
     def test_tightening_a_curated_printer_needs_no_code(self, door):
         tools, shown = door

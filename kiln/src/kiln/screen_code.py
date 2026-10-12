@@ -589,12 +589,24 @@ def answer(words: str, *, host: str = "") -> dict[str, Any]:
     return {"outcome": ANSWERED, "record": record, "host": host}
 
 
-def take_answer(file_name: str, printer_name: str | None) -> Answered | None:
-    """The unspent answer for this print on this printer, spent now."""
+def take_answer(file_name: str, printer_name: str | None, *, tool: str | None = None) -> Answered | None:
+    """The unspent answer for this print on this printer, spent now.
+
+    A code is answered for the door that showed it: with *tool* unset
+    only a print's answer is handed over, and with ``tool=LIMITS_TOOL``
+    only a limits answer -- an answer for the other door is left where it
+    is, never spent, so a code typed for one thing cannot approve another.
+    """
     now = time.time()
     with _lock:
         _prune(now)
-        return _answered.pop(_key(file_name, printer_name), None)
+        key = _key(file_name, printer_name)
+        record = _answered.get(key)
+        if record is None:
+            return None
+        if (record.issued.tool == LIMITS_TOOL) != (tool == LIMITS_TOOL):
+            return None
+        return _answered.pop(key)
 
 
 def status() -> dict[str, Any]:

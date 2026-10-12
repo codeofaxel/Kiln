@@ -48,7 +48,7 @@ def _limits_confirmed_by_a_person(printer_model: str, profile: dict) -> Any:
             code="NOT_HERE",
         )
     key, digest = _limits_proposal_key(printer_model, profile)
-    answered = screen_code.take_answer(key, printer_model)
+    answered = screen_code.take_answer(key, printer_model, tool=screen_code.LIMITS_TOOL)
     if answered is not None and answered.issued.file_sha256 == digest:
         _srv._audit(
             "add_safety_profile", "limits_confirmed",
@@ -664,7 +664,8 @@ class _SafetyToolsPlugin:
                         else f"Call the tool that starts the print again ({issued.tool}); this yes covers it."
                     ),
                 }
-                if rec.answer.opens_window:
+                for_a_print = issued.tool != screen_code.LIMITS_TOOL
+                if for_a_print and rec.answer.opens_window:
                     # The window opens where the dialog's does: when the print
                     # starts, in the wrapper — never from a tool.
                     reply["standing_window"] = {
@@ -672,8 +673,9 @@ class _SafetyToolsPlugin:
                         "for": rec.answer.describe_window_ask(),
                     }
                 # Someone who typed a code is someone the phone would help:
-                # one line for after the print starts, once.
-                offer = _srv._phone_offer()
+                # one line for after the print starts, once.  A limits code
+                # starts nothing, so it earns no print offer.
+                offer = _srv._phone_offer() if for_a_print else None
                 if offer:
                     reply["phone_next_time"] = offer
                 _srv._audit(
