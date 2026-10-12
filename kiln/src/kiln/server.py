@@ -107,6 +107,7 @@ from kiln.print_consent import (
     unasked_look_noted,
     why_not_asked,
 )
+from kiln.provider_terms import CRAFTCLOUD_TERMS_URL, order_terms
 from kiln.tool_args import parse_json_array, parse_json_object
 
 with contextlib.suppress(ImportError):
@@ -161,7 +162,6 @@ except ImportError:
     FulfillmentProvider = None
     QuoteRequest = None
     get_fulfillment_provider = None
-from kiln.gateway.threedos import ThreeDOSClient
 from kiln.gcode import validate_gcode as _validate_gcode_impl
 from kiln.gcode import validate_gcode_for_printer
 from kiln.generation import (
@@ -5621,26 +5621,8 @@ def _validate_quote_for_order(
     )
 
 
-_threedos_client: ThreeDOSClient | None = None
-
-
-def _get_threedos_client() -> ThreeDOSClient:
-    """Return the lazily-initialised 3DOS gateway client.
-
-    Requires ``KILN_3DOS_API_KEY`` to be set.
-    """
-    global _threedos_client  # noqa: PLW0603
-
-    if _threedos_client is not None:
-        return _threedos_client
-
-    _threedos_client = ThreeDOSClient()
-    return _threedos_client
-
-
 _PROVIDER_TERMS_URLS: dict[str, str] = {
-    "craftcloud": "https://craftcloud3d.com/terms-and-conditions",
-    "3dos": "https://www.3dos.io/terms",
+    "craftcloud": CRAFTCLOUD_TERMS_URL,
 }
 
 
@@ -5648,7 +5630,7 @@ def _provider_routing_metadata(
     provider_name: str,
     *,
     provider_order_id: str = "",
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """Return normalized routing metadata for provider-managed orders.
 
     Kiln is orchestration infrastructure. For provider-routed jobs, the
@@ -5659,6 +5641,7 @@ def _provider_routing_metadata(
         "provider_name": provider_name,
         "provider_order_id": provider_order_id,
         "provider_terms_url": _PROVIDER_TERMS_URLS.get(normalized, ""),
+        "provider_order_terms": order_terms(normalized),
         "support_owner": "provider",
         "merchant_of_record": "provider",
     }
@@ -15182,11 +15165,6 @@ def list_plugins() -> dict:
 
 # ---------------------------------------------------------------------------
 # Consumer workflow tools — moved to plugins/consumer_tools.py
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# 3DOS Network tools — moved to plugins/network_tools.py
 # ---------------------------------------------------------------------------
 
 

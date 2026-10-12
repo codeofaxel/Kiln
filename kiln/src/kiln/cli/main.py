@@ -50,11 +50,6 @@ except ImportError:
     FulfillmentError = Exception  # type: ignore[misc,assignment]
 
 try:
-    from kiln.gateway.threedos import ThreeDOSError
-except ImportError:
-    ThreeDOSError = Exception  # type: ignore[misc,assignment]
-
-try:
     from kiln.generation.base import GenerationError
 except ImportError:
     GenerationError = Exception  # type: ignore[misc,assignment]
