@@ -1720,8 +1720,14 @@ class TestRegisterPrinter:
     @pytest.fixture(autouse=True)
     def _no_config_write(self, monkeypatch, tmp_path):
         import kiln.server as mod
+        from kiln.cli.config import PrinterSaveResult
 
-        monkeypatch.setattr(mod, "save_printer", lambda *a, **kw: tmp_path / "config.yaml")
+        monkeypatch.setattr("kiln.cli.config.get_config_path", lambda: tmp_path / "config.yaml")
+        monkeypatch.setattr(
+            mod,
+            "save_printer",
+            lambda name, *a, **kw: PrinterSaveResult(tmp_path / "config.yaml", name, "added"),
+        )
 
     def test_octoprint_success(self, monkeypatch):
         import kiln.server as mod
@@ -1989,6 +1995,173 @@ class TestRegisterPrinter:
         )
         assert result["success"] is False
         assert result["error"]["code"] == "INVALID_ARGS"
+
+
+class TestRegisterPrinterUnderASavedName:
+    """register_printer and a name already saved: a different machine is
+    refused before anything is built or registered; the same machine keeps
+    the model and camera saved for it, live and on disk."""
+
+    _SERIAL = "01P00A000000001"
+
+    @pytest.fixture
+    def saved(self, monkeypatch, tmp_path):
+        import kiln.bench
+        import kiln.server as mod
+        from kiln.cli.config import save_printer
+
+        cfg = tmp_path / "config.yaml"
+        monkeypatch.setattr("kiln.cli.config.get_config_path", lambda: cfg)
+        registry = PrinterRegistry()
+        monkeypatch.setattr(mod, "_registry", registry)
+        monkeypatch.setattr(mod, "_adapter", None)
+        monkeypatch.setattr(kiln.bench, "offer_after_registration", lambda *_a, **_k: None)
+        built: list = []
+
+        class FakeBambuAdapter:
+            name = "bambu"
+
+            def __init__(self, *, host, access_code, serial, tls_mode, printer_model=None):
+                self.printer_model = printer_model
+                self.camera = None
+                built.append(self)
+
+            def set_safety_profile(self, profile_id):
+                self.profile_id = profile_id
+
+            def set_external_camera(self, *, snapshot_url=None, stream_url=None):
+                self.camera = (snapshot_url, stream_url)
+
+        monkeypatch.setattr(mod, "BambuAdapter", FakeBambuAdapter)
+        save_printer(
+            "a1", "bambu", "192.168.1.6",
+            access_code="x", serial=self._SERIAL, printer_model="bambu_a1",
+            camera_stream_url="rtsps://192.168.1.50/live", config_path=cfg, probe=False,
+        )
+        return cfg, registry, built
+
+    def test_a_different_serial_is_refused_and_not_registered(self, saved):
+        cfg, registry, built = saved
+        before = cfg.read_text()
+        result = register_printer(
+            name="a1", printer_type="bambu", host="192.168.1.7",
+            api_key="y", serial="01P00A000000002", verify_connection=False,
+        )
+        assert result["success"] is False
+        assert result["error"]["code"] == "NAME_TAKEN"
+        assert "serial ending 0001" in result["error"]["message"]
+        assert result["suggested_name"] == "a1-2"
+        assert "a1" not in registry
+        assert built == []
+        assert cfg.read_text() == before
+
+    def test_the_same_serial_updates_and_keeps_model_and_camera(self, saved):
+        import yaml
+
+        cfg, registry, built = saved
+        result = register_printer(
+            name="a1", printer_type="bambu", host="192.168.1.7",
+            api_key="y", serial=self._SERIAL, verify_connection=False,
+        )
+        assert result["success"] is True
+        assert result["saved"] == "updated"
+        assert "Updated existing printer 'a1'" in result["message"]
+        assert "a1" in registry
+        assert built[0].printer_model == "bambu_a1"
+        assert built[0].camera == (None, "rtsps://192.168.1.50/live")
+        entry = yaml.safe_load(cfg.read_text())["printers"]["a1"]
+        assert entry["host"] == "192.168.1.7"
+        assert entry["printer_model"] == "bambu_a1"
+
+
+class TestRegisterPrinterSessionOnly:
+    """register_printer(persist=False) under a name in use: judged by the
+    same rule as a saved registration, against both the saved config and
+    printers registered earlier in the session without saving."""
+
+    @pytest.fixture
+    def door(self, monkeypatch, tmp_path):
+        import kiln.bench
+        import kiln.server as mod
+
+        cfg = tmp_path / "config.yaml"
+        monkeypatch.setattr("kiln.cli.config.get_config_path", lambda: cfg)
+        registry = PrinterRegistry()
+        monkeypatch.setattr(mod, "_registry", registry)
+        monkeypatch.setattr(mod, "_adapter", None)
+        monkeypatch.setattr(mod, "_SESSION_PRINTERS", {}, raising=False)
+        monkeypatch.setattr(kiln.bench, "offer_after_registration", lambda *_a, **_k: None)
+        built: list = []
+
+        class FakeBambuAdapter:
+            name = "bambu"
+
+            def __init__(self, *, host, access_code, serial, tls_mode, printer_model=None):
+                self.host = host
+                self.printer_model = printer_model
+                self.camera = None
+                built.append(self)
+
+            def set_safety_profile(self, profile_id):
+                self.profile_id = profile_id
+
+            def set_external_camera(self, *, snapshot_url=None, stream_url=None):
+                self.camera = (snapshot_url, stream_url)
+
+            def disconnect(self):
+                pass
+
+        monkeypatch.setattr(mod, "BambuAdapter", FakeBambuAdapter)
+
+        def register(serial, host="192.168.1.6", **kw):
+            return register_printer(
+                name="a1", printer_type="bambu", host=host, api_key="x",
+                serial=serial, persist=False, verify_connection=False, **kw,
+            )
+
+        return cfg, registry, built, register
+
+    def test_a_different_serial_is_refused_and_the_first_stays(self, door):
+        _cfg, registry, built, register = door
+        assert register("01P00A000000001")["success"] is True
+        result = register("01P00A000000002", host="192.168.1.7")
+        assert result["success"] is False
+        assert result["error"]["code"] == "NAME_TAKEN"
+        assert "serial ending 0001" in result["error"]["message"]
+        assert len(built) == 1
+        assert registry.get("a1") is built[0]
+
+    def test_the_same_serial_updates_and_keeps_the_model(self, door):
+        _cfg, registry, built, register = door
+        register("01P00A000000001", printer_model="bambu_a1")
+        result = register("01P00A000000001", host="192.168.1.7")
+        assert result["success"] is True
+        assert "Updated printer 'a1' for this session" in result["message"]
+        assert registry.get("a1") is built[1]
+        assert built[1].printer_model == "bambu_a1"
+
+    def test_a_saved_name_is_not_bypassed_by_skipping_the_save(self, door):
+        from kiln.cli.config import save_printer
+
+        cfg, registry, built, register = door
+        save_printer(
+            "a1", "bambu", "192.168.1.6", access_code="x",
+            serial="01P00A000000001", config_path=cfg, probe=False,
+        )
+        result = register("01P00A000000002", host="192.168.1.7")
+        assert result["success"] is False
+        assert result["error"]["code"] == "NAME_TAKEN"
+        assert built == []
+        assert "a1" not in registry
+
+    def test_a_name_no_longer_registered_is_free_again(self, door):
+        _cfg, registry, built, register = door
+        register("01P00A000000001")
+        registry.unregister("a1")
+        result = register("01P00A000000002", host="192.168.1.7")
+        assert result["success"] is True
+        assert "notice" not in result
+        assert registry.get("a1") is built[1]
 
 
 # ---------------------------------------------------------------------------

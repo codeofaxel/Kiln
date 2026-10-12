@@ -199,6 +199,115 @@ class TestSaveAndLoad:
 
 
 # ---------------------------------------------------------------------------
+# save_printer under a name already saved
+# ---------------------------------------------------------------------------
+
+_A1_SERIAL = "01P00A000000001"
+
+
+def _saved_a1(tmp_path: Path) -> Path:
+    cfg = tmp_path / "config.yaml"
+    save_printer(
+        "a1", "bambu", "192.168.1.6",
+        access_code="x", serial=_A1_SERIAL, printer_model="bambu_a1",
+        camera_stream_url="rtsps://192.168.1.50/live",
+        config_path=cfg, probe=False,
+    )
+    return cfg
+
+
+def _entry(cfg: Path, name: str) -> dict:
+    return yaml.safe_load(cfg.read_text())["printers"][name]
+
+
+class TestSaveUnderASavedName:
+    """Same machine (serial, or an unchanged address) updates and keeps
+    what was stated before; a different machine is refused unwritten;
+    an address-only printer that moved is replaced with a notice."""
+
+    def test_a_new_name_is_added_without_a_notice(self, tmp_path):
+        result = save_printer("p", "bambu", "10.0.0.2", access_code="x", serial="S1",
+                              config_path=tmp_path / "config.yaml", probe=False)
+        assert result.outcome == "added"
+        assert result.notice is None
+        assert result.path == tmp_path / "config.yaml"
+
+    def test_a_different_serial_is_refused_and_nothing_is_written(self, tmp_path):
+        cfg = _saved_a1(tmp_path)
+        before = cfg.read_text()
+        with pytest.raises(ValueError, match="serial ending 0001, at 192.168.1.6"):
+            save_printer("a1", "bambu", "192.168.1.7", access_code="y", serial="01P00A000000002",
+                         config_path=cfg, probe=False)
+        assert cfg.read_text() == before
+
+    def test_the_refusal_names_a_free_name(self, tmp_path):
+        cfg = _saved_a1(tmp_path)
+        save_printer("a1-2", "bambu", "192.168.1.8", access_code="z", serial="S3", config_path=cfg, probe=False)
+        with pytest.raises(ValueError) as info:
+            save_printer("a1", "bambu", "192.168.1.7", access_code="y", serial="S2", config_path=cfg, probe=False)
+        assert info.value.suggested_name == "a1-3"
+        assert "'a1-3'" in str(info.value)
+
+    def test_the_same_serial_updates_and_keeps_model_and_camera(self, tmp_path):
+        cfg = _saved_a1(tmp_path)
+        result = save_printer("a1", "bambu", "192.168.1.7", access_code="y", serial=_A1_SERIAL.lower(),
+                              config_path=cfg, probe=False)
+        entry = _entry(cfg, "a1")
+        assert entry["host"] == "192.168.1.7"
+        assert entry["access_code"] == "y"
+        assert entry["printer_model"] == "bambu_a1"
+        assert entry["camera_stream_url"] == "rtsps://192.168.1.50/live"
+        assert result.outcome == "updated"
+        assert "from 192.168.1.6 to 192.168.1.7" in result.notice
+        assert "printer_model, camera_stream_url" in result.notice
+
+    def test_a_different_printer_type_is_refused(self, tmp_path):
+        cfg = _saved_a1(tmp_path)
+        before = cfg.read_text()
+        with pytest.raises(ValueError, match="different kind of printer"):
+            save_printer("a1", "moonraker", "http://192.168.1.6", config_path=cfg, probe=False)
+        assert cfg.read_text() == before
+
+    def test_a_different_elegoo_mainboard_is_refused(self, tmp_path):
+        cfg = tmp_path / "config.yaml"
+        save_printer("sat", "elegoo", "10.0.0.3", serial="MAINBOARD-AAAA", config_path=cfg, probe=False)
+        with pytest.raises(ValueError, match="serial ending AAAA"):
+            save_printer("sat", "elegoo", "10.0.0.3", serial="MAINBOARD-BBBB", config_path=cfg, probe=False)
+        assert _entry(cfg, "sat")["mainboard_id"] == "MAINBOARD-AAAA"
+
+    def test_an_address_only_printer_that_moved_is_replaced_with_a_notice(self, tmp_path):
+        cfg = tmp_path / "config.yaml"
+        save_printer("ender", "octoprint", "http://10.0.0.5", api_key="k", printer_model="ender3",
+                     config_path=cfg, probe=False)
+        result = save_printer("ender", "octoprint", "http://10.0.0.9", api_key="k2", config_path=cfg, probe=False)
+        entry = _entry(cfg, "ender")
+        assert entry["host"] == "http://10.0.0.9"
+        assert entry["api_key"] == "k2"
+        assert entry["printer_model"] == "ender3"
+        assert result.outcome == "replaced"
+        assert "(was at http://10.0.0.5)" in result.notice
+        assert "Kept printer_model" in result.notice
+
+    def test_an_address_only_printer_at_the_same_address_is_updated(self, tmp_path):
+        cfg = tmp_path / "config.yaml"
+        save_printer("ender", "octoprint", "http://10.0.0.5", api_key="k", printer_model="ender3",
+                     config_path=cfg, probe=False)
+        result = save_printer("ender", "octoprint", "http://10.0.0.5", api_key="k2", config_path=cfg, probe=False)
+        assert result.outcome == "updated"
+        assert result.notice.startswith("Updated existing printer 'ender'.")
+        assert _entry(cfg, "ender")["printer_model"] == "ender3"
+
+    def test_a_new_camera_replaces_both_saved_camera_urls(self, tmp_path):
+        cfg = _saved_a1(tmp_path)
+        save_printer("a1", "bambu", "192.168.1.6", access_code="x", serial=_A1_SERIAL,
+                     camera_snapshot_url="http://192.168.1.60/snap.jpg", config_path=cfg, probe=False)
+        entry = _entry(cfg, "a1")
+        assert entry["camera_snapshot_url"] == "http://192.168.1.60/snap.jpg"
+        assert "camera_stream_url" not in entry
+        assert entry["printer_model"] == "bambu_a1"
+
+
+# ---------------------------------------------------------------------------
 # set_active_printer
 # ---------------------------------------------------------------------------
 

@@ -19,6 +19,7 @@ from unittest.mock import patch
 import pytest
 
 from kiln import octoprint_appkeys
+from kiln.cli.config import PrinterSaveResult
 from kiln.printer_backends import REQUEST_OFFERS, backend_for
 
 KEY = "kiln-app-key-0123456789"
@@ -278,7 +279,7 @@ def test_kiln_setup_gets_a_found_octoprints_key_from_octoprint(octoprint, tmp_pa
         patch("kiln.cli.config.get_config_path", return_value=tmp_path / "config.yaml"),
         patch("kiln.cli.discovery.discover_printers", return_value=[found]),
         patch("kiln.cli.printer_model_prompt.prompt_for_printer_model", return_value=None),
-        patch("kiln.cli.main.save_printer", return_value=tmp_path / "config.yaml") as save,
+        patch("kiln.cli.main.save_printer", return_value=PrinterSaveResult(tmp_path / "config.yaml", "p", "added")) as save,
         patch("kiln.cli.main._make_adapter", return_value=MagicMock()),
     ):
         result = CliRunner().invoke(cli, ["setup"], input="1\noctopi\ny\n")

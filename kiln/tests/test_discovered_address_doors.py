@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
+from kiln.cli.config import PrinterSaveResult
 from kiln.discovery import DiscoveredPrinter
 
 
@@ -44,7 +45,7 @@ def test_kiln_setup_saves_a_found_octoprint_at_its_port(tmp_path: Path) -> None:
         patch("kiln.cli.discovery.discover_printers", return_value=[found]),
         patch("kiln.octoprint_appkeys.supported", return_value=False),
         patch("kiln.cli.printer_model_prompt.prompt_for_printer_model", return_value=None),
-        patch("kiln.cli.main.save_printer", return_value=tmp_path / "config.yaml") as save,
+        patch("kiln.cli.main.save_printer", return_value=PrinterSaveResult(tmp_path / "config.yaml", "p", "added")) as save,
         patch("kiln.cli.main._make_adapter", return_value=MagicMock()),
     ):
         result = CliRunner().invoke(cli, ["setup"], input="1\noctopi\nkey-123\n")

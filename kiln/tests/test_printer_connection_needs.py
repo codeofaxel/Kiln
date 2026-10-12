@@ -20,7 +20,7 @@ import click
 import pytest
 from click.testing import CliRunner
 
-from kiln.cli.config import save_printer, validate_printer_config
+from kiln.cli.config import PrinterSaveResult, save_printer, validate_printer_config
 from kiln.discovery import DiscoveredPrinter
 from kiln.printer_backends import PRINTER_BACKENDS, backend_for
 
@@ -170,7 +170,7 @@ def test_kiln_setup_says_back_a_discovered_serial_instead_of_asking(tmp_path: Pa
         patch("kiln.cli.config.get_config_path", return_value=tmp_path / "config.yaml"),
         patch("kiln.cli.discovery.discover_printers", return_value=[found]),
         patch("kiln.cli.printer_model_prompt.prompt_for_printer_model", return_value="bambu_a1"),
-        patch("kiln.cli.main.save_printer", return_value=tmp_path / "config.yaml") as save,
+        patch("kiln.cli.main.save_printer", return_value=PrinterSaveResult(tmp_path / "config.yaml", "p", "added")) as save,
         patch("kiln.cli.main._make_adapter", return_value=adapter),
     ):
         result = CliRunner().invoke(cli, ["setup"], input="1\na1\n12345678\n")

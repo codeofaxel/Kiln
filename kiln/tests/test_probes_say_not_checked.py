@@ -15,11 +15,13 @@ any other failure keeps today's words.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from click.testing import CliRunner
 
+from kiln.cli.config import PrinterSaveResult
 from kiln.cli.main import _engaged_elsewhere, cli
 from kiln.printers.base import PrinterEngagementError, PrinterError
 
@@ -131,7 +133,7 @@ class TestSetup:
     def _run(self, adapter) -> str:
         with patch("kiln.cli.main._make_adapter", return_value=adapter), \
              patch("kiln.cli.main.load_printer_config", return_value={"type": "moonraker", "host": "http://ender.local"}), \
-             patch("kiln.cli.main.save_printer"), \
+             patch("kiln.cli.main.save_printer", return_value=PrinterSaveResult(Path("config.yaml"), "ender", "added")), \
              patch("kiln.cli.connection_prompt.ask_connection_needs", return_value={}), \
              patch("kiln.cli.discovery.probe_host", return_value=[]):
             return CliRunner().invoke(

@@ -62,6 +62,7 @@ except ImportError:
 from kiln.cli.auth_commands import register_auth_cli
 from kiln.cli.bridge_commands import register_bridge_cli
 from kiln.cli.config import (
+    PrinterNameTaken,
     _normalize_printer_type,
     load_printer_config,
     remove_printer,
@@ -1954,7 +1955,7 @@ def auth(
             except ValueError as exc:
                 raise click.UsageError(str(exc)) from exc
     try:
-        path = save_printer(
+        saved = save_printer(
             name,
             printer_type,
             host,
@@ -2010,8 +2011,11 @@ def auth(
             "name": name,
             "type": printer_type,
             "host": saved_host,
-            "config_path": str(path),
+            "config_path": str(saved.path),
+            "saved": saved.outcome,
         }
+        if saved.notice:
+            data["notice"] = saved.notice
         if printer_model:
             data["printer_model"] = printer_model
         if prusa_diagnostics is not None:
@@ -2101,6 +2105,8 @@ def auth(
                     f"CFS discovery: {detected}; active slot control is hardware-unverified in Kiln."
                 )
             click.echo("Creality connectivity check passed. Run: kiln doctor-creality for full diagnostics.")
+    except PrinterNameTaken as exc:
+        raise click.UsageError(str(exc)) from exc
     except OSError as exc:
         click.echo(
             format_error(
@@ -8825,17 +8831,27 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
     # -- Save --------------------------------------------------------------
     click.echo()
     try:
-        path = save_printer(
-            name,
-            printer_type,
-            host,
-            api_key=api_key,
-            access_code=access_code,
-            serial=serial,
-            printer_model=printer_model,
-            set_active=True,
-        )
-        click.echo(f"  Saved printer '{name}' to {path}")
+        while True:
+            try:
+                saved = save_printer(
+                    name,
+                    printer_type,
+                    host,
+                    api_key=api_key,
+                    access_code=access_code,
+                    serial=serial,
+                    printer_model=printer_model,
+                    set_active=True,
+                )
+                break
+            except PrinterNameTaken as exc:
+                # Everything else is in hand, so ask only for another name.
+                click.echo(click.style(f"  {exc}", fg="yellow"))
+                name = click.prompt("  Friendly name for this printer", default=exc.suggested_name)
+                name = name.strip().lower().replace(" ", "-")
+        click.echo(f"  Saved printer '{name}' to {saved.path}")
+        if saved.notice:
+            click.echo(click.style(f"  {saved.notice}", fg="yellow"))
     except OSError as exc:
         click.echo(click.style(f"  Failed to save config: {exc}", fg="red"))
         sys.exit(1)

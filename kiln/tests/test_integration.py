@@ -33,6 +33,7 @@ try:
 except ImportError:
     BillingLedger = None
     FeePolicy = None
+from kiln.cli.config import PrinterSaveResult
 from kiln.cli.main import cli
 from kiln.events import Event, EventBus, EventType
 from kiln.gcode import validate_gcode, validate_gcode_for_printer
@@ -167,7 +168,7 @@ class TestFullPipeline:
 
         # Step 2: Auth with discovered printer
         cfg_path = tmp_path / "config.yaml"
-        with patch("kiln.cli.main.save_printer", return_value=cfg_path):
+        with patch("kiln.cli.main.save_printer", return_value=PrinterSaveResult(cfg_path, "p", "added")):
             result = runner.invoke(cli, [
                 "auth",
                 "--name", printer["name"],

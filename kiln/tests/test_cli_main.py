@@ -13,6 +13,7 @@ import click
 import pytest
 from click.testing import CliRunner
 
+from kiln.cli.config import PrinterSaveResult
 from kiln.cli.main import cli
 from kiln.printers.base import (
     JobProgress,
@@ -895,7 +896,7 @@ class TestPrinterManagement:
 
 class TestAuth:
     def test_auth_octoprint(self, runner):
-        with patch("kiln.cli.main.save_printer", return_value=Path("/tmp/config.yaml")):
+        with patch("kiln.cli.main.save_printer", return_value=PrinterSaveResult(Path("/tmp/config.yaml"), "p", "added")):
             result = runner.invoke(cli, [
                 "auth",
                 "--name", "ender",
@@ -910,7 +911,7 @@ class TestAuth:
         assert data["data"]["name"] == "ender"
 
     def test_auth_bambu(self, runner):
-        with patch("kiln.cli.main.save_printer", return_value=Path("/tmp/config.yaml")):
+        with patch("kiln.cli.main.save_printer", return_value=PrinterSaveResult(Path("/tmp/config.yaml"), "p", "added")):
             result = runner.invoke(cli, [
                 "auth",
                 "--name", "x1c",
@@ -931,7 +932,7 @@ class TestAuth:
             "file_count": 16,
             "checks": [{"name": "storage_usb", "ok": True}],
         }
-        with patch("kiln.cli.main.save_printer", return_value=Path("/tmp/config.yaml")) as mock_save, \
+        with patch("kiln.cli.main.save_printer", return_value=PrinterSaveResult(Path("/tmp/config.yaml"), "p", "added")) as mock_save, \
              patch("kiln.cli.main.load_printer_config", return_value={
                  "type": "prusalink",
                  "host": "http://192.168.0.44",
@@ -964,7 +965,7 @@ class TestAuth:
         # stringified so the expectation matches on Windows too (where
         # the separator is a backslash).
         config_path = Path("/tmp/config.yaml")
-        with patch("kiln.cli.main.save_printer", return_value=config_path) as mock_save, \
+        with patch("kiln.cli.main.save_printer", return_value=PrinterSaveResult(config_path, "p", "added")) as mock_save, \
              patch("kiln.cli.main.load_printer_config", return_value={
                  "type": "prusalink",
                  "host": "http://192.168.0.44",
@@ -986,6 +987,70 @@ class TestAuth:
         assert data["error"]["code"] == "PRUSA_DIAGNOSTICS_FAILED"
         assert data["data"]["config_path"] == str(config_path)
         assert mock_save.call_count == 1
+
+
+class TestSavingUnderASavedName:
+    """``kiln auth`` and ``kiln setup`` against a name already saved for a
+    different machine: auth refuses as a usage error, setup asks for
+    another name; a re-save of the same machine says it updated."""
+
+    _SERIAL = "01P00A000000001"
+
+    def _auth(self, runner, serial: str, *extra: str):
+        return runner.invoke(cli, [
+            "auth", "--name", "a1", "--host", "192.168.1.7", "--type", "bambu",
+            "--access-code", "12345678", "--serial", serial, *extra,
+        ])
+
+    @pytest.fixture
+    def cfg(self, tmp_path):
+        from kiln.cli.config import save_printer
+
+        path = tmp_path / "config.yaml"
+        save_printer(
+            "a1", "bambu", "192.168.1.6", access_code="x", serial=self._SERIAL,
+            printer_model="bambu_a1", config_path=path, probe=False,
+        )
+        with patch("kiln.cli.config.get_config_path", return_value=path):
+            yield path
+
+    def test_auth_refuses_a_different_serial_as_a_usage_error(self, runner, cfg):
+        before = cfg.read_text()
+        result = self._auth(runner, "01P00A000000002")
+        assert result.exit_code == 2, result.output
+        assert "serial ending 0001" in result.output
+        assert cfg.read_text() == before
+
+    def test_auth_says_it_updated_the_same_printer(self, runner, cfg):
+        import yaml
+
+        result = self._auth(runner, self._SERIAL, "--json")
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)["data"]
+        assert data["saved"] == "updated"
+        assert "Kept printer_model" in data["notice"]
+        assert yaml.safe_load(cfg.read_text())["printers"]["a1"]["printer_model"] == "bambu_a1"
+
+    def test_setup_asks_for_another_name_and_keeps_the_saved_printer(self, cfg):
+        import yaml
+
+        from kiln.discovery import DiscoveredPrinter
+
+        found = DiscoveredPrinter(
+            host="192.168.1.9", port=8883, printer_type="bambu", name="A1", serial="01P00A000000002",
+        )
+        with (
+            patch("kiln.terms.is_current", return_value=True),
+            patch("kiln.cli.discovery.discover_printers", return_value=[found]),
+            patch("kiln.cli.printer_model_prompt.prompt_for_printer_model", return_value="bambu_a1"),
+            patch("kiln.cli.main._make_adapter", return_value=MagicMock()),
+        ):
+            result = CliRunner().invoke(cli, ["setup"], input="add\n1\na1\n12345678\n\n" + "\n" * 8)
+        printers = yaml.safe_load(cfg.read_text())["printers"]
+        assert printers["a1"]["serial"] == self._SERIAL, result.output
+        assert printers["a1"]["host"] == "192.168.1.6"
+        assert printers["a1-2"]["serial"] == "01P00A000000002", result.output
+        assert "A different printer is already saved as 'a1'" in result.output
 
 
 class TestPrusaProfileDetection:

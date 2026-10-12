@@ -126,7 +126,16 @@ try:
     from kiln.billing_alerts import BillingAlertManager
 except ImportError:
     BillingAlertManager = None  # Available in kiln-pro
-from kiln.cli.config import _check_printer_url, _normalize_printer_type, save_printer
+from kiln.cli.config import (
+    PrinterNameTaken,
+    _check_printer_url,
+    _identity_from_args,
+    _normalize_printer_type,
+    _printer_identity,
+    _same_host,
+    save_printer,
+    saved_printer_for_update,
+)
 from kiln.cloud_sync import CloudSyncManager, SyncConfig
 from kiln.cost_estimator import (
     BUILTIN_MATERIALS,
@@ -12658,6 +12667,53 @@ def fleet_status() -> dict:
 # fleet_analytics — extracted to plugins/fleet_tools.py
 
 
+#: Printers ``register_printer`` put in the registry WITHOUT saving them,
+#: as entries shaped like saved ones, so a later registration under the same
+#: name is judged by the rule the config file applies.  Only names still in
+#: the registry count; a saved registration drops its name from here.
+_SESSION_PRINTERS: dict[str, dict[str, Any]] = {}
+
+
+def _session_printer_entry(
+    printer_type: str,
+    host: str,
+    serial: str | None,
+    printer_model: str | None,
+    camera: tuple[str | None, str | None],
+) -> dict[str, Any]:
+    """A session-only registration, in the shape :func:`save_printer` writes."""
+    entry: dict[str, Any] = {"type": printer_type, "host": host}
+    identity = _identity_from_args(printer_type, serial)
+    if identity:
+        entry["mainboard_id" if printer_type == "elegoo" else "serial"] = identity
+    if printer_model:
+        entry["printer_model"] = printer_model
+    if camera[0]:
+        entry["camera_snapshot_url"] = camera[0]
+    if camera[1]:
+        entry["camera_stream_url"] = camera[1]
+    return entry
+
+
+def _session_replace_notice(
+    name: str,
+    existing: dict[str, Any],
+    printer_type: str,
+    host: str,
+    serial: str | None,
+) -> str:
+    """One sentence for a session-only registration under a name in use."""
+    identity = _identity_from_args(printer_type, serial)
+    old_host = str(existing.get("host") or "")
+    if (identity and identity == _printer_identity(existing)) or _same_host(old_host, host):
+        return f"Updated printer {name!r} for this session; it is not saved."
+    was = f" (was at {old_host})" if old_host else ""
+    return (
+        f"Replaced printer {name!r} for this session{was}; it is not saved. Kiln cannot "
+        "tell from an address alone whether this is the same machine."
+    )
+
+
 @mcp.tool()
 def register_printer(
     name: str,
@@ -12789,6 +12845,32 @@ def register_printer(
                 code="INVALID_ARGS",
             )
 
+        # A name already used for a different machine -- saved, or
+        # registered earlier in this session without saving -- is refused
+        # before anything is asked of the printer, built, saved or
+        # registered, whether or not this registration persists.  An update
+        # of the same machine keeps the model and camera stated before, so
+        # the live adapter is built with them too.
+        session_entries = {n: e for n, e in _SESSION_PRINTERS.items() if n in _get_registry()}
+        try:
+            saved_entry = saved_printer_for_update(
+                name, printer_type, serial=serial, session=session_entries
+            )
+        except PrinterNameTaken as exc:
+            return _error_dict(
+                str(exc),
+                code="NAME_TAKEN",
+                extra={"suggested_name": exc.suggested_name},
+            )
+        live_model = printer_model or (saved_entry or {}).get("printer_model") or None
+        if camera_snapshot_url or camera_stream_url:
+            live_camera = (camera_snapshot_url, camera_stream_url)
+        else:
+            live_camera = (
+                (saved_entry or {}).get("camera_snapshot_url") or None,
+                (saved_entry or {}).get("camera_stream_url") or None,
+            )
+
         # What this kind of printer needs is one list every setup door reads
         # (kiln.printer_backends); the refusal says what is missing and where
         # the person finds it.
@@ -12837,7 +12919,7 @@ def register_printer(
             adapter = CrealityAdapter(
                 host=host,
                 api_key=api_key or None,
-                model=printer_model or None,
+                model=live_model,
                 verify_ssl=verify_ssl,
             )
         elif printer_type == "bambu":
@@ -12853,7 +12935,7 @@ def register_printer(
                 # Like the Creality branch: the declared model is the
                 # adapter's identity too, not just a safety-profile hint —
                 # bed-aware planners read it back off the registry.
-                printer_model=printer_model or None,
+                printer_model=live_model,
                 tls_mode="pin" if verify_ssl else "insecure",
             )
         elif printer_type == "elegoo":
@@ -12882,11 +12964,11 @@ def register_printer(
                 code="INVALID_ARGS",
             )
 
-        if printer_model:
-            adapter.set_safety_profile(printer_model)
+        if live_model:
+            adapter.set_safety_profile(live_model)
             from kiln.printer_profile_ids import resolve_declared_model
 
-            resolved, close = resolve_declared_model(printer_model)
+            resolved, close = resolve_declared_model(live_model)
             if resolved is None:
                 # The CLI's setup asks before recording an unknown model; this
                 # door records it, so it says here what home_axes and
@@ -12894,24 +12976,25 @@ def register_printer(
                 hint = f" Closest catalogue rows: {', '.join(close)}." if close else ""
                 url_warnings = [
                     *url_warnings,
-                    f"printer_model {printer_model!r} is not a catalogue row Kiln knows, so the "
+                    f"printer_model {live_model!r} is not a catalogue row Kiln knows, so the "
                     "per-model safety checks stay off and home_axes / park_head will refuse to home Z "
                     f"or park until printer_model names one.{hint}",
                 ]
 
         # A camera the user supplies.  Judged before anything is written,
         # so a bad URL refuses the registration rather than saving half.
-        if camera_snapshot_url or camera_stream_url:
+        if live_camera[0] or live_camera[1]:
             try:
                 adapter.set_external_camera(
-                    snapshot_url=camera_snapshot_url,
-                    stream_url=camera_stream_url,
+                    snapshot_url=live_camera[0],
+                    stream_url=live_camera[1],
                 )
             except ValueError as exc:
                 return _error_dict(str(exc), code="INVALID_ARGS")
 
         warnings_out: list[str] = list(url_warnings)
         persisted_path: str | None = None
+        saved_outcome: Any = None
         if persist:
             try:
                 persisted = save_printer(
@@ -12928,7 +13011,16 @@ def register_printer(
                     set_active=True,
                     probe=False,
                 )
-                persisted_path = str(persisted)
+                persisted_path = str(persisted.path)
+                saved_outcome = persisted
+            except PrinterNameTaken as exc:
+                # Checked above; the config changed in between.  Still a
+                # refusal: nothing is registered under the taken name.
+                return _error_dict(
+                    str(exc),
+                    code="NAME_TAKEN",
+                    extra={"suggested_name": exc.suggested_name},
+                )
             except Exception as exc:
                 warnings_out.append(f"Printer registered for this session but could not be saved: {exc}")
 
@@ -12940,6 +13032,13 @@ def register_printer(
         _adapter = adapter  # Update immediately so tools use the new one.
 
         _get_registry().register(name, adapter)
+        if saved_outcome is not None:
+            # The config file now answers for this name.
+            _SESSION_PRINTERS.pop(name, None)
+        else:
+            _SESSION_PRINTERS[name] = _session_printer_entry(
+                printer_type, host, serial, live_model, live_camera
+            )
 
         # If the boot-time adapter was a different object (not in the
         # registry), disconnect it to stop orphaned MQTT threads.
@@ -12958,6 +13057,15 @@ def register_printer(
             "message": f"Registered printer {name!r} ({printer_type} @ {host}).",
             "name": name,
         }
+        if saved_outcome is not None:
+            result["saved"] = saved_outcome.outcome
+            if saved_outcome.notice:
+                result["notice"] = saved_outcome.notice
+                result["message"] += " " + saved_outcome.notice
+        elif saved_entry is not None:
+            notice = _session_replace_notice(name, saved_entry, printer_type, host, serial)
+            result["notice"] = notice
+            result["message"] += " " + notice
         _camera = getattr(adapter, "external_camera", None)
         if _camera is not None:
             # Redacted by construction; the note is the honesty every door

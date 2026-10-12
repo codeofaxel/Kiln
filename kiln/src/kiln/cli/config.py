@@ -19,6 +19,7 @@ import re
 import stat
 import sys
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -394,6 +395,178 @@ def load_printer_config(
 # Save / mutate
 # ---------------------------------------------------------------------------
 
+#: Entry keys that name ONE physical machine: a Bambu serial, an Elegoo
+#: mainboard id.  Types without one are known only by an address, which
+#: legitimately changes when the router hands out a new lease.
+_IDENTITY_KEYS: tuple[str, ...] = ("serial", "mainboard_id")
+
+#: Keys that describe one user-supplied camera.  Replaced together: a new
+#: snapshot URL beside a kept stream URL could describe two cameras.
+_CAMERA_KEYS: tuple[str, ...] = ("camera_snapshot_url", "camera_stream_url")
+
+
+class PrinterNameTaken(ValueError):
+    """A save would put a different machine under a name already saved.
+
+    Raised before anything is written.  ``suggested_name`` is the first
+    free ``<name>-<n>``, for a door that offers one.
+    """
+
+    def __init__(self, message: str, *, name: str, suggested_name: str) -> None:
+        super().__init__(message)
+        self.name = name
+        self.suggested_name = suggested_name
+
+
+@dataclass(frozen=True)
+class PrinterSaveResult:
+    """What :func:`save_printer` did to the config file.
+
+    ``outcome`` is ``"added"`` (a new name), ``"updated"`` (the same
+    machine, matched by serial or by an unchanged address) or
+    ``"replaced"`` (a printer with no serial-style identity whose address
+    changed, so Kiln cannot tell whether it is the same machine).
+    ``kept`` names the saved fields the caller did not resend and that
+    were carried over -- names only, never values.
+    """
+
+    path: Path
+    name: str
+    outcome: str
+    previous_host: str | None = None
+    host: str | None = None
+    kept: tuple[str, ...] = ()
+
+    @property
+    def notice(self) -> str | None:
+        """One sentence for the person, or ``None`` for a new name."""
+        if self.outcome == "added":
+            return None
+        kept = f" Kept {', '.join(self.kept)} from the saved entry." if self.kept else ""
+        if self.outcome == "updated":
+            moved = (
+                f" Its address changed from {self.previous_host} to {self.host}."
+                if self.previous_host and self.host and self.previous_host != self.host
+                else ""
+            )
+            return f"Updated existing printer {self.name!r}.{moved}{kept}"
+        was = f" (was at {self.previous_host})" if self.previous_host else ""
+        check = (
+            " If this is a different machine, check those, or save it under another name."
+            if self.kept
+            else ""
+        )
+        return (
+            f"Replaced the saved entry for {self.name!r}{was}. Kiln cannot tell from an "
+            f"address alone whether this is the same machine.{kept}{check}"
+        )
+
+
+def _printer_identity(entry: dict[str, Any]) -> str | None:
+    """The serial-style id that names *entry*'s machine, or ``None``."""
+    for key in _IDENTITY_KEYS:
+        value = str(entry.get(key) or "").strip()
+        if value:
+            return value.upper()
+    return None
+
+
+def _identity_from_args(printer_type: str, serial: str | None) -> str | None:
+    """The id a save of this type would store from *serial*, or ``None``.
+
+    Only Bambu (``serial``) and Elegoo (``mainboard_id``) store one.
+    """
+    if _normalize_printer_type(printer_type) not in ("bambu", "elegoo"):
+        return None
+    value = str(serial or "").strip()
+    return value.upper() or None
+
+
+def _free_printer_name(name: str, printers: dict[str, Any]) -> str:
+    n = 2
+    while f"{name}-{n}" in printers:
+        n += 1
+    return f"{name}-{n}"
+
+
+def _same_host(a: Any, b: Any) -> bool:
+    return str(a or "").strip().rstrip("/").lower() == str(b or "").strip().rstrip("/").lower()
+
+
+def _judge_existing_printer(
+    name: str,
+    printers: dict[str, Any],
+    printer_type: str,
+    identity: str | None,
+) -> dict[str, Any] | None:
+    """The saved entry a save under *name* would update, or ``None`` for a new name.
+
+    Raises :class:`PrinterNameTaken` when the saved entry is a different
+    machine: another printer type, or another serial.  The one decision
+    every door reaches, through :func:`save_printer` or
+    :func:`saved_printer_for_update`.
+    """
+    existing = printers.get(name)
+    if not isinstance(existing, dict):
+        return None
+    suggestion = _free_printer_name(name, printers)
+    old_type = _normalize_printer_type(str(existing.get("type") or ""))
+    old_host = str(existing.get("host") or "?")
+    remedy = (
+        f"Save this one under another name (for example {suggestion!r}), or remove the "
+        f"saved one first (kiln remove {name})."
+    )
+    if old_type != _normalize_printer_type(printer_type):
+        raise PrinterNameTaken(
+            f"{name!r} is already saved for a different kind of printer ({old_type or 'unknown'} "
+            f"at {old_host}); this one is {printer_type}. {remedy}",
+            name=name,
+            suggested_name=suggestion,
+        )
+    old_identity = _printer_identity(existing)
+    if identity and old_identity and identity != old_identity:
+        raise PrinterNameTaken(
+            f"A different printer is already saved as {name!r}: serial ending "
+            f"{old_identity[-4:]}, at {old_host}. {remedy} To change that printer, "
+            f"register it again under {name!r} with its own serial.",
+            name=name,
+            suggested_name=suggestion,
+        )
+    return existing
+
+
+def saved_printer_for_update(
+    name: str,
+    printer_type: str,
+    *,
+    serial: str | None = None,
+    config_path: Path | None = None,
+    session: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    """Ask, without writing, what saving *name* would build on.
+
+    Returns a copy of the saved entry a :func:`save_printer` call with
+    these arguments would update, ``None`` for a new name, and raises
+    :class:`PrinterNameTaken` exactly when that call would.  For a door
+    that builds a live adapter before it saves: the adapter then carries
+    the same model and camera the saved entry will.
+
+    *session* holds printers a door registered without saving, as entries
+    shaped like the saved ones.  They are judged by the same rule and win
+    over the file for the same name, because the session's printer is the
+    one a registration under that name would replace.
+    """
+    raw = _read_config_file(config_path or get_config_path())
+    saved = raw.get("printers")
+    printers: dict[str, Any] = dict(saved) if isinstance(saved, dict) else {}
+    printers.update(session or {})
+    if not printers:
+        return None
+    identity = _identity_from_args(printer_type, serial)
+    existing = _judge_existing_printer(name, printers, printer_type, identity)
+    return dict(existing) if existing is not None else None
+
+
 
 def save_printer(
     name: str,
@@ -410,8 +583,17 @@ def save_printer(
     set_active: bool = True,
     config_path: Path | None = None,
     probe: bool = True,
-) -> Path:
-    """Add or update a printer in the config file.
+) -> PrinterSaveResult:
+    """Add a printer to the config file, or update the one saved under *name*.
+
+    A save under a name already in use builds on the saved entry: only the
+    fields this call passes are changed, so a model or camera stated once
+    survives a later save that changes the address.  It is refused with
+    :class:`PrinterNameTaken`, before anything is written, when the saved
+    entry is a different machine -- another printer type, or another
+    serial / mainboard id.  A printer with no serial-style id whose address
+    changed is updated as ``"replaced"``, and the result's ``notice`` says
+    so.  Passing either camera URL replaces both saved camera URLs.
 
     *baudrate* applies to serial printers only; omit it to let the adapter
     fall back to :data:`DEFAULT_SERIAL_BAUDRATE`.
@@ -426,13 +608,17 @@ def save_printer(
     *probe* asks the address over the network before saving it (up to 5 s
     when nothing answers); a caller that has just asked passes ``False``.
 
-    Returns the path to the config file.
+    Returns a :class:`PrinterSaveResult`: the config file's path, and
+    whether the printer was added, updated or replaced.
     """
     path = config_path or get_config_path()
     raw = _read_config_file(path)
     printers = raw.setdefault("printers", {})
     if not isinstance(printers, dict):
         raw["printers"] = printers = {}
+
+    identity = _identity_from_args(printer_type, serial)
+    existing = _judge_existing_printer(name, printers, printer_type, identity)
 
     cleaned_host, url_warnings = _validate_printer_url(host, printer_type=printer_type, probe=probe)
 
@@ -476,6 +662,22 @@ def save_printer(
     if camera_stream_url:
         entry["camera_stream_url"] = camera_stream_url.strip()
 
+    outcome = "added"
+    previous_host: str | None = None
+    kept: tuple[str, ...] = ()
+    if existing is not None:
+        base = dict(existing)
+        if any(key in entry for key in _CAMERA_KEYS):
+            for key in _CAMERA_KEYS:
+                base.pop(key, None)
+        if printer_type == "usb" and baudrate is not None:
+            base.pop("baudrate", None)
+        kept = tuple(k for k in base if k not in entry and k not in ("type", "host"))
+        previous_host = str(existing.get("host") or "") or None
+        same_machine = bool(identity and identity == _printer_identity(existing))
+        outcome = "updated" if same_machine or _same_host(previous_host, cleaned_host) else "replaced"
+        entry = {**base, **entry}
+
     printers[name] = entry
 
     if set_active or "active_printer" not in raw:
@@ -488,7 +690,14 @@ def save_printer(
         for w in url_warnings:
             logger.warning("Printer %r URL: %s", name, w)
 
-    return path
+    return PrinterSaveResult(
+        path=path,
+        name=name,
+        outcome=outcome,
+        previous_host=previous_host,
+        host=cleaned_host,
+        kept=kept,
+    )
 
 
 def set_printer_model(
