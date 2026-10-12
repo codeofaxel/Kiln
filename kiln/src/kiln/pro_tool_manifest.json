@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-11T16:41:43.848366+00:00",
-  "tool_count": 422,
+  "generated": "2026-10-12T07:47:21.110159+00:00",
+  "tool_count": 423,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -9913,6 +9913,18 @@
             "title": "Cycle Count",
             "type": "integer"
           },
+          "service_temperature_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Service Temperature C"
+          },
           "printer_id": {
             "anyOf": [
               {
@@ -9945,6 +9957,16 @@
               "auto"
             ],
             "title": "Mode",
+            "type": "string"
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
+          },
+          "version_id": {
+            "default": "",
+            "title": "Version Id",
             "type": "string"
           }
         },
@@ -13278,6 +13300,126 @@
           "result"
         ],
         "title": "record_hardware_outcomeArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
+      }
+    },
+    {
+      "name": "record_load_outcome",
+      "description": "Report how a printed part did under a load it carried in real use.",
+      "tier": "free",
+      "access": "free",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "material": {
+            "title": "Material",
+            "type": "string"
+          },
+          "result": {
+            "title": "Result",
+            "type": "string"
+          },
+          "days_in_service": {
+            "title": "Days In Service",
+            "type": "number"
+          },
+          "service_temperature_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Service Temperature C"
+          },
+          "temperature_knowledge": {
+            "default": "estimated",
+            "title": "Temperature Knowledge",
+            "type": "string"
+          },
+          "load_knowledge": {
+            "default": "estimated",
+            "title": "Load Knowledge",
+            "type": "string"
+          },
+          "stress_fraction": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Stress Fraction"
+          },
+          "load_n": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Load N"
+          },
+          "verdict": {
+            "default": "",
+            "title": "Verdict",
+            "type": "string"
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
+          },
+          "version_id": {
+            "default": "",
+            "title": "Version Id",
+            "type": "string"
+          },
+          "printer_id": {
+            "default": "",
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "printer_model": {
+            "default": "",
+            "title": "Printer Model",
+            "type": "string"
+          },
+          "environment": {
+            "default": "",
+            "title": "Environment",
+            "type": "string"
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string"
+          },
+          "conditioning": {
+            "default": "",
+            "title": "Conditioning",
+            "type": "string"
+          }
+        },
+        "required": [
+          "material",
+          "result",
+          "days_in_service"
+        ],
+        "title": "record_load_outcomeArguments",
         "type": "object"
       },
       "offline": {
