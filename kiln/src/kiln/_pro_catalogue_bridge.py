@@ -54,7 +54,9 @@ logger = logging.getLogger(__name__)
 WIRE_TOOL = "get_printer_record"
 #: The two blocks a record carries; each public loader parses one of them.
 BLOCKS = ("safety", "intel")
-#: Where the same answer is read from when kiln-pro IS installed here.
+#: Where the same answer is read from when kiln-pro IS installed here
+#: (imported by name in :func:`_local`, never by a string, so a static
+#: reader of the call graph sees the crossing).
 LOCAL_MODULE = "kiln_pro.device_intelligence.printer_catalogue"
 #: Setting a printer up is a person waiting; a command on the way to a
 #: print must not wait longer than this for a record it can do without.
@@ -153,9 +155,9 @@ def printer_record(printer_id: Any) -> dict[str, Any] | None:
 
 def _local(key: str) -> tuple[dict[str, Any] | None, Miss | None]:
     try:
-        import importlib
+        from kiln_pro.device_intelligence.printer_catalogue import printer_record as local_record
 
-        record = importlib.import_module(LOCAL_MODULE).printer_record(key)
+        record = local_record(key)
     except Exception as exc:  # noqa: BLE001 -- a loader never fails for want of it
         logger.debug("printer catalogue on this computer failed", exc_info=True)
         return None, Miss("unanswered", _NOT_ASKED, f"kiln-pro on this computer stopped: {exc}"[:400])
