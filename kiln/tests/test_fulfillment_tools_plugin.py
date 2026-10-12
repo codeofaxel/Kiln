@@ -209,6 +209,44 @@ def test_fulfillment_quote_caches_provider_quote_id(registered_tools, tmp_path, 
     assert get_cached_quote_by_id("provider-quote-1") is not None
 
 
+def test_fulfillment_quote_leads_with_the_order_services_message(registered_tools, tmp_path, monkeypatch):
+    """The quote reply opens with what the person must hear, worded by the
+    order service, so an agent's summary cannot drop the terms or the
+    more-copies prices (it did, live, 2026-10-12)."""
+    service = order_service.provide(monkeypatch)
+    import kiln.server as server
+    from kiln.quote_cache import get_quote_cache
+
+    get_quote_cache().invalidate_all()
+    model = tmp_path / "model.stl"
+    model.write_bytes(b"solid test\nendsolid test\n")
+    quote = SimpleNamespace(
+        quote_id="q-1", provider="craftcloud", material="pla", quantity=1,
+        total_price=10.99, currency="USD", lead_time_days=7, shipping_options=[],
+        to_dict=lambda: {"quote_id": "q-1"},
+    )
+    seen: dict = {}
+
+    def fake_message(q, sheet, routing):
+        seen.update(quote=q, sheet=sheet, routing=routing)
+        return ["1 copy, delivered: 24.02 USD.", "Customs are yours."]
+
+    monkeypatch.setattr(service, "price_sheet", lambda q, kiln_fee=0.0: {"total": 24.02}, raising=False)
+    monkeypatch.setattr(service, "quote_message", fake_message, raising=False)
+    monkeypatch.setattr(server, "_get_fulfillment", lambda: SimpleNamespace(name="craftcloud", get_quote=lambda r: quote))
+    monkeypatch.setattr(server, "_get_billing", lambda: None)
+    monkeypatch.setattr(server, "_get_payment_mgr", lambda: SimpleNamespace(available_rails=[]))
+    routing = {"provider_terms_url": "https://terms.example", "provider_order_terms": ["Customs are yours."]}
+    monkeypatch.setattr(server, "_provider_routing_metadata", lambda provider, provider_order_id="": dict(routing))
+
+    result = registered_tools["fulfillment_quote"](file_path=str(model), material_id="pla")
+
+    assert list(result)[:2] == ["success", "tell_the_person"], "the message comes before the data"
+    assert result["tell_the_person"] == ["1 copy, delivered: 24.02 USD.", "Customs are yours."]
+    assert seen["quote"] is quote and seen["sheet"] == {"total": 24.02} and seen["routing"] == routing
+    assert result["quote"]["price_sheet"] == {"total": 24.02}
+
+
 def test_fulfillment_order_requires_preview_confirmation(registered_tools, monkeypatch):
     order_service.provide(monkeypatch)
     result = registered_tools["fulfillment_order"](

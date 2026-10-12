@@ -218,19 +218,12 @@ class _FulfillmentToolsPlugin:
             when the order is placed via ``fulfillment_order``, or released
             if the user doesn't proceed.
 
-            The quote's ``price_sheet`` is the price: what is printing, what
-            is a print shop's minimum order charge, what is shipping, Kiln's
-            fee, the total and the price per copy, with ``copies_ladder``
-            (what more copies would cost, delivered) and ``notes``. Show the
-            person the whole sheet and every note before they decide, and
-            never add the parts up yourself: a $16.58 production line can be
-            $4.45 of printing and the rest a shop's minimum that ten copies
-            would share.
-
-            The reply also carries ``provider_order_terms``: what the buyer
-            agrees to when they order (when they pay, what a change of mind
-            costs, when they get a full refund). Tell the person these with
-            the price too, and give them ``provider_terms_url``.
+            The reply opens with ``tell_the_person``: the price and what it
+            is made of, timing, what more copies would cost, and the print
+            service's order terms with a link to them, already worded for
+            the person. Pass every line on to them word for word, in order,
+            before they decide; do not summarise, shorten or drop any.
+            ``quote.price_sheet`` holds the same numbers as data.
 
             Use the returned ``quote_id`` with ``fulfillment_order`` to place the
             order.
@@ -269,13 +262,24 @@ class _FulfillmentToolsPlugin:
                     quote_data["total_with_fee"] = float(fee_calc.total_cost)
                 # The one price sheet every door serves, built by the order
                 # service so this tool never folds its own total.
+                routing = _srv._provider_routing_metadata(provider.name)
                 sheet = getattr(service, "price_sheet", None)
+                message = getattr(service, "quote_message", None)
+                tell: list[str] = []
                 if sheet is not None:
                     kiln_fee = 0.0
                     if fee_calc is not None:
-                        kiln_fee = float(fee_calc.fee_amount + getattr(fee_calc, "tax_amount", 0))
-                    quote_data["price_sheet"] = sheet(quote, kiln_fee=kiln_fee)
-                quote_data.update(_srv._provider_routing_metadata(provider.name))
+                        kiln_fee = float(
+                            getattr(fee_calc, "fee_amount", 0) + getattr(fee_calc, "tax_amount", 0)
+                        )
+                    # How the price is shown never costs the person the quote.
+                    try:
+                        quote_data["price_sheet"] = sheet(quote, kiln_fee=kiln_fee)
+                        if message is not None:
+                            tell = message(quote, quote_data["price_sheet"], routing)
+                    except Exception:
+                        _logger.warning("Could not word the price for quote %s", quote.quote_id, exc_info=True)
+                quote_data.update(routing)
                 quote_data["provider_quote_id"] = quote.quote_id
                 try:
                     from kiln.quote_cache import cache_quote
@@ -321,10 +325,12 @@ class _FulfillmentToolsPlugin:
                     # Hold failed — fee will be collected at order time.
                     pass
 
-                return {
-                    "success": True,
-                    "quote": quote_data,
-                }
+                # The message first, already worded for the person.
+                reply: dict = {"success": True}
+                if tell:
+                    reply["tell_the_person"] = tell
+                reply["quote"] = quote_data
+                return reply
             except FileNotFoundError as exc:
                 return _srv._error_dict(
                     f"Failed to get fulfillment quote: {exc}", code="FILE_NOT_FOUND"
@@ -607,6 +613,10 @@ class _FulfillmentToolsPlugin:
                     charge — the tax line shows $0.00.
 
             Use ``fulfillment_order_status`` to track progress after placing.
+
+            The reply opens with ``tell_the_person`` (the payment link, the
+            print service's order terms and a link to them); pass every line
+            on to the person word for word.
             """
             import kiln.server as _srv
 
@@ -832,12 +842,18 @@ class _FulfillmentToolsPlugin:
 
                 # 5. Build response.
                 order_data = result.to_dict()
-                order_data.update(
-                    _srv._provider_routing_metadata(
-                        provider.name,
-                        provider_order_id=result.order_id or "",
-                    )
+                routing = _srv._provider_routing_metadata(
+                    provider.name,
+                    provider_order_id=result.order_id or "",
                 )
+                order_data.update(routing)
+                message = getattr(service, "order_message", None)
+                tell = []
+                if message is not None:
+                    try:
+                        tell = message(result, routing)
+                    except Exception:
+                        _logger.warning("Could not word order %s", result.order_id, exc_info=True)
                 if fee_calc:
                     order_data["kiln_fee"] = fee_calc.to_dict()
                     order_data["total_with_fee"] = float(fee_calc.total_cost)
@@ -901,10 +917,11 @@ class _FulfillmentToolsPlugin:
                 if response_warnings:
                     order_data["warnings"] = response_warnings
 
-                return {
-                    "success": True,
-                    "order": order_data,
-                }
+                reply = {"success": True}
+                if tell:
+                    reply["tell_the_person"] = tell
+                reply["order"] = order_data
+                return reply
             except Exception as exc:
                 _logger.exception("Unexpected error in fulfillment_order")
                 return _srv._error_dict(
