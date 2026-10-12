@@ -495,6 +495,7 @@ class TestKilnAuth:
         from kiln.cli.main import cli
 
         monkeypatch.setattr("kiln.cli.config.get_config_path", lambda: tmp_path / "config.yaml")
+        monkeypatch.setattr(requests, "head", lambda *_a, **_k: object())  # the address answers
         with patch("kiln.cli.main._make_adapter", return_value=_Fake(_SILENT)):
             result = CliRunner().invoke(
                 cli, ["auth", "--name", "k1", "--host", "http://192.0.2.9", "--type", "moonraker"]
@@ -511,6 +512,7 @@ class TestKilnAuth:
         from kiln.cli.main import cli
 
         monkeypatch.setattr("kiln.cli.config.get_config_path", lambda: tmp_path / "config.yaml")
+        monkeypatch.setattr(requests, "head", lambda *_a, **_k: object())  # the address answers
         with patch("kiln.cli.main._make_adapter", return_value=_Fake(_ANSWERING)):
             result = CliRunner().invoke(
                 cli, ["auth", "--name", "k1", "--host", "http://192.0.2.9", "--type", "moonraker", "--json"]
@@ -519,6 +521,27 @@ class TestKilnAuth:
         payload = json.loads(result.output)
         assert payload["data"]["camera_check"]["answered"] is True
         assert payload["data"]["camera_check"]["line"] == "Camera: answering (built-in)."
+
+
+    def test_a_printer_that_did_not_answer_the_save_is_not_asked_about_its_camera(self, monkeypatch, tmp_path):
+        import json
+
+        from kiln.cli.config import PrinterSaveResult
+        from kiln.cli.main import cli
+
+        def _built(*_a, **_k):
+            raise AssertionError("an adapter was built for a printer that did not answer")
+
+        silent_save = PrinterSaveResult(tmp_path / "config.yaml", "k1", "added", answered=False)
+        with (
+            patch("kiln.cli.main.save_printer", return_value=silent_save),
+            patch("kiln.cli.main._make_adapter", side_effect=_built),
+        ):
+            result = CliRunner().invoke(
+                cli, ["auth", "--name", "k1", "--host", "http://192.0.2.9", "--type", "moonraker", "--json"]
+            )
+        assert result.exit_code == 0, result.output
+        assert "camera_check" not in json.loads(result.output)["data"]
 
 
 class TestKilnSetup:

@@ -2062,14 +2062,15 @@ def auth(
                 logger.debug("Creality diagnostics after auth failed: %s", exc)
 
         # Does the camera answer?  Asked once, without a frame, only when the
-        # backend's own diagnostics (where it has them) did not just fail:
-        # a printer that is not answering is not asked about its camera.
+        # address answered the save's own probe and the backend's diagnostics
+        # (where it has them) did not just fail: a printer that is not
+        # answering is not asked about its camera.
         camera_line = ""
         camera_handshake = None
         diagnostics_failed = any(
             d is not None and not d.get("ok", False) for d in (prusa_diagnostics, creality_diagnostics)
         )
-        if not diagnostics_failed:
+        if saved.answered is not False and not diagnostics_failed:
             try:
                 from kiln.camera_check import camera_setup_line, describe_handshake, handshake_external_camera
 

@@ -457,6 +457,9 @@ class PrinterSaveResult:
     #: The id the machine reported for itself and the entry now carries,
     #: whether passed in or read during this save; ``None`` when none was.
     machine_identity: MachineIdentity | None = None
+    #: Whether the address answered the save's own probe: ``False`` when it
+    #: was asked and did not, ``None`` when it was not asked (``probe=False``).
+    answered: bool | None = None
 
     @property
     def notice(self) -> str | None:
@@ -930,6 +933,7 @@ def save_printer(
         kept=kept,
         dropped=dropped,
         machine_identity=machine_identity if "machine_id" in entry else None,
+        answered=answered,
     )
 
 

@@ -1248,17 +1248,17 @@ def limits_above_floor(printer_model: str, profile: dict[str, Any]) -> tuple[str
     enforce as its own -- which is why that takes a person, never only an
     agent.
 
-    The exemption is an exact match on purpose.  :func:`get_profile` also
-    reaches an override by prefix, and a request can match the override's
-    key without matching any curated key (``"enderx"`` reaches an override
-    saved as ``"ender"``, which no curated row answers), so a ceiling
-    exempted on a fuzzy curated hit would stand unclamped under that
-    request.  Exact match in, exact match out.
+    The exemption is the override's OWN key being a curated key, nothing
+    looser.  :func:`get_profile` reaches an override by prefix, and a
+    request can match the override's key without matching any curated key
+    (``"enderx"`` reaches an override saved as ``"ender"``, which no
+    curated row answers), so a ceiling exempted on a fuzzy curated hit --
+    or on a spelling that resolves to a curated key but is saved under
+    another -- could stand unclamped under some request.  The key that is
+    saved is the key that is judged.
     """
     _load()
-    normalised = _normalise(printer_model)
-    candidates = [normalised] + [c for c in printer_key_candidates(printer_model) if c != normalised]
-    if any(candidate in _cache for candidate in candidates):
+    if _normalise(printer_model) in _cache:
         return ()
     floor = _cache.get("default")
     if floor is None:

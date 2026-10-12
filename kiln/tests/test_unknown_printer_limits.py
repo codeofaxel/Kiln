@@ -152,6 +152,13 @@ class TestWhatNeedsAPerson:
             "max_bed_temp",
         )
 
+    def test_a_spelling_that_resolves_to_a_curated_key_is_still_saved_under_its_own(self):
+        # "Creality K1C" resolves to the curated "k1c" for a lookup, but an
+        # override is saved as "creality_k1c"; the key judged is the key
+        # saved, so this asks for a person like any uncatalogued key.
+        assert limits_above_floor("Creality K1C", _foo_x2(max_hotend_temp=400.0, max_bed_temp=80.0)) == ("max_hotend_temp",)
+        assert limits_above_floor("k1c", _foo_x2(max_hotend_temp=400.0, max_bed_temp=80.0)) == ()
+
     def test_the_engine_closes_the_prefix_route_an_unconfirmed_ceiling_could_take(self):
         with pytest.raises(LimitsNeedAPerson):
             set_local_printer_override("ender", _foo_x2(max_hotend_temp=500.0))
