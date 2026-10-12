@@ -308,6 +308,10 @@ Every piece of data above maps to one of these narrow purposes:
     cross-site tracking; see §3.2. We never sell or share either
     dataset.
 
+11. **Choosing what to research** — from 11 November 2026, we count the
+    reports of how printed parts held up under a load across accounts,
+    without names, to decide which materials to research next.
+
 We do not use your data for advertising, profiling for commercial
 purposes, or cross-context behavioral advertising. We do not sell
 or "share" (as defined under CCPA §1798.140) personal information.
