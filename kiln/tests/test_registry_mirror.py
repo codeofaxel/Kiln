@@ -1,43 +1,33 @@
-"""The safety ceiling and the printer registry describe the same machine.
+"""The bundled printer files are a roster, and a roster carries no limit.
 
-``safety_profiles.json`` and ``printer_intelligence.json`` both carry
-``max_hotend_temp`` and ``max_bed_temp`` for every printer Kiln knows.  They
-are the same physical quantity written down twice, so they have to agree:
+Until 2026-10-12 ``safety_profiles.json`` and ``printer_intelligence.json``
+both carried ``max_hotend_temp`` and ``max_bed_temp`` for every printer Kiln
+knows, and this file held the two copies of one physical quantity to agree:
+a ceiling ABOVE the rating grants rope the machine was never rated for, a
+ceiling BELOW it silently caps hardware the owner paid for.  Those rows are
+now kiln-pro's catalogue, one record per printer, and that mirror lives
+beside the rows (``kiln-pro/tests/test_printer_catalogue.py``: the two
+ceilings agree per row, a variant never sits below its base) together with
+the design-knowledge and compatibility-note mirrors this file used to run
+(``kiln-pro/tests/test_printer_catalogue_numbers.py``).
 
-* a ceiling ABOVE the rating grants rope the machine was never rated for —
-  the worst instance was the ``default`` profile, which let an unidentified
-  (possibly PTFE-lined) printer be driven to 300 C;
-* a ceiling BELOW the rating silently caps hardware the owner paid for — the
-  Centauri Carbon sat at 300 C against a manufacturer-rated 320 C hotend.
+What is left to hold HERE is the shape of the public files, which is what
+the strip changed and what nothing else pins:
 
-Safety MARGIN is deliberately not expressed in either file.  It lives as a
-named derived constant (``_PTFE_SAFE_MAX`` = 240 C, applied when
-``hotend_type`` is ``ptfe_lined``), which is what a guard band should look
-like: one value, one reason, applied by rule rather than hand-typed per
-printer.
+* the two files list the same printers, and so do the other three files
+  keyed by printer id -- a printer is a two-repo event, and a row present
+  in one roster and absent from another is a lookup that returns nothing;
+* the generic ``default`` rows -- the one bundled row each file keeps
+  whole, the floor a printer with no record is held to -- agree on the
+  ceiling they both state;
+* **no roster row carries a limit field.**  A number that drifts back into
+  a roster row would be read by nobody (the loaders build a profile only
+  from a row that states a ceiling) and would still be a copy of a served
+  value, free to disagree with it.  The strip cannot regress.
 
-WHY THIS FILE EXISTS HERE, which is the whole point of it
----------------------------------------------------------
-An equivalent check has existed in the private repo since the 2026-07-20
-drift incident, and ``safety_profiles.json`` has said so in its own ``_meta``
-ever since — "Both directions are caught by a test."  That was true in
-letter and false in force.  The private test could never guard a public
-commit:
-
-* it is not in the private repo's CI allowlist, so that CI never ran it;
-* public CI asserts the private package is ABSENT, so it structurally cannot
-  run there;
-* it self-skips when public Kiln is not importable.
-
-So the only thing that ever ran it was somebody running the full private
-suite by hand.  A wrong ceiling committed here passed every gate that fires
-on the commit that introduced it — which is exactly how seventeen values
-drifted apart the first time.
-
-Both inputs are public files.  Nothing about this comparison needed the
-private repo; it lived there by accident of where it was written.  Here, the
-public suite runs it on every commit, which is the difference between a check
-that exists and a check that fires.
+Both files are public and both are read here, so this runs in public CI on
+every commit -- the reason the mirror lived here rather than in the private
+repo, where a public commit could never trip it.
 """
 
 from __future__ import annotations
@@ -45,191 +35,167 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from kiln.data_manifest import PUBLIC_PROFILE_FIELDS
+
 _DATA = Path(__file__).resolve().parent.parent / "src" / "kiln" / "data"
 _SAFETY = _DATA / "safety_profiles.json"
 _REGISTRY = _DATA / "printer_intelligence.json"
-_DESIGN = _DATA / "design_knowledge" / "printer_profiles.json"
-_COMPAT = _DATA / "design_knowledge" / "printer_material_compatibility.json"
 
-_MIRRORED_FIELDS = ("max_hotend_temp", "max_bed_temp")
-
-# The design-knowledge profile writes the same two quantities under different
-# key names.  Same physical fact, third spelling.
-_DESIGN_ALIASES = {
-    "max_hotend_temp": "max_hotend_temp_c",
-    "max_bed_temp": "max_bed_temp_c",
+#: Every file keyed by printer id.  A new one belongs in this list.
+_ROSTER_FILES = {
+    "safety_profiles": _SAFETY,
+    "printer_intelligence": _REGISTRY,
+    "slicer_profiles": _DATA / "slicer_profiles.json",
+    "printer_profiles": _DATA / "design_knowledge" / "printer_profiles.json",
+    "printer_material_compatibility": (
+        _DATA / "design_knowledge" / "printer_material_compatibility.json"
+    ),
 }
+
+#: What a safety roster row carries: its name, and nothing it could be held
+#: to.  The intelligence roster row's set is ``PUBLIC_PROFILE_FIELDS``.
+_SAFETY_ROSTER_FIELDS = frozenset({"display_name"})
+
+#: The fields a served record carries and a roster row therefore may not --
+#: the enforced limits and their curated extras on the safety side, the spec
+#: sheet and the recipes on the intelligence side.  Listed by name rather
+#: than derived from the ``default`` row, because the default row is the one
+#: place these keys legitimately appear and a sweep derived from it could
+#: not fail on the row it was derived from.
+_LIMIT_FIELDS = frozenset(
+    {
+        "max_hotend_temp",
+        "max_bed_temp",
+        "max_chamber_temp",
+        "max_feedrate",
+        "min_safe_z",
+        "max_volumetric_flow",
+        "build_volume",
+        "build_volume_mm",
+        "variants",
+        "notes",
+        "materials",
+        "hotend_type",
+        "extruder_type",
+        "has_enclosure",
+        "has_chamber_sensor",
+        "has_abl",
+        "has_input_shaping",
+        "nozzle_clumping_probe",
+    }
+)
 
 
 def _load(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def test_ceilings_match_the_registry_in_both_directions() -> None:
-    registry, safety = _load(_REGISTRY), _load(_SAFETY)
+def _roster(data: dict) -> dict[str, dict]:
+    return {k: v for k, v in data.items() if not k.startswith("_") and k != "default"}
 
-    drift: list[str] = []
-    for pid, entry in registry.items():
-        if pid.startswith("_") or pid not in safety:
-            continue
-        for field in _MIRRORED_FIELDS:
-            rated, ceiling = entry.get(field), safety[pid].get(field)
-            if rated is None or ceiling is None:
-                continue
-            if float(ceiling) != float(rated):
-                direction = "ABOVE" if float(ceiling) > float(rated) else "below"
-                drift.append(
-                    f"{pid}.{field}: safety {ceiling} is {direction} registry {rated}"
-                )
 
-    assert not drift, (
-        "The safety ceiling and the printer registry disagree about the same "
-        "machine. A ceiling above the rating permits what the hardware was "
-        "never rated for; below it, Kiln refuses a print the owner paid to be "
-        "able to make. Change BOTH files, or neither:\n  "
-        + "\n  ".join(sorted(drift))
+def test_the_two_files_list_the_same_printers() -> None:
+    safety, registry = _load(_SAFETY), _load(_REGISTRY)
+    assert set(_roster(safety)) == set(_roster(registry)), (
+        "safety_profiles.json and printer_intelligence.json disagree about "
+        "which printers exist: "
+        f"{sorted(set(_roster(safety)) ^ set(_roster(registry)))}"
+    )
+    assert "default" in safety and "default" in registry
+
+
+def test_every_printer_keyed_file_lists_the_same_printers() -> None:
+    """Five files, one roster.  The failure names the file that was missed."""
+    rosters = {name: set(_roster(_load(path))) for name, path in _ROSTER_FILES.items()}
+    everyone = set().union(*rosters.values())
+    holes = {name: sorted(everyone - ids) for name, ids in rosters.items() if everyone - ids}
+    assert not holes, (
+        "these printer files are missing machines the other files know about, "
+        f"so a lookup keyed by printer id returns nothing: {holes}"
     )
 
 
-def test_every_safety_profile_has_a_registry_twin() -> None:
-    """A ceiling with no rating behind it is a number nobody can check.
+def test_the_generic_rows_agree_on_the_ceiling_they_both_state() -> None:
+    """The one bundled row each file keeps whole is the floor every printer
+    with no record is held to, and the two files must not describe two
+    different generic machines.
 
-    ``default`` and ``klipper_generic`` are the exceptions and they are named
-    rather than filtered by a pattern, because they are the two profiles an
-    UNIDENTIFIED printer inherits — the most consequential numbers in the file
-    and the ones with no manufacturer to cite. They are excused from the
-    mirror, not from scrutiny.
+    The hotend ceiling is pinned identical: it is the number the G-code
+    interceptor blocks on.  The bed is pinned in the safe direction only
+    -- the safety file's generic bed must not exceed the registry's -- and
+    deliberately not identical, because on 2026-10-12 the safety floor was
+    lowered to 80 C while the registry's generic row still says 100 C, and
+    which of the two is right is a data decision, not one this test makes
+    by failing.  Build volume is pinned identical: the same generic bed.
     """
-    registry, safety = _load(_REGISTRY), _load(_SAFETY)
-    non_model = {"default", "klipper_generic"}
-
-    orphans = sorted(
-        pid
-        for pid in safety
-        if not pid.startswith("_") and pid not in registry and pid not in non_model
+    safety, registry = _load(_SAFETY)["default"], _load(_REGISTRY)["default"]
+    assert float(safety["max_hotend_temp"]) == float(registry["max_hotend_temp"]), (
+        "the generic hotend ceiling is written twice and the copies disagree"
     )
-    assert not orphans, (
-        f"safety profiles with no registry entry to check them against: {orphans}. "
-        "Add the registry record, or the ceiling is unverifiable by construction."
+    assert float(safety["max_bed_temp"]) <= float(registry["max_bed_temp"]), (
+        "the generic safety bed ceiling is above the registry's generic rating"
+    )
+    assert [float(v) for v in safety["build_volume"]] == [
+        float(v) for v in registry["build_volume_mm"]
+    ]
+
+
+def test_no_roster_row_carries_a_limit_field() -> None:
+    """The strip cannot regress: a roster row is a name (and, in the
+    intelligence file, the motion block) and nothing a print could be held
+    to.  Checked both ways -- the exact field set, and the absence of every
+    served field by name -- so a row that grew a key under a new name is
+    caught by the first and a key that came back under its old name by the
+    second."""
+    offenders: list[str] = []
+    for key, row in _roster(_load(_SAFETY)).items():
+        if set(row) != _SAFETY_ROSTER_FIELDS or set(row) & _LIMIT_FIELDS:
+            offenders.append(f"safety_profiles.json:{key} carries {sorted(set(row) - _SAFETY_ROSTER_FIELDS)}")
+    for key, row in _roster(_load(_REGISTRY)).items():
+        if set(row) != PUBLIC_PROFILE_FIELDS or set(row) & _LIMIT_FIELDS:
+            offenders.append(f"printer_intelligence.json:{key} carries {sorted(set(row) - PUBLIC_PROFILE_FIELDS)}")
+    assert not offenders, (
+        "a roster row carries a field a served record owns; the limits, "
+        "variants, spec sheet and recipes are kiln-pro's catalogue and a "
+        "bundled copy would drift from it:\n  " + "\n  ".join(offenders)
     )
 
 
-def test_variants_are_never_below_the_base_they_modify() -> None:
-    """A variant exists to raise a ceiling. One that lowers it is a mistake.
+def test_the_generic_rows_compatibility_notes_quote_its_ceiling() -> None:
+    """The ceiling embedded in PROSE, for the one row both halves of which
+    are still public.
 
-    Tightening is what a local override is for, and it is per-machine. A
-    curated variant that came out BELOW its own base would mean either the
-    base is wrong or the variant is mis-filed, and both are worth failing on.
+    The compatibility matrix's refusal notes tell the user a number --
+    "needs a 380C hotend, this printer tops out at NC" -- and nothing tied
+    that N to the registry; when the generic hotend floor moved to 240 C
+    on 2026-10-12 the generic row's six refusals kept saying 250.  Every
+    "tops out at NC" above the hotend threshold in the generic row must
+    equal the generic registry row's own ceiling.  (The same check for every
+    catalogued printer runs beside the served records, in kiln-pro.)
     """
-    safety = _load(_SAFETY)
-
-    inverted: list[str] = []
-    for pid, profile in safety.items():
-        if pid.startswith("_"):
-            continue
-        for vid, spec in (profile.get("variants") or {}).items():
-            for field in _MIRRORED_FIELDS:
-                base, variant = profile.get(field), spec.get(field)
-                if base is None or variant is None:
-                    continue
-                if float(variant) < float(base):
-                    inverted.append(f"{pid}/{vid}.{field}: {variant} < base {base}")
-
-    assert not inverted, (
-        "curated variants sit BELOW the base profile they modify: "
-        + "; ".join(sorted(inverted))
-    )
-
-
-def test_the_design_knowledge_profile_carries_the_same_ceilings() -> None:
-    """The third door, which the two-file mirror could never see.
-
-    ``max_hotend_temp`` is written down in THREE public files, not two.
-    ``design_knowledge/printer_profiles.json`` spells it ``max_hotend_temp_c``
-    and feeds the design/material advice path, so a printer can be corrected
-    in the safety file and the registry and still hand out the old number
-    from here.
-
-    That is exactly what happened to the Vorons: the V0/V2.4 ceiling was
-    audited down off an uncited 300 on 2026-08-07, and this file was not in
-    the brief because the mirror test did not know it existed.  A guard that
-    compares two of three files reports agreement while the odd one out keeps
-    answering — the same failure mode as the drift this module was written
-    for, one file further along.
-    """
-    safety = _load(_SAFETY)
-    design = _load(_DESIGN)
-
-    mismatches: list[str] = []
-    for pid, profile in design.items():
-        if pid.startswith("_") or not isinstance(profile, dict):
-            continue
-        curated = safety.get(pid)
-        if not isinstance(curated, dict):
-            continue
-        for field, alias in _DESIGN_ALIASES.items():
-            theirs, mine = curated.get(field), profile.get(alias)
-            if theirs is None or mine is None:
-                continue
-            if float(mine) != float(theirs):
-                mismatches.append(f"{pid}.{alias}: {mine} vs safety {theirs}")
-
-    assert not mismatches, (
-        "design-knowledge profiles disagree with the safety ceiling: "
-        + "; ".join(sorted(mismatches))
-    )
-
-
-def test_compatibility_notes_quote_the_registry_ceiling() -> None:
-    """The fourth door: the ceiling embedded in PROSE.
-
-    The compatibility matrix's refusal notes tell the user a number —
-    "needs a 380C hotend, this printer tops out at NC" — and nothing tied
-    that N to the registry.  When the Ender-3 family was corrected to its
-    maker's published 250 (2026-08-08), nine notes per machine kept saying
-    260; the sweep that fixed those found the builder platforms quoting
-    300 against registries of 285 (RatRig VCore3) and 270 (Voron 0/2.4),
-    and the Ender-3 S1 Pro quoting 260 against a real 300.  Both drift
-    directions were live at once: prose overstating grants imaginary rope
-    in the user's head, prose understating gives a refusal a false reason.
-
-    Every "tops out at NC" above the hotend threshold must equal that
-    printer's own registry ceiling — a note may omit the number, but it
-    may not freelance one.  (Values below the threshold are bed/chamber
-    figures in the same phrasing and belong to other assertions.)
-    """
-    registry = _load(_REGISTRY)
-    compat = _load(_COMPAT)
-    hotend_threshold = 150  # bed tops out ≤120C in these notes; hotends ≥250C
-
     import re
 
+    generic = _load(_REGISTRY)["default"]
+    compat = _load(_DATA / "design_knowledge" / "printer_material_compatibility.json")
+    compat = compat.get("printers", compat)
+    hotend_threshold = 150  # bed figures in the same phrasing belong to other assertions
     freelanced: list[str] = []
-    for pid, rows in compat.items():
-        if pid.startswith("_") or not isinstance(rows, dict):
+    for material, row in compat["default"].items():
+        if not isinstance(row, dict):
             continue
-        ceiling = (registry.get(pid) or {}).get("max_hotend_temp")
-        for mid, row in rows.items():
-            if not isinstance(row, dict):
-                continue
-            texts = []
-            for value in row.values():
-                if isinstance(value, str):
-                    texts.append(value)
-                elif isinstance(value, list):
-                    texts.extend(t for t in value if isinstance(t, str))
-            for text in texts:
-                for quoted in re.findall(r"tops out at (\d+)C", text):
-                    quoted = int(quoted)
-                    if quoted < hotend_threshold:
-                        continue
-                    if ceiling is None or float(quoted) != float(ceiling):
-                        freelanced.append(
-                            f"{pid}/{mid}: note says {quoted}C, "
-                            f"registry says {ceiling}"
-                        )
+        for text in (v for v in row.values() if isinstance(v, str)):
+            for quoted in re.findall(r"tops out at (\d+)C", text):
+                if int(quoted) >= hotend_threshold and float(quoted) != float(generic["max_hotend_temp"]):
+                    freelanced.append(f"default/{material}: note says {quoted}C, generic row says {generic['max_hotend_temp']}")
+    assert not freelanced, "the generic row's refusal notes freelance a hotend ceiling: " + "; ".join(freelanced)
 
-    assert not freelanced, (
-        "compatibility notes freelance a hotend ceiling: "
-        + "; ".join(sorted(set(freelanced)))
-    )
+
+def test_the_generic_rows_are_the_only_bundled_rows_with_a_ceiling() -> None:
+    """The loaders build a profile from any row that states ``max_hotend_temp``.
+    Outside ``default`` no bundled row may, or a printer would be answered
+    from a bundled number instead of its served record."""
+    for path in (_SAFETY, _REGISTRY):
+        with_ceiling = sorted(
+            key for key, row in _roster(_load(path)).items() if "max_hotend_temp" in row
+        )
+        assert with_ceiling == [], f"{path.name}: {with_ceiling}"

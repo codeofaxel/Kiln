@@ -1,12 +1,10 @@
 {
   "_meta": {
-    "version": "1.0.0",
-    "description": "Printer intelligence database: firmware quirks, material compatibility, calibration guidance, and known failure modes. Keyed by the same printer_id as safety_profiles.json.",
-    "updated": "2025-02-11",
-    "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Engineering depth (each printer's quirks, its calibration recipes, and the failures it is known for) is available in Kiln Pro; see https://kiln3d.com/pricing.",
-    "has_chamber_sensor_note": "has_chamber_sensor: whether the machine has a chamber temperature sensor whose reading its firmware reports. true/false only where a primary source settles it; null means unknown, never false, and every row must answer. Bambu rows come from Bambu Studio's own per-printer configuration (resources/printers/<model_id>.json): a chamber temperature is shown only where support_chamber_temp_display, or failing that support_chamber, is true. The Elegoo Centauri Carbon row comes from Elegoo's own wiki, which carries a chamber-thermistor replacement procedure for it (B0C2N1). Read by adapters whose protocol publishes a chamber field for every model regardless of hardware.",
-    "nozzle_clumping_probe_note": "nozzle_clumping_probe: where this machine taps the bed to feel for a blob on the nozzle, as its maker publishes it -- detection_area_mm is [x_min, y_min, x_max, y_max] in bed coordinates, and defeated_by lists the slicing modes that skip the probe. A part placed in that area stops the detection working, so the rectangle is a physical fact about the machine like build_volume_mm, not a judgement. Present only for models whose maker states it; absent means Kiln does not know, never that the machine has no probe.",
-    "motion_note": "motion: the physical facts that decide whether Kiln may move the head on an idle machine that may still hold a part -- which part moves in Z (z_carrier, xy_layout), how Z finds its datum and where (z_home_method, z_home_xy_mm), whether the vendor's own homing routine travels sideways before Z is known (home_routine_travels_blind), the firmware family and what it does with an unhomed move (unhomed_move_policy: refused / clamped / unclamped), the commanded Z ceiling and what kind of source states it (z_travel_limit_mm, z_travel_limit_kind), the vendor's park verb and position (park_verb, park_position_mm, park_refuses_unhomed), and any vendor-stated purge or wipe station (purge_wipe_station; 'served_plan' on the Bambu rows whose station rides with the plan document Kiln Pro serves for that printer, never as public coordinates). Every field has a _sources entry {class, note}; class is the gate's real input: vendor_config / vendor_sentence / vendor_layout / vendor_slicer / firmware_docs settle a fact, community / not_found do not -- and a field on an unsettled class is null in this file, with the hearsay in the note. 'Descends onto the plate' is derived, never stored: false only for endstop_switch_off_plate, endstop_switch_top and nozzle_contact_strip. z_carrier may be inferred from a vendor layout name only under the rule in kiln.motion_facts.Z_CARRIER_FROM_LAYOUT, marked class vendor_layout so the plan text can say so. The note carries no link: the URL or file:line each fact was read from is research provenance and lives in Kiln Pro's motion provenance overlay, as every other research provenance does. Vocabulary, loader and derivations: kiln.motion_facts. Read 2026-09-16 from vendor firmware configs, vendor wikis and manuals, the vendors' own slicer profiles, and three vendor firmware images (Ender-3 V4, SPARKX i7, Neptune 4); the per-row refs say which."
+    "version": "2.0.0",
+    "updated": "2026-10-12",
+    "description": "The roster of printers Kiln knows, keyed by the same printer_id as safety_profiles.json. Each named row carries display_name and the motion block. A printer's spec sheet (firmware, extruder and hotend type, enclosure, chamber sensor, bed levelling, input shaping, build volume, rated ceilings), its per-material temperature recipes and its nozzle-probe rectangle are served per printer from Kiln's catalogue when the printer is set up and merged into the row here. A row with no spec sheet is never a profile: a printer whose record this install does not hold answers as the generic 'default' row, which carries the full set of fields as the floor. Engineering depth (quirks, calibration recipes, known failure modes) is Kiln Pro's; see https://kiln3d.com/pricing.",
+    "motion_note": "motion: the physical facts that decide whether Kiln may move the head on an idle machine that may still hold a part -- which part moves in Z (z_carrier, xy_layout), how Z finds its datum and where (z_home_method, z_home_xy_mm), whether the vendor's own homing routine travels sideways before Z is known (home_routine_travels_blind), the firmware family and what it does with an unhomed move (unhomed_move_policy: refused / clamped / unclamped), the commanded Z ceiling and what kind of source states it (z_travel_limit_mm, z_travel_limit_kind), the vendor's park verb and position (park_verb, park_position_mm, park_refuses_unhomed), and any vendor-stated purge or wipe station (purge_wipe_station; 'served_plan' on the Bambu rows whose station rides with the plan document Kiln Pro serves for that printer, never as public coordinates). Every field has a _sources entry {class, note}; class is the gate's real input: vendor_config / vendor_sentence / vendor_layout / vendor_slicer / firmware_docs settle a fact, community / not_found do not -- and a field on an unsettled class is null in this file, with the hearsay in the note. 'Descends onto the plate' is derived, never stored: false only for endstop_switch_off_plate, endstop_switch_top and nozzle_contact_strip. z_carrier may be inferred from a vendor layout name only under the rule in kiln.motion_facts.Z_CARRIER_FROM_LAYOUT, marked class vendor_layout so the plan text can say so. The note carries no link: the URL or file:line each fact was read from is research provenance and lives in Kiln Pro's motion provenance overlay, as every other research provenance does. Vocabulary, loader and derivations: kiln.motion_facts. Read 2026-09-16 from vendor firmware configs, vendor wikis and manuals, the vendors' own slicer profiles, and three vendor firmware images (Ender-3 V4, SPARKX i7, Neptune 4); the per-row refs say which.",
+    "why_motion_stays_public": "The motion block is public at every tier and never served: the safe-motion gate must be able to refuse a blind move on an install with no record and no connection. Everything else about a machine can wait for its record; a move over a part still on the plate cannot."
   },
   "default": {
     "display_name": "Generic FDM Printer",
@@ -119,38 +117,6 @@
   },
   "ender3": {
     "display_name": "Creality Ender 3 / Ender 3 Pro",
-    "firmware": "marlin",
-    "extruder_type": "bowden",
-    "hotend_type": "ptfe_lined",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": false,
-    "materials": {
-      "PLA": {
-        "hotend": 200,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 230,
-        "bed": 80,
-        "fan": 50
-      },
-      "TPU": {
-        "hotend": 220,
-        "bed": 50,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      220,
-      220,
-      250
-    ],
-    "max_hotend_temp": 250,
-    "max_bed_temp": 110,
-    "has_input_shaping": false,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -226,43 +192,6 @@
   },
   "ender3_s1": {
     "display_name": "Creality Ender 3 S1",
-    "firmware": "marlin",
-    "extruder_type": "direct_drive",
-    "hotend_type": "ptfe_lined",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 205,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 80,
-        "fan": 50
-      },
-      "ABS": {
-        "hotend": 245,
-        "bed": 100,
-        "fan": 0
-      },
-      "TPU": {
-        "hotend": 220,
-        "bed": 50,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      220,
-      220,
-      270
-    ],
-    "max_hotend_temp": 260,
-    "max_bed_temp": 100,
-    "has_input_shaping": false,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -342,43 +271,6 @@
   },
   "k1": {
     "display_name": "Creality K1",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 220,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 240,
-        "bed": 80,
-        "fan": 40
-      },
-      "ABS": {
-        "hotend": 250,
-        "bed": 100,
-        "fan": 0
-      },
-      "TPU": {
-        "hotend": 225,
-        "bed": 50,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      220,
-      220,
-      250
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 100,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -462,38 +354,6 @@
   },
   "ender3_v2": {
     "display_name": "Creality Ender 3 V2",
-    "firmware": "marlin",
-    "extruder_type": "bowden",
-    "hotend_type": "ptfe_lined",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": false,
-    "materials": {
-      "PLA": {
-        "hotend": 200,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 75,
-        "fan": 50
-      },
-      "TPU": {
-        "hotend": 220,
-        "bed": 50,
-        "fan": 60
-      }
-    },
-    "build_volume_mm": [
-      220,
-      220,
-      250
-    ],
-    "max_hotend_temp": 250,
-    "max_bed_temp": 110,
-    "has_input_shaping": false,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -573,43 +433,6 @@
   },
   "sparkx_i7": {
     "display_name": "Creality SPARKX i7",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 215,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 75,
-        "fan": 45
-      },
-      "TPU": {
-        "hotend": 225,
-        "bed": 50,
-        "fan": 50
-      },
-      "PLA-CF": {
-        "hotend": 230,
-        "bed": 60,
-        "fan": 70
-      }
-    },
-    "build_volume_mm": [
-      260,
-      260,
-      255
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 100,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -691,43 +514,6 @@
   },
   "k1_max": {
     "display_name": "Creality K1 Max",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 220,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 240,
-        "bed": 80,
-        "fan": 40
-      },
-      "ABS": {
-        "hotend": 250,
-        "bed": 100,
-        "fan": 0
-      },
-      "TPU": {
-        "hotend": 225,
-        "bed": 50,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      300,
-      300,
-      300
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 100,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -811,43 +597,6 @@
   },
   "k1c": {
     "display_name": "Creality K1C",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 220,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 240,
-        "bed": 80,
-        "fan": 40
-      },
-      "ABS": {
-        "hotend": 250,
-        "bed": 100,
-        "fan": 0
-      },
-      "PLA-CF": {
-        "hotend": 230,
-        "bed": 60,
-        "fan": 70
-      }
-    },
-    "build_volume_mm": [
-      220,
-      220,
-      250
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 100,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -931,38 +680,6 @@
   },
   "k1_se": {
     "display_name": "Creality K1 SE",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 215,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 75,
-        "fan": 45
-      },
-      "TPU": {
-        "hotend": 225,
-        "bed": 50,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      220,
-      220,
-      250
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 100,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -1046,38 +763,6 @@
   },
   "k2": {
     "display_name": "Creality K2",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 220,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 240,
-        "bed": 80,
-        "fan": 45
-      },
-      "ABS": {
-        "hotend": 250,
-        "bed": 100,
-        "fan": 0
-      }
-    },
-    "build_volume_mm": [
-      260,
-      260,
-      260
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 100,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -1160,43 +845,6 @@
   },
   "k2_pro": {
     "display_name": "Creality K2 Pro",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 220,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 240,
-        "bed": 80,
-        "fan": 45
-      },
-      "ABS": {
-        "hotend": 255,
-        "bed": 100,
-        "fan": 0
-      },
-      "ASA": {
-        "hotend": 260,
-        "bed": 100,
-        "fan": 20
-      }
-    },
-    "build_volume_mm": [
-      300,
-      300,
-      300
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 110,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -1279,48 +927,6 @@
   },
   "k2_plus": {
     "display_name": "Creality K2 Plus",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 220,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 240,
-        "bed": 80,
-        "fan": 45
-      },
-      "ABS": {
-        "hotend": 255,
-        "bed": 105,
-        "fan": 0
-      },
-      "PC": {
-        "hotend": 295,
-        "bed": 115,
-        "fan": 0
-      },
-      "PPS": {
-        "hotend": 340,
-        "bed": 120,
-        "fan": 0
-      }
-    },
-    "build_volume_mm": [
-      350,
-      350,
-      350
-    ],
-    "max_hotend_temp": 350,
-    "max_bed_temp": 120,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -1403,43 +1009,6 @@
   },
   "k2_se": {
     "display_name": "Creality K2 SE",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 215,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 75,
-        "fan": 45
-      },
-      "TPU": {
-        "hotend": 225,
-        "bed": 50,
-        "fan": 50
-      },
-      "PLA-CF": {
-        "hotend": 230,
-        "bed": 60,
-        "fan": 70
-      }
-    },
-    "build_volume_mm": [
-      220,
-      215,
-      245
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 100,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -1512,43 +1081,6 @@
   },
   "creality_hi": {
     "display_name": "Creality Hi",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 215,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 75,
-        "fan": 45
-      },
-      "ABS": {
-        "hotend": 250,
-        "bed": 95,
-        "fan": 0
-      },
-      "PLA-CF": {
-        "hotend": 230,
-        "bed": 60,
-        "fan": 70
-      }
-    },
-    "build_volume_mm": [
-      260,
-      260,
-      300
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 100,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -1631,48 +1163,6 @@
   },
   "ender3_v4": {
     "display_name": "Creality Ender-3 V4",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 215,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 75,
-        "fan": 45
-      },
-      "ABS": {
-        "hotend": 250,
-        "bed": 95,
-        "fan": 0
-      },
-      "TPU": {
-        "hotend": 225,
-        "bed": 50,
-        "fan": 50
-      },
-      "PLA-CF": {
-        "hotend": 230,
-        "bed": 60,
-        "fan": 70
-      }
-    },
-    "build_volume_mm": [
-      220,
-      220,
-      235
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 100,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -1755,43 +1245,6 @@
   },
   "ender3_v3": {
     "display_name": "Creality Ender-3 V3",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 215,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 75,
-        "fan": 45
-      },
-      "ABS": {
-        "hotend": 250,
-        "bed": 100,
-        "fan": 0
-      },
-      "TPU": {
-        "hotend": 225,
-        "bed": 50,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      220,
-      220,
-      250
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 110,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "head",
       "xy_layout": "corexz",
@@ -1864,43 +1317,6 @@
   },
   "ender3_v3_ke": {
     "display_name": "Creality Ender-3 V3 KE",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 215,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 75,
-        "fan": 45
-      },
-      "ABS": {
-        "hotend": 250,
-        "bed": 95,
-        "fan": 0
-      },
-      "TPU": {
-        "hotend": 225,
-        "bed": 50,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      220,
-      220,
-      240
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 100,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -1979,38 +1395,6 @@
   },
   "ender3_v3_se": {
     "display_name": "Creality Ender-3 V3 SE",
-    "firmware": "marlin",
-    "extruder_type": "direct_drive",
-    "hotend_type": "ptfe_lined",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 205,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 75,
-        "fan": 50
-      },
-      "TPU": {
-        "hotend": 220,
-        "bed": 50,
-        "fan": 60
-      }
-    },
-    "build_volume_mm": [
-      220,
-      220,
-      250
-    ],
-    "max_hotend_temp": 260,
-    "max_bed_temp": 100,
-    "has_input_shaping": false,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -2090,43 +1474,6 @@
   },
   "ender3_v3_plus": {
     "display_name": "Creality Ender-3 V3 Plus",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 215,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 75,
-        "fan": 45
-      },
-      "ABS": {
-        "hotend": 250,
-        "bed": 95,
-        "fan": 0
-      },
-      "TPU": {
-        "hotend": 225,
-        "bed": 50,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      300,
-      300,
-      330
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 100,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "head",
       "xy_layout": "corexz",
@@ -2199,43 +1546,6 @@
   },
   "ender5_max": {
     "display_name": "Creality Ender-5 Max",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 215,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 75,
-        "fan": 45
-      },
-      "ABS": {
-        "hotend": 250,
-        "bed": 95,
-        "fan": 0
-      },
-      "TPU": {
-        "hotend": 225,
-        "bed": 50,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      400,
-      400,
-      400
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 100,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -2308,43 +1618,6 @@
   },
   "cr10_se": {
     "display_name": "Creality CR-10 SE",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 215,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 75,
-        "fan": 45
-      },
-      "ABS": {
-        "hotend": 250,
-        "bed": 100,
-        "fan": 0
-      },
-      "TPU": {
-        "hotend": 225,
-        "bed": 50,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      220,
-      220,
-      265
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 110,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -2423,48 +1696,6 @@
   },
   "prusa_mk3s": {
     "display_name": "Prusa i3 MK3S / MK3S+",
-    "firmware": "marlin",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 215,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 85,
-        "fan": 50
-      },
-      "ABS": {
-        "hotend": 255,
-        "bed": 100,
-        "fan": 0
-      },
-      "ASA": {
-        "hotend": 260,
-        "bed": 105,
-        "fan": 20
-      },
-      "TPU": {
-        "hotend": 220,
-        "bed": 50,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      250,
-      210,
-      210
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 120,
-    "has_input_shaping": false,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -2540,43 +1771,6 @@
   },
   "prusa_mk4": {
     "display_name": "Prusa MK4 / MK4S",
-    "firmware": "marlin",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 215,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 240,
-        "bed": 85,
-        "fan": 50
-      },
-      "ABS": {
-        "hotend": 255,
-        "bed": 100,
-        "fan": 0
-      },
-      "TPU": {
-        "hotend": 220,
-        "bed": 50,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      250,
-      210,
-      220
-    ],
-    "max_hotend_temp": 290,
-    "max_bed_temp": 120,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -2656,43 +1850,6 @@
   },
   "prusa_mini": {
     "display_name": "Prusa Mini / Mini+",
-    "firmware": "marlin",
-    "extruder_type": "bowden",
-    "hotend_type": "ptfe_lined",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 215,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 85,
-        "fan": 50
-      },
-      "ABS": {
-        "hotend": 240,
-        "bed": 100,
-        "fan": 0
-      },
-      "TPU": {
-        "hotend": 220,
-        "bed": 50,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      180,
-      180,
-      180
-    ],
-    "max_hotend_temp": 280,
-    "max_bed_temp": 100,
-    "has_input_shaping": false,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "head",
       "xy_layout": "cantilever",
@@ -2772,58 +1929,6 @@
   },
   "bambu_x1c": {
     "display_name": "Bambu Lab X1 Carbon",
-    "firmware": "bambu",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": true,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 220,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 245,
-        "bed": 80,
-        "fan": 40
-      },
-      "ABS": {
-        "hotend": 260,
-        "bed": 100,
-        "fan": 30
-      },
-      "ASA": {
-        "hotend": 260,
-        "bed": 100,
-        "fan": 30
-      },
-      "TPU": {
-        "hotend": 230,
-        "bed": 50,
-        "fan": 50
-      },
-      "PA-CF": {
-        "hotend": 280,
-        "bed": 100,
-        "fan": 30
-      },
-      "PC": {
-        "hotend": 270,
-        "bed": 110,
-        "fan": 0
-      }
-    },
-    "build_volume_mm": [
-      256,
-      256,
-      256
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 120,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -2899,58 +2004,6 @@
   },
   "bambu_x1e": {
     "display_name": "Bambu Lab X1E",
-    "firmware": "bambu",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": true,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 220,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 245,
-        "bed": 80,
-        "fan": 40
-      },
-      "ABS": {
-        "hotend": 260,
-        "bed": 100,
-        "fan": 30
-      },
-      "ASA": {
-        "hotend": 260,
-        "bed": 100,
-        "fan": 30
-      },
-      "TPU": {
-        "hotend": 230,
-        "bed": 50,
-        "fan": 50
-      },
-      "PA-CF": {
-        "hotend": 280,
-        "bed": 100,
-        "fan": 30
-      },
-      "PC": {
-        "hotend": 270,
-        "bed": 110,
-        "fan": 0
-      }
-    },
-    "build_volume_mm": [
-      256,
-      256,
-      256
-    ],
-    "max_hotend_temp": 320,
-    "max_bed_temp": 120,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -3026,38 +2079,6 @@
   },
   "bambu_p1s": {
     "display_name": "Bambu Lab P1S",
-    "firmware": "bambu",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": false,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 220,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 245,
-        "bed": 80,
-        "fan": 40
-      },
-      "ABS": {
-        "hotend": 260,
-        "bed": 100,
-        "fan": 30
-      }
-    },
-    "build_volume_mm": [
-      256,
-      256,
-      256
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 100,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -3133,58 +2154,6 @@
   },
   "bambu_p2s": {
     "display_name": "Bambu Lab P2S",
-    "firmware": "bambu",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": true,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 220,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 245,
-        "bed": 80,
-        "fan": 40
-      },
-      "ABS": {
-        "hotend": 260,
-        "bed": 100,
-        "fan": 30
-      },
-      "ASA": {
-        "hotend": 260,
-        "bed": 100,
-        "fan": 30
-      },
-      "TPU": {
-        "hotend": 230,
-        "bed": 50,
-        "fan": 50
-      },
-      "PA-CF": {
-        "hotend": 280,
-        "bed": 100,
-        "fan": 30
-      },
-      "PC": {
-        "hotend": 270,
-        "bed": 110,
-        "fan": 0
-      }
-    },
-    "build_volume_mm": [
-      256,
-      256,
-      256
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 110,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -3260,64 +2229,6 @@
   },
   "bambu_a1": {
     "display_name": "Bambu Lab A1",
-    "firmware": "bambu",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": false,
-    "has_chamber_sensor": false,
-    "has_abl": true,
-    "build_volume_mm": [
-      256,
-      256,
-      256
-    ],
-    "max_bed_temp": 100,
-    "materials": {
-      "PLA": {
-        "hotend": 220,
-        "bed": 55,
-        "fan": 100
-      },
-      "PLA+": {
-        "hotend": 220,
-        "bed": 60,
-        "fan": 100
-      },
-      "PLA Silk": {
-        "hotend": 215,
-        "bed": 55,
-        "fan": 80
-      },
-      "PLA-CF": {
-        "hotend": 230,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 240,
-        "bed": 80,
-        "fan": 40
-      },
-      "TPU": {
-        "hotend": 225,
-        "bed": 50,
-        "fan": 50
-      }
-    },
-    "max_hotend_temp": 300,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": {
-      "detection_area_mm": [
-        226,
-        224,
-        256,
-        256
-      ],
-      "defeated_by": [
-        "spiral vase",
-        "print by object"
-      ]
-    },
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -3393,58 +2304,6 @@
   },
   "bambu_a2l": {
     "display_name": "Bambu Lab A2L",
-    "firmware": "bambu",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": false,
-    "has_chamber_sensor": false,
-    "has_abl": true,
-    "build_volume_mm": [
-      330,
-      320,
-      325
-    ],
-    "max_bed_temp": 80,
-    "materials": {
-      "PLA": {
-        "hotend": 220,
-        "bed": 55,
-        "fan": 100
-      },
-      "PLA+": {
-        "hotend": 220,
-        "bed": 60,
-        "fan": 100
-      },
-      "PLA-CF": {
-        "hotend": 230,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 240,
-        "bed": 70,
-        "fan": 40
-      },
-      "PETG-CF": {
-        "hotend": 250,
-        "bed": 70,
-        "fan": 40
-      },
-      "TPU": {
-        "hotend": 225,
-        "bed": 50,
-        "fan": 50
-      },
-      "PVA": {
-        "hotend": 215,
-        "bed": 60,
-        "fan": 50
-      }
-    },
-    "max_hotend_temp": 300,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -3517,78 +2376,6 @@
   },
   "bambu_h2s": {
     "display_name": "Bambu Lab H2S",
-    "firmware": "bambu",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": true,
-    "has_abl": true,
-    "build_volume_mm": [
-      340,
-      320,
-      340
-    ],
-    "max_bed_temp": 120,
-    "materials": {
-      "PLA": {
-        "hotend": 220,
-        "bed": 55,
-        "fan": 100
-      },
-      "PLA-CF": {
-        "hotend": 230,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 245,
-        "bed": 70,
-        "fan": 40
-      },
-      "PETG-CF": {
-        "hotend": 255,
-        "bed": 70,
-        "fan": 40
-      },
-      "ABS": {
-        "hotend": 270,
-        "bed": 90,
-        "fan": 30
-      },
-      "ASA": {
-        "hotend": 270,
-        "bed": 100,
-        "fan": 30
-      },
-      "PC": {
-        "hotend": 280,
-        "bed": 110,
-        "fan": 0
-      },
-      "TPU": {
-        "hotend": 230,
-        "bed": 35,
-        "fan": 50
-      },
-      "PVA": {
-        "hotend": 240,
-        "bed": 55,
-        "fan": 50
-      },
-      "PA-CF": {
-        "hotend": 290,
-        "bed": 100,
-        "fan": 30
-      },
-      "PPS": {
-        "hotend": 340,
-        "bed": 120,
-        "fan": 0
-      }
-    },
-    "max_hotend_temp": 350,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -3664,53 +2451,6 @@
   },
   "voron_2": {
     "display_name": "Voron 2.4",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 210,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 80,
-        "fan": 50
-      },
-      "ABS": {
-        "hotend": 250,
-        "bed": 110,
-        "fan": 0
-      },
-      "ASA": {
-        "hotend": 250,
-        "bed": 105,
-        "fan": 20
-      },
-      "PA-CF": {
-        "hotend": 275,
-        "bed": 100,
-        "fan": 30
-      },
-      "PC": {
-        "hotend": 270,
-        "bed": 115,
-        "fan": 0
-      }
-    },
-    "build_volume_mm": [
-      300,
-      300,
-      300
-    ],
-    "max_hotend_temp": 270,
-    "max_bed_temp": 120,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "head",
       "xy_layout": "corexy",
@@ -3787,53 +2527,6 @@
   },
   "voron_trident": {
     "display_name": "Voron Trident",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 210,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 80,
-        "fan": 50
-      },
-      "ABS": {
-        "hotend": 250,
-        "bed": 110,
-        "fan": 0
-      },
-      "ASA": {
-        "hotend": 250,
-        "bed": 105,
-        "fan": 20
-      },
-      "PA-CF": {
-        "hotend": 275,
-        "bed": 100,
-        "fan": 30
-      },
-      "PC": {
-        "hotend": 270,
-        "bed": 115,
-        "fan": 0
-      }
-    },
-    "build_volume_mm": [
-      300,
-      300,
-      250
-    ],
-    "max_hotend_temp": 270,
-    "max_bed_temp": 120,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -3906,38 +2599,6 @@
   },
   "elegoo_neptune4": {
     "display_name": "Elegoo Neptune 4 / 4 Pro",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 210,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 80,
-        "fan": 50
-      },
-      "TPU": {
-        "hotend": 220,
-        "bed": 50,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      225,
-      225,
-      265
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 100,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -4016,48 +2677,6 @@
   },
   "elegoo_centauri_carbon": {
     "display_name": "Elegoo Centauri Carbon",
-    "firmware": "sdcp",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": true,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 210,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 240,
-        "bed": 80,
-        "fan": 50
-      },
-      "ABS": {
-        "hotend": 260,
-        "bed": 100,
-        "fan": 0
-      },
-      "TPU": {
-        "hotend": 220,
-        "bed": 50,
-        "fan": 50
-      },
-      "ASA": {
-        "hotend": 260,
-        "bed": 100,
-        "fan": 30
-      }
-    },
-    "build_volume_mm": [
-      256,
-      256,
-      256
-    ],
-    "max_hotend_temp": 320,
-    "max_bed_temp": 110,
-    "has_input_shaping": false,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -4140,63 +2759,6 @@
   },
   "elegoo_centauri_carbon_2": {
     "display_name": "Elegoo Centauri Carbon 2 / Carbon 2 Combo",
-    "firmware": "proprietary",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": true,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 210,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 250,
-        "bed": 70,
-        "fan": 40
-      },
-      "ABS": {
-        "hotend": 270,
-        "bed": 90,
-        "fan": 40
-      },
-      "TPU": {
-        "hotend": 225,
-        "bed": 35,
-        "fan": 100
-      },
-      "ASA": {
-        "hotend": 270,
-        "bed": 90,
-        "fan": 80
-      },
-      "PC": {
-        "hotend": 270,
-        "bed": 110,
-        "fan": 35
-      },
-      "PLA-CF": {
-        "hotend": 220,
-        "bed": 60,
-        "fan": 80
-      },
-      "PETG-CF": {
-        "hotend": 250,
-        "bed": 70,
-        "fan": 40
-      }
-    },
-    "build_volume_mm": [
-      256,
-      256,
-      256
-    ],
-    "max_hotend_temp": 350,
-    "max_bed_temp": 110,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -4279,33 +2841,6 @@
   },
   "elegoo_orangestorm_giga": {
     "display_name": "Elegoo OrangeStorm Giga",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 210,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 80,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      800,
-      800,
-      1000
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 110,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -4384,53 +2919,6 @@
   },
   "qidi_x_plus3": {
     "display_name": "QIDI X-Plus 3",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 215,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 240,
-        "bed": 80,
-        "fan": 40
-      },
-      "ABS": {
-        "hotend": 260,
-        "bed": 100,
-        "fan": 0
-      },
-      "PA-CF": {
-        "hotend": 300,
-        "bed": 100,
-        "fan": 30
-      },
-      "PC": {
-        "hotend": 280,
-        "bed": 110,
-        "fan": 0
-      },
-      "PPS": {
-        "hotend": 340,
-        "bed": 120,
-        "fan": 0
-      }
-    },
-    "build_volume_mm": [
-      280,
-      280,
-      270
-    ],
-    "max_hotend_temp": 350,
-    "max_bed_temp": 120,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -4509,48 +2997,6 @@
   },
   "klipper_generic": {
     "display_name": "Generic Klipper Printer (Moonraker)",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 210,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 80,
-        "fan": 50
-      },
-      "ABS": {
-        "hotend": 245,
-        "bed": 100,
-        "fan": 0
-      },
-      "TPU": {
-        "hotend": 225,
-        "bed": 50,
-        "fan": 50
-      },
-      "ASA": {
-        "hotend": 250,
-        "bed": 100,
-        "fan": 20
-      }
-    },
-    "build_volume_mm": [
-      220,
-      220,
-      250
-    ],
-    "max_hotend_temp": 260,
-    "max_bed_temp": 110,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": null,
       "xy_layout": null,
@@ -4623,38 +3069,6 @@
   },
   "ender5": {
     "display_name": "Creality Ender 5 / Ender 5 Plus",
-    "firmware": "marlin",
-    "extruder_type": "bowden",
-    "hotend_type": "ptfe_lined",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": false,
-    "materials": {
-      "PLA": {
-        "hotend": 200,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 230,
-        "bed": 80,
-        "fan": 50
-      },
-      "TPU": {
-        "hotend": 220,
-        "bed": 50,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      220,
-      220,
-      300
-    ],
-    "max_hotend_temp": 260,
-    "max_bed_temp": 110,
-    "has_input_shaping": false,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": null,
@@ -4727,38 +3141,6 @@
   },
   "cr10": {
     "display_name": "Creality CR-10 / CR-10S",
-    "firmware": "marlin",
-    "extruder_type": "bowden",
-    "hotend_type": "ptfe_lined",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": false,
-    "materials": {
-      "PLA": {
-        "hotend": 200,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 230,
-        "bed": 80,
-        "fan": 50
-      },
-      "TPU": {
-        "hotend": 220,
-        "bed": 50,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      300,
-      300,
-      400
-    ],
-    "max_hotend_temp": 260,
-    "max_bed_temp": 100,
-    "has_input_shaping": false,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -4834,43 +3216,6 @@
   },
   "voron_0": {
     "display_name": "Voron 0 / 0.2",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": null,
-    "has_abl": false,
-    "materials": {
-      "PLA": {
-        "hotend": 210,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 80,
-        "fan": 50
-      },
-      "ABS": {
-        "hotend": 250,
-        "bed": 110,
-        "fan": 0
-      },
-      "ASA": {
-        "hotend": 250,
-        "bed": 105,
-        "fan": 20
-      }
-    },
-    "build_volume_mm": [
-      120,
-      120,
-      120
-    ],
-    "max_hotend_temp": 270,
-    "max_bed_temp": 120,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -4943,43 +3288,6 @@
   },
   "ratrig_vcore3": {
     "display_name": "Rat Rig V-Core 3 / V-Core 3.1",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 210,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 80,
-        "fan": 50
-      },
-      "ABS": {
-        "hotend": 250,
-        "bed": 110,
-        "fan": 0
-      },
-      "TPU": {
-        "hotend": 225,
-        "bed": 50,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      300,
-      300,
-      300
-    ],
-    "max_hotend_temp": 285,
-    "max_bed_temp": 120,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -5052,38 +3360,6 @@
   },
   "elegoo_neptune3": {
     "display_name": "Elegoo Neptune 3 / 3 Pro / 3 Plus",
-    "firmware": "marlin",
-    "extruder_type": "direct_drive",
-    "hotend_type": "ptfe_lined",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 200,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 230,
-        "bed": 80,
-        "fan": 50
-      },
-      "TPU": {
-        "hotend": 220,
-        "bed": 50,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      220,
-      220,
-      280
-    ],
-    "max_hotend_temp": 260,
-    "max_bed_temp": 100,
-    "has_input_shaping": false,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -5160,38 +3436,6 @@
   },
   "anker_m5": {
     "display_name": "AnkerMake M5 / M5C",
-    "firmware": "marlin",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 210,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 80,
-        "fan": 50
-      },
-      "TPU": {
-        "hotend": 220,
-        "bed": 50,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      235,
-      235,
-      250
-    ],
-    "max_hotend_temp": 260,
-    "max_bed_temp": 100,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -5271,43 +3515,6 @@
   },
   "artillery_sw_x3": {
     "display_name": "Artillery Sidewinder X3 Pro",
-    "firmware": "marlin",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 210,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 80,
-        "fan": 50
-      },
-      "ABS": {
-        "hotend": 250,
-        "bed": 100,
-        "fan": 0
-      },
-      "TPU": {
-        "hotend": 225,
-        "bed": 50,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      240,
-      240,
-      260
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 100,
-    "has_input_shaping": false,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -5380,43 +3587,6 @@
   },
   "artillery_sw_x3_plus": {
     "display_name": "Artillery Sidewinder X3 Plus",
-    "firmware": "marlin",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 210,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 80,
-        "fan": 50
-      },
-      "ABS": {
-        "hotend": 250,
-        "bed": 100,
-        "fan": 0
-      },
-      "TPU": {
-        "hotend": 225,
-        "bed": 50,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      300,
-      300,
-      400
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 100,
-    "has_input_shaping": false,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -5489,43 +3659,6 @@
   },
   "sovol_sv06": {
     "display_name": "Sovol SV06",
-    "firmware": "marlin",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 210,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 80,
-        "fan": 50
-      },
-      "ABS": {
-        "hotend": 250,
-        "bed": 100,
-        "fan": 0
-      },
-      "TPU": {
-        "hotend": 220,
-        "bed": 50,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      220,
-      220,
-      250
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 100,
-    "has_input_shaping": false,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -5605,43 +3738,6 @@
   },
   "sovol_sv06_plus": {
     "display_name": "Sovol SV06 Plus",
-    "firmware": "marlin",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 210,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 80,
-        "fan": 50
-      },
-      "ABS": {
-        "hotend": 250,
-        "bed": 100,
-        "fan": 0
-      },
-      "TPU": {
-        "hotend": 220,
-        "bed": 50,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      300,
-      300,
-      340
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 100,
-    "has_input_shaping": false,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -5721,43 +3817,6 @@
   },
   "sovol_sv07": {
     "display_name": "Sovol SV07",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 210,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 80,
-        "fan": 50
-      },
-      "ABS": {
-        "hotend": 250,
-        "bed": 100,
-        "fan": 0
-      },
-      "TPU": {
-        "hotend": 225,
-        "bed": 50,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      220,
-      220,
-      250
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 100,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -5836,43 +3895,6 @@
   },
   "sovol_sv07_plus": {
     "display_name": "Sovol SV07 Plus",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 210,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 80,
-        "fan": 50
-      },
-      "ABS": {
-        "hotend": 250,
-        "bed": 100,
-        "fan": 0
-      },
-      "TPU": {
-        "hotend": 225,
-        "bed": 50,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      300,
-      300,
-      350
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 100,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -5951,38 +3973,6 @@
   },
   "flashforge_adventurer5m": {
     "display_name": "FlashForge Adventurer 5M / 5M Pro",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "ptfe_lined",
-    "has_enclosure": true,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 210,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 230,
-        "bed": 80,
-        "fan": 50
-      },
-      "TPU": {
-        "hotend": 220,
-        "bed": 50,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      220,
-      220,
-      220
-    ],
-    "max_hotend_temp": 280,
-    "max_bed_temp": 110,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -6055,48 +4045,6 @@
   },
   "prusa_xl": {
     "display_name": "Prusa XL",
-    "firmware": "marlin",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 215,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 240,
-        "bed": 85,
-        "fan": 50
-      },
-      "ABS": {
-        "hotend": 255,
-        "bed": 100,
-        "fan": 0
-      },
-      "ASA": {
-        "hotend": 260,
-        "bed": 105,
-        "fan": 20
-      },
-      "PA-CF": {
-        "hotend": 280,
-        "bed": 100,
-        "fan": 30
-      }
-    },
-    "build_volume_mm": [
-      360,
-      360,
-      360
-    ],
-    "max_hotend_temp": 290,
-    "max_bed_temp": 120,
-    "has_input_shaping": false,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -6179,38 +4127,6 @@
   },
   "bambu_p1p": {
     "display_name": "Bambu Lab P1P",
-    "firmware": "bambu",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": false,
-    "has_chamber_sensor": false,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 220,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 240,
-        "bed": 80,
-        "fan": 40
-      },
-      "TPU": {
-        "hotend": 225,
-        "bed": 50,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      256,
-      256,
-      256
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 100,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -6286,49 +4202,6 @@
   },
   "bambu_a1_mini": {
     "display_name": "Bambu Lab A1 Mini",
-    "firmware": "bambu",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": false,
-    "has_chamber_sensor": false,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 220,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 240,
-        "bed": 80,
-        "fan": 40
-      },
-      "TPU": {
-        "hotend": 225,
-        "bed": 50,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      180,
-      180,
-      180
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 80,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": {
-      "detection_area_mm": [
-        156,
-        152,
-        180,
-        180
-      ],
-      "defeated_by": [
-        "spiral vase",
-        "print by object"
-      ]
-    },
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -6404,78 +4277,6 @@
   },
   "aon_m2_plus": {
     "display_name": "AON3D AON-M2+",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "has_input_shaping": true,
-    "materials": {
-      "PPS": {
-        "hotend": 340,
-        "bed": 120,
-        "fan": 0
-      },
-      "PLA": {
-        "hotend": 215,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 240,
-        "bed": 80,
-        "fan": 40
-      },
-      "ABS": {
-        "hotend": 260,
-        "bed": 100,
-        "fan": 0
-      },
-      "PA-CF": {
-        "hotend": 300,
-        "bed": 100,
-        "fan": 30
-      },
-      "PC": {
-        "hotend": 280,
-        "bed": 110,
-        "fan": 0
-      },
-      "PEEK": {
-        "hotend": 400,
-        "bed": 140,
-        "fan": 0
-      },
-      "PEKK": {
-        "hotend": 375,
-        "bed": 120,
-        "fan": 0
-      },
-      "ASA": {
-        "hotend": 260,
-        "bed": 100,
-        "fan": 30
-      },
-      "TPU": {
-        "hotend": 230,
-        "bed": 50,
-        "fan": 50
-      },
-      "PVA": {
-        "hotend": 240,
-        "bed": 55,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      450,
-      450,
-      565
-    ],
-    "max_hotend_temp": 500,
-    "max_bed_temp": 200,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "idex",
@@ -6548,53 +4349,6 @@
   },
   "qidi_plus4": {
     "display_name": "QIDI Plus 4",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "has_input_shaping": true,
-    "materials": {
-      "PPS": {
-        "hotend": 340,
-        "bed": 120,
-        "fan": 0
-      },
-      "PLA": {
-        "hotend": 215,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 240,
-        "bed": 80,
-        "fan": 40
-      },
-      "ABS": {
-        "hotend": 260,
-        "bed": 100,
-        "fan": 0
-      },
-      "PA-CF": {
-        "hotend": 300,
-        "bed": 100,
-        "fan": 30
-      },
-      "PC": {
-        "hotend": 280,
-        "bed": 110,
-        "fan": 0
-      }
-    },
-    "build_volume_mm": [
-      305,
-      305,
-      280
-    ],
-    "max_hotend_temp": 370,
-    "max_bed_temp": 120,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -6677,53 +4431,6 @@
   },
   "qidi_q1_pro": {
     "display_name": "QIDI Q1 Pro",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "has_input_shaping": true,
-    "materials": {
-      "PPS": {
-        "hotend": 340,
-        "bed": 120,
-        "fan": 0
-      },
-      "PLA": {
-        "hotend": 215,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 240,
-        "bed": 80,
-        "fan": 40
-      },
-      "ABS": {
-        "hotend": 260,
-        "bed": 100,
-        "fan": 0
-      },
-      "PA-CF": {
-        "hotend": 300,
-        "bed": 100,
-        "fan": 30
-      },
-      "PC": {
-        "hotend": 280,
-        "bed": 110,
-        "fan": 0
-      }
-    },
-    "build_volume_mm": [
-      245,
-      245,
-      240
-    ],
-    "max_hotend_temp": 350,
-    "max_bed_temp": 120,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -6806,53 +4513,6 @@
   },
   "qidi_x_max3": {
     "display_name": "QIDI X-Max 3",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "has_input_shaping": true,
-    "materials": {
-      "PPS": {
-        "hotend": 340,
-        "bed": 120,
-        "fan": 0
-      },
-      "PLA": {
-        "hotend": 215,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 240,
-        "bed": 80,
-        "fan": 40
-      },
-      "ABS": {
-        "hotend": 260,
-        "bed": 100,
-        "fan": 0
-      },
-      "PA-CF": {
-        "hotend": 300,
-        "bed": 100,
-        "fan": 30
-      },
-      "PC": {
-        "hotend": 280,
-        "bed": 110,
-        "fan": 0
-      }
-    },
-    "build_volume_mm": [
-      325,
-      325,
-      315
-    ],
-    "max_hotend_temp": 350,
-    "max_bed_temp": 120,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -6931,53 +4591,6 @@
   },
   "qidi_q2": {
     "display_name": "QIDI Q2",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "has_input_shaping": true,
-    "materials": {
-      "PPS": {
-        "hotend": 340,
-        "bed": 120,
-        "fan": 0
-      },
-      "PLA": {
-        "hotend": 215,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 240,
-        "bed": 80,
-        "fan": 40
-      },
-      "ABS": {
-        "hotend": 260,
-        "bed": 100,
-        "fan": 0
-      },
-      "PA-CF": {
-        "hotend": 300,
-        "bed": 100,
-        "fan": 30
-      },
-      "PC": {
-        "hotend": 280,
-        "bed": 110,
-        "fan": 0
-      }
-    },
-    "build_volume_mm": [
-      270,
-      270,
-      256
-    ],
-    "max_hotend_temp": 370,
-    "max_bed_temp": 120,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -7060,73 +4673,6 @@
   },
   "qidi_plus5": {
     "display_name": "QIDI Plus 5",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "has_input_shaping": true,
-    "build_volume_mm": [
-      320,
-      320,
-      300
-    ],
-    "max_hotend_temp": 370,
-    "max_bed_temp": 120,
-    "materials": {
-      "PLA": {
-        "hotend": 220,
-        "bed": 60,
-        "fan": 100
-      },
-      "PLA+": {
-        "hotend": 230,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 250,
-        "bed": 80,
-        "fan": 90
-      },
-      "ABS": {
-        "hotend": 250,
-        "bed": 90,
-        "fan": 80
-      },
-      "ASA": {
-        "hotend": 255,
-        "bed": 90,
-        "fan": 50
-      },
-      "PC": {
-        "hotend": 280,
-        "bed": 110,
-        "fan": 60
-      },
-      "TPU": {
-        "hotend": 230,
-        "bed": 35,
-        "fan": 100
-      },
-      "PLA-CF": {
-        "hotend": 220,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG-CF": {
-        "hotend": 255,
-        "bed": 80,
-        "fan": 40
-      },
-      "PPS-CF": {
-        "hotend": 320,
-        "bed": 110,
-        "fan": 30
-      }
-    },
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -7203,73 +4749,6 @@
   },
   "qidi_q2c": {
     "display_name": "QIDI Q2C",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "has_input_shaping": true,
-    "build_volume_mm": [
-      270,
-      270,
-      256
-    ],
-    "max_hotend_temp": 370,
-    "max_bed_temp": 120,
-    "materials": {
-      "PLA": {
-        "hotend": 220,
-        "bed": 60,
-        "fan": 100
-      },
-      "PLA+": {
-        "hotend": 230,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 250,
-        "bed": 80,
-        "fan": 90
-      },
-      "ABS": {
-        "hotend": 250,
-        "bed": 90,
-        "fan": 80
-      },
-      "ASA": {
-        "hotend": 270,
-        "bed": 90,
-        "fan": 50
-      },
-      "PC": {
-        "hotend": 280,
-        "bed": 110,
-        "fan": 60
-      },
-      "TPU": {
-        "hotend": 230,
-        "bed": 35,
-        "fan": 100
-      },
-      "PLA-CF": {
-        "hotend": 220,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG-CF": {
-        "hotend": 255,
-        "bed": 80,
-        "fan": 40
-      },
-      "PPS-CF": {
-        "hotend": 320,
-        "bed": 110,
-        "fan": 30
-      }
-    },
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -7342,78 +4821,6 @@
   },
   "qidi_max4": {
     "display_name": "QIDI Max 4",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "has_input_shaping": true,
-    "build_volume_mm": [
-      390,
-      390,
-      340
-    ],
-    "max_hotend_temp": 370,
-    "max_bed_temp": 120,
-    "materials": {
-      "PLA": {
-        "hotend": 220,
-        "bed": 55,
-        "fan": 100
-      },
-      "PLA+": {
-        "hotend": 230,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 250,
-        "bed": 70,
-        "fan": 90
-      },
-      "ABS": {
-        "hotend": 250,
-        "bed": 85,
-        "fan": 80
-      },
-      "ASA": {
-        "hotend": 250,
-        "bed": 90,
-        "fan": 50
-      },
-      "PC": {
-        "hotend": 280,
-        "bed": 110,
-        "fan": 60
-      },
-      "TPU": {
-        "hotend": 230,
-        "bed": 35,
-        "fan": 100
-      },
-      "PLA-CF": {
-        "hotend": 220,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG-CF": {
-        "hotend": 255,
-        "bed": 70,
-        "fan": 40
-      },
-      "PPS-CF": {
-        "hotend": 320,
-        "bed": 110,
-        "fan": 30
-      },
-      "PPS-GF": {
-        "hotend": 320,
-        "bed": 90,
-        "fan": 90
-      }
-    },
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -7497,63 +4904,6 @@
   },
   "qidi_x_smart3": {
     "display_name": "QIDI X-Smart 3",
-    "firmware": "klipper",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "has_input_shaping": true,
-    "build_volume_mm": [
-      175,
-      180,
-      170
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 120,
-    "materials": {
-      "PLA": {
-        "hotend": 220,
-        "bed": 60,
-        "fan": 100
-      },
-      "PLA+": {
-        "hotend": 230,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 250,
-        "bed": 80,
-        "fan": 90
-      },
-      "ABS": {
-        "hotend": 260,
-        "bed": 90,
-        "fan": 80
-      },
-      "ASA": {
-        "hotend": 270,
-        "bed": 90,
-        "fan": 50
-      },
-      "TPU": {
-        "hotend": 230,
-        "bed": 35,
-        "fan": 100
-      },
-      "PLA-CF": {
-        "hotend": 230,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG-CF": {
-        "hotend": 255,
-        "bed": 80,
-        "fan": 40
-      }
-    },
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -7632,48 +4982,6 @@
   },
   "ender3_s1_pro": {
     "display_name": "Creality Ender 3 S1 Pro",
-    "firmware": "marlin",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": false,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 205,
-        "bed": 60,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 235,
-        "bed": 80,
-        "fan": 50
-      },
-      "ABS": {
-        "hotend": 245,
-        "bed": 100,
-        "fan": 0
-      },
-      "TPU": {
-        "hotend": 220,
-        "bed": 50,
-        "fan": 50
-      },
-      "ASA": {
-        "hotend": 255,
-        "bed": 100,
-        "fan": 20
-      }
-    },
-    "build_volume_mm": [
-      220,
-      220,
-      270
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 100,
-    "has_input_shaping": false,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -7753,93 +5061,6 @@
   },
   "aon_hylo": {
     "display_name": "AON3D Hylo",
-    "firmware": "proprietary",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "has_input_shaping": false,
-    "materials": {
-      "PLA": {
-        "hotend": 215,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 240,
-        "bed": 80,
-        "fan": 40
-      },
-      "ABS": {
-        "hotend": 260,
-        "bed": 100,
-        "fan": 0
-      },
-      "ASA": {
-        "hotend": 260,
-        "bed": 100,
-        "fan": 30
-      },
-      "PC": {
-        "hotend": 280,
-        "bed": 110,
-        "fan": 0
-      },
-      "PA-CF": {
-        "hotend": 300,
-        "bed": 100,
-        "fan": 30
-      },
-      "PPS": {
-        "hotend": 340,
-        "bed": 120,
-        "fan": 0
-      },
-      "PEKK": {
-        "hotend": 375,
-        "bed": 120,
-        "fan": 0
-      },
-      "PEEK": {
-        "hotend": 400,
-        "bed": 140,
-        "fan": 0
-      },
-      "PEI 9085": {
-        "hotend": 360,
-        "bed": 190,
-        "fan": 0
-      },
-      "PEI 1010": {
-        "hotend": 360,
-        "bed": 190,
-        "fan": 0
-      },
-      "PPSU": {
-        "hotend": 380,
-        "bed": 190,
-        "fan": 0
-      },
-      "TPU": {
-        "hotend": 230,
-        "bed": 50,
-        "fan": 50
-      },
-      "PVA": {
-        "hotend": 240,
-        "bed": 55,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      650,
-      450,
-      450
-    ],
-    "max_hotend_temp": 500,
-    "max_bed_temp": 250,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": null,
       "xy_layout": "idex",
@@ -7912,98 +5133,6 @@
   },
   "intamsys_610ht": {
     "display_name": "INTAMSYS FUNMAT PRO 610HT",
-    "firmware": "proprietary",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "has_input_shaping": false,
-    "materials": {
-      "PLA": {
-        "hotend": 215,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 240,
-        "bed": 80,
-        "fan": 40
-      },
-      "ABS": {
-        "hotend": 260,
-        "bed": 100,
-        "fan": 0
-      },
-      "ASA": {
-        "hotend": 260,
-        "bed": 100,
-        "fan": 30
-      },
-      "PC": {
-        "hotend": 280,
-        "bed": 110,
-        "fan": 0
-      },
-      "PA-CF": {
-        "hotend": 300,
-        "bed": 100,
-        "fan": 30
-      },
-      "PPS": {
-        "hotend": 340,
-        "bed": 120,
-        "fan": 0
-      },
-      "PEKK": {
-        "hotend": 375,
-        "bed": 120,
-        "fan": 0
-      },
-      "PEEK": {
-        "hotend": 400,
-        "bed": 140,
-        "fan": 0
-      },
-      "PEI 9085": {
-        "hotend": 360,
-        "bed": 190,
-        "fan": 0
-      },
-      "PEI 1010": {
-        "hotend": 360,
-        "bed": 190,
-        "fan": 0
-      },
-      "PPSU": {
-        "hotend": 380,
-        "bed": 190,
-        "fan": 0
-      },
-      "HIPS": {
-        "hotend": 240,
-        "bed": 100,
-        "fan": 30
-      },
-      "TPU": {
-        "hotend": 230,
-        "bed": 50,
-        "fan": 50
-      },
-      "PVA": {
-        "hotend": 240,
-        "bed": 55,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      610,
-      508,
-      508
-    ],
-    "max_hotend_temp": 500,
-    "max_bed_temp": 300,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": null,
@@ -8076,68 +5205,6 @@
   },
   "visionminer_22idex_v4": {
     "display_name": "Vision Miner 22 IDEX v4",
-    "firmware": "reprapfirmware",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": null,
-    "has_abl": true,
-    "has_input_shaping": false,
-    "materials": {
-      "PLA": {
-        "hotend": 215,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 240,
-        "bed": 80,
-        "fan": 40
-      },
-      "ABS": {
-        "hotend": 260,
-        "bed": 100,
-        "fan": 0
-      },
-      "ASA": {
-        "hotend": 260,
-        "bed": 100,
-        "fan": 30
-      },
-      "PC": {
-        "hotend": 280,
-        "bed": 110,
-        "fan": 0
-      },
-      "PA-CF": {
-        "hotend": 300,
-        "bed": 100,
-        "fan": 30
-      },
-      "PPS": {
-        "hotend": 340,
-        "bed": 120,
-        "fan": 0
-      },
-      "TPU": {
-        "hotend": 230,
-        "bed": 50,
-        "fan": 50
-      },
-      "PVA": {
-        "hotend": 240,
-        "bed": 55,
-        "fan": 50
-      }
-    },
-    "build_volume_mm": [
-      350,
-      350,
-      450
-    ],
-    "max_hotend_temp": 500,
-    "max_bed_temp": 200,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "idex",
@@ -8219,78 +5286,6 @@
   },
   "bambu_h2d": {
     "display_name": "Bambu Lab H2D",
-    "firmware": "bambu",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": true,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 220,
-        "bed": 55,
-        "fan": 100
-      },
-      "PLA-CF": {
-        "hotend": 230,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 245,
-        "bed": 70,
-        "fan": 40
-      },
-      "PETG-CF": {
-        "hotend": 255,
-        "bed": 70,
-        "fan": 40
-      },
-      "ABS": {
-        "hotend": 270,
-        "bed": 90,
-        "fan": 30
-      },
-      "ASA": {
-        "hotend": 270,
-        "bed": 100,
-        "fan": 30
-      },
-      "PC": {
-        "hotend": 280,
-        "bed": 110,
-        "fan": 0
-      },
-      "TPU": {
-        "hotend": 230,
-        "bed": 35,
-        "fan": 50
-      },
-      "PVA": {
-        "hotend": 240,
-        "bed": 55,
-        "fan": 50
-      },
-      "PA-CF": {
-        "hotend": 290,
-        "bed": 100,
-        "fan": 30
-      },
-      "PPS": {
-        "hotend": 320,
-        "bed": 110,
-        "fan": 0
-      }
-    },
-    "build_volume_mm": [
-      300,
-      320,
-      320
-    ],
-    "max_hotend_temp": 350,
-    "max_bed_temp": 120,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -8366,78 +5361,6 @@
   },
   "bambu_h2d_pro": {
     "display_name": "Bambu Lab H2D Pro",
-    "firmware": "bambu",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": true,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 220,
-        "bed": 55,
-        "fan": 100
-      },
-      "PLA-CF": {
-        "hotend": 230,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 245,
-        "bed": 70,
-        "fan": 40
-      },
-      "PETG-CF": {
-        "hotend": 255,
-        "bed": 70,
-        "fan": 40
-      },
-      "ABS": {
-        "hotend": 270,
-        "bed": 90,
-        "fan": 30
-      },
-      "ASA": {
-        "hotend": 270,
-        "bed": 100,
-        "fan": 30
-      },
-      "PC": {
-        "hotend": 280,
-        "bed": 110,
-        "fan": 0
-      },
-      "TPU": {
-        "hotend": 230,
-        "bed": 35,
-        "fan": 50
-      },
-      "PVA": {
-        "hotend": 240,
-        "bed": 55,
-        "fan": 50
-      },
-      "PA-CF": {
-        "hotend": 290,
-        "bed": 100,
-        "fan": 30
-      },
-      "PPS": {
-        "hotend": 320,
-        "bed": 110,
-        "fan": 0
-      }
-    },
-    "build_volume_mm": [
-      300,
-      320,
-      320
-    ],
-    "max_hotend_temp": 350,
-    "max_bed_temp": 120,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -8513,78 +5436,6 @@
   },
   "bambu_h2c": {
     "display_name": "Bambu Lab H2C",
-    "firmware": "bambu",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": true,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 220,
-        "bed": 55,
-        "fan": 100
-      },
-      "PLA-CF": {
-        "hotend": 230,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 245,
-        "bed": 70,
-        "fan": 40
-      },
-      "PETG-CF": {
-        "hotend": 255,
-        "bed": 70,
-        "fan": 40
-      },
-      "ABS": {
-        "hotend": 270,
-        "bed": 90,
-        "fan": 30
-      },
-      "ASA": {
-        "hotend": 270,
-        "bed": 100,
-        "fan": 30
-      },
-      "PC": {
-        "hotend": 280,
-        "bed": 110,
-        "fan": 0
-      },
-      "TPU": {
-        "hotend": 230,
-        "bed": 35,
-        "fan": 50
-      },
-      "PVA": {
-        "hotend": 240,
-        "bed": 55,
-        "fan": 50
-      },
-      "PA-CF": {
-        "hotend": 290,
-        "bed": 100,
-        "fan": 30
-      },
-      "PPS": {
-        "hotend": 320,
-        "bed": 110,
-        "fan": 0
-      }
-    },
-    "build_volume_mm": [
-      300,
-      320,
-      320
-    ],
-    "max_hotend_temp": 350,
-    "max_bed_temp": 120,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -8660,73 +5511,6 @@
   },
   "bambu_x2d": {
     "display_name": "Bambu Lab X2D",
-    "firmware": "bambu",
-    "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
-    "has_enclosure": true,
-    "has_chamber_sensor": true,
-    "has_abl": true,
-    "materials": {
-      "PLA": {
-        "hotend": 220,
-        "bed": 55,
-        "fan": 100
-      },
-      "PLA-CF": {
-        "hotend": 230,
-        "bed": 55,
-        "fan": 100
-      },
-      "PETG": {
-        "hotend": 245,
-        "bed": 70,
-        "fan": 40
-      },
-      "PETG-CF": {
-        "hotend": 255,
-        "bed": 70,
-        "fan": 40
-      },
-      "ABS": {
-        "hotend": 270,
-        "bed": 90,
-        "fan": 30
-      },
-      "ASA": {
-        "hotend": 270,
-        "bed": 100,
-        "fan": 30
-      },
-      "PC": {
-        "hotend": 260,
-        "bed": 110,
-        "fan": 0
-      },
-      "TPU": {
-        "hotend": 230,
-        "bed": 35,
-        "fan": 50
-      },
-      "PVA": {
-        "hotend": 240,
-        "bed": 55,
-        "fan": 50
-      },
-      "PA-CF": {
-        "hotend": 290,
-        "bed": 100,
-        "fan": 30
-      }
-    },
-    "build_volume_mm": [
-      235,
-      256,
-      256
-    ],
-    "max_hotend_temp": 300,
-    "max_bed_temp": 120,
-    "has_input_shaping": true,
-    "nozzle_clumping_probe": null,
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",

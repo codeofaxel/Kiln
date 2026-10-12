@@ -341,11 +341,50 @@ class TestTheHotendCeilingIsStated:
                 wrong.append(f"{pid}: {stated!r}, safety profile says {expected!r}")
         assert not wrong, "\n".join(wrong)
 
-    def test_the_multi_extruder_door_states_it_too(self) -> None:
+    def test_the_multi_extruder_door_states_it_too(self, monkeypatch) -> None:
+        """A printer's flow ceiling is on its served record (the bundled
+        file is a roster since 2026-10-12), so the record is served here with
+        a synthetic ceiling: the door must state whatever the profile says."""
+        import json
+
+        from kiln import _pro_catalogue_bridge as bridge
+        from kiln import printer_intelligence as pi
+        from kiln import safety_profiles as sp
         from kiln.safety_profiles import get_profile
 
-        ceiling = get_profile("bambu_a1").max_volumetric_flow
-        assert _ini(resolve_multiextruder_profile("bambu_a1", 4))["max_volumetric_speed"] == f"{ceiling:g}"
+        record = {
+            "printer_id": "bambu_a1", "matched_by": "exact", "display_name": "Served test record",
+            "safety": {
+                "max_hotend_temp": 240.0, "max_bed_temp": 80.0, "max_chamber_temp": None,
+                "max_feedrate": 10000.0, "min_safe_z": 0.0, "max_volumetric_flow": 17.5,
+                "build_volume": [200, 200, 200], "notes": "Synthetic served record.",
+            },
+            "intel": {
+                "firmware": "bambu", "extruder_type": "direct_drive", "hotend_type": "all_metal",
+                "has_enclosure": False, "has_chamber_sensor": None, "has_abl": True,
+                "has_input_shaping": True, "build_volume_mm": [200, 200, 200],
+                "max_hotend_temp": 240, "max_bed_temp": 80, "materials": {}, "nozzle_clumping_probe": None,
+            },
+        }
+
+        def reset() -> None:
+            sp._cache.clear()
+            sp._roster.clear()
+            sp._variant_data.clear()
+            sp._loaded = False
+            pi._reset_caches()
+            bridge.forget()
+
+        monkeypatch.setattr(bridge, "available", lambda: False)
+        monkeypatch.setattr(bridge, "KEEP_DIR", Path(tempfile.mkdtemp()) / "printer_catalogue")
+        monkeypatch.setattr(bridge, "_served", lambda key: (json.loads(json.dumps(record)), None) if key == "bambu_a1" else (None, None))
+        reset()
+        try:
+            ceiling = get_profile("bambu_a1").max_volumetric_flow
+            assert ceiling == 17.5, "the served record did not reach the safety profile"
+            assert _ini(resolve_multiextruder_profile("bambu_a1", 4))["max_volumetric_speed"] == f"{ceiling:g}"
+        finally:
+            reset()
 
     def test_a_callers_ceiling_is_theirs(self) -> None:
         s = _ini(resolve_slicer_profile("bambu_a1", overrides={"max_volumetric_speed": "15"}))

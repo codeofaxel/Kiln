@@ -952,8 +952,10 @@ def test_set_tool_temp_sends_m104() -> None:
     fake = _rrf3()
     adapter = fake.install(_adapter())
 
-    assert adapter.set_tool_temp(245).ok
-    assert fake.gcodes() == ["M104 S245"]
+    # Under the generic floor (240 C): no model is bound here, and the wire
+    # is what this test is about.
+    assert adapter.set_tool_temp(235).ok
+    assert fake.gcodes() == ["M104 S235"]
 
 
 def test_set_bed_temp_sends_m140() -> None:
@@ -966,10 +968,12 @@ def test_set_bed_temp_sends_m140() -> None:
 
 def test_high_temp_machines_are_not_capped_at_desktop_limits() -> None:
     """Duet drives 500 C hotends; a 300 C ceiling would break the class --
-    once Kiln has been told which machine this is."""
+    once Kiln has been told which machine this is.  The session fixture's
+    synthetic ``kilntest_hot`` (500 C / 200 C) stands in for the industrial
+    machines whose real rows are served."""
     fake = _rrf3()
     adapter = fake.install(_adapter())
-    adapter.set_safety_profile("intamsys_610ht")
+    adapter.set_safety_profile("kilntest_hot")
 
     assert adapter.set_tool_temp(450).ok
     assert fake.gcodes() == ["M104 S450"]
@@ -1238,22 +1242,28 @@ def test_duet_examples_name_a_reprapfirmware_machine() -> None:
     )
     printers = data.get("printers", data)
 
+    # A roster row states its firmware through its cited motion family;
+    # ``firmware_label`` reads that (and a stored label where a full row
+    # carries one).
+    from kiln.motion_facts import firmware_label
+
     for model_id in _EXAMPLES_BY_TYPE["duet"]:
-        firmware = str(printers[model_id].get("firmware", "")).lower()
+        firmware = str(firmware_label(printers[model_id]) or "").lower()
         assert "reprap" in firmware, f"{model_id} is not a RepRapFirmware machine"
 
 
-def test_real_safety_profile_clamps_the_adapter_ceiling() -> None:
-    """End-to-end: a catalogued Duet machine's real limits must bind.
+def test_a_bound_safety_profile_clamps_the_adapter_ceiling() -> None:
+    """End-to-end: a catalogued Duet machine's limits must bind.
 
     The adapter's own ceiling is the widest the backend class allows; the
-    bound profile is what narrows it to this machine.
+    bound profile is what narrows it to this machine.  ``kilntest_hot`` is
+    the session fixture's synthetic 500 C / 200 C machine.
     """
     fake = _rrf3()
     adapter = fake.install(_adapter())
-    adapter.set_safety_profile("visionminer_22idex_v4")
+    adapter.set_safety_profile("kilntest_hot")
 
-    # Within the machine's real envelope (500 C hotend / 200 C bed).
+    # Within the machine's envelope (500 C hotend / 200 C bed).
     assert adapter.set_tool_temp(480).ok
     assert adapter.set_bed_temp(190).ok
 

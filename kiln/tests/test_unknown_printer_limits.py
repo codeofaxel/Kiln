@@ -1,19 +1,24 @@
 """A printer Kiln has not been told the model of is held to the floor, and
 a limit above that floor needs a person.
 
-Three doors, one rule.  The generic profile IS the least capable machine
-in the catalogue (derived, so it moves when the catalogue does).  An
-adapter with no model bound holds every heater to it, never to the loosest
-hotend its protocol can drive.  And an override that would stand above the
-floor for a printer Kiln has no curated number for is written only after
-the person typed the code Kiln showed on their screen -- an agent's call is
-not a confirmation.
+Three doors, one rule.  The generic profile IS the floor: since 2026-10-12
+a PTFE-safe 240 C hotend, because a printer's record -- which says whether
+its hotend is lined -- is served per printer and an install without the
+record cannot know.  An adapter with no model bound holds every heater to
+it, never to the loosest hotend its protocol can drive.  And an override
+that would stand above the floor for a printer Kiln has no curated number
+for is written only after the person typed the code Kiln showed on their
+screen -- an agent's call is not a confirmation.
+
+The curated machines here are the session fixture's synthetic printers
+(``tests/fixtures/printer_catalogue_test.json``): a test about the clamp
+needs a row with a ceiling in it, and the real rows are served.  That the
+floor sits below every REAL catalogued printer is pinned where the real
+rows are, in kiln-pro's ``tests/test_printer_catalogue_numbers.py``.
 """
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -23,30 +28,24 @@ from kiln import screen_code
 from kiln.printers.base import PrinterError
 from kiln.safety_profiles import LimitsNeedAPerson, get_profile, limits_above_floor, set_local_printer_override
 
+#: A synthetic curated printer (300 C hotend, 110 C bed, no variants).
+CURATED = "kilntest_open"
+
 # ---------------------------------------------------------------------------
-# The floor is derived, not typed
+# The floor is the named constant, not a typed number
 # ---------------------------------------------------------------------------
 
 
-def _catalogue() -> dict[str, dict[str, Any]]:
-    data = json.loads((Path(sp.__file__).parent / "data" / "safety_profiles.json").read_text())
-    return {
-        k: v for k, v in data.items()
-        if isinstance(v, dict) and "max_hotend_temp" in v and k != "default"
-    }
-
-
-class TestTheFloorIsTheLeastCapableMachine:
-    def test_the_generic_profile_is_below_every_catalogued_printer(self):
-        rows = _catalogue().values()
-        generic = get_profile("default")
-        assert generic.max_hotend_temp == min(r["max_hotend_temp"] for r in rows)
-        assert generic.max_bed_temp == min(r["max_bed_temp"] for r in rows)
-
+class TestTheFloor:
     def test_the_last_resort_constants_say_the_same(self):
         generic = get_profile("default")
         assert generic.max_hotend_temp == sp._UNKNOWN_PRINTER_MAX_HOTEND_C
         assert generic.max_bed_temp == sp._UNKNOWN_PRINTER_MAX_BED_C
+
+    def test_the_hotend_floor_is_the_ptfe_safe_ceiling(self):
+        """An install that could not fetch a record cannot know whether the
+        hotend is lined, so the floor assumes it is."""
+        assert sp._UNKNOWN_PRINTER_MAX_HOTEND_C == 240.0
 
 
 # ---------------------------------------------------------------------------
@@ -79,19 +78,19 @@ class TestAnAdapterWithNoModelBound:
         assert "printer_model" in str(info.value)
         assert "add_safety_profile" in str(info.value)
 
-    def test_a_temperature_under_the_floor_passes(self):
+    def test_a_temperature_at_the_floor_passes(self):
         _Adapter()._validate_temp(240.0, 300.0, "Hotend")
 
     def test_a_known_model_keeps_its_own_ceiling(self):
         a = _Adapter()
-        a._safety_profile_id = "k1_max"
+        a._safety_profile_id = CURATED
         a._validate_temp(300.0, 300.0, "Hotend")
         with pytest.raises(PrinterError, match="exceeds safety limit"):
             a._validate_temp(301.0, 350.0, "Hotend")
 
     def test_the_adapters_own_literal_still_binds_below_the_profile(self):
         a = _Adapter()
-        a._safety_profile_id = "k1_max"
+        a._safety_profile_id = CURATED
         with pytest.raises(PrinterError):
             a._validate_temp(280.0, 275.0, "Hotend")
 
@@ -136,41 +135,42 @@ class TestWhatNeedsAPerson:
         assert limits_above_floor("foo_x2", _foo_x2()) == ("max_hotend_temp", "max_bed_temp")
 
     def test_limits_at_or_below_the_floor_do_not(self):
-        assert limits_above_floor("foo_x2", _foo_x2(max_hotend_temp=250.0, max_bed_temp=80.0, max_feedrate=10000.0)) == ()
+        assert limits_above_floor("foo_x2", _foo_x2(max_hotend_temp=240.0, max_bed_temp=80.0, max_feedrate=10000.0)) == ()
 
     def test_every_field_that_loosens_enforcement_needs_a_person_not_only_the_temperatures(self):
         # Speed, flow and the Z floor are enforced too; a typed number past
         # the generic one on any of them is a ceiling nobody at Kiln verified.
-        quiet = _foo_x2(max_hotend_temp=250.0, max_bed_temp=80.0, max_feedrate=10000.0)
+        quiet = _foo_x2(max_hotend_temp=240.0, max_bed_temp=80.0, max_feedrate=10000.0)
         assert limits_above_floor("foo_x2", {**quiet, "max_feedrate": 30000.0}) == ("max_feedrate",)
         assert limits_above_floor("foo_x2", {**quiet, "max_volumetric_flow": 40.0}) == ("max_volumetric_flow",)
         assert limits_above_floor("foo_x2", {**quiet, "min_safe_z": -1.0}) == ("min_safe_z",)
 
     def test_a_curated_printer_never_does_because_the_override_can_only_tighten(self):
-        assert limits_above_floor("ender3", _foo_x2(max_hotend_temp=500.0)) == ()
+        assert limits_above_floor(CURATED, _foo_x2(max_hotend_temp=500.0)) == ()
 
     def test_a_key_that_only_resembles_a_curated_one_still_needs_a_person(self):
-        # "ender" is a prefix of the curated "ender3", so the lookup's fuzzy
-        # rule would answer a request for "ender" with the Ender 3 -- but a
-        # request for "enderx" reaches an override saved as "ender" with no
-        # curated row underneath to clamp it.  So resembling a curated key
-        # exempts nothing; only being one does.
-        assert limits_above_floor("ender", _foo_x2(max_hotend_temp=500.0, max_bed_temp=200.0)) == (
+        # "kilntest" is a prefix of the curated "kilntest_open", so the
+        # lookup's fuzzy rule would answer a request for "kilntest" with that
+        # printer -- but a request for "kilntestx" reaches an override saved
+        # as "kilntest" with no curated row underneath to clamp it.  So
+        # resembling a curated key exempts nothing; only being one does.
+        assert limits_above_floor("kilntest", _foo_x2(max_hotend_temp=500.0, max_bed_temp=200.0)) == (
             "max_hotend_temp",
             "max_bed_temp",
         )
 
     def test_a_spelling_that_resolves_to_a_curated_key_is_still_saved_under_its_own(self):
-        # "Creality K1C" resolves to the curated "k1c" for a lookup, but an
-        # override is saved as "creality_k1c"; the key judged is the key
-        # saved, so this asks for a person like any uncatalogued key.
-        assert limits_above_floor("Creality K1C", _foo_x2(max_hotend_temp=400.0, max_bed_temp=80.0)) == ("max_hotend_temp",)
-        assert limits_above_floor("k1c", _foo_x2(max_hotend_temp=400.0, max_bed_temp=80.0)) == ()
+        # The printer's own name resolves to the curated "kilntest_open" for
+        # a lookup, but an override is saved under the name as typed; the key
+        # judged is the key saved, so this asks for a person like any
+        # uncatalogued key.
+        assert limits_above_floor("Kilntest Open 220", _foo_x2(max_hotend_temp=400.0, max_bed_temp=80.0)) == ("max_hotend_temp",)
+        assert limits_above_floor(CURATED, _foo_x2(max_hotend_temp=400.0, max_bed_temp=80.0)) == ()
 
     def test_the_engine_closes_the_prefix_route_an_unconfirmed_ceiling_could_take(self):
         with pytest.raises(LimitsNeedAPerson):
-            set_local_printer_override("ender", _foo_x2(max_hotend_temp=500.0))
-        assert get_profile("enderx").max_hotend_temp == get_profile("default").max_hotend_temp
+            set_local_printer_override("kilntest", _foo_x2(max_hotend_temp=500.0))
+        assert get_profile("kilntestx").max_hotend_temp == get_profile("default").max_hotend_temp
 
     def test_the_engine_refuses_an_unconfirmed_limit_above_the_floor(self):
         with pytest.raises(LimitsNeedAPerson) as info:
@@ -183,8 +183,8 @@ class TestWhatNeedsAPerson:
         assert get_profile("foo_x2").max_hotend_temp == 300.0
 
     def test_the_engine_writes_a_floor_level_one_without_asking(self):
-        set_local_printer_override("foo_x2", _foo_x2(max_hotend_temp=250.0, max_bed_temp=80.0))
-        assert get_profile("foo_x2").max_hotend_temp == 250.0
+        set_local_printer_override("foo_x2", _foo_x2(max_hotend_temp=240.0, max_bed_temp=80.0))
+        assert get_profile("foo_x2").max_hotend_temp == 240.0
 
 
 # ---------------------------------------------------------------------------
@@ -297,7 +297,7 @@ class TestAddSafetyProfileAsksThePerson:
 
     def test_tightening_a_curated_printer_needs_no_code(self, door):
         tools, shown = door
-        result = tools["add_safety_profile"]("ender3", _foo_x2(max_hotend_temp=240.0, max_bed_temp=90.0))
+        result = tools["add_safety_profile"](CURATED, _foo_x2(max_hotend_temp=240.0, max_bed_temp=90.0))
         assert result["success"] is True, result
         assert shown == []
 

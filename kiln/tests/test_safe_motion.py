@@ -248,8 +248,13 @@ class TestOccupiedRegion:
 
 
 # ---------------------------------------------------------------------------
-# Park planning against real catalogue geometries
+# Park planning against catalogue geometries
 # ---------------------------------------------------------------------------
+
+#: The session fixture's synthetic printers (see ``test_catalogue_geometries_resolve``).
+BEDSLINGER = "kilntest_open"      # 220 x 220 x 250, corner origin
+COREXY = "kilntest_enclosed"      # 256 x 256 x 256
+LARGE = "kilntest_big"            # 350 x 350 x 400
 
 
 def _region(x0: float, x1: float, y0: float, y1: float, margin: float = 10.0) -> OccupiedRegion:
@@ -260,14 +265,19 @@ def _region(x0: float, x1: float, y0: float, y1: float, margin: float = 10.0) ->
 
 class TestParkPlanning:
     def test_catalogue_geometries_resolve(self):
-        # The geometries these tests rely on, verified against the catalogue.
-        assert get_build_volume("ender3") == (220.0, 220.0, 250.0)
-        assert get_build_volume("bambu_x1c") == (256.0, 256.0, 256.0)
-        assert get_build_volume("voron_2_4_350") == (350.0, 350.0, 350.0)
+        # The geometries these tests rely on, verified against the session
+        # fixture's synthetic rows: a 220 mm corner-origin bedslinger, a
+        # 256 mm enclosed CoreXY and a 350 mm large-format machine
+        # (tests/fixtures/printer_catalogue_test.json).  A real printer's bed
+        # is served from its record, so the planner is exercised on rows a
+        # public install always holds.
+        assert get_build_volume(BEDSLINGER) == (220.0, 220.0, 250.0)
+        assert get_build_volume(COREXY) == (256.0, 256.0, 256.0)
+        assert get_build_volume(LARGE) == (350.0, 350.0, 400.0)
 
     def test_bedslinger_centre_part_parks_clear(self):
-        # Ender 3 (corner-origin bedslinger), 60x60 part centred on the bed.
-        park = plan_park_point("ender3", _region(80, 140, 80, 140))
+        # Corner-origin 220 mm bedslinger, 60x60 part centred on the bed.
+        park = plan_park_point(BEDSLINGER, _region(80, 140, 80, 140))
         assert park.ok is True
         x, y = park.xy
         assert 0 <= x <= 220 and 0 <= y <= 220
@@ -277,14 +287,14 @@ class TestParkPlanning:
         # Part hugging the origin corner: the only sensible park is the
         # far corner, and near-origin candidates must be rejected.
         region = _region(0, 80, 0, 80)
-        park = plan_park_point("ender3", region)
+        park = plan_park_point(BEDSLINGER, region)
         assert park.ok is True
         assert park.xy == (215.0, 215.0)
 
     def test_enclosed_corexy_parks_clear(self):
-        # X1C (enclosed CoreXY, 256mm bed), part in the +X half.
+        # Enclosed CoreXY, 256mm bed, part in the +X half.
         region = _region(150, 250, 60, 200)
-        park = plan_park_point("bambu_x1c", region)
+        park = plan_park_point(COREXY, region)
         assert park.ok is True
         x, y = park.xy
         assert not region.contains(x, y)
@@ -292,7 +302,7 @@ class TestParkPlanning:
 
     def test_large_corexy_parks_clear(self):
         region = _region(100, 250, 100, 250)
-        park = plan_park_point("voron_2_4_350", region)
+        park = plan_park_point(LARGE, region)
         assert park.ok is True
         assert not region.contains(*park.xy)
 
@@ -305,7 +315,7 @@ class TestParkPlanning:
         assert "bed geometry unknown" in park.reason
 
     def test_unknown_occupancy_refuses(self):
-        park = plan_park_point("ender3", None)
+        park = plan_park_point(BEDSLINGER, None)
         assert park.ok is False
         assert park.xy is None
         assert "occupied region unknown" in park.reason
@@ -313,7 +323,7 @@ class TestParkPlanning:
     def test_bed_filling_part_refuses(self):
         # A plate-filling job: no corner is provably clear -> refuse,
         # never guess.
-        park = plan_park_point("ender3", _region(0, 220, 0, 220))
+        park = plan_park_point(BEDSLINGER, _region(0, 220, 0, 220))
         assert park.ok is False
         assert park.xy is None
         assert "no on-bed point is provably clear" in park.reason
@@ -340,14 +350,14 @@ def _assert_route_proven_clear(plan, regions) -> None:
 class TestPlanTravel:
     def test_direct_when_clear(self):
         region = _region(150, 200, 150, 200)
-        plan = plan_travel("ender3", (10, 10), (100, 10), region)
+        plan = plan_travel(BEDSLINGER, (10, 10), (100, 10), region)
         assert plan.ok and plan.strategy == "direct"
         assert plan.waypoints == [(10, 10), (100, 10)]
 
     def test_routes_around_a_blocking_part(self):
         # Part square in the middle of the straight line.
         region = _region(90, 130, 90, 130)
-        plan = plan_travel("ender3", (10, 110), (210, 110), region)
+        plan = plan_travel(BEDSLINGER, (10, 110), (210, 110), region)
         assert plan.strategy == "route_around"
         _assert_route_proven_clear(plan, [region])
         assert plan.waypoints[0] == (10, 110)
@@ -359,13 +369,13 @@ class TestPlanTravel:
         # (110,130)).
         low = _region(80, 140, 50, 100)
         high = _region(80, 140, 140, 190)
-        plan = plan_travel("ender3", (10, 120), (210, 120), [low, high])
+        plan = plan_travel(BEDSLINGER, (10, 120), (210, 120), [low, high])
         _assert_route_proven_clear(plan, [low, high])
 
     def test_wall_across_the_bed_refuses(self):
         # Keep-out spanning the full bed width: no route can exist.
         wall = _region(0, 220, 100, 120)
-        plan = plan_travel("ender3", (110, 10), (110, 210), wall)
+        plan = plan_travel(BEDSLINGER, (110, 10), (110, 210), wall)
         assert plan.ok is False
         assert plan.waypoints == []
         assert "no clear route" in plan.reason
@@ -376,7 +386,7 @@ class TestPlanTravel:
             margin_mm=10.0, z_top_mm=12.0, source="test",
         )
         plan = plan_travel(
-            "ender3", (10, 110), (210, 110), region, travel_z_mm=20.0
+            BEDSLINGER, (10, 110), (210, 110), region, travel_z_mm=20.0
         )
         assert plan.ok and plan.strategy == "fly_over"
         assert plan.waypoints == [(10, 110), (210, 110)]
@@ -385,7 +395,7 @@ class TestPlanTravel:
         # z_top unknown -> cannot prove fly-over; must route around.
         region = _region(90, 130, 90, 130)  # z_top_mm=None
         plan = plan_travel(
-            "ender3", (10, 110), (210, 110), region, travel_z_mm=20.0
+            BEDSLINGER, (10, 110), (210, 110), region, travel_z_mm=20.0
         )
         assert plan.strategy == "route_around"
         _assert_route_proven_clear(plan, [region])
@@ -399,18 +409,18 @@ class TestPlanTravel:
             x_min=30, x_max=60, y_min=30, y_max=60,
             margin_mm=10.0, source="exclude_object", name="coaster_1",
         )
-        blocked = plan_travel("ender3", (5, 110), (110, 110), [target, other])
+        blocked = plan_travel(BEDSLINGER, (5, 110), (110, 110), [target, other])
         assert blocked.ok is False
         assert "coaster_2" in blocked.reason
         # Aiming AT the target (mid-print decoration) exempts only it.
         aimed = plan_travel(
-            "ender3", (5, 110), (110, 110), [target, other],
+            BEDSLINGER, (5, 110), (110, 110), [target, other],
             ignore_names={"coaster_2"},
         )
         _assert_route_proven_clear(aimed, [other])
 
     def test_off_bed_endpoint_refuses(self):
-        plan = plan_travel("ender3", (10, 10), (400, 10), _region(90, 130, 90, 130))
+        plan = plan_travel(BEDSLINGER, (10, 10), (400, 10), _region(90, 130, 90, 130))
         assert plan.ok is False
         assert "outside" in plan.reason
 
@@ -422,7 +432,7 @@ class TestPlanTravel:
         assert "bed geometry unknown" in plan.reason
 
     def test_unknown_occupancy_refuses(self):
-        plan = plan_travel("ender3", (10, 10), (50, 10), None)
+        plan = plan_travel(BEDSLINGER, (10, 10), (50, 10), None)
         assert plan.ok is False
         assert "occupied regions unknown" in plan.reason
 
@@ -430,7 +440,7 @@ class TestPlanTravel:
         # Part in the origin corner; route from one adjacent edge to the
         # other must go around the outside, never through.
         region = _region(0, 60, 0, 60)
-        plan = plan_travel("ender3", (5, 90), (90, 5), region)
+        plan = plan_travel(BEDSLINGER, (5, 90), (90, 5), region)
         _assert_route_proven_clear(plan, [region])
 
 
@@ -475,7 +485,7 @@ class TestOccupiedRegionsForJob:
         gcode = tmp_path / "plate.gcode"
         gcode.write_text(_MULTI_OBJECT_GCODE)
         regions = occupied_regions_for_job(str(gcode))
-        park = plan_park_point("ender3", regions)
+        park = plan_park_point(BEDSLINGER, regions)
         assert park.ok is True
         assert not any(r.contains(*park.xy) for r in regions)
 
@@ -546,10 +556,10 @@ class TestPerObjectHeights:
         gcode.write_text(_MARKER_BLOCK_GCODE)
         regions = occupied_regions_for_job(str(gcode))
         # Travel at Z=50 clears both parts (42.0 and 0.2) — provable.
-        over = plan_travel("ender3", (10, 110), (210, 110), regions, travel_z_mm=50.0)
+        over = plan_travel(BEDSLINGER, (10, 110), (210, 110), regions, travel_z_mm=50.0)
         assert over.ok and over.strategy == "fly_over"
         # Travel at Z=10 does NOT clear the 42mm part — must route around.
-        around = plan_travel("ender3", (10, 45), (210, 45), regions, travel_z_mm=10.0)
+        around = plan_travel(BEDSLINGER, (10, 45), (210, 45), regions, travel_z_mm=10.0)
         assert around.strategy == "route_around"
         _assert_route_proven_clear(around, regions)
 
@@ -624,7 +634,7 @@ class TestPlanLivePark:
         # Part in the centre; home at origin corner (from config).
         region = _region(80, 140, 80, 140)
         route = plan_live_park(
-            "ender3", home_xy_from_config(_PARK_CONFIG), region,
+            BEDSLINGER, home_xy_from_config(_PARK_CONFIG), region,
             bed_rect=bed_rect_from_config(_PARK_CONFIG),
         )
         assert route.ok, route.reason
@@ -634,14 +644,14 @@ class TestPlanLivePark:
         assert not region.contains(*route.waypoints[-1])
 
     def test_unknown_home_refuses(self):
-        route = plan_live_park("ender3", None, _region(80, 140, 80, 140))
+        route = plan_live_park(BEDSLINGER, None, _region(80, 140, 80, 140))
         assert route.ok is False
         assert "position unknown" in route.reason
 
     def test_home_corner_under_part_refuses(self):
         # Part covers the home corner: no provable escape, no move.
         route = plan_live_park(
-            "ender3", (0.0, 0.0), _region(0, 60, 0, 60),
+            BEDSLINGER, (0.0, 0.0), _region(0, 60, 0, 60),
             bed_rect=bed_rect_from_config(_PARK_CONFIG),
         )
         assert route.ok is False
@@ -654,7 +664,7 @@ class TestPlanLivePark:
             _region(120, 220, 30, 70),
         ]
         route = plan_live_park(
-            "ender3", (0.0, 0.0), walls,
+            BEDSLINGER, (0.0, 0.0), walls,
             bed_rect=bed_rect_from_config(_PARK_CONFIG),
         )
         if route.ok:
@@ -663,7 +673,7 @@ class TestPlanLivePark:
             assert "no clear park corner" in route.reason
 
     def test_unknown_occupancy_refuses(self):
-        route = plan_live_park("ender3", (0.0, 0.0), None)
+        route = plan_live_park(BEDSLINGER, (0.0, 0.0), None)
         assert route.ok is False
 
 

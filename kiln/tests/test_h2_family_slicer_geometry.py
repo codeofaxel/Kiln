@@ -15,7 +15,11 @@ machine-specific subset explicit, so adding a printer by copying one again
 fails here rather than at somebody's nozzle.
 
 Values below are read from the vendor's own shipped machine profiles and
-from each model's published specifications.
+from each model's published specifications.  That the slicer geometry
+agrees with each machine's catalogue record, and that the material list
+agrees with its recipe table, is pinned beside the records -- served per
+printer since 2026-10-12 -- in kiln-pro's
+``tests/test_printer_catalogue_numbers.py``.
 """
 from __future__ import annotations
 
@@ -50,11 +54,6 @@ def slicer() -> dict:
     return raw.get("profiles", raw)
 
 
-@pytest.fixture(scope="module")
-def catalogue() -> dict:
-    return json.loads((DATA / "printer_intelligence.json").read_text(encoding="utf-8"))
-
-
 @pytest.mark.parametrize("model", MODELS)
 def test_bed_rectangle_is_this_machines_own(slicer, model: str):
     x, y, _ = GEOMETRY[model]
@@ -67,15 +66,16 @@ def test_height_ceiling_is_this_machines_own(slicer, model: str):
 
 
 @pytest.mark.parametrize("model", MODELS)
-def test_slicer_geometry_agrees_with_the_catalogue(slicer, catalogue, model: str):
-    """The two must never disagree: one guards placement, the other refuses
-    an oversize part, and a part slipping between them reaches the printer."""
+def test_slicer_geometry_is_a_plain_rectangle_at_the_catalogued_envelope(slicer, model: str):
+    """The bed the slicer places against is the same conservative envelope
+    the catalogue refuses against (agreement with the served record itself
+    is pinned in kiln-pro)."""
     bed = slicer[model]["settings"]["bed_shape"]
     match = re.fullmatch(r"0x0,(\d+)x0,\d+x(\d+),0x\d+", bed)
     assert match, f"{model} bed_shape is not a plain rectangle: {bed}"
     x, y = int(match.group(1)), int(match.group(2))
     z = int(slicer[model]["settings"]["max_print_height"])
-    assert [x, y, z] == catalogue[model]["build_volume_mm"]
+    assert (x, y, z) == GEOMETRY[model]
 
 
 @pytest.mark.parametrize("model", MODELS)
@@ -156,21 +156,3 @@ def test_direct_drive_describes_the_main_extruder(profiles, model: str):
     which side it applies to.
     """
     assert profiles[model]["has_direct_drive"] is True
-
-
-@pytest.mark.parametrize("model", MODELS)
-def test_supported_materials_agree_with_the_temperature_table(profiles, model: str):
-    """The material list and the per-material temperatures must not disagree.
-
-    PPS is the one that separates these machines, so a list claiming it on the
-    machine whose hotend cannot reach it would be caught here.
-    """
-    catalogue = json.loads(
-        (DATA / "printer_intelligence.json").read_text(encoding="utf-8")
-    )
-    listed = set(profiles[model]["supported_materials"])
-    has_pps_temps = "PPS" in catalogue[model]["materials"]
-    assert ("pps" in listed) == has_pps_temps, (
-        f"{model} lists pps={'pps' in listed} but its temperature table "
-        f"says {has_pps_temps}"
-    )

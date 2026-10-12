@@ -2873,12 +2873,15 @@ def _design_profile_from_intel(
 
 def _all_design_profiles() -> dict[str, PrinterDesignProfile]:
     """Build the full design-capability map: an entry for every printer
-    Kiln supports.  ``printer_intelligence.json`` (the canonical supported-
-    printer set) is the base; a curated ``printer_profiles.json`` record,
-    when present, overrides the intel-derived one (hand-tuned specs + the
-    kiln-pro ``agent_notes`` overlay).  This keeps the design tools in sync
-    with the rest of the system instead of stranding ~80% of supported
-    printers behind an "Unknown printer" error.
+    Kiln supports.  The curated ``printer_profiles.json`` carries a record
+    for every printer on the roster (``tests/test_printer_roster_consistency``
+    pins the five rosters identical), and it wins on its own id (hand-tuned
+    specs + the kiln-pro ``agent_notes`` overlay).  Underneath it, a profile
+    is derived from each spec sheet this process holds -- since 2026-10-12
+    the rows ``printer_intelligence`` has resolved from Kiln's catalogue,
+    never the roster rows, which carry no spec sheet to derive from.  This
+    keeps the design tools in sync with the rest of the system instead of
+    stranding supported printers behind an "Unknown printer" error.
     """
     from kiln import printer_intelligence as _pi
 
@@ -2886,6 +2889,8 @@ def _all_design_profiles() -> dict[str, PrinterDesignProfile]:
     profiles: dict[str, PrinterDesignProfile] = {}
     for pid, raw in _pi._raw_cache.items():
         if pid == "default":  # sentinel fallback, not a real model
+            continue
+        if not raw.get("build_volume_mm"):  # no spec sheet held: nothing to derive
             continue
         profiles[pid] = _design_profile_from_intel(pid, raw)
 
