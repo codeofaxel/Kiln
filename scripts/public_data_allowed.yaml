@@ -1,0 +1,73 @@
+# Bundled data files that hold a table keyed by several printer makers and
+# carrying limit-shaped fields, and why each may ship in public Kiln.
+#
+# Read by scripts/audit_public_sme_leak.py, which finds those tables by the
+# SHAPE of their fields, never by file name: a file nobody listed here fails
+# the day it lands.  Paths are relative to kiln/src/kiln/data/.
+#
+# classification:
+#   roster              ids and display names, plus the fields named in
+#                       `fields`; every row may carry only those.  `full_rows`
+#                       names the generic rows that stay whole (never a
+#                       printer).
+#   safety_floor        a free floor every install needs offline; `fields`
+#                       names what each row may carry, enforced the same way.
+#   standard_reference  published standard or catalogue facts anyone can look
+#                       up; `fields` enforced the same way.
+#   pending_move        a per-model dataset that moves to kiln-pro, one record
+#                       per printer, served.  Needs `why` and an ISO `by`; the
+#                       gate fails once the date has passed.
+#   not_printer_keyed   the maker names are a coincidence of keying; say why.
+#
+# Every row carries `why`.  A row whose file is gone, or whose file no longer
+# holds the shape, fails as stale: delete the row.
+
+files:
+  safety_profiles.json:
+    classification: roster
+    fields: [display_name]
+    full_rows: [default]
+    why: >-
+      The printer roster: each printer's id and display name.  A printer's
+      limits are served one printer at a time from kiln-pro; the default row
+      is the generic floor an unknown or signed-out printer is held to, so it
+      stays whole.
+
+  printer_intelligence.json:
+    classification: roster
+    fields: [display_name, motion]
+    full_rows: [default]
+    why: >-
+      The printer roster plus each printer's motion block, which stays public
+      because the check that refuses a blind head move must work offline with
+      no kiln-pro installed.  Everything else about a printer is served one
+      printer at a time from kiln-pro; the default row is the generic floor.
+
+  design_knowledge/printer_profiles.json:
+    classification: pending_move
+    by: 2026-11-15
+    why: >-
+      Per-printer hotend and bed ceilings, build volume, chamber, speed and
+      tolerance: the same per-model figures that moved out of
+      safety_profiles.json.
+
+  slicer_profiles.json:
+    classification: pending_move
+    by: 2026-11-15
+    why: >-
+      Per-printer bed shape, print height, speeds and temperatures inside each
+      slicer profile; slicing offline needs a profile, so part of this may be
+      re-decided as a safety_floor rather than moved.
+
+  design_knowledge/printer_material_compatibility.json:
+    classification: pending_move
+    by: 2026-11-15
+    why: >-
+      A verdict per printer and material whose notes quote each printer's
+      ceilings, so the moved limits can be read back out of it.
+
+  material_catalog.json:
+    classification: not_printer_keyed
+    why: >-
+      Filament products keyed by maker and product line; the maker names are
+      filament brands and no row describes a printer.
