@@ -43,3 +43,7 @@ def test_no_second_copy_of_the_address_in_server_source():
     src = inspect.getsource(server)
     assert "craftcloud3d.com/terms" not in src
     assert "craftcloud3d.com/en/p/terms" not in src
+
+
+def test_the_cancel_contact_is_recorded_once():
+    assert provider_terms.CRAFTCLOUD_SUPPORT_EMAIL == "support@craftcloud3d.com"

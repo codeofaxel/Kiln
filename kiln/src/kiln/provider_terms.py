@@ -16,6 +16,11 @@ from __future__ import annotations
 #: Craftcloud's Terms of Contract, the page a buyer is sent to.
 CRAFTCLOUD_TERMS_URL = "https://craftcloud3d.com/en/p/terms-and-conditions"
 
+#: Where a buyer asks Craftcloud to cancel or change an order.  Craftcloud's
+#: customer API has no cancel call, and its status change refuses Kiln
+#: (measured 2026-10-12: HTTP 401), so cancelling is a message to them.
+CRAFTCLOUD_SUPPORT_EMAIL = "support@craftcloud3d.com"
+
 #: What a buyer should know before ordering through Craftcloud, said at
 #: quote time so nobody has to go looking.
 CRAFTCLOUD_ORDER_TERMS: tuple[str, ...] = (
