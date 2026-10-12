@@ -129,11 +129,12 @@ def _read_printer_model_from_config() -> str | None:
     if model:
         model_str = str(model).strip()
         # Typo check — warn loudly if the value isn't in our database.
-        # get_build_volume returns None for unknown printers; unlike
-        # get_printer_intel which silently falls back to "default".
+        # catalogue_printer_id answers from the roster, so a catalogued
+        # printer is known whether or not its record has been fetched;
+        # get_printer_intel would silently fall back to "default".
         try:
-            from kiln.printers.bed_fit import get_build_volume, owner_stated_build_volume
-            known = get_build_volume(model_str) is not None or owner_stated_build_volume(model_str) is not None
+            from kiln.printers.bed_fit import catalogue_printer_id, owner_stated_build_volume
+            known = catalogue_printer_id(model_str) is not None or owner_stated_build_volume(model_str) is not None
             if model_str != model_str.lower() or not known:
                 logger.warning(
                     "printer_model=%r in %s doesn't match any known printer.  "

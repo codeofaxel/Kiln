@@ -43,7 +43,7 @@
       200,
       200
     ],
-    "max_hotend_temp": 250,
+    "max_hotend_temp": 240,
     "max_bed_temp": 100,
     "has_input_shaping": false,
     "nozzle_clumping_probe": null,

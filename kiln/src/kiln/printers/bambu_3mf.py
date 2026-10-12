@@ -1231,43 +1231,25 @@ _TPL_VAR_RE = re.compile(r"\[(?P<name>[a-z_][a-z0-9_]*)\]")
 _KILN_SPIRAL_MODE = False
 _KILN_PRINT_SEQUENCE = "by layer"
 
-_PRINTER_INTEL_PATH = _DATA_DIR / "printer_intelligence.json"
-_printer_intel_raw: dict[str, Any] | None = None
-
-
 def _bed_center(printer_model: str) -> tuple[float, float] | None:
     """Bed centre ``(x, y)`` in mm for a DECLARED model, or ``None`` if unknown.
 
-    Read from ``printer_intelligence.json`` — the same spec sheet the rest of
-    Kiln reads — rather than copied into a table here, because a second copy
-    of a machine's bed size drifts silently and keeps answering confidently.
+    Read from the printer's catalogue record -- the same spec sheet the rest
+    of Kiln reads (:func:`kiln.printer_intelligence.build_volume_for`) --
+    rather than copied into a table here, because a second copy of a
+    machine's bed size drifts silently and keeps answering confidently.
 
     Exact key only: no fuzzy prefix match and no ``"default"`` profile.  This
     number becomes a travel move, so an unrecognised model gets ``None`` and
     the caller refuses instead of parking the head somewhere plausible.
     """
-    global _printer_intel_raw  # noqa: PLW0603
-    if _printer_intel_raw is None:
-        try:
-            _printer_intel_raw = json.loads(
-                _PRINTER_INTEL_PATH.read_text(encoding="utf-8")
-            )
-        except (OSError, ValueError):
-            _printer_intel_raw = {}
-    entry = _printer_intel_raw.get(_normalize_model(printer_model))
-    if not isinstance(entry, dict):
+    from kiln.printer_intelligence import build_volume_for
+
+    resolved = build_volume_for(_normalize_model(printer_model))
+    if resolved is None:
         return None
-    volume = entry.get("build_volume_mm")
-    if isinstance(volume, dict):
-        width, depth = volume.get("x"), volume.get("y")
-    elif isinstance(volume, (list, tuple)) and len(volume) >= 2:
-        width, depth = volume[0], volume[1]
-    else:
-        return None
-    try:
-        return float(width) / 2.0, float(depth) / 2.0
-    except (TypeError, ValueError):
-        return None
+    width, depth = resolved[1][0], resolved[1][1]
+    return width / 2.0, depth / 2.0
 
 
 def _format_template_number(value: float) -> str:

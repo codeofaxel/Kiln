@@ -716,6 +716,16 @@ class _UtilityToolsPlugin:
                     "tool": "kiln_signin",
                     "message": AGENT_ACCOUNT_NUDGE,
                 }
+            # A printer set up from the config at boot had no door to speak
+            # to; its limits nudge, if one was minted, is said here, once.
+            try:
+                from kiln.safety_profiles import pending_limits_nudge
+
+                _limits_note = pending_limits_nudge()
+            except Exception:  # noqa: BLE001 -- onboarding must not break
+                _limits_note = None
+            if _limits_note:
+                _account["limits_note"] = _limits_note
 
             # Serve-process pile-up nudge — get_started is the mandated
             # first call, so it's where an agent learns the machine has

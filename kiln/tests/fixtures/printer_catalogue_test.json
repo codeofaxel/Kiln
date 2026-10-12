@@ -1,0 +1,206 @@
+{
+  "_meta": {
+    "description": "Synthetic printers for public Kiln's own tests. No row is a real machine and every number is made up, so the public suite never carries Kiln's catalogue: a real printer's limits, variants and spec sheet are kiln-pro's and are pinned in kiln-pro's tests. conftest installs these rows into copies of the two bundled data files (safety_profiles.json takes each row's 'safety' block, printer_intelligence.json its 'intel' block) and points the loaders at the copies for the whole session. A row with no blocks is a ROSTER-ONLY printer: it exists by name and its record is served, which is what a catalogued printer looks like to an install without kiln-pro.",
+    "shape": "The same two-block record kiln-pro's printer_catalogue.json carries per printer."
+  },
+  "kilntest_open": {
+    "display_name": "Kilntest Open 220",
+    "safety": {
+      "max_hotend_temp": 300.0,
+      "max_bed_temp": 110.0,
+      "max_chamber_temp": null,
+      "max_feedrate": 12000.0,
+      "min_safe_z": 0.0,
+      "max_volumetric_flow": 18.0,
+      "build_volume": [220, 220, 250],
+      "notes": "Synthetic open-frame all-metal test printer. Not a real machine."
+    },
+    "intel": {
+      "firmware": "marlin",
+      "extruder_type": "direct_drive",
+      "hotend_type": "all_metal",
+      "has_enclosure": false,
+      "has_chamber_sensor": false,
+      "has_abl": true,
+      "has_input_shaping": false,
+      "build_volume_mm": [220, 220, 250],
+      "max_hotend_temp": 300,
+      "max_bed_temp": 110,
+      "materials": {
+        "PLA": {"hotend": 205, "bed": 60, "fan": 100},
+        "PETG": {"hotend": 235, "bed": 80, "fan": 50},
+        "ABS": {"hotend": 245, "bed": 100, "fan": 0},
+        "TPU": {"hotend": 225, "bed": 50, "fan": 50}
+      },
+      "nozzle_clumping_probe": null
+    }
+  },
+  "kilntest_enclosed": {
+    "display_name": "Kilntest Enclosed 256",
+    "safety": {
+      "max_hotend_temp": 320.0,
+      "max_bed_temp": 120.0,
+      "max_chamber_temp": 60.0,
+      "max_feedrate": 30000.0,
+      "min_safe_z": 0.0,
+      "max_volumetric_flow": 24.0,
+      "build_volume": [256, 256, 256],
+      "notes": "Synthetic enclosed core-XY test printer with a chamber sensor. Not a real machine."
+    },
+    "intel": {
+      "firmware": "klipper",
+      "extruder_type": "direct_drive",
+      "hotend_type": "all_metal",
+      "has_enclosure": true,
+      "has_chamber_sensor": true,
+      "has_abl": true,
+      "has_input_shaping": true,
+      "build_volume_mm": [256, 256, 256],
+      "max_hotend_temp": 320,
+      "max_bed_temp": 120,
+      "materials": {
+        "PLA": {"hotend": 215, "bed": 55, "fan": 100},
+        "PETG": {"hotend": 240, "bed": 75, "fan": 40},
+        "ABS": {"hotend": 255, "bed": 100, "fan": 10},
+        "ASA": {"hotend": 260, "bed": 100, "fan": 10},
+        "PA-CF": {"hotend": 290, "bed": 100, "fan": 0}
+      },
+      "nozzle_clumping_probe": {
+        "detection_area_mm": [0, 0, 30, 30],
+        "defeated_by": ["by_object"]
+      }
+    }
+  },
+  "kilntest_ptfe": {
+    "display_name": "Kilntest Lined 235",
+    "safety": {
+      "max_hotend_temp": 260.0,
+      "max_bed_temp": 100.0,
+      "max_chamber_temp": null,
+      "max_feedrate": 8000.0,
+      "min_safe_z": 0.0,
+      "max_volumetric_flow": 11.0,
+      "build_volume": [235, 235, 250],
+      "notes": "Synthetic PTFE-lined bed-slinger test printer. Not a real machine."
+    },
+    "intel": {
+      "firmware": "marlin",
+      "extruder_type": "bowden",
+      "hotend_type": "ptfe_lined",
+      "has_enclosure": false,
+      "has_chamber_sensor": false,
+      "has_abl": false,
+      "has_input_shaping": false,
+      "build_volume_mm": [235, 235, 250],
+      "max_hotend_temp": 260,
+      "max_bed_temp": 100,
+      "materials": {
+        "PLA": {"hotend": 200, "bed": 60, "fan": 100},
+        "PETG": {"hotend": 230, "bed": 75, "fan": 50}
+      },
+      "nozzle_clumping_probe": null
+    }
+  },
+  "kilntest_variants": {
+    "display_name": "Kilntest Lined 220 (upgradeable)",
+    "safety": {
+      "max_hotend_temp": 255.0,
+      "max_bed_temp": 105.0,
+      "max_chamber_temp": null,
+      "max_feedrate": 7500.0,
+      "min_safe_z": 0.0,
+      "max_volumetric_flow": 12.0,
+      "build_volume": [220, 220, 240],
+      "notes": "Synthetic PTFE-lined test printer with one curated hardware variant. Not a real machine.",
+      "variants": {
+        "allmetal_kit_reflashed": {
+          "display_name": "Kilntest Lined 220 + all-metal kit (firmware reflashed)",
+          "description": "Synthetic variant: the lined hot end replaced with an all-metal one AND the firmware reflashed.",
+          "max_hotend_temp": 300.0,
+          "requires": [
+            "The firmware is reflashed to accept a 300 C target.",
+            "The all-metal kit is fitted."
+          ]
+        }
+      }
+    },
+    "intel": {
+      "firmware": "marlin",
+      "extruder_type": "bowden",
+      "hotend_type": "ptfe_lined",
+      "has_enclosure": false,
+      "has_chamber_sensor": false,
+      "has_abl": false,
+      "has_input_shaping": false,
+      "build_volume_mm": [220, 220, 240],
+      "max_hotend_temp": 255,
+      "max_bed_temp": 105,
+      "materials": {
+        "PLA": {"hotend": 200, "bed": 60, "fan": 100}
+      },
+      "nozzle_clumping_probe": null
+    }
+  },
+  "kilntest_big": {
+    "display_name": "Kilntest Big 350",
+    "safety": {
+      "max_hotend_temp": 300.0,
+      "max_bed_temp": 110.0,
+      "max_chamber_temp": null,
+      "max_feedrate": 20000.0,
+      "min_safe_z": 0.0,
+      "max_volumetric_flow": 20.0,
+      "build_volume": [350, 350, 400],
+      "notes": "Synthetic large-format test printer. Not a real machine."
+    },
+    "intel": {
+      "firmware": "klipper",
+      "extruder_type": "direct_drive",
+      "hotend_type": "all_metal",
+      "has_enclosure": false,
+      "has_chamber_sensor": null,
+      "has_abl": true,
+      "has_input_shaping": true,
+      "build_volume_mm": [350, 350, 400],
+      "max_hotend_temp": 300,
+      "max_bed_temp": 110,
+      "materials": {
+        "PLA": {"hotend": 210, "bed": 60, "fan": 100},
+        "PETG": {"hotend": 240, "bed": 80, "fan": 50}
+      },
+      "nozzle_clumping_probe": null
+    }
+  },
+  "kilntest_small": {
+    "display_name": "Kilntest Small 120",
+    "safety": {
+      "max_hotend_temp": 250.0,
+      "max_bed_temp": 80.0,
+      "max_chamber_temp": null,
+      "max_feedrate": 9000.0,
+      "min_safe_z": 0.0,
+      "max_volumetric_flow": 10.0,
+      "build_volume": [120, 120, 120],
+      "notes": "Synthetic compact test printer. Not a real machine."
+    },
+    "intel": {
+      "firmware": "klipper",
+      "extruder_type": "direct_drive",
+      "hotend_type": "all_metal",
+      "has_enclosure": false,
+      "has_chamber_sensor": false,
+      "has_abl": true,
+      "has_input_shaping": true,
+      "build_volume_mm": [120, 120, 120],
+      "max_hotend_temp": 250,
+      "max_bed_temp": 80,
+      "materials": {
+        "PLA": {"hotend": 205, "bed": 55, "fan": 100}
+      },
+      "nozzle_clumping_probe": null
+    }
+  },
+  "kilntest_served": {
+    "display_name": "Kilntest Served 200"
+  }
+}

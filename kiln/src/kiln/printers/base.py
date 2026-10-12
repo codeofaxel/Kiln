@@ -3127,10 +3127,23 @@ class PrinterAdapter(ABC):
         When set, :meth:`_validate_temp` will use the profile's limits
         instead of the caller-supplied default.
 
+        Every setup door ends here -- the boot-time printer, a config
+        entry, ``register_printer`` -- so this is where the printer's
+        catalogue record is fetched once (``safety_profiles.warm_profile``),
+        and where an install that could not get it is handed its one
+        sentence, which the door that spoke to the person takes with
+        ``safety_profiles.pending_limits_nudge``.  Never raises for it.
+
         Args:
             profile_id: Profile identifier (e.g. ``"ender3"``, ``"bambu_x1c"``).
         """
         self._safety_profile_id = profile_id
+        try:
+            from kiln.safety_profiles import warm_profile
+
+            warm_profile(profile_id)
+        except Exception:  # noqa: BLE001 -- a setup never fails over the record
+            logger.debug("printer record not warmed at setup", exc_info=True)
 
     # -- print-duration semantics ----------------------------------------
     #

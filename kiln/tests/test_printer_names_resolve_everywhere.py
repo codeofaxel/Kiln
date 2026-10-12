@@ -31,6 +31,13 @@ from kiln.catalog_keys import listed_names, printer_key_candidates, resolve_prin
 from kiln.printers.bed_fit import _load_printer_intelligence
 
 GENERIC_ROWS = {"default", "klipper_generic"}
+#: The session fixture's synthetic printers (``tests/fixtures/
+#: printer_catalogue_test.json``) ride in the roster copy this test reads,
+#: but in no other surface -- and one of them is roster-only on purpose, a
+#: catalogued printer whose record is served, which without kiln-pro and a
+#: sign-in resolves to the generic floor (test_pro_catalogue_bridge proves
+#: the served path).  Every door is held to the REAL rows.
+SYNTHETIC_PREFIX = "kilntest_"
 
 
 def _rows() -> dict[str, dict]:
@@ -38,6 +45,7 @@ def _rows() -> dict[str, dict]:
         k: v
         for k, v in _load_printer_intelligence().items()
         if not k.startswith("_") and k not in GENERIC_ROWS and isinstance(v, dict)
+        and not k.startswith(SYNTHETIC_PREFIX)
     }
 
 

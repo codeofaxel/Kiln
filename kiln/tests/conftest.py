@@ -1325,13 +1325,19 @@ def _forget_served_misses() -> None:
         ("kiln._pro_melt_bridge", "_last_miss"),
         # Its answers too: a figure one test was served is not the next one's.
         ("kiln._pro_melt_bridge", "_answers"),
+        # The printer catalogue bridge: a record, a settled "no row", a miss
+        # and the ask-again clock are all one test's, never the next one's.
+        ("kiln._pro_catalogue_bridge", "_last_miss"),
+        ("kiln._pro_catalogue_bridge", "_answers"),
+        ("kiln._pro_catalogue_bridge", "_retry_after"),
     ):
         record = getattr(sys.modules.get(module), attr, None)
         if isinstance(record, dict):
             record.clear()
-    melt = sys.modules.get("kiln._pro_melt_bridge")
-    if melt is not None:
-        melt._service_down_until, melt._service_down_miss = 0.0, None
+    for name in ("kiln._pro_melt_bridge", "kiln._pro_catalogue_bridge"):
+        bridge = sys.modules.get(name)
+        if bridge is not None:
+            bridge._service_down_until, bridge._service_down_miss = 0.0, None
 
 
 @pytest.fixture(autouse=True)
@@ -1355,3 +1361,122 @@ def _no_served_miss_crosses_a_test():
     _forget_served_misses()
     yield
     _forget_served_misses()
+
+
+# ---------------------------------------------------------------------------
+# The printer catalogue: synthetic rows, and no network
+# ---------------------------------------------------------------------------
+#
+# Since 2026-10-12 the bundled ``safety_profiles.json`` and
+# ``printer_intelligence.json`` are a ROSTER (id, display name, the motion
+# block, the generic row); a real printer's limits, variants and spec sheet
+# are kiln-pro's catalogue, served one printer at a time through
+# ``kiln._pro_catalogue_bridge``.  Public CI runs without kiln-pro and
+# without a sign-in, so a test that names a real printer and expects its
+# numbers is a test of data this repo does not hold.  Those live in
+# kiln-pro.  Here, ``tests/fixtures/printer_catalogue_test.json`` adds
+# SYNTHETIC printers (``kilntest_*``) to copies of both files for the whole
+# session, so a test of CODE -- the clamp, the validator, bed fit, the PTFE
+# margin, variants -- has rows with numbers in them that belong to no
+# machine.  The real roster rows ride along untouched, so every motion and
+# roster test keeps its real ids.
+
+_PRINTER_FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "printer_catalogue_test.json")
+
+
+def _install_synthetic_printers() -> dict[str, str]:
+    """Write the two data-file copies and return their paths by name."""
+    import json
+    import shutil
+    from pathlib import Path
+
+    from kiln import printer_intelligence as _pi, safety_profiles as _sp
+
+    fixture = json.loads(Path(_PRINTER_FIXTURE).read_text(encoding="utf-8"))
+    out_dir = Path(tempfile.mkdtemp(prefix="kiln-test-printers-"))
+    written: dict[str, str] = {}
+    for name, source, block in (
+        ("safety_profiles.json", _sp._DATA_FILE, "safety"),
+        ("printer_intelligence.json", _pi._DATA_FILE, "intel"),
+    ):
+        data = json.loads(Path(source).read_text(encoding="utf-8"))
+        for key, row in fixture.items():
+            if key.startswith("_"):
+                continue
+            entry: dict = {"display_name": row["display_name"]}
+            entry.update(row.get(block) or {})
+            if block == "intel":
+                # Every intelligence row carries a motion block; a synthetic
+                # printer borrows the generic row's, which refuses a blind
+                # move like any machine nobody has described.
+                entry["motion"] = json.loads(json.dumps(data["default"]["motion"]))
+            data[key] = entry
+        target = out_dir / name
+        target.write_text(json.dumps(data, indent=1, ensure_ascii=False), encoding="utf-8")
+        written[name] = str(target)
+    shutil.copy(_PRINTER_FIXTURE, out_dir / "printer_catalogue_test.json")
+    return written
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _synthetic_printer_catalogue():
+    """Point the three loaders at the copies for the whole session."""
+    from pathlib import Path
+
+    from kiln import printer_intelligence as _pi, safety_profiles as _sp
+    from kiln.printers import bed_fit as _bf
+
+    written = _install_synthetic_printers()
+    originals = (_sp._DATA_FILE, _pi._DATA_FILE, _bf._PRINTER_INTELLIGENCE_PATH)
+    _sp._DATA_FILE = Path(written["safety_profiles.json"])
+    _pi._DATA_FILE = Path(written["printer_intelligence.json"])
+    _bf._PRINTER_INTELLIGENCE_PATH = Path(written["printer_intelligence.json"])
+    _reset_printer_loaders()
+    yield
+    _sp._DATA_FILE, _pi._DATA_FILE, _bf._PRINTER_INTELLIGENCE_PATH = originals
+    _reset_printer_loaders()
+
+
+def _reset_printer_loaders() -> None:
+    from kiln import printer_intelligence as _pi, safety_profiles as _sp
+    from kiln.printers import bed_fit as _bf
+
+    _sp._cache.clear()
+    _sp._roster.clear()
+    _sp._variant_data.clear()
+    _sp._loaded = False
+    _pi._reset_caches()
+    _bf._printer_intelligence_cache = None
+    try:
+        from kiln import catalog_keys as _ck
+
+        _ck._names_cache = None
+    except Exception:  # noqa: BLE001
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _catalogue_bridge_never_reaches_the_network(monkeypatch):
+    """No test asks Kiln's servers for a printer record.
+
+    A developer's shell may carry a sign-in or a license key, and the
+    bridge would then make a real call for every unknown spelling a test
+    tries.  Sealed here: the served door answers "signed out" at once, the
+    cause an install without an account gets, so a test that names a
+    roster printer with no kiln-pro here is held to the generic floor -- the
+    posture public CI is in.  A test of the served path replaces
+    ``_served`` itself; a test of the local path replaces ``available``.
+    """
+    from kiln import _pro_catalogue_bridge as _bridge
+    from kiln.served_answer import Miss
+
+    monkeypatch.setattr(_bridge, "_served", lambda key: (None, Miss("signed_out", "KILN_ACCOUNT_NOT_PAIRED")))
+    _bridge.forget()
+    from kiln import safety_profiles as _sp
+
+    _sp._nudged.clear()
+    _sp._pending_nudges.clear()
+    yield
+    _bridge.forget()
+    _sp._nudged.clear()
+    _sp._pending_nudges.clear()

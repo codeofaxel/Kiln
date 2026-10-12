@@ -181,11 +181,14 @@ class TestGetProfile:
         These were 300/130 until 2026-07-20 — the loosest ceiling in the whole
         file, applied to a printer we cannot identify and which may well have a
         PTFE-lined hotend. An unknown machine is now treated as the weakest one
-        the registry describes (250/80), matching printer_intelligence.
+        the registry describes, matching printer_intelligence -- and since
+        2026-10-12, when the rows moved to kiln-pro's catalogue, the hotend
+        floor is the PTFE-safe 240 C: an install that could not fetch a
+        printer's record cannot know whether its hotend is lined.
         """
         profile = get_profile("default")
         assert profile.id == "default"
-        assert profile.max_hotend_temp == 250.0
+        assert profile.max_hotend_temp == 240.0
         assert profile.max_bed_temp == 80.0
         assert profile.max_chamber_temp == 80.0
         assert profile.max_feedrate == 10000.0

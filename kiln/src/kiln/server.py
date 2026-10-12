@@ -12995,8 +12995,12 @@ def register_printer(
                     inherited.get("camera_stream_url") or None,
                 )
 
+        limits_note: str | None = None
         if live_model:
             adapter.set_safety_profile(live_model)
+            from kiln.safety_profiles import pending_limits_nudge
+
+            limits_note = pending_limits_nudge()
             from kiln.printer_profile_ids import resolve_declared_model
 
             resolved, close = resolve_declared_model(live_model)
@@ -13113,6 +13117,11 @@ def register_printer(
             # Redacted by construction; the note is the honesty every door
             # points at, said here where the camera is first accepted.
             result["camera"] = _camera.describe()
+        if limits_note:
+            # Said once, here, where the printer was set up: what limits
+            # Kiln is holding this machine to and what would change them.
+            result["limits_note"] = limits_note
+            result["message"] += " " + limits_note
         if fleet_note:
             result["fleet_note"] = fleet_note
             result["upgrade_url"] = "https://kiln3d.com/pricing"

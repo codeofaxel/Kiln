@@ -145,16 +145,31 @@ def _lookup_build_volume_exact(
         return None
     if candidate in _BUILD_VOLUME_OVERRIDES:
         return _BUILD_VOLUME_OVERRIDES[candidate]
-    entry = _load_printer_intelligence().get(candidate)
-    if not entry:
+    if candidate not in _load_printer_intelligence():
         return None
-    vol = entry.get("build_volume_mm")
-    if not vol or len(vol) < 3:
-        return None
-    try:
-        return (float(vol[0]), float(vol[1]), float(vol[2]))
-    except (TypeError, ValueError):
-        return None
+    # A roster printer: its bed is in its catalogue record, fetched once
+    # per printer (kiln.printer_intelligence reads it through the bridge).
+    from kiln.printer_intelligence import build_volume_for
+
+    resolved = build_volume_for(candidate)
+    return resolved[1] if resolved is not None else None
+
+
+def catalogue_printer_id(printer_id: str | None) -> str | None:
+    """The roster id *printer_id* spells, or ``None`` -- never ``default``.
+
+    Whether a printer IS a catalogue printer, asked of the roster alone, so
+    the answer is the same signed out, offline, or with the record in hand.
+    :func:`resolve_build_volume` answers a different question -- what its
+    bed is -- and has nothing to say until the record has been fetched.
+    """
+    roster = _load_printer_intelligence()
+    for candidate in _printer_id_candidates(printer_id):
+        if candidate != "default" and not candidate.startswith("_") and candidate in roster:
+            return candidate
+        if candidate in _BUILD_VOLUME_OVERRIDES:
+            return candidate
+    return None
 
 
 def get_build_volume(printer_id: str | None) -> tuple[float, float, float] | None:
@@ -207,7 +222,7 @@ def owner_stated_build_volume(printer_id: str | None) -> tuple[float, float, flo
     on it says whose it is (the validation pipeline's resolver does), and
     a caller that only lays a part out on it need not.
     """
-    if resolve_build_volume(printer_id) is not None:
+    if catalogue_printer_id(printer_id) is not None:
         return None
     from kiln.safety_profiles import local_printer_build_volume
 

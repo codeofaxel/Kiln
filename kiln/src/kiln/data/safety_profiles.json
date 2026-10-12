@@ -1,7 +1,7 @@
 {
   "default": {
     "display_name": "Generic / Unknown Printer",
-    "max_hotend_temp": 250.0,
+    "max_hotend_temp": 240.0,
     "max_bed_temp": 80.0,
     "max_chamber_temp": 80.0,
     "max_feedrate": 10000.0,
