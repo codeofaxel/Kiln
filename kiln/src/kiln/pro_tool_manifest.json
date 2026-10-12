@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-12T07:47:21.110159+00:00",
+  "generated": "2026-10-12T16:49:24.526586+00:00",
   "tool_count": 423,
   "categories": {
     "product_generators": {
@@ -1250,7 +1250,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "billing_check_setup",
@@ -1317,7 +1318,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "billing_history",
@@ -1339,7 +1341,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "billing_invoice",
@@ -1366,7 +1369,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "billing_setup_url",
@@ -1405,7 +1409,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "billing_summary",
@@ -1421,7 +1426,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "check_payment_status",
@@ -1445,7 +1451,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      }
+      },
+      "served": false
     },
     {
       "name": "license_status_live",
@@ -1561,7 +1568,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "reissue_license",
