@@ -218,12 +218,14 @@ class _FulfillmentToolsPlugin:
             when the order is placed via ``fulfillment_order``, or released
             if the user doesn't proceed.
 
-            The quote's ``price_breakdown`` says what is printing, what is a
-            print shop's minimum order charge, and what is shipping, and its
-            ``price_notes`` say when more copies would cost little more. Show
-            the person the breakdown and every note with the price, before
-            they decide: a $16.58 production line can be $4.45 of printing
-            and the rest a shop's minimum that ten copies would share.
+            The quote's ``price_sheet`` is the price: what is printing, what
+            is a print shop's minimum order charge, what is shipping, Kiln's
+            fee, the total and the price per copy, with ``copies_ladder``
+            (what more copies would cost, delivered) and ``notes``. Show the
+            person the whole sheet and every note before they decide, and
+            never add the parts up yourself: a $16.58 production line can be
+            $4.45 of printing and the rest a shop's minimum that ten copies
+            would share.
 
             The reply also carries ``provider_order_terms``: what the buyer
             agrees to when they order (when they pay, what a change of mind
@@ -265,6 +267,14 @@ class _FulfillmentToolsPlugin:
                     )
                     quote_data["kiln_fee"] = fee_calc.to_dict()
                     quote_data["total_with_fee"] = float(fee_calc.total_cost)
+                # The one price sheet every door serves, built by the order
+                # service so this tool never folds its own total.
+                sheet = getattr(service, "price_sheet", None)
+                if sheet is not None:
+                    kiln_fee = 0.0
+                    if fee_calc is not None:
+                        kiln_fee = float(fee_calc.fee_amount + getattr(fee_calc, "tax_amount", 0))
+                    quote_data["price_sheet"] = sheet(quote, kiln_fee=kiln_fee)
                 quote_data.update(_srv._provider_routing_metadata(provider.name))
                 quote_data["provider_quote_id"] = quote.quote_id
                 try:
