@@ -541,10 +541,11 @@ def _row_problems(row: Any) -> list[str]:
 
 def _field_class_failures(
     rel: str, row: dict, tables: list[tuple[dict, list[tuple[str, Any]]]]
-) -> list[dict]:
+) -> tuple[list[dict], set[str]]:
     """A roster / floor / reference row: each row carries only the named
     fields, the named full rows exist and are not printers, and every named
-    field is still carried somewhere."""
+    field is still carried somewhere.  Also returns the fields the rows
+    outside ``full_rows`` actually carry, for the report."""
     allowed = set(row["fields"])
     full = set(row.get("full_rows") or [])
     failures: list[dict] = []
@@ -601,7 +602,7 @@ def _field_class_failures(
                 "detail": f"fields names fields no row carries: {unused}",
             }
         )
-    return failures
+    return failures, carried
 
 
 def judge_data(
@@ -667,7 +668,9 @@ def judge_data(
         if cls in _FIELD_CLASSES:
             entry["fields"] = list(row["fields"])
             entry["full_rows"] = list(row.get("full_rows") or [])
-            failures += _field_class_failures(rel, row, tables)
+            found, carried = _field_class_failures(rel, row, tables)
+            entry["rows_carry"] = sorted(carried)
+            failures += found
         elif cls == "pending_move":
             by = _as_date(row["by"])
             assert by is not None  # _row_problems checked it
@@ -786,6 +789,7 @@ def _print_data_report(result: dict) -> None:
             print(
                 f"  {cls:<19} {entry['file']}  fields: {', '.join(entry['fields'])}{extra}"
             )
+            print(f"      the other rows carry: {', '.join(entry['rows_carry']) or 'nothing'}")
         elif cls == "pending_move":
             print(
                 f"  PENDING MOVE        {entry['file']}  to kiln-pro by {entry['by']} "
