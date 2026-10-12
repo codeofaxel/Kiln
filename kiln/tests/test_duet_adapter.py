@@ -965,12 +965,25 @@ def test_set_bed_temp_sends_m140() -> None:
 
 
 def test_high_temp_machines_are_not_capped_at_desktop_limits() -> None:
-    """Duet drives 500 C hotends; a 300 C ceiling would break the class."""
+    """Duet drives 500 C hotends; a 300 C ceiling would break the class --
+    once Kiln has been told which machine this is."""
     fake = _rrf3()
     adapter = fake.install(_adapter())
+    adapter.set_safety_profile("intamsys_610ht")
 
     assert adapter.set_tool_temp(450).ok
     assert fake.gcodes() == ["M104 S450"]
+
+
+def test_an_unnamed_machine_is_held_to_the_floor_until_it_is_named() -> None:
+    """With no model bound, the Duet's 500 C protocol ceiling says nothing
+    about the hotend on the bench; the refusal says what to set."""
+    fake = _rrf3()
+    adapter = fake.install(_adapter())
+
+    with pytest.raises(PrinterError, match="has not been told this printer's model"):
+        adapter.set_tool_temp(450)
+    assert fake.gcodes() == []
 
 
 def test_temperature_above_the_ceiling_is_refused() -> None:

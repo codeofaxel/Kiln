@@ -275,7 +275,7 @@ class TestNothingCanExceedTheCuratedVariant:
         return base
 
     def test_an_override_cannot_exceed_the_base(self, local_store):
-        sp.add_community_profile(_PRINTER, self._override())
+        sp.add_community_profile(_PRINTER, self._override(), confirmed=True)
         assert sp.get_profile(_PRINTER).max_hotend_temp == sp._cache[_PRINTER].max_hotend_temp
 
     def test_an_override_cannot_exceed_the_SELECTED_VARIANT(self, local_store):
@@ -288,7 +288,7 @@ class TestNothingCanExceedTheCuratedVariant:
         sp.select_printer_variant(_PRINTER, _VARIANT)
         curated = sp._variant_data[_PRINTER][_VARIANT]["max_hotend_temp"]
 
-        sp.add_community_profile(_PRINTER, self._override())
+        sp.add_community_profile(_PRINTER, self._override(), confirmed=True)
         assert sp.get_profile(_PRINTER).max_hotend_temp == curated
 
     def test_a_variant_selection_does_not_lift_the_OTHER_ceilings(self, local_store):
@@ -296,7 +296,7 @@ class TestNothingCanExceedTheCuratedVariant:
         a free bed or flow increase by declaring a hotend swap."""
         base = sp.get_profile(_PRINTER)
         sp.select_printer_variant(_PRINTER, _VARIANT)
-        sp.add_community_profile(_PRINTER, self._override())
+        sp.add_community_profile(_PRINTER, self._override(), confirmed=True)
 
         got = sp.get_profile(_PRINTER)
         assert got.max_bed_temp == base.max_bed_temp
@@ -305,13 +305,13 @@ class TestNothingCanExceedTheCuratedVariant:
 
     def test_tightening_below_a_variant_is_still_honoured(self, local_store):
         sp.select_printer_variant(_PRINTER, _VARIANT)
-        sp.add_community_profile(_PRINTER, self._override(max_hotend_temp=205.0))
+        sp.add_community_profile(_PRINTER, self._override(max_hotend_temp=205.0), confirmed=True)
         assert sp.get_profile(_PRINTER).max_hotend_temp == 205.0
 
     def test_hardware_modified_is_dead(self, local_store):
         """The escape hatch this change exists to remove."""
         assert not hasattr(sp.SafetyProfile("x", "x", 1, 1, None, 1, 0, None, None, ""), "hardware_modified")
-        sp.add_community_profile(_PRINTER, self._override(hardware_modified=True))
+        sp.add_community_profile(_PRINTER, self._override(hardware_modified=True), confirmed=True)
         assert sp.get_profile(_PRINTER).max_hotend_temp == sp._cache[_PRINTER].max_hotend_temp
 
     def test_a_recommended_setting_is_clamped_to_the_variant_too(self, local_store):

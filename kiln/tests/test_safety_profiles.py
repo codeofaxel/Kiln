@@ -181,12 +181,12 @@ class TestGetProfile:
         These were 300/130 until 2026-07-20 — the loosest ceiling in the whole
         file, applied to a printer we cannot identify and which may well have a
         PTFE-lined hotend. An unknown machine is now treated as the weakest one
-        the registry describes (250/100), matching printer_intelligence.
+        the registry describes (250/80), matching printer_intelligence.
         """
         profile = get_profile("default")
         assert profile.id == "default"
         assert profile.max_hotend_temp == 250.0
-        assert profile.max_bed_temp == 100.0
+        assert profile.max_bed_temp == 80.0
         assert profile.max_chamber_temp == 80.0
         assert profile.max_feedrate == 10000.0
         assert profile.display_name == "Generic / Unknown Printer"

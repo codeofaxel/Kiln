@@ -807,7 +807,7 @@ def match_display_name(name: str) -> str | None:
 # hotend be driven to 300C.  Named, and named honestly, so the next reader does
 # not have to guess whether the number means anything.
 _UNKNOWN_PRINTER_MAX_HOTEND_C = 250.0
-_UNKNOWN_PRINTER_MAX_BED_C = 100.0
+_UNKNOWN_PRINTER_MAX_BED_C = 80.0
 
 
 def resolve_limits(printer_id: str | None = None) -> tuple:
@@ -1214,13 +1214,77 @@ def _save_local_overrides() -> None:
     _LOCAL_OVERRIDE_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
+class LimitsNeedAPerson(ValueError):
+    """An override would raise a limit above Kiln's floor for a printer
+    Kiln has no number of its own for, and no person has confirmed it.
+
+    ``above_floor`` names the fields asking for more than the generic
+    profile allows.  A door that can put the question to a person (the
+    code on the screen) does so and calls again with ``confirmed=True``.
+    """
+
+    def __init__(self, printer_model: str, above_floor: tuple[str, ...]) -> None:
+        self.printer_model = printer_model
+        self.above_floor = above_floor
+        super().__init__(
+            f"Kiln has no verified limits for {printer_model!r}, so these numbers would be the only "
+            f"ceiling it has, and they go above the generic floor on {', '.join(above_floor)}. "
+            "A person has to confirm them."
+        )
+
+
+#: Fields where a typed number can loosen what Kiln would otherwise hold.
+_FLOOR_BOUND_FIELDS = ("max_hotend_temp", "max_bed_temp", "max_chamber_temp")
+
+
+def limits_above_floor(printer_model: str, profile: dict[str, Any]) -> tuple[str, ...]:
+    """The limit fields in *profile* that would stand ABOVE Kiln's floor with
+    nothing of Kiln's underneath them.
+
+    Empty when a curated profile answers for this printer (an override can
+    only tighten it, so the number typed can never win), and empty when
+    every stated limit is at or below the generic profile's.  A field
+    named here is a ceiling a person typed that Kiln would then enforce as
+    its own -- which is why that takes a person, never only an agent.
+    """
+    _load()
+    normalised = _normalise(printer_model)
+    candidates = [normalised] + [c for c in printer_key_candidates(printer_model) if c != normalised]
+    if _curated_match(candidates) is not None:
+        return ()
+    floor = _cache.get("default")
+    if floor is None:
+        return tuple(f for f in _FLOOR_BOUND_FIELDS if profile.get(f) is not None)
+    above: list[str] = []
+    for field in _FLOOR_BOUND_FIELDS:
+        value = profile.get(field)
+        limit = getattr(floor, field, None)
+        if value is None or limit is None:
+            continue
+        try:
+            if float(value) > float(limit):
+                above.append(field)
+        except (TypeError, ValueError):
+            above.append(field)
+    return tuple(above)
+
+
 def set_local_printer_override(
     printer_model: str,
     profile: dict[str, Any],
     *,
     source: str = "local",
+    confirmed: bool = False,
 ) -> None:
     """Validate and save an override for a printer on THIS machine.
+
+    A limit above the generic floor for a printer Kiln has no curated
+    number for is refused with :class:`LimitsNeedAPerson` unless
+    *confirmed* says a person has confirmed these numbers.  Only a door
+    that put the question to a person may pass it; an agent's say-so is
+    not a confirmation.  A curated printer is never asked (the override
+    can only tighten it), and neither is an override at or below the
+    floor, which is what Kiln would hold anyway.
 
     Persisted to ``~/.kiln/local_printer_overrides.json`` so it survives
     restarts.  It takes precedence over the bundled profile only in the
@@ -1252,6 +1316,10 @@ def set_local_printer_override(
     errors = validate_safety_profile(profile)
     if errors:
         raise ValueError(f"Invalid safety profile: {'; '.join(errors)}")
+    if not confirmed:
+        above = limits_above_floor(printer_model, profile)
+        if above:
+            raise LimitsNeedAPerson(printer_model, above)
 
     notes = profile.get("notes", "")
     if source and source not in ("local", "community"):

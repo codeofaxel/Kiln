@@ -2,7 +2,7 @@
   "default": {
     "display_name": "Generic / Unknown Printer",
     "max_hotend_temp": 250.0,
-    "max_bed_temp": 100.0,
+    "max_bed_temp": 80.0,
     "max_chamber_temp": 80.0,
     "max_feedrate": 10000.0,
     "min_safe_z": 0.0,
@@ -12,7 +12,7 @@
       200,
       200
     ],
-    "notes": "Conservative defaults suitable for most FDM printers."
+    "notes": "The least capable machine Kiln describes, applied to a printer it has not been told the model of: a ceiling below every catalogued printer's, never above one."
   },
   "ender3": {
     "display_name": "Creality Ender 3 / Ender 3 Pro",

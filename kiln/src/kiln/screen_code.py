@@ -74,6 +74,10 @@ RESHOW_EVERY_S = 30.0
 _WORD_TO_CHOICE = {"2h": "next_two_hours", "today": "rest_of_today"}
 _EVERY_PRINTER_WORDS = {"all", "every", "everywhere", "fleet"}
 
+#: The one non-print door that shows a code: limits a person must confirm
+#: for a printer Kiln has no number for.  The banner names it as such.
+LIMITS_TOOL = "add_safety_profile"
+
 #: Outcomes of :func:`issue`.
 SHOWN = "shown"
 COOLDOWN = "cooldown"
@@ -184,6 +188,12 @@ def banner_text(issued: Issued) -> tuple[str, str, str]:
     from kiln.print_consent import display_name
 
     printer = issued.printer_label or issued.printer_name or "your printer"
+    if issued.tool == LIMITS_TOOL:
+        return (
+            f"Kiln code {issued.code}",
+            f"Temperature limits for {printer}",
+            "Type the code in your chat to let Kiln hold this printer to the limits proposed.",
+        )
     return (
         f"Kiln print code {issued.code}",
         f"{display_name(issued.file_name)} on {printer}",

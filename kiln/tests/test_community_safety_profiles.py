@@ -224,21 +224,21 @@ class TestAddCommunityProfile:
     """add_community_profile() — save, retrieve, and persistence."""
 
     def test_add_and_retrieve(self):
-        add_community_profile("test_printer", _valid_profile())
+        add_community_profile("test_printer", _valid_profile(), confirmed=True)
         profile = get_profile("test_printer")
         assert profile.id == "test_printer"
         assert profile.max_hotend_temp == 280.0
         assert profile.display_name == "Test Printer XL"
 
     def test_normalises_model_name(self):
-        add_community_profile("My-Custom-Printer", _valid_profile())
+        add_community_profile("My-Custom-Printer", _valid_profile(), confirmed=True)
         profile = get_profile("my_custom_printer")
         assert profile.id == "my_custom_printer"
 
     def test_persists_to_disk(self, tmp_path: Path):
         import kiln.safety_profiles as sp
 
-        add_community_profile("disk_test", _valid_profile())
+        add_community_profile("disk_test", _valid_profile(), confirmed=True)
         assert sp._LOCAL_OVERRIDE_FILE.exists()
 
         raw = json.loads(sp._LOCAL_OVERRIDE_FILE.read_text(encoding="utf-8"))
@@ -248,28 +248,28 @@ class TestAddCommunityProfile:
     def test_invalid_profile_raises_value_error(self):
         bad = {"max_hotend_temp": 999}
         with pytest.raises(ValueError, match="Invalid safety profile"):
-            add_community_profile("bad_printer", bad)
+            add_community_profile("bad_printer", bad, confirmed=True)
 
     def test_source_tagging_in_notes(self):
-        add_community_profile("tagged", _valid_profile(), source="john_bass")
+        add_community_profile("tagged", _valid_profile(), source="john_bass", confirmed=True)
         profile = get_profile("tagged")
         assert "[source: john_bass]" in profile.notes
 
     def test_default_source_does_not_add_tag(self):
-        add_community_profile("no_tag", _valid_profile())
+        add_community_profile("no_tag", _valid_profile(), confirmed=True)
         profile = get_profile("no_tag")
         assert "[source:" not in profile.notes
 
     def test_overwrite_existing_community_profile(self):
-        add_community_profile("overwrite_me", _valid_profile())
+        add_community_profile("overwrite_me", _valid_profile(), confirmed=True)
         updated = _valid_profile()
         updated["max_hotend_temp"] = 300.0
-        add_community_profile("overwrite_me", updated)
+        add_community_profile("overwrite_me", updated, confirmed=True)
         profile = get_profile("overwrite_me")
         assert profile.max_hotend_temp == 300.0
 
     def test_optional_fields_default(self):
-        add_community_profile("minimal", _valid_profile())
+        add_community_profile("minimal", _valid_profile(), confirmed=True)
         profile = get_profile("minimal")
         assert profile.max_chamber_temp is None
         assert profile.max_volumetric_flow is None
@@ -280,7 +280,7 @@ class TestAddCommunityProfile:
         p["max_chamber_temp"] = 55.0
         p["max_volumetric_flow"] = 18.0
         p["min_safe_z"] = 0.2
-        add_community_profile("full_opts", p)
+        add_community_profile("full_opts", p, confirmed=True)
         profile = get_profile("full_opts")
         assert profile.max_chamber_temp == 55.0
         assert profile.max_volumetric_flow == 18.0
@@ -295,7 +295,7 @@ class TestExportProfile:
     """export_profile() — exporting profiles for sharing."""
 
     def test_export_community_profile(self):
-        add_community_profile("exportable", _valid_profile())
+        add_community_profile("exportable", _valid_profile(), confirmed=True)
         exported = export_profile("exportable")
         assert exported["max_hotend_temp"] == 280.0
         assert exported["max_bed_temp"] == 100.0
@@ -324,7 +324,7 @@ class TestExportProfile:
             export_profile("nonexistent_printer_xyz")
 
     def test_export_contains_all_fields(self):
-        add_community_profile("full_export", _valid_profile())
+        add_community_profile("full_export", _valid_profile(), confirmed=True)
         exported = export_profile("full_export")
         expected_keys = {
             "display_name", "max_hotend_temp", "max_bed_temp",
@@ -366,7 +366,7 @@ class TestCommunityOverridesBundled:
         override["display_name"] = "Ender 3 (All-Metal Upgrade)"
         override["hardware_modified"] = True
         override["notes"] = "PTFE liner replaced with an all-metal hotend"
-        add_community_profile("ender3", override)
+        add_community_profile("ender3", override, confirmed=True)
 
         overridden = get_profile("ender3")
         assert overridden.max_hotend_temp == 250.0
@@ -378,11 +378,11 @@ class TestCommunityOverridesBundled:
         """The same edit without the declaration is clamped identically."""
         override = _valid_profile()
         override["max_hotend_temp"] = 300.0
-        add_community_profile("ender3", override)
+        add_community_profile("ender3", override, confirmed=True)
         assert get_profile("ender3").max_hotend_temp == 250.0
 
     def test_bundled_still_available_for_non_overridden(self):
-        add_community_profile("custom_only", _valid_profile())
+        add_community_profile("custom_only", _valid_profile(), confirmed=True)
         # Bundled profiles should still be accessible. The specific value is
         # incidental to this test — 290C is the MK4's firmware-enforced nozzle
         # ceiling (Prusa's sheet says 300; Buddy caps at 290).
@@ -390,7 +390,7 @@ class TestCommunityOverridesBundled:
         assert prusa.max_hotend_temp == 290.0
 
     def test_list_profiles_includes_both(self):
-        add_community_profile("community_only", _valid_profile())
+        add_community_profile("community_only", _valid_profile(), confirmed=True)
         all_ids = list_profiles()
         assert "community_only" in all_ids
         assert "ender3" in all_ids  # Bundled profile.
@@ -409,15 +409,15 @@ class TestListCommunityProfiles:
         assert result == []
 
     def test_returns_added_profiles(self):
-        add_community_profile("alpha", _valid_profile())
-        add_community_profile("beta", _valid_profile())
+        add_community_profile("alpha", _valid_profile(), confirmed=True)
+        add_community_profile("beta", _valid_profile(), confirmed=True)
         result = list_community_profiles()
         assert result == ["alpha", "beta"]
 
     def test_sorted_alphabetically(self):
-        add_community_profile("zulu", _valid_profile())
-        add_community_profile("alpha", _valid_profile())
-        add_community_profile("mike", _valid_profile())
+        add_community_profile("zulu", _valid_profile(), confirmed=True)
+        add_community_profile("alpha", _valid_profile(), confirmed=True)
+        add_community_profile("mike", _valid_profile(), confirmed=True)
         result = list_community_profiles()
         assert result == ["alpha", "mike", "zulu"]
 

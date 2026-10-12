@@ -85,7 +85,7 @@ class TestGetTempLimits:
         from kiln.server import _get_temp_limits
         max_tool, max_bed = _get_temp_limits()
         assert max_tool == 250.0
-        assert max_bed == 100.0
+        assert max_bed == 80.0
 
     def test_ender3_limits(self, monkeypatch) -> None:
         """Ender 3 has PTFE hotend — max hotend should be clamped to 240
@@ -109,7 +109,7 @@ class TestGetTempLimits:
         Those limits were 300C/130C until 2026-07-20, described as
         "conservative" while actually being the LOOSEST ceiling in the fleet.
         An unidentified printer is now treated as the least capable machine
-        the registry describes (250C/100C)."""
+        the registry describes (250C/80C)."""
         monkeypatch.setattr(
             "kiln.server._PRINTER_MODEL", "nonexistent_printer_xyz",
         )
@@ -120,7 +120,7 @@ class TestGetTempLimits:
         from kiln.server import _get_temp_limits
         max_tool, max_bed = _get_temp_limits()
         assert max_tool == 250.0
-        assert max_bed == 100.0
+        assert max_bed == 80.0
 
 
 # ===================================================================
@@ -189,8 +189,14 @@ class TestAdapterSafetyProfile:
 
         adapter = _TestAdapter()
 
-        # Without profile: 300 should be OK
-        adapter._validate_temp(300, 300.0, "Hotend")  # should not raise
+        # Without a profile the adapter is held to the generic floor, not to
+        # the 300 the caller passes.  This line used to assert the opposite
+        # ("without profile: 300 should be OK"); it was inverted on purpose,
+        # because an adapter literal is the loosest hotend its protocol can
+        # drive and says nothing about the one on the bench.
+        with pytest.raises(PrinterError, match="has not been told this printer's model"):
+            adapter._validate_temp(300, 300.0, "Hotend")
+        adapter._validate_temp(250, 300.0, "Hotend")  # at the floor: fine
 
         # With ender3 profile: 300 should fail (max 250)
         adapter.set_safety_profile("ender3")

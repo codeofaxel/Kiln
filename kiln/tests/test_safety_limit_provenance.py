@@ -163,7 +163,7 @@ class TestAnUnverifiedPrinterSaysSo:
 
 class TestBothDoorsStampTheSameWay:
     def test_set_local_printer_override_stamps(self) -> None:
-        sp.set_local_printer_override("garage_two", dict(_BASE))
+        sp.set_local_printer_override("garage_two", dict(_BASE), confirmed=True)
         got = sp.get_profile("garage_two")
         assert "max_hotend_temp" in got.owner_supplied
         assert "min_safe_z" not in got.owner_supplied
@@ -172,7 +172,7 @@ class TestBothDoorsStampTheSameWay:
         """The save writes optional limit fields only when owner-stated,
         so a reload cannot promote Kiln's parse defaults (min_safe_z 0.0)
         into owner-stated values."""
-        sp.set_local_printer_override("garage_two", dict(_BASE))
+        sp.set_local_printer_override("garage_two", dict(_BASE), confirmed=True)
         saved = json.loads(sp._LOCAL_OVERRIDE_FILE.read_text(encoding="utf-8"))
         assert "min_safe_z" not in saved["garage_two"]
         assert "max_chamber_temp" not in saved["garage_two"]
@@ -185,8 +185,7 @@ class TestBothDoorsStampTheSameWay:
 
     def test_a_stated_optional_field_survives_the_round_trip(self) -> None:
         sp.set_local_printer_override(
-            "garage_two", {**_BASE, "min_safe_z": 1.5}
-        )
+            "garage_two", {**_BASE, "min_safe_z": 1.5}, confirmed=True)
         sp._local_overrides_loaded = False
         sp._local_override_cache.clear()
         got = sp.get_profile("garage_two")

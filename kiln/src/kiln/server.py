@@ -2137,6 +2137,22 @@ def _get_temp_limits(printer_name: str | None = None) -> tuple:
     return _UNKNOWN_PRINTER_MAX_HOTEND_C, _UNKNOWN_PRINTER_MAX_BED_C
 
 
+def _unknown_limit_ask(printer_name: str | None) -> str:
+    """The sentence after a refusal at the generic floor: the limit is not
+    the printer's, it is what Kiln holds a printer to when it has not been
+    told the model.  Empty when a model is known."""
+    try:
+        if _resolve_printer_model_live(printer_name) or (not printer_name and _PRINTER_MODEL):
+            return ""
+    except Exception:  # noqa: BLE001 — an unreadable model is an unknown one
+        pass
+    return (
+        " That is the generic floor: Kiln has not been told this printer's model. Set printer_model "
+        "to a printer Kiln knows, or find the maker's limits and have the person confirm them "
+        "with add_safety_profile."
+    )
+
+
 def _is_resume_mode_3mf(file_name: str) -> bool:
     """Return True if ``file_name`` looks like a mid-print resume 3MF.
 
@@ -10278,9 +10294,12 @@ def set_temperature(
             which is what this did before it could be aimed — so asking to
             preheat a second machine heated the default one instead.  The
             safety ceiling follows the named machine: a printer with no
-            declared model is held to the unknown-printer limit rather than
-            to the default printer's, which may be the more permissive of
-            the two.
+            declared model is held to the generic floor (the least capable
+            machine Kiln describes) rather than to the default printer's,
+            which may be the more permissive of the two.  When that floor
+            refuses a temperature, the fix is a model, not a number: set
+            ``printer_model`` to a printer Kiln knows, or find the maker's
+            limits and have the person confirm them (``add_safety_profile``).
 
     At least one of ``tool_temp`` or ``bed_temp`` must be provided.
 
@@ -10349,7 +10368,8 @@ def set_temperature(
             )
         if tool_temp > _MAX_TOOL:
             return _error_dict(
-                f"Hotend temperature {tool_temp}°C exceeds safety limit ({_MAX_TOOL}°C).",
+                f"Hotend temperature {tool_temp}°C exceeds safety limit ({_MAX_TOOL}°C)."
+                + _unknown_limit_ask(printer_name),
                 code="VALIDATION_ERROR",
             )
     if bed_temp is not None:
@@ -10360,7 +10380,8 @@ def set_temperature(
             )
         if bed_temp > _MAX_BED:
             return _error_dict(
-                f"Bed temperature {bed_temp}°C exceeds safety limit ({_MAX_BED}°C).",
+                f"Bed temperature {bed_temp}°C exceeds safety limit ({_MAX_BED}°C)."
+                + _unknown_limit_ask(printer_name),
                 code="VALIDATION_ERROR",
             )
 

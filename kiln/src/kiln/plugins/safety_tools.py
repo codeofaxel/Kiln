@@ -17,6 +17,69 @@ from typing import Any
 _logger = logging.getLogger(__name__)
 
 
+def _limits_proposal_key(printer_model: str, profile: dict) -> tuple[str, str]:
+    """``(what the code is for, its fingerprint)``: the proposal's numbers,
+    so a code answered for one set of limits cannot be spent on another."""
+    import hashlib
+    import json
+
+    limits = {k: profile.get(k) for k in sorted(profile) if k != "notes"}
+    digest = hashlib.sha256(json.dumps(limits, sort_keys=True, default=str).encode()).hexdigest()
+    return f"limits for {printer_model}", digest
+
+
+def _limits_confirmed_by_a_person(printer_model: str, profile: dict) -> Any:
+    """``True`` when a person has typed the code shown for exactly these
+    limits; otherwise the refusal that says what to do, after showing the
+    code where a screen can show one.
+
+    The hosted server has no screen and no single owner, so it never
+    writes a limit a person did not confirm on their own machine.
+    """
+    import kiln.server as _srv
+    from kiln import screen_code
+    from kiln.runtime_env import is_hosted_multitenant
+
+    if is_hosted_multitenant():
+        return _srv._error_dict(
+            f"Kiln has no verified limits for {printer_model!r}; a limit above its generic floor "
+            "is confirmed by the person on the machine the printer is set up on, and the hosted "
+            "server is not that machine.",
+            code="NOT_HERE",
+        )
+    key, digest = _limits_proposal_key(printer_model, profile)
+    answered = screen_code.take_answer(key, printer_model)
+    if answered is not None and answered.issued.file_sha256 == digest:
+        _srv._audit(
+            "add_safety_profile", "limits_confirmed",
+            details={"printer_model": printer_model, "proposal": digest, "words": answered.words},
+        )
+        return True
+    shown = screen_code.issue(
+        tool=screen_code.LIMITS_TOOL, file_name=key, file_sha256=digest,
+        printer_name=printer_model, host=_srv._host_label(None),
+        printer_label=str(profile.get("display_name") or printer_model),
+    )
+    outcome = shown.get("outcome")
+    lead = (
+        f"Kiln has no verified limits for {printer_model!r}, so these numbers would be the only "
+        "ceiling it has. "
+    )
+    if outcome == screen_code.SHOWN:
+        how = (
+            "A code was just shown on the person's screen. Ask them to type it, pass their words "
+            "to give_print_code, then call add_safety_profile again with the same numbers."
+        )
+    elif outcome == screen_code.COOLDOWN:
+        how = f"Too many codes were shown recently; try again in {shown.get('seconds_left', 60)} seconds."
+    else:
+        how = (
+            "This machine cannot show the person a code, so Kiln cannot take these limits here. "
+            "Set printer_model to a printer Kiln knows, or state limits at or below the generic floor."
+        )
+    return _srv._error_dict(lead + how, code="CONFIRMATION_REQUIRED", extra={"code_shown": outcome})
+
+
 class _SafetyToolsPlugin:
     """Safety audit, dashboard, settings, and profile management tools.
 
@@ -410,6 +473,16 @@ class _SafetyToolsPlugin:
             Values saved here are labelled owner-supplied in every profile
             readout — Kiln never presents them as its own verified numbers.
 
+            For a printer Kiln has no number for, a limit above its generic
+            floor is held until a PERSON confirms it: Kiln shows a code on
+            the screen of the machine it runs on, the person types it in the
+            chat, you pass it to ``give_print_code``, then call this again
+            with the same numbers.  Find the numbers on the maker's own spec
+            page (maximum hotend and bed temperature, bed size) and say where
+            they came from in ``notes``; never guess them, and never ask the
+            person to type numbers they do not know.  The code is the
+            confirmation; nothing you can call stands in for it.
+
             Args:
                 printer_model: Short identifier for the printer (e.g.
                     ``"my_custom_corexy"``).
@@ -423,7 +496,8 @@ class _SafetyToolsPlugin:
                 return err
             try:
                 from kiln.safety_profiles import (
-                    add_community_profile,
+                    limits_above_floor,
+                    set_local_printer_override,
                     validate_safety_profile,
                 )
 
@@ -433,11 +507,18 @@ class _SafetyToolsPlugin:
                         f"Validation failed: {'; '.join(errors)}",
                         code="VALIDATION_ERROR",
                     )
-                add_community_profile(printer_model, profile)
+                confirmed = False
+                if limits_above_floor(printer_model, profile):
+                    answered = _limits_confirmed_by_a_person(printer_model, profile)
+                    if answered is not True:
+                        return answered
+                    confirmed = True
+                set_local_printer_override(printer_model, profile, confirmed=confirmed)
                 return {
                     "success": True,
                     "printer_model": printer_model.lower().replace("-", "_").strip(),
-                    "message": "Local printer override saved successfully.",
+                    "message": "Local printer override saved successfully."
+                    + (" The person confirmed these limits." if confirmed else ""),
                 }
             except ValueError as exc:
                 return _srv._error_dict(
@@ -577,7 +658,11 @@ class _SafetyToolsPlugin:
                         "file": issued.file_name, "printer": issued.printer_name or "default",
                         "choice": rec.choice, "typed_duration": rec.typed_duration,
                     },
-                    "next": f"Call the tool that starts the print again ({issued.tool}); this yes covers it.",
+                    "next": (
+                        "Call add_safety_profile again with the same limits; this yes covers them."
+                        if issued.tool == screen_code.LIMITS_TOOL
+                        else f"Call the tool that starts the print again ({issued.tool}); this yes covers it."
+                    ),
                 }
                 if rec.answer.opens_window:
                     # The window opens where the dialog's does: when the print

@@ -552,7 +552,7 @@ class TestAPrinterOutsideTheCatalogue:
         file is a second opinion about the bed, said as a note."""
         sp.set_local_printer_override(ACME, {
             "max_hotend_temp": 220.0, "max_bed_temp": 70.0, "max_feedrate": 6000.0, "build_volume": [280.0, 280.0, 380.0],
-        })
+        }, confirmed=True)
         out = set_printer_model(slicer_file=_acme_project(tmp_path / "part.3mf"), printer_name="shed", config_path=config)
         assert out["applied"] and sp.get_profile(ACME).max_hotend_temp == 220.0
         assert sp.get_profile(ACME).build_volume == [280.0, 280.0, 380.0]
@@ -603,7 +603,7 @@ class TestAPrinterOutsideTheCatalogue:
         catalogue = get_build_volume("Bambu Lab A1")
         sp.set_local_printer_override("bambu_lab_a1", {
             "max_hotend_temp": 200.0, "max_bed_temp": 60.0, "max_feedrate": 6000.0, "build_volume": [100.0, 100.0, 100.0],
-        })
+        }, confirmed=True)
         assert get_build_volume("Bambu Lab A1") == catalogue
         for spelling in ("Bambu Lab A1", "bambu_lab_a1", "bambu_a1"):
             assert owner_stated_build_volume(spelling) is None
@@ -613,7 +613,7 @@ class TestAPrinterOutsideTheCatalogue:
 
         sp.set_local_printer_override("default", {
             "max_hotend_temp": 200.0, "max_bed_temp": 60.0, "max_feedrate": 6000.0, "build_volume": [100.0, 100.0, 100.0],
-        })
+        }, confirmed=True)
         assert get_build_volume("default") is None and owner_stated_build_volume("default") is None
 
     def test_a_newer_file_corrects_the_bed_only_when_asked(self, config, tmp_path):
@@ -633,7 +633,7 @@ class TestAPrinterOutsideTheCatalogue:
     def test_limits_an_owner_typed_are_not_written_over_even_when_asked(self, config, tmp_path):
         sp.set_local_printer_override(ACME, {
             "max_hotend_temp": 220.0, "max_bed_temp": 70.0, "max_feedrate": 6000.0, "build_volume": [280.0, 280.0, 380.0],
-        })
+        }, confirmed=True)
         out = set_printer_model(
             slicer_file=_acme_project(tmp_path / "part.3mf"), printer_name="shed", replace=True, config_path=config,
         )

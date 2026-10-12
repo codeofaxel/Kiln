@@ -4088,23 +4088,33 @@ class PrinterAdapter(ABC):
         Raises:
             PrinterError: If the temperature is out of safe range.
         """
-        # Use per-printer profile limits when available (defense-in-depth).
-        if self._safety_profile_id:
-            try:
-                from kiln.safety_profiles import get_profile  # noqa: E402
+        # The printer's own ceiling tightens the adapter's.  With no model
+        # bound, that ceiling is the generic profile's -- the least capable
+        # machine Kiln describes -- never the adapter's literal, which is
+        # the loosest hotend its protocol can drive and says nothing about
+        # the one on the bench.
+        try:
+            from kiln.safety_profiles import resolve_limits  # noqa: E402
 
-                profile = get_profile(self._safety_profile_id)
-                lower_heater = heater.lower()
-                if lower_heater in ("hotend", "tool"):
-                    max_temp = min(max_temp, profile.max_hotend_temp)
-                elif lower_heater == "bed":
-                    max_temp = min(max_temp, profile.max_bed_temp)
-            except (KeyError, ImportError):
-                pass  # fall back to caller-supplied max_temp
+            max_hotend, max_bed = resolve_limits(self._safety_profile_id or None)
+            lower_heater = heater.lower()
+            if lower_heater in ("hotend", "tool"):
+                max_temp = min(max_temp, max_hotend)
+            elif lower_heater == "bed":
+                max_temp = min(max_temp, max_bed)
+        except ImportError:
+            pass  # fall back to caller-supplied max_temp
 
         if target < 0:
             raise PrinterError(f"{heater} temperature {target}°C is negative -- must be >= 0.")
         if target > max_temp:
+            if not self._safety_profile_id:
+                raise PrinterError(
+                    f"{heater} temperature {target}°C exceeds safety limit ({max_temp:g}°C) -- the generic "
+                    "floor, because Kiln has not been told this printer's model. Set printer_model to a "
+                    "printer Kiln knows, or have the maker's limits confirmed by the person "
+                    "(add_safety_profile)."
+                )
             raise PrinterError(f"{heater} temperature {target}°C exceeds safety limit ({max_temp}°C).")
 
     # -- filament handling (load / unload / purge) -----------------------
