@@ -864,6 +864,18 @@ def _offer_first_printer() -> None:
         click.style("  Saved ✓", fg="green")
         + f" — '{name}' is your active printer."
     )
+    # Discovery just heard this printer; now, without a frame, does its
+    # camera answer?  One line, and never a reason for enable to fail.
+    try:
+        from kiln.camera_check import camera_setup_line
+        from kiln.cli.config import load_printer_config
+        from kiln.cli.main import _make_adapter
+
+        _handshake, camera_line = camera_setup_line(_make_adapter(load_printer_config(name)), door="cli")
+    except Exception:  # noqa: BLE001 — the printer is saved; a camera line must not undo it
+        camera_line = ""
+    if camera_line:
+        click.echo(f"  {camera_line}")
 
 
 def _slicer_note() -> None:

@@ -27,6 +27,7 @@ from requests.exceptions import RequestException, Timeout
 
 from kiln.printer_backends import PRUSALINK_PI_KEY_WHERE, need_where
 from kiln.printers.base import (
+    CameraHandshake,
     FilamentHandlingUnsupported,
     FilamentOpPlan,
     FilamentOpResult,
@@ -1178,6 +1179,31 @@ class PrusaLinkAdapter(PrinterAdapter):
         except Exception:
             logger.debug("Webcam snapshot failed", exc_info=True)
         return None
+
+    #: The one camera endpoint Prusa Link offers (``GET /api/v1/cameras/snap``);
+    #: it needs the printer's API key, so it is asked through this adapter's
+    #: own session rather than listed as a probe for the bare check.
+    _CAMERA_SNAP_PATH: ClassVar[str] = "/api/v1/cameras/snap"
+
+    def _own_camera_handshake(self) -> CameraHandshake:
+        """Headers only, through the authenticated session: no picture is read.
+
+        The snap endpoint answers with the camera's current still; the
+        handshake hangs up at its headers, so the image is never read.
+        """
+        from kiln.camera_check import handshake_address
+        from kiln.printers.base import CAMERA_HANDSHAKE_ADDRESS_TIMEOUT
+
+        answered, what = handshake_address(
+            self._url(self._CAMERA_SNAP_PATH),
+            timeout=CAMERA_HANDSHAKE_ADDRESS_TIMEOUT,
+            session=self._session,
+        )
+        if answered:
+            return CameraHandshake(True, "prusalink_cameras_snap", f"The printer's camera answered with {what}.")
+        return CameraHandshake(
+            False, "prusalink_cameras_snap", f"The printer's camera endpoint gave {what}."
+        )
 
     # ------------------------------------------------------------------
     # Dunder helpers
