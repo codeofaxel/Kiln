@@ -373,11 +373,6 @@ READ_ONLY_TOOLS: set[str] = {
     "mesh_quality_scorecard",
     "validate_generated_mesh",
 
-    # network_tools.py -- provider queries (connect/submit/sync are gated)
-    "find_provider_capacity",
-    "list_provider_capacity",
-    "provider_job_status",
-
     # printability_tools.py -- analysis (auto_orient_model can write a
     # reoriented STL and is gated)
     "analyze_printability",
@@ -622,7 +617,6 @@ class TestAuthScopeAudit:
             "retrieve_credential",
             "upgrade_kiln",
             "trim_serve_processes",
-            "submit_provider_job",
             "save_shipping_profile",
             "retry_print_with_fix",
             "repair_mesh",

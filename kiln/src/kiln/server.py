@@ -154,7 +154,6 @@ except ImportError:
     FulfillmentProvider = None
     QuoteRequest = None
     get_fulfillment_provider = None
-from kiln.gateway.threedos import ThreeDOSClient
 from kiln.gcode import validate_gcode as _validate_gcode_impl
 from kiln.gcode import validate_gcode_for_printer
 from kiln.generation import (
@@ -5598,26 +5597,8 @@ def _validate_quote_for_order(
     )
 
 
-_threedos_client: ThreeDOSClient | None = None
-
-
-def _get_threedos_client() -> ThreeDOSClient:
-    """Return the lazily-initialised 3DOS gateway client.
-
-    Requires ``KILN_3DOS_API_KEY`` to be set.
-    """
-    global _threedos_client  # noqa: PLW0603
-
-    if _threedos_client is not None:
-        return _threedos_client
-
-    _threedos_client = ThreeDOSClient()
-    return _threedos_client
-
-
 _PROVIDER_TERMS_URLS: dict[str, str] = {
     "craftcloud": CRAFTCLOUD_TERMS_URL,
-    "3dos": "https://www.3dos.io/terms",
 }
 
 
@@ -15003,11 +14984,6 @@ def list_plugins() -> dict:
 
 # ---------------------------------------------------------------------------
 # Consumer workflow tools — moved to plugins/consumer_tools.py
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# 3DOS Network tools — moved to plugins/network_tools.py
 # ---------------------------------------------------------------------------
 
 
