@@ -136,7 +136,15 @@ class TestWhatNeedsAPerson:
         assert limits_above_floor("foo_x2", _foo_x2()) == ("max_hotend_temp", "max_bed_temp")
 
     def test_limits_at_or_below_the_floor_do_not(self):
-        assert limits_above_floor("foo_x2", _foo_x2(max_hotend_temp=250.0, max_bed_temp=80.0)) == ()
+        assert limits_above_floor("foo_x2", _foo_x2(max_hotend_temp=250.0, max_bed_temp=80.0, max_feedrate=10000.0)) == ()
+
+    def test_every_field_that_loosens_enforcement_needs_a_person_not_only_the_temperatures(self):
+        # Speed, flow and the Z floor are enforced too; a typed number past
+        # the generic one on any of them is a ceiling nobody at Kiln verified.
+        quiet = _foo_x2(max_hotend_temp=250.0, max_bed_temp=80.0, max_feedrate=10000.0)
+        assert limits_above_floor("foo_x2", {**quiet, "max_feedrate": 30000.0}) == ("max_feedrate",)
+        assert limits_above_floor("foo_x2", {**quiet, "max_volumetric_flow": 40.0}) == ("max_volumetric_flow",)
+        assert limits_above_floor("foo_x2", {**quiet, "min_safe_z": -1.0}) == ("min_safe_z",)
 
     def test_a_curated_printer_never_does_because_the_override_can_only_tighten(self):
         assert limits_above_floor("ender3", _foo_x2(max_hotend_temp=500.0)) == ()

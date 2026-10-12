@@ -1233,13 +1233,25 @@ class LimitsNeedAPerson(ValueError):
         )
 
 
-#: Fields where a typed number can loosen what Kiln would otherwise hold.
-_FLOOR_BOUND_FIELDS = ("max_hotend_temp", "max_bed_temp", "max_chamber_temp")
+#: Fields where a typed number can loosen what Kiln would otherwise hold,
+#: each with the direction that loosens it: a ceiling above the floor's, or
+#: a floor (min_safe_z) below it.  A ceiling the generic profile leaves
+#: unset (``max_volumetric_flow``) is unbounded there, so any number stated
+#: for it stands with nothing of Kiln's underneath and needs a person too.
+_FLOOR_BOUND_FIELDS = (
+    ("max_hotend_temp", "above"),
+    ("max_bed_temp", "above"),
+    ("max_chamber_temp", "above"),
+    ("max_feedrate", "above"),
+    ("max_volumetric_flow", "above"),
+    ("min_safe_z", "below"),
+)
 
 
 def limits_above_floor(printer_model: str, profile: dict[str, Any]) -> tuple[str, ...]:
-    """The limit fields in *profile* that would stand ABOVE Kiln's floor with
-    nothing of Kiln's underneath them.
+    """The limit fields in *profile* that would LOOSEN Kiln's floor with
+    nothing of Kiln's underneath them: a ceiling above the generic one, a
+    minimum below it, or a ceiling the generic profile leaves unbounded.
 
     Empty when a curated profile answers for this printer BY NAME (an
     override can only tighten it, so the number typed can never win), and
@@ -1262,19 +1274,22 @@ def limits_above_floor(printer_model: str, profile: dict[str, Any]) -> tuple[str
         return ()
     floor = _cache.get("default")
     if floor is None:
-        return tuple(f for f in _FLOOR_BOUND_FIELDS if profile.get(f) is not None)
-    above: list[str] = []
-    for field in _FLOOR_BOUND_FIELDS:
+        return tuple(f for f, _ in _FLOOR_BOUND_FIELDS if profile.get(f) is not None)
+    loosened: list[str] = []
+    for field, direction in _FLOOR_BOUND_FIELDS:
         value = profile.get(field)
-        limit = getattr(floor, field, None)
-        if value is None or limit is None:
+        if value is None:
             continue
+        limit = getattr(floor, field, None)
         try:
-            if float(value) > float(limit):
-                above.append(field)
+            past = limit is None or (
+                float(value) > float(limit) if direction == "above" else float(value) < float(limit)
+            )
         except (TypeError, ValueError):
-            above.append(field)
-    return tuple(above)
+            past = True
+        if past:
+            loosened.append(field)
+    return tuple(loosened)
 
 
 def set_local_printer_override(
