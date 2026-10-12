@@ -2687,6 +2687,34 @@ class ExternalCamera:
         }
 
 
+#: The most one address is waited on during a camera handshake, and the
+#: most the whole handshake may take: setup runs it after the printer has
+#: answered, and a camera must never make setup feel slow.
+CAMERA_HANDSHAKE_ADDRESS_TIMEOUT = 2.0
+CAMERA_HANDSHAKE_BUDGET = 5.0
+
+
+@dataclass(frozen=True)
+class CameraHandshake:
+    """Whether a printer's camera answers, learned at setup without a frame.
+
+    ``answered`` is ``True`` when something answered as a camera at
+    ``where``, ``False`` when it was asked and did not, and ``None`` when
+    Kiln has no way to ask this printer's camera without starting it (or
+    knows no address to ask).  ``where`` is a probe id — several joined by
+    commas when each was asked — or ``"external"`` for the camera the user
+    supplied; never an address.  ``detail`` says it in a sentence a person
+    can act on.  No frame, and nothing that spells an address, lives here.
+    """
+
+    answered: bool | None
+    where: str
+    detail: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 def find_ffmpeg() -> str | None:
     """Find an ffmpeg binary on PATH or in the usual install locations."""
     import shutil
@@ -6066,12 +6094,63 @@ class PrinterAdapter(ABC):
 
         Each is a :class:`kiln.camera_check.CameraProbe` on the printer's own
         host, carrying the basis for trying it, with an id from
-        :attr:`camera_check_ids`.  Called only for a check the user asked
-        for, and it may contact the printer.  A camera the user registered
-        does not change the answer: the check is about the printer's own
-        camera.  The default is no addresses.
+        :attr:`camera_check_ids`.  Called for a check the user asked for,
+        and by the setup handshake (:meth:`camera_handshake`); it may
+        contact the printer, but an adapter whose probes switch anything on
+        the printer ON overrides :meth:`_own_camera_handshake` to refuse the
+        handshake instead.  A camera the user registered does not change
+        the answer: the check is about the printer's own camera.  The
+        default is no addresses.
         """
         return []
+
+    # -- camera handshake (setup) ----------------------------------------
+
+    def camera_handshake(self) -> CameraHandshake:
+        """Whether this printer's camera answers, learned without a frame.
+
+        Run once at setup, after the printer itself has answered.  A camera
+        the user supplied is asked in place of the printer's own: it is the
+        one they stated, and it is what Kiln would read.  Otherwise the
+        printer's own camera is asked through :meth:`_own_camera_handshake`.
+        Bounded to :data:`CAMERA_HANDSHAKE_BUDGET` seconds in all; never
+        raises for anything the camera does.
+        """
+        from kiln.camera_check import handshake_external_camera
+
+        camera = self._external_camera
+        if camera is not None:
+            return handshake_external_camera(
+                camera, timeout=min(CAMERA_HANDSHAKE_ADDRESS_TIMEOUT, CAMERA_HANDSHAKE_BUDGET)
+            )
+        return self._own_camera_handshake()
+
+    def _own_camera_handshake(self) -> CameraHandshake:
+        """The handshake for the printer's own camera.
+
+        The default asks each :meth:`camera_probes` address in turn, headers
+        only, until one answers as a camera.  A type that declares no probe
+        ids answers ``None`` at once, with no socket opened.  An adapter whose
+        camera speaks its own protocol, or whose probes would switch video on,
+        overrides this: it must not start anything, and it returns
+        ``answered=None`` with the reason when it cannot ask without starting.
+        """
+        from kiln.camera_check import NO_CAMERA_HANDSHAKE_DETAIL, handshake_probes
+
+        if not self.camera_check_ids:
+            return CameraHandshake(None, "", NO_CAMERA_HANDSHAKE_DETAIL)
+        probes = self.camera_probes()
+        if not probes:
+            return CameraHandshake(
+                False,
+                ",".join(self.camera_check_ids),
+                "The printer named no camera address to ask.",
+            )
+        return handshake_probes(
+            probes,
+            budget=CAMERA_HANDSHAKE_BUDGET,
+            address_timeout=CAMERA_HANDSHAKE_ADDRESS_TIMEOUT,
+        )
 
     # -- a camera the user supplied ------------------------------------
     #

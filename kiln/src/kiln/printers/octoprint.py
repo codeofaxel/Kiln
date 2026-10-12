@@ -1595,6 +1595,29 @@ class OctoPrintAdapter(PrinterAdapter):
         """
         return f"{self._host}/webcam/?action=stream"
 
+    # Where this printer type's camera is known to answer, for the check
+    # and the setup handshake (kiln.camera_check).
+    camera_check_ids: ClassVar[tuple[str, ...]] = ("octoprint_webcam_stream",)
+
+    def camera_probes(self) -> list[Any]:
+        """The one address this adapter opens for OctoPrint's webcam.
+
+        Built from what the adapter already holds; nothing is contacted here.
+        """
+        from kiln.camera_check import CameraProbe
+
+        return [
+            CameraProbe(
+                "octoprint_webcam_stream",
+                f"{self._host}/webcam/?action=stream",
+                "OctoPrint's own configuration reference (config.yaml, webcam section) gives "
+                "the stream as the MJPG-Streamer path ?action=stream on the stream host; this "
+                "adapter has always opened it as /webcam/?action=stream on the printer's own "
+                "host, the same address its snapshots and live video use. Source: the maker's "
+                "documentation for the path, this adapter for the host.",
+            )
+        ]
+
     # -- filament sensor (optional) ----------------------------------------
 
     def get_filament_status(self) -> dict[str, Any] | None:

@@ -13153,6 +13153,20 @@ def register_printer(
             except Exception:
                 logger.debug("bench offer after registration skipped", exc_info=True)
 
+        # Does the camera answer?  Asked once, here, without a frame: the
+        # printer's own camera only when the printer's address answered (an
+        # offline printer is not asked twice), and a camera the user supplied
+        # always, since it is on its own host.  A camera that does not answer
+        # is a warning, never a refusal: it may simply be off.
+        if url_answered is not False or adapter.external_camera is not None:
+            from kiln.camera_check import camera_setup_line
+
+            _handshake, _camera_line = camera_setup_line(adapter, door="tool")
+            if _handshake is not None:
+                result["camera_check"] = {**_handshake.to_dict(), "line": _camera_line}
+                if _handshake.answered is False and _handshake.where == "external":
+                    warnings_out.append(_camera_line)
+
         if printer_type == "bambu" and verify_connection:
             try:
                 ams_info = adapter.get_ams_status()

@@ -2059,6 +2059,37 @@ class MoonrakerAdapter(PrinterAdapter):
             logger.debug("Webcam stream URL discovery failed", exc_info=True)
             return None
 
+    # Where this printer type's camera is known to answer, for the check
+    # and the setup handshake (kiln.camera_check): the one address the
+    # printer's own webcam list names.
+    camera_check_ids: ClassVar[tuple[str, ...]] = ("moonraker_webcam_list",)
+
+    def camera_probes(self) -> list[Any]:
+        """The stream address Moonraker's own webcam list names, to check.
+
+        Asks the printer through this adapter's own :meth:`get_stream_url`,
+        past the wrap that answers with a camera the user registered: the
+        check is about the printer's camera.  Reading the list switches
+        nothing on.  ``[]`` when the list names no webcam.
+        """
+        from kiln.camera_check import CameraProbe
+
+        ask = type(self).get_stream_url
+        while getattr(ask, "_kiln_camera_wrapped", False) and hasattr(ask, "__wrapped__"):
+            ask = ask.__wrapped__
+        url = ask(self)
+        if not url:
+            return []
+        return [
+            CameraProbe(
+                "moonraker_webcam_list",
+                url,
+                "The stream address the printer's own Moonraker webcam list reports "
+                "(GET /server/webcams/list, stream_url), as configured on the printer. "
+                "Source: the printer's own API.",
+            )
+        ]
+
     # ------------------------------------------------------------------
     # PrinterAdapter -- filament sensor
     # ------------------------------------------------------------------

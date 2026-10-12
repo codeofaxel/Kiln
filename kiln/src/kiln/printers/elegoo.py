@@ -44,6 +44,7 @@ from typing import Any, ClassVar
 import requests
 
 from kiln.printers.base import (
+    CameraHandshake,
     STALE_STATE_WARN_AGE,
     ActiveSlotReading,
     FilamentHandlingUnsupported,
@@ -1619,6 +1620,22 @@ class ElegooAdapter(PrinterAdapter):
                 ),
             )
         ]
+
+    def _own_camera_handshake(self) -> CameraHandshake:
+        """Not checked: asking this printer where its camera is switches video on.
+
+        The one address this printer's camera answers on comes from SDCP
+        command 386 with ``Enable: 1`` — the printer starts its stream to
+        answer — so there is no way to ask without starting it, and the
+        handshake says so rather than send the command.
+        """
+        return CameraHandshake(
+            None,
+            "elegoo_video_url",
+            "This printer names its camera address only when asked to switch video on "
+            "(SDCP command 386), so Kiln did not ask; the camera check does, when you "
+            "ask for it.",
+        )
 
     def stream_capability(self) -> StreamCapability:
         """Whether Kiln's relay can carry this printer's video, from what the

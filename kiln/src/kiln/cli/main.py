@@ -2061,6 +2061,24 @@ def auth(
             except Exception as exc:
                 logger.debug("Creality diagnostics after auth failed: %s", exc)
 
+        # Does the camera answer?  Asked once, without a frame, only when the
+        # backend's own diagnostics (where it has them) did not just fail:
+        # a printer that is not answering is not asked about its camera.
+        camera_line = ""
+        camera_handshake = None
+        diagnostics_failed = any(
+            d is not None and not d.get("ok", False) for d in (prusa_diagnostics, creality_diagnostics)
+        )
+        if not diagnostics_failed:
+            try:
+                from kiln.camera_check import camera_setup_line
+
+                camera_handshake, camera_line = camera_setup_line(
+                    _make_adapter(load_printer_config(name)), door="cli"
+                )
+            except Exception as exc:  # noqa: BLE001 — the save succeeded; a camera line must not undo it
+                logger.debug("camera handshake after auth skipped: %s", exc)
+
         data = {
             "name": name,
             "type": printer_type,
@@ -2078,6 +2096,8 @@ def auth(
             data["diagnostics"] = prusa_diagnostics
         if creality_diagnostics is not None:
             data["diagnostics"] = creality_diagnostics
+        if camera_handshake is not None:
+            data["camera_check"] = {**camera_handshake.to_dict(), "line": camera_line}
 
         if printer_type == "prusalink" and prusa_diagnostics is not None and not prusa_diagnostics.get("ok", False):
             checks = prusa_diagnostics.get("checks", [])
@@ -2130,6 +2150,8 @@ def auth(
             sys.exit(1)
 
         click.echo(format_response("success", data=data, json_mode=json_mode))
+        if not json_mode and camera_line:
+            click.echo(camera_line)
         if not json_mode and prusa_diagnostics is not None:
             profile_id = prusa_diagnostics.get("profile_id")
             file_count = prusa_diagnostics.get("file_count")
@@ -8937,6 +8959,12 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
                     click.echo(click.style("  AMS reachable, but no loaded trays were reported.", fg="yellow"))
             except Exception as exc:
                 click.echo(click.style(f"  AMS check failed: {exc}", fg="yellow"))
+        # The printer answered; now, without a frame, does its camera?
+        from kiln.camera_check import camera_setup_line
+
+        _camera_handshake, _camera_line = camera_setup_line(adapter, door="cli")
+        if _camera_line:
+            click.echo(f"  {_camera_line}")
     except PrinterError as exc:
         if why := _engaged_elsewhere(exc):
             click.echo(click.style(f"  Connection not tested: {why}", fg="yellow"))
@@ -9284,6 +9312,14 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
                 click.echo(f"    Hotend: {state.tool_temp_actual:.0f}C")
             if state.bed_temp_actual is not None:
                 click.echo(f"    Bed:    {state.bed_temp_actual:.0f}C")
+        # The printer answered; now, without a frame, does its camera?
+        from kiln.camera_check import camera_setup_line
+
+        _camera_handshake, _camera_line = camera_setup_line(adapter, door="cli")
+        if _camera_handshake is not None:
+            results["status"]["camera_check"] = {**_camera_handshake.to_dict(), "line": _camera_line}
+        if _camera_line and not json_mode:
+            click.echo(f"    {_camera_line}")
     except ValueError as exc:
         results["status"] = {"error": str(exc), "connected": False}
         if not json_mode:

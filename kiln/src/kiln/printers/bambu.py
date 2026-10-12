@@ -61,6 +61,7 @@ from kiln.printers.base import (
     DEFAULT_PURGE_LENGTH_MM,
     FILAMENT_FEED_RATE_MM_MIN,
     STALE_STATE_WARN_AGE,
+    CameraHandshake,
     CameraStreamError,
     FilamentHandlingUnsupported,
     FilamentOpPlan,
@@ -1371,6 +1372,9 @@ def _find_ffmpeg() -> str | None:
 #: The printer-side port for the TLS + JPEG camera feed (A1 / P1 series).
 _CAMERA_PORT = 6000
 
+#: The printer-side port for the RTSPS camera stream (X1 series).
+_RTSPS_PORT = 322
+
 #: Per-frame header: payload size, itrack, flags, reserved — all uint32 LE.
 _CAMERA_FRAME_HEADER = struct.Struct("<IIII")
 
@@ -1477,6 +1481,44 @@ def _read_port6000_frames(
             yield frame
 
 
+def _connect_camera_tls(
+    host: str, port: int, ctx: ssl.SSLContext, *, timeout: float, name_address: bool = True
+) -> ssl.SSLSocket:
+    """Open the camera port and complete its TLS handshake, nothing more.
+
+    The one connect for the relay's feed and for the setup handshake: the
+    feed goes on to send the auth packet, the handshake hangs up here.  A
+    port that does not answer, and a port that answers but will not complete
+    TLS, raise :class:`CameraStreamError` naming what the person can check.
+    The returned socket is open and the caller closes it.  A setup reply
+    carries no address, so the handshake asks for the messages without one
+    (``name_address=False``).
+    """
+    shown = f" ({host}:{port})" if name_address else ""
+    try:
+        sock = socket.create_connection((host, port), timeout=timeout)
+    except OSError as exc:
+        raise CameraStreamError(
+            f"Nothing answered on the camera port{shown}: "
+            "the printer may be off, a LAN-mode liveview switch may be off "
+            "on models that have one, or this model streams over RTSPS "
+            "instead. "
+            f"({exc.__class__.__name__})",
+            code="CAMERA_UNREACHABLE",
+        ) from exc
+    try:
+        return ctx.wrap_socket(sock, server_hostname=host)
+    except (ssl.SSLError, OSError) as exc:
+        sock.close()
+        raise CameraStreamError(
+            f"The camera port{shown} answered but did "
+            "not complete a TLS handshake: a LAN-mode liveview switch may "
+            "be off on models that have one, or this model streams over "
+            f"RTSPS instead. ({exc.__class__.__name__})",
+            code="CAMERA_UNREACHABLE",
+        ) from exc
+
+
 class BambuPort6000Source:
     """The relay's frame source for an A1 / P1 camera: ONE authenticated
     connection, every frame the printer pushes, until stopped.
@@ -1505,28 +1547,7 @@ class BambuPort6000Source:
         self.label = f"bambu-port6000://{host}:{port}"
 
     def frames(self, stop: threading.Event) -> Iterator[bytes]:
-        try:
-            sock = socket.create_connection((self._host, self._port), timeout=self._timeout)
-        except OSError as exc:
-            raise CameraStreamError(
-                f"Nothing answered on the camera port ({self._host}:{self._port}): "
-                "the printer may be off, a LAN-mode liveview switch may be off "
-                "on models that have one, or this model streams over RTSPS "
-                "instead. "
-                f"({exc.__class__.__name__})",
-                code="CAMERA_UNREACHABLE",
-            ) from exc
-        try:
-            ssock = self._ctx.wrap_socket(sock, server_hostname=self._host)
-        except (ssl.SSLError, OSError) as exc:
-            sock.close()
-            raise CameraStreamError(
-                f"The camera port ({self._host}:{self._port}) answered but did "
-                "not complete a TLS handshake: a LAN-mode liveview switch may "
-                "be off on models that have one, or this model streams over "
-                f"RTSPS instead. ({exc.__class__.__name__})",
-                code="CAMERA_UNREACHABLE",
-            ) from exc
+        ssock = _connect_camera_tls(self._host, self._port, self._ctx, timeout=self._timeout)
         try:
             ssock.sendall(self._auth)
             yield from _read_port6000_frames(ssock, stop, first_frame_timeout=self._timeout)
@@ -7671,6 +7692,54 @@ class BambuAdapter(PrinterAdapter):
         model = self._printer_model
         return model[len("bambu_") :] if model.startswith("bambu_") else model
 
+    def _own_camera_handshake(self) -> CameraHandshake:
+        """Open the camera port, complete TLS, hang up: no access code, no video.
+
+        Judged honestly per family.  The A1 / P1 feed (port 6000) answers a
+        connection with a TLS handshake before anything is sent to it, and
+        starts video only after the 80-byte auth packet — so a completed
+        handshake proves the camera service is up and listening, and
+        nothing more: whether the LAN access code is accepted is only known
+        when video first starts, and the detail says so.  The X1 families
+        stream RTSPS on port 322, and RTSP over TLS also completes its TLS
+        handshake before any RTSP request; Kiln has no RTSP client that
+        asks without opening the stream, so the handshake stops there.  That
+        path has not been exercised against an X1 in this repository.  A
+        model declared in neither family is tried on port 6000, as the feed
+        itself is.
+        """
+        from kiln.printers.base import CAMERA_HANDSHAKE_ADDRESS_TIMEOUT
+
+        if self._family() in _RTSPS_FAMILIES:
+            port, where, proven = (
+                _RTSPS_PORT,
+                "bambu_rtsps_322",
+                "The RTSPS camera port completed a TLS handshake. Kiln has no RTSP client "
+                "that asks without opening the stream, so nothing past the handshake was "
+                "checked.",
+            )
+        else:
+            port, where, proven = (
+                _CAMERA_PORT,
+                "bambu_port6000",
+                "The camera port completed a TLS handshake. Kiln sent no access code and "
+                "read no video, so whether the code is accepted is learned when video "
+                "first starts.",
+            )
+        try:
+            ssock = _connect_camera_tls(
+                self._host,
+                port,
+                self._camera_tls_context(),
+                timeout=CAMERA_HANDSHAKE_ADDRESS_TIMEOUT,
+                name_address=False,
+            )
+        except CameraStreamError as exc:
+            return CameraHandshake(False, where, str(exc))
+        with contextlib.suppress(OSError):
+            ssock.close()
+        return CameraHandshake(True, where, proven)
+
     def stream_capability(self) -> StreamCapability:
         """Whether Kiln's local relay can carry this printer's live video.
 
@@ -7726,7 +7795,7 @@ class BambuAdapter(PrinterAdapter):
 
     def _raw_stream_url(self) -> str:
         """Return the real RTSPS URL with embedded credentials (internal use only)."""
-        return f"rtsps://bblp:{self._access_code}@{self._host}:322/streaming/live/1"
+        return f"rtsps://bblp:{self._access_code}@{self._host}:{_RTSPS_PORT}/streaming/live/1"
 
     def get_stream_url(self) -> str | None:
         """Return the RTSPS stream URL for X1 series printers.
@@ -7739,7 +7808,7 @@ class BambuAdapter(PrinterAdapter):
         tool responses.  Internal methods that need the real credential
         call :meth:`_raw_stream_url` directly.
         """
-        return f"rtsps://bblp:****@{self._host}:322/streaming/live/1"
+        return f"rtsps://bblp:****@{self._host}:{_RTSPS_PORT}/streaming/live/1"
 
     # ------------------------------------------------------------------
     # Cleanup
