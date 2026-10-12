@@ -107,6 +107,7 @@ from kiln.print_consent import (
     unasked_look_noted,
     why_not_asked,
 )
+from kiln.provider_terms import CRAFTCLOUD_TERMS_URL, order_terms
 from kiln.tool_args import parse_json_array, parse_json_object
 
 with contextlib.suppress(ImportError):
@@ -5615,7 +5616,7 @@ def _get_threedos_client() -> ThreeDOSClient:
 
 
 _PROVIDER_TERMS_URLS: dict[str, str] = {
-    "craftcloud": "https://craftcloud3d.com/terms-and-conditions",
+    "craftcloud": CRAFTCLOUD_TERMS_URL,
     "3dos": "https://www.3dos.io/terms",
 }
 
@@ -5624,7 +5625,7 @@ def _provider_routing_metadata(
     provider_name: str,
     *,
     provider_order_id: str = "",
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """Return normalized routing metadata for provider-managed orders.
 
     Kiln is orchestration infrastructure. For provider-routed jobs, the
@@ -5635,6 +5636,7 @@ def _provider_routing_metadata(
         "provider_name": provider_name,
         "provider_order_id": provider_order_id,
         "provider_terms_url": _PROVIDER_TERMS_URLS.get(normalized, ""),
+        "provider_order_terms": order_terms(normalized),
         "support_owner": "provider",
         "merchant_of_record": "provider",
     }

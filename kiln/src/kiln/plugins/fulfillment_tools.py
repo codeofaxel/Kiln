@@ -218,6 +218,11 @@ class _FulfillmentToolsPlugin:
             when the order is placed via ``fulfillment_order``, or released
             if the user doesn't proceed.
 
+            The reply carries ``provider_order_terms``: what the buyer agrees
+            to when they order (when they pay, what a change of mind costs,
+            when they get a full refund). Tell the person these with the
+            price, before they decide, and give them ``provider_terms_url``.
+
             Use the returned ``quote_id`` with ``fulfillment_order`` to place the
             order.
             """
