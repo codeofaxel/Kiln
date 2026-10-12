@@ -1078,6 +1078,10 @@ def _isolate_daily_stats(tmp_path, monkeypatch):
         return
 
     monkeypatch.setattr(daily_stats, "_STATS_PATH", tmp_path / "daily_stats.json")
+    # The limits-nudge marker is the same kind of per-install state: a nudge
+    # one test minted must not be the sign-in conversion the next one counts.
+    if hasattr(daily_stats, "_LIMITS_NUDGE_MARKER_PATH"):
+        monkeypatch.setattr(daily_stats, "_LIMITS_NUDGE_MARKER_PATH", tmp_path / "limits_nudge_pending.json")
     yield
 
 
