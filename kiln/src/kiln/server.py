@@ -278,7 +278,7 @@ from kiln.printers import (
     status_is_unreachable,
     stuck_job_note,
 )
-from kiln.printers.base import PrinterEngagementError
+from kiln.printers.base import PrinterEngagementError, read_machine_identity_bounded
 from kiln.printers.command_verdict import CommandVerdict
 from kiln.printers import engagement as _engagement
 from kiln.printers.engagement import refusal_in_flight as engagement_refusal_in_flight
@@ -12758,6 +12758,15 @@ def register_printer(
     names it and says where the person finds it; ``discover_printers``
     says the same for each printer it finds, before anything is asked.
 
+    Once the address has answered, Kiln reads the id the machine reports
+    for itself (a Prusa Link printer's serial, a Duet board's unique id,
+    the host serial Moonraker reports) and saves it with the printer, so a
+    later registration under this name at a new address is matched to the
+    same machine -- or refused as a different one -- by that id rather
+    than by the address.  The reply's ``machine_identity`` carries what
+    was read; a read that fails is noted in ``warnings`` and never fails
+    the registration.
+
     Once registered the printer can be targeted by name — ``printer_status``,
     ``monitor_print``, ``cancel_print``, ``pause_print`` and ``resume_print``
     all take a ``printer_name`` at every tier, so owning a second machine
@@ -12936,6 +12945,51 @@ def register_printer(
                 code="INVALID_ARGS",
             )
 
+        # The machine's own id, read now that the adapter exists and the
+        # address has answered (an address that did not is not asked again
+        # at the adapter's retry pace).  With it, the saved name is judged
+        # once more: a printer that moved is matched by this id and nothing
+        # else, and what it inherits (its model, its camera, its credential)
+        # follows that judgement.  A read that fails is said, never fatal.
+        machine_identity = None
+        identity_warning: str | None = None
+        _identity_reader = getattr(type(adapter), "read_machine_identity", None)
+        reads_identity = (
+            _identity_reader is not None
+            and _identity_reader is not PrinterAdapter.read_machine_identity
+        )
+        if reads_identity and url_answered is not False:
+            machine_identity = read_machine_identity_bounded(adapter.read_machine_identity)
+            if machine_identity is None:
+                identity_warning = (
+                    "Kiln could not read this printer's own id, so it is known by its address "
+                    "only; a later registration under this name at a new address cannot be "
+                    "matched to it."
+                )
+        if machine_identity is not None:
+            try:
+                saved_match = saved_printer_for_update(
+                    name, printer_type, host,
+                    serial=serial, machine_identity=machine_identity, session=session_entries,
+                )
+            except PrinterNameTaken as exc:
+                _disconnect = getattr(adapter, "disconnect", None)
+                if _disconnect is not None:
+                    with contextlib.suppress(Exception):
+                        _disconnect()
+                return _error_dict(
+                    str(exc),
+                    code="NAME_TAKEN",
+                    extra={"suggested_name": exc.suggested_name},
+                )
+            inherited = saved_match.entry if saved_match is not None else {}
+            live_model = printer_model or inherited.get("printer_model") or None
+            if not (camera_snapshot_url or camera_stream_url):
+                live_camera = (
+                    inherited.get("camera_snapshot_url") or None,
+                    inherited.get("camera_stream_url") or None,
+                )
+
         if live_model:
             adapter.set_safety_profile(live_model)
             from kiln.printer_profile_ids import resolve_declared_model
@@ -12965,6 +13019,8 @@ def register_printer(
                 return _error_dict(str(exc), code="INVALID_ARGS")
 
         warnings_out: list[str] = list(url_warnings)
+        if identity_warning:
+            warnings_out.append(identity_warning)
         persisted_path: str | None = None
         saved_outcome: Any = None
         if persist:
@@ -12976,6 +13032,7 @@ def register_printer(
                     api_key=api_key if printer_type != "bambu" else None,
                     access_code=api_key if printer_type == "bambu" else None,
                     serial=serial,
+                    machine_identity=machine_identity,
                     printer_model=printer_model,
                     baudrate=baudrate,
                     camera_snapshot_url=camera_snapshot_url,
@@ -13012,6 +13069,7 @@ def register_printer(
                 printer_type,
                 host,
                 serial=serial,
+                machine_identity=machine_identity,
                 printer_model=live_model,
                 camera_snapshot_url=live_camera[0],
                 camera_stream_url=live_camera[1],
@@ -13034,6 +13092,8 @@ def register_printer(
             "message": f"Registered printer {name!r} ({printer_type} @ {host}).",
             "name": name,
         }
+        if machine_identity is not None:
+            result["machine_identity"] = machine_identity.to_dict()
         if saved_outcome is not None:
             result["saved"] = saved_outcome.outcome
             if saved_outcome.notice:

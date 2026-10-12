@@ -846,13 +846,20 @@ def _offer_first_printer() -> None:
     model = prompt_for_printer_model(chosen.printer_type, serial_hint, allow_skip=True)
 
     from kiln.cli.config import save_printer
+    from kiln.cli.main import _machine_identity_for_save
 
     name = _suggest_printer_name(getattr(chosen, "name", ""), chosen.printer_type)
     try:
+        # The save asks the machine for the id it reports for itself once
+        # the address answers (bounded; a read that fails leaves the printer
+        # known by its address).
         save_printer(
             name,
             chosen.printer_type,
             chosen.address,
+            read_machine_identity=lambda: _machine_identity_for_save(
+                chosen.printer_type, chosen.address, printer_model=model, **extras
+            ),
             printer_model=model,
             **extras,
         )

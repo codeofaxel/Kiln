@@ -1052,6 +1052,109 @@ class TestSavingUnderASavedName:
         assert printers["a1-2"]["serial"] == "01P00A000000002", result.output
         assert "A different printer is already saved as 'a1'" in result.output
 
+    @staticmethod
+    def _moonraker_identity(value="b898bdb4"):
+        from kiln.printers.base import MachineIdentity
+
+        return MachineIdentity(
+            value=value, source="moonraker_system_info.cpu_info.serial_number", kind="host_board_serial",
+        )
+
+    @pytest.fixture
+    def voron(self, tmp_path):
+        from kiln.cli.config import save_printer
+
+        path = tmp_path / "config.yaml"
+        save_printer(
+            "voron", "moonraker", "http://10.0.0.5", api_key="k", printer_model="voron_2",
+            camera_stream_url="rtsp://user:secret@10.0.0.50/live",
+            machine_identity=self._moonraker_identity(), config_path=path, probe=False,
+        )
+        with patch("kiln.cli.config.get_config_path", return_value=path):
+            yield path
+
+    def test_setup_matches_a_moved_printer_by_the_id_it_reports(self, voron):
+        import yaml
+
+        from kiln.discovery import DiscoveredPrinter
+
+        found = DiscoveredPrinter(host="10.0.0.9", port=7125, printer_type="moonraker", name="Voron")
+        adapter = MagicMock()
+        adapter.get_state.return_value = PrinterState(state=PrinterStatus.IDLE, connected=True)
+        adapter.read_machine_identity.return_value = self._moonraker_identity()
+        with (
+            patch("kiln.terms.is_current", return_value=True),
+            patch("kiln.cli.discovery.discover_printers", return_value=[found]),
+            patch("kiln.cli.connection_prompt.ask_connection_needs", return_value={}),
+            patch("kiln.cli.printer_model_prompt.prompt_for_printer_model", return_value="voron_2"),
+            patch("kiln.cli.main._make_adapter", return_value=adapter) as make,
+        ):
+            result = CliRunner().invoke(cli, ["setup"], input="add\n1\nvoron\n" + "\n" * 10)
+        entry = yaml.safe_load(voron.read_text())["printers"]["voron"]
+        assert entry["host"] == "http://10.0.0.9:7125", result.output
+        assert entry["api_key"] == "k"
+        assert entry["camera_stream_url"] == "rtsp://user:secret@10.0.0.50/live"
+        assert entry["machine_id"] == "b898bdb4"
+        assert "Updated existing printer 'voron'" in result.output
+        # The connection was tested on the printer as entered, before the save.
+        assert make.call_args[0][0]["host"] == "http://10.0.0.9:7125"
+        assert result.output.index("Connected!") < result.output.index("Saved printer")
+
+    def test_setup_refuses_a_different_machine_under_the_name(self, voron):
+        import yaml
+
+        from kiln.discovery import DiscoveredPrinter
+
+        found = DiscoveredPrinter(host="10.0.0.9", port=7125, printer_type="moonraker", name="Voron")
+        adapter = MagicMock()
+        adapter.get_state.return_value = PrinterState(state=PrinterStatus.IDLE, connected=True)
+        adapter.read_machine_identity.return_value = self._moonraker_identity("0badf00d")
+        with (
+            patch("kiln.terms.is_current", return_value=True),
+            patch("kiln.cli.discovery.discover_printers", return_value=[found]),
+            patch("kiln.cli.connection_prompt.ask_connection_needs", return_value={}),
+            patch("kiln.cli.printer_model_prompt.prompt_for_printer_model", return_value="voron_2"),
+            patch("kiln.cli.main._make_adapter", return_value=adapter),
+        ):
+            result = CliRunner().invoke(cli, ["setup"], input="add\n1\nvoron\n\n" + "\n" * 10)
+        printers = yaml.safe_load(voron.read_text())["printers"]
+        assert printers["voron"]["host"] == "http://10.0.0.5", result.output
+        assert printers["voron"]["machine_id"] == "b898bdb4"
+        assert printers["voron-2"]["machine_id"] == "0badf00d"
+        assert "A different machine answers as 'voron'" in result.output
+
+    def test_auth_matches_a_moved_printer_by_the_id_it_reports(self, runner, voron):
+        import yaml
+
+        with (
+            patch("kiln.cli.config._check_printer_url", lambda url, *, printer_type, probe: (url, [], True)),
+            patch("kiln.cli.main._machine_identity_for_save", return_value=self._moonraker_identity()),
+        ):
+            result = runner.invoke(cli, [
+                "auth", "--name", "voron", "--host", "http://10.0.0.9", "--type", "moonraker", "--json",
+            ])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)["data"]
+        assert data["saved"] == "updated"
+        assert data["machine_identity"]["value"] == "b898bdb4"
+        entry = yaml.safe_load(voron.read_text())["printers"]["voron"]
+        assert entry["host"] == "http://10.0.0.9"
+        assert entry["api_key"] == "k"
+        assert entry["camera_stream_url"] == "rtsp://user:secret@10.0.0.50/live"
+
+    def test_auth_refuses_a_different_machine_as_a_usage_error(self, runner, voron):
+        before = voron.read_text()
+        with (
+            patch("kiln.cli.config._check_printer_url", lambda url, *, printer_type, probe: (url, [], True)),
+            patch("kiln.cli.main._machine_identity_for_save", return_value=self._moonraker_identity("0badf00d")),
+        ):
+            result = runner.invoke(cli, [
+                "auth", "--name", "voron", "--host", "http://10.0.0.9", "--type", "moonraker",
+            ])
+        assert result.exit_code == 2, result.output
+        assert "A different machine answers as 'voron'" in result.output
+        assert voron.read_text() == before
+
 
 class TestPrusaProfileDetection:
     def test_map_printer_hint_does_not_assume_generic_mini(self):

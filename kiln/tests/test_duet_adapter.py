@@ -1268,3 +1268,39 @@ def test_adapter_writes_no_local_state() -> None:
     source = inspect.getsource(duet_module)
     assert "~/.kiln" not in source
     assert "Path.home" not in source
+
+
+# ---------------------------------------------------------------------------
+# Machine identity
+# ---------------------------------------------------------------------------
+
+
+def test_main_board_unique_id_is_read_verbose() -> None:
+    fake = _rrf3(rr_model=_model_router({"state.status": "idle", "boards[0].uniqueId": "08DGM-9T6BU-F42SW-6J1FD"}))
+    adapter = fake.install(_adapter())
+
+    identity = adapter.read_machine_identity()
+
+    assert identity is not None
+    assert identity.value == "08DGM-9T6BU-F42SW-6J1FD"
+    assert identity.source == "rrf_object_model.boards[0].uniqueId"
+    assert identity.kind == "board_id"
+    query = next(c for c in fake.calls if c.path == "rr_model" and c.params.get("key") == "boards[0].uniqueId")
+    assert "v" in query.params["flags"]
+
+
+def test_a_board_without_a_unique_id_is_none() -> None:
+    fake = _rrf3(rr_model=_model_router({"state.status": "idle", "boards[0].uniqueId": None}))
+    adapter = fake.install(_adapter())
+    assert adapter.read_machine_identity() is None
+
+
+def test_rrf2_board_has_no_object_model_and_reports_none() -> None:
+    fake = _FakeDuet(
+        rr_connect=_CONNECT_OK,
+        rr_model=(404, "Not found"),
+        rr_status={"status": "I"},
+    )
+    adapter = fake.install(_adapter())
+    assert adapter.read_machine_identity() is None
+    assert all(c.params.get("key") != "boards[0].uniqueId" for c in fake.calls)

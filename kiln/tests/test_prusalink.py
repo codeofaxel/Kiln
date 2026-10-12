@@ -817,3 +817,29 @@ class TestBadApiKeyOnRaspberryPiPrusaLink:
         assert "Bad X-Api-Key" in str(exc_info.value)
         assert "storage roots" not in str(exc_info.value)
         assert req.call_count == 1, "a refused key is the same on every root; stop at the first"
+
+
+class TestReadMachineIdentity:
+    """``/api/v1/info`` ``serial`` is the printer's own serial."""
+
+    def test_serial_is_read_from_info(self):
+        a = _adapter()
+        resp = _mock_response(json_data={"serial": "CZPX4720X004XC34242", "nozzle_diameter": 0.4})
+        with patch.object(a._session, "request", return_value=resp) as req:
+            identity = a.read_machine_identity()
+        assert identity is not None
+        assert identity.value == "CZPX4720X004XC34242"
+        assert identity.source == "prusalink_info.serial"
+        assert identity.kind == "printer_serial"
+        assert req.call_args[0][1].endswith("/api/v1/info")
+
+    def test_info_without_a_serial_is_none(self):
+        a = _adapter()
+        resp = _mock_response(json_data={"nozzle_diameter": 0.4, "serial": ""})
+        with patch.object(a._session, "request", return_value=resp):
+            assert a.read_machine_identity() is None
+
+    def test_an_unreachable_printer_is_none_not_an_error(self):
+        a = _adapter()
+        with patch.object(a._session, "request", side_effect=requests.ConnectionError("down")):
+            assert a.read_machine_identity() is None

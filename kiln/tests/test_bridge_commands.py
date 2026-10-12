@@ -982,6 +982,9 @@ def test_onboarding_saves_the_one_found_printer(monkeypatch, capsys):
     saved = {}
 
     def fake_save(name, ptype, host, **kw):
+        # The save is handed a way to read the machine's own id; what it
+        # reads is the config layer's business, so only its presence is pinned.
+        assert callable(kw.pop("read_machine_identity"))
         saved.update({"name": name, "type": ptype, "host": host, **kw})
         return "/tmp/config.yaml"
 

@@ -37,6 +37,7 @@ from kiln.printers.base import (
     FirmwareUpdateResult,
     JobProgress,
     JobResult,
+    MachineIdentity,
     NozzleSetting,
     PrinterAdapter,
     PrinterCapabilities,
@@ -1744,6 +1745,33 @@ class MoonrakerAdapter(PrinterAdapter):
             diameter_mm=diameter,
             source="klipper_configfile",
             firmware_version=self._software_version(),
+        )
+
+    def read_machine_identity(self) -> MachineIdentity | None:
+        """The serial of the computer running Klipper, from Moonraker's host info.
+
+        Read from ``GET /machine/system_info`` as
+        ``system_info.cpu_info.serial_number`` -- the CPU serial Moonraker
+        reads from ``/proc/cpuinfo`` on the host, and an empty string on a
+        host that has none (most x86 machines), which is reported as
+        ``None`` here.  This names the HOST (a Raspberry Pi, or the mainboard
+        computer of a printer that runs Klipper itself), not the printer
+        frame: a Pi carried to another printer carries its id along, so a
+        match means "the same host answered", and that is what the record
+        claims.  Nothing is sent to the printer.
+        """
+        try:
+            payload = self._get_json("/machine/system_info")
+        except PrinterError:
+            return None
+        raw = _safe_get(payload, "result", "system_info", "cpu_info", "serial_number", default="")
+        value = str(raw or "").strip()
+        if not value:
+            return None
+        return MachineIdentity(
+            value=value,
+            source="moonraker_system_info.cpu_info.serial_number",
+            kind="host_board_serial",
         )
 
     def _software_version(self) -> str | None:

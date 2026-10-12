@@ -305,3 +305,23 @@ class TestPrinterModelProperty:
 
     def test_unconfigured_reports_nothing(self):
         assert self._adapter(None).printer_model is None
+
+
+class TestReadMachineIdentity:
+    """read_machine_identity() is the Moonraker backend's read."""
+
+    def _adapter(self) -> CrealityAdapter:
+        with patch("kiln.printers.creality.requests.get") as mock_get:
+            mock_get.return_value = _ok_response({"result": {"klippy_state": "ready"}})
+            return CrealityAdapter("k1-max.local", timeout=5, retries=1)
+
+    def test_delegates_to_backend(self) -> None:
+        from kiln.printers.base import MachineIdentity
+
+        adapter = self._adapter()
+        reported = MachineIdentity(
+            value="b898bdb4", source="moonraker_system_info.cpu_info.serial_number", kind="host_board_serial",
+        )
+        with patch.object(adapter._backend, "read_machine_identity", return_value=reported) as read:
+            assert adapter.read_machine_identity() is reported
+        read.assert_called_once_with()

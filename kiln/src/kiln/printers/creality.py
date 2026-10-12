@@ -15,6 +15,7 @@ from kiln.printers.base import (
     FirmwareStatus,
     FirmwareUpdateResult,
     JobProgress,
+    MachineIdentity,
     NozzleSetting,
     PrinterAdapter,
     PrinterCapabilities,
@@ -841,6 +842,13 @@ class CrealityAdapter(PrinterAdapter):
         """The nozzle setting in the machine's Klipper configuration, via the
         Moonraker backend -- the same read a stock Moonraker printer gets."""
         return self._backend.read_nozzle_setting()
+
+    def read_machine_identity(self) -> MachineIdentity | None:
+        """The host serial Moonraker reports, via the Moonraker backend -- the
+        same read a stock Moonraker printer gets, with the same limit: it
+        names the computer running Klipper, which on these machines is the
+        printer's own mainboard."""
+        return self._backend.read_machine_identity()
 
     def get_printer_config(self) -> dict | None:
         """Klipper config sections, via the Moonraker backend.
