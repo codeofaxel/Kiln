@@ -297,6 +297,45 @@ class TestSaveUnderASavedName:
         assert result.notice.startswith("Updated existing printer 'ender'.")
         assert _entry(cfg, "ender")["printer_model"] == "ender3"
 
+    def test_a_replaced_entry_drops_the_old_credentials_and_camera(self, tmp_path):
+        # A credential belongs to the machine it was issued for.  When the
+        # address changed and nothing proves this is that machine, the old
+        # key and the camera URL (which may embed a password) are not sent
+        # to the new address; the notice says what has to be re-entered.
+        cfg = tmp_path / "config.yaml"
+        save_printer("ender", "octoprint", "http://10.0.0.5", api_key="k", printer_model="ender3",
+                     camera_stream_url="rtsp://user:secret@10.0.0.50/live",
+                     config_path=cfg, probe=False)
+        result = save_printer("ender", "octoprint", "http://10.0.0.9", config_path=cfg, probe=False)
+        entry = _entry(cfg, "ender")
+        assert entry["host"] == "http://10.0.0.9"
+        assert "api_key" not in entry
+        assert "camera_stream_url" not in entry
+        assert entry["printer_model"] == "ender3"
+        assert result.outcome == "replaced"
+        assert result.dropped == ("api_key", "camera_stream_url")
+        assert "api_key, camera_stream_url" in result.notice
+        assert "secret" not in result.notice
+
+    def test_a_serial_printer_saved_without_its_serial_at_a_new_address_is_refused(self, tmp_path):
+        # The saved entry names one machine by serial; a save that names
+        # none, at another address, cannot be shown to be that machine, so
+        # neither the serial nor the access code is carried to the new host.
+        cfg = _saved_a1(tmp_path)
+        before = cfg.read_text()
+        with pytest.raises(ValueError, match="serial ending 0001") as info:
+            save_printer("a1", "bambu", "192.168.1.7", access_code="y", config_path=cfg, probe=False)
+        assert info.value.suggested_name == "a1-2"
+        assert cfg.read_text() == before
+
+    def test_a_serial_printer_saved_without_its_serial_at_the_same_address_is_updated(self, tmp_path):
+        cfg = _saved_a1(tmp_path)
+        result = save_printer("a1", "bambu", "192.168.1.6", access_code="y", config_path=cfg, probe=False)
+        entry = _entry(cfg, "a1")
+        assert result.outcome == "updated"
+        assert entry["serial"] == _A1_SERIAL
+        assert entry["access_code"] == "y"
+
     def test_a_new_camera_replaces_both_saved_camera_urls(self, tmp_path):
         cfg = _saved_a1(tmp_path)
         save_printer("a1", "bambu", "192.168.1.6", access_code="x", serial=_A1_SERIAL,

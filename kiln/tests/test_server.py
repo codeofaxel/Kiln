@@ -2074,6 +2074,67 @@ class TestRegisterPrinterUnderASavedName:
         assert entry["printer_model"] == "bambu_a1"
 
 
+class TestRegisterPrinterReplacedName:
+    """A name saved for a printer Kiln cannot match to this one (no serial,
+    address changed) is replaced: nothing saved for the old address --
+    credential, camera -- reaches the live adapter or the new entry."""
+
+    @pytest.fixture
+    def door(self, monkeypatch, tmp_path):
+        import kiln.bench
+        import kiln.server as mod
+        from kiln.cli.config import save_printer
+
+        cfg = tmp_path / "config.yaml"
+        monkeypatch.setattr("kiln.cli.config.get_config_path", lambda: cfg)
+        registry = PrinterRegistry()
+        monkeypatch.setattr(mod, "_registry", registry)
+        monkeypatch.setattr(mod, "_adapter", None)
+        monkeypatch.setattr(mod, "_SESSION_PRINTERS", {}, raising=False)
+        monkeypatch.setattr(kiln.bench, "offer_after_registration", lambda *_a, **_k: None)
+        built: list = []
+
+        class FakeMoonrakerAdapter:
+            name = "moonraker"
+
+            def __init__(self, *, host, api_key=None, verify_ssl=True):
+                self.host = host
+                self.api_key = api_key
+                self.camera = None
+                built.append(self)
+
+            def set_external_camera(self, *, snapshot_url=None, stream_url=None):
+                self.camera = (snapshot_url, stream_url)
+
+            def disconnect(self):
+                pass
+
+        monkeypatch.setattr(mod, "MoonrakerAdapter", FakeMoonrakerAdapter)
+        save_printer(
+            "voron", "moonraker", "http://10.0.0.5", api_key="k",
+            camera_stream_url="rtsp://user:secret@10.0.0.50/live",
+            config_path=cfg, probe=False,
+        )
+        return cfg, registry, built
+
+    def test_the_saved_camera_and_key_do_not_follow_the_name_to_a_new_address(self, door):
+        import yaml
+
+        cfg, registry, built = door
+        result = register_printer(
+            name="voron", printer_type="moonraker", host="http://10.0.0.9", verify_connection=False,
+        )
+        assert result["success"] is True, result
+        assert result["saved"] == "replaced"
+        assert "api_key, camera_stream_url" in result["notice"]
+        assert "secret" not in json.dumps(result)
+        assert built[0].camera is None
+        entry = yaml.safe_load(cfg.read_text())["printers"]["voron"]
+        assert "api_key" not in entry
+        assert "camera_stream_url" not in entry
+        assert registry.get("voron") is built[0]
+
+
 class TestRegisterPrinterSessionOnly:
     """register_printer(persist=False) under a name in use: judged by the
     same rule as a saved registration, against both the saved config and

@@ -404,6 +404,17 @@ _IDENTITY_KEYS: tuple[str, ...] = ("serial", "mainboard_id")
 #: snapshot URL beside a kept stream URL could describe two cameras.
 _CAMERA_KEYS: tuple[str, ...] = ("camera_snapshot_url", "camera_stream_url")
 
+#: A credential is issued for one machine.  Kiln sends it to whatever
+#: address the entry names, so it never follows a name to an address that
+#: nothing proves belongs to the same machine.  A camera URL is in this
+#: set because a stream URL may embed a password.
+_BOUND_TO_MACHINE_KEYS: tuple[str, ...] = (
+    "api_key",
+    "access_code",
+    *_IDENTITY_KEYS,
+    *_CAMERA_KEYS,
+)
+
 
 class PrinterNameTaken(ValueError):
     """A save would put a different machine under a name already saved.
@@ -427,7 +438,10 @@ class PrinterSaveResult:
     ``"replaced"`` (a printer with no serial-style identity whose address
     changed, so Kiln cannot tell whether it is the same machine).
     ``kept`` names the saved fields the caller did not resend and that
-    were carried over -- names only, never values.
+    were carried over; ``dropped`` names the saved fields a ``"replaced"``
+    save left behind because they belong to the machine at the old
+    address (its credential, its serial, its camera).  Names only, never
+    values.
     """
 
     path: Path
@@ -436,6 +450,7 @@ class PrinterSaveResult:
     previous_host: str | None = None
     host: str | None = None
     kept: tuple[str, ...] = ()
+    dropped: tuple[str, ...] = ()
 
     @property
     def notice(self) -> str | None:
@@ -451,6 +466,12 @@ class PrinterSaveResult:
             )
             return f"Updated existing printer {self.name!r}.{moved}{kept}"
         was = f" (was at {self.previous_host})" if self.previous_host else ""
+        dropped = (
+            f" Not carried over: {', '.join(self.dropped)}; enter them again if this is "
+            "the same printer."
+            if self.dropped
+            else ""
+        )
         check = (
             " If this is a different machine, check those, or save it under another name."
             if self.kept
@@ -458,8 +479,25 @@ class PrinterSaveResult:
         )
         return (
             f"Replaced the saved entry for {self.name!r}{was}. Kiln cannot tell from an "
-            f"address alone whether this is the same machine.{kept}{check}"
+            f"address alone whether this is the same machine.{dropped}{kept}{check}"
         )
+
+
+@dataclass(frozen=True)
+class SavedPrinterMatch:
+    """The saved entry a save under a name in use builds on, judged.
+
+    ``outcome`` is ``"updated"`` (the same machine, by serial or by an
+    unchanged address) or ``"replaced"`` (no serial-style identity and the
+    address changed).  ``entry`` is what the new entry inherits: a copy of
+    the saved one, less the fields a ``"replaced"`` save leaves behind,
+    which ``dropped`` names.
+    """
+
+    outcome: str
+    entry: dict[str, Any]
+    previous_host: str | None
+    dropped: tuple[str, ...] = ()
 
 
 def _printer_identity(entry: dict[str, Any]) -> str | None:
@@ -535,21 +573,58 @@ def _judge_existing_printer(
     return existing
 
 
+def _match_saved_printer(
+    name: str,
+    printers: dict[str, Any],
+    existing: dict[str, Any],
+    host: str,
+    identity: str | None,
+) -> SavedPrinterMatch:
+    """How a save at *host* relates to *existing*, already judged by type and serial.
+
+    Raises :class:`PrinterNameTaken` when the saved entry names a machine
+    by serial, this save names none, and the address changed: nothing
+    shows it is that machine, so neither its serial nor its credential
+    may be carried to the new address.
+    """
+    old_host = str(existing.get("host") or "") or None
+    old_identity = _printer_identity(existing)
+    same_machine = bool(identity and identity == old_identity)
+    if same_machine or _same_host(old_host, host):
+        return SavedPrinterMatch("updated", dict(existing), old_host)
+    if old_identity:
+        suggestion = _free_printer_name(name, printers)
+        raise PrinterNameTaken(
+            f"{name!r} is saved for a printer with serial ending {old_identity[-4:]}, at "
+            f"{old_host or '?'}; this save names no serial and a different address, so Kiln "
+            f"cannot tell whether it is that printer. Pass its serial to update it, or save "
+            f"this one under another name (for example {suggestion!r}).",
+            name=name,
+            suggested_name=suggestion,
+        )
+    inherited = {k: v for k, v in existing.items() if k not in _BOUND_TO_MACHINE_KEYS}
+    dropped = tuple(k for k in _BOUND_TO_MACHINE_KEYS if k in existing)
+    return SavedPrinterMatch("replaced", inherited, old_host, dropped)
+
+
 def saved_printer_for_update(
     name: str,
     printer_type: str,
+    host: str,
     *,
     serial: str | None = None,
     config_path: Path | None = None,
     session: dict[str, dict[str, Any]] | None = None,
-) -> dict[str, Any] | None:
+) -> SavedPrinterMatch | None:
     """Ask, without writing, what saving *name* would build on.
 
-    Returns a copy of the saved entry a :func:`save_printer` call with
-    these arguments would update, ``None`` for a new name, and raises
+    Returns the :class:`SavedPrinterMatch` a :func:`save_printer` call with
+    these arguments would make, ``None`` for a new name, and raises
     :class:`PrinterNameTaken` exactly when that call would.  For a door
     that builds a live adapter before it saves: the adapter then carries
-    the same model and camera the saved entry will.
+    the same model and camera the saved entry will, and nothing a
+    ``"replaced"`` save leaves behind.  *host* is the address as the door
+    will save it.
 
     *session* holds printers a door registered without saving, as entries
     shaped like the saved ones.  They are judged by the same rule and win
@@ -564,7 +639,87 @@ def saved_printer_for_update(
         return None
     identity = _identity_from_args(printer_type, serial)
     existing = _judge_existing_printer(name, printers, printer_type, identity)
-    return dict(existing) if existing is not None else None
+    if existing is None:
+        return None
+    return _match_saved_printer(name, printers, existing, host, identity)
+
+
+def unsaved_printer_entry(
+    printer_type: str,
+    host: str,
+    *,
+    serial: str | None = None,
+    printer_model: str | None = None,
+    camera_snapshot_url: str | None = None,
+    camera_stream_url: str | None = None,
+) -> dict[str, Any]:
+    """A printer registered without saving, in the shape :func:`save_printer` writes.
+
+    For a door that keeps unsaved registrations beside the config file so
+    a later save under the same name is judged by one rule.  Carries no
+    credential: the judgement never needs one.
+    """
+    return _printer_entry(
+        printer_type,
+        host,
+        serial=serial,
+        printer_model=printer_model,
+        camera_snapshot_url=camera_snapshot_url,
+        camera_stream_url=camera_stream_url,
+    )
+
+
+def _printer_entry(
+    printer_type: str,
+    host: str,
+    *,
+    api_key: str | None = None,
+    access_code: str | None = None,
+    serial: str | None = None,
+    printer_model: str | None = None,
+    baudrate: int | None = None,
+    camera_snapshot_url: str | None = None,
+    camera_stream_url: str | None = None,
+) -> dict[str, Any]:
+    """The config entry these arguments describe -- only the fields given."""
+    entry: dict[str, Any] = {
+        "type": printer_type,
+        "host": host,
+    }
+    # Duet carries the machine password (M551) in the generic api_key slot.
+    if printer_type in ("octoprint", "moonraker", "creality", "duet"):
+        if api_key:
+            entry["api_key"] = api_key
+    elif printer_type == "bambu":
+        if access_code:
+            entry["access_code"] = access_code
+        if serial:
+            entry["serial"] = serial
+    elif printer_type == "elegoo":
+        # Elegoo SDCP uses no auth; optional mainboard_id for identification.
+        if serial:
+            entry["mainboard_id"] = serial
+    elif printer_type == "prusalink":
+        if api_key:
+            entry["api_key"] = api_key
+    elif printer_type == "usb":
+        # For USB printers, 'host' stores the serial port path.
+        pass
+
+    if printer_model:
+        entry["printer_model"] = printer_model
+
+    # Record a baud rate only when it differs from the default, so changing
+    # the default later stays an edit rather than a migration of every
+    # config that pinned it.
+    if printer_type == "usb" and baudrate and baudrate != DEFAULT_SERIAL_BAUDRATE:
+        entry["baudrate"] = int(baudrate)
+
+    if camera_snapshot_url:
+        entry["camera_snapshot_url"] = camera_snapshot_url.strip()
+    if camera_stream_url:
+        entry["camera_stream_url"] = camera_stream_url.strip()
+    return entry
 
 
 
@@ -591,9 +746,13 @@ def save_printer(
     survives a later save that changes the address.  It is refused with
     :class:`PrinterNameTaken`, before anything is written, when the saved
     entry is a different machine -- another printer type, or another
-    serial / mainboard id.  A printer with no serial-style id whose address
-    changed is updated as ``"replaced"``, and the result's ``notice`` says
-    so.  Passing either camera URL replaces both saved camera URLs.
+    serial / mainboard id -- or a serial-bearing entry re-saved with no
+    serial at a new address, which nothing shows to be the same machine.
+    A printer with no serial-style id whose address changed is
+    ``"replaced"``: its model is kept, but its credential, serial and
+    camera stay with the old address rather than being sent to a machine
+    that may be a different one, and the result's ``notice`` names them.
+    Passing either camera URL replaces both saved camera URLs.
 
     *baudrate* applies to serial printers only; omit it to let the adapter
     fall back to :data:`DEFAULT_SERIAL_BAUDRATE`.
@@ -622,60 +781,32 @@ def save_printer(
 
     cleaned_host, url_warnings = _validate_printer_url(host, printer_type=printer_type, probe=probe)
 
-    entry: dict[str, Any] = {
-        "type": printer_type,
-        "host": cleaned_host,
-    }
-    # Duet carries the machine password (M551) in the generic api_key slot.
-    if printer_type in ("octoprint", "moonraker", "creality", "duet"):
-        if api_key:
-            entry["api_key"] = api_key
-    elif printer_type == "bambu":
-        if access_code:
-            entry["access_code"] = access_code
-        if serial:
-            entry["serial"] = serial
-    elif printer_type == "elegoo":
-        # Elegoo SDCP uses no auth; optional mainboard_id for identification.
-        if serial:
-            entry["mainboard_id"] = serial
-    elif printer_type == "prusalink":
-        if api_key:
-            entry["api_key"] = api_key
-        if printer_model:
-            entry["printer_model"] = printer_model
-    elif printer_type == "usb":
-        # For USB printers, 'host' stores the serial port path.
-        pass
-
-    if printer_model:
-        entry["printer_model"] = printer_model
-
-    # Record a baud rate only when it differs from the default, so changing
-    # the default later stays an edit rather than a migration of every
-    # config that pinned it.
-    if printer_type == "usb" and baudrate and baudrate != DEFAULT_SERIAL_BAUDRATE:
-        entry["baudrate"] = int(baudrate)
-
-    if camera_snapshot_url:
-        entry["camera_snapshot_url"] = camera_snapshot_url.strip()
-    if camera_stream_url:
-        entry["camera_stream_url"] = camera_stream_url.strip()
+    entry = _printer_entry(
+        printer_type,
+        cleaned_host,
+        api_key=api_key,
+        access_code=access_code,
+        serial=serial,
+        printer_model=printer_model,
+        baudrate=baudrate,
+        camera_snapshot_url=camera_snapshot_url,
+        camera_stream_url=camera_stream_url,
+    )
 
     outcome = "added"
     previous_host: str | None = None
     kept: tuple[str, ...] = ()
+    dropped: tuple[str, ...] = ()
     if existing is not None:
-        base = dict(existing)
+        match = _match_saved_printer(name, printers, existing, cleaned_host, identity)
+        base = match.entry
         if any(key in entry for key in _CAMERA_KEYS):
             for key in _CAMERA_KEYS:
                 base.pop(key, None)
         if printer_type == "usb" and baudrate is not None:
             base.pop("baudrate", None)
         kept = tuple(k for k in base if k not in entry and k not in ("type", "host"))
-        previous_host = str(existing.get("host") or "") or None
-        same_machine = bool(identity and identity == _printer_identity(existing))
-        outcome = "updated" if same_machine or _same_host(previous_host, cleaned_host) else "replaced"
+        outcome, previous_host, dropped = match.outcome, match.previous_host, match.dropped
         entry = {**base, **entry}
 
     printers[name] = entry
@@ -697,6 +828,7 @@ def save_printer(
         previous_host=previous_host,
         host=cleaned_host,
         kept=kept,
+        dropped=dropped,
     )
 
 

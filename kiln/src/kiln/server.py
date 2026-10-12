@@ -129,12 +129,10 @@ except ImportError:
 from kiln.cli.config import (
     PrinterNameTaken,
     _check_printer_url,
-    _identity_from_args,
     _normalize_printer_type,
-    _printer_identity,
-    _same_host,
     save_printer,
     saved_printer_for_update,
+    unsaved_printer_entry,
 )
 from kiln.cloud_sync import CloudSyncManager, SyncConfig
 from kiln.cost_estimator import (
@@ -12674,43 +12672,15 @@ def fleet_status() -> dict:
 _SESSION_PRINTERS: dict[str, dict[str, Any]] = {}
 
 
-def _session_printer_entry(
-    printer_type: str,
-    host: str,
-    serial: str | None,
-    printer_model: str | None,
-    camera: tuple[str | None, str | None],
-) -> dict[str, Any]:
-    """A session-only registration, in the shape :func:`save_printer` writes."""
-    entry: dict[str, Any] = {"type": printer_type, "host": host}
-    identity = _identity_from_args(printer_type, serial)
-    if identity:
-        entry["mainboard_id" if printer_type == "elegoo" else "serial"] = identity
-    if printer_model:
-        entry["printer_model"] = printer_model
-    if camera[0]:
-        entry["camera_snapshot_url"] = camera[0]
-    if camera[1]:
-        entry["camera_stream_url"] = camera[1]
-    return entry
-
-
-def _session_replace_notice(
-    name: str,
-    existing: dict[str, Any],
-    printer_type: str,
-    host: str,
-    serial: str | None,
-) -> str:
+def _session_replace_notice(name: str, match: Any) -> str:
     """One sentence for a session-only registration under a name in use."""
-    identity = _identity_from_args(printer_type, serial)
-    old_host = str(existing.get("host") or "")
-    if (identity and identity == _printer_identity(existing)) or _same_host(old_host, host):
+    if match.outcome == "updated":
         return f"Updated printer {name!r} for this session; it is not saved."
-    was = f" (was at {old_host})" if old_host else ""
+    was = f" (was at {match.previous_host})" if match.previous_host else ""
+    dropped = f" Not carried over: {', '.join(match.dropped)}." if match.dropped else ""
     return (
         f"Replaced printer {name!r} for this session{was}; it is not saved. Kiln cannot "
-        "tell from an address alone whether this is the same machine."
+        f"tell from an address alone whether this is the same machine.{dropped}"
     )
 
 
@@ -12850,11 +12820,12 @@ def register_printer(
         # before anything is asked of the printer, built, saved or
         # registered, whether or not this registration persists.  An update
         # of the same machine keeps the model and camera stated before, so
-        # the live adapter is built with them too.
+        # the live adapter is built with them too; a replaced one inherits
+        # the model only, never the old address's credential or camera.
         session_entries = {n: e for n, e in _SESSION_PRINTERS.items() if n in _get_registry()}
         try:
-            saved_entry = saved_printer_for_update(
-                name, printer_type, serial=serial, session=session_entries
+            saved_match = saved_printer_for_update(
+                name, printer_type, host, serial=serial, session=session_entries
             )
         except PrinterNameTaken as exc:
             return _error_dict(
@@ -12862,13 +12833,14 @@ def register_printer(
                 code="NAME_TAKEN",
                 extra={"suggested_name": exc.suggested_name},
             )
-        live_model = printer_model or (saved_entry or {}).get("printer_model") or None
+        inherited = saved_match.entry if saved_match is not None else {}
+        live_model = printer_model or inherited.get("printer_model") or None
         if camera_snapshot_url or camera_stream_url:
             live_camera = (camera_snapshot_url, camera_stream_url)
         else:
             live_camera = (
-                (saved_entry or {}).get("camera_snapshot_url") or None,
-                (saved_entry or {}).get("camera_stream_url") or None,
+                inherited.get("camera_snapshot_url") or None,
+                inherited.get("camera_stream_url") or None,
             )
 
         # What this kind of printer needs is one list every setup door reads
@@ -13036,8 +13008,13 @@ def register_printer(
             # The config file now answers for this name.
             _SESSION_PRINTERS.pop(name, None)
         else:
-            _SESSION_PRINTERS[name] = _session_printer_entry(
-                printer_type, host, serial, live_model, live_camera
+            _SESSION_PRINTERS[name] = unsaved_printer_entry(
+                printer_type,
+                host,
+                serial=serial,
+                printer_model=live_model,
+                camera_snapshot_url=live_camera[0],
+                camera_stream_url=live_camera[1],
             )
 
         # If the boot-time adapter was a different object (not in the
@@ -13062,8 +13039,8 @@ def register_printer(
             if saved_outcome.notice:
                 result["notice"] = saved_outcome.notice
                 result["message"] += " " + saved_outcome.notice
-        elif saved_entry is not None:
-            notice = _session_replace_notice(name, saved_entry, printer_type, host, serial)
+        elif saved_match is not None:
+            notice = _session_replace_notice(name, saved_match)
             result["notice"] = notice
             result["message"] += " " + notice
         _camera = getattr(adapter, "external_camera", None)
