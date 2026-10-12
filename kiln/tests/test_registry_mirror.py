@@ -118,23 +118,21 @@ def test_every_printer_keyed_file_lists_the_same_printers() -> None:
 def test_the_generic_rows_agree_on_the_ceiling_they_both_state() -> None:
     """The one bundled row each file keeps whole is the floor every printer
     with no record is held to, and the two files must not describe two
-    different generic machines.
-
-    The hotend ceiling is pinned identical: it is the number the G-code
-    interceptor blocks on.  The bed is pinned in the safe direction only
-    -- the safety file's generic bed must not exceed the registry's -- and
-    deliberately not identical, because on 2026-10-12 the safety floor was
-    lowered to 80 C while the registry's generic row still says 100 C, and
-    which of the two is right is a data decision, not one this test makes
-    by failing.  Build volume is pinned identical: the same generic bed.
+    different generic machines: hotend, bed and build volume identical.
+    (On 2026-10-12 the registry's generic bed said 100 C while the safety
+    floor said 80 C -- the lowest catalogued bed; the registry now agrees,
+    and its generic recipes stay under its own ceilings.)
     """
     safety, registry = _load(_SAFETY)["default"], _load(_REGISTRY)["default"]
     assert float(safety["max_hotend_temp"]) == float(registry["max_hotend_temp"]), (
         "the generic hotend ceiling is written twice and the copies disagree"
     )
-    assert float(safety["max_bed_temp"]) <= float(registry["max_bed_temp"]), (
-        "the generic safety bed ceiling is above the registry's generic rating"
+    assert float(safety["max_bed_temp"]) == float(registry["max_bed_temp"]), (
+        "the generic bed ceiling is written twice and the copies disagree"
     )
+    for material, recipe in registry["materials"].items():
+        assert float(recipe["hotend"]) <= float(registry["max_hotend_temp"]), material
+        assert float(recipe["bed"]) <= float(registry["max_bed_temp"]), material
     assert [float(v) for v in safety["build_volume"]] == [
         float(v) for v in registry["build_volume_mm"]
     ]

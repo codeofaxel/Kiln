@@ -25,11 +25,6 @@
         "bed": 80,
         "fan": 50
       },
-      "ABS": {
-        "hotend": 240,
-        "bed": 100,
-        "fan": 0
-      },
       "TPU": {
         "hotend": 225,
         "bed": 50,
@@ -42,7 +37,7 @@
       200
     ],
     "max_hotend_temp": 240,
-    "max_bed_temp": 100,
+    "max_bed_temp": 80,
     "has_input_shaping": false,
     "nozzle_clumping_probe": null,
     "motion": {

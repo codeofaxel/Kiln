@@ -6,7 +6,7 @@
     "max_chamber_temp": 80.0,
     "max_feedrate": 10000.0,
     "min_safe_z": 0.0,
-    "max_volumetric_flow": null,
+    "max_volumetric_flow": 11,
     "build_volume": [
       200,
       200,

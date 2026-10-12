@@ -1231,6 +1231,33 @@ _TPL_VAR_RE = re.compile(r"\[(?P<name>[a-z_][a-z0-9_]*)\]")
 _KILN_SPIRAL_MODE = False
 _KILN_PRINT_SEQUENCE = "by layer"
 
+def _profile_bed(printer_model: str) -> tuple[float, float, float] | None:
+    """``(x, y, z)`` from the bundled slicer profile's own bed geometry, or
+    ``None``: the public floor a Bambu owner's install has even before the
+    printer's record is fetched (a signed-out install, a first setup
+    offline).  Exact catalogue id only, like the record read."""
+    try:
+        from kiln.printer_intelligence import list_intel_profiles
+        from kiln.slicer_profiles import get_slicer_profile
+
+        model = _normalize_model(printer_model)
+        if model == "default" or model not in list_intel_profiles():
+            return None
+        settings = get_slicer_profile(model).settings
+    except Exception:  # noqa: BLE001 -- no profile, no bed
+        return None
+    corners = re.findall(r"(-?\d+(?:\.\d+)?)x(-?\d+(?:\.\d+)?)", str(settings.get("bed_shape") or ""))
+    if len(corners) < 4:
+        return None
+    try:
+        width = max(float(x) for x, _ in corners)
+        depth = max(float(y) for _, y in corners)
+        height = float(settings.get("max_print_height") or 0.0)
+    except (TypeError, ValueError):
+        return None
+    return (width, depth, height) if width > 0 and depth > 0 else None
+
+
 def _bed_center(printer_model: str) -> tuple[float, float] | None:
     """Bed centre ``(x, y)`` in mm for a DECLARED model, or ``None`` if unknown.
 
@@ -1238,6 +1265,9 @@ def _bed_center(printer_model: str) -> tuple[float, float] | None:
     of Kiln reads (:func:`kiln.printer_intelligence.build_volume_for`) --
     rather than copied into a table here, because a second copy of a
     machine's bed size drifts silently and keeps answering confidently.
+    With no record in hand (a signed-out install), the bundled slicer
+    profile's own bed geometry answers: the same number, public today, so a
+    person can still build a file for a machine Kiln lists.
 
     Exact key only: no fuzzy prefix match and no ``"default"`` profile.  This
     number becomes a travel move, so an unrecognised model gets ``None`` and
@@ -1246,10 +1276,10 @@ def _bed_center(printer_model: str) -> tuple[float, float] | None:
     from kiln.printer_intelligence import build_volume_for
 
     resolved = build_volume_for(_normalize_model(printer_model))
-    if resolved is None:
+    volume = resolved[1] if resolved is not None else _profile_bed(printer_model)
+    if volume is None:
         return None
-    width, depth = resolved[1][0], resolved[1][1]
-    return width / 2.0, depth / 2.0
+    return volume[0] / 2.0, volume[1] / 2.0
 
 
 def _format_template_number(value: float) -> str:
@@ -1480,8 +1510,8 @@ def _machine_top_mm(printer_model: str | None) -> float | None:
         with contextlib.suppress(TypeError, ValueError):
             if travel is not None and float(travel) > 0:
                 return float(travel)
-        volume = get_build_volume(candidate)
-        return float(volume[2]) if volume else None
+        volume = get_build_volume(candidate) or _profile_bed(candidate)
+        return float(volume[2]) if volume and volume[2] > 0 else None
     return None
 
 

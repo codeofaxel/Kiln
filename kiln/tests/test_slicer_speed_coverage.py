@@ -703,7 +703,18 @@ class TestTheGcodeKeepsThePace:
 
     def test_the_solid_layers_print_at_the_derived_speed(self, prusa_slices) -> None:
         """The printing half, read off the feedrates: the A1's solid infill
-        runs at 200 mm/s, not the slicer's 20."""
+        runs at 200 mm/s, not the slicer's 20.
+
+        Judged where the printer's own flow ceiling is in hand (kiln-pro
+        here, as the pre-push pace gate runs it).  With no record -- public
+        CI, a signed-out install -- the generic row's flow floor caps the
+        slice below the profile's pace on purpose: slower than the printer
+        could go, never faster, so the pace is not this run's to judge.
+        """
+        from kiln.safety_profiles import get_profile
+
+        if get_profile("bambu_a1").id == "default":
+            pytest.skip("no record for this printer here: the flow floor caps the pace on purpose")
         settings, gcode = prusa_slices["bambu_a1"]
         report = _pace_report(gcode)
         fastest = max(speed for speed, _ in report["Solid infill"])

@@ -299,6 +299,30 @@ class TestSignedOut:
 # ---------------------------------------------------------------------------
 
 
+class TestTheSignedOutFloorStillPrints:
+    """What an install with no record can still do: build a Bambu file for a
+    machine Kiln lists (the bundled slicer profile's own bed geometry is the
+    public floor), and slice under a stated flow ceiling."""
+
+    def test_a_bambu_file_gets_its_bed_centre_from_the_public_profile(self, monkeypatch):
+        from kiln.printers import bambu_3mf
+
+        assert sp.get_profile("bambu_a1").id == "default"  # signed out: no record
+        assert bambu_3mf._bed_center("bambu_a1") == (128.0, 128.0)
+        assert bambu_3mf._machine_top_mm("bambu_a1") is not None
+        assert bambu_3mf._bed_center("a printer nobody makes") is None
+        # A/B: the profile geometry is the only thing answering here.
+        monkeypatch.setattr(bambu_3mf, "_profile_bed", lambda model: None)
+        assert bambu_3mf._bed_center("bambu_a1") is None
+
+    def test_the_generic_row_states_a_flow_ceiling(self):
+        """Before 2026-10-12 the generic row left the hotend's flow ceiling
+        unset, so a slice for a printer with no record ran with no flow cap
+        at all (the slicer's default).  It is the lowest catalogued figure."""
+        assert sp.get_profile("default").max_volumetric_flow == 11.0
+        assert sp.get_profile(SERVED_ID).max_volumetric_flow == 11.0
+
+
 class TestSetupChokepoint:
     def test_set_safety_profile_warms_and_mints_once(self):
         from kiln.printers.base import PrinterAdapter

@@ -2523,16 +2523,21 @@ class TestBedCentreIsRead:
             assert _bed_center(model) == (volume[0] / 2.0, volume[1] / 2.0)
         assert _bed_center("bambu_a1") != _bed_center("bambu_a1_mini")
 
-    def test_a_roster_model_with_no_record_has_no_centre(self, monkeypatch):
-        """The bed is on the record; a roster name alone yields no centre,
-        never a guessed one (and the builder then refuses -- see
-        ``_expand_end_template``)."""
+    def test_a_roster_model_with_no_record_reads_the_public_profiles_bed(self, monkeypatch):
+        """With no record in hand (a signed-out install) the bundled slicer
+        profile's own bed geometry answers -- the same number, public today
+        -- so a person can still build a file for a machine Kiln lists.  A
+        roster name with neither is no centre, never a guessed one (and the
+        builder then refuses -- see ``_expand_end_template``)."""
         from kiln import _pro_catalogue_bridge as bridge
+        from kiln.printers import bambu_3mf
         from kiln.printers.bambu_3mf import _bed_center
         from kiln.served_answer import Miss
 
         monkeypatch.setattr(bridge, "_served", lambda key: (None, Miss("signed_out", "KILN_ACCOUNT_NOT_PAIRED")))
         _forget_served_records()
+        assert _bed_center("bambu_a1") == (128.0, 128.0)
+        monkeypatch.setattr(bambu_3mf, "_profile_bed", lambda model: None)
         assert _bed_center("bambu_a1") is None
 
     def test_unknown_model_gets_none_not_a_default_bed(self):
