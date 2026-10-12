@@ -273,6 +273,9 @@ class TestSignedOut:
         profile = sp.get_profile(SERVED_ID)
         assert profile.max_hotend_temp == 240.0 and profile.max_bed_temp == 80.0
         assert profile.curated_base is False
+        # Reached by prefix under a spelling the roster does not list, the
+        # override's OWN key still names the catalogue printer: still the floor.
+        assert sp.get_profile(SERVED_ID + "x").max_hotend_temp == 240.0
         # An unknown name a person confirmed keeps standing, as it always has.
         sp.set_local_printer_override(
             "acme_zed",
