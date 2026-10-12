@@ -46,10 +46,16 @@ def local_store(monkeypatch):
     _reset()
 
 
-# A profile that really carries a curated variant, so the tests below are
-# pinned to shipped data rather than to a fixture that could drift from it.
-_PRINTER = "ender3"
-_VARIANT = "e3d_revo_cr_reflashed"
+# The session fixture's synthetic printer with one curated variant
+# (``tests/fixtures/printer_catalogue_test.json``).  The real rows, and the
+# real variants with their preconditions, are kiln-pro's catalogue and are
+# pinned there (``tests/test_printer_catalogue.py``,
+# ``tests/test_printer_catalogue_numbers.py``); what is tested here is the
+# resolution, which needs a row with a variant in it.
+_PRINTER = "kilntest_variants"
+_VARIANT = "allmetal_kit_reflashed"
+#: A separately catalogued prefix relative of ``_PRINTER`` with no variant.
+_SIBLING = "kilntest_variants_se"
 
 
 class TestSelectionResolvesToTheCuratedNumber:
@@ -93,13 +99,15 @@ class TestSelectionResolvesToTheCuratedNumber:
         sp.select_printer_variant(_PRINTER, None)
         assert sp.get_profile(_PRINTER).max_hotend_temp == base
 
-    def test_every_shipped_variant_states_its_preconditions(self):
+    def test_every_held_variant_states_its_preconditions(self):
         """A variant ships its REQUIREMENTS, never its sourcing.
 
         A raised ceiling is only true if the operator has done what it
-        assumes, so the preconditions have to travel with the number.  The
-        research behind the number does not: that is recorded privately, and
-        a sourcing field in the public file is a leak rather than diligence.
+        assumes, so the preconditions have to travel with the number, and
+        the resolver must be able to reach every variant it holds.  The
+        research behind a real number is recorded privately; that every
+        REAL variant states its preconditions and carries no sourcing is
+        pinned beside the real rows, in kiln-pro.
         """
         sp._load()
         assert sp._variant_data, "expected at least one curated variant"
@@ -109,30 +117,6 @@ class TestSelectionResolvesToTheCuratedNumber:
                 resolved = sp.get_profile(pid, variant=vid)
                 assert resolved.variant == vid
                 assert 0 < resolved.max_hotend_temp <= sp._MAX_TEMP_CEILING
-
-    def test_no_variant_carries_sourcing_into_public_data(self):
-        """The leak guard, as a test rather than a good intention.
-
-        Sourcing was added to this file on 2026-08-07 and removed the same
-        day: a curated list of which vendors publish what is hand-collected
-        research, and it does not belong in a public repo.  The public
-        SME-table gate did not catch it because it was prose in a data file
-        rather than a compiled table, so the check lives here too.
-        """
-        import json as _json
-
-        raw = _json.loads(sp._DATA_FILE.read_text(encoding="utf-8"))
-        banned = ("source", "source_kind", "verified", "url", "citation")
-        for pid, prof in raw.items():
-            if pid.startswith("_"):
-                continue
-            for vid, spec in (prof.get("variants") or {}).items():
-                leaked = sorted(set(spec) & set(banned))
-                assert not leaked, f"{pid}/{vid} carries sourcing fields: {leaked}"
-                blob = _json.dumps(spec)
-                assert "http://" not in blob and "https://" not in blob, (
-                    f"{pid}/{vid} carries a source URL"
-                )
 
 
 class TestAnUndeclaredMachineGetsTheConservativeNumber:
@@ -177,28 +161,32 @@ class TestAnUndeclaredMachineGetsTheConservativeNumber:
     def test_a_variant_does_not_travel_across_a_fuzzy_model_match(self, local_store):
         """The CR-10 case: a near relative is NOT the machine that got upgraded.
 
-        ``cr10`` fuzzy-matches requests like ``cr10_smart_pro``, and for a base
+        A base row fuzzy-matches requests that extend its key, and for a base
         ceiling that is right — a conservative number for a close relative
         beats none.  Carrying the VARIANT across that edge would claim the
-        owner's upgrade is fitted to a machine they do not own, and the vendor
-        compatibility lists explicitly exclude the later CR-10 revisions.
+        owner's upgrade is fitted to a machine they do not own (the vendor
+        compatibility lists for the real upgrade explicitly exclude the later
+        CR-10 revisions).
         """
-        sp.select_printer_variant("cr10", "e3d_revo_cr_reflashed")
-        assert sp.get_profile("cr10").variant == "e3d_revo_cr_reflashed"
+        sp.select_printer_variant(_PRINTER, _VARIANT)
+        assert sp.get_profile(_PRINTER).variant == _VARIANT
 
-        # Relatives with no curated profile of their own reach ``cr10`` by
-        # prefix match.  They get its conservative BASE ceiling and none of
-        # its variant.
-        for relative in ("cr10_smart_pro", "cr10_v2", "cr10_max"):
+        # Relatives with no curated profile of their own reach ``_PRINTER``
+        # by prefix match.  They get its conservative BASE ceiling and none
+        # of its variant.
+        for relative in (f"{_PRINTER}_pro", f"{_PRINTER}_v2", f"{_PRINTER}_max"):
             got = sp.get_profile(relative)
+            assert got.id == _PRINTER, f"{relative} did not reach {_PRINTER} by prefix"
             assert got.variant is None, f"{relative} inherited a variant"
-            assert got.max_hotend_temp == sp._cache["cr10"].max_hotend_temp
+            assert got.max_hotend_temp == sp._cache[_PRINTER].max_hotend_temp
 
         # A relative that IS separately curated keeps its own numbers and is
         # likewise untouched by the neighbour's declaration.
-        sibling = sp.get_profile("cr10_se")
+        sibling = sp.get_profile(_SIBLING)
+        assert sibling.id == _SIBLING
         assert sibling.variant is None
-        assert sibling.max_hotend_temp == sp._cache["cr10_se"].max_hotend_temp
+        assert sibling.max_hotend_temp == sp._cache[_SIBLING].max_hotend_temp
+        assert sibling.max_hotend_temp != sp._cache[_PRINTER].max_hotend_temp
 
     def test_hosted_multitenant_ignores_declarations_entirely(
         self, local_store, monkeypatch
@@ -292,8 +280,8 @@ class TestNothingCanExceedTheCuratedVariant:
         assert sp.get_profile(_PRINTER).max_hotend_temp == curated
 
     def test_a_variant_selection_does_not_lift_the_OTHER_ceilings(self, local_store):
-        """The Revo CR variant restates the hotend only.  A user must not get
-        a free bed or flow increase by declaring a hotend swap."""
+        """The variant restates the hotend only.  A user must not get a free
+        bed or flow increase by declaring a hotend swap."""
         base = sp.get_profile(_PRINTER)
         sp.select_printer_variant(_PRINTER, _VARIANT)
         sp.add_community_profile(_PRINTER, self._override(), confirmed=True)
@@ -353,7 +341,7 @@ class TestListingVariants:
         assert sp.list_printer_variants(_PRINTER)["selected"] == _VARIANT
 
     def test_a_printer_with_no_curated_variants_says_so(self, local_store):
-        out = sp.list_printer_variants("prusa_mini")
+        out = sp.list_printer_variants("kilntest_open")
         assert out["known"] is True
         assert out["variants"] == {}
 

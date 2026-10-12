@@ -83,11 +83,13 @@ class TestEveryDoorAgrees:
         keys = list(_get_kb().printer_compatibility)
         assert _misses(lambda n: resolve_printer_key(n, keys)) == []
 
-    def test_the_safety_profiles(self):
+    def test_the_safety_profiles(self, served_roster):
         """The ceilings every print is checked against.  A miss here was
         the generic profile -- 250C hotend, a 100C bed an A1 mini cannot
         reach, a 200mm cube -- for a printer Kiln has curated limits for.
-        A/B: with the Bambu Lab vendor form removed this fails."""
+        A/B: with the Bambu Lab vendor form removed this fails; and with the
+        served door sealed (the session default) every name misses, because
+        the door asks the catalogue and nothing answers."""
         from kiln import safety_profiles
 
         def profile_of(name):
@@ -96,15 +98,15 @@ class TestEveryDoorAgrees:
 
         assert _misses(profile_of) == []
 
-    def test_the_bed_fit_and_the_motion_gate(self):
+    def test_the_bed_fit_and_the_motion_gate(self, served_roster):
         """The build volume and the head-motion facts.  A/B: with the shared
-        candidates not appended to the bed-fit candidates this fails."""
+        candidates not appended to the bed-fit candidates this fails.  The
+        bed is on the served record, so every roster row has one here."""
         from kiln.motion_facts import motion_facts_for
         from kiln.printers.bed_fit import resolve_build_volume_printer_id
 
-        with_volume = {k for k, v in _rows().items() if v.get("build_volume_mm")}
         with_motion = {k for k, v in _rows().items() if isinstance(v.get("motion"), dict)}
-        assert _misses(lambda n: resolve_build_volume_printer_id(n) if _key_of(n) in with_volume else _key_of(n)) == []
+        assert _misses(resolve_build_volume_printer_id) == []
 
         def motion_row(name):
             if _key_of(name) not in with_motion:
@@ -134,6 +136,63 @@ class TestEveryDoorAgrees:
 
 def _key_of(name: str) -> str:
     return dict((n, k) for n, k in _corpus())[name]
+
+
+@pytest.fixture
+def served_roster(monkeypatch, tmp_path):
+    """The servers answer every ROSTER id with a synthetic record.
+
+    Since 2026-10-12 a printer's limits and spec sheet are served per
+    printer; the safety and bed-fit doors ask the catalogue by the roster
+    id a spelling names (and the catalogue's own resolver, pinned in
+    kiln-pro, answers the rest).  Public CI has no kiln-pro and no sign-in,
+    so the servers are stood in for here: a record for an exact roster id,
+    nothing for any other spelling.  Every number is made up; only the id
+    is the printer's.
+    """
+    import json
+
+    from kiln import _pro_catalogue_bridge as bridge
+    from kiln import printer_intelligence as pi
+    from kiln import safety_profiles as sp
+    from kiln.printers import bed_fit
+
+    roster = set(_rows())
+
+    def served(key: str):
+        if key not in roster:
+            return None, None
+        record = {
+            "printer_id": key, "matched_by": "exact", "display_name": key,
+            "safety": {
+                "max_hotend_temp": 240.0, "max_bed_temp": 80.0, "max_chamber_temp": None,
+                "max_feedrate": 10000.0, "min_safe_z": 0.0, "max_volumetric_flow": None,
+                "build_volume": [200, 200, 200], "notes": "Synthetic served record.",
+            },
+            "intel": {
+                "firmware": "marlin", "extruder_type": "direct_drive", "hotend_type": "all_metal",
+                "has_enclosure": False, "has_chamber_sensor": None, "has_abl": False,
+                "has_input_shaping": False, "build_volume_mm": [200, 200, 200],
+                "max_hotend_temp": 240, "max_bed_temp": 80, "materials": {}, "nozzle_clumping_probe": None,
+            },
+        }
+        return json.loads(json.dumps(record)), None
+
+    def reset() -> None:
+        sp._cache.clear()
+        sp._roster.clear()
+        sp._variant_data.clear()
+        sp._loaded = False
+        pi._reset_caches()
+        bed_fit._printer_intelligence_cache = None
+        bridge.forget()
+
+    monkeypatch.setattr(bridge, "available", lambda: False)
+    monkeypatch.setattr(bridge, "KEEP_DIR", tmp_path / "printer_catalogue")
+    monkeypatch.setattr(bridge, "_served", served)
+    reset()
+    yield
+    reset()
 
 
 class TestTheNamesThemselves:

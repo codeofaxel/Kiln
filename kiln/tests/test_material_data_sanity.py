@@ -501,9 +501,18 @@ def printer_intel() -> dict:
     printers exist and which materials they claim, so the public set is the
     right one to read — and it is the same set at every tier.
     """
-    from kiln.printer_intelligence import _load_raw, _raw_cache
-    _load_raw()     # ensure the raw cache is primed
-    return dict(_raw_cache)
+    from kiln.printer_intelligence import list_intel_profiles
+
+    # The roster: every printer the bundled file lists.  Since 2026-10-12 a
+    # row's spec sheet is served per printer, so the raw-row cache holds
+    # only the rows this process has fetched; the cross-checks below are
+    # about which printers EXIST.  The session fixture's synthetic
+    # ``kilntest_*`` rows ride in the roster copy and in no other file.
+    return {
+        key: {}
+        for key in list_intel_profiles()
+        if not key.startswith("kilntest_")
+    }
 
 
 class TestCompatibilityMatrix:

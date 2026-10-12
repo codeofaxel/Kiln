@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "description": "Synthetic printers for public Kiln's own tests. No row is a real machine and every number is made up, so the public suite never carries Kiln's catalogue: a real printer's limits, variants and spec sheet are kiln-pro's and are pinned in kiln-pro's tests. conftest installs these rows into copies of the two bundled data files (safety_profiles.json takes each row's 'safety' block, printer_intelligence.json its 'intel' block) and points the loaders at the copies for the whole session. A row with no blocks is a ROSTER-ONLY printer: it exists by name and its record is served, which is what a catalogued printer looks like to an install without kiln-pro.",
+    "description": "Synthetic printers for public Kiln's own tests. No row is a real machine and every number is made up, so the public suite never carries Kiln's catalogue: a real printer's limits, variants and spec sheet are kiln-pro's and are pinned in kiln-pro's tests. conftest installs these rows into copies of the two bundled data files (safety_profiles.json takes each row's 'safety' block, printer_intelligence.json its 'intel' block) and points the loaders at the copies for the whole session. A row with no blocks is a ROSTER-ONLY printer: it exists by name and its record is served, which is what a catalogued printer looks like to an install without kiln-pro. kilntest_variants_se is a separately catalogued prefix relative of kilntest_variants; kilntest_hot is a 500 C class machine for the adapters whose protocol ceiling sits above the desktop limits.",
     "shape": "The same two-block record kiln-pro's printer_catalogue.json carries per printer."
   },
   "kilntest_open": {
@@ -196,6 +196,66 @@
       "max_bed_temp": 80,
       "materials": {
         "PLA": {"hotend": 205, "bed": 55, "fan": 100}
+      },
+      "nozzle_clumping_probe": null
+    }
+  },
+  "kilntest_variants_se": {
+    "display_name": "Kilntest Lined 220 SE",
+    "safety": {
+      "max_hotend_temp": 265.0,
+      "max_bed_temp": 105.0,
+      "max_chamber_temp": null,
+      "max_feedrate": 7800.0,
+      "min_safe_z": 0.0,
+      "max_volumetric_flow": 12.5,
+      "build_volume": [220, 220, 240],
+      "notes": "Synthetic sibling of kilntest_variants: separately catalogued, a prefix relative, no curated variant of its own. Not a real machine."
+    },
+    "intel": {
+      "firmware": "marlin",
+      "extruder_type": "bowden",
+      "hotend_type": "ptfe_lined",
+      "has_enclosure": false,
+      "has_chamber_sensor": false,
+      "has_abl": true,
+      "has_input_shaping": false,
+      "build_volume_mm": [220, 220, 240],
+      "max_hotend_temp": 265,
+      "max_bed_temp": 105,
+      "materials": {
+        "PLA": {"hotend": 205, "bed": 60, "fan": 100}
+      },
+      "nozzle_clumping_probe": null
+    }
+  },
+  "kilntest_hot": {
+    "display_name": "Kilntest Hot 500",
+    "safety": {
+      "max_hotend_temp": 500.0,
+      "max_bed_temp": 200.0,
+      "max_chamber_temp": 90.0,
+      "max_feedrate": 15000.0,
+      "min_safe_z": 0.0,
+      "max_volumetric_flow": 30.0,
+      "build_volume": [300, 300, 300],
+      "notes": "Synthetic high-temperature test printer: a class ceiling well above the desktop machines. Not a real machine."
+    },
+    "intel": {
+      "firmware": "klipper",
+      "extruder_type": "direct_drive",
+      "hotend_type": "all_metal",
+      "has_enclosure": true,
+      "has_chamber_sensor": true,
+      "has_abl": true,
+      "has_input_shaping": true,
+      "build_volume_mm": [300, 300, 300],
+      "max_hotend_temp": 500,
+      "max_bed_temp": 200,
+      "materials": {
+        "PLA": {"hotend": 210, "bed": 60, "fan": 100},
+        "ABS": {"hotend": 250, "bed": 100, "fan": 0},
+        "PEEK": {"hotend": 420, "bed": 150, "fan": 0}
       },
       "nozzle_clumping_probe": null
     }
