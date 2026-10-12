@@ -34,6 +34,12 @@ from kiln.plugins._validation_pipeline_internals import (
 _OWNER_NOTE = "(owner-set limit, not Kiln-verified)"
 _GENERIC_NOTE = "generic fallback"
 
+#: Synthetic catalogue printers (tests/fixtures/printer_catalogue_test.json):
+#: a real printer's bed is kiln-pro's catalogue and is not in public CI.
+_CATALOGUED = "kilntest_enclosed"  # a 256 mm cube
+_CATALOGUED_DIMS = (256.0, 256.0, 256.0)
+_CURATED = "kilntest_ptfe"
+
 _GARAGE = {
     "display_name": "Garage Build",
     "max_hotend_temp": 240.0,
@@ -68,19 +74,19 @@ class TestTheCuratedCatalogueClaimsNothing:
         """The intelligence catalogue is entirely Kiln's own — a narrow
         variant dict plus printer_intelligence.json — so a hit there has
         no owner to attribute and must stay silent."""
-        got = _resolve_build_volume("bambu_a1")
+        got = _resolve_build_volume(_CATALOGUED)
         assert got is not None
-        assert got.dims == (256.0, 256.0, 256.0)
+        assert got.dims == _CATALOGUED_DIMS
         assert got.provenance == ""
 
     def test_catalogue_wins_over_an_override_and_stays_silent(self) -> None:
         """Resolution order is unchanged: intelligence first.  An override
         on a catalogued printer must not make the catalogue's own number
         read as the owner's."""
-        _override("bambu_a1", dict(_GARAGE))
-        got = _resolve_build_volume("bambu_a1")
+        _override(_CATALOGUED, dict(_GARAGE))
+        got = _resolve_build_volume(_CATALOGUED)
         assert got is not None
-        assert got.dims == (256.0, 256.0, 256.0)
+        assert got.dims == _CATALOGUED_DIMS
         assert got.provenance == ""
 
 
@@ -96,10 +102,10 @@ class TestAnOwnerDeclaredBedIsAttributed:
         """Pins the premise the passing-verdict note rests on: a bed is
         not a tighten-only safety limit, so an owner CAN declare one
         larger than the curated machine and keep it."""
-        curated = sp.get_profile("ender3").build_volume
+        curated = sp.get_profile(_CURATED).build_volume
         assert curated is not None
-        _override("ender3", {**_GARAGE, "build_volume": [999, 999, 999]})
-        got = sp.get_profile("ender3")
+        _override(_CURATED, {**_GARAGE, "build_volume": [999, 999, 999]})
+        got = sp.get_profile(_CURATED)
         assert got.build_volume == [999, 999, 999]
         assert "build_volume" in got.owner_supplied
 
@@ -113,8 +119,8 @@ class TestAnUnrecognisedPrinterSaysGeneric:
 
 class TestTheDimensionsOnlyWrapperIsUnchanged:
     def test_wrapper_returns_a_bare_triple(self) -> None:
-        got = _get_build_volume_for_printer("bambu_a1")
-        assert got == (256.0, 256.0, 256.0)
+        got = _get_build_volume_for_printer(_CATALOGUED)
+        assert got == _CATALOGUED_DIMS
 
     def test_wrapper_agrees_with_the_resolver(self) -> None:
         """One resolution path, so the two can never disagree about
@@ -199,7 +205,7 @@ class TestTheNoteReachesTheVerdict:
         details = _bed_fit_details(
             tmp_path,
             {"width_mm": 20.0, "depth_mm": 20.0, "height_mm": 20.0},
-            sp.get_profile("ender3"),
+            sp.get_profile(_CURATED),
         )
         assert "Fits build volume" in details
         assert _OWNER_NOTE not in details
