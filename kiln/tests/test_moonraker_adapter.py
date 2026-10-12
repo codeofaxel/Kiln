@@ -1262,3 +1262,31 @@ class TestJobElapsedTime:
             }
         )
         assert adapter.get_job().print_time_seconds == 1
+
+
+class TestReadMachineIdentity:
+    """``/machine/system_info`` ``cpu_info.serial_number`` names the host."""
+
+    def test_host_cpu_serial_is_read(self) -> None:
+        adapter = _adapter()
+        resp = _mock_response(json_data={
+            "result": {"system_info": {"cpu_info": {"serial_number": "b898bdb4", "model": "Raspberry Pi 3"}}}
+        })
+        with mock.patch.object(adapter._session, "request", return_value=resp) as req:
+            identity = adapter.read_machine_identity()
+        assert identity is not None
+        assert identity.value == "b898bdb4"
+        assert identity.source == "moonraker_system_info.cpu_info.serial_number"
+        assert identity.kind == "host_board_serial"
+        assert req.call_args[0][1].endswith("/machine/system_info")
+
+    def test_a_host_without_a_cpu_serial_is_none(self) -> None:
+        adapter = _adapter()
+        resp = _mock_response(json_data={"result": {"system_info": {"cpu_info": {"serial_number": ""}}}})
+        with mock.patch.object(adapter._session, "request", return_value=resp):
+            assert adapter.read_machine_identity() is None
+
+    def test_an_unreachable_host_is_none_not_an_error(self) -> None:
+        adapter = _adapter()
+        with mock.patch.object(adapter._session, "request", side_effect=requests.ConnectionError("down")):
+            assert adapter.read_machine_identity() is None

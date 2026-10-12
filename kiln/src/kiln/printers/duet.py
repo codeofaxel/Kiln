@@ -67,6 +67,7 @@ from kiln.printers.base import (
     FilamentOpPlan,
     FilamentOpResult,
     JobProgress,
+    MachineIdentity,
     PrinterAdapter,
     PrinterCapabilities,
     PrinterError,
@@ -635,10 +636,37 @@ class DuetAdapter(PrinterAdapter):
         logger.debug("Detected RepRapFirmware 2 (legacy status) at %s", self._host)
         return 2
 
-    def _model(self, key: str) -> Any:
-        """Query one object-model *key* (RRF 3 only) and return its ``result``."""
-        body = self._get_json("/rr_model", params={"key": key, "flags": "d99"})
+    def _model(self, key: str, *, flags: str = "d99") -> Any:
+        """Query one object-model *key* (RRF 3 only) and return its ``result``.
+
+        *flags* is the object model's own flag string; ``v`` adds the fields
+        it marks verbose, which a plain query leaves out.
+        """
+        body = self._get_json("/rr_model", params={"key": key, "flags": flags})
         return body.get("result")
+
+    def read_machine_identity(self) -> MachineIdentity | None:
+        """The main board's unique id, from the RRF 3 object model.
+
+        Read as ``boards[0].uniqueId`` -- the first entry is the main board
+        -- which the object model flags verbose, so the query carries ``v``.
+        It identifies the controller board: it stays with the board when the
+        board is moved to another frame, and is ``null`` on a board that has
+        none.  RRF 2 has no object model, so an RRF 2 board reports ``None``
+        here and stays known by its address.
+        """
+        try:
+            if self._generation() != 3:
+                return None
+            raw = self._model("boards[0].uniqueId", flags="d99v")
+        except PrinterError:
+            return None
+        value = str(raw or "").strip() if isinstance(raw, (str, int)) else ""
+        if not value:
+            return None
+        return MachineIdentity(
+            value=value, source="rrf_object_model.boards[0].uniqueId", kind="board_id"
+        )
 
     def _current_status(self) -> PrinterStatus:
         """Fetch just the machine status, without temperatures.

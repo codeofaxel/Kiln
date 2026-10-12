@@ -349,6 +349,154 @@ class TestSaveUnderASavedName:
 # ---------------------------------------------------------------------------
 
 
+class TestSaveWithAReadMachineId:
+    """A machine id Kiln read off the printer is stored for the types that
+    state none, and judges a save under the name the way a stated serial
+    does: the same id at a new address updates and keeps the credential,
+    a different id is refused, and an id that could not be read this time
+    is replaced as an id-less printer is -- never refused, since the
+    person never typed it."""
+
+    @staticmethod
+    def _identity(value="CZPX4720X004XC34242", source="prusalink_info.serial"):
+        from kiln.printers.base import MachineIdentity
+
+        return MachineIdentity(value=value, source=source, kind="printer_serial")
+
+    def _saved_mk4(self, tmp_path, **extra):
+        cfg = tmp_path / "config.yaml"
+        save_printer("mk4", "prusalink", "http://10.0.0.5", api_key="k", printer_model="prusa_mk4",
+                     camera_stream_url="rtsp://user:secret@10.0.0.50/live",
+                     machine_identity=self._identity(), config_path=cfg, probe=False, **extra)
+        return cfg
+
+    def test_the_read_id_is_stored_with_its_source(self, tmp_path):
+        cfg = self._saved_mk4(tmp_path)
+        entry = _entry(cfg, "mk4")
+        assert entry["machine_id"] == "CZPX4720X004XC34242"
+        assert entry["machine_id_source"] == "prusalink_info.serial"
+
+    def test_a_bambu_save_never_stores_a_read_id(self, tmp_path):
+        cfg = tmp_path / "config.yaml"
+        save_printer("a1", "bambu", "10.0.0.2", access_code="x", serial="S1",
+                     machine_identity=self._identity(), config_path=cfg, probe=False)
+        assert "machine_id" not in _entry(cfg, "a1")
+
+    def test_a_printer_that_moved_is_updated_when_it_reports_the_saved_id(self, tmp_path):
+        cfg = self._saved_mk4(tmp_path)
+        result = save_printer("mk4", "prusalink", "http://10.0.0.9",
+                              machine_identity=self._identity(), config_path=cfg, probe=False)
+        entry = _entry(cfg, "mk4")
+        assert result.outcome == "updated"
+        assert "from http://10.0.0.5 to http://10.0.0.9" in result.notice
+        assert entry["host"] == "http://10.0.0.9"
+        assert entry["api_key"] == "k"
+        assert entry["camera_stream_url"] == "rtsp://user:secret@10.0.0.50/live"
+        assert entry["machine_id"] == "CZPX4720X004XC34242"
+        assert "machine_id" not in result.notice
+
+    def test_the_id_is_compared_without_regard_to_case(self, tmp_path):
+        cfg = self._saved_mk4(tmp_path)
+        result = save_printer("mk4", "prusalink", "http://10.0.0.9",
+                              machine_identity=self._identity("czpx4720x004xc34242"),
+                              config_path=cfg, probe=False)
+        assert result.outcome == "updated"
+
+    def test_a_different_id_at_a_new_address_is_refused_unwritten(self, tmp_path):
+        cfg = self._saved_mk4(tmp_path)
+        before = cfg.read_text()
+        with pytest.raises(ValueError, match="machine id ending 4242") as info:
+            save_printer("mk4", "prusalink", "http://10.0.0.9", api_key="k2",
+                         machine_identity=self._identity("CZPX4720X004XC99999"),
+                         config_path=cfg, probe=False)
+        assert info.value.suggested_name == "mk4-2"
+        assert cfg.read_text() == before
+
+    def test_a_different_id_at_the_same_address_is_refused_too(self, tmp_path):
+        cfg = self._saved_mk4(tmp_path)
+        with pytest.raises(ValueError, match="A different machine answers as 'mk4'"):
+            save_printer("mk4", "prusalink", "http://10.0.0.5",
+                         machine_identity=self._identity("CZPX4720X004XC99999"),
+                         config_path=cfg, probe=False)
+        assert _entry(cfg, "mk4")["machine_id"] == "CZPX4720X004XC34242"
+
+    def test_a_moved_printer_whose_id_could_not_be_read_is_replaced_not_refused(self, tmp_path):
+        cfg = self._saved_mk4(tmp_path)
+        result = save_printer("mk4", "prusalink", "http://10.0.0.9", config_path=cfg, probe=False)
+        entry = _entry(cfg, "mk4")
+        assert result.outcome == "replaced"
+        assert "api_key" not in entry
+        assert "machine_id" not in entry
+        assert "machine_id_source" not in entry
+        assert "printer_model" not in entry
+        assert result.dropped == ("api_key", "printer_model", "camera_stream_url")
+        assert "machine_id" not in result.notice
+
+    def test_an_id_from_another_source_says_nothing_either_way(self, tmp_path):
+        # A backend that starts reading a different field must not call
+        # every printer saved before it a different machine.
+        cfg = self._saved_mk4(tmp_path)
+        result = save_printer("mk4", "prusalink", "http://10.0.0.9",
+                              machine_identity=self._identity("OTHER", source="prusalink_info.hostname"),
+                              config_path=cfg, probe=False)
+        assert result.outcome == "replaced"
+        assert _entry(cfg, "mk4")["machine_id"] == "OTHER"
+
+    def test_a_save_at_the_same_address_keeps_the_saved_id_when_none_was_read(self, tmp_path):
+        cfg = self._saved_mk4(tmp_path)
+        result = save_printer("mk4", "prusalink", "http://10.0.0.5", api_key="k2",
+                              config_path=cfg, probe=False)
+        assert result.outcome == "updated"
+        assert _entry(cfg, "mk4")["machine_id"] == "CZPX4720X004XC34242"
+        assert "machine_id" not in result.notice
+
+    def test_the_result_carries_the_id_the_entry_holds(self, tmp_path):
+        cfg = tmp_path / "config.yaml"
+        result = save_printer("mk4", "prusalink", "http://10.0.0.5", api_key="k",
+                              machine_identity=self._identity(), config_path=cfg, probe=False)
+        assert result.machine_identity == self._identity()
+        plain = save_printer("ender", "octoprint", "http://10.0.0.6", api_key="k",
+                             config_path=cfg, probe=False)
+        assert plain.machine_identity is None
+
+    def test_a_reader_is_asked_only_when_the_address_answers(self, tmp_path, monkeypatch):
+        import kiln.cli.config as mod
+
+        cfg = tmp_path / "config.yaml"
+        asked: list[str] = []
+
+        def reader():
+            asked.append("read")
+            return self._identity()
+
+        monkeypatch.setattr(mod, "_check_printer_url", lambda url, *, printer_type, probe: (url, [], False))
+        save_printer("mk4", "prusalink", "http://10.0.0.5", api_key="k",
+                     read_machine_identity=reader, config_path=cfg, probe=True)
+        assert asked == []
+        assert "machine_id" not in _entry(cfg, "mk4")
+
+        monkeypatch.setattr(mod, "_check_printer_url", lambda url, *, printer_type, probe: (url, [], True))
+        result = save_printer("mk4", "prusalink", "http://10.0.0.5", api_key="k",
+                              read_machine_identity=reader, config_path=cfg, probe=True)
+        assert asked == ["read"]
+        assert _entry(cfg, "mk4")["machine_id"] == "CZPX4720X004XC34242"
+        assert result.machine_identity == self._identity()
+
+    def test_a_reader_that_fails_leaves_the_save_without_an_id(self, tmp_path, monkeypatch):
+        import kiln.cli.config as mod
+
+        cfg = tmp_path / "config.yaml"
+        monkeypatch.setattr(mod, "_check_printer_url", lambda url, *, printer_type, probe: (url, [], True))
+
+        def reader():
+            raise RuntimeError("printer hung up")
+
+        result = save_printer("mk4", "prusalink", "http://10.0.0.5", api_key="k",
+                              read_machine_identity=reader, config_path=cfg, probe=True)
+        assert result.outcome == "added"
+        assert "machine_id" not in _entry(cfg, "mk4")
+
+
 class TestSetActive:
     def test_set_active(self, tmp_path):
         cfg_path = tmp_path / "config.yaml"

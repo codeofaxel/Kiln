@@ -930,6 +930,80 @@ class NozzleSetting:
 
 
 @dataclass(frozen=True)
+class MachineIdentity:
+    """An id the machine reports for ITSELF, read off the printer at setup.
+
+    Kiln saves printers under a name the person chooses and reaches them by
+    an address the router hands out, so an address alone cannot say whether
+    the printer answering today is the one saved yesterday.  This record can:
+    a saved id that the machine at the new address reports again is the same
+    machine, and one it does not is a different one.  Kiln stores it beside
+    the saved printer and compares it on every save under a name in use.
+
+    :param value: The id exactly as the machine reports it (compared
+        case-insensitively).  Opaque: never parsed for a model or a date.
+    :param source: The endpoint and field it was read from, e.g.
+        ``"prusalink_info.serial"``.  Two ids are comparable only when their
+        sources agree, so a backend that starts reading a different field
+        changes nothing about printers saved before.
+    :param kind: What the id names.  ``"printer_serial"``: the printer's own
+        serial.  ``"board_id"``: the controller board's unique id -- it
+        travels with the board, not the frame.  ``"host_board_serial"``: the
+        serial of the computer running the printer's software (a Raspberry
+        Pi running Klipper); it identifies that computer, which a person can
+        move from one printer to another, so a match says "the same host",
+        not "the same frame".
+    """
+
+    value: str
+    source: str
+    kind: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {"value": self.value, "source": self.source, "kind": self.kind}
+
+
+#: How long a setup door waits for :meth:`PrinterAdapter.read_machine_identity`.
+#: The printer has just answered a state request on the same channel, so a
+#: healthy read returns well inside this; a slow one is given up on rather
+#: than holding setup, and the save goes ahead without an id.
+MACHINE_IDENTITY_READ_SECONDS: float = 5.0
+
+
+def read_machine_identity_bounded(
+    read: Callable[[], MachineIdentity | None],
+    *,
+    timeout_seconds: float = MACHINE_IDENTITY_READ_SECONDS,
+) -> MachineIdentity | None:
+    """Run *read* with a time limit; ``None`` when it fails or runs over.
+
+    *read* is normally an adapter's :meth:`PrinterAdapter.read_machine_identity`.
+    It runs on its own thread so an adapter whose request helper retries at
+    its own pace cannot hold a setup door past *timeout_seconds*; a read that
+    outlives the wait is abandoned, and nothing it returns later is used.
+    Never raises: a setup that could not learn the id is still a setup.
+    """
+    box: list[MachineIdentity | None] = [None]
+
+    def _run() -> None:
+        try:
+            found = read()
+        except Exception:
+            logger.debug("machine identity read failed", exc_info=True)
+            return
+        if isinstance(found, MachineIdentity) and found.value.strip():
+            box[0] = found
+
+    worker = threading.Thread(target=_run, name="kiln-machine-identity", daemon=True)
+    worker.start()
+    worker.join(timeout_seconds)
+    if worker.is_alive():
+        logger.debug("machine identity read gave up after %.1fs", timeout_seconds)
+        return None
+    return box[0]
+
+
+@dataclass(frozen=True)
 class NozzleClumpingDetection:
     """Whether a printer's own "nozzle clumping detection" switch is on, read
     off the machine.
@@ -6290,6 +6364,21 @@ class PrinterAdapter(ABC):
         is a different fact from "the machine agrees with anything" and must
         never be read as one.  Sends no command and changes nothing on the
         printer.
+        """
+        return None
+
+    def read_machine_identity(self) -> MachineIdentity | None:
+        """The id this machine reports for itself, or ``None``.
+
+        Optional.  A backend whose protocol exposes a stable id for the
+        machine returns it as a :class:`MachineIdentity`; the default knows
+        none and says so.  ``None`` means "this backend cannot say" -- the
+        printer is then known by its address alone, and a later save under
+        its name at a new address is treated as a machine nothing can match.
+        Sends no command and changes nothing on the printer.  Called by the
+        setup doors after the connection check, through
+        :func:`read_machine_identity_bounded`, so a slow or failing read is
+        said and never fatal.
         """
         return None
 

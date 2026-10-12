@@ -63,6 +63,7 @@ from kiln.cli.auth_commands import register_auth_cli
 from kiln.cli.bridge_commands import register_bridge_cli
 from kiln.cli.config import (
     PrinterNameTaken,
+    _normalize_host,
     _normalize_printer_type,
     load_printer_config,
     remove_printer,
@@ -573,6 +574,51 @@ def _make_adapter(cfg: dict[str, Any]):
     adapter = _make_bare_adapter(cfg)
     apply_external_camera(adapter, cfg)
     return adapter
+
+
+def _machine_identity_for_save(
+    printer_type: str,
+    host: str,
+    *,
+    api_key: str | None = None,
+    access_code: str | None = None,
+    serial: str | None = None,
+    printer_model: str | None = None,
+    adapter: Any | None = None,
+):
+    """The id the printer at *host* reports for itself, or ``None``.
+
+    What every CLI door that saves a printer calls so a save under a name
+    in use is judged by the machine's own id
+    (:meth:`kiln.printers.base.PrinterAdapter.read_machine_identity`), not
+    by its address.  *adapter* is one the door already built and tested;
+    without one, an adapter is built from the arguments the save will
+    carry.  Bounded (:data:`kiln.printers.base.MACHINE_IDENTITY_READ_SECONDS`)
+    and never raises: a printer whose id cannot be read is saved without
+    one, known by its address, and the door says so.  Bambu and Elegoo
+    state their id and are not asked; a USB port names no machine.
+    """
+    from kiln.printers.base import read_machine_identity_bounded
+
+    if _normalize_printer_type(printer_type) in ("bambu", "elegoo", "usb"):
+        return None
+
+    def _read():
+        live = adapter
+        if live is None:
+            cfg: dict[str, Any] = {"type": printer_type, "host": host}
+            if api_key:
+                cfg["api_key"] = api_key
+            if access_code:
+                cfg["access_code"] = access_code
+            if serial:
+                cfg["serial"] = serial
+            if printer_model:
+                cfg["printer_model"] = printer_model
+            live = _make_adapter(cfg)
+        return live.read_machine_identity()
+
+    return read_machine_identity_bounded(_read)
 
 
 def _make_bare_adapter(cfg: dict[str, Any]):
@@ -1955,6 +2001,9 @@ def auth(
             except ValueError as exc:
                 raise click.UsageError(str(exc)) from exc
     try:
+        # The save reads the id the printer reports for itself once the
+        # address answers, so a printer that moved is matched to its saved
+        # entry by that id rather than replaced.
         saved = save_printer(
             name,
             printer_type,
@@ -1962,11 +2011,16 @@ def auth(
             api_key=api_key,
             access_code=access_code,
             serial=serial,
+            read_machine_identity=lambda: _machine_identity_for_save(
+                printer_type, host,
+                api_key=api_key, access_code=access_code, serial=serial, printer_model=printer_model,
+            ),
             baudrate=baudrate,
             printer_model=printer_model,
             camera_snapshot_url=camera_snapshot_url,
             camera_stream_url=camera_stream_url,
         )
+        machine_identity = saved.machine_identity
         prusa_diagnostics: dict[str, Any] | None = None
         creality_diagnostics: dict[str, Any] | None = None
         saved_host = host
@@ -2016,6 +2070,8 @@ def auth(
         }
         if saved.notice:
             data["notice"] = saved.notice
+        if machine_identity is not None:
+            data["machine_identity"] = machine_identity.to_dict()
         if printer_model:
             data["printer_model"] = printer_model
         if prusa_diagnostics is not None:
@@ -8828,43 +8884,27 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
         printer_type, serial=serial, allow_skip=False,
     )
 
-    # -- Save --------------------------------------------------------------
-    click.echo()
-    try:
-        while True:
-            try:
-                saved = save_printer(
-                    name,
-                    printer_type,
-                    host,
-                    api_key=api_key,
-                    access_code=access_code,
-                    serial=serial,
-                    printer_model=printer_model,
-                    set_active=True,
-                )
-                break
-            except PrinterNameTaken as exc:
-                # Everything else is in hand, so ask only for another name.
-                click.echo(click.style(f"  {exc}", fg="yellow"))
-                name = click.prompt("  Friendly name for this printer", default=exc.suggested_name)
-                name = name.strip().lower().replace(" ", "-")
-        click.echo(f"  Saved printer '{name}' to {saved.path}")
-        if saved.notice:
-            click.echo(click.style(f"  {saved.notice}", fg="yellow"))
-    except OSError as exc:
-        click.echo(click.style(f"  Failed to save config: {exc}", fg="red"))
-        sys.exit(1)
-    except Exception as exc:
-        click.echo(click.style(f"  Failed to save config: {exc}", fg="red"))
-        sys.exit(1)
-
     # -- Test connection ---------------------------------------------------
+    # Before the save: a printer that answers is asked for the id it
+    # reports for itself, and the save under a name in use is judged by
+    # that id.  A printer that does not answer is still saved below.
+    click.echo()
     click.echo("  Testing connection...")
+    adapter = None
+    connected = False
+    # Built on the address as it will be saved, so the test speaks to the
+    # same URL the saved entry will.
+    live_cfg: dict[str, Any] = {"type": printer_type, "host": _normalize_host(host, printer_type)}
+    for key, value in (
+        ("api_key", api_key), ("access_code", access_code),
+        ("serial", serial), ("printer_model", printer_model),
+    ):
+        if value:
+            live_cfg[key] = value
     try:
-        cfg = load_printer_config(name)
-        adapter = _make_adapter(cfg)
+        adapter = _make_adapter(live_cfg)
         state = adapter.get_state()
+        connected = True
         click.echo(click.style("  Connected!", fg="green") + f" Printer state: {state.state.value}")
         if state.tool_temp_actual is not None:
             click.echo(f"  Hotend: {state.tool_temp_actual:.0f}C")
@@ -8900,21 +8940,57 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
     except PrinterError as exc:
         if why := _engaged_elsewhere(exc):
             click.echo(click.style(f"  Connection not tested: {why}", fg="yellow"))
-            click.echo("  The printer was saved.")
+            click.echo("  The printer is saved anyway.")
         else:
             click.echo(click.style(f"  Connection test failed: {exc}", fg="yellow"))
             click.echo(
-                f"  The printer was saved but may need correct credentials.\n"
+                f"  The printer is saved anyway but may need correct credentials.\n"
                 f"  Update with: kiln auth --name {name} --host {host} "
                 f"--type {printer_type} --api-key <key>"
             )
     except Exception as exc:
         click.echo(click.style(f"  Connection test failed: {exc}", fg="yellow"))
         click.echo(
-            f"  The printer was saved but may need correct credentials.\n"
+            f"  The printer is saved anyway but may need correct credentials.\n"
             f"  Update with: kiln auth --name {name} --host {host} "
             f"--type {printer_type} --api-key <key>"
         )
+
+    machine_identity = None
+    if connected:
+        machine_identity = _machine_identity_for_save(printer_type, host, adapter=adapter)
+
+    # -- Save --------------------------------------------------------------
+    try:
+        while True:
+            try:
+                saved = save_printer(
+                    name,
+                    printer_type,
+                    host,
+                    api_key=api_key,
+                    access_code=access_code,
+                    serial=serial,
+                    machine_identity=machine_identity,
+                    printer_model=printer_model,
+                    set_active=True,
+                    probe=not connected,
+                )
+                break
+            except PrinterNameTaken as exc:
+                # Everything else is in hand, so ask only for another name.
+                click.echo(click.style(f"  {exc}", fg="yellow"))
+                name = click.prompt("  Friendly name for this printer", default=exc.suggested_name)
+                name = name.strip().lower().replace(" ", "-")
+        click.echo(f"  Saved printer '{name}' to {saved.path}")
+        if saved.notice:
+            click.echo(click.style(f"  {saved.notice}", fg="yellow"))
+    except OSError as exc:
+        click.echo(click.style(f"  Failed to save config: {exc}", fg="red"))
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(click.style(f"  Failed to save config: {exc}", fg="red"))
+        sys.exit(1)
 
     # -- Auto-print safety preferences -------------------------------------
     click.echo()
@@ -9128,11 +9204,17 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
         found_serial = getattr(first, "serial", None) or None
         still_needed = missing_needs(first.printer_type, {"host": first.address, "serial": found_serial})
         try:
+            # The save asks the machine for the id it reports for itself
+            # once the address answers; a read that fails leaves the
+            # printer known by its address.
             save_printer(
                 printer_name,
                 first.printer_type,
                 first.address,
                 serial=found_serial,
+                read_machine_identity=lambda: _machine_identity_for_save(
+                    first.printer_type, first.address, serial=found_serial, printer_model=auto_model,
+                ),
                 printer_model=auto_model,
                 set_active=True,
             )

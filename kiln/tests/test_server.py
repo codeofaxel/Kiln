@@ -2134,6 +2134,140 @@ class TestRegisterPrinterReplacedName:
         assert registry.get("voron") is built[0]
 
 
+class TestRegisterPrinterMatchedByMachineId:
+    """register_printer reads the id the machine reports for itself once
+    the address answers, and a name saved for a printer that moved is
+    judged by that id: the same id updates and keeps the credential and
+    camera, live and on disk; a different id is refused unregistered."""
+
+    _ID = "b898bdb4"
+
+    @pytest.fixture
+    def door(self, monkeypatch, tmp_path):
+        import kiln.bench
+        import kiln.server as mod
+        from kiln.cli.config import save_printer
+        from kiln.printers.base import MachineIdentity
+
+        cfg = tmp_path / "config.yaml"
+        monkeypatch.setattr("kiln.cli.config.get_config_path", lambda: cfg)
+        registry = PrinterRegistry()
+        monkeypatch.setattr(mod, "_registry", registry)
+        monkeypatch.setattr(mod, "_adapter", None)
+        monkeypatch.setattr(mod, "_SESSION_PRINTERS", {}, raising=False)
+        monkeypatch.setattr(kiln.bench, "offer_after_registration", lambda *_a, **_k: None)
+        # The address answers; what the machine then reports is the fake's.
+        monkeypatch.setattr(mod, "_check_printer_url", lambda host, *, printer_type: (host, [], True))
+        built: list = []
+        reports = {"value": self._ID}
+
+        class FakeMoonrakerAdapter:
+            name = "moonraker"
+
+            def __init__(self, *, host, api_key=None, verify_ssl=True):
+                self.host = host
+                self.api_key = api_key
+                self.camera = None
+                built.append(self)
+
+            def set_external_camera(self, *, snapshot_url=None, stream_url=None):
+                self.camera = (snapshot_url, stream_url)
+
+            def set_safety_profile(self, profile_id):
+                self.profile_id = profile_id
+
+            def read_machine_identity(self):
+                if reports["value"] is None:
+                    return None
+                return MachineIdentity(
+                    value=reports["value"],
+                    source="moonraker_system_info.cpu_info.serial_number",
+                    kind="host_board_serial",
+                )
+
+            def disconnect(self):
+                pass
+
+        monkeypatch.setattr(mod, "MoonrakerAdapter", FakeMoonrakerAdapter)
+        save_printer(
+            "voron", "moonraker", "http://10.0.0.5", api_key="k", printer_model="voron_2",
+            camera_stream_url="rtsp://user:secret@10.0.0.50/live",
+            machine_identity=FakeMoonrakerAdapter(host="x").read_machine_identity(),
+            config_path=cfg, probe=False,
+        )
+        built.clear()
+        return cfg, registry, built, reports
+
+    def test_the_same_id_at_a_new_address_updates_and_keeps_key_and_camera(self, door):
+        import yaml
+
+        cfg, registry, built, _reports = door
+        result = register_printer(
+            name="voron", printer_type="moonraker", host="http://10.0.0.9", verify_connection=False,
+        )
+        assert result["success"] is True, result
+        assert result["saved"] == "updated"
+        assert result["machine_identity"]["value"] == self._ID
+        assert result["machine_identity"]["kind"] == "host_board_serial"
+        assert "secret" not in json.dumps(result)
+        assert built[0].camera == (None, "rtsp://user:secret@10.0.0.50/live")
+        assert built[0].profile_id == "voron_2"
+        entry = yaml.safe_load(cfg.read_text())["printers"]["voron"]
+        assert entry["host"] == "http://10.0.0.9"
+        assert entry["api_key"] == "k"
+        assert entry["machine_id"] == self._ID
+        assert registry.get("voron") is built[0]
+
+    def test_a_different_id_is_refused_and_nothing_is_registered(self, door):
+        cfg, registry, built, reports = door
+        reports["value"] = "0badf00d"
+        before = cfg.read_text()
+        result = register_printer(
+            name="voron", printer_type="moonraker", host="http://10.0.0.9", verify_connection=False,
+        )
+        assert result["success"] is False, result
+        assert result["error"]["code"] == "NAME_TAKEN"
+        assert "machine id ending BDB4" in result["error"]["message"]
+        assert result["suggested_name"] == "voron-2"
+        assert "voron" not in registry
+        assert cfg.read_text() == before
+
+    def test_an_id_that_cannot_be_read_replaces_and_says_so(self, door):
+        import yaml
+
+        cfg, registry, built, reports = door
+        reports["value"] = None
+        result = register_printer(
+            name="voron", printer_type="moonraker", host="http://10.0.0.9", verify_connection=False,
+        )
+        assert result["success"] is True, result
+        assert result["saved"] == "replaced"
+        assert "machine_identity" not in result
+        assert any("could not read this printer's own id" in w for w in result.get("warnings", []))
+        assert built[0].camera is None
+        entry = yaml.safe_load(cfg.read_text())["printers"]["voron"]
+        assert "api_key" not in entry
+        assert "machine_id" not in entry
+
+    def test_a_session_only_registration_carries_the_read_id(self, door, monkeypatch):
+        import kiln.server as mod
+
+        _cfg, registry, built, reports = door
+        reports["value"] = "feedface"
+        first = register_printer(
+            name="k1", printer_type="moonraker", host="http://10.0.0.7", persist=False, verify_connection=False,
+        )
+        assert first["success"] is True, first
+        assert mod._SESSION_PRINTERS["k1"]["machine_id"] == "feedface"
+        reports["value"] = "0badf00d"
+        second = register_printer(
+            name="k1", printer_type="moonraker", host="http://10.0.0.8", persist=False, verify_connection=False,
+        )
+        assert second["success"] is False
+        assert second["error"]["code"] == "NAME_TAKEN"
+        assert registry.get("k1") is built[0]
+
+
 class TestRegisterPrinterSessionOnly:
     """register_printer(persist=False) under a name in use: judged by the
     same rule as a saved registration, against both the saved config and

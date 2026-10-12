@@ -32,6 +32,7 @@ from kiln.printers.base import (
     FilamentOpResult,
     JobProgress,
     JobResult,
+    MachineIdentity,
     NozzleSetting,
     PrinterAdapter,
     PrinterCapabilities,
@@ -667,6 +668,24 @@ class PrusaLinkAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
     # PrinterAdapter -- state queries
     # ------------------------------------------------------------------
+
+    def read_machine_identity(self) -> MachineIdentity | None:
+        """The printer's own serial number, from its info endpoint.
+
+        PrusaLink serves it as ``serial`` on ``GET /api/v1/info`` (the
+        printer's serial, the one on its label), beside the nozzle diameter
+        the setting read above uses.  ``None`` when the endpoint cannot be
+        read or carries no serial.
+        """
+        try:
+            info = self._get_json("/api/v1/info")
+        except PrinterError:
+            return None
+        raw = info.get("serial") if isinstance(info, dict) else None
+        value = str(raw or "").strip()
+        if not value:
+            return None
+        return MachineIdentity(value=value, source="prusalink_info.serial", kind="printer_serial")
 
     def read_nozzle_setting(self) -> NozzleSetting | None:
         """The nozzle diameter this printer holds in its own settings.
