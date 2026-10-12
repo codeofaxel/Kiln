@@ -312,6 +312,15 @@ def _row_for(printer_id: str) -> tuple[str, dict[str, Any]] | None:
     fetched = _fetch_row(listed or candidates[0])
     if fetched is not None:
         return fetched
+    try:
+        from kiln._pro_catalogue_bridge import available
+    except Exception:  # noqa: BLE001
+        available = lambda: False  # noqa: E731
+    if available():
+        # kiln-pro here is the resolver; its "no row" is final (see
+        # safety_profiles._curated_match for why a prefix hit over held
+        # rows would be wrong on a shared server).
+        return None
     for key, row in rows.items():
         if key == "default":
             continue

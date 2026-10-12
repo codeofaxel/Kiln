@@ -312,6 +312,48 @@ class TestSetupChokepoint:
         PrinterAdapter.set_safety_profile(adapter, SERVED_ID)
         assert sp.pending_limits_nudge() is None
 
+    def test_register_printer_speaks_the_note_once(self, monkeypatch, tmp_path):
+        pytest.importorskip("kiln.server")
+        from kiln import bench, server
+
+        monkeypatch.setattr(server, "_check_auth", lambda *_a, **_k: None)
+        monkeypatch.setattr("kiln.cli.config.get_config_path", lambda: tmp_path / "config.yaml")
+        monkeypatch.setattr(bench, "offer_after_registration", lambda _adapter, name: None)
+        result = server.register_printer(
+            name="bench", printer_type="moonraker", host="192.0.2.21",
+            printer_model=SERVED_ID, persist=False, verify_connection=False,
+        )
+        assert result["success"], result
+        assert "Kilntest Served 200" in result["limits_note"] and result["limits_note"] in result["message"]
+        again = server.register_printer(
+            name="bench2", printer_type="moonraker", host="192.0.2.22",
+            printer_model=SERVED_ID, persist=False, verify_connection=False,
+        )
+        assert again["success"] and "limits_note" not in again
+
+    def test_set_printer_model_speaks_the_note(self, monkeypatch, tmp_path):
+        from kiln import printer_setup
+        from kiln.cli import config as cli_config
+
+        path = tmp_path / "config.yaml"
+        path.write_text(
+            "printers:\n  bench:\n    type: moonraker\n    host: 192.0.2.21\nactive_printer: bench\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(cli_config, "get_config_path", lambda: path)
+        result = printer_setup.set_printer_model(SERVED_ID, printer_name="bench", config_path=path)
+        assert result["success"] and result["applied"], result
+        assert "Kilntest Served 200" in result["limits_note"] and result["limits_note"] in result["message"]
+
+    def test_get_started_carries_a_note_minted_at_boot(self):
+        pytest.importorskip("kiln.server")
+        from kiln.server import get_started
+
+        sp.warm_profile(SERVED_ID)
+        account = get_started()["account"]
+        assert "Kilntest Served 200" in account["limits_note"]
+        assert "limits_note" not in get_started()["account"]
+
     def test_the_bridge_is_on_the_hosted_doors_roster(self):
         from kiln.served_answer import HOSTED_DOORS
 
@@ -324,6 +366,21 @@ class TestSetupChokepoint:
 
 
 class TestLocal:
+    def test_with_kiln_pro_here_the_local_answer_is_final(self, monkeypatch):
+        """On a kiln-pro install (the hosted server is one) the local reader
+        IS the resolver, so a spelling it answers nothing for gets the floor
+        even when a row it would prefix-match is already held: the coverage
+        guard and the loaders then resolve a spelling identically, and no
+        spelling reaches a held row uncounted.  A/B: with the local prefix
+        fallback still running here, the second call returned the held row."""
+        monkeypatch.setattr(bridge, "available", lambda: True)
+        answers = {SERVED_ID: json.loads(json.dumps(RECORD))}
+        monkeypatch.setattr(bridge, "_local", lambda key: (answers.get(key), None))
+        assert sp.get_profile(SERVED_ID).max_hotend_temp == 280.0
+        assert pi.get_printer_intel(SERVED_ID).hotend_type == "ptfe_lined"
+        assert sp.get_profile(SERVED_ID + "x").id == "default"
+        assert pi.get_printer_intel(SERVED_ID + "x").id == "default"
+
     def test_the_local_record_is_read_and_never_kept(self, monkeypatch):
         monkeypatch.setattr(bridge, "available", lambda: True)
         monkeypatch.setattr(bridge, "_local", lambda key: (json.loads(json.dumps(RECORD)), None))

@@ -698,6 +698,13 @@ def _curated_match(candidates: list[str]) -> SafetyProfile | None:
     fetched = _fetch_curated(listed or (candidates[0] if candidates else ""))
     if fetched is not None:
         return fetched
+    if _catalogue_here():
+        # kiln-pro on this computer IS the resolver (the hosted server is
+        # one): its "no row" is final.  A prefix hit over the rows this
+        # process happens to hold would answer a spelling the resolver
+        # rejected -- and on a shared server, uncounted by the guard that
+        # fences how many models one seat may ask about.
+        return None
     # No answer (offline, signed out, the service silent): the prefix rule
     # over whatever this process already holds, as before.
     for key, profile in _cache.items():
@@ -707,6 +714,16 @@ def _curated_match(candidates: list[str]) -> SafetyProfile | None:
             if candidate.startswith(key) or key.startswith(candidate):
                 return profile
     return None
+
+
+def _catalogue_here() -> bool:
+    """True when kiln-pro's catalogue reader is installed on this computer."""
+    try:
+        from kiln._pro_catalogue_bridge import available
+
+        return available()
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _fetch_curated(spelling: str) -> SafetyProfile | None:
