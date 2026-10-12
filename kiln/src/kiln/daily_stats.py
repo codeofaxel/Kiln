@@ -13,6 +13,7 @@ File: ``~/.kiln/daily_stats.json``
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import json
 import logging
@@ -311,8 +312,10 @@ def _empty_day() -> dict[str, Any]:
         "update_nudge": {},        # {"shown_tool_result": 1, "upgrade_ok": 1}
         # Sign-in funnel: stage -> count today, over the CLOSED vocabulary
         # _ACCOUNT_NUDGE_STAGES.  Where an account was offered (at connect,
-        # in get_started, on a reply a sign-in would fix), whether a
-        # sign-in was started and through which door, and how it ended.
+        # in get_started, on a reply a sign-in would fix, at a printer's
+        # setup when the install is holding it to generic limits for want
+        # of a sign-in), whether a sign-in was started and through which
+        # door, how it ended, and whether it followed a limits nudge.
         # Every stage happens on this machine; the server sees a device
         # code being made and claimed, never the offer that led to it.
         "account_nudge": {},       # {"offered_connect": 1, "started_chat": 1}
@@ -1005,6 +1008,14 @@ _ACCOUNT_NUDGE_STAGES = frozenset({
     "completed_returning",   # ALSO counted under its door: the machine
                              # still held a session, so this was signing
                              # back in, not a first account
+    # The setup-time limits nudge (safety_profiles.warm_profile): a printer
+    # was set up on a signed-out install, which is therefore holding it to
+    # the generic floor, and the person was told a free sign-in lifts it.
+    "offered_limits",        # ... Kiln has the printer's record, unfetched
+    "offered_limits_unknown",  # ... Kiln has no row for the printer at all
+    "completed_limits",      # ALSO counted under its door: a sign-in that
+                             # finished within a day of a limits nudge
+                             # (the marker in record_limits_nudge_offer)
     "denied",                # cancelled in the browser
     "expired",               # the code ran out before anyone finished
     "timed_out",             # the terminal stopped waiting first
@@ -1025,6 +1036,87 @@ def record_account_nudge(stage: str) -> None:
     if name not in _ACCOUNT_NUDGE_STAGES:
         return
     _record_name_count("account_nudge", name)
+
+
+#: Where a setup-time limits nudge waits for the sign-in it asked for.  The
+#: nudge is minted in the MCP server process (``safety_profiles.warm_profile``)
+#: and the sign-in it leads to usually finishes in another one -- ``kiln
+#: signin`` in a terminal -- so "did a sign-in follow it" cannot be a fact one
+#: process holds.  One marker, overwritten by the latest nudge, read and
+#: removed by the sign-in that completes (``auth_commands._complete_signin``,
+#: where every sign-in door ends).
+_LIMITS_NUDGE_MARKER_PATH: Path = Path.home() / ".kiln" / "limits_nudge_pending.json"
+#: A sign-in later than this after the nudge is not the nudge's: it counts
+#: as nothing, and the marker is cleared all the same.
+_LIMITS_NUDGE_FRESH_S = 24 * 3600
+_LIMITS_OFFER_STAGES = frozenset({"offered_limits", "offered_limits_unknown"})
+
+
+def record_limits_nudge_offer(stage: str, printer_model: str) -> None:
+    """Count a setup-time limits nudge and leave the marker its sign-in reads.
+
+    ``stage`` is ``offered_limits`` (a catalogued printer the install is
+    signed out for) or ``offered_limits_unknown`` (a printer Kiln has no row
+    for); any other word is dropped.  ``printer_model`` is the spelling the
+    printer was set up under -- a model name, never a serial or an address --
+    and it stays in the marker on this computer: the heartbeat carries the
+    count alone.
+
+    The marker is written only where the nudge is shown: an install without
+    kiln-pro, signed out.  The hosted server never shows it (kiln-pro's own
+    catalogue answers there, in-process) and never records anything
+    (:func:`_recording_suppressed`), so no marker is written on a machine
+    that serves more than one person.  Never raises: a marker that cannot
+    be written costs one uncounted conversion, never a printer's setup.
+    """
+    name = (stage or "").strip()
+    if name not in _LIMITS_OFFER_STAGES:
+        return
+    record_account_nudge(name)
+    if _recording_suppressed():
+        return
+    try:
+        _LIMITS_NUDGE_MARKER_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _LIMITS_NUDGE_MARKER_PATH.write_text(
+            json.dumps({
+                "shown_at": time.time(),
+                "stage": name,
+                "printer_model": str(printer_model or "")[:120],
+            }),
+            encoding="utf-8",
+        )
+    except Exception as exc:  # noqa: BLE001 -- one uncounted conversion, never a failed setup
+        _logger.debug("limits nudge marker not written: %s", exc)
+
+
+def record_limits_nudge_conversion() -> bool:
+    """A sign-in just completed: count ``completed_limits`` if a limits nudge
+    was shown within :data:`_LIMITS_NUDGE_FRESH_S`, and clear the marker.
+
+    Returns True when a conversion was counted.  The marker is removed
+    whatever its age -- the sign-in it waited for has happened, and an older
+    one belongs to nobody -- and no marker, the common case, counts nothing.
+    Under suppressed recording the file is not touched either: a test
+    runner must not consume a real marker.  Never raises.
+    """
+    if _recording_suppressed():
+        return False
+    path = _LIMITS_NUDGE_MARKER_PATH
+    shown_at = 0.0
+    try:
+        if not path.is_file():
+            return False
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            shown_at = float(raw.get("shown_at") or 0.0)
+    except Exception as exc:  # noqa: BLE001 -- an unreadable marker is no marker
+        _logger.debug("limits nudge marker unreadable: %s", exc)
+    with contextlib.suppress(OSError):
+        path.unlink()
+    if shown_at <= 0.0 or time.time() - shown_at > _LIMITS_NUDGE_FRESH_S:
+        return False
+    record_account_nudge("completed_limits")
+    return True
 
 
 def record_update_nudge(stage: str) -> None:

@@ -254,3 +254,167 @@ class TestItRidesTheHeartbeat:
             "offered_connect": 1,
             "started_chat": 1,
         }
+
+
+# ---------------------------------------------------------------------------
+# The setup-time limits nudge
+# ---------------------------------------------------------------------------
+
+
+_SERVED_ID = "kilntest_served"  # a roster-only row in the session fixture
+
+
+@pytest.fixture
+def limits(stats, monkeypatch, tmp_path):
+    """A signed-out install without kiln-pro (public CI's posture), with the
+    nudge marker under the test's own home.  Returns the marker path."""
+    from kiln import _pro_catalogue_bridge as bridge
+    from kiln import printer_intelligence as pi
+    from kiln import safety_profiles as sp
+
+    marker = tmp_path / "limits_nudge_pending.json"
+    monkeypatch.setattr(daily_stats, "_LIMITS_NUDGE_MARKER_PATH", marker)
+    monkeypatch.setattr(bridge, "available", lambda: False)
+    monkeypatch.setattr(bridge, "KEEP_DIR", tmp_path / "printer_catalogue")
+
+    def reset() -> None:
+        sp._cache.clear()
+        sp._roster.clear()
+        sp._variant_data.clear()
+        sp._loaded = False
+        sp._nudged.clear()
+        sp._pending_nudges.clear()
+        pi._reset_caches()
+        bridge.forget()
+
+    reset()
+    yield marker
+    reset()
+
+
+class TestTheLimitsNudge:
+    """Minted in one place (``safety_profiles.warm_profile``); counted there."""
+
+    def test_a_catalogued_printer_signed_out_is_offered_limits(self, stats, limits):
+        from kiln import safety_profiles as sp
+
+        assert sp.warm_profile(_SERVED_ID)
+        assert stats() == {"offered_limits": 1}
+        marker = json.loads(limits.read_text())
+        assert marker["stage"] == "offered_limits"
+        assert marker["printer_model"] == _SERVED_ID
+        assert set(marker) == {"shown_at", "stage", "printer_model"}
+        # Once per process per printer, like the sentence itself.
+        assert sp.warm_profile(_SERVED_ID) is None
+        assert stats() == {"offered_limits": 1}
+
+    def test_an_unknown_printer_signed_out_is_offered_limits_unknown(self, stats, limits):
+        from kiln import safety_profiles as sp
+
+        assert sp.warm_profile("Acme Zed")
+        assert stats() == {"offered_limits_unknown": 1}
+        assert json.loads(limits.read_text())["printer_model"] == "Acme Zed"
+
+    def test_an_offline_miss_offers_nothing(self, stats, limits, monkeypatch):
+        from kiln import _pro_catalogue_bridge as bridge
+        from kiln import safety_profiles as sp
+        from kiln.served_answer import Miss
+
+        monkeypatch.setattr(
+            bridge, "_served", lambda key: (None, Miss("offline", "SERVER_UNREACHABLE")),
+        )
+        assert sp.warm_profile(_SERVED_ID) is None
+        assert stats() == {} and not limits.exists()
+
+    def test_an_unknown_printer_on_a_signed_in_install_offers_nothing(
+        self, stats, limits, monkeypatch,
+    ):
+        from kiln import _pro_catalogue_bridge as bridge
+        from kiln import safety_profiles as sp
+
+        monkeypatch.setattr(bridge, "_served", lambda key: (None, None))  # a settled "no row"
+        sentence = sp.warm_profile("Acme Zed")
+        assert sentence and "Sign in" not in sentence
+        assert stats() == {} and not limits.exists()
+
+    def test_the_sign_in_that_follows_counts_once_and_clears_the_marker(
+        self, stats, limits,
+    ):
+        from kiln import safety_profiles as sp
+        from kiln.cli.auth_commands import _complete_signin
+
+        sp.warm_profile(_SERVED_ID)
+        _complete_signin(dict(_DONE), door="cli")
+        assert stats() == {"offered_limits": 1, "completed_cli": 1, "completed_limits": 1}
+        assert not limits.exists()
+        _complete_signin(dict(_DONE), door="cli")
+        assert stats()["completed_limits"] == 1
+
+    def test_a_sign_in_a_day_later_is_not_the_nudges(self, stats, limits):
+        import time
+
+        from kiln.cli.auth_commands import _complete_signin
+
+        limits.write_text(json.dumps({
+            "shown_at": time.time() - 25 * 3600, "stage": "offered_limits",
+            "printer_model": _SERVED_ID,
+        }))
+        _complete_signin(dict(_DONE), door="cli")
+        assert stats() == {"completed_cli": 1}
+        assert not limits.exists(), "an old marker is cleared, never kept for a later sign-in"
+
+    def test_a_sign_in_with_no_nudge_before_it_counts_nothing(self, stats, limits):
+        from kiln.cli.auth_commands import _complete_signin
+
+        _complete_signin(dict(_DONE), door="pair")
+        assert stats() == {"completed_pair": 1}
+
+    def test_an_unreadable_marker_is_no_marker(self, stats, limits):
+        from kiln.cli.auth_commands import _complete_signin
+
+        limits.write_text("{not json")
+        _complete_signin(dict(_DONE), door="cli")
+        assert stats() == {"completed_cli": 1} and not limits.exists()
+
+    def test_suppressed_recording_leaves_the_marker_file_alone(
+        self, limits, monkeypatch, tmp_path,
+    ):
+        """A test or CI run pointed at the REAL stats file writes nothing and
+        consumes nothing -- the same guard the counters have, on the marker."""
+        monkeypatch.setattr(daily_stats, "_STATS_PATH", daily_stats._DEFAULT_STATS_PATH)
+        assert daily_stats._recording_suppressed()
+        limits.write_text('{"shown_at": 1, "stage": "offered_limits", "printer_model": "x"}')
+        before = limits.read_text()
+        daily_stats.record_limits_nudge_offer("offered_limits", "kilntest_served")
+        assert limits.read_text() == before
+        assert daily_stats.record_limits_nudge_conversion() is False
+        assert limits.read_text() == before
+
+    def test_a_word_outside_the_vocabulary_is_dropped(self, stats, limits):
+        daily_stats.record_limits_nudge_offer("offered_something_else", "x")
+        assert stats() == {} and not limits.exists()
+
+    def test_signing_in_lets_this_process_ask_for_the_record_at_once(
+        self, stats, limits, monkeypatch,
+    ):
+        """The in-chat door ends in the same process as the printers it will
+        now answer for: the bridge forgets its signed-out misses on sign-in,
+        so the next ask is not held for the retry wait."""
+        from kiln import _pro_catalogue_bridge as bridge
+        from kiln import safety_profiles as sp
+        from kiln.cli.auth_commands import _complete_signin
+
+        assert sp.get_profile(_SERVED_ID).id == "default"
+        assert bridge.why_unanswered(_SERVED_ID) == "signed_out"
+        assert _SERVED_ID in bridge._retry_after
+        record = {
+            "printer_id": _SERVED_ID, "matched_by": "exact", "display_name": "Kilntest Served 200",
+            "safety": {"max_hotend_temp": 280.0, "max_bed_temp": 95.0, "build_volume": [200, 200, 210]},
+            "intel": {},
+        }
+        monkeypatch.setattr(bridge, "_served", lambda key: (dict(record), None))
+        # Still within the retry wait: the miss stands until the sign-in.
+        assert sp.get_profile(_SERVED_ID).id == "default"
+        _complete_signin(dict(_DONE), door="chat")
+        assert bridge.why_unanswered(_SERVED_ID) == ""
+        assert sp.get_profile(_SERVED_ID).max_hotend_temp == 280.0

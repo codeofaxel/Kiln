@@ -108,7 +108,9 @@ def _complete_signin(data: dict[str, Any], *, door: str = "other") -> None:
     here because this is the one function every door ends in: a fourth door
     still counts, as ``completed_other``, instead of going unseen.  A machine
     that still held a session is also counted ``completed_returning``, so a
-    lapsed owner signing back in is never read as a new account.
+    lapsed owner signing back in is never read as a new account; one that
+    was shown a limits nudge at a printer's setup within the day is also
+    counted ``completed_limits``.
     """
     try:
         held = _read_tokens()
@@ -121,6 +123,26 @@ def _complete_signin(data: dict[str, Any], *, door: str = "other") -> None:
     )
     if returning:
         _record_signin_stage("completed_returning")
+    # A limits nudge shown at a printer's setup (``safety_profiles.warm_profile``)
+    # waits for this moment in a marker on disk, because it was minted in the
+    # MCP server process and this sign-in may be finishing in another: counted
+    # ``completed_limits`` when the nudge was within a day, nothing otherwise.
+    try:
+        from kiln.daily_stats import record_limits_nudge_conversion
+
+        record_limits_nudge_conversion()
+    except Exception:  # noqa: BLE001 -- a sign-in never fails over its counter
+        pass
+    # And in THIS process the catalogue bridge forgets the signed-out misses,
+    # so the next ask for a printer's record goes to the servers at once
+    # rather than after its retry wait -- the in-chat door (kiln_signin_poll)
+    # ends here in the same process that will now answer for the printers.
+    try:
+        from kiln._pro_catalogue_bridge import forget
+
+        forget()
+    except Exception:  # noqa: BLE001
+        pass
     try:
         from kiln import terms
 
