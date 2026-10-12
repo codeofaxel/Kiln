@@ -7,6 +7,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Kiln recognises your printer after its address changes.**
+
+- **Setup tells you whether the camera answers, without taking a picture.**
+
 - **Connect an OctoPrint printer without copying a key.** Kiln asks OctoPrint for one, and you click Allow there. OctoPrint versions without this still take a pasted key.
 
 - **Paid printer tools now work with just the free install.** Kiln's servers do the thinking, and the Kiln on your computer does the step on your printer, after showing you each action and why. Fleet routing and material rule checks (food contact, REACH, RoHS, flame, UV) work the same way.
@@ -40,6 +44,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **The 3D stage shows what's already on your plate.** The print still standing there shows as itself, by name, beside where your new part would go, with a plain "fits here" or "doesn't fit here".
 
 ### Changed
+
+- **A saved printer's name is never written over by a different printer.**
+
+- **A printer Kiln doesn't know is held to cautious limits until you confirm its real ones.**
 
 - **Kiln tells you when it's working with your other printer, instead of calling this one offline.**
 
