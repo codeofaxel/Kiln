@@ -13429,13 +13429,16 @@ def repair(file_path: str, output: str | None, json_mode: bool) -> None:
     try:
         import os as _os
 
+        from kiln import edit_lineage
         from kiln.generation.validation import repair_stl
 
         if not output:
             base, ext = _os.path.splitext(file_path)
             output = f"{base}_repaired{ext or '.stl'}"
 
-        result = repair_stl(file_path, output_path=output)
+        with edit_lineage.around("kiln repair", file_path) as edit:
+            result = edit.finish(repair_stl(file_path, output_path=output))
+        kept = result.get(edit_lineage.SAVED_VERSION_KEY) if isinstance(result, dict) else None
         if json_mode:
             click.echo(
                 format_response("success", data=result, json_mode=True)
@@ -13448,6 +13451,8 @@ def repair(file_path: str, output: str | None, json_mode: bool) -> None:
                 f"(removed {result.get('degenerate_removed', 0)} degenerate, "
                 f"recomputed {result.get('normals_recomputed', 0)} normals)"
             )
+            if isinstance(kept, dict) and kept.get("note"):
+                click.echo(f"  {kept['note']}")
     except ValueError as exc:
         click.echo(
             format_error(

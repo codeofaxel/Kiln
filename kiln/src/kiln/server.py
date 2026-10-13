@@ -20155,6 +20155,16 @@ def _start() -> None:
     except Exception:
         logger.debug("front-door clause not stamped", exc_info=True)
 
+    # An edit of a part keeps its result as that part's next version.  Same
+    # timing as the two above: it reads the registered tools.  A no-op
+    # without kiln-pro (see kiln.edit_lineage).
+    try:
+        from kiln import edit_lineage
+
+        edit_lineage.install(mcp)
+    except Exception:
+        logger.debug("edit lineage not installed", exc_info=True)
+
     # restart_server's exec keeps the pipe but not the MCP handshake: this
     # records the handshake, lets the fresh process take it up, and, when
     # there is none to take, makes the refusal name the restart instead of
