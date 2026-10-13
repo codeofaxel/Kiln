@@ -35,6 +35,25 @@ CORE = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
 MAT = "http://schemas.microsoft.com/3dmanufacturing/material/2015/02"
 PROD = "http://schemas.microsoft.com/3dmanufacturing/production/2015/06"
 
+#: Printed by a measuring child: its OWN peak memory in MB.  On Linux the
+#: child reads VmHWM, which belongs to the program it runs; ``ru_maxrss``
+#: there carries the forking parent's high-water mark across the exec, so in
+#: a pytest worker that has already run heavy tests it reports the worker's
+#: peak, not the child's.  macOS has no /proc and keeps no such carry-over.
+_PRINT_CHILD_PEAK_MB = (
+    "def _peak_mb():\n"
+    "    try:\n"
+    "        with open('/proc/self/status') as fh:\n"
+    "            for line in fh:\n"
+    "                if line.startswith('VmHWM:'):\n"
+    "                    return int(line.split()[1]) / 1024\n"
+    "    except OSError:\n"
+    "        pass\n"
+    "    r = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss\n"
+    "    return r / (1024 * 1024) if sys.platform == 'darwin' else r / 1024\n"
+    "print(_peak_mb())\n"
+)
+
 
 def _model(body: str, *, unit: str = "millimeter") -> str:
     return (
@@ -298,13 +317,12 @@ def test_bounded_readers_stay_flat_on_a_60_mb_model(tmp_path):
         "    m = tp.parse_colored_3mf(p)\n"
         "    found, count = m.colors_found, m.color_count\n"
         "assert count == 1 and not found, (found, count)\n"
-        "print(int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))\n"
+        + _PRINT_CHILD_PEAK_MB
     )
     env = {"PATH": os.environ.get("PATH", "")}
     out = subprocess.run(
         [sys.executable, "-c", script], capture_output=True, text=True, timeout=300, env=env,
     )
     assert out.returncode == 0, out.stderr[-1500:]
-    peak = int(out.stdout.strip().splitlines()[-1])
-    peak_mb = peak / (1024 * 1024) if sys.platform == "darwin" else peak / 1024
+    peak_mb = float(out.stdout.strip().splitlines()[-1])
     assert peak_mb < 400, f"the bounded readers peaked at {peak_mb:.0f} MB"
