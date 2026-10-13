@@ -26,7 +26,10 @@ make door cannot ship silent:
 * kiln-pro's manifest builder and its REST / hosted-connector description
   chokepoint import :data:`MAKE_DOOR_TOOLS` and :func:`make_door_clause`;
 * the server instructions, local and hosted, open the make story with
-  :func:`front_door_line`.
+  :func:`front_door_line`;
+* ``compile_scad`` -- the door a search for a make lands on most -- opens
+  with :data:`ENGINE_LEAD` while the real front door is registered, so the
+  engine says what it is in its first words rather than in a closing clause.
 
 The roster names tools from BOTH repos, like ``kiln.local_stage.VIEWER_TOOLS``
 does, so the public install can stamp the stubs it registers for kiln-pro's
@@ -51,6 +54,21 @@ then says so, and says that ``compile_scad`` IS the make -> preview -> iterate
 loop on that install -- the public fallback the product rule promises.
 Presence is judged by the REAL tool (:func:`front_door_present`): a stub is
 not the front door, it is the hosted one behind a sign-in.
+
+A MAKE THAT NAMES NO GOAL
+=========================
+Words alone did not steer it.  Measured 2026-10-13 on the hosted connector,
+after every make door said the above: asked for a cube and a quote, an agent
+still compiled directly.  So where the real front door is installed, the one
+helper every make door calls (:func:`join_goal`) opens a design session for a
+make that names no goal -- or names one this install cannot find -- through
+kiln-pro's opener, which records the make there as the session's first
+version and leaves the goal sidecar beside the file; the result's
+``saved_goal`` block says the session's id in one line, so the next make
+iterates inside it.  The make is never refused, held back or changed: when
+the opener is missing (an older kiln-pro) or fails, the failure is logged and
+the result carries the one-line note saying what was skipped.  A plain
+install is untouched, because there ``compile_scad`` IS the loop.
 """
 
 from __future__ import annotations
@@ -305,6 +323,17 @@ FALLBACK_CLAUSE = (
     "it, show the preview, iterate."
 )
 
+#: The sentence ``compile_scad`` -- the fallback loop -- opens with while the
+#: real front door is registered.  A search for a make lands on the compile
+#: more often than on the front door (it is the door an agent that knows
+#: OpenSCAD reaches for), and a closing clause is the part of a long
+#: description a reader skips; so the engine says what it is first.  Not
+#: stamped on a plain install, where the compile IS the loop.
+ENGINE_LEAD = (
+    f"The OpenSCAD engine that `{FRONT_DOOR}` calls: to make something for a "
+    f"person, start with `{FRONT_DOOR}`."
+)
+
 #: The one sentence the server instructions open the make story with.
 FRONT_DOOR_LINE = (
     f"MAKE: a make starts with `{FRONT_DOOR}`, Kiln's front door for making an "
@@ -368,18 +397,33 @@ _CLAUSE_PARAGRAPH = re.compile(rf"{re.escape(MAKE_DOOR_MARKER)}[^\n]*")
 
 def with_make_door_clause(name: str, description: str, front_door_present: bool = True) -> str:
     """``description`` with this install's clause, for a make door; unchanged
-    otherwise.  Idempotent, and a clause from another install (a stub's
-    description arrives carrying the hosted wording) is replaced, so one
-    install speaks with one voice."""
+    otherwise.  The fallback loop also opens with :data:`ENGINE_LEAD` while
+    the real front door is here.  Idempotent, and a clause from another
+    install (a stub's description arrives carrying the hosted wording) is
+    replaced, so one install speaks with one voice."""
     if name not in MAKE_DOOR_TOOLS:
         return description
     clause = make_door_clause(front_door_present, name)
     text = description or ""
-    if clause in text:
+    if clause not in text:
+        if MAKE_DOOR_MARKER in text:
+            text = _CLAUSE_PARAGRAPH.sub(clause, text, count=1)
+        else:
+            text = f"{text}\n\n{clause}" if text else clause
+    return _with_engine_lead(name, text, front_door_present)
+
+
+def _with_engine_lead(name: str, text: str, front_door_present: bool) -> str:
+    """``text`` opening with :data:`ENGINE_LEAD` when ``name`` is the fallback
+    loop and the real front door is here; without it otherwise.  Idempotent."""
+    if name != FALLBACK_LOOP:
         return text
-    if MAKE_DOOR_MARKER in text:
-        return _CLAUSE_PARAGRAPH.sub(clause, text, count=1)
-    return f"{text}\n\n{clause}" if text else clause
+    has_lead = text.startswith(ENGINE_LEAD)
+    if front_door_present and not has_lead:
+        return f"{ENGINE_LEAD}\n\n{text}"
+    if not front_door_present and has_lead:
+        return text[len(ENGINE_LEAD):].lstrip("\n")
+    return text
 
 
 def install(mcp: Any) -> dict[str, Any]:
@@ -423,6 +467,15 @@ def install(mcp: Any) -> dict[str, Any]:
 #: word for one thing.
 SAVED_GOAL_KEY = "saved_goal"
 
+#: How a session opened for a make is said, after the clause naming why.
+#: One line: the session's id, the version the make is kept as, and how the
+#: next make (or the front door itself) iterates inside it.
+_KEPT_IN_SESSION = (
+    "is kept there as version {version}; pass " + GOAL_PARAM + " {brief_id} "
+    "on the next make, or goal_id {brief_id} to `" + FRONT_DOOR + "`, to keep "
+    "iterating inside it."
+)
+
 #: What the result's ``saved_goal`` block says, per outcome.  Describes what
 #: Kiln did with the id it was handed, never where the file came from.
 GOAL_NOTES = {
@@ -436,15 +489,100 @@ GOAL_NOTES = {
         "Saved goals live with `design_session`, which is not installed here, so "
         "this make could not join goal {brief_id}; it was made as asked."
     ),
-    # Said on a make that named no goal, where the front door IS here: the
-    # moment the agent compiled directly is the moment to say what it skipped.
-    # Stateless and short on purpose -- one line, never a refusal.
+    # A make that named no goal, where the front door IS here: the session
+    # opened for it, said once, with the id to carry forward.
+    "opened": "No goal was named, so this make opened design session {brief_id} and "
+    + _KEPT_IN_SESSION,
+    # A make that named a goal this install cannot find: the same, saying so.
+    "opened_instead": (
+        "Saved goal {named} was not found here, so this make opened design "
+        "session {brief_id} and " + _KEPT_IN_SESSION
+    ),
+    # Said on a make that named no goal when no session could be opened for
+    # it (an older kiln-pro, or the opener failed): the moment the agent
+    # compiled directly is the moment to say what it skipped.  Stateless and
+    # short on purpose -- one line, never a refusal.
     "none_named": (
         f"No saved goal named. Start with `{FRONT_DOOR}` to keep the goal (free) "
         "and, on Kiln Pro, have the result checked against it; then make with "
         f"its {GOAL_PARAM}."
     ),
 }
+
+
+def _envelope_of(result: Any) -> dict[str, Any] | None:
+    """The make's envelope: the result itself, or the one dict beside the
+    preview image a make door hands back inline (``[Image, envelope]``, the
+    shape every generator returns on a local install).  ``None`` when there
+    is nothing to speak in."""
+    if isinstance(result, dict):
+        return result
+    if isinstance(result, (list, tuple)):
+        envelopes = [item for item in result if isinstance(item, dict)]
+        if len(envelopes) == 1:
+            return envelopes[0]
+    return None
+
+
+def _was_made(result: dict[str, Any]) -> bool:
+    """Whether a make door's envelope reports a make (the compile answers
+    ``success``, the generators ``status``)."""
+    return result.get("success", True) is not False and result.get("status") != "error"
+
+
+def _open_session(result: dict[str, Any], mesh_path: str | None) -> dict[str, Any] | None:
+    """A design session opened for this make by kiln-pro's opener, or ``None``.
+
+    ``None`` when the opener is not there (an older kiln-pro), found nothing
+    to record (no file), or failed -- and a failure is logged, because the
+    make it was meant to keep has already happened and must still be
+    returned.  The door that made it, and what it was asked, are the tool
+    being dispatched (:mod:`kiln.tool_context`), so a generator's session
+    records the caller's choices rather than the generator's defaults."""
+    try:
+        from kiln_pro.design_brief.explicit_attach import open_session_for_make
+    except Exception:  # noqa: BLE001 -- an older kiln-pro: the note stands in
+        return None
+    try:
+        from kiln.tool_context import current_tool_arguments, current_tool_name
+
+        door, arguments = current_tool_name(), current_tool_arguments()
+    except Exception:  # noqa: BLE001
+        door, arguments = None, {}
+    try:
+        opened = open_session_for_make(
+            result, mesh_path=mesh_path, door=door, arguments=arguments
+        )
+    except Exception:  # noqa: BLE001 -- the make is kept whatever the session does
+        logger.warning("front door: opening a session for a make failed", exc_info=True)
+        return None
+    if isinstance(opened, dict) and opened.get("brief_id"):
+        return opened
+    return None
+
+
+def _session_block(opened: dict[str, Any], named: str = "") -> dict[str, Any]:
+    """The ``saved_goal`` block for a make kept in the session ``opened``
+    names: a fresh one (the make is its first version), or the one a goal
+    sidecar beside the file already names."""
+    brief_id = str(opened["brief_id"])
+    if opened.get("opened") is False:
+        return {
+            "brief_id": brief_id,
+            "joined": True,
+            "note": GOAL_NOTES["joined"].format(brief_id=brief_id),
+        }
+    version = opened.get("version") or 1
+    note = GOAL_NOTES["opened_instead" if named else "opened"].format(
+        brief_id=brief_id, version=version, named=named
+    )
+    return {
+        "brief_id": brief_id,
+        "joined": True,
+        "opened": True,
+        "version": version,
+        "note": note,
+    }
 
 
 def join_goal(brief_id: str, result: Any, mesh_path: str | None = None) -> Any:
@@ -455,33 +593,48 @@ def join_goal(brief_id: str, result: Any, mesh_path: str | None = None) -> Any:
     the front door's own); this public helper is the one door every make
     tool calls, so a plain install answers honestly instead of silently
     dropping the id.  ``mesh_path`` names the file when the envelope keeps
-    it under a key the join does not read.  Never raises.  An empty
-    ``brief_id`` on an install that has the real front door adds the one-line
-    nudge (``GOAL_NOTES["none_named"]``) instead of a join; on a plain install
-    it leaves the envelope untouched.
+    it under a key the join does not read.  A result handed back as
+    ``[Image, envelope]`` is spoken to through its envelope and returned as
+    it came.  Never raises.
+
+    Where the real front door is installed, a make that names no goal, or a
+    goal this install cannot find, gets a design session of its own: the
+    make is kept there as the first version and the block names the session
+    (``GOAL_NOTES["opened"]``).  When no session can be opened the block
+    falls back to saying what was skipped.  On a plain install a make that
+    names no goal leaves the envelope untouched.
     """
-    if not isinstance(result, dict):
+    envelope = _envelope_of(result)
+    if envelope is None:
         return result
+    _speak(brief_id, envelope, mesh_path)
+    return result
+
+
+def _speak(brief_id: str, result: dict[str, Any], mesh_path: str | None) -> None:
+    """:func:`join_goal`'s body, on the envelope itself."""
     try:
         from kiln_pro.design_brief.explicit_attach import attach_brief_id_to_result
     except Exception:  # noqa: BLE001 -- a plain install
         attach_brief_id_to_result = None
     if not brief_id:
-        # A make that named no goal.  Where the real front door is installed
-        # (kiln-pro's join imports), say once what was skipped; on a plain
-        # install the fallback clause already says compile_scad is the loop,
-        # and a nudge toward a door that is not here would be noise.
+        # A make that named no goal.  On a plain install the fallback clause
+        # already says compile_scad is the loop, and pointing at a door that
+        # is not here would be noise.  Where the front door is installed, the
+        # make gets a session of its own, or is told once what it skipped.
         if (
-            attach_brief_id_to_result is not None
-            and result.get("success", True) is not False
-            and SAVED_GOAL_KEY not in result
+            attach_brief_id_to_result is None
+            or not _was_made(result)
+            or SAVED_GOAL_KEY in result
         ):
-            result[SAVED_GOAL_KEY] = {
-                "brief_id": "",
-                "joined": False,
-                "note": GOAL_NOTES["none_named"],
-            }
-        return result
+            return
+        opened = _open_session(result, mesh_path)
+        result[SAVED_GOAL_KEY] = (
+            _session_block(opened)
+            if opened
+            else {"brief_id": "", "joined": False, "note": GOAL_NOTES["none_named"]}
+        )
+        return
     outcome = "unavailable"
     if attach_brief_id_to_result is not None:
         probe: dict[str, Any] = dict(result)
@@ -499,9 +652,14 @@ def join_goal(brief_id: str, result: Any, mesh_path: str | None = None) -> Any:
         except Exception:  # noqa: BLE001 -- a join must never cost the make
             logger.debug("front door: goal join failed", exc_info=True)
             outcome = "not_found"
+    if outcome == "not_found" and _was_made(result):
+        # A goal this install cannot find: the make still gets a session.
+        opened = _open_session(result, mesh_path)
+        if opened:
+            result[SAVED_GOAL_KEY] = _session_block(opened, named=brief_id)
+            return
     result[SAVED_GOAL_KEY] = {
         "brief_id": brief_id,
         "joined": outcome == "joined",
         "note": GOAL_NOTES[outcome].format(brief_id=brief_id),
     }
-    return result

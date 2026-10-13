@@ -1362,7 +1362,7 @@ def _install_mcp_request_context_capture() -> None:
         convert_result: bool = False,
     ):
         token = _current_mcp_request_context.set(context)
-        tool_token = _tool_context.enter_tool(name)
+        tool_token = _tool_context.enter_tool(name, arguments)
         consent_token = None
         # Which app is on the other end of this connection, counted once
         # per process on the first tool call to land — the handshake is

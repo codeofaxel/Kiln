@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-13T01:36:11.868009+00:00",
+  "generated": "2026-10-13T08:03:38.397247+00:00",
   "tool_count": 423,
   "categories": {
     "product_generators": {
@@ -3521,7 +3521,7 @@
     },
     {
       "name": "design_session",
-      "description": "Kiln's front door for making an object. Describe what you want in plain English, answer a few quick questions, save the goal, generate an STL with a sidecar report of which design checks it passes; every other make tool is an engine this one calls. Verbs: start, update, save, generate. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).",
+      "description": "Make, design or create any physical object \u2014 a part, a bracket, a box, a holder, a gift \u2014 as a 3D model ready to print: Kiln's front door for making, where every make for a person starts. Say what they want in plain English (a specific request goes straight to generate; a vague one gets a quick question or two), then generate the STL from OpenSCAD you write (scad_code), with a report of which design checks it passes; every other make tool is an engine this one calls. Verbs: start, update, save, generate. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).",
       "tier": "free",
       "access": "free",
       "category": "design_session",
