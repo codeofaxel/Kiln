@@ -178,19 +178,20 @@ def test_no_family_profile_shadows_a_machine_that_has_its_own_id():
     )
 
 
-def test_build_volumes_are_plausible_and_present():
-    """A profile with no envelope cannot answer the only question it exists for."""
+def test_the_generic_envelope_is_plausible_and_the_roster_carries_none():
+    """A profile with no envelope cannot answer the only question it exists
+    for.  Since 2026-10-12 the bundled file is a roster: the generic row is
+    the one envelope here (every catalogued printer's is its served record,
+    judged beside it in kiln-pro), and a roster row carries no envelope at
+    all -- a number that drifted back in would be a copy of a served value."""
     profiles = json.loads(ROSTER_FILES["printer_profiles"].read_text(encoding="utf-8"))
 
-    bad: list[str] = []
-    for pid, entry in profiles.items():
-        if pid.startswith("_"):
-            continue
-        vol = entry.get("build_volume_mm") or {}
-        for axis in ("x", "y", "z"):
-            value = vol.get(axis)
-            if not isinstance(value, (int, float)) or not (50 <= value <= 2000):
-                bad.append(f"{pid}.{axis}={value!r}")
-    assert not bad, (
-        f"build volume axes missing or outside a plausible FDM range: {bad}"
+    vol = profiles["default"].get("build_volume_mm") or {}
+    for axis in ("x", "y", "z"):
+        value = vol.get(axis)
+        assert isinstance(value, (int, float)) and 50 <= value <= 2000, f"default.{axis}={value!r}"
+    carrying = sorted(
+        pid for pid, entry in profiles.items()
+        if not pid.startswith("_") and pid != "default" and set(entry) != {"printer_id", "display_name"}
     )
+    assert carrying == [], f"roster rows carrying more than an id and a name: {carrying}"

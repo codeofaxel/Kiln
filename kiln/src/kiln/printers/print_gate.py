@@ -153,6 +153,18 @@ def _temp_verdict(
         # min that strictly exceeds the ceiling is physically impossible.
         # Explicit "is not None" (not truthiness) so a legitimate 0 isn't lost.
         if printer_max is not None and mat_min is not None and mat_min > printer_max:
+            if getattr(printer, "resolved_from", "") == "generic":
+                # A roster printer with no record in hand is held to the
+                # generic floor; say so, rather than calling the floor its
+                # rating.
+                return (
+                    True,
+                    "MATERIAL_EXCEEDS_HOTEND",
+                    f"{material_id} needs at least {mat_min}°C at the nozzle, and "
+                    f"Kiln is holding this printer to the generic {printer_max}°C "
+                    f"floor because this install has no record for it. Sign in "
+                    f"free and Kiln works to the printer's real limits.",
+                )
             return (
                 True,
                 "MATERIAL_EXCEEDS_HOTEND",

@@ -55,6 +55,13 @@ _ROSTER_FILES = {
 #: What a safety roster row carries: its name, and nothing it could be held
 #: to.  The intelligence roster row's set is ``PUBLIC_PROFILE_FIELDS``.
 _SAFETY_ROSTER_FIELDS = frozenset({"display_name"})
+#: The design-knowledge capability roster row (2026-10-12): its id and name.
+_DESIGN_ROSTER_FIELDS = frozenset({"printer_id", "display_name"})
+#: The slicer-profile roster row (2026-10-12): its name.
+_SLICER_ROSTER_FIELDS = frozenset({"display_name"})
+#: What a compatibility cell carries: the verdict and the upgrades it needs.
+#: The explaining note is the Pro overlay's since 2026-10-12.
+_COMPAT_CELL_FIELDS = frozenset({"status", "upgrades_needed"})
 
 #: The fields a served record carries and a roster row therefore may not --
 #: the enforced limits and their curated extras on the safety side, the spec
@@ -82,6 +89,19 @@ _LIMIT_FIELDS = frozenset(
         "has_abl",
         "has_input_shaping",
         "nozzle_clumping_probe",
+        # The design-knowledge spellings and the slicer profile's own.
+        "max_hotend_temp_c",
+        "max_bed_temp_c",
+        "supported_materials",
+        "typical_tolerance_mm",
+        "max_print_speed_mm_s",
+        "default_layer_heights_mm",
+        "chamber_temp_c",
+        "chamber_heated",
+        "manufacturer",
+        "settings",
+        "slicer",
+        "tool_change",
     }
 )
 
@@ -152,6 +172,16 @@ def test_no_roster_row_carries_a_limit_field() -> None:
     for key, row in _roster(_load(_REGISTRY)).items():
         if set(row) != PUBLIC_PROFILE_FIELDS or set(row) & _LIMIT_FIELDS:
             offenders.append(f"printer_intelligence.json:{key} carries {sorted(set(row) - PUBLIC_PROFILE_FIELDS)}")
+    for key, row in _roster(_load(_ROSTER_FILES["printer_profiles"])).items():
+        if set(row) != _DESIGN_ROSTER_FIELDS or set(row) & _LIMIT_FIELDS:
+            offenders.append(f"printer_profiles.json:{key} carries {sorted(set(row) - _DESIGN_ROSTER_FIELDS)}")
+    for key, row in _roster(_load(_ROSTER_FILES["slicer_profiles"])).items():
+        if set(row) != _SLICER_ROSTER_FIELDS or set(row) & _LIMIT_FIELDS:
+            offenders.append(f"slicer_profiles.json:{key} carries {sorted(set(row) - _SLICER_ROSTER_FIELDS)}")
+    for key, row in _roster(_load(_ROSTER_FILES["printer_material_compatibility"])).items():
+        for material, cell in row.items():
+            if not isinstance(cell, dict) or set(cell) != _COMPAT_CELL_FIELDS:
+                offenders.append(f"printer_material_compatibility.json:{key}.{material} carries {sorted(cell) if isinstance(cell, dict) else cell!r}")
     assert not offenders, (
         "a roster row carries a field a served record owns; the limits, "
         "variants, spec sheet and recipes are kiln-pro's catalogue and a "
@@ -189,11 +219,31 @@ def test_the_generic_rows_compatibility_notes_quote_its_ceiling() -> None:
 
 
 def test_the_generic_rows_are_the_only_bundled_rows_with_a_ceiling() -> None:
-    """The loaders build a profile from any row that states ``max_hotend_temp``.
-    Outside ``default`` no bundled row may, or a printer would be answered
-    from a bundled number instead of its served record."""
-    for path in (_SAFETY, _REGISTRY):
-        with_ceiling = sorted(
-            key for key, row in _roster(_load(path)).items() if "max_hotend_temp" in row
-        )
+    """The loaders build a profile from any row that states ``max_hotend_temp``
+    (``max_hotend_temp_c`` in the design roster, ``settings`` in the slicer
+    roster).  Outside ``default`` no bundled row may, or a printer would be
+    answered from a bundled number instead of its served record."""
+    for path, field in (
+        (_SAFETY, "max_hotend_temp"),
+        (_REGISTRY, "max_hotend_temp"),
+        (_ROSTER_FILES["printer_profiles"], "max_hotend_temp_c"),
+        (_ROSTER_FILES["slicer_profiles"], "settings"),
+    ):
+        with_ceiling = sorted(key for key, row in _roster(_load(path)).items() if field in row)
         assert with_ceiling == [], f"{path.name}: {with_ceiling}"
+
+
+def test_the_generic_design_row_states_the_same_floor() -> None:
+    """The design-knowledge generic row is the floor a roster printer with no
+    record is answered from for a feasibility question, and it must be the
+    SAME floor the generic safety profile holds a print to: one generic
+    machine, written once per file.  (It said 250 / 100 until 2026-10-12
+    while the safety floor said 240 / 80.)"""
+    safety = _load(_SAFETY)["default"]
+    design = _load(_ROSTER_FILES["printer_profiles"])["default"]
+    assert float(design["max_hotend_temp_c"]) == float(safety["max_hotend_temp"])
+    assert float(design["max_bed_temp_c"]) == float(safety["max_bed_temp"])
+    volume = design["build_volume_mm"]
+    assert [float(volume[a]) for a in ("x", "y", "z")] == [float(v) for v in safety["build_volume"]]
+    generic_slicer = _load(_ROSTER_FILES["slicer_profiles"])["default"]
+    assert "settings" in generic_slicer and "tool_change" in generic_slicer

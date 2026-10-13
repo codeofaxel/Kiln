@@ -1075,84 +1075,82 @@ class TestEnvironmentCompatibility:
 
 
 class TestPrinterProfiles:
-    # NOTE: every test that calls ``get_printer_design_profile`` or
-    # ``list_printer_profiles`` exercises a constructor that
-    # hard-keys the overlay-supplied ``agent_notes`` field; without the
-    # kiln-pro printer_profiles overlay those calls raise KeyError.
-    # The unknown-printer path is the one exception — it returns
-    # None before touching the constructor.
+    # The session fixture's synthetic printers (``kilntest_*``) are the full
+    # rows here.  A real printer's capability profile is its served record
+    # since 2026-10-12, pinned in kiln-pro's
+    # ``tests/test_printer_catalogue_numbers.py``; in public CI every real
+    # roster printer answers the generic floor, marked ``generic``.
 
-    @requires_printer_profiles_overlay
     def test_get_known_printer_profile(self):
-        profile = get_printer_design_profile("bambu_x1c")
+        profile = get_printer_design_profile("kilntest_enclosed")
         assert isinstance(profile, PrinterDesignProfile)
-        assert profile is not None
-        assert profile.display_name == "Bambu Lab X1 Carbon"
+        assert profile.display_name == "Kilntest Enclosed 256"
         assert profile.has_enclosure is True
+        assert profile.resolved_from == "curated"
+        assert profile.build_volume_mm == {"x": 256, "y": 256, "z": 256}
 
     def test_unknown_printer_returns_none(self):
         assert get_printer_design_profile("unknown_printer") is None
 
-    @requires_printer_profiles_overlay
     def test_case_insensitive_lookup(self):
-        profile = get_printer_design_profile("BAMBU_X1C")
+        profile = get_printer_design_profile("KILNTEST_ENCLOSED")
         assert profile is not None
-        assert profile.printer_id == "bambu_x1c"
+        assert profile.printer_id == "kilntest_enclosed"
 
-    @requires_printer_profiles_overlay
-    def test_list_printers_includes_all_known_profiles(self):
+    def test_a_roster_printer_with_no_record_is_the_marked_floor(self):
+        """A machine Kiln lists whose record this install does not hold is
+        answered from the generic row under its own name, and says so."""
+        profile = get_printer_design_profile("bambu_x1c")
+        assert profile is not None and profile.printer_id == "bambu_x1c"
+        assert profile.resolved_from in {"generic", "curated"}  # curated with kiln-pro here
+        if profile.resolved_from == "generic":
+            generic = get_printer_design_profile("default")
+            assert profile.max_hotend_temp_c == generic.max_hotend_temp_c
+            assert profile.build_volume_mm == generic.build_volume_mm
+            assert profile.agent_notes == []
+
+    def test_list_printers_includes_every_roster_printer(self):
         profiles = list_printer_profiles()
         assert len(profiles) >= 9
         ids = {p.printer_id for p in profiles}
-        assert "bambu_x1c" in ids
-        assert "voron_2" in ids
-        assert "prusa_mk4" in ids
+        assert {"bambu_x1c", "voron_2", "prusa_mk4", "kilntest_open", "kilntest_enclosed"} <= ids
+        assert all(p.resolved_from in {"curated", "derived", "generic"} for p in profiles)
 
-    @requires_printer_profiles_overlay
     def test_filter_has_enclosure(self):
-        enclosed = [p for p in list_printer_profiles() if p.has_enclosure]
-        ids = {p.printer_id for p in enclosed}
-        assert "bambu_x1c" in ids
-        assert "voron_2" in ids
-        assert "prusa_mini" not in ids
+        enclosed = {p.printer_id for p in list_printer_profiles() if p.has_enclosure}
+        assert {"kilntest_enclosed", "kilntest_hot"} <= enclosed
+        assert "kilntest_open" not in enclosed
 
-    @requires_printer_profiles_overlay
     def test_filter_supported_materials(self):
-        nylon_capable = [p.printer_id for p in list_printer_profiles() if "nylon" in p.supported_materials]
-        assert "bambu_x1c" in nylon_capable
-        assert "voron_2" in nylon_capable
-        assert "prusa_mini" not in nylon_capable
+        asa_capable = {p.printer_id for p in list_printer_profiles() if "asa" in p.supported_materials}
+        assert "kilntest_enclosed" in asa_capable
+        assert "kilntest_open" not in asa_capable
 
-    @requires_printer_profiles_overlay
-    def test_polycarbonate_support_subset(self):
-        pc_capable = [p.printer_id for p in list_printer_profiles() if "polycarbonate" in p.supported_materials]
-        assert "bambu_x1c" in pc_capable
-        assert "voron_2" in pc_capable
-        assert "ender3_v2" not in pc_capable
+    def test_high_temperature_support_subset(self):
+        peek_capable = {p.printer_id for p in list_printer_profiles() if "peek" in p.supported_materials}
+        assert "kilntest_hot" in peek_capable
+        assert "kilntest_small" not in peek_capable
 
-    @requires_printer_profiles_overlay
     def test_default_layer_heights_present(self):
-        profile = get_printer_design_profile("prusa_mk4")
+        profile = get_printer_design_profile("kilntest_open")
         assert profile is not None
-        assert profile.default_layer_heights_mm == [0.08, 0.12, 0.16, 0.2, 0.28]
+        assert profile.default_layer_heights_mm == [0.12, 0.16, 0.2, 0.28]
 
-    @requires_printer_profiles_overlay
-    def test_direct_drive_capability_differs_between_enders(self):
-        v2 = get_printer_design_profile("ender3_v2")
-        s1 = get_printer_design_profile("ender3_s1")
-        assert v2 is not None
-        assert s1 is not None
-        assert v2.has_direct_drive is False
-        assert s1.has_direct_drive is True
+    def test_direct_drive_capability_differs_between_rows(self):
+        bowden = get_printer_design_profile("kilntest_ptfe")
+        direct = get_printer_design_profile("kilntest_open")
+        assert bowden is not None and direct is not None
+        assert bowden.has_direct_drive is False
+        assert direct.has_direct_drive is True
 
-    @requires_printer_profiles_overlay
     def test_printer_profile_to_dict(self):
-        profile = get_printer_design_profile("bambu_a1")
+        profile = get_printer_design_profile("kilntest_open")
         assert profile is not None
         data = profile.to_dict()
-        assert data["printer_id"] == "bambu_a1"
+        assert data["printer_id"] == "kilntest_open"
         assert "supported_materials" in data
         assert isinstance(data["agent_notes"], list)
+        assert data["resolved_from"] == "curated"
 
 
 class TestIntelDerivedDesignProfiles:

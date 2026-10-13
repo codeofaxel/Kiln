@@ -43,12 +43,34 @@ import pytest
 import kiln.slicer_profiles as sp_mod
 from kiln.slicer_orca import ini_to_settings, settings_to_orca_presets
 from kiln.slicer_profiles import (
+    get_slicer_profile,
     list_slicer_profiles,
     profile_with_overrides,
     resolve_multiextruder_profile,
     resolve_slicer_profile,
     speed_mm_s,
 )
+
+
+def _profiles_in_hand() -> list[str]:
+    """The roster printers whose own profile this process holds.
+
+    Since 2026-10-12 a printer's slicer profile is its served record; here
+    that is every printer with kiln-pro's catalogue on this computer (the
+    pre-push pace gate's run) and only the generic profile and the session's
+    synthetic printers without it (public CI).  A roster printer with no
+    record slices with the generic profile, which is judged once under its
+    own name, never 70 more times under theirs.
+    """
+    return [pid for pid in list_slicer_profiles() if get_slicer_profile(pid).id == pid]
+
+
+def _real_profiles_in_hand(*printer_ids: str) -> list[str]:
+    """Of *printer_ids*, the ones whose own record is in hand, or a skip."""
+    held = [pid for pid in printer_ids if get_slicer_profile(pid).id == pid]
+    if not held:
+        pytest.skip(f"no record for {', '.join(printer_ids)} here: public CI holds no real printer's profile")
+    return held
 
 # ---------------------------------------------------------------------------
 # The ledger: every speed and acceleration PrusaSlicer documents, decided
@@ -220,7 +242,7 @@ class TestEveryProfileStatesItsPace:
         """
         missing = [
             f"{pid}: {key}"
-            for pid in list_slicer_profiles()
+            for pid in _profiles_in_hand()
             for settings in [_ini(resolve_slicer_profile(pid))]
             for key in sorted(STATED | DERIVED)
             if speed_mm_s(settings, key) is None
@@ -228,7 +250,7 @@ class TestEveryProfileStatesItsPace:
         assert not missing, "speeds left to the slicer's defaults:\n" + "\n".join(missing)
 
     def test_no_derived_speed_outruns_the_feature_it_is_tied_to(self) -> None:
-        for pid in list_slicer_profiles():
+        for pid in _profiles_in_hand():
             s = _ini(resolve_slicer_profile(pid))
             perimeter = speed_mm_s(s, "perimeter_speed")
             external = speed_mm_s(s, "external_perimeter_speed")
@@ -243,7 +265,7 @@ class TestEveryProfileStatesItsPace:
         """The floor the slicer-backed check applies to the G-code, applied
         to the profile itself so CI sees it too."""
         slow: list[str] = []
-        for pid in list_slicer_profiles():
+        for pid in _profiles_in_hand():
             s = _ini(resolve_slicer_profile(pid))
             floor = _pace_floor(s)
             for key in sorted(DERIVED):
@@ -252,34 +274,39 @@ class TestEveryProfileStatesItsPace:
                     slow.append(f"{pid}: {key}={value} under {floor:g}")
         assert not slow, "\n".join(slow)
 
-    def test_the_a1_speeds(self) -> None:
-        """The machine this was found on, spelled out."""
-        s = _ini(resolve_slicer_profile("bambu_a1"))
-        assert s["perimeter_speed"] == "200"
-        assert s["external_perimeter_speed"] == "150"
-        assert s["infill_speed"] == "250"
-        assert s["solid_infill_speed"] == "200"
-        assert s["top_solid_infill_speed"] == "150"
-        assert s["gap_fill_speed"] == "75"
-        assert s["small_perimeter_speed"] == "75"
+    def test_the_derived_speeds_of_a_held_profile(self) -> None:
+        """Spelled out on a synthetic profile (the machine the bug was found
+        on is pinned beside its record, in kiln-pro): the four derived from
+        perimeter 150, outer wall 120, infill 200."""
+        s = _ini(resolve_slicer_profile("kilntest_enclosed"))
+        assert s["perimeter_speed"] == "150"
+        assert s["external_perimeter_speed"] == "120"
+        assert s["infill_speed"] == "200"
+        assert s["solid_infill_speed"] == "150"
+        assert s["top_solid_infill_speed"] == "120"
+        assert s["gap_fill_speed"] == "60"
+        assert s["small_perimeter_speed"] == "60"
 
 
 class TestEveryDoorDerivesThem:
-    """Three doors write an ``.ini``; the rule reaches all three."""
+    """Three doors write an ``.ini``; the rule reaches all three.  On the
+    session's synthetic profiles (``kilntest_enclosed``: perimeter 150, outer
+    wall 120, infill 200; ``kilntest_open``: 60, 45, 80) -- a real printer's
+    profile is its served record since 2026-10-12."""
 
     def test_an_override_moves_the_speeds_tied_to_it(self) -> None:
-        s = _ini(resolve_slicer_profile("bambu_a1", overrides={"perimeter_speed": "120"}))
+        s = _ini(resolve_slicer_profile("kilntest_enclosed", overrides={"perimeter_speed": "120"}))
         assert s["solid_infill_speed"] == "120"
 
     def test_a_stated_speed_is_never_replaced(self) -> None:
         s = _ini(
             resolve_slicer_profile(
-                "bambu_a1", overrides={"top_solid_infill_speed": "40", "gap_fill_speed": "20"}
+                "kilntest_enclosed", overrides={"top_solid_infill_speed": "40", "gap_fill_speed": "20"}
             )
         )
         assert s["top_solid_infill_speed"] == "40"
         assert s["gap_fill_speed"] == "20"
-        assert s["small_perimeter_speed"] == "75"
+        assert s["small_perimeter_speed"] == "60"
 
     def test_slowed_walls_are_never_outrun_by_a_derived_speed(self) -> None:
         """A caller that slows the inner walls and leaves the outer one alone
@@ -289,7 +316,7 @@ class TestEveryDoorDerivesThem:
         way: it caps every feature through its melt rate,
         kiln.slicer_material.  A caller still can.)"""
         slowed = {"perimeter_speed": "20", "infill_speed": "20"}
-        s = _ini(resolve_slicer_profile("bambu_a1", overrides=slowed))
+        s = _ini(resolve_slicer_profile("kilntest_enclosed", overrides=slowed))
         wall = float(slowed["perimeter_speed"])
         assert float(s["solid_infill_speed"]) <= wall
         assert float(s["top_solid_infill_speed"]) <= wall
@@ -298,14 +325,14 @@ class TestEveryDoorDerivesThem:
 
     def test_a_percentage_anchor_is_read_against_its_documented_base(self) -> None:
         # PrusaSlicer reads the outer wall's "50%" against the perimeter speed.
-        s = _ini(resolve_slicer_profile("bambu_a1", overrides={"external_perimeter_speed": "50%"}))
-        assert s["top_solid_infill_speed"] == "100"
-        assert s["small_perimeter_speed"] == "50"
+        s = _ini(resolve_slicer_profile("kilntest_open", overrides={"external_perimeter_speed": "50%"}))
+        assert s["top_solid_infill_speed"] == "30"
+        assert s["small_perimeter_speed"] == "15"
 
     def test_the_multi_extruder_door(self) -> None:
-        s = _ini(resolve_multiextruder_profile("bambu_a1", 4))
-        assert s["solid_infill_speed"] == "200"
-        assert s["small_perimeter_speed"] == "75"
+        s = _ini(resolve_multiextruder_profile("kilntest_enclosed", 4))
+        assert s["solid_infill_speed"] == "150"
+        assert s["small_perimeter_speed"] == "60"
 
     def test_the_override_fallback_door_writes_them_into_the_file(self, tmp_path: Path) -> None:
         base = tmp_path / "mine.ini"
@@ -333,7 +360,7 @@ class TestTheHotendCeilingIsStated:
         from kiln.safety_profiles import get_profile
 
         wrong: list[str] = []
-        for pid in list_slicer_profiles():
+        for pid in _profiles_in_hand():
             ceiling = get_profile(pid).max_volumetric_flow
             stated = _ini(resolve_slicer_profile(pid)).get("max_volumetric_speed")
             expected = f"{ceiling:g}" if ceiling else None
@@ -352,20 +379,12 @@ class TestTheHotendCeilingIsStated:
         from kiln import safety_profiles as sp
         from kiln.safety_profiles import get_profile
 
-        record = {
-            "printer_id": "bambu_a1", "matched_by": "exact", "display_name": "Served test record",
-            "safety": {
-                "max_hotend_temp": 240.0, "max_bed_temp": 80.0, "max_chamber_temp": None,
-                "max_feedrate": 10000.0, "min_safe_z": 0.0, "max_volumetric_flow": 17.5,
-                "build_volume": [200, 200, 200], "notes": "Synthetic served record.",
-            },
-            "intel": {
-                "firmware": "bambu", "extruder_type": "direct_drive", "hotend_type": "all_metal",
-                "has_enclosure": False, "has_chamber_sensor": None, "has_abl": True,
-                "has_input_shaping": True, "build_volume_mm": [200, 200, 200],
-                "max_hotend_temp": 240, "max_bed_temp": 80, "materials": {}, "nozzle_clumping_probe": None,
-            },
-        }
+        from .conftest import synthetic_roster_record
+
+        # The four-block synthetic record the session serves, with a ceiling
+        # of its own so the door is seen stating what the record says.
+        record = synthetic_roster_record("bambu_a1")
+        record["safety"]["max_volumetric_flow"] = 17.5
 
         def reset() -> None:
             sp._cache.clear()
@@ -373,6 +392,7 @@ class TestTheHotendCeilingIsStated:
             sp._variant_data.clear()
             sp._loaded = False
             pi._reset_caches()
+            sp_mod._reset()
             bridge.forget()
 
         monkeypatch.setattr(bridge, "available", lambda: False)
@@ -401,7 +421,7 @@ class TestOrcaCarriesThePace:
             "gap_fill_speed": "gap_infill_speed",
             "small_perimeter_speed": "small_perimeter_speed",
         }
-        for pid in list_slicer_profiles():
+        for pid in _profiles_in_hand():
             settings = _ini(resolve_slicer_profile(pid))
             process = settings_to_orca_presets(settings).process
             for src, dst in orca_key.items():
@@ -652,7 +672,7 @@ def prusa_slices(tmp_path_factory: pytest.TempPathFactory) -> dict[str, tuple[di
     model = _write_fixture(work / "plate.stl")
     sp_mod._cache.clear()
     sp_mod._loaded = False
-    inis = {pid: resolve_slicer_profile(pid) for pid in list_slicer_profiles()}
+    inis = {pid: resolve_slicer_profile(pid) for pid in _profiles_in_hand()}
 
     def run(pid: str) -> tuple[str, tuple[dict, str]]:
         out_dir = tempfile.mkdtemp(dir=work)
@@ -711,10 +731,7 @@ class TestTheGcodeKeepsThePace:
         slice below the profile's pace on purpose: slower than the printer
         could go, never faster, so the pace is not this run's to judge.
         """
-        from kiln.safety_profiles import get_profile
-
-        if get_profile("bambu_a1").id == "default":
-            pytest.skip("no record for this printer here: the flow floor caps the pace on purpose")
+        _real_profiles_in_hand("bambu_a1")
         settings, gcode = prusa_slices["bambu_a1"]
         report = _pace_report(gcode)
         fastest = max(speed for speed, _ in report["Solid infill"])
@@ -723,6 +740,7 @@ class TestTheGcodeKeepsThePace:
     def test_the_estimate_falls_with_the_pace(self, tmp_path: Path) -> None:
         """A/B against the same profile with the four speeds put back to the
         slicer's defaults -- what every bundled profile emitted before."""
+        _real_profiles_in_hand("bambu_a1")
         model = _write_fixture(tmp_path / "plate.stl")
         emitted = resolve_slicer_profile("bambu_a1")
         slicer_defaults = {
@@ -759,7 +777,7 @@ def material_slices(tmp_path_factory: pytest.TempPathFactory) -> dict[tuple[str,
 
     work = tmp_path_factory.mktemp("material_pace")
     model = _write_fixture(work / "plate.stl")
-    jobs = [(pid, m) for pid in _MATERIAL_PRINTERS for m in _materials_with_a_melt_rate()]
+    jobs = [(pid, m) for pid in _real_profiles_in_hand(*_MATERIAL_PRINTERS) for m in _materials_with_a_melt_rate()]
 
     def run(job: tuple[str, str]):
         pid, material = job

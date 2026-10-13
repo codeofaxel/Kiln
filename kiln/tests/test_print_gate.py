@@ -27,7 +27,7 @@ def _box(size_mm: float, path: str) -> str:
 
 @pytest.fixture
 def big(tmp_path) -> str:
-    return _box(400.0, str(tmp_path / "big.stl"))  # 400mm > 256mm bed
+    return _box(400.0, str(tmp_path / "big.stl"))  # 400mm > the synthetic 220mm bed
 
 
 @pytest.fixture
@@ -45,16 +45,16 @@ def _clear_overrides():
 
 class TestFitVerdict:
     def test_oversize_is_blocked(self, big):
-        r = G(big, "bambu_a1")
+        r = G(big, "kilntest_open")
         assert r["blocked"] is True
         assert r["code"] == "EXCEEDS_BED"
         assert r["suggestions"]
 
     def test_normal_passes(self, small):
-        assert G(small, "bambu_a1")["blocked"] is False
+        assert G(small, "kilntest_open")["blocked"] is False
 
     def test_override_converts_block_to_allowed(self, big):
-        r = G(big, "bambu_a1", allow_oversize=True)
+        r = G(big, "kilntest_open", allow_oversize=True)
         assert r["blocked"] is False
         assert r.get("overridden") is True
 
@@ -65,7 +65,7 @@ class TestNeverFalseBlocks:
         assert G(big, "totally_unknown_printer_zzz")["blocked"] is False
 
     def test_missing_file_soft_passes(self):
-        assert G("/no/such/file.stl", "bambu_a1")["blocked"] is False
+        assert G("/no/such/file.stl", "kilntest_open")["blocked"] is False
 
     def test_no_printer_soft_passes(self, big):
         assert G(big, None)["blocked"] is False
@@ -92,11 +92,11 @@ class TestTempCeiling:
 
 class TestOverrideGrant:
     def test_grant_is_per_printer_and_expiring(self):
-        pg.grant_oversize_override("bambu_a1", ttl_seconds=300)
-        assert pg._override_active("bambu_a1") is True
+        pg.grant_oversize_override("kilntest_open", ttl_seconds=300)
+        assert pg._override_active("kilntest_open") is True
         assert pg._override_active("prusa_mk4") is False
         # case-insensitive key
-        assert pg._override_active("BAMBU_A1") is True
+        assert pg._override_active("KILNTEST_OPEN") is True
 
     def test_grant_expires(self):
         pg.grant_oversize_override("expiretest", ttl_seconds=-1)  # already expired
@@ -106,7 +106,7 @@ class TestOverrideGrant:
 class _FakeAdapter(PrinterAdapter):
     """Minimal adapter to exercise the Template Method without hardware."""
 
-    printer_id = "bambu_a1"
+    printer_id = "kilntest_open"
 
     def __init__(self) -> None:
         self.impl_calls: list[str] = []
@@ -144,7 +144,7 @@ class TestTemplateMethodBackstop:
 
     def test_override_lets_oversize_through(self, big):
         a = _FakeAdapter()
-        pg.grant_oversize_override("bambu_a1", ttl_seconds=300)
+        pg.grant_oversize_override("kilntest_open", ttl_seconds=300)
         r = a.start_print(big)
         assert r.success is True and a.impl_calls == [big]
 
@@ -172,7 +172,7 @@ class TestSwarmFixes:
 
     def test_override_is_single_use(self, big):
         a = _FakeAdapter()
-        pg.grant_oversize_override("bambu_a1", ttl_seconds=300)
+        pg.grant_oversize_override("kilntest_open", ttl_seconds=300)
         assert a.start_print(big).success is True   # 1st: override rescues, grant consumed
         assert a.start_print(big).success is False  # 2nd: grant gone -> blocked again
 
@@ -374,7 +374,7 @@ class TestFileOnPrinterIsRead:
 
         _Broken.__abstractmethods__ = frozenset()
         a = _Broken(None)
-        pg.grant_oversize_override("bambu_a1", ttl_seconds=300)
+        pg.grant_oversize_override("kilntest_open", ttl_seconds=300)
         assert a.start_print("x.gcode.3mf").success is True and a.impl_calls == ["x.gcode.3mf"]
         # consumed: the next start is refused again
         assert a.start_print("x.gcode.3mf").success is False

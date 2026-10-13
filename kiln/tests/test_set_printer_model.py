@@ -554,7 +554,7 @@ class TestAPrinterOutsideTheCatalogue:
         from kiln.slicer_profiles import resolve_slicer_profile
 
         monkeypatch.setattr("kiln.printers.bed_fit.get_build_volume", lambda printer_id: (999.0, 999.0, 999.0))
-        assert ini_to_settings(resolve_slicer_profile("bambu_a1"))["bed_shape"] == "0x0,256x0,256x256,0x256"
+        assert ini_to_settings(resolve_slicer_profile("kilntest_open"))["bed_shape"] == "0x0,220x0,220x220,0x220"
 
     def test_it_can_then_be_named_like_any_other(self, config, tmp_path):
         set_printer_model(slicer_file=_acme_project(tmp_path / "part.3mf"), printer_name="shed", config_path=config)

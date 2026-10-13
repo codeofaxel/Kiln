@@ -33,12 +33,28 @@ PROFILES_FILE = DATA_DIR / "printer_profiles.json"
 
 
 def _profiles() -> dict:
+    """The capability rows the bundled file holds whole: since 2026-10-12
+    that is the generic ``default`` row (every catalogued printer's row is
+    its served record, where kiln-pro's ``tests/test_printer_catalogue.py``
+    pins both chamber keys on every record)."""
     raw = json.loads(PROFILES_FILE.read_text(encoding="utf-8"))
-    return {k: v for k, v in raw.items() if not k.startswith("_")}
+    return {k: v for k, v in raw.items() if not k.startswith("_") and "build_volume_mm" in v}
+
+
+def test_the_roster_carries_no_chamber_claim():
+    """A roster row is an id and a name; a chamber claim that drifted back
+    into one would be a copy of a served value."""
+    raw = json.loads(PROFILES_FILE.read_text(encoding="utf-8"))
+    carrying = sorted(
+        pid for pid, entry in raw.items()
+        if not pid.startswith("_") and pid != "default" and ("chamber_temp_c" in entry or "chamber_heated" in entry)
+    )
+    assert carrying == [], carrying
 
 
 def test_every_printer_declares_chamber_capability():
     """A new printer cannot silently skip the chamber question."""
+    assert _profiles(), "the generic row is held whole"
     missing = sorted(
         pid for pid, entry in _profiles().items()
         if "chamber_temp_c" not in entry or "chamber_heated" not in entry

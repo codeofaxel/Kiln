@@ -124,21 +124,35 @@ _slicer_profiles_cache: dict[str, dict[str, Any]] | None = None
 
 
 def _load_slicer_profiles() -> dict[str, dict[str, Any]]:
-    """Lazy-load slicer_profiles.json."""
+    """Lazy-load the bundled slicer_profiles.json: since 2026-10-12 a ROSTER
+    plus the generic profile and the ``_multi_material_addons`` table, which
+    is what the add-on readers below want.  A printer's own profile is its
+    catalogue record's, read through :func:`_profile_row`."""
     global _slicer_profiles_cache  # noqa: PLW0603
     if _slicer_profiles_cache is not None:
         return _slicer_profiles_cache
 
-    profiles_path = os.path.join(
-        os.path.dirname(__file__), "data", "slicer_profiles.json"
-    )
+    from kiln.slicer_profiles import _DATA_FILE
+
     try:
-        with open(profiles_path, encoding="utf-8") as fh:
+        with open(_DATA_FILE, encoding="utf-8") as fh:
             _slicer_profiles_cache = json.load(fh)
     except Exception:
         _logger.debug("Could not load slicer_profiles.json, using defaults")
         _slicer_profiles_cache = {}
     return _slicer_profiles_cache
+
+
+def _profile_row(printer_id: str | None) -> dict[str, Any]:
+    """The slicer profile row for the EXACT *printer_id* -- bundled, held, or
+    fetched once through the catalogue bridge -- or ``{}``.  One reader for
+    every estimate figure, so the speeds, the layer height and the
+    tool-change record all come off the same row."""
+    if not printer_id:
+        return {}
+    from kiln.slicer_profiles import raw_profile
+
+    return raw_profile(printer_id) or {}
 
 
 def _get_printer_speeds(printer_id: str | None) -> dict[str, float]:
@@ -147,9 +161,7 @@ def _get_printer_speeds(printer_id: str | None) -> dict[str, float]:
     Returns a dict with keys: perimeter, infill, first_layer, travel.
     """
     if printer_id:
-        profiles = _load_slicer_profiles()
-        profile = profiles.get(printer_id, {})
-        settings = profile.get("settings", {})
+        settings = _profile_row(printer_id).get("settings", {})
         if settings:
             return {
                 "perimeter": float(settings.get("perimeter_speed", _DEFAULT_PERIMETER_SPEED)),
@@ -169,9 +181,7 @@ def _get_printer_speeds(printer_id: str | None) -> dict[str, float]:
 def _get_printer_layer_height(printer_id: str | None) -> float:
     """Return default layer height for a printer model."""
     if printer_id:
-        profiles = _load_slicer_profiles()
-        profile = profiles.get(printer_id, {})
-        settings = profile.get("settings", {})
+        settings = _profile_row(printer_id).get("settings", {})
         if settings:
             return float(settings.get("layer_height", 0.2))
     return 0.2
@@ -180,9 +190,7 @@ def _get_printer_layer_height(printer_id: str | None) -> float:
 def _get_printer_infill(printer_id: str | None) -> float:
     """Return default infill percentage for a printer model."""
     if printer_id:
-        profiles = _load_slicer_profiles()
-        profile = profiles.get(printer_id, {})
-        settings = profile.get("settings", {})
+        settings = _profile_row(printer_id).get("settings", {})
         if settings:
             fill_str = settings.get("fill_density", "20%")
             return float(fill_str.replace("%", ""))
@@ -233,8 +241,7 @@ def _get_printer_tool_change(
 
     # --- Built-in tool changer (default path) ---
     if printer_id:
-        profile = profiles.get(printer_id, {})
-        tc = profile.get("tool_change", {})
+        tc = _profile_row(printer_id).get("tool_change", {})
         if tc:
             changer = tc.get("tool_changer", "none")
             return {

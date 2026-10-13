@@ -20,15 +20,6 @@ from kiln import data_manifest
 #: waived so the gap stays visible and cannot grow -- the fix is to author
 #: the reason from the machine's published chamber and hotend limits, not
 #: to extend this set.
-RECORDED_REFUSALS_WITHOUT_A_REASON = frozenset(
-    {
-        "visionminer_22idex_v4.peek",
-        "visionminer_22idex_v4.pei_1010",
-        "visionminer_22idex_v4.pei_9085",
-        "visionminer_22idex_v4.pekk",
-        "visionminer_22idex_v4.ppsu",
-    }
-)
 
 
 class TestBundledDataManifest:
@@ -256,27 +247,34 @@ class TestSafetyNotesAreRequired:
         assert not missing, f"no material compatibility for {sorted(missing)}"
 
     def test_a_refused_material_explains_itself(self) -> None:
-        """The refusal note is the 'do not try this' door -- it needs a why."""
+        """The refusal note is the 'do not try this' door -- it needs a why.
+
+        Since 2026-10-12 the per-printer notes are the Pro overlay's, and
+        that every verdict has one is kiln-pro's material-note coverage
+        gate; the one bundled row whose notes are still public is the
+        generic ``default`` row, judged here."""
         compatibility = data_manifest.load(
             "design_knowledge/printer_material_compatibility.json"
         )
         unexplained = {
-            f"{printer_id}.{material}"
-            for printer_id, materials in compatibility.items()
-            if not printer_id.startswith("_")
-            for material, record in materials.items()
+            f"default.{material}"
+            for material, record in compatibility["default"].items()
             if record.get("status") == "not_compatible"
             and not record.get("notes", "").strip()
         }
-        new_gaps = unexplained - RECORDED_REFUSALS_WITHOUT_A_REASON
-        assert not new_gaps, (
-            f"{len(new_gaps)} material refusal(s) ship with no reason: "
-            f"{sorted(new_gaps)[:5]}. Every other refused material explains "
-            "what the machine lacks; write the same sentence rather than "
-            "adding to the recorded gap."
+        assert not unexplained, (
+            f"{len(unexplained)} generic-row refusal(s) ship with no reason: "
+            f"{sorted(unexplained)[:5]}. Every other refused material explains "
+            "what the machine lacks; write the same sentence."
         )
-        closed = RECORDED_REFUSALS_WITHOUT_A_REASON - unexplained
-        assert not closed, (
-            "These refusals now carry a reason -- drop them from "
-            f"RECORDED_REFUSALS_WITHOUT_A_REASON: {sorted(closed)}"
+        noted_elsewhere = {
+            f"{printer_id}.{material}"
+            for printer_id, materials in compatibility.items()
+            if not printer_id.startswith("_") and printer_id != "default"
+            for material, record in materials.items()
+            if record.get("notes")
+        }
+        assert not noted_elsewhere, (
+            "a per-printer compatibility note is the Pro overlay's since "
+            f"2026-10-12, never the public matrix's: {sorted(noted_elsewhere)[:5]}"
         )

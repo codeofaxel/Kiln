@@ -31,7 +31,7 @@ def _flow_need(needs):
 
 
 @pytest.fixture
-def served(monkeypatch):
+def served(monkeypatch, served_roster_records):
     """The served path, with a fake server whose answers a test sets."""
     import kiln.server
 

@@ -1231,14 +1231,6 @@ _TPL_VAR_RE = re.compile(r"\[(?P<name>[a-z_][a-z0-9_]*)\]")
 _KILN_SPIRAL_MODE = False
 _KILN_PRINT_SEQUENCE = "by layer"
 
-def _profile_bed(printer_model: str) -> tuple[float, float, float] | None:
-    """The bundled slicer profile's bed for the EXACT model, the public floor
-    an install has before the record is fetched (``bed_fit.bundled_profile_bed``)."""
-    from kiln.printers.bed_fit import bundled_profile_bed
-
-    return bundled_profile_bed(_normalize_model(printer_model))
-
-
 def _bed_center(printer_model: str) -> tuple[float, float] | None:
     """Bed centre ``(x, y)`` in mm for a DECLARED model, or ``None`` if unknown.
 
@@ -1246,9 +1238,9 @@ def _bed_center(printer_model: str) -> tuple[float, float] | None:
     of Kiln reads (:func:`kiln.printer_intelligence.build_volume_for`) --
     rather than copied into a table here, because a second copy of a
     machine's bed size drifts silently and keeps answering confidently.
-    With no record in hand (a signed-out install), the bundled slicer
-    profile's own bed geometry answers: the same number, public today, so a
-    person can still build a file for a machine Kiln lists.
+    With no record in hand (a signed-out install) there is no centre, and
+    the build is refused with the fix named (:func:`_no_bed_on_record`):
+    nothing is guessed for a number that becomes a travel move.
 
     Exact key only: no fuzzy prefix match and no ``"default"`` profile.  This
     number becomes a travel move, so an unrecognised model gets ``None`` and
@@ -1257,10 +1249,41 @@ def _bed_center(printer_model: str) -> tuple[float, float] | None:
     from kiln.printer_intelligence import build_volume_for
 
     resolved = build_volume_for(_normalize_model(printer_model))
-    volume = resolved[1] if resolved is not None else _profile_bed(printer_model)
-    if volume is None:
+    if resolved is None:
         return None
+    volume = resolved[1]
     return volume[0] / 2.0, volume[1] / 2.0
+
+
+def _no_bed_on_record(printer_model: str | None) -> str:
+    """Why this model has no bed centre, as a sentence that names the fix.
+
+    A roster printer whose record is not in hand -- this install is signed
+    out, or could not reach Kiln's servers when it was set up -- is told
+    the sign-in is the fix; a model the roster does not list is told it is
+    not catalogued.  Never a guessed number: the sentence ends the build.
+    """
+    model = _normalize_model(printer_model) if printer_model else ""
+    from kiln.printers.bed_fit import catalogue_printer_id
+
+    listed = catalogue_printer_id(model) if model else None
+    if listed is None:
+        return (
+            f"Kiln's catalogue has no row for {model or 'this printer'!r}, so it has no bed "
+            "centre to build the file's end sequence around and will not guess one."
+        )
+    try:
+        from kiln._pro_catalogue_bridge import unanswered
+
+        reason = unanswered(listed)
+    except Exception:  # noqa: BLE001
+        reason = None
+    why = reason or "sign in free and Kiln fetches it the next time this printer is set up"
+    return (
+        f"Kiln knows the {listed} but this install holds no record for it, so it has no "
+        f"bed centre to build the file's end sequence around: {why.rstrip('.')}. "
+        "Nothing is guessed."
+    )
 
 
 def _format_template_number(value: float) -> str:
@@ -1491,7 +1514,7 @@ def _machine_top_mm(printer_model: str | None) -> float | None:
         with contextlib.suppress(TypeError, ValueError):
             if travel is not None and float(travel) > 0:
                 return float(travel)
-        volume = get_build_volume(candidate) or _profile_bed(candidate)
+        volume = get_build_volume(candidate)
         return float(volume[2]) if volume and volume[2] > 0 else None
     return None
 
@@ -1548,7 +1571,15 @@ def _resolve_end_gcode(
         template this is): the first lift is ``max_z + 5`` but never past it.
         ``None`` leaves the lift uncapped.
     """
-    expanded = _expand_end_template(template, _end_template_variables(max_z, printer_model))
+    variables = _end_template_variables(max_z, printer_model)
+    try:
+        expanded = _expand_end_template(template, variables)
+    except ValueError as exc:
+        if "first_layer_center_no_wipe_tower" in str(exc) and "first_layer_center_no_wipe_tower" not in variables:
+            # The template needs the bed centre and this install has none
+            # for the model: say why and what fixes it, never a guess.
+            raise ValueError(_no_bed_on_record(printer_model)) from exc
+        raise
 
     safe_z = max_z + 5.0
     if z_top_mm is not None:

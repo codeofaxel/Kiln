@@ -186,6 +186,12 @@ _public_raw: dict[str, Any] | None = None
 #: Catalogue rows this process has resolved: ``{id: the roster row merged
 #: with the record's intel block}``.  Grows per printer; never the roster.
 _catalogue_rows: dict[str, dict[str, Any]] = {}
+#: The whole record behind each row above, by catalogue id: the four blocks
+#: the bridge parsed.  This module reads ``intel``; :mod:`kiln.slicer_profiles`
+#: and :mod:`kiln.design_intelligence` read their blocks through
+#: :func:`catalogue_block`, so the record is fetched ONCE per printer and
+#: resolved ONCE (:func:`_row_for`), never three times by three loaders.
+_catalogue_records: dict[str, dict[str, Any]] = {}
 #: Bumped when a row lands, so every decoded view rebuilds on its next read
 #: instead of answering from before the row existed.
 _rows_version: int = 0
@@ -289,8 +295,61 @@ def _fetch_row(spelling: str) -> tuple[str, dict[str, Any]] | None:
     row.update(record.get("intel") or {})
     row.setdefault("display_name", record.get("display_name") or key)
     _catalogue_rows[key] = row
+    _catalogue_records[key] = record
     _rows_version += 1
     return key, row
+
+
+def catalogue_block(
+    printer_id: str, block: str, *, exact: bool = False,
+) -> tuple[str, dict[str, Any]] | None:
+    """``(id, the record's *block*)`` for *printer_id*, or ``None``.
+
+    The one door the other loaders read their block of a record through
+    (``design`` for :mod:`kiln.design_intelligence`, ``slicer`` for
+    :mod:`kiln.slicer_profiles`): resolved by :func:`_row_for` -- exact among
+    the rows held, else the catalogue's answer (fetched, and held with its
+    whole record), else the prefix rule -- so a spelling cannot get one
+    printer's spec sheet and another's slicer profile.  ``exact`` demands the
+    resolved id BE the spelling, for a fact that belongs to one model.
+
+    ``None`` when nothing resolved, or when what resolved is a bundled row
+    with no record behind it (the generic row, a fixture's full row): the
+    caller then reads its own bundled copy.  Never raises.
+    """
+    normalised = _normalise(printer_id or "")
+    if not normalised or normalised == "default":
+        return None
+    resolved = _row_for(normalised)
+    if resolved is None or (exact and resolved[0] != normalised):
+        return None
+    record = _catalogue_records.get(resolved[0])
+    found = record.get(block) if isinstance(record, dict) else None
+    if not isinstance(found, dict):
+        return None
+    return resolved[0], dict(found)
+
+
+def held_catalogue_blocks(block: str) -> dict[str, dict[str, Any]]:
+    """Every record this process has fetched so far, as ``{id: block}``.
+    Never fetches: a listing on an install whose records are served must
+    not ask the servers for every printer on the roster."""
+    return {
+        key: dict(record[block])
+        for key, record in _catalogue_records.items()
+        if isinstance(record.get(block), dict)
+    }
+
+
+def catalogue_here() -> bool:
+    """True when kiln-pro's catalogue is on this computer: every record is a
+    dict read away, so a listing may resolve the whole roster."""
+    try:
+        from kiln._pro_catalogue_bridge import available
+
+        return available()
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _row_for(printer_id: str) -> tuple[str, dict[str, Any]] | None:
@@ -994,6 +1053,7 @@ def _reset_caches() -> None:
     _raw_cache.clear()
     _raw_loaded = False
     _catalogue_rows.clear()
+    _catalogue_records.clear()
     _rows_version += 1
     _full_rows_cache = None
 

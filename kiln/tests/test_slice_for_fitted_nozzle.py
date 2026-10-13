@@ -65,7 +65,7 @@ def _state_a_flow_ceiling(patch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _bench(monkeypatch) -> Iterator[None]:
+def _bench(monkeypatch, served_roster_records) -> Iterator[None]:
     """No record, no readable printer, no registered machine, nothing
     remembered, until a test says so."""
     monkeypatch.setattr(assumed, "_setting_memo", {})
@@ -144,8 +144,8 @@ class TestTheSliceIsForTheFittedNozzle:
         assert fit["source"] == "record" and fit["changed"] == {}
 
     def test_a_default_never_replaces_a_profile_written_for_another_size(self):
-        # aon_m2_plus ships a 0.6: Kiln's 0.4 default is not a fitted nozzle.
-        settings, fit = _resolved("aon_m2_plus")
+        # kilntest_big ships a 0.6: Kiln's 0.4 default is not a fitted nozzle.
+        settings, fit = _resolved("kilntest_big")
         assert settings["nozzle_diameter"] == "0.6" and fit["source"] == "profile"
 
     def test_a_stated_size_is_the_callers_and_wins_over_the_record(self, monkeypatch):
@@ -535,6 +535,9 @@ def slices(tmp_path_factory) -> dict[tuple[str, float], tuple[dict, str]]:
     out: dict[tuple[str, float], tuple[dict, str]] = {}
     patch = pytest.MonkeyPatch()
     try:
+        from .conftest import serve_synthetic_roster_records
+
+        serve_synthetic_roster_records(patch)  # the A1's profile, served
         patch.setattr(bridge, "consult_only_recorded_nozzle", lambda: {"printer_id": None, "diameter_mm": None, "answered": True})
         patch.setattr("kiln.printer_nozzle_reading.observe_printer_nozzle", lambda pid: None)
         patch.setattr("kiln.printer_model_resolver.resolve_printer_model_for", lambda name: None)

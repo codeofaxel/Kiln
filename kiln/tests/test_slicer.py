@@ -640,7 +640,7 @@ class TestBundledProfilesActuallySlice:
         """All nine, not just the two that happened to declare layer_gcode."""
         assert os.path.getsize(self._slice(printer_id, tmp_path)) > 0
 
-    def test_p2s_gcode_is_relative_e_and_resets_each_layer(self, tmp_path) -> None:
+    def test_p2s_gcode_is_relative_e_and_resets_each_layer(self, tmp_path, served_roster_records) -> None:
         """The output is correct, not merely non-empty."""
         import re
 

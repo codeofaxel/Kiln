@@ -553,15 +553,34 @@ requires_engineering_overlay = pytest.mark.skipif(
 
 
 def _printer_profiles_overlay_loaded() -> bool:
-    """True when the printer_profiles overlay is merged in."""
+    """True when the printer_profiles overlay is merged in AND a real
+    printer's record is in hand to merge it onto (kiln-pro here).
+
+    Probed with the catalogue bridge's served door sealed: since 2026-10-12
+    asking for a printer's design profile fetches its record, and at
+    collection time -- before the autouse seal below -- that would open the
+    network on a signed-in machine and import ``kiln.server`` into every
+    test session (2026-10-12: it did, and the CLI's ``--json`` tests read
+    the server's log lines back as their output).
+    """
     try:
+        from kiln import _pro_catalogue_bridge as _bridge
         from kiln.design_intelligence import (
             _reset_knowledge_base,
             get_printer_design_profile,
         )
-        _reset_knowledge_base()
-        profile = get_printer_design_profile("bambu_x1c")
-        if profile is None or not profile.agent_notes:
+        from kiln.served_answer import Miss
+
+        served = _bridge._served
+        _bridge._served = lambda key: (None, Miss("signed_out", "KILN_ACCOUNT_NOT_PAIRED"))
+        try:
+            _reset_knowledge_base()
+            profile = get_printer_design_profile("bambu_x1c")
+        finally:
+            _bridge._served = served
+            _bridge.forget()
+            _reset_knowledge_base()
+        if profile is None or profile.resolved_from != "curated" or not profile.agent_notes:
             return False
     except Exception:
         return False
@@ -1381,30 +1400,40 @@ def _no_served_miss_crosses_a_test():
 # The printer catalogue: synthetic rows, and no network
 # ---------------------------------------------------------------------------
 #
-# Since 2026-10-12 the bundled ``safety_profiles.json`` and
-# ``printer_intelligence.json`` are a ROSTER (id, display name, the motion
-# block, the generic row); a real printer's limits, variants and spec sheet
-# are kiln-pro's catalogue, served one printer at a time through
-# ``kiln._pro_catalogue_bridge``.  Public CI runs without kiln-pro and
+# Since 2026-10-12 the bundled ``safety_profiles.json``,
+# ``printer_intelligence.json``, ``design_knowledge/printer_profiles.json``
+# and ``slicer_profiles.json`` are a ROSTER (id, display name, the motion
+# block, the generic rows); a real printer's limits, variants, spec sheet,
+# capability profile and slicer profile are kiln-pro's catalogue, served one
+# printer at a time through ``kiln._pro_catalogue_bridge``.  Public CI runs without kiln-pro and
 # without a sign-in, so a test that names a real printer and expects its
 # numbers is a test of data this repo does not hold.  Those live in
 # kiln-pro.  Here, ``tests/fixtures/printer_catalogue_test.json`` adds
-# SYNTHETIC printers (``kilntest_*``) to copies of both files for the whole
-# session, so a test of CODE -- the clamp, the validator, bed fit, the PTFE
-# margin, variants -- has rows with numbers in them that belong to no
-# machine.  The real roster rows ride along untouched, so every motion and
+# SYNTHETIC printers (``kilntest_*``) to copies of the four files for the
+# whole session, so a test of CODE -- the clamp, the validator, bed fit, the
+# PTFE margin, variants, the slicer invariants, the design brief -- has rows
+# with numbers in them that belong to no machine.  The real roster rows ride along untouched, so every motion and
 # roster test keeps its real ids.
 
 _PRINTER_FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "printer_catalogue_test.json")
 
 
 def _install_synthetic_printers() -> dict[str, str]:
-    """Write the two data-file copies and return their paths by name."""
+    """Write the four data-file copies and return their paths by name.
+
+    Each copy is the bundled file with the fixture rows flattened in exactly
+    as the loaders expect that file's rows: the safety and intelligence
+    files take a ``display_name`` plus the block, the capability roster
+    takes ``printer_id`` + ``display_name`` plus the ``design`` block, and
+    the slicer roster takes the ``slicer`` block whole.  A roster-only
+    fixture row lands as a roster row in every file.
+    """
     import json
     import shutil
     from pathlib import Path
 
-    from kiln import printer_intelligence as _pi, safety_profiles as _sp
+    from kiln import design_intelligence as _di, printer_intelligence as _pi, safety_profiles as _sp
+    from kiln import slicer_profiles as _slp
 
     fixture = json.loads(Path(_PRINTER_FIXTURE).read_text(encoding="utf-8"))
     out_dir = Path(tempfile.mkdtemp(prefix="kiln-test-printers-"))
@@ -1412,12 +1441,16 @@ def _install_synthetic_printers() -> dict[str, str]:
     for name, source, block in (
         ("safety_profiles.json", _sp._DATA_FILE, "safety"),
         ("printer_intelligence.json", _pi._DATA_FILE, "intel"),
+        ("printer_profiles.json", _di._PRINTER_PROFILES_FILE, "design"),
+        ("slicer_profiles.json", _slp._DATA_FILE, "slicer"),
     ):
         data = json.loads(Path(source).read_text(encoding="utf-8"))
         for key, row in fixture.items():
             if key.startswith("_"):
                 continue
             entry: dict = {"display_name": row["display_name"]}
+            if block == "design":
+                entry = {"printer_id": key, **entry}
             entry.update(row.get(block) or {})
             if block == "intel":
                 # Every intelligence row carries a motion block; a synthetic
@@ -1434,25 +1467,35 @@ def _install_synthetic_printers() -> dict[str, str]:
 
 @pytest.fixture(scope="session", autouse=True)
 def _synthetic_printer_catalogue():
-    """Point the three loaders at the copies for the whole session."""
+    """Point the loaders at the copies for the whole session."""
     from pathlib import Path
 
-    from kiln import printer_intelligence as _pi, safety_profiles as _sp
+    from kiln import design_intelligence as _di, printer_intelligence as _pi, safety_profiles as _sp
+    from kiln import slicer_profiles as _slp
     from kiln.printers import bed_fit as _bf
 
     written = _install_synthetic_printers()
-    originals = (_sp._DATA_FILE, _pi._DATA_FILE, _bf._PRINTER_INTELLIGENCE_PATH)
+    originals = (
+        _sp._DATA_FILE, _pi._DATA_FILE, _bf._PRINTER_INTELLIGENCE_PATH,
+        _di._PRINTER_PROFILES_FILE, _slp._DATA_FILE,
+    )
     _sp._DATA_FILE = Path(written["safety_profiles.json"])
     _pi._DATA_FILE = Path(written["printer_intelligence.json"])
     _bf._PRINTER_INTELLIGENCE_PATH = Path(written["printer_intelligence.json"])
+    _di._PRINTER_PROFILES_FILE = Path(written["printer_profiles.json"])
+    _slp._DATA_FILE = Path(written["slicer_profiles.json"])
     _reset_printer_loaders()
     yield
-    _sp._DATA_FILE, _pi._DATA_FILE, _bf._PRINTER_INTELLIGENCE_PATH = originals
+    (
+        _sp._DATA_FILE, _pi._DATA_FILE, _bf._PRINTER_INTELLIGENCE_PATH,
+        _di._PRINTER_PROFILES_FILE, _slp._DATA_FILE,
+    ) = originals
     _reset_printer_loaders()
 
 
 def _reset_printer_loaders() -> None:
-    from kiln import printer_intelligence as _pi, safety_profiles as _sp
+    from kiln import design_intelligence as _di, printer_intelligence as _pi, safety_profiles as _sp
+    from kiln import slicer_profiles as _slp
     from kiln.printers import bed_fit as _bf
 
     _sp._cache.clear()
@@ -1460,7 +1503,15 @@ def _reset_printer_loaders() -> None:
     _sp._variant_data.clear()
     _sp._loaded = False
     _pi._reset_caches()
+    _slp._reset()
+    _di._reset_knowledge_base()
     _bf._printer_intelligence_cache = None
+    try:
+        from kiln import pre_estimate as _pe
+
+        _pe._slicer_profiles_cache = None
+    except Exception:  # noqa: BLE001
+        pass
     try:
         from kiln import catalog_keys as _ck
 
@@ -1500,6 +1551,130 @@ def _catalogue_bridge_never_reaches_the_network(monkeypatch):
     _forget_fetched_printer_rows(_sp, _pi)
 
 
+#: A made-up cube for a served synthetic record whose roster row states no
+#: firmware Z limit (a printer with one gets a cube of that height, which
+#: reproduces the two Bambu hardware captures the 3MF tests replay).
+_SYNTHETIC_RECORD_CUBE_MM = 300
+
+
+def synthetic_roster_record(printer_id: str, *, volume: tuple[float, float, float] | None = None) -> dict | None:
+    """A synthetic four-block catalogue record for roster printer *printer_id*,
+    or ``None`` for a printer the roster does not list.
+
+    Every number is made up: the bed is a cube of the public motion block's
+    ``z_travel_limit_mm`` where the firmware states one (the A1's capture
+    parks at Y128 on a 256 mm plate; the A1 mini's chute sits on a 180 mm
+    one), else :data:`_SYNTHETIC_RECORD_CUBE_MM`; the ceilings, speeds and
+    recipes are one synthetic set for every printer; a Bambu row's slicer
+    block carries the transport invariants the 3MF path requires (relative
+    E, empty start and end G-code).  For a test that names a REAL printer
+    and needs its record in hand -- never for one that pins that printer's
+    real numbers, which live in kiln-pro beside the record.
+    """
+    import json
+    from pathlib import Path
+
+    from kiln import printer_intelligence as _pi, slicer_profiles as _slp
+
+    key = str(printer_id or "").lower().replace("-", "_").strip()
+    roster = json.loads(Path(_pi._DATA_FILE).read_text(encoding="utf-8"))
+    row = roster.get(key)
+    if not key or key == "default" or not isinstance(row, dict):
+        return None
+    motion = row.get("motion") if isinstance(row.get("motion"), dict) else {}
+    limit = motion.get("z_travel_limit_mm")
+    side = int(limit) if isinstance(limit, (int, float)) and limit > 0 else _SYNTHETIC_RECORD_CUBE_MM
+    # A test may state the bed (the one an incident was measured on); the
+    # cube is the default.
+    x, y, z = (int(v) for v in volume) if volume else (side, side, side)
+    volume = [x, y, z]
+    bambu = key.startswith("bambu_")
+    family = str(motion.get("firmware_family") or "")
+    firmware = "bambu" if bambu else ("klipper" if "klipper" in family else "marlin")
+    name = str(row.get("display_name") or key)
+    generic = json.loads(Path(_slp._DATA_FILE).read_text(encoding="utf-8"))["default"]["settings"]
+    settings = dict(generic)
+    settings.update({
+        "bed_shape": f"0x0,{x}x0,{x}x{y},0x{y}", "max_print_height": str(z),
+        "gcode_flavor": "klipper" if firmware == "klipper" else "marlin",
+        "perimeter_speed": "150", "external_perimeter_speed": "120", "infill_speed": "200",
+        "first_layer_speed": "40", "travel_speed": "300", "temperature": "212",
+        "first_layer_temperature": "217", "bed_temperature": "58", "first_layer_bed_temperature": "62",
+        "retract_length": "0.8", "retract_speed": "35", "fill_density": "15%",
+    })
+    if bambu:
+        settings.update({"use_relative_e_distances": "1", "start_gcode": "", "end_gcode": ""})
+    # A served profile leaves the skirt distance to the slicer, as the real
+    # ones do: the bed-edge scenarios were measured against that default.
+    settings.pop("skirt_distance", None)
+    return {
+        "printer_id": key, "matched_by": "exact", "display_name": name,
+        "safety": {
+            "max_hotend_temp": 300.0, "max_bed_temp": 110.0, "max_chamber_temp": None,
+            "max_feedrate": 12000.0, "min_safe_z": 0.0, "max_volumetric_flow": 18.0,
+            "build_volume": list(volume), "notes": "Synthetic served record for a public test; every number is made up.",
+        },
+        "intel": {
+            "firmware": firmware, "extruder_type": "direct_drive", "hotend_type": "all_metal",
+            "has_enclosure": False, "has_chamber_sensor": None, "has_abl": True, "has_input_shaping": True,
+            "build_volume_mm": list(volume), "max_hotend_temp": 300, "max_bed_temp": 110,
+            "materials": {"PLA": {"hotend": 212, "bed": 58, "fan": 100}, "PETG": {"hotend": 240, "bed": 80, "fan": 50}},
+            "nozzle_clumping_probe": None,
+        },
+        "design": {
+            "display_name": name, "manufacturer": "Kilntest",
+            "build_volume_mm": {"x": x, "y": y, "z": z},
+            "max_hotend_temp_c": 300, "max_bed_temp_c": 110, "has_enclosure": False, "has_direct_drive": True,
+            "supported_materials": ["petg", "pla"], "typical_tolerance_mm": 0.15, "max_print_speed_mm_s": 200,
+            "default_layer_heights_mm": [0.12, 0.16, 0.2, 0.28], "chamber_temp_c": None, "chamber_heated": False,
+        },
+        "slicer": {
+            "display_name": name, "slicer": "prusaslicer", "notes": "Synthetic served slicer profile for a public test.",
+            "settings": settings,
+            "tool_change": (
+                {"tool_change_seconds": 70, "tool_changer": "ams_lite", "tool_change_notes": "Synthetic."}
+                if bambu else
+                {"tool_change_seconds": 90, "tool_changer": "none", "tool_change_notes": "Synthetic: manual swap assumed."}
+            ),
+        },
+    }
+
+
+def serve_synthetic_roster_records(patch, volumes: dict[str, tuple[float, float, float]] | None = None) -> None:
+    """Have the catalogue bridge SERVE :func:`synthetic_roster_record` for
+    every roster printer, on *patch* (a ``MonkeyPatch``), with no kiln-pro
+    here and nothing kept on disk.  *volumes* states a bed per printer id
+    for the records that need one (an incident's)."""
+    import json
+    import tempfile
+    from pathlib import Path
+
+    from kiln import _pro_catalogue_bridge as _bridge
+
+    def served(key: str):
+        record = synthetic_roster_record(key, volume=(volumes or {}).get(key))
+        return (json.loads(json.dumps(record)), None) if record else (None, None)
+
+    patch.setattr(_bridge, "available", lambda: False)
+    patch.setattr(_bridge, "KEEP_DIR", Path(tempfile.mkdtemp(prefix="kiln-test-kept-")) / "printer_catalogue")
+    patch.setattr(_bridge, "_served", served)
+    _bridge.forget()
+
+
+@pytest.fixture
+def served_roster_records(monkeypatch):
+    """Every roster printer's record SERVED as a synthetic four-block
+    record, for a test that names a real printer id and needs its profile,
+    bed or spec sheet in hand.  The session seal (signed out, the floor) is
+    the default; this is the install that set its printer up."""
+    from kiln import printer_intelligence as _pi, safety_profiles as _sp
+
+    serve_synthetic_roster_records(monkeypatch)
+    _forget_fetched_printer_rows(_sp, _pi)
+    yield
+    _forget_fetched_printer_rows(_sp, _pi)
+
+
 def _forget_fetched_printer_rows(_sp, _pi) -> None:
     import json
     from pathlib import Path
@@ -1512,7 +1687,20 @@ def _forget_fetched_printer_rows(_sp, _pi) -> None:
         _sp._cache.pop(key, None)
         _sp._variant_data.pop(key, None)
         _sp._roster.pop(key, None)
-    if _pi._catalogue_rows:
+    if _pi._catalogue_rows or _pi._catalogue_records:
         _pi._catalogue_rows.clear()
+        _pi._catalogue_records.clear()
         _pi._rows_version += 1
         _pi._full_rows_cache = None
+    from kiln import slicer_profiles as _slp
+
+    try:
+        slicer_bundled = {
+            k for k, v in json.loads(Path(_slp._DATA_FILE).read_text(encoding="utf-8")).items()
+            if not k.startswith("_") and isinstance(v, dict) and "settings" in v
+        }
+    except Exception:  # noqa: BLE001
+        return
+    for key in [k for k in _slp._cache if k not in slicer_bundled]:
+        _slp._cache.pop(key, None)
+        _slp._raw_rows.pop(key, None)

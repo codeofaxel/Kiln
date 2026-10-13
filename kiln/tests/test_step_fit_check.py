@@ -235,6 +235,11 @@ class TestTheSliceModelTool:
 
     @pytest.fixture(autouse=True)
     def _isolated(self, monkeypatch, tmp_path):
+        from .conftest import serve_synthetic_roster_records
+
+        # The MK4's profile is its served record since 2026-10-12: synthetic
+        # here, on the bed the scenario states.
+        serve_synthetic_roster_records(monkeypatch, volumes={_MK4: _MK4_BED})
         from kiln import monitor_twin
 
         monkeypatch.setenv("KILN_HOME", str(tmp_path / "home"))

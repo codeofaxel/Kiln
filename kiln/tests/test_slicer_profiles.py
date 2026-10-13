@@ -40,13 +40,9 @@ from kiln.slicer_profiles import (
 def _reset_slicer_profile_cache():
     """Reset the singleton cache before each test for isolation."""
     import kiln.slicer_profiles as mod
-    mod._cache.clear()
-    mod._loaded = False
-    mod._temp_cache.clear()
+    mod._reset()
     yield
-    mod._cache.clear()
-    mod._loaded = False
-    mod._temp_cache.clear()
+    mod._reset()
 
 
 # ===================================================================
@@ -56,53 +52,47 @@ def _reset_slicer_profile_cache():
 class TestGetSlicerProfile:
     """Tests for get_slicer_profile() lookup and fallback logic."""
 
-    def test_ender3_profile_exists(self) -> None:
-        profile = get_slicer_profile("ender3")
-        assert profile.id == "ender3"
-        assert profile.display_name == "Creality Ender 3 / Ender 3 Pro"
+    # The session fixture's synthetic printers (``kilntest_*``) are the full
+    # rows here; a real printer's profile is its served record, pinned in
+    # kiln-pro's ``tests/test_printer_catalogue_numbers.py``.
+
+    def test_a_held_profile_resolves_whole(self) -> None:
+        profile = get_slicer_profile("kilntest_open")
+        assert profile.id == "kilntest_open"
+        assert profile.display_name == "Kilntest Open 220"
         assert profile.slicer == "prusaslicer"
+        assert profile.settings["bed_shape"] == "0x0,220x0,220x220,0x220"
+        assert profile.settings["max_print_height"] == "250"
 
-    def test_ender3_bowden_retraction(self) -> None:
-        """Ender 3 has bowden setup — retraction should be longer than direct drive."""
-        profile = get_slicer_profile("ender3")
-        retract = float(profile.settings["retract_length"])
-        assert retract >= 4.0, "Bowden retraction should be >= 4mm"
+    def test_bowden_retraction_is_longer_than_direct_drive(self) -> None:
+        bowden = float(get_slicer_profile("kilntest_ptfe").settings["retract_length"])
+        direct = float(get_slicer_profile("kilntest_open").settings["retract_length"])
+        assert bowden >= 4.0 > direct
 
-    def test_bambu_x1c_profile(self) -> None:
-        profile = get_slicer_profile("bambu_x1c")
-        assert profile.id == "bambu_x1c"
-        assert profile.slicer == "prusaslicer"
-        assert profile.display_name == "Bambu Lab X1 Carbon"
-
-    def test_creality_k1_max_profile(self) -> None:
-        profile = get_slicer_profile("k1_max")
-        assert profile.id == "k1_max"
-        assert profile.slicer == "orcaslicer"
-        assert profile.settings["bed_shape"] == "0x0,300x0,300x300,0x300"
-        assert profile.settings["max_print_height"] == "300"
-
-    def test_creality_brand_prefixed_alias(self) -> None:
-        profile = get_slicer_profile("creality_k1_max")
-        assert profile.id == "k1_max"
-
-    def test_sparkx_i7_profile(self) -> None:
-        profile = get_slicer_profile("sparkx_i7")
-        assert profile.settings["bed_shape"] == "0x0,260x0,260x260,0x260"
-        assert "four-color" in profile.notes
-
-    def test_ender3_v4_profile(self) -> None:
-        profile = get_slicer_profile("ender3_v4")
-        assert profile.settings["max_print_height"] == "235"
-        assert "CFS" in profile.notes
-
-    def test_qidi_x_plus3_profile(self) -> None:
-        profile = get_slicer_profile("qidi_x_plus3")
-        assert profile.id == "qidi_x_plus3"
-        assert profile.display_name == "QIDI X-Plus 3"
+    def test_a_klipper_profile(self) -> None:
+        profile = get_slicer_profile("kilntest_enclosed")
+        assert profile.id == "kilntest_enclosed"
         assert profile.slicer == "orcaslicer"
         assert profile.settings["gcode_flavor"] == "klipper"
-        assert profile.settings["bed_shape"] == "0x0,280x0,280x280,0x280"
-        assert profile.settings["max_print_height"] == "270"
+        assert profile.display_name == "Kilntest Enclosed 256"
+        assert "Synthetic" in profile.notes
+
+    def test_creality_brand_prefixed_alias(self) -> None:
+        profile = get_slicer_profile("creality_kilntest_big")
+        assert profile.id == "kilntest_big"
+
+    def test_a_roster_printer_with_no_record_is_the_generic_profile(self) -> None:
+        """Every real printer is a roster row here (public CI holds no
+        record): it slices with the generic profile, and the file says
+        which printer it stands in for."""
+        from kiln.slicer_profiles import generic_stand_in, profile_origin
+
+        profile = get_slicer_profile("ender3")
+        assert profile.id == "default"
+        assert generic_stand_in("ender3", profile) == "ender3"
+        assert generic_stand_in("nonexistent_printer_9999", profile) is None
+        assert profile_origin(resolve_slicer_profile("ender3")).standing_in_for == "ender3"
+        assert profile_origin(resolve_slicer_profile("kilntest_open")).standing_in_for is None
 
     def test_nonexistent_falls_back_to_default(self) -> None:
         profile = get_slicer_profile("nonexistent_printer_9999")
@@ -110,24 +100,19 @@ class TestGetSlicerProfile:
         assert profile.display_name == "Generic FDM Defaults"
 
     def test_case_normalization(self) -> None:
-        """'Ender3' (mixed case) should resolve to 'ender3'."""
-        profile = get_slicer_profile("Ender3")
-        assert profile.id == "ender3"
+        """Mixed case resolves to the lower-case id."""
+        profile = get_slicer_profile("Kilntest_Open")
+        assert profile.id == "kilntest_open"
 
     def test_hyphen_normalization(self) -> None:
-        """'Ender-3' normalizes hyphens to underscores ('ender_3').
-
-        Since 'ender_3' doesn't exactly match 'ender3' and the prefix
-        fuzzy match also fails (different character at position 5),
-        this falls back to default.
-        """
-        profile = get_slicer_profile("Ender-3")
-        # "ender_3" doesn't match "ender3" exactly or by prefix
-        assert profile.id == "default"
+        """A hyphen normalises to an underscore; an underscore in the wrong
+        place matches nothing, exactly or by prefix, and falls to default."""
+        assert get_slicer_profile("Kilntest-Open").id == "kilntest_open"
+        assert get_slicer_profile("kilntest_o_pen").id == "default"
 
     def test_whitespace_stripping(self) -> None:
-        profile = get_slicer_profile("  ender3  ")
-        assert profile.id == "ender3"
+        profile = get_slicer_profile("  kilntest_open  ")
+        assert profile.id == "kilntest_open"
 
     def test_default_profile_directly(self) -> None:
         profile = get_slicer_profile("default")
@@ -147,10 +132,12 @@ class TestListSlicerProfiles:
         assert profiles == sorted(profiles)
 
     def test_contains_expected_profiles(self) -> None:
+        """The roster -- every printer Kiln lists -- plus the profiles held."""
         profiles = list_slicer_profiles()
         assert "default" in profiles
         assert "ender3" in profiles
         assert "bambu_x1c" in profiles
+        assert "kilntest_open" in profiles
 
     def test_returns_list_of_strings(self) -> None:
         profiles = list_slicer_profiles()
@@ -221,9 +208,9 @@ class TestSlicerProfileToDict:
     """Tests for slicer_profile_to_dict() serialization."""
 
     def test_roundtrip_contains_all_fields(self) -> None:
-        profile = get_slicer_profile("ender3")
+        profile = get_slicer_profile("kilntest_open")
         d = slicer_profile_to_dict(profile)
-        assert d["id"] == "ender3"
+        assert d["id"] == "kilntest_open"
         assert d["display_name"] == profile.display_name
         assert d["slicer"] == profile.slicer
         assert d["notes"] == profile.notes
@@ -247,7 +234,15 @@ class TestSlicerProfileToDict:
 # ===================================================================
 
 class TestSlicerProfilesJSON:
-    """Tests for the bundled slicer_profiles.json data file."""
+    """The bundled slicer_profiles.json: a roster plus the generic profile.
+
+    (The session fixture points ``_DATA_FILE`` at a copy carrying the
+    synthetic full rows; the shape rules below hold for both.)  That every
+    catalogued printer's record states the required settings and marks a
+    CFS changer hardware-unverified is pinned beside the records, in
+    kiln-pro's ``tests/test_printer_catalogue.py`` and
+    ``tests/test_printer_catalogue_numbers.py``.
+    """
 
     REQUIRED_SETTINGS_KEYS = [
         "layer_height",
@@ -261,43 +256,28 @@ class TestSlicerProfilesJSON:
         raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
         assert isinstance(raw, dict)
 
-    def test_all_profiles_have_settings_dict(self) -> None:
+    def test_every_full_row_states_the_required_settings(self) -> None:
         raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
-        for key, data in raw.items():
-            if key.startswith("_"):
-                continue
-            assert "settings" in data, f"Profile '{key}' missing 'settings'"
+        full = {k: v for k, v in raw.items() if not k.startswith("_") and "settings" in v}
+        assert "default" in full
+        for key, data in full.items():
             assert isinstance(data["settings"], dict)
-
-    def test_all_profiles_have_required_settings_keys(self) -> None:
-        raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
-        for key, data in raw.items():
-            if key.startswith("_"):
-                continue
-            settings = data["settings"]
             for req_key in self.REQUIRED_SETTINGS_KEYS:
-                assert req_key in settings, (
-                    f"Profile '{key}' missing required setting '{req_key}'"
-                )
+                assert req_key in data["settings"], f"Profile '{key}' missing required setting '{req_key}'"
+            assert isinstance(data.get("tool_change"), dict), f"Profile '{key}' missing 'tool_change'"
 
-    def test_all_profiles_have_display_name(self) -> None:
+    def test_every_row_has_a_display_name_and_a_roster_row_nothing_else(self) -> None:
         raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
         for key, data in raw.items():
             if key.startswith("_"):
                 continue
             assert "display_name" in data, f"Profile '{key}' missing 'display_name'"
+            if "settings" not in data:
+                assert set(data) == {"display_name"}, f"roster row '{key}' carries {sorted(data)}"
 
-    def test_cfs_tool_changes_are_hardware_unverified(self) -> None:
+    def test_the_addon_table_stays_bundled(self) -> None:
         raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
-        for key, data in raw.items():
-            if key.startswith("_"):
-                continue
-            tool_change = data.get("tool_change", {})
-            if tool_change.get("tool_changer") == "cfs":
-                assert tool_change.get("hardware_unverified") is True, (
-                    f"Profile '{key}' must mark CFS slot control hardware-unverified"
-                )
-                assert tool_change.get("control_mode") == "firmware_gcode_or_creality_print"
+        assert isinstance(raw.get("_multi_material_addons"), dict)
 
 
 # ===================================================================
@@ -361,6 +341,10 @@ class TestProfileSettingsConsistency:
 # ===================================================================
 
 class TestResolveMultiextruderProfile:
+    @pytest.fixture(autouse=True)
+    def _the_a1_record(self, served_roster_records):
+        """A real printer's profile is its served record since 2026-10-12."""
+
     """Tests for resolve_multiextruder_profile() — AMS/MMU INI generation."""
 
     def test_writes_ini_file(self) -> None:
@@ -395,8 +379,9 @@ class TestResolveMultiextruderProfile:
     def test_temperature_expanded(self) -> None:
         path = resolve_multiextruder_profile("bambu_a1", 2)
         content = Path(path).read_text(encoding="utf-8")
-        # bambu_a1 temp is 220; should be 220;220 for 2-extruder
-        assert "temperature = 220;220" in content
+        # The profile's own temperature, once per extruder.
+        temperature = get_slicer_profile("bambu_a1").settings["temperature"]
+        assert f"temperature = {temperature};{temperature}" in content
 
     def test_four_extruder_semicolons(self) -> None:
         path = resolve_multiextruder_profile("bambu_a1", 4)
@@ -450,6 +435,10 @@ class TestResolveMultiextruderProfile:
 # ===================================================================
 
 class TestRelativeExtrusionNeedsLayerReset:
+    @pytest.fixture(autouse=True)
+    def _the_bambu_records(self, served_roster_records):
+        """The Bambu rows' profiles are their served records since 2026-10-12."""
+
     """A relative-E profile with no per-layer E reset does not slice.
 
     PrusaSlicer refuses such a profile on a Marlin flavour: it writes the
@@ -586,6 +575,11 @@ _START_GCODE_EXEMPT: dict[str, str] = {
 
 
 class TestStartGcodeWarmsUpBeforeExtruding:
+    @pytest.fixture(autouse=True)
+    def _the_records(self, served_roster_records):
+        """Every roster printer's profile is its served record since
+        2026-10-12; the guard walks the roster with each one in hand."""
+
     """No bundled profile may reach a printer without a warm-up.
 
     ``start_gcode`` arrived as a Bambu implementation detail — nine profiles

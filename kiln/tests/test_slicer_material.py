@@ -301,6 +301,10 @@ class TestTheSliceIsSetForTheMaterial:
 
 
 class TestProfileOrigin:
+    @pytest.fixture(autouse=True)
+    def _the_a1_record(self, served_roster_records):
+        """A real printer's profile is its served record since 2026-10-12."""
+
     def test_a_bundled_profile_names_its_printer_and_states_nothing(self):
         origin = profile_origin(resolve_slicer_profile("bambu_a1"))
         assert (origin.kiln, origin.printer_id, origin.stated) == (True, "bambu_a1", frozenset())

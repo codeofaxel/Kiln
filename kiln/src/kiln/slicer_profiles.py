@@ -1,9 +1,20 @@
-"""Bundled slicer profiles for per-printer G-code generation.
+"""Slicer profiles for per-printer G-code generation.
 
-Ships a curated JSON database of PrusaSlicer/OrcaSlicer settings keyed
-by printer model.  The settings are written to a temporary ``.ini`` file
-at slicing time, so agents never need to supply or manage external
-profile files.
+The bundled ``slicer_profiles.json`` is a ROSTER since 2026-10-12: each
+printer's row carries its name, and the tuned PrusaSlicer/OrcaSlicer
+settings a printer slices with are its catalogue record's ``slicer`` block
+(kiln-pro's, https://kiln3d.com), fetched ONE printer at a time through
+:mod:`kiln._pro_catalogue_bridge` the first time a door asks and parsed into
+this module's cache -- the same way :mod:`kiln.safety_profiles` takes a
+printer's limits.  The generic ``default`` profile and the multi-material
+add-on table stay bundled whole.  The settings are written to a temporary
+``.ini`` file at slicing time, so agents never need to supply or manage
+external profile files.
+
+A roster printer whose record is not in hand (a signed-out install, a first
+setup offline) slices with the generic profile on the generic bed, and the
+``.ini`` says so on its origin line (:class:`ProfileOrigin.standing_in_for`),
+so no door mistakes the generic numbers for that machine's.
 
 Usage::
 
@@ -77,8 +88,32 @@ _FREE_PROFILES: frozenset[str] = frozenset(
 # Singleton cache
 # ---------------------------------------------------------------------------
 
+#: The profiles this process HOLDS, by id: the bundled full rows (the generic
+#: profile; a fixture's rows) and every record block a door has fetched.
 _cache: dict[str, SlicerProfile] = {}
+#: The raw row behind each held profile (``display_name``, ``slicer``,
+#: ``notes``, ``settings``, ``tool_change``), for the readers that want the
+#: tool-change record rather than a :class:`SlicerProfile`.
+_raw_rows: dict[str, dict[str, Any]] = {}
+#: The roster: ``{id: display_name}`` for every printer the bundled file
+#: lists, whether or not its profile is in hand.
+_roster: dict[str, str] = {}
 _loaded: bool = False
+
+
+def _tier_of(key: str) -> str:
+    return "free" if key in _FREE_PROFILES else "pro"
+
+
+def _parse_profile(key: str, data: dict[str, Any]) -> SlicerProfile:
+    return SlicerProfile(
+        id=key,
+        display_name=str(data.get("display_name") or key),
+        slicer=str(data.get("slicer") or "prusaslicer"),
+        notes=str(data.get("notes") or ""),
+        settings={str(k): str(v) for k, v in dict(data.get("settings") or {}).items()},
+        tier=_tier_of(key),
+    )
 
 
 def _load() -> None:
@@ -94,23 +129,76 @@ def _load() -> None:
         return
 
     for key, data in raw.items():
-        if key.startswith("_"):
+        if key.startswith("_") or not isinstance(data, dict):
+            continue
+        if "settings" not in data:
+            # A roster row: the printer exists and has a name; its profile
+            # is fetched per printer.  Never a profile.
+            _roster[key] = str(data.get("display_name") or key)
             continue
         try:
-            tier = "free" if key in _FREE_PROFILES else "pro"
-            _cache[key] = SlicerProfile(
-                id=key,
-                display_name=data.get("display_name", key),
-                slicer=data.get("slicer", "prusaslicer"),
-                notes=data.get("notes", ""),
-                settings=dict(data.get("settings", {})),
-                tier=tier,
-            )
+            _cache[key] = _parse_profile(key, data)
+            _raw_rows[key] = dict(data)
         except (KeyError, TypeError, ValueError) as exc:
             logger.warning("Skipping malformed slicer profile '%s': %s", key, exc)
 
     _loaded = True
-    logger.debug("Loaded %d slicer profiles from %s", len(_cache), _DATA_FILE)
+    logger.debug(
+        "Loaded %d slicer profiles and a roster of %d from %s", len(_cache), len(_roster), _DATA_FILE,
+    )
+
+
+def _reset() -> None:
+    """Drop every held profile and the roster (tests, and a deliberate reload)."""
+    global _loaded
+    _cache.clear()
+    _raw_rows.clear()
+    _roster.clear()
+    _temp_cache.clear()
+    _loaded = False
+
+
+def _catalogue_here() -> bool:
+    try:
+        from kiln.printer_intelligence import catalogue_here
+
+        return catalogue_here()
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _fetch_profile(spelling: str) -> SlicerProfile | None:
+    """The catalogue's profile for *spelling*, parsed into ``_cache``, or
+    ``None`` when the catalogue has no row for it or nothing answered.
+
+    One resolver for every per-printer block
+    (:func:`kiln.printer_intelligence.catalogue_block`): the slicer profile
+    lands under the same id the spec sheet and the ceilings did.
+    """
+    if not spelling or spelling == "default":
+        return None
+    try:
+        from kiln.printer_intelligence import catalogue_block
+
+        found = catalogue_block(spelling, "slicer")
+    except Exception:  # noqa: BLE001 -- the bridge never raises; a lookup never fails for it
+        logger.debug("slicer profile not fetched", exc_info=True)
+        return None
+    if found is None:
+        return None
+    key, block = found
+    held = _cache.get(key)
+    if held is not None:
+        return held
+    try:
+        profile = _parse_profile(key, block)
+    except (KeyError, TypeError, ValueError) as exc:
+        logger.warning("Skipping malformed served slicer profile '%s': %s", key, exc)
+        return None
+    _cache[key] = profile
+    _raw_rows[key] = dict(block)
+    _roster.setdefault(key, profile.display_name)
+    return profile
 
 
 # ---------------------------------------------------------------------------
@@ -705,7 +793,11 @@ def _apply_profile_invariants(settings: dict[str, str]) -> None:
 def get_slicer_profile(printer_id: str) -> SlicerProfile:
     """Return the slicer profile for *printer_id*.
 
-    Falls back to ``"default"`` if no specific profile matches.
+    Exact among the profiles held, else the catalogue's record (fetched once
+    per printer and held), else -- with no catalogue on this computer to
+    give a final answer -- the prefix rule over the profiles held, else
+    ``"default"``: the generic profile, which is what a roster printer with
+    no record in hand slices with.
 
     Args:
         printer_id: Short identifier (case-insensitive, hyphens normalised).
@@ -720,11 +812,25 @@ def get_slicer_profile(printer_id: str) -> SlicerProfile:
         if profile is not None:
             return profile
 
-    # Fuzzy prefix match.
-    for key in _cache:
-        for candidate in candidates:
-            if candidate.startswith(key) or key.startswith(candidate):
-                return _cache[key]
+    # Not held here: the catalogue's answer, by the roster id when a
+    # spelling names one outright (one ask, never one per spelling), else by
+    # the spelling itself.
+    listed = next((c for c in candidates if c in _roster), None)
+    fetched = _fetch_profile(listed or (candidates[0] if candidates else ""))
+    if fetched is not None:
+        return fetched
+    if not _catalogue_here():
+        # No answer (offline, signed out, the service silent): the prefix
+        # rule over whatever this process already holds, as before.  With
+        # kiln-pro here its "no row" is final (see
+        # safety_profiles._curated_match for why a prefix hit would be wrong
+        # on a shared server).
+        for key in _cache:
+            if key == "default":
+                continue
+            for candidate in candidates:
+                if candidate.startswith(key) or key.startswith(candidate):
+                    return _cache[key]
 
     default = _cache.get("default")
     if default is not None:
@@ -732,10 +838,67 @@ def get_slicer_profile(printer_id: str) -> SlicerProfile:
     raise KeyError(f"No slicer profile for '{printer_id}' and no default available.")
 
 
-def list_slicer_profiles() -> list[str]:
-    """Return all available slicer profile IDs sorted alphabetically."""
+def raw_profile(printer_id: str) -> dict[str, Any] | None:
+    """The raw profile row for the EXACT id *printer_id* (``settings``,
+    ``tool_change``, ...), held or fetched, or ``None``.  Never a prefix hit
+    and never the generic row: the estimator reads a tool-change record off
+    it, and a sibling's would be a wrong fact stated confidently."""
     _load()
-    return sorted(_cache.keys())
+    key = (printer_id or "").lower().replace("-", "_").strip()
+    if not key:
+        return None
+    held = _raw_rows.get(key)
+    if held is not None:
+        return dict(held)
+    if key == "default" or key not in _roster:
+        return None
+    fetched = _fetch_profile(key)
+    if fetched is None or fetched.id != key:
+        return None
+    return dict(_raw_rows[key])
+
+
+def list_slicer_profiles() -> list[str]:
+    """Every printer the roster lists (plus the profiles held), by id."""
+    _load()
+    return sorted(set(_roster) | set(_cache))
+
+
+def roster_display_name(printer_id: str) -> str | None:
+    """The bundled roster's name for a CANONICAL id, or ``None``."""
+    _load()
+    key = (printer_id or "").lower().replace("-", "_").strip()
+    held = _cache.get(key)
+    return held.display_name if held is not None else _roster.get(key)
+
+
+def roster_entries() -> list[dict[str, Any]]:
+    """One entry per roster printer -- ``id``, ``display_name``, ``tier`` and
+    ``slicer`` -- for a listing door.  ``slicer`` (which backend the profile
+    is tuned for) is read off the profile where it is in hand and is
+    ``None`` otherwise.  With kiln-pro's catalogue on this computer every
+    profile is a dict read away and all are resolved; on an install whose
+    records are served, a listing never asks the servers for the whole
+    roster -- that is the harvest the per-printer wire exists to prevent.
+    """
+    _load()
+    resolve_all = _catalogue_here()
+    entries: list[dict[str, Any]] = []
+    for key in list_slicer_profiles():
+        profile = _cache.get(key)
+        if profile is None and resolve_all:
+            profile = _fetch_profile(key)
+            if profile is not None and profile.id != key:
+                profile = None
+        entries.append(
+            {
+                "id": key,
+                "display_name": profile.display_name if profile else _roster.get(key, key),
+                "slicer": profile.slicer if profile else None,
+                "tier": _tier_of(key),
+            }
+        )
+    return entries
 
 
 def resolve_slicer_profile(
@@ -780,6 +943,7 @@ def resolve_slicer_profile(
     # start floor quotes, change a speed a derived one is tied to, or state
     # a flow ceiling or machine limits of its own.
     _apply_printer_invariants(merged, profile.id)
+    standing_in_for = generic_stand_in(printer_id, profile)
 
     # Build a cache key from what the file records beside the settings: the
     # nozzle answer (two machines can reach the same settings for different
@@ -787,12 +951,16 @@ def resolve_slicer_profile(
     # stated (an override equal to the printer's own value is still theirs).
     stated = sorted(overrides or ())
     fit_key = _settings_hash({**merged, _NOZZLE_FIT_MARK: json.dumps(fit, sort_keys=True)})
-    cache_key = f"{profile.id}:{fit_key}:{','.join(stated)}"
+    cache_key = f"{profile.id}:{fit_key}:{','.join(stated)}:{standing_in_for or ''}"
     if cache_key in _temp_cache and os.path.isfile(_temp_cache[cache_key]):
         return _temp_cache[cache_key]
 
     ini_content = _with_nozzle_fit(
-        _settings_to_ini(merged, profile.display_name, printer_id=profile.id, stated=stated), fit,
+        _settings_to_ini(
+            merged, profile.display_name, printer_id=profile.id, stated=stated,
+            standing_in_for=standing_in_for,
+        ),
+        fit,
     )
 
     tmp_dir = os.path.join(tempfile.gettempdir(), "kiln_slicer_profiles")
@@ -874,6 +1042,8 @@ def profile_with_overrides(
                 lines.append(raw)
         if origin.kiln:
             at = 2 if len(lines) > 1 and lines[1].startswith(_PRINTER_LINE) else 1
+            # The stated line only: the stand-in line, when there is one,
+            # was kept where it stood by the loop above.
             lines[at:at] = _origin_lines(None, origin.stated | newly_stated)
     else:
         lines.append(f"{_KILN_HEADER}overrides only")
@@ -1218,15 +1388,34 @@ def resolve_multiextruder_profile(
 # ---------------------------------------------------------------------------
 
 
+def generic_stand_in(printer_id: str | None, profile: SlicerProfile) -> str | None:
+    """The roster id the generic profile is standing in for, or ``None``.
+
+    A roster printer whose record is not in hand slices with the generic
+    profile; this is how the file, and every door that reads it back, can
+    say so instead of passing the generic numbers off as that machine's.
+    ``None`` for the printer's own profile, for the generic profile asked
+    for by name, and for a printer the roster does not list.
+    """
+    if profile.id != "default":
+        return None
+    key = (printer_id or "").lower().replace("-", "_").strip()
+    if not key or key == "default":
+        return None
+    _load()
+    return key if key in _roster else None
+
+
 def _settings_to_ini(
     settings: dict[str, str],
     header: str = "",
     *,
     printer_id: str | None = None,
     stated: Iterable[str] = (),
+    standing_in_for: str | None = None,
 ) -> str:
     """Convert a flat dict to PrusaSlicer INI format, with its origin on top."""
-    lines = [f"{_KILN_HEADER}{header}", *_origin_lines(printer_id, stated), ""]
+    lines = [f"{_KILN_HEADER}{header}", *_origin_lines(printer_id, stated, standing_in_for), ""]
     for key in sorted(settings):
         lines.append(f"{key} = {settings[key]}")
     lines.append("")
@@ -1244,11 +1433,18 @@ _KILN_HEADER = "# Kiln auto-generated profile: "
 _PRINTER_LINE = "# kiln-printer: "
 #: The keys a caller (or a door, for the caller) stated on top of it.
 _STATED_LINE = "# kiln-stated: "
+#: The roster printer the generic profile is standing in for, when it is.
+_STAND_IN_LINE = "# kiln-generic-for: "
 
 
-def _origin_lines(printer_id: str | None, stated: Iterable[str]) -> list[str]:
+def _origin_lines(
+    printer_id: str | None, stated: Iterable[str], standing_in_for: str | None = None,
+) -> list[str]:
     lines = [f"{_PRINTER_LINE}{printer_id}"] if printer_id else []
-    return [*lines, f"{_STATED_LINE}{' '.join(sorted(set(stated)))}".rstrip()]
+    lines.append(f"{_STATED_LINE}{' '.join(sorted(set(stated)))}".rstrip())
+    if standing_in_for:
+        lines.append(f"{_STAND_IN_LINE}{standing_in_for}")
+    return lines
 
 
 @dataclass(frozen=True)
@@ -1269,6 +1465,9 @@ class ProfileOrigin:
     kiln: bool
     printer_id: str | None = None
     stated: frozenset[str] = frozenset()
+    #: The roster printer the generic profile stood in for -- the record was
+    #: not in hand when the file was written -- or ``None``.
+    standing_in_for: str | None = None
 
 
 def profile_origin(path: str | None) -> ProfileOrigin:
@@ -1277,19 +1476,22 @@ def profile_origin(path: str | None) -> ProfileOrigin:
         return ProfileOrigin(kiln=False)
     try:
         with open(path, encoding="utf-8") as fh:
-            head = [fh.readline().rstrip("\n") for _ in range(4)]
+            head = [fh.readline().rstrip("\n") for _ in range(5)]
     except (OSError, UnicodeDecodeError):
         return ProfileOrigin(kiln=False)
     if not head[0].startswith(_KILN_HEADER):
         return ProfileOrigin(kiln=False)
     printer_id: str | None = None
     stated: frozenset[str] = frozenset()
+    standing_in_for: str | None = None
     for line in head[1:]:
         if line.startswith(_PRINTER_LINE):
             printer_id = line[len(_PRINTER_LINE):].strip() or None
         elif line.startswith(_STATED_LINE.rstrip()):
             stated = frozenset(line[len(_STATED_LINE.rstrip()):].split())
-    return ProfileOrigin(kiln=True, printer_id=printer_id, stated=stated)
+        elif line.startswith(_STAND_IN_LINE):
+            standing_in_for = line[len(_STAND_IN_LINE):].strip() or None
+    return ProfileOrigin(kiln=True, printer_id=printer_id, stated=stated, standing_in_for=standing_in_for)
 
 
 def _settings_hash(settings: dict[str, str]) -> str:
