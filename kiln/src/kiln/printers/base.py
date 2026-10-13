@@ -5027,6 +5027,32 @@ class PrinterAdapter(ABC):
         config = reader()
         return None if config is None else ("klipper_config", config)
 
+    def read_machine_limits(self) -> dict[str, Any] | None:
+        """The limits this machine states about itself, as a proposal, or ``None``.
+
+        The shape :func:`kiln.machine_limits.limits_from_klipper_config`
+        returns -- the profile ``add_safety_profile`` takes, the config
+        line each number came from, and what the config left unstated.
+        Read fresh on every call, never from the motion cache: a person is
+        about to confirm these numbers, so they are the file as it is now.
+        Only a backend that exposes Moonraker's ``configfile`` object can
+        answer; every other backend answers ``None``, and so does a Klipper
+        machine that could not be asked.  Nothing is written anywhere.
+        """
+        reader = getattr(self, "get_printer_config", None)
+        if reader is None:
+            return None
+        try:
+            config = reader()
+        except PrinterEngagementError:
+            raise  # the one-printer rule's refusal names the other machine; it is the answer
+        except Exception as exc:  # noqa: BLE001 -- a limit Kiln cannot read is one it does not propose
+            logger.debug("limits: %s could not read its config: %s", self.name, exc)
+            return None
+        from kiln.machine_limits import limits_from_klipper_config
+
+        return limits_from_klipper_config(config)
+
     def _count_motion_refusal(self, code: str, reason: str) -> None:
         """One tally per refusal, keyed by model, code and why -- the only trace it leaves.
 

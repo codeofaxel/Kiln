@@ -116,6 +116,65 @@ def _limits_confirmed_by_a_person(printer_model: str, profile: dict) -> Any:
     return _srv._error_dict(lead + how, code="CONFIRMATION_REQUIRED", extra={"code_shown": outcome})
 
 
+def _limits_read_off_the_printer(printer_model: str, printer_name: str) -> dict:
+    """The limits the connected printer states for itself, as a proposal
+    (``{"profile", "read", "missing"}``), or the refusal that says why
+    nothing could be read and what to pass instead.
+
+    A Klipper machine through Moonraker states its heater ceilings, travel
+    and velocity in its own configuration; nothing else does.  Read on the
+    machine the printer is set up on, never the hosted server.
+    """
+    import kiln.server as _srv
+    from kiln.printers.base import PrinterEngagementError, PrinterError
+    from kiln.runtime_env import is_hosted_multitenant
+
+    say_profile = "State the limits yourself in `profile` (from the maker's own spec page, never a guess)."
+    or_say_profile = "or state them yourself in `profile` (from the maker's own spec page, never a guess)."
+    if is_hosted_multitenant():
+        return _srv._error_dict(
+            f"Limits for {printer_model!r} can be read off the printer only on the machine it is set up on, "
+            "and the hosted server is not that machine. " + say_profile,
+            code="NOT_HERE",
+        )
+    try:
+        adapter = _srv._resolve_adapter(printer_name or None)
+    except Exception as exc:  # noqa: BLE001 -- no printer, a misnamed one, a bad config: one refusal
+        return _srv._error_dict(
+            f"No printer to read limits from ({exc}). Name a registered printer in `printer_name`, or "
+            + say_profile,
+            code="PRINTER_NOT_FOUND",
+        )
+    try:
+        proposal = adapter.read_machine_limits()
+    except PrinterEngagementError as exc:
+        return _srv._error_dict(
+            _srv.engagement_refusal_words(exc.verdict),
+            code=str(exc.verdict.get("code") or "TIER_SINGLE_PRINTER_LIMIT"),
+        )
+    except PrinterError as exc:
+        return _srv._error_dict(
+            f"{adapter.name} could not be asked for its configuration ({exc}). Try again when it is "
+            "reachable, " + or_say_profile,
+            code="PRINTER_UNREACHABLE", retryable=True,
+        )
+    if proposal is None:
+        return _srv._error_dict(
+            f"{adapter.name} does not state its own limits: only a Klipper machine reached through "
+            "Moonraker does, and this one is not one or exposes no configuration. " + say_profile,
+            code="MACHINE_STATES_NO_LIMITS",
+        )
+    if proposal["missing"]:
+        return _srv._error_dict(
+            f"{adapter.name}'s configuration states {', '.join(proposal['read'])} but not "
+            f"{', '.join(proposal['missing'])}. Pass the full `profile`, keeping the numbers it did state "
+            "(in `proposal`) and adding the rest from the maker's own spec page.",
+            code="MACHINE_STATES_PARTIAL_LIMITS",
+            extra={"proposal": proposal["profile"], "read_from_printer": proposal["read"], "missing": proposal["missing"]},
+        )
+    return proposal
+
+
 class _SafetyToolsPlugin:
     """Safety audit, dashboard, settings, and profile management tools.
 
@@ -489,7 +548,7 @@ class _SafetyToolsPlugin:
         # ------------------------------------------------------------------
 
         @mcp.tool()
-        def add_safety_profile(printer_model: str, profile: dict) -> dict:
+        def add_safety_profile(printer_model: str, profile: dict | None = None, printer_name: str = "") -> dict:
             """Add a local safety-profile override for a printer model.  Free at every tier.
 
             Validates the profile and saves it to this machine's override file
@@ -521,6 +580,16 @@ class _SafetyToolsPlugin:
             person to type numbers they do not know.  The code is the
             confirmation; nothing you can call stands in for it.
 
+            A Klipper printer that is set up here can state them itself.
+            Leave ``profile`` out and Kiln reads the heater ceilings, travel
+            and velocity limit off the printer's own configuration (through
+            Moonraker), puts them in front of the person as ``proposal`` with
+            the configuration lines they came from, and takes the same code.
+            The saved limits are labelled as read from that printer.  A
+            printer that cannot state them (any other backend) says so and
+            asks for ``profile``; a configuration that states only some of
+            them hands those back in ``proposal`` for you to complete.
+
             Args:
                 printer_model: Short identifier for the printer (e.g.
                     ``"my_custom_corexy"``).
@@ -528,7 +597,11 @@ class _SafetyToolsPlugin:
                     ``max_bed_temp``, ``max_feedrate``, and ``build_volume``
                     (a list of 3 positive numbers ``[X, Y, Z]``).  Optional
                     fields: ``display_name``, ``max_chamber_temp``, ``min_safe_z``,
-                    ``max_volumetric_flow``, ``notes``.
+                    ``max_volumetric_flow``, ``notes``.  Omit it to read the
+                    limits off the printer.
+                printer_name: Which registered printer to read the limits
+                    off when ``profile`` is omitted; the default printer
+                    when empty.  Ignored when ``profile`` is given.
             """
             if err := _srv._check_auth("safety"):
                 return err
@@ -539,26 +612,37 @@ class _SafetyToolsPlugin:
                     validate_safety_profile,
                 )
 
+                read: dict = {}
+                if not profile:
+                    proposal = _limits_read_off_the_printer(printer_model, printer_name)
+                    if "profile" not in proposal:
+                        return proposal
+                    profile, read = proposal["profile"], proposal["read"]
+                # What the person is confirming rides on every reply when the
+                # numbers were read off the printer: they never typed them.
+                shown = {"proposal": profile, "read_from_printer": read} if read else {}
                 errors = validate_safety_profile(profile)
                 if errors:
                     return _srv._error_dict(
                         f"Validation failed: {'; '.join(errors)}",
-                        code="VALIDATION_ERROR",
+                        code="VALIDATION_ERROR", extra=shown or None,
                     )
                 confirmed = False
                 if limits_above_floor(printer_model, profile):
                     if (wall := _needs_a_sign_in(printer_model)) is not None:
-                        return wall
+                        return {**wall, **shown}
                     answered = _limits_confirmed_by_a_person(printer_model, profile)
                     if answered is not True:
-                        return answered
+                        return {**answered, **shown}
                     confirmed = True
                 set_local_printer_override(printer_model, profile, confirmed=confirmed)
                 return {
                     "success": True,
                     "printer_model": printer_model.lower().replace("-", "_").strip(),
                     "message": "Local printer override saved successfully."
-                    + (" The person confirmed these limits." if confirmed else ""),
+                    + (" The person confirmed these limits." if confirmed else "")
+                    + (" They were read off the printer's own configuration." if read else ""),
+                    **shown,
                 }
             except ValueError as exc:
                 return _srv._error_dict(

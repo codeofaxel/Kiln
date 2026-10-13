@@ -1067,9 +1067,10 @@ def warm_profile(printer_id: str) -> str | None:
         # the conversion marker.
         sentence = (
             f"Kiln doesn't know the {spelling!r} yet, so it holds it to generic limits "
-            f"({hotend:g} C hotend, {bed:g} C bed). Sign in free, and your agent can find its real "
-            "limits on the maker's own spec page (add_safety_profile) or you can enter them; you "
-            "confirm them with a code on this screen, as a print start is."
+            f"({hotend:g} C hotend, {bed:g} C bed). Sign in free, and your agent can read its real "
+            "limits off the printer itself (a Klipper machine), find them on the maker's own spec "
+            "page, or you can enter them (add_safety_profile); you confirm them with a code on this "
+            "screen, as a print start is."
         )
         _count_limits_offer("offered_limits_unknown", spelling)
     else:
@@ -1077,9 +1078,10 @@ def warm_profile(printer_id: str) -> str | None:
         # so no offer is counted.
         sentence = (
             f"Kiln doesn't know the {spelling!r} yet, so it holds it to generic limits "
-            f"({hotend:g} C hotend, {bed:g} C bed). Your agent can find its real limits on the "
-            "maker's own spec page (add_safety_profile) or you can enter them; you confirm them "
-            "with a code on this screen, as a print start is."
+            f"({hotend:g} C hotend, {bed:g} C bed). Your agent can read its real limits off the "
+            "printer itself (a Klipper machine), find them on the maker's own spec page, or you can "
+            "enter them (add_safety_profile); you confirm them with a code on this screen, as a "
+            "print start is."
         )
     _nudged.add(normalised)
     _pending_nudges.append(sentence)
