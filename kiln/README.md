@@ -123,8 +123,8 @@ The full searchable list of **70 tuned printer profiles across 15 brands** is at
 
 ## Features
 
-- **<!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 937 MCP capabilities** for design intelligence, model generation, printability analysis, slicing, printing, monitoring, failure recovery, fleet management, and fulfillment
-- **<!-- KILN_CLI_COUNT:OLD --> 247 CLI commands** with `--json` output for agent consumption
+- **<!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 926 MCP capabilities** for design intelligence, model generation, printability analysis, slicing, printing, monitoring, failure recovery, fleet management, and fulfillment
+- **<!-- KILN_CLI_COUNT:OLD --> 245 CLI commands** with `--json` output for agent consumption
 - **Multi-printer fleet** management with job queue and background scheduler
 - **Model marketplaces** — search/download from MyMiniFactory, Cults3D (Thingiverse deprecated — acquired by MMF, Feb 2026)
 - **Slicer integration** — PrusaSlicer, OrcaSlicer, and BambuStudio with auto-detection
