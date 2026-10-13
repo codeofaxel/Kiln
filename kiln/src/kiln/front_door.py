@@ -436,6 +436,14 @@ GOAL_NOTES = {
         "Saved goals live with `design_session`, which is not installed here, so "
         "this make could not join goal {brief_id}; it was made as asked."
     ),
+    # Said on a make that named no goal, where the front door IS here: the
+    # moment the agent compiled directly is the moment to say what it skipped.
+    # Stateless and short on purpose -- one line, never a refusal.
+    "none_named": (
+        f"No saved goal named. Start with `{FRONT_DOOR}` to keep the goal (free) "
+        "and, on Kiln Pro, have the result checked against it; then make with "
+        f"its {GOAL_PARAM}."
+    ),
 }
 
 
@@ -447,16 +455,34 @@ def join_goal(brief_id: str, result: Any, mesh_path: str | None = None) -> Any:
     the front door's own); this public helper is the one door every make
     tool calls, so a plain install answers honestly instead of silently
     dropping the id.  ``mesh_path`` names the file when the envelope keeps
-    it under a key the join does not read.  Never raises; an empty
-    ``brief_id`` leaves the envelope untouched.
+    it under a key the join does not read.  Never raises.  An empty
+    ``brief_id`` on an install that has the real front door adds the one-line
+    nudge (``GOAL_NOTES["none_named"]``) instead of a join; on a plain install
+    it leaves the envelope untouched.
     """
-    if not brief_id or not isinstance(result, dict):
+    if not isinstance(result, dict):
         return result
-    outcome = "unavailable"
     try:
         from kiln_pro.design_brief.explicit_attach import attach_brief_id_to_result
     except Exception:  # noqa: BLE001 -- a plain install
         attach_brief_id_to_result = None
+    if not brief_id:
+        # A make that named no goal.  Where the real front door is installed
+        # (kiln-pro's join imports), say once what was skipped; on a plain
+        # install the fallback clause already says compile_scad is the loop,
+        # and a nudge toward a door that is not here would be noise.
+        if (
+            attach_brief_id_to_result is not None
+            and result.get("success", True) is not False
+            and SAVED_GOAL_KEY not in result
+        ):
+            result[SAVED_GOAL_KEY] = {
+                "brief_id": "",
+                "joined": False,
+                "note": GOAL_NOTES["none_named"],
+            }
+        return result
+    outcome = "unavailable"
     if attach_brief_id_to_result is not None:
         probe: dict[str, Any] = dict(result)
         if mesh_path:

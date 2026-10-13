@@ -326,10 +326,36 @@ class _NoKilnPro:
 
 
 class TestJoinGoal:
-    def test_no_goal_leaves_the_envelope_untouched(self):
+    def test_no_goal_on_a_plain_install_leaves_the_envelope_untouched(self, monkeypatch):
+        """Without the real front door there is nothing to point at; the
+        fallback clause already says compile_scad is the loop here."""
+        for key in [k for k in sys.modules if k == "kiln_pro" or k.startswith("kiln_pro.")]:
+            monkeypatch.delitem(sys.modules, key)
+        monkeypatch.setattr(sys, "meta_path", [_NoKilnPro(), *sys.meta_path])
         env = {"success": True, "stl_path": "/x.stl"}
         assert join_goal("", env, "/x.stl") is env
         assert SAVED_GOAL_KEY not in env
+
+    def test_no_goal_where_the_front_door_is_installed_says_what_was_skipped(self, monkeypatch):
+        """The incident's shape: a make with no goal named.  One line, at the
+        moment it was skipped, never a refusal."""
+        calls = _fake_attach(monkeypatch, True)
+        env = {"success": True, "stl_path": "/x.stl"}
+        join_goal("", env, "/x.stl")
+        assert env[SAVED_GOAL_KEY] == {
+            "brief_id": "", "joined": False, "note": GOAL_NOTES["none_named"],
+        }
+        assert FRONT_DOOR in env[SAVED_GOAL_KEY]["note"]
+        assert GOAL_PARAM in env[SAVED_GOAL_KEY]["note"]
+        assert calls == []  # nothing to join
+
+    def test_the_nudge_never_rides_a_failure_or_a_second_time(self, monkeypatch):
+        _fake_attach(monkeypatch, True)
+        failed = {"success": False, "error": "no"}
+        assert SAVED_GOAL_KEY not in join_goal("", failed)
+        said = {"success": True, SAVED_GOAL_KEY: {"brief_id": "g", "joined": True, "note": "x"}}
+        join_goal("", said)
+        assert said[SAVED_GOAL_KEY]["brief_id"] == "g"
 
     def test_joined(self, monkeypatch, tmp_path):
         calls = _fake_attach(monkeypatch, True)

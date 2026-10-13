@@ -20,16 +20,16 @@ _logger = logging.getLogger(__name__)
 def _attach_brief_to_iteration_result(
     brief_id: str, best_result: dict[str, Any],
 ) -> None:
-    """Write a ``design_brief:<id>`` intent sidecar next to the best mesh.
-
-    Best-effort: when kiln-pro isn't installed, the saved goal can't be
-    loaded, or the sidecar write fails for any reason, silently no-op
-    — the iteration result is still valid.  Same pattern as the audit
-    honor-gate hook in ``kiln.original_design``.
+    """Record the best mesh against the saved goal, through the one helper
+    every make door calls (``kiln.front_door.join_goal``), which also says
+    in the envelope what became of the id -- or, when none was named, what
+    starting with the front door would have kept.
 
     Reads the mesh path out of either ``best_result["result"]["local_path"]``
     (download_result envelope) or ``best_result["job"]["local_path"]``.
     """
+    from kiln.front_door import join_goal
+
     mesh_path: str | None = None
     for nested in ("result", "job"):
         block = best_result.get(nested)
@@ -38,18 +38,7 @@ def _attach_brief_to_iteration_result(
             if isinstance(v, str) and v:
                 mesh_path = v
                 break
-    if not mesh_path:
-        return
-    try:
-        from kiln_pro.design_brief.explicit_attach import (
-            attach_brief_id_to_result,
-        )
-        attach_brief_id_to_result(brief_id, {"local_path": mesh_path})
-    except Exception:
-        _logger.debug(
-            "iterate_design: brief sidecar attach skipped (best-effort)",
-            exc_info=True,
-        )
+    join_goal(brief_id, best_result, mesh_path)
 
 
 def _resolve_tool_build_volume(
@@ -1084,8 +1073,7 @@ class _DesignReasoningToolsPlugin:
             # all light up against the saved goal.  Best-effort — kiln-pro
             # not installed silently skips, same pattern as the audit's
             # honor-gate hook in original_design.py.
-            if brief_id:
-                _attach_brief_to_iteration_result(brief_id, best_result)
+            _attach_brief_to_iteration_result(brief_id, best_result)
 
             response = {
                 "success": True,
