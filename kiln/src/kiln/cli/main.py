@@ -5535,6 +5535,43 @@ def _get_fulfillment_provider(service: Any) -> Any:
         ) from exc
 
 
+def _order_routing(provider_name: Any, provider_order_id: Any = "") -> dict[str, Any]:
+    """The print service's terms and ownership, as every order reply carries them.
+
+    A provider without a plain-text name has no recorded terms: its reply
+    carries none rather than a name that cannot be written out.
+    """
+    from kiln.server import _provider_routing_metadata
+
+    return _provider_routing_metadata(
+        provider_name if isinstance(provider_name, str) else "",
+        provider_order_id=provider_order_id if isinstance(provider_order_id, str) else "",
+    )
+
+
+def _order_words(service: Any, message: str, *args: Any) -> list[str]:
+    """The lines the order service words for the person, or none.
+
+    The same words every other ordering door says; how an answer is worded
+    never costs the person the answer itself.
+    """
+    word = getattr(service, message, None)
+    if word is None:
+        return []
+    try:
+        return [str(line) for line in word(*args)]
+    except Exception:
+        logger.warning("Could not word the order service's %s", message, exc_info=True)
+        return []
+
+
+def _echo_words(lines: list[str]) -> None:
+    """Print worded lines ahead of the details they summarise."""
+    if lines:
+        click.echo("\n".join(lines))
+        click.echo()
+
+
 @order.command("materials")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def order_materials(json_mode: bool) -> None:
@@ -5598,7 +5635,22 @@ def order_quote(file_path: str, material: str, quantity: int, country: str, json
             fee_calc = ledger.calculate_fee(quote.total_price, currency=quote.currency)
             quote_data["kiln_fee"] = fee_calc.to_dict()
             quote_data["total_with_fee"] = float(fee_calc.total_cost)
+        # The print service's terms ride every quote, as at every other door;
+        # a quote is never lost to how its terms are read.
+        try:
+            routing = _order_routing(provider.name)
+        except Exception:
+            logger.warning("Could not read the print service's terms", exc_info=True)
+            routing = {}
+        quote_data.update(routing)
         click.echo(format_quote(quote_data, json_mode=json_mode))
+        if not json_mode:
+            terms = list(routing.get("provider_order_terms") or [])
+            if routing.get("provider_terms_url"):
+                terms.append(f"The print service's full terms: {routing['provider_terms_url']}")
+            if terms:
+                click.echo()
+                click.echo("\n".join(terms))
     except click.ClickException:
         raise
     except FileNotFoundError as exc:
@@ -5978,6 +6030,17 @@ def order_place(
     order_data = result.to_dict()
     if result.total_price and result.total_price > 0:
         _settle_order_fee(order_data, result, *fee_tools)
+    # The step that is left comes first: where to pay.
+    try:
+        routing = _order_routing(provider.name, result.order_id)
+    except Exception:
+        logger.warning("Could not read the print service's terms", exc_info=True)
+        routing = {}
+    tell = _order_words(service, "order_message", result, routing)
+    if json_mode:
+        order_data = {"tell_the_person": tell, **order_data} if tell else order_data
+    else:
+        _echo_words(tell)
     click.echo(format_order(order_data, json_mode=json_mode))
 
 
@@ -5990,7 +6053,13 @@ def order_status(order_id: str, json_mode: bool) -> None:
     try:
         provider = _get_fulfillment_provider(service)
         result = provider.get_order_status(order_id)
-        click.echo(format_order(result.to_dict(), json_mode=json_mode))
+        order_data = result.to_dict()
+        tell = _order_words(service, "status_message", result)
+        if json_mode:
+            order_data = {"tell_the_person": tell, **order_data} if tell else order_data
+        else:
+            _echo_words(tell)
+        click.echo(format_order(order_data, json_mode=json_mode))
     except click.ClickException:
         raise
     except FulfillmentError as exc:
@@ -6024,6 +6093,13 @@ def order_cancel(order_id: str, json_mode: bool) -> None:
     except click.ClickException:
         raise
     except FulfillmentError as exc:
+        from kiln.fulfillment_service import WORDED_CANCEL_REFUSALS
+
+        code = getattr(exc, "code", None)
+        if code in WORDED_CANCEL_REFUSALS:
+            # Already worded for the person, with what to do next.
+            click.echo(format_error(str(exc), code=code, json_mode=json_mode))
+            sys.exit(1)
         click.echo(
             format_error(
                 f"Failed to cancel order {order_id!r}: {exc}. The order may no longer be cancellable.",

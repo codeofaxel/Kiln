@@ -280,6 +280,128 @@ def test_fulfillment_order_requires_shipping_confirmation(registered_tools, tmp_
     assert result["error"]["code"] == "SHIPPING_NOT_CONFIRMED"
 
 
+def _service_error(service, message: str, code: str) -> Exception:
+    """The order service's error carrying ``code``, on either service."""
+    exc = service.FulfillmentError(message)
+    exc.code = code
+    return exc
+
+
+def test_order_status_leads_with_the_order_services_words(registered_tools, monkeypatch):
+    """Where the order is -- and, unpaid, where to pay -- worded by the order
+    service, first in the reply, the same words every other door says."""
+    service = order_service.provide(monkeypatch)
+    import kiln.server as server
+
+    result = SimpleNamespace(to_dict=lambda: {"order_id": "ord-1", "status": "submitted"})
+    seen: list = []
+
+    def fake_words(r):
+        seen.append(r)
+        return ["Order 1528 is waiting for payment. To start it, pay on the print service's checkout: https://pay.example"]
+
+    monkeypatch.setattr(service, "status_message", fake_words, raising=False)
+    monkeypatch.setattr(
+        server, "_get_fulfillment",
+        lambda: SimpleNamespace(name="craftcloud", get_order_status=lambda order_id: result),
+    )
+
+    reply = registered_tools["fulfillment_order_status"](order_id="ord-1")
+
+    assert list(reply)[:2] == ["success", "tell_the_person"], "the words come before the data"
+    assert reply["tell_the_person"][0].endswith("https://pay.example")
+    assert seen == [result]
+    assert reply["order"]["order_id"] == "ord-1"
+
+
+@pytest.mark.parametrize("code", ["NOTHING_TO_CANCEL", "CANCEL_NOT_SUPPORTED"])
+def test_a_cancel_the_order_service_words_in_full_is_said_as_it_is(registered_tools, monkeypatch, code):
+    """"Nothing to cancel" is not a failure to cancel something that shipped:
+    the service's own sentence reaches the person, unwrapped."""
+    service = order_service.provide(monkeypatch)
+    import kiln.licensing
+    import kiln.server as server
+
+    sentence = "Nothing to cancel: order 1528 is waiting for payment."
+
+    def refuse(order_id):
+        raise _service_error(service, sentence, code)
+
+    monkeypatch.setattr(server, "_check_billing_auth", lambda scope="print": None)
+    monkeypatch.setattr(kiln.licensing, "check_tier", lambda *a, **k: (True, ""))
+    monkeypatch.setattr(server, "_get_fulfillment", lambda: SimpleNamespace(name="craftcloud", cancel_order=refuse))
+
+    reply = registered_tools["fulfillment_cancel"](order_id="ord-1")
+
+    assert reply["success"] is False
+    assert reply["error"]["message"] == sentence
+    assert reply["error"]["code"] == code
+
+
+def test_an_order_whose_checkout_adds_shipping_and_tax_is_not_a_price_change(
+    registered_tools, tmp_path, monkeypatch,
+):
+    """A quote's price is the printing alone; the placed order states the
+    checkout's total, which adds shipping and sales tax.  Compared as they
+    were, a 16.58 quote and a 27.55 checkout read as a 66% price jump and the
+    order -- already placed -- was reported blocked, its pay link never
+    shown.  Like with like: 16.58 + 8.85 shipping against 25.43 before tax."""
+    service = order_service.provide(monkeypatch)
+    import kiln.licensing
+    import kiln.quote_cache
+    import kiln.server as server
+    from kiln.fulfillment_profiles import issue_shipping_confirmation_token, normalize_shipping_address
+    from kiln.preview_gate import get_preview_gate
+
+    model = tmp_path / "model.stl"
+    model.write_bytes(b"solid test\nendsolid test\n")
+    preview_token = get_preview_gate().issue(str(model)).token
+    shipping_token = issue_shipping_confirmation_token(
+        quote_id="quote-1", shipping_option_id="ship-1",
+        shipping_address=normalize_shipping_address(ADDRESS),
+    ).token
+
+    placed = SimpleNamespace(
+        order_id="ord-1", total_price=27.55, checkout_net=25.43,
+        to_dict=lambda: {"order_id": "ord-1", "status": "submitted", "checkout_url": "https://pay.example"},
+    )
+    provider = SimpleNamespace(name="proxy", place_order=lambda request: placed)
+    monkeypatch.setattr(server, "_check_billing_auth", lambda scope="print": None)
+    monkeypatch.setattr(kiln.licensing, "check_tier", lambda *a, **k: (True, ""))
+    monkeypatch.setattr(server, "_get_fulfillment", lambda: provider)
+    monkeypatch.setattr(
+        server, "_validate_quote_for_order",
+        lambda quote_id, provider_name=None: SimpleNamespace(quoted_price=16.58, warnings=[]),
+    )
+    monkeypatch.setattr(
+        kiln.quote_cache, "get_cached_quote_by_id",
+        lambda quote_id: SimpleNamespace(metadata={"shipping_options": [{"id": "ship-1", "price": 8.85}]}),
+    )
+    monkeypatch.setattr(service, "order_message", lambda r, routing: ["Pay here: https://pay.example"], raising=False)
+    compared: list[tuple[float, float]] = []
+
+    def record_drift(quoted, placed):
+        compared.append((quoted, placed))
+        return None, False
+
+    import sys
+
+    monkeypatch.setattr(sys.modules["kiln.fulfillment.intelligence"], "_check_price_drift", record_drift, raising=False)
+
+    reply = registered_tools["fulfillment_order"](
+        quote_id="quote-1",
+        shipping_option_id="ship-1",
+        shipping_address=ADDRESS,
+        preview_token=preview_token,
+        preview_file_path=str(model),
+        shipping_confirmation_token=shipping_token,
+    )
+
+    assert reply["success"] is True, reply
+    assert compared == [(pytest.approx(25.43), pytest.approx(25.43))], "printing + shipping vs before tax"
+    assert reply["tell_the_person"] == ["Pay here: https://pay.example"]
+
+
 def _must_not_reach(*_args, **_kwargs):
     raise AssertionError("an order tool reached for a print-service provider")
 

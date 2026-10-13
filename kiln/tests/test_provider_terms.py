@@ -57,3 +57,31 @@ def test_no_second_copy_of_the_address_in_server_source():
 
 def test_the_cancel_contact_is_recorded_once():
     assert provider_terms.CRAFTCLOUD_SUPPORT_EMAIL == "support@craftcloud3d.com"
+
+
+def test_the_pay_link_is_the_orders_own_checkout_page():
+    """A buyer pays for an order on that order's own checkout page, named by
+    the service's id for the order -- never by the number they quote to
+    support -- and an order nothing is known about gets no link at all."""
+    order_id = "20106a2d-1fc5-4a04-8393-6139e5803dfd"
+    assert provider_terms.checkout_url("Craftcloud", order_id) == (
+        f"https://craftcloud3d.com/order/{order_id}/checkout"
+    )
+    assert provider_terms.checkout_url("craftcloud", "") == ""
+    assert provider_terms.checkout_url("nobody", order_id) == ""
+    assert provider_terms.checkout_url("craftcloud", "../x?y") == (
+        "https://craftcloud3d.com/order/..%2Fx%3Fy/checkout"
+    ), "an id never reshapes the address"
+
+
+def test_every_quote_says_sales_tax_is_added_at_checkout():
+    """The quoted price is before tax; the checkout adds sales tax where it
+    applies, so the buyer hears it with the price."""
+    line = "Sales tax, where it applies, is added at Craftcloud's checkout."
+    assert line in provider_terms.order_terms("craftcloud")
+    assert line in server._provider_routing_metadata("craftcloud")["provider_order_terms"]
+
+
+def test_how_long_an_unpaid_order_stays_open_is_recorded_once():
+    assert provider_terms.unpaid_expiry_days("Craftcloud") == provider_terms.CRAFTCLOUD_UNPAID_EXPIRY_DAYS == 90
+    assert provider_terms.unpaid_expiry_days("nobody") is None, "not recorded, never 'never expires'"

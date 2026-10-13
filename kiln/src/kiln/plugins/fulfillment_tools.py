@@ -35,7 +35,12 @@ from kiln.fulfillment_profiles import (
 from kiln.fulfillment_profiles import (
     validate_shipping_confirmation_token as _validate_shipping_confirmation_token,
 )
-from kiln.fulfillment_service import NOT_INCLUDED, NOT_INCLUDED_CODE, order_service
+from kiln.fulfillment_service import (
+    NOT_INCLUDED,
+    NOT_INCLUDED_CODE,
+    WORDED_CANCEL_REFUSALS,
+    order_service,
+)
 from kiln.preview_gate import get_preview_gate
 
 _logger = logging.getLogger(__name__)
@@ -68,6 +73,47 @@ def _normalize_save_profile_decision(raw: str) -> str:
     if value in {"no", "n", "do_not_save", "dont_save", "false"}:
         return "do_not_save"
     return ""
+
+
+def _drift_prices(
+    quoted_price: float,
+    result: Any,
+    *,
+    quote_id: str,
+    shipping_option_id: str,
+) -> tuple[float, float]:
+    """The quoted and placed prices to compare for a price change, like with like.
+
+    A quote's price is the printing alone; a placed order states what the
+    print service's checkout charges, which adds shipping and any tax.  When
+    the order states its total before tax and the quote recorded the
+    shipping option that was chosen, the comparison is printing plus that
+    shipping against the checkout's total before tax: tax is added at the
+    checkout and is never a change of price.  Otherwise the comparison is
+    the one it has always been.
+    """
+    placed = result.total_price
+    before_tax = getattr(result, "checkout_net", None)
+    if not isinstance(before_tax, (int, float)):
+        return quoted_price, placed
+    try:
+        from kiln.quote_cache import get_cached_quote_by_id
+
+        cached = get_cached_quote_by_id(quote_id)
+    except Exception:
+        cached = None
+    options = ((getattr(cached, "metadata", None) or {}).get("shipping_options")) or []
+    shipping = next(
+        (
+            option.get("price")
+            for option in options
+            if isinstance(option, dict) and option.get("id") == shipping_option_id
+        ),
+        None,
+    )
+    if not isinstance(shipping, (int, float)):
+        return quoted_price, placed
+    return quoted_price + float(shipping), float(before_tax)
 
 
 def _validate_preview_confirmation(
@@ -614,9 +660,11 @@ class _FulfillmentToolsPlugin:
 
             Use ``fulfillment_order_status`` to track progress after placing.
 
-            The reply opens with ``tell_the_person`` (the payment link, the
-            print service's order terms and a link to them); pass every line
-            on to the person word for word.
+            Nothing is made until the person pays on the print service's
+            checkout, so the reply opens with ``tell_the_person``: the link to
+            pay first, then the checkout total with any tax, the print
+            service's order terms and a link to them. Pass every line on to
+            the person word for word.
             """
             import kiln.server as _srv
 
@@ -887,8 +935,12 @@ class _FulfillmentToolsPlugin:
                     from kiln.fulfillment.intelligence import _check_price_drift
 
                     drift_warning, should_block = _check_price_drift(
-                        quote_validation.quoted_price,
-                        result.total_price,
+                        *_drift_prices(
+                            quote_validation.quoted_price,
+                            result,
+                            quote_id=quote_id,
+                            shipping_option_id=shipping_option_id,
+                        )
                     )
                     if should_block:
                         _logger.error(
@@ -936,6 +988,10 @@ class _FulfillmentToolsPlugin:
                 order_id: Order ID from ``fulfillment_order``.
 
             Returns current order state, tracking info, and estimated delivery.
+
+            The reply opens with ``tell_the_person``: where the order is and,
+            while it is unpaid, the link to pay for it. Pass every line on to
+            the person word for word.
             """
             import kiln.server as _srv
 
@@ -954,10 +1010,20 @@ class _FulfillmentToolsPlugin:
                         provider_order_id=order_id,
                     )
                 )
-                return {
-                    "success": True,
-                    "order": order_data,
-                }
+                # The message first, worded by the order service.  How a
+                # status is worded never costs the person the status.
+                reply: dict = {"success": True}
+                message = getattr(service, "status_message", None)
+                if message is not None:
+                    try:
+                        tell = message(result)
+                    except Exception:
+                        _logger.warning("Could not word the status of %s", order_id, exc_info=True)
+                        tell = []
+                    if tell:
+                        reply["tell_the_person"] = tell
+                reply["order"] = order_data
+                return reply
             except (FulfillmentError, RuntimeError) as exc:
                 return _srv._error_dict(
                     f"Failed to check order status: {exc}. Verify the order_id is correct."
@@ -975,7 +1041,10 @@ class _FulfillmentToolsPlugin:
             Args:
                 order_id: Order ID to cancel.
 
-            Only orders that have not yet shipped can be cancelled.
+            Only orders that have not yet shipped can be cancelled. When the
+            print service has nothing to cancel (an unpaid order is never
+            made) or cancels only on a written request, the error message
+            says which and how; pass it on to the person as it is.
             """
             import kiln.server as _srv
 
@@ -1022,6 +1091,10 @@ class _FulfillmentToolsPlugin:
                     "order": result.to_dict(),
                 }
             except (FulfillmentError, RuntimeError) as exc:
+                code = getattr(exc, "code", None)
+                if code in WORDED_CANCEL_REFUSALS:
+                    # Already worded for the person, with what to do next.
+                    return _srv._error_dict(str(exc), code=code)
                 return _srv._error_dict(
                     f"Failed to cancel order: {exc}. The order may have already shipped."
                 )
