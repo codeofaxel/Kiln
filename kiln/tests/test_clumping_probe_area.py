@@ -27,7 +27,11 @@ from kiln.nozzle_clumping_detection import (
 )
 from kiln.printers.base import NozzleClumpingDetection, PrinterStatus
 
-A1_AREA = {"x_min": 226.0, "y_min": 224.0, "x_max": 256.0, "y_max": 256.0}
+#: The session fixture's synthetic enclosed printer states a probe corner
+#: (tests/fixtures/printer_catalogue_test.json); the real printers' corners
+#: are kiln-pro's and are pinned there.
+PROBED = "kilntest_enclosed"
+A1_AREA = {"x_min": 226.0, "y_min": 0.0, "x_max": 256.0, "y_max": 30.0}
 
 
 def _on() -> NozzleClumpingDetection:
@@ -37,39 +41,44 @@ def _on() -> NozzleClumpingDetection:
 
 
 class TestTheCatalogueCarriesTheFact:
-    def test_the_a1_and_the_a1_mini_state_their_probe_corner(self) -> None:
-        assert probe_facts_for("bambu_a1")["detection_area_mm"] == A1_AREA
-        assert probe_facts_for("bambu_a1_mini")["detection_area_mm"] == {
-            "x_min": 156.0, "y_min": 152.0, "x_max": 180.0, "y_max": 180.0,
-        }
+    def test_a_catalogued_printer_states_its_probe_corner(self) -> None:
+        """Read through the catalogue row (A/B: before the strip this read
+        the bundled file, which no longer carries the rectangle)."""
+        assert probe_facts_for(PROBED)["detection_area_mm"] == A1_AREA
 
-    def test_both_name_the_modes_that_skip_the_probe(self) -> None:
-        for model in ("bambu_a1", "bambu_a1_mini"):
-            assert probe_facts_for(model)["defeated_by"] == ["spiral vase", "print by object"]
+    def test_it_names_the_modes_that_skip_the_probe(self) -> None:
+        assert probe_facts_for(PROBED)["defeated_by"] == ['spiral vase', 'print by object']
 
     def test_a_model_nobody_measured_states_nothing(self) -> None:
-        assert probe_facts_for("bambu_x1c") is None
-        assert probe_facts_for("ender3") is None
+        assert probe_facts_for("kilntest_open") is None
+        assert probe_facts_for("kilntest_ptfe") is None
         assert probe_facts_for("") is None
+
+    def test_a_sibling_spelling_never_borrows_the_corner(self) -> None:
+        assert probe_facts_for(PROBED + "x") is None
+
+
+#: Pure geometry for the overlap helper: any rectangle will do.
+AREA = {"x_min": 200.0, "y_min": 210.0, "x_max": 240.0, "y_max": 250.0}
 
 
 class TestTheOverlapIsOneHelper:
     @pytest.mark.parametrize(
         "footprint, overlaps",
         [
-            ({"x_min": 230, "y_min": 230, "x_max": 250, "y_max": 250}, True),
+            ({"x_min": 210, "y_min": 220, "x_max": 230, "y_max": 240}, True),
             ({"x_min": 20, "y_min": 20, "x_max": 120, "y_max": 120}, False),
-            ({"x_min": 200, "y_min": 200, "x_max": 226, "y_max": 224}, True),
-            ({"x_min": 100, "y_min": 100, "x_max": 225.9, "y_max": 223.9}, False),
+            ({"x_min": 150, "y_min": 150, "x_max": 200, "y_max": 210}, True),
+            ({"x_min": 100, "y_min": 100, "x_max": 199.9, "y_max": 209.9}, False),
         ],
         ids=["inside", "clear", "touching-the-corner", "just-short"],
     )
     def test_it_answers_the_geometry(self, footprint: dict, overlaps: bool) -> None:
-        assert part_overlaps_probe_area(footprint, A1_AREA) is overlaps
+        assert part_overlaps_probe_area(footprint, AREA) is overlaps
 
     def test_a_footprint_it_cannot_read_is_not_an_overlap(self) -> None:
-        assert part_overlaps_probe_area({"x_min": "left"}, A1_AREA) is False
-        assert part_overlaps_probe_area(None, A1_AREA) is False
+        assert part_overlaps_probe_area({"x_min": "left"}, AREA) is False
+        assert part_overlaps_probe_area(None, AREA) is False
         assert part_overlaps_probe_area({"x_min": 1, "y_min": 1, "x_max": 2, "y_max": 2}, None) is False
 
 
@@ -98,32 +107,32 @@ def _gcode(tmp_path, x: float, y: float, spiral: bool = False, tower: bool = Fal
 
 class TestThePreFlightWarnsWithoutTheePaidPackage:
     def test_a_part_in_the_corner_is_named(self, tmp_path) -> None:
-        facts = file_facts(_gcode(tmp_path, 230, 230, tower=True))
-        entry = preflight_entry_for_file(_on(), facts, printer_model="bambu_a1")
+        facts = file_facts(_gcode(tmp_path, 230, 5, tower=True))
+        entry = preflight_entry_for_file(_on(), facts, printer_model=PROBED)
         assert any("where the probe taps" in w for w in entry["warnings"])
         assert "226" in " ".join(entry["warnings"])
 
     def test_a_part_clear_of_it_is_not(self, tmp_path) -> None:
         facts = file_facts(_gcode(tmp_path, 30, 30, tower=True))
-        entry = preflight_entry_for_file(_on(), facts, printer_model="bambu_a1")
+        entry = preflight_entry_for_file(_on(), facts, printer_model=PROBED)
         assert not any("probe taps" in w for w in entry["warnings"])
 
     def test_a_mode_that_skips_the_probe_is_named(self, tmp_path) -> None:
         facts = file_facts(_gcode(tmp_path, 30, 30, spiral=True, tower=True))
-        entry = preflight_entry_for_file(_on(), facts, printer_model="bambu_a1")
+        entry = preflight_entry_for_file(_on(), facts, printer_model=PROBED)
         assert any("spiral vase" in w and "will not run" in w for w in entry["warnings"])
 
     def test_a_model_without_the_fact_warns_about_neither(self, tmp_path) -> None:
-        facts = file_facts(_gcode(tmp_path, 230, 230, spiral=True, tower=True))
-        entry = preflight_entry_for_file(_on(), facts, printer_model="bambu_x1c")
+        facts = file_facts(_gcode(tmp_path, 230, 5, spiral=True, tower=True))
+        entry = preflight_entry_for_file(_on(), facts, printer_model="kilntest_open")
         assert entry["warnings"] == []
 
     def test_a_switch_that_is_off_warns_about_neither(self, tmp_path) -> None:
         off = NozzleClumpingDetection(
             enabled=False, source="bambu_mqtt_home_flag", supported=True, mode="off",
         )
-        facts = file_facts(_gcode(tmp_path, 230, 230))
-        entry = preflight_entry_for_file(off, facts, printer_model="bambu_a1")
+        facts = file_facts(_gcode(tmp_path, 230, 5))
+        entry = preflight_entry_for_file(off, facts, printer_model=PROBED)
         assert entry["warnings"] == []
 
 
@@ -150,14 +159,14 @@ class TestTheWholePreFlightDoorWithNoPaidPackage:
         mock_adapter.return_value.read_nozzle_clumping_detection.return_value = _on()
         mock_registry.count = 1
         mock_registry.list_names.return_value = ["default"]
-        monkeypatch.setattr("kiln.server._PRINTER_MODEL", "bambu_a1", raising=False)
+        monkeypatch.setattr("kiln.server._PRINTER_MODEL", PROBED, raising=False)
         # No kiln-pro on this machine: the curated judgement is unavailable.
         monkeypatch.setattr(
             "kiln._pro_nozzle_bridge.consult_clumping_detection", lambda **kw: None,
         )
         from kiln.server import preflight_check
 
-        result = preflight_check(file_path=_gcode(tmp_path, 230, 230, tower=True))
+        result = preflight_check(file_path=_gcode(tmp_path, 230, 5, tower=True))
         check = next(c for c in result["checks"] if c["name"] == "nozzle_clumping_detection")
         assert any("where the probe taps" in w for w in check["warnings"])
         assert "where the probe taps" in check["message"]

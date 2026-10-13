@@ -924,6 +924,23 @@ def _get_raw(printer_id: str) -> dict[str, Any] | None:
     return resolved[1] if resolved is not None else None
 
 
+def row_for_exact(printer_id: str) -> dict[str, Any] | None:
+    """The catalogue row for the EXACT roster id *printer_id*, or ``None``.
+
+    Fetched through the bridge like every other read, but never a prefix
+    hit: a fact read here (a probe rectangle, a sensor) belongs to one
+    model, and a sibling's would be a wrong fact stated confidently.
+    Never the generic row.
+    """
+    normalised = _normalise(printer_id or "")
+    if not normalised or normalised == "default":
+        return None
+    resolved = _row_for(normalised)
+    if resolved is None or resolved[0] != normalised:
+        return None
+    return resolved[1]
+
+
 def build_volume_for(printer_id: str) -> tuple[str, tuple[float, float, float]] | None:
     """``(id, (x, y, z))`` for the EXACT roster id *printer_id*, or ``None``.
 

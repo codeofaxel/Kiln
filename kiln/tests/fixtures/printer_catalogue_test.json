@@ -12,7 +12,11 @@
       "max_feedrate": 12000.0,
       "min_safe_z": 0.0,
       "max_volumetric_flow": 18.0,
-      "build_volume": [220, 220, 250],
+      "build_volume": [
+        220,
+        220,
+        250
+      ],
       "notes": "Synthetic open-frame all-metal test printer. Not a real machine."
     },
     "intel": {
@@ -23,14 +27,34 @@
       "has_chamber_sensor": false,
       "has_abl": true,
       "has_input_shaping": false,
-      "build_volume_mm": [220, 220, 250],
+      "build_volume_mm": [
+        220,
+        220,
+        250
+      ],
       "max_hotend_temp": 300,
       "max_bed_temp": 110,
       "materials": {
-        "PLA": {"hotend": 205, "bed": 60, "fan": 100},
-        "PETG": {"hotend": 235, "bed": 80, "fan": 50},
-        "ABS": {"hotend": 245, "bed": 100, "fan": 0},
-        "TPU": {"hotend": 225, "bed": 50, "fan": 50}
+        "PLA": {
+          "hotend": 205,
+          "bed": 60,
+          "fan": 100
+        },
+        "PETG": {
+          "hotend": 235,
+          "bed": 80,
+          "fan": 50
+        },
+        "ABS": {
+          "hotend": 245,
+          "bed": 100,
+          "fan": 0
+        },
+        "TPU": {
+          "hotend": 225,
+          "bed": 50,
+          "fan": 50
+        }
       },
       "nozzle_clumping_probe": null
     }
@@ -44,7 +68,11 @@
       "max_feedrate": 30000.0,
       "min_safe_z": 0.0,
       "max_volumetric_flow": 24.0,
-      "build_volume": [256, 256, 256],
+      "build_volume": [
+        256,
+        256,
+        256
+      ],
       "notes": "Synthetic enclosed core-XY test printer with a chamber sensor. Not a real machine."
     },
     "intel": {
@@ -55,19 +83,51 @@
       "has_chamber_sensor": true,
       "has_abl": true,
       "has_input_shaping": true,
-      "build_volume_mm": [256, 256, 256],
+      "build_volume_mm": [
+        256,
+        256,
+        256
+      ],
       "max_hotend_temp": 320,
       "max_bed_temp": 120,
       "materials": {
-        "PLA": {"hotend": 215, "bed": 55, "fan": 100},
-        "PETG": {"hotend": 240, "bed": 75, "fan": 40},
-        "ABS": {"hotend": 255, "bed": 100, "fan": 10},
-        "ASA": {"hotend": 260, "bed": 100, "fan": 10},
-        "PA-CF": {"hotend": 290, "bed": 100, "fan": 0}
+        "PLA": {
+          "hotend": 215,
+          "bed": 55,
+          "fan": 100
+        },
+        "PETG": {
+          "hotend": 240,
+          "bed": 75,
+          "fan": 40
+        },
+        "ABS": {
+          "hotend": 255,
+          "bed": 100,
+          "fan": 10
+        },
+        "ASA": {
+          "hotend": 260,
+          "bed": 100,
+          "fan": 10
+        },
+        "PA-CF": {
+          "hotend": 290,
+          "bed": 100,
+          "fan": 0
+        }
       },
       "nozzle_clumping_probe": {
-        "detection_area_mm": [0, 0, 30, 30],
-        "defeated_by": ["by_object"]
+        "detection_area_mm": [
+          226,
+          0,
+          256,
+          30
+        ],
+        "defeated_by": [
+          "spiral vase",
+          "print by object"
+        ]
       }
     }
   },
@@ -80,7 +140,11 @@
       "max_feedrate": 8000.0,
       "min_safe_z": 0.0,
       "max_volumetric_flow": 11.0,
-      "build_volume": [235, 235, 250],
+      "build_volume": [
+        235,
+        235,
+        250
+      ],
       "notes": "Synthetic PTFE-lined bed-slinger test printer. Not a real machine."
     },
     "intel": {
@@ -91,12 +155,24 @@
       "has_chamber_sensor": false,
       "has_abl": false,
       "has_input_shaping": false,
-      "build_volume_mm": [235, 235, 250],
+      "build_volume_mm": [
+        235,
+        235,
+        250
+      ],
       "max_hotend_temp": 260,
       "max_bed_temp": 100,
       "materials": {
-        "PLA": {"hotend": 200, "bed": 60, "fan": 100},
-        "PETG": {"hotend": 230, "bed": 75, "fan": 50}
+        "PLA": {
+          "hotend": 200,
+          "bed": 60,
+          "fan": 100
+        },
+        "PETG": {
+          "hotend": 230,
+          "bed": 75,
+          "fan": 50
+        }
       },
       "nozzle_clumping_probe": null
     }
@@ -110,7 +186,11 @@
       "max_feedrate": 7500.0,
       "min_safe_z": 0.0,
       "max_volumetric_flow": 12.0,
-      "build_volume": [220, 220, 240],
+      "build_volume": [
+        220,
+        220,
+        240
+      ],
       "notes": "Synthetic PTFE-lined test printer with one curated hardware variant. Not a real machine.",
       "variants": {
         "allmetal_kit_reflashed": {
@@ -132,11 +212,19 @@
       "has_chamber_sensor": false,
       "has_abl": false,
       "has_input_shaping": false,
-      "build_volume_mm": [220, 220, 240],
+      "build_volume_mm": [
+        220,
+        220,
+        240
+      ],
       "max_hotend_temp": 255,
       "max_bed_temp": 105,
       "materials": {
-        "PLA": {"hotend": 200, "bed": 60, "fan": 100}
+        "PLA": {
+          "hotend": 200,
+          "bed": 60,
+          "fan": 100
+        }
       },
       "nozzle_clumping_probe": null
     }
@@ -150,7 +238,11 @@
       "max_feedrate": 20000.0,
       "min_safe_z": 0.0,
       "max_volumetric_flow": 20.0,
-      "build_volume": [350, 350, 400],
+      "build_volume": [
+        350,
+        350,
+        400
+      ],
       "notes": "Synthetic large-format test printer. Not a real machine."
     },
     "intel": {
@@ -161,12 +253,24 @@
       "has_chamber_sensor": null,
       "has_abl": true,
       "has_input_shaping": true,
-      "build_volume_mm": [350, 350, 400],
+      "build_volume_mm": [
+        350,
+        350,
+        400
+      ],
       "max_hotend_temp": 300,
       "max_bed_temp": 110,
       "materials": {
-        "PLA": {"hotend": 210, "bed": 60, "fan": 100},
-        "PETG": {"hotend": 240, "bed": 80, "fan": 50}
+        "PLA": {
+          "hotend": 210,
+          "bed": 60,
+          "fan": 100
+        },
+        "PETG": {
+          "hotend": 240,
+          "bed": 80,
+          "fan": 50
+        }
       },
       "nozzle_clumping_probe": null
     }
@@ -180,7 +284,11 @@
       "max_feedrate": 9000.0,
       "min_safe_z": 0.0,
       "max_volumetric_flow": 10.0,
-      "build_volume": [120, 120, 120],
+      "build_volume": [
+        120,
+        120,
+        120
+      ],
       "notes": "Synthetic compact test printer. Not a real machine."
     },
     "intel": {
@@ -191,11 +299,19 @@
       "has_chamber_sensor": false,
       "has_abl": true,
       "has_input_shaping": true,
-      "build_volume_mm": [120, 120, 120],
+      "build_volume_mm": [
+        120,
+        120,
+        120
+      ],
       "max_hotend_temp": 250,
       "max_bed_temp": 80,
       "materials": {
-        "PLA": {"hotend": 205, "bed": 55, "fan": 100}
+        "PLA": {
+          "hotend": 205,
+          "bed": 55,
+          "fan": 100
+        }
       },
       "nozzle_clumping_probe": null
     }
@@ -209,7 +325,11 @@
       "max_feedrate": 7800.0,
       "min_safe_z": 0.0,
       "max_volumetric_flow": 12.5,
-      "build_volume": [220, 220, 240],
+      "build_volume": [
+        220,
+        220,
+        240
+      ],
       "notes": "Synthetic sibling of kilntest_variants: separately catalogued, a prefix relative, no curated variant of its own. Not a real machine."
     },
     "intel": {
@@ -220,11 +340,19 @@
       "has_chamber_sensor": false,
       "has_abl": true,
       "has_input_shaping": false,
-      "build_volume_mm": [220, 220, 240],
+      "build_volume_mm": [
+        220,
+        220,
+        240
+      ],
       "max_hotend_temp": 265,
       "max_bed_temp": 105,
       "materials": {
-        "PLA": {"hotend": 205, "bed": 60, "fan": 100}
+        "PLA": {
+          "hotend": 205,
+          "bed": 60,
+          "fan": 100
+        }
       },
       "nozzle_clumping_probe": null
     }
@@ -238,7 +366,11 @@
       "max_feedrate": 15000.0,
       "min_safe_z": 0.0,
       "max_volumetric_flow": 30.0,
-      "build_volume": [300, 300, 300],
+      "build_volume": [
+        300,
+        300,
+        300
+      ],
       "notes": "Synthetic high-temperature test printer: a class ceiling well above the desktop machines. Not a real machine."
     },
     "intel": {
@@ -249,13 +381,29 @@
       "has_chamber_sensor": true,
       "has_abl": true,
       "has_input_shaping": true,
-      "build_volume_mm": [300, 300, 300],
+      "build_volume_mm": [
+        300,
+        300,
+        300
+      ],
       "max_hotend_temp": 500,
       "max_bed_temp": 200,
       "materials": {
-        "PLA": {"hotend": 210, "bed": 60, "fan": 100},
-        "ABS": {"hotend": 250, "bed": 100, "fan": 0},
-        "PEEK": {"hotend": 420, "bed": 150, "fan": 0}
+        "PLA": {
+          "hotend": 210,
+          "bed": 60,
+          "fan": 100
+        },
+        "ABS": {
+          "hotend": 250,
+          "bed": 100,
+          "fan": 0
+        },
+        "PEEK": {
+          "hotend": 420,
+          "bed": 150,
+          "fan": 0
+        }
       },
       "nozzle_clumping_probe": null
     }

@@ -87,12 +87,18 @@ _NOT_ASKED = "NOT_ASKED"
 
 
 def available() -> bool:
-    """True when kiln-pro is installed here with its catalogue reader."""
-    try:
-        import kiln_pro.device_intelligence.printer_catalogue  # noqa: F401
+    """True when kiln-pro is installed here WITH its catalogue file.
 
-        return True
-    except ImportError:
+    The reader alone is not enough: kiln-pro's wheel leaves the file out,
+    so a pip-installed kiln-pro has the reader and nothing to read, and
+    trusting it would hand every printer the floor and never ask the
+    servers.  The Fly deploy and a repo checkout have the file.
+    """
+    try:
+        from kiln_pro.device_intelligence.printer_catalogue import catalogue_present
+
+        return bool(catalogue_present())
+    except Exception:  # noqa: BLE001 -- an older kiln-pro, or none: the served door
         return False
 
 

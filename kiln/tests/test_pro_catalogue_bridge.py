@@ -392,6 +392,25 @@ class TestSetupChokepoint:
 
 
 class TestLocal:
+    def test_a_reader_with_no_file_is_not_available(self, monkeypatch):
+        """A pip-installed kiln-pro has the reader and no catalogue file; the
+        bridge must go to the served door, not hand every printer the floor."""
+        import importlib.util
+        import sys
+        import types
+
+        reader = types.ModuleType("kiln_pro.device_intelligence.printer_catalogue")
+        reader.catalogue_present = lambda: False
+        monkeypatch.setitem(sys.modules, "kiln_pro.device_intelligence.printer_catalogue", reader)
+        # The module fixture stubs ``available``; read the real one off a
+        # fresh load of the bridge's source.
+        spec = importlib.util.spec_from_file_location("_fresh_catalogue_bridge", bridge.__file__)
+        fresh = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fresh)
+        assert fresh.available() is False
+        reader.catalogue_present = lambda: True
+        assert fresh.available() is True
+
     def test_with_kiln_pro_here_the_local_answer_is_final(self, monkeypatch):
         """On a kiln-pro install (the hosted server is one) the local reader
         IS the resolver, so a spelling it answers nothing for gets the floor
