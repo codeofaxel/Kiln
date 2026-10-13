@@ -289,21 +289,24 @@ class TestEveryProfileStatesItsPace:
 
 
 class TestEveryDoorDerivesThem:
-    """Three doors write an ``.ini``; the rule reaches all three."""
+    """Three doors write an ``.ini``; the rule reaches all three.  On the
+    session's synthetic profiles (``kilntest_enclosed``: perimeter 150, outer
+    wall 120, infill 200; ``kilntest_open``: 60, 45, 80) -- a real printer's
+    profile is its served record since 2026-10-12."""
 
     def test_an_override_moves_the_speeds_tied_to_it(self) -> None:
-        s = _ini(resolve_slicer_profile("bambu_a1", overrides={"perimeter_speed": "120"}))
+        s = _ini(resolve_slicer_profile("kilntest_enclosed", overrides={"perimeter_speed": "120"}))
         assert s["solid_infill_speed"] == "120"
 
     def test_a_stated_speed_is_never_replaced(self) -> None:
         s = _ini(
             resolve_slicer_profile(
-                "bambu_a1", overrides={"top_solid_infill_speed": "40", "gap_fill_speed": "20"}
+                "kilntest_enclosed", overrides={"top_solid_infill_speed": "40", "gap_fill_speed": "20"}
             )
         )
         assert s["top_solid_infill_speed"] == "40"
         assert s["gap_fill_speed"] == "20"
-        assert s["small_perimeter_speed"] == "75"
+        assert s["small_perimeter_speed"] == "60"
 
     def test_slowed_walls_are_never_outrun_by_a_derived_speed(self) -> None:
         """A caller that slows the inner walls and leaves the outer one alone
@@ -313,7 +316,7 @@ class TestEveryDoorDerivesThem:
         way: it caps every feature through its melt rate,
         kiln.slicer_material.  A caller still can.)"""
         slowed = {"perimeter_speed": "20", "infill_speed": "20"}
-        s = _ini(resolve_slicer_profile("bambu_a1", overrides=slowed))
+        s = _ini(resolve_slicer_profile("kilntest_enclosed", overrides=slowed))
         wall = float(slowed["perimeter_speed"])
         assert float(s["solid_infill_speed"]) <= wall
         assert float(s["top_solid_infill_speed"]) <= wall
@@ -322,14 +325,14 @@ class TestEveryDoorDerivesThem:
 
     def test_a_percentage_anchor_is_read_against_its_documented_base(self) -> None:
         # PrusaSlicer reads the outer wall's "50%" against the perimeter speed.
-        s = _ini(resolve_slicer_profile("bambu_a1", overrides={"external_perimeter_speed": "50%"}))
-        assert s["top_solid_infill_speed"] == "100"
-        assert s["small_perimeter_speed"] == "50"
+        s = _ini(resolve_slicer_profile("kilntest_open", overrides={"external_perimeter_speed": "50%"}))
+        assert s["top_solid_infill_speed"] == "30"
+        assert s["small_perimeter_speed"] == "15"
 
     def test_the_multi_extruder_door(self) -> None:
-        s = _ini(resolve_multiextruder_profile("bambu_a1", 4))
-        assert s["solid_infill_speed"] == "200"
-        assert s["small_perimeter_speed"] == "75"
+        s = _ini(resolve_multiextruder_profile("kilntest_enclosed", 4))
+        assert s["solid_infill_speed"] == "150"
+        assert s["small_perimeter_speed"] == "60"
 
     def test_the_override_fallback_door_writes_them_into_the_file(self, tmp_path: Path) -> None:
         base = tmp_path / "mine.ini"
@@ -376,20 +379,12 @@ class TestTheHotendCeilingIsStated:
         from kiln import safety_profiles as sp
         from kiln.safety_profiles import get_profile
 
-        record = {
-            "printer_id": "bambu_a1", "matched_by": "exact", "display_name": "Served test record",
-            "safety": {
-                "max_hotend_temp": 240.0, "max_bed_temp": 80.0, "max_chamber_temp": None,
-                "max_feedrate": 10000.0, "min_safe_z": 0.0, "max_volumetric_flow": 17.5,
-                "build_volume": [200, 200, 200], "notes": "Synthetic served record.",
-            },
-            "intel": {
-                "firmware": "bambu", "extruder_type": "direct_drive", "hotend_type": "all_metal",
-                "has_enclosure": False, "has_chamber_sensor": None, "has_abl": True,
-                "has_input_shaping": True, "build_volume_mm": [200, 200, 200],
-                "max_hotend_temp": 240, "max_bed_temp": 80, "materials": {}, "nozzle_clumping_probe": None,
-            },
-        }
+        from .conftest import synthetic_roster_record
+
+        # The four-block synthetic record the session serves, with a ceiling
+        # of its own so the door is seen stating what the record says.
+        record = synthetic_roster_record("bambu_a1")
+        record["safety"]["max_volumetric_flow"] = 17.5
 
         def reset() -> None:
             sp._cache.clear()
@@ -397,6 +392,7 @@ class TestTheHotendCeilingIsStated:
             sp._variant_data.clear()
             sp._loaded = False
             pi._reset_caches()
+            sp_mod._reset()
             bridge.forget()
 
         monkeypatch.setattr(bridge, "available", lambda: False)

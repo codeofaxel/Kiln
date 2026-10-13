@@ -272,9 +272,7 @@
         "gcode_flavor": "klipper",
         "bed_shape": "0x0,256x0,256x256,0x256",
         "max_print_height": "256",
-        "use_relative_e_distances": "1",
-        "start_gcode": "",
-        "end_gcode": ""
+        "use_relative_e_distances": "1"
       },
       "tool_change": {
         "tool_change_seconds": 70,

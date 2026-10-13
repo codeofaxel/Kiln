@@ -96,7 +96,7 @@ class TestOverrideGrant:
         assert pg._override_active("kilntest_open") is True
         assert pg._override_active("prusa_mk4") is False
         # case-insensitive key
-        assert pg._override_active("BAMBU_A1") is True
+        assert pg._override_active("KILNTEST_OPEN") is True
 
     def test_grant_expires(self):
         pg.grant_oversize_override("expiretest", ttl_seconds=-1)  # already expired

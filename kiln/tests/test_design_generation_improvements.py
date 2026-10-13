@@ -5737,7 +5737,7 @@ class TestDesignToGcode:
             "kiln.parametric.compile_scad_code", side_effect=_fake_compile
         ), patch("kiln.slicer.slice_file", side_effect=_fake_slice):
             result = design_to_gcode(
-                "hook", output_dir=str(tmp_path), printer_model="ender3"
+                "hook", output_dir=str(tmp_path), printer_model="kilntest_open"
             )
 
         assert "slicing" in result.steps_completed, result.errors
@@ -5749,7 +5749,7 @@ class TestDesignToGcode:
         assert result.gcode_file and result.gcode_file.endswith("out.gcode")
         assert captured["profile"] and captured["profile"].endswith(".ini")
         ini = pathlib.Path(captured["profile"]).read_text(encoding="utf-8")
-        assert "Creality Ender 3" in ini or "ender3" in captured["profile"]
+        assert "Kilntest Open 220" in ini or "kilntest_open" in captured["profile"]
 
 
 class TestDesignToGcodePipelineTool:

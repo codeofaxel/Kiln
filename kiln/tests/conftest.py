@@ -1604,6 +1604,9 @@ def synthetic_roster_record(printer_id: str, *, volume: tuple[float, float, floa
     })
     if bambu:
         settings.update({"use_relative_e_distances": "1", "start_gcode": "", "end_gcode": ""})
+    # A served profile leaves the skirt distance to the slicer, as the real
+    # ones do: the bed-edge scenarios were measured against that default.
+    settings.pop("skirt_distance", None)
     return {
         "printer_id": key, "matched_by": "exact", "display_name": name,
         "safety": {
