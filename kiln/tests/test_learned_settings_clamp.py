@@ -21,6 +21,11 @@ import pytest
 import kiln.safety_profiles as sp
 from kiln.print_dna import _aggregate_prediction
 
+#: A curated printer the session's bundled copy holds: the synthetic
+#: PTFE-lined machine from tests/fixtures/printer_catalogue_test.json.  A
+#: real printer's limits are kiln-pro's catalogue and are not in public CI.
+_CURATED = "kilntest_ptfe"
+
 
 class _Row(dict):
     """print_dna rows arrive as sqlite3.Row; dict() over them is all the
@@ -33,11 +38,12 @@ def _rows(*settings: dict) -> list[_Row]:
 
 class TestCommunityMediansAreHeldUnderTheCeiling:
     def test_a_hotter_corpus_cannot_raise_this_machine(self):
-        curated = sp.get_profile("ender3").max_hotend_temp
+        assert sp.get_profile(_CURATED).id == _CURATED, "the premise: a curated ceiling"
+        curated = sp.get_profile(_CURATED).max_hotend_temp
         pred = _aggregate_prediction(
             _rows({"temp_tool": 300}, {"temp_tool": 300}, {"temp_tool": 300}),
             source="exact_match",
-            printer_model="ender3",
+            printer_model=_CURATED,
         )
         assert pred.recommended_settings["temp_tool"] == curated
 
@@ -45,7 +51,7 @@ class TestCommunityMediansAreHeldUnderTheCeiling:
         pred = _aggregate_prediction(
             _rows({"temp_tool": 210}, {"temp_tool": 215}, {"temp_tool": 220}),
             source="exact_match",
-            printer_model="ender3",
+            printer_model=_CURATED,
         )
         assert pred.recommended_settings["temp_tool"] == 215
 
@@ -57,7 +63,7 @@ class TestCommunityMediansAreHeldUnderTheCeiling:
                 {"temp_tool": 300, "layer_height": 0.2, "fill_pattern": "gyroid"},
             ),
             source="exact_match",
-            printer_model="ender3",
+            printer_model=_CURATED,
         )
         assert pred.recommended_settings["layer_height"] == 0.2
         assert pred.recommended_settings["fill_pattern"] == "gyroid"
@@ -77,9 +83,9 @@ class TestTheLocalLearningAggregateIsHeldToo:
         import kiln.server as _srv
         from kiln.plugins import learning_tools  # noqa: F401  (registers the tool)
 
-        curated = sp.get_profile("ender3")
+        curated = sp.get_profile(_CURATED)
         recommended = {"temp_tool": 300.0, "temp_bed": 190.0, "speed": 60.0}
-        held = sp.clamp_settings_to_profile(recommended, "ender3")
+        held = sp.clamp_settings_to_profile(recommended, _CURATED)
 
         assert held.settings["temp_tool"] == curated.max_hotend_temp
         assert held.settings["temp_bed"] == curated.max_bed_temp
@@ -112,7 +118,7 @@ class TestTheClampNeverRemovesTheLimit:
 
     @pytest.mark.parametrize("bad", [None, {}, {"temp_tool": "hot"}, {"temp_tool": None}])
     def test_unusable_input_returns_something_usable(self, bad):
-        held = sp.clamp_settings_to_profile(bad, "ender3")
+        held = sp.clamp_settings_to_profile(bad, _CURATED)
         assert isinstance(held.settings, dict)
 
     def test_an_unknown_printer_falls_back_to_the_same_authority_validate_uses(self):

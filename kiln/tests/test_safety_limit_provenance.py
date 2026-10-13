@@ -30,6 +30,11 @@ import pytest
 
 import kiln.safety_profiles as sp
 
+#: A curated printer the session's bundled copy holds (a synthetic row from
+#: tests/fixtures/printer_catalogue_test.json): a real printer's limits are
+#: kiln-pro's catalogue and are not in public CI.
+_CURATED = "kilntest_open"
+
 _BASE = {
     "display_name": "P",
     "max_hotend_temp": 240.0,
@@ -70,22 +75,22 @@ def _write_overrides(payload: dict) -> None:
 
 class TestCuratedProfilesCarryNoOwnerStamp:
     def test_curated_profile_is_all_kiln(self) -> None:
-        profile = sp.get_profile("ender3")
+        profile = sp.get_profile(_CURATED)
         assert profile.owner_supplied == ()
         assert profile.curated_base is True
 
     def test_note_says_all_verified(self) -> None:
-        note = sp.limits_provenance_note(sp.get_profile("ender3"))
+        note = sp.limits_provenance_note(sp.get_profile(_CURATED))
         assert note == "All limits are Kiln-verified values."
 
 
 class TestOwnerFieldsAreStampedOnACuratedBase:
     def test_survived_fields_are_listed(self) -> None:
-        curated = sp.get_profile("ender3")
+        curated = sp.get_profile(_CURATED)
         _write_overrides(
-            {"ender3": {**_BASE, "max_hotend_temp": curated.max_hotend_temp - 30}}
+            {_CURATED: {**_BASE, "max_hotend_temp": curated.max_hotend_temp - 30}}
         )
-        got = sp.get_profile("ender3")
+        got = sp.get_profile(_CURATED)
         assert "max_hotend_temp" in got.owner_supplied
         assert got.curated_base is True
         assert got.max_hotend_temp == curated.max_hotend_temp - 30
@@ -96,30 +101,30 @@ class TestOwnerFieldsAreStampedOnACuratedBase:
         A raise attempt is replaced with the curated number, so the field's
         value is Kiln's again and it must not be labelled owner-supplied.
         """
-        curated = sp.get_profile("ender3")
+        curated = sp.get_profile(_CURATED)
         _write_overrides(
-            {"ender3": {**_BASE, "max_hotend_temp": curated.max_hotend_temp + 100}}
+            {_CURATED: {**_BASE, "max_hotend_temp": curated.max_hotend_temp + 100}}
         )
-        got = sp.get_profile("ender3")
+        got = sp.get_profile(_CURATED)
         assert got.max_hotend_temp == curated.max_hotend_temp
         assert "max_hotend_temp" not in got.owner_supplied
         # Fields whose owner values DID survive stay listed.
         assert "max_bed_temp" in got.owner_supplied
 
     def test_unstated_optional_fields_are_never_listed(self) -> None:
-        _write_overrides({"ender3": dict(_BASE)})  # no min_safe_z, no chamber
-        got = sp.get_profile("ender3")
+        _write_overrides({_CURATED: dict(_BASE)})  # no min_safe_z, no chamber
+        got = sp.get_profile(_CURATED)
         assert "min_safe_z" not in got.owner_supplied
         assert "max_chamber_temp" not in got.owner_supplied
 
     def test_note_names_the_owner_fields_and_keeps_the_base(self) -> None:
         """The sentence uses human names, never snake_case — the raw field
         names live in ``owner_supplied`` for programmatic callers."""
-        curated = sp.get_profile("ender3")
+        curated = sp.get_profile(_CURATED)
         _write_overrides(
-            {"ender3": {**_BASE, "max_hotend_temp": curated.max_hotend_temp - 30}}
+            {_CURATED: {**_BASE, "max_hotend_temp": curated.max_hotend_temp - 30}}
         )
-        note = sp.limits_provenance_note(sp.get_profile("ender3"))
+        note = sp.limits_provenance_note(sp.get_profile(_CURATED))
         assert "hotend temperature" in note
         assert "max_hotend_temp" not in note
         assert "Remaining limits are Kiln-verified" in note
@@ -127,10 +132,10 @@ class TestOwnerFieldsAreStampedOnACuratedBase:
     def test_tightening_everything_does_not_read_as_unverified(self) -> None:
         """The reason curated_base exists as its own bit: an owner who
         tightens every field is still capped by Kiln-verified ceilings."""
-        curated = sp.get_profile("ender3")
+        curated = sp.get_profile(_CURATED)
         _write_overrides(
             {
-                "ender3": {
+                _CURATED: {
                     **_BASE,
                     "max_hotend_temp": curated.max_hotend_temp - 20,
                     "max_bed_temp": curated.max_bed_temp - 20,
@@ -138,7 +143,7 @@ class TestOwnerFieldsAreStampedOnACuratedBase:
                 }
             }
         )
-        got = sp.get_profile("ender3")
+        got = sp.get_profile(_CURATED)
         assert got.curated_base is True
         assert "has not verified" not in sp.limits_provenance_note(got)
 
@@ -240,7 +245,7 @@ class TestProvenanceReachesTheWire:
         assert "Kiln has not verified this printer" in d["limits_provenance"]
 
     def test_curated_wire_shape_is_quiet_and_stable(self) -> None:
-        d = sp.profile_to_dict(sp.get_profile("bambu_x1c"))
+        d = sp.profile_to_dict(sp.get_profile("kilntest_enclosed"))
         assert d["owner_supplied"] == []
         assert d["curated_base"] is True
         assert d["limits_provenance"] == "All limits are Kiln-verified values."

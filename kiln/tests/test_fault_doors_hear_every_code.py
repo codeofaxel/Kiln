@@ -139,11 +139,18 @@ def _join_fault_notices(timeout: float = 5.0) -> None:
             t.join(timeout)
 
 
+#: The printer the playbook below is served for: a synthetic row the session
+#: holds (tests/fixtures/printer_catalogue_test.json).  An overlay entry
+#: merges over a row this process holds, and a real printer's row is
+#: kiln-pro's catalogue, which public CI does not hold.  The code matcher
+#: does not care whose codes they are.
+_PLAYBOOK_PRINTER = "kilntest_open"
+
 #: A playbook shaped like the A1 overlay: one mode that claims a code, and
 #: generic ones that share words with everything.  Installed as a fake
 #: kiln-pro overlay the way test_troubleshoot_signals.py does it.
 PLAYBOOK = {
-    "bambu_a1": {
+    _PLAYBOOK_PRINTER: {
         "failure_modes": [
             {
                 "symptom": "Repeat clogs after a new nozzle -- heat creep",
@@ -406,20 +413,20 @@ class TestTheSymptomDoorHearsEveryCode:
         and the answer was hot-end entries matched on words with nothing
         saying the codes went unmatched.  The word matches stay -- they are
         labelled -- but the unmatched codes are named beside them."""
-        out = _troubleshoot(printer_id="bambu_a1", symptom=TODAYS_SYMPTOM)
+        out = _troubleshoot(printer_id=_PLAYBOOK_PRINTER, symptom=TODAYS_SYMPTOM)
 
         assert out["codes_without_a_playbook"] == [HOMING_SCREEN, SENSOR_SCREEN]
         assert out["matches"], "the word matches were dropped, not labelled"
         assert all(m["matched_on"] == "text" for m in out["matches"])
 
     def test_a_carried_code_is_not_listed_as_missing(self, playbook: None) -> None:
-        out = _troubleshoot(printer_id="bambu_a1", symptom="the cutter failed, 1200-8001")
+        out = _troubleshoot(printer_id=_PLAYBOOK_PRINTER, symptom="the cutter failed, 1200-8001")
         assert "codes_without_a_playbook" not in out
         assert [m["matched_on"] for m in out["matches"]] == ["code"]
 
     def test_only_the_uncarried_codes_are_named(self, playbook: None) -> None:
         out = _troubleshoot(
-            printer_id="bambu_a1", symptom=f"1200-8001 and then {HOMING_SCREEN}"
+            printer_id=_PLAYBOOK_PRINTER, symptom=f"1200-8001 and then {HOMING_SCREEN}"
         )
         assert out["codes_without_a_playbook"] == [HOMING_SCREEN]
 
@@ -437,10 +444,12 @@ class TestTheSymptomDoorHearsEveryCode:
         free row, served to a signed-in caller of any tier) must not be told
         Kiln cannot read a fault code here."""
         from kiln.tiers_and_terms import reset_spoken_keys
+        from tests.test_troubleshoot_signals import _a_bambu_on_record
 
         reset_spoken_keys()
         try:
-            out = _troubleshoot(printer_id="bambu_a1", symptom=f"screen says {HOMING_SCREEN}")
+            with _a_bambu_on_record():
+                out = _troubleshoot(printer_id="bambu_a1", symptom=f"screen says {HOMING_SCREEN}")
         finally:
             reset_spoken_keys()
 
@@ -456,10 +465,12 @@ class TestTheSymptomDoorHearsEveryCode:
         """The bridge silent: the floor line is public Kiln's own, so the
         specific nudge -- Kiln cannot read a fault code here -- stays true."""
         from kiln.tiers_and_terms import reset_spoken_keys
+        from tests.test_troubleshoot_signals import _a_bambu_on_record
 
         reset_spoken_keys()
         try:
-            out = _troubleshoot(printer_id="bambu_a1", symptom=f"screen says {HOMING_SCREEN}")
+            with _a_bambu_on_record():
+                out = _troubleshoot(printer_id="bambu_a1", symptom=f"screen says {HOMING_SCREEN}")
         finally:
             reset_spoken_keys()
 

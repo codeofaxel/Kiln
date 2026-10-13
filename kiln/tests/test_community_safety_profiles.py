@@ -30,6 +30,12 @@ from kiln.safety_profiles import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+#: A synthetic PTFE-lined printer with a curated base ceiling and a curated
+#: all-metal variant (tests/fixtures/printer_catalogue_test.json).  A real
+#: printer's numbers are kiln-pro's catalogue and are not in public CI.
+_LINED = "kilntest_variants"
+
+
 def _valid_profile() -> dict[str, Any]:
     """Return a minimal valid community profile dict."""
     return {
@@ -303,9 +309,11 @@ class TestExportProfile:
         assert "id" not in exported  # ID is stripped for sharing.
 
     def test_export_bundled_profile(self):
-        # The bundled data should load from the real JSON file.
-        exported = export_profile("ender3")
-        assert exported["max_hotend_temp"] == 250.0
+        # A curated profile the bundled file holds: the session's copy
+        # carries the synthetic printers (tests/fixtures/
+        # printer_catalogue_test.json), whose numbers belong to no machine.
+        exported = export_profile("kilntest_open")
+        assert exported["max_hotend_temp"] == 300.0
         assert "id" not in exported
 
     def test_export_missing_falls_back_to_default(self):
@@ -357,43 +365,49 @@ class TestCommunityOverridesBundled:
         modified machine resolves through CURATED data and nothing has to
         trust a hand-typed 300.  An old file still carrying the flag is
         held to the curated number like any other override.
+
+        ``kilntest_variants`` is the synthetic lined machine with a curated
+        all-metal variant: the shape this declaration used to stand in for.
         """
-        bundled = get_profile("ender3")
-        assert bundled.max_hotend_temp == 250.0
+        bundled = get_profile(_LINED)
+        assert bundled.id == _LINED, "the premise: a curated base to clamp against"
+        raised = bundled.max_hotend_temp + 45.0
 
         override = _valid_profile()
-        override["max_hotend_temp"] = 300.0
-        override["display_name"] = "Ender 3 (All-Metal Upgrade)"
+        override["max_hotend_temp"] = raised
+        override["display_name"] = "Lined machine (All-Metal Upgrade)"
         override["hardware_modified"] = True
         override["notes"] = "PTFE liner replaced with an all-metal hotend"
-        add_community_profile("ender3", override, confirmed=True)
+        add_community_profile(_LINED, override, confirmed=True)
 
-        overridden = get_profile("ender3")
-        assert overridden.max_hotend_temp == 250.0
+        overridden = get_profile(_LINED)
+        assert overridden.max_hotend_temp == bundled.max_hotend_temp
         # The rest of the entry is still the user's to set — only the
         # direction of a LIMIT is constrained.
-        assert overridden.display_name == "Ender 3 (All-Metal Upgrade)"
+        assert overridden.display_name == "Lined machine (All-Metal Upgrade)"
 
     def test_an_undeclared_higher_limit_does_not_override(self):
         """The same edit without the declaration is clamped identically."""
+        bundled = get_profile(_LINED).max_hotend_temp
         override = _valid_profile()
-        override["max_hotend_temp"] = 300.0
-        add_community_profile("ender3", override, confirmed=True)
-        assert get_profile("ender3").max_hotend_temp == 250.0
+        override["max_hotend_temp"] = bundled + 45.0
+        add_community_profile(_LINED, override, confirmed=True)
+        assert get_profile(_LINED).max_hotend_temp == bundled
 
     def test_bundled_still_available_for_non_overridden(self):
         add_community_profile("custom_only", _valid_profile(), confirmed=True)
-        # Bundled profiles should still be accessible. The specific value is
-        # incidental to this test — 290C is the MK4's firmware-enforced nozzle
-        # ceiling (Prusa's sheet says 300; Buddy caps at 290).
-        prusa = get_profile("prusa_mk4")
-        assert prusa.max_hotend_temp == 290.0
+        # Bundled profiles should still be accessible.  The specific value is
+        # incidental to this test: the synthetic enclosed printer's ceiling.
+        enclosed = get_profile("kilntest_enclosed")
+        assert enclosed.id == "kilntest_enclosed"
+        assert enclosed.max_hotend_temp == 320.0
 
     def test_list_profiles_includes_both(self):
         add_community_profile("community_only", _valid_profile(), confirmed=True)
         all_ids = list_profiles()
         assert "community_only" in all_ids
-        assert "ender3" in all_ids  # Bundled profile.
+        assert "ender3" in all_ids  # The bundled roster lists it; no limit is read.
+        assert "kilntest_open" in all_ids  # A bundled profile with limits.
         assert "default" in all_ids
 
 

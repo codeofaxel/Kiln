@@ -378,11 +378,14 @@ class TestSharedGate:
             stub.load_filament(temperature=260)
 
     def test_a_bound_safety_profile_tightens_the_ceiling(self):
+        # A synthetic lined printer (tests/fixtures/printer_catalogue_test.json):
+        # its ceiling sits under the adapter's own default.
         stub = _Stub()
-        stub.set_safety_profile("ender3")
+        stub.set_safety_profile("kilntest_ptfe")
         from kiln.safety_profiles import get_profile
 
-        ceiling = get_profile("ender3").max_hotend_temp
+        ceiling = get_profile("kilntest_ptfe").max_hotend_temp
+        assert ceiling < stub._MAX_HOTEND_C, "the premise: the profile is the tighter limit"
         with pytest.raises(PrinterError, match="exceeds safety limit"):
             stub.purge_filament(temperature=ceiling + 10)
 
@@ -402,7 +405,10 @@ class TestSharedGate:
         assert "material table" in plan.temperature_source
 
     def test_temperature_outside_the_material_window_is_refused(self):
+        # A printer whose ceiling is above 250 C, so the refusal is the
+        # material window's and not the generic floor's (240 C).
         stub = _Stub()
+        stub.set_safety_profile("kilntest_open")
         with pytest.raises(PrinterError, match="outside the 180–220°C window"):
             stub.purge_filament(material="PLA", temperature=250)
 
@@ -1549,6 +1555,9 @@ class TestBambuTrayNowLocation:
         assert result.verification_source == "ams_tray_now"
 
     def test_purge_reads_the_feeding_tray_from_the_ams_section(self, bambu, monkeypatch):
+        # A profile whose ceiling clears the PETG window: the generic floor
+        # (240 C) would refuse tray 3's midpoint before it was read.
+        bambu.set_safety_profile("kilntest_open")
         bambu._last_status["ams"]["tray_now"] = "3"  # the PETG tray: 230-260
         bambu._last_status["nozzle_temper"] = 245.0
         counter = itertools.count(0.0, 0.5)

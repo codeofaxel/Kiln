@@ -359,44 +359,45 @@ class _SafetyToolsPlugin:
 
         @mcp.tool()
         def list_safety_profiles() -> dict:
-            """List all available printer safety profiles.
+            """List the printers Kiln has a safety profile for, by id and name.
 
-            Returns a list of profile IDs and display names from the bundled
-            safety database.  Use with ``get_safety_profile`` to inspect limits
-            for a specific printer, or ``validate_gcode_safe`` to validate
-            commands against a printer's limits.
+            The list names printers; it carries no limits.  Kiln reads a
+            printer's limits one printer at a time: call
+            ``get_safety_profile`` with one of these ids for its temperature,
+            feedrate and flow limits, its build volume, and where those
+            numbers came from.  ``validate_gcode_safe`` checks commands
+            against one printer's limits.  A printer set up on this machine
+            with limits its owner entered is listed too, marked
+            ``set_up_on_this_machine``.
             """
             if err := _srv._check_auth("safety"):
                 return err
             try:
                 from kiln.safety_profiles import (
-                    get_profile,
-                    limits_provenance_note,
+                    list_local_printer_overrides,
                     list_profiles,
+                    roster_display_name,
                 )
 
-                ids = list_profiles()
+                # Names only, from the roster this install carries: asking for
+                # every printer's limits here would be one catalogue fetch per
+                # printer, and a bulk door to every ceiling Kiln holds.
+                set_up_here = set(list_local_printer_overrides())
                 profiles = []
-                for pid in ids:
-                    try:
-                        p = get_profile(pid)
-                        profiles.append(
-                            {
-                                "id": p.id,
-                                "display_name": p.display_name,
-                                "max_hotend_temp": p.max_hotend_temp,
-                                "max_bed_temp": p.max_bed_temp,
-                                # A roster row quotes two limits, so it owes
-                                # the same one-line answer to "whose numbers
-                                # are these?" the full profile carries — an
-                                # owner-typed profile must not read like a
-                                # curated one here either.
-                                "limits_provenance": limits_provenance_note(p),
-                            }
-                        )
-                    except KeyError:
-                        continue
-                return {"success": True, "count": len(profiles), "profiles": profiles}
+                for pid in list_profiles():
+                    entry: dict[str, Any] = {"id": pid, "display_name": roster_display_name(pid) or pid}
+                    if pid in set_up_here:
+                        entry["set_up_on_this_machine"] = True
+                    profiles.append(entry)
+                return {
+                    "success": True,
+                    "count": len(profiles),
+                    "profiles": profiles,
+                    "note": (
+                        "Names only. For one printer's limits and where they came from, "
+                        "call get_safety_profile(printer_id=<id>)."
+                    ),
+                }
             except Exception as exc:
                 _logger.exception("Unexpected error in list_safety_profiles")
                 return _srv._error_dict(

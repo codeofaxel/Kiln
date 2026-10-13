@@ -96,10 +96,12 @@ class TestGenerationToolsPlugin:
 
         monkeypatch.setattr("kiln.original_design.generate_original_design", fake_generate)
 
+        # A synthetic printer the session holds (a 256 mm cube): a real
+        # printer's bed is its catalogue record, which public CI does not hold.
         result = registered_tools["generate_model_with_provider"](
             "phone stand with cable slot",
             provider="auto",
-            printer_model="bambu_a1",
+            printer_model="kilntest_enclosed",
             max_attempts=2,
         )
 
@@ -107,6 +109,6 @@ class TestGenerationToolsPlugin:
         assert result["message"] == session.summary
         assert result["provider_used"] == "gemini"
         assert result["best_readiness_score"] == 94
-        assert result["bed_size_model_id"] == "bambu_a1"
+        assert result["bed_size_model_id"] == "kilntest_enclosed"
         assert result["bed_dims_mm"] == [256.0, 256.0, 256.0]
         assert captured_kwargs["build_volume"] == (256.0, 256.0, 256.0)

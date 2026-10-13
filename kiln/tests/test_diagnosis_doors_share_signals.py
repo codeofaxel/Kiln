@@ -118,13 +118,15 @@ def test_a_long_bridge_reaches_the_live_diagnosis(tmp_path, free_tier, paused_pr
 
 
 def test_a_retry_hears_an_open_frame_printer(tmp_path, monkeypatch, free_tier, paused_printer):
-    """ABS on an open-frame A1: the diagnosis is the material-environment
-    mismatch, and its slicer fix reaches the retry's re-slice."""
+    """ABS on an open-frame printer: the diagnosis is the material-environment
+    mismatch, and its slicer fix reaches the retry's re-slice.  The printer
+    is the session's synthetic open-frame row: whether a real printer has an
+    enclosure is its catalogue record, which public CI does not hold."""
     import kiln.slicer as slicer
     import kiln.slicer_profiles as profiles
     from kiln.printer_intelligence import get_printer_intel
 
-    assert get_printer_intel("bambu_a1").has_enclosure is False  # the premise
+    assert get_printer_intel("kilntest_open").has_enclosure is False  # the premise
     handed: dict[str, Any] = {}
 
     def capture_profile(_printer_id, overrides=None, **_kwargs):
@@ -142,7 +144,7 @@ def test_a_retry_hears_an_open_frame_printer(tmp_path, monkeypatch, free_tier, p
     retry(
         model_path=_block_stl(tmp_path / "block.stl"),
         material="ABS",
-        printer_id="bambu_a1",
+        printer_id="kilntest_open",
         skip_validation=True,
     )
 
