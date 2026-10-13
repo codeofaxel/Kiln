@@ -78,11 +78,14 @@ def limits_from_klipper_config(config: Any) -> dict[str, Any] | None:
     or states none of the four.  Pure, and never raises.
 
     Hotend and bed ceilings are ``[extruder] max_temp`` and ``[heater_bed]
-    max_temp``: the temperature past which Klipper shuts the heater down,
-    which is the firmware's own ceiling and the honest one for Kiln to
-    hold.  Feedrate is ``[printer] max_velocity`` (mm/s) as mm/min.  Build
-    volume is each axis's travel.  Chamber ceilings and flow limits are
-    not read: no standard section states them.
+    max_temp``: the temperature at which the printer's board shuts the
+    heater down.  Klipper documents that range as a safety check set "just
+    wide enough" -- a fault limit, not a rating -- so the note names it as
+    the shutdown point, and nothing here says what the hotend's parts can
+    take (a PTFE liner is not in any config).  Feedrate is ``[printer]
+    max_velocity`` (mm/s) as mm/min.  Build volume is each axis's travel.
+    Chamber ceilings and flow limits are not read: no standard section
+    states them.
     """
     if not isinstance(config, dict) or not config:
         return None
@@ -92,12 +95,12 @@ def limits_from_klipper_config(config: Any) -> dict[str, Any] | None:
     hotend = _number(_section(config, "extruder"), "max_temp")
     if hotend is not None and hotend > 0:
         profile["max_hotend_temp"] = hotend
-        read["max_hotend_temp"] = f"[extruder] max_temp: {hotend:g}"
+        read["max_hotend_temp"] = f"[extruder] max_temp: {hotend:g} (the board's shutdown point)"
 
     bed = _number(_section(config, "heater_bed"), "max_temp")
     if bed is not None and bed > 0:
         profile["max_bed_temp"] = bed
-        read["max_bed_temp"] = f"[heater_bed] max_temp: {bed:g}"
+        read["max_bed_temp"] = f"[heater_bed] max_temp: {bed:g} (the board's shutdown point)"
 
     velocity = _number(_section(config, "printer"), "max_velocity")
     if velocity is not None and velocity > 0:

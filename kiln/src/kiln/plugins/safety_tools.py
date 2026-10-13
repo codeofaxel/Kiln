@@ -168,7 +168,34 @@ def _limits_read_off_the_printer(printer_model: str, printer_name: str) -> dict:
             code="MACHINE_STATES_PARTIAL_LIMITS",
             extra={"proposal": proposal["profile"], "read_from_printer": proposal["read"], "missing": proposal["missing"]},
         )
+    caution = _hotend_caution(proposal["profile"].get("max_hotend_temp"))
+    if caution:
+        proposal["caution"] = caution
+        proposal["profile"]["notes"] = f"{proposal['profile'].get('notes', '')} {caution}".strip()
     return proposal
+
+
+def _hotend_caution(hotend: object) -> str | None:
+    """What the person must hear before confirming a hotend limit read off
+    the printer that is above the generic floor -- the PTFE-safe ceiling
+    Kiln holds a hotend it knows nothing about to -- or None.
+
+    The number is the board's shutdown point, and no config says whether
+    the hotend is lined, so the caution is a floor at every tier.
+    """
+    from kiln.safety_profiles import get_profile
+
+    try:
+        value, floor = float(hotend), float(get_profile("default").max_hotend_temp)
+    except (TypeError, ValueError, KeyError):
+        return None
+    if value <= floor:
+        return None
+    return (
+        f"{value:g} C is where this printer's board shuts the hotend down, not a rating, so a print "
+        f"set that hot can trip it. If the hotend has a PTFE liner, keep it at or below {floor:g} C: "
+        "above that the liner breaks down and gives off fumes."
+    )
 
 
 class _SafetyToolsPlugin:
@@ -581,10 +608,14 @@ class _SafetyToolsPlugin:
             and velocity limit off the printer's own configuration (through
             Moonraker), puts them in front of the person as ``proposal`` with
             the configuration lines they came from, and takes the same code.
-            The saved limits are labelled as read from that printer.  A
-            printer that cannot state them (any other backend) says so and
-            asks for ``profile``; a configuration that states only some of
-            them hands those back in ``proposal`` for you to complete.
+            The saved limits are labelled as read from that printer.  The
+            hotend and bed numbers are the board's shutdown points, and a
+            hotend proposal above Kiln's generic floor carries a
+            ``caution`` about PTFE-lined hotends: say it to the person
+            before they confirm.  A printer that cannot state them (any
+            other backend) says so and asks for ``profile``; a
+            configuration that states only some of them hands those back
+            in ``proposal`` for you to complete.
 
             Args:
                 printer_model: Short identifier for the printer (e.g.
@@ -608,15 +639,18 @@ class _SafetyToolsPlugin:
                     validate_safety_profile,
                 )
 
-                read: dict = {}
+                shown: dict = {}
                 if not profile:
                     proposal = _limits_read_off_the_printer(printer_model, printer_name)
                     if "profile" not in proposal:
                         return proposal
-                    profile, read = proposal["profile"], proposal["read"]
-                # What the person is confirming rides on every reply when the
-                # numbers were read off the printer: they never typed them.
-                shown = {"proposal": profile, "read_from_printer": read} if read else {}
+                    profile = proposal["profile"]
+                    # What the person is confirming rides on every reply when
+                    # the numbers were read off the printer: they never typed
+                    # them, and the caution is said before they confirm.
+                    shown = {"proposal": profile, "read_from_printer": proposal["read"]}
+                    if proposal.get("caution"):
+                        shown["caution"] = proposal["caution"]
                 errors = validate_safety_profile(profile)
                 if errors:
                     return _srv._error_dict(
@@ -637,7 +671,7 @@ class _SafetyToolsPlugin:
                     "printer_model": printer_model.lower().replace("-", "_").strip(),
                     "message": "Local printer override saved successfully."
                     + (" The person confirmed these limits." if confirmed else "")
-                    + (" They were read off the printer's own configuration." if read else ""),
+                    + (" They were read off the printer's own configuration." if shown else ""),
                     **shown,
                 }
             except ValueError as exc:

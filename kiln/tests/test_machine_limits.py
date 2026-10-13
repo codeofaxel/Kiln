@@ -240,7 +240,7 @@ class TestAddSafetyProfileReadsThePrinter:
         first = tools["add_safety_profile"]("my_voron")
         assert first["success"] is False and first["error"]["code"] == "CONFIRMATION_REQUIRED"
         assert first["proposal"]["max_hotend_temp"] == 300.0
-        assert first["read_from_printer"]["max_bed_temp"] == "[heater_bed] max_temp: 120"
+        assert first["read_from_printer"]["max_bed_temp"] == "[heater_bed] max_temp: 120 (the board's shutdown point)"
         assert len(shown) == 1
         assert tools["give_print_code"](shown[0].code)["success"]
         second = tools["add_safety_profile"]("my_voron")
@@ -338,3 +338,49 @@ class TestAddSafetyProfileReadsThePrinter:
         result = tools["add_safety_profile"]("my_voron")
         assert result["success"] is True and shown == []
         assert result["proposal"]["max_feedrate"] == 6000.0
+
+
+# ---------------------------------------------------------------------------
+# What the numbers are, said before anyone confirms them
+# ---------------------------------------------------------------------------
+
+
+def _floor() -> float:
+    from kiln.safety_profiles import get_profile
+
+    return float(get_profile("default").max_hotend_temp)
+
+
+class TestTheProposalSaysWhatTheNumbersAre:
+    def test_the_note_names_the_board_shutdown_point(self):
+        notes = limits_from_klipper_config(VORON_LIKE)["profile"]["notes"]
+        assert "[extruder] max_temp: 300 (the board's shutdown point)" in notes
+        assert "[heater_bed] max_temp: 120 (the board's shutdown point)" in notes
+
+    def test_a_hotend_above_the_floor_carries_the_ptfe_caution(self, door):
+        tools, _shown, printers = door
+        printers["default"] = _FakePrinter()
+        result = tools["add_safety_profile"]("my_voron")
+        caution = result.get("caution") or ""
+        assert "PTFE" in caution and f"{_floor():g} C" in caution
+        assert "shuts the hotend down" in caution
+        assert caution in result["proposal"]["notes"]
+
+    def test_the_caution_reaches_the_saved_limits(self, door):
+        tools, shown, printers = door
+        printers["default"] = _FakePrinter()
+        tools["add_safety_profile"]("my_voron")
+        tools["give_print_code"](shown[0].code)
+        assert tools["add_safety_profile"]("my_voron")["success"] is True
+        from kiln.safety_profiles import get_profile
+
+        assert "PTFE" in get_profile("my_voron").notes
+
+    def test_a_hotend_at_or_below_the_floor_carries_none(self, door):
+        tools, _shown, printers = door
+        printers["default"] = _FakePrinter({
+            **VORON_LIKE, "extruder": {"max_temp": f"{_floor():g}"}, "heater_bed": {"max_temp": "80"},
+            "printer": {"max_velocity": "100"},
+        })
+        result = tools["add_safety_profile"]("my_voron")
+        assert result["success"] is True and "caution" not in result
