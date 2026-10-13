@@ -182,7 +182,7 @@ _KIND_RULES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
         ("read", r"^(list|get|find|search|show|inspect|read|visualize|visual_diff|fingerprint|tail|summarize|query|"
                  r"usage_summary|billing_|license_status|check_payment|preview_overage|cutter_wear_status|"
                  r"nozzle_wear_status|maintenance_due|abrasive_escalation|decoration_history|"
-                 r"design_version_health|github_|best_|cross_|resolve_handle)"),
+                 r"design_version_health|github_|best_|cross_)"),
         ("action", r"^(fleet_|pause|resume|cancel|revert|plan_|request_|auto_recover|recover_power|"
                    r"resume_interrupted|emit_test|add_feature_during|decorate_during|deboss_during|"
                    r"apply_mid_print|plan_mid_print|preview_mid_print|revert_mid_print|start_|stop_|trigger|"

@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-13T18:20:57.907074+00:00",
-  "tool_count": 416,
+  "generated": "2026-10-13T19:02:05.211563+00:00",
+  "tool_count": 415,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -21429,7 +21429,7 @@
     },
     {
       "name": "add_org_member",
-      "description": "Add *tenant_id* to *org_id*.  ``role`` is one of ``owner``, ``admin``, ``member``, ``viewer``.  Already- enrolled members get their role updated in place.\n\nKiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Add *tenant_id* to *org_id*.  ``role`` is one of ``owner``, ``admin``, ``member``, ``viewer``.  Already- enrolled members get their role updated in place.\n\nKiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.\nRequires Kiln Business for the organisation (its owner's plan), not for you: everyone whose role may see it reads it, on any plan of their own.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
@@ -21484,7 +21484,7 @@
     },
     {
       "name": "add_team_member",
-      "description": "Add *tenant_id* to *team_id*.\n\nKiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Add *tenant_id* to *team_id*.\n\nKiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.\nRequires Kiln Business for the organisation (its owner's plan), not for you: everyone whose role may see it reads it, on any plan of their own.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
@@ -21539,7 +21539,7 @@
     },
     {
       "name": "apply_role_template",
-      "description": "Grant every scope in a role template to a tenant or team in a single call.  Composes repeated ``grant_scope`` under the hood \u2014 no new primitive, just ergonomic bundling.\n\nKiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Grant every scope in a role template to a tenant or team in a single call.  Composes repeated ``grant_scope`` under the hood \u2014 no new primitive, just ergonomic bundling.\n\nKiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.\nRequires Kiln Business for the organisation (its owner's plan), not for you: everyone whose role may see it reads it, on any plan of their own.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
@@ -21606,7 +21606,7 @@
     },
     {
       "name": "assign_artifact_to_org",
-      "description": "Mark a local artifact as owned by *org_id*.\n\nKiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Mark a local artifact as owned by *org_id*.\n\nKiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.\nRequires Kiln Business for the organisation (its owner's plan), not for you: everyone whose role may see it reads it, on any plan of their own.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
@@ -21743,7 +21743,7 @@
     },
     {
       "name": "create_team",
-      "description": "Create a team (sub-group) inside an org.\n\nKiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Create a team (sub-group) inside an org.\n\nKiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.\nRequires Kiln Business for the organisation (its owner's plan), not for you: everyone whose role may see it reads it, on any plan of their own.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
@@ -21815,7 +21815,7 @@
     },
     {
       "name": "delete_team",
-      "description": "Delete a team, its memberships, and its scope grants.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Delete a team, its memberships, and its scope grants.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business for the organisation (its owner's plan), not for you: everyone whose role may see it reads it, on any plan of their own.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
@@ -21947,7 +21947,7 @@
     },
     {
       "name": "grant_scope",
-      "description": "Grant *capability* on *scope_key* to a tenant OR a team.\n\nKiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Grant *capability* on *scope_key* to a tenant OR a team.\n\nKiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.\nRequires Kiln Business for the organisation (its owner's plan), not for you: everyone whose role may see it reads it, on any plan of their own.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
@@ -22313,7 +22313,7 @@
     },
     {
       "name": "remove_org_member",
-      "description": "Remove a member and every permission scope they held inside *org_id*.\n\nKiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Remove a member and every permission scope they held inside *org_id*.\n\nKiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.\nRequires Kiln Business for the organisation (its owner's plan), not for you: everyone whose role may see it reads it, on any plan of their own.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
@@ -22351,7 +22351,7 @@
     },
     {
       "name": "remove_team_member",
-      "description": "Remove a tenant from a team.  Their personal org membership is unaffected; only team-targeted scope grants stop applying to them.\n\nKiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Remove a tenant from a team.  Their personal org membership is unaffected; only team-targeted scope grants stop applying to them.\n\nKiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.\nRequires Kiln Business for the organisation (its owner's plan), not for you: everyone whose role may see it reads it, on any plan of their own.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
@@ -22427,37 +22427,8 @@
       }
     },
     {
-      "name": "resolve_handle",
-      "description": "Invite-by-handle resolver: ``(provider, handle)`` \u2192 Kiln tenant id.  Returns the linked identity row (or ``{found: False}`` when no binding exists).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "teams",
-      "parameters": {
-        "properties": {
-          "provider": {
-            "title": "Provider",
-            "type": "string"
-          },
-          "handle": {
-            "title": "Handle",
-            "type": "string"
-          }
-        },
-        "required": [
-          "provider",
-          "handle"
-        ],
-        "title": "resolve_handleArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "read"
-      }
-    },
-    {
       "name": "revoke_scope",
-      "description": "Revoke a scope grant.  Supply either ``tenant_id`` (to remove a personal grant) or ``team_id`` (to remove a team-targeted grant).\n\nKiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Revoke a scope grant.  Supply either ``tenant_id`` (to remove a personal grant) or ``team_id`` (to remove a team-targeted grant).\n\nKiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.\nRequires Kiln Business for the organisation (its owner's plan), not for you: everyone whose role may see it reads it, on any plan of their own.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
@@ -22744,7 +22715,7 @@
     },
     {
       "name": "unassign_artifact",
-      "description": "Remove the local org-ownership marker for an artifact.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Remove the local org-ownership marker for an artifact.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business for the organisation (its owner's plan), not for you: everyone whose role may see it reads it, on any plan of their own.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
