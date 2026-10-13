@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-13T09:37:40.682846+00:00",
+  "generated": "2026-10-13T09:47:16.993910+00:00",
   "tool_count": 423,
   "categories": {
     "product_generators": {
@@ -21851,9 +21851,9 @@
     },
     {
       "name": "backfill_artifact_into_org",
-      "description": "Move an existing tenant-owned artifact into *org_id*, updating BOTH the cloud rows and the local ownership marker.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Move an existing tenant-owned artifact into *org_id*, updating BOTH the cloud rows and the local ownership marker.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
       "category": "teams",
       "parameters": {
         "properties": {
