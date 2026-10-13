@@ -684,7 +684,7 @@ def _made_by_step_conversion(path: Path) -> bool:
 
     try:
         if path.suffix.lower() == ".3mf":
-            with zipfile.ZipFile(path) as zf, zf.open("3D/3dmodel.model", encoding="utf-8") as fh:
+            with zipfile.ZipFile(path) as zf, zf.open("3D/3dmodel.model") as fh:
                 return _3MF_CREATED_BY.strip().encode("utf-8") in fh.read(4096)
         with path.open("rb") as fh:
             return fh.read(len(_STEP_MESH_STAMP)) == _STEP_MESH_STAMP

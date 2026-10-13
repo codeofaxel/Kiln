@@ -3584,6 +3584,24 @@ def test_a_same_named_3mf_kiln_did_not_make_is_left_alone(real_kernel, tmp_dir):
     assert again.output_path == result.output_path
 
 
+def test_a_real_3mf_is_told_apart_without_the_cad_kernel(tmp_dir):
+    """A 3MF is a zip: its model is read as bytes, Kiln's own is known by its
+    mark, and anyone else's names no STEP (the door the edge and wall edits
+    use) instead of raising."""
+    import zipfile
+
+    from kiln.step_import import _3MF_CREATED_BY, _made_by_step_conversion, step_converted_from
+
+    ours, theirs = tmp_dir / "ours.3mf", tmp_dir / "theirs.3mf"
+    for path, line in ((ours, _3MF_CREATED_BY), (theirs, ' <metadata name="Application">slicer</metadata>\n')):
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("3D/3dmodel.model", f'<?xml version="1.0" encoding="UTF-8"?>\n<model>\n{line}</model>\n')
+
+    assert _made_by_step_conversion(ours) is True
+    assert _made_by_step_conversion(theirs) is False
+    assert step_converted_from(str(theirs)) is None
+
+
 def test_the_implicit_door_names_its_mesh_after_the_step(real_kernel, tmp_dir):
     """ensure_mesh_path: first conversion and cache hit alike."""
     import time as _time

@@ -31,6 +31,16 @@ Two halves, because each can pass while the other fails:
 A/B: both halves fail at the revision before the fix (the structural
 half with 65 findings, the behavioural half with the incident's exact
 error) and pass after it.
+
+The scan also refuses an ``encoding`` on a call that takes none: a
+``ZipFile`` member open (bytes; ``ZipFile.open`` has no such parameter,
+so it raises ``TypeError``) and a binary-mode open (``ValueError``).
+2026-10-12: the scan read the member name in
+``zf.open("3D/3dmodel.model")`` as a text mode and asked for an
+encoding; the line that answered it made every STEP conversion with a
+3MF already at its output name raise ``TypeError``.  A zip member is now
+recognised by its receiver, so the scan neither asks for that encoding
+nor lets one through.
 """
 
 from __future__ import annotations
@@ -57,63 +67,169 @@ _NOT_A_TEXT_OPEN = {"Image", "os", "store", "webbrowser"}
 
 _OPENERS = {"open", "read_text", "write_text"}
 
+_FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+
+
+def _is_zipfile(node: ast.AST) -> bool:
+    """``ZipFile(...)`` or ``zipfile.ZipFile(...)``."""
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    return (func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)) == "ZipFile"
+
+
+def _own_nodes(scope: ast.AST):
+    """Every node inside *scope*, not descending into nested functions."""
+    for child in ast.iter_child_nodes(scope):
+        yield child
+        if not isinstance(child, _FUNCTIONS):
+            yield from _own_nodes(child)
+
+
+def _zipfile_names(scope: ast.AST) -> set[str]:
+    """Names *scope* binds to a ``ZipFile``: ``with ZipFile(...) as zf``,
+    ``zf = ZipFile(...)``, or a parameter annotated ``ZipFile``."""
+    names: set[str] = set()
+    for node in _own_nodes(scope):
+        if isinstance(node, ast.withitem) and _is_zipfile(node.context_expr):
+            if isinstance(node.optional_vars, ast.Name):
+                names.add(node.optional_vars.id)
+        elif isinstance(node, ast.Assign) and _is_zipfile(node.value):
+            names.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            if _is_zipfile(node.value) or "ZipFile" in ast.unparse(node.annotation):
+                names.add(node.target.id)
+        elif isinstance(node, ast.arg) and node.annotation is not None and "ZipFile" in ast.unparse(node.annotation):
+            names.add(node.arg)
+    return names
+
+
+def _scoped_calls(scope: ast.AST, inherited: frozenset[str] = frozenset()):
+    """``(call, zip_names)`` for every call, with the ``ZipFile`` names in
+    scope where it is made (a nested function sees its parents' names)."""
+    names = inherited | _zipfile_names(scope)
+    for node in _own_nodes(scope):
+        if isinstance(node, ast.Call):
+            yield node, names
+        elif isinstance(node, _FUNCTIONS):
+            yield from _scoped_calls(node, names)
+
+
+def _is_zip_member_open(node: ast.Call, zip_names: frozenset[str]) -> bool:
+    """``zf.open(member)`` on a ``ZipFile``: its first argument is a member
+    name, not a mode, and what it returns is bytes."""
+    func = node.func
+    if not (isinstance(func, ast.Attribute) and func.attr == "open"):
+        return False
+    return _is_zipfile(func.value) or (isinstance(func.value, ast.Name) and func.value.id in zip_names)
+
+
+def _opener_name(func: ast.expr) -> str | None:
+    """The file-opening call *func* names, or None when it is not one."""
+    if isinstance(func, ast.Name):
+        name = func.id
+    elif isinstance(func, ast.Attribute):
+        name = func.attr
+        base = func.value
+        base_name = base.id if isinstance(base, ast.Name) else (
+            base.attr if isinstance(base, ast.Attribute) else None
+        )
+        if name == "open" and base_name in _NOT_A_TEXT_OPEN:
+            return None
+    else:
+        return None
+    return name if name in _OPENERS else None
+
+
+def _mode(node: ast.Call, name: str) -> ast.expr | None:
+    """The mode argument of an ``open`` / ``Path.open`` call, if written."""
+    mode = None
+    for kw in node.keywords:
+        if kw.arg == "mode":
+            mode = kw.value
+    if name == "open":
+        positional = node.args[1:] if isinstance(node.func, ast.Name) else node.args[:1]
+        if positional:
+            mode = positional[0]
+    return mode
+
+
+def _parse(path: Path) -> tuple[str, ast.Module | None]:
+    src = path.read_text(encoding="utf-8")
+    try:
+        return src, ast.parse(src)
+    except SyntaxError:
+        return src, None
+
+
+def _site(src: str, node: ast.Call, fallback: str) -> tuple[int, str]:
+    segment = ast.get_source_segment(src, node) or fallback
+    return node.lineno, " ".join(segment.split())[:100]
+
 
 def _unencoded_text_opens(path: Path) -> list[tuple[int, str]]:
     """``(line, source)`` for every text-mode file open in *path* that
     names no encoding."""
-    src = path.read_text(encoding="utf-8")
-    try:
-        tree = ast.parse(src)
-    except SyntaxError:
+    src, tree = _parse(path)
+    if tree is None:
         return []
     found: list[tuple[int, str]] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        func = node.func
-        if isinstance(func, ast.Name):
-            name = func.id
-        elif isinstance(func, ast.Attribute):
-            name = func.attr
-            base = func.value
-            base_name = base.id if isinstance(base, ast.Name) else (
-                base.attr if isinstance(base, ast.Attribute) else None
-            )
-            if name == "open" and base_name in _NOT_A_TEXT_OPEN:
-                continue
-        else:
-            continue
-        if name not in _OPENERS:
+    for node, zip_names in _scoped_calls(tree):
+        name = _opener_name(node.func)
+        if name is None or _is_zip_member_open(node, zip_names):
             continue
         keywords = {kw.arg for kw in node.keywords}
         if "encoding" in keywords or None in keywords:
             continue  # named, or passed through **kwargs (judged at that site)
-        mode = None
-        for kw in node.keywords:
-            if kw.arg == "mode":
-                mode = kw.value
-        if name == "open":
-            positional = node.args[1:] if isinstance(func, ast.Name) else node.args[:1]
-            if positional:
-                mode = positional[0]
+        mode = _mode(node, name)
         if mode is not None and not isinstance(mode, ast.Constant):
             continue  # a mode chosen at runtime: the binary download path
         if isinstance(mode, ast.Constant) and "b" in str(mode.value):
             continue
-        segment = ast.get_source_segment(src, node) or name
-        found.append((node.lineno, " ".join(segment.split())[:100]))
+        found.append(_site(src, node, name))
     return found
 
 
-def scan_package(root: Path) -> list[str]:
+def _encodings_nothing_takes(path: Path) -> list[tuple[int, str]]:
+    """``(line, source)`` for every ``encoding=`` in *path* on a call that
+    cannot take one: a ``ZipFile`` member open (``TypeError``) or a
+    binary-mode open (``ValueError``)."""
+    src, tree = _parse(path)
+    if tree is None:
+        return []
+    found: list[tuple[int, str]] = []
+    for node, zip_names in _scoped_calls(tree):
+        if not any(kw.arg == "encoding" for kw in node.keywords):
+            continue
+        if _is_zip_member_open(node, zip_names):
+            found.append(_site(src, node, "open"))
+            continue
+        name = _opener_name(node.func)
+        if name is None:
+            continue
+        mode = _mode(node, name)
+        if isinstance(mode, ast.Constant) and "b" in str(mode.value):
+            found.append(_site(src, node, name))
+    return found
+
+
+def _scan(root: Path, judge) -> list[str]:
     findings: list[str] = []
     for path in sorted(root.rglob("*.py")):
         rel = path.relative_to(root).as_posix()
         if rel.startswith(_VENDORED):
             continue
-        for line, source in _unencoded_text_opens(path):
+        for line, source in judge(path):
             findings.append(f"{rel}:{line}: {source}")
     return findings
+
+
+def scan_package(root: Path) -> list[str]:
+    return _scan(root, _unencoded_text_opens)
+
+
+def scan_package_for_misplaced_encodings(root: Path) -> list[str]:
+    return _scan(root, _encodings_nothing_takes)
 
 
 def test_every_text_open_names_utf8() -> None:
@@ -175,6 +291,71 @@ def test_the_scan_sees_the_incident_shape(tmp_path: Path) -> None:
     findings = scan_package(pkg)
     assert [f.split(":")[0] for f in findings] == ["bad.py"] * 4, findings
     assert any("open(p)" in f for f in findings)
+
+
+def test_no_call_is_handed_an_encoding_it_cannot_take() -> None:
+    findings = scan_package_for_misplaced_encodings(PACKAGE)
+    assert not findings, (
+        f"{len(findings)} call(s) pass an encoding they cannot take -- a ZipFile member is "
+        "bytes (decode what you read), and a binary-mode open takes no encoding:\n  " + "\n  ".join(findings)
+    )
+
+
+def test_a_zip_member_is_bytes_and_takes_no_encoding(tmp_path: Path) -> None:
+    """The 2026-10-12 line is refused, a zip member read as bytes is not
+    asked for an encoding, and a text open still is."""
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "bad.py").write_text(
+        textwrap.dedent(
+            """
+            import zipfile
+            from pathlib import Path
+            def made_by_us(path):
+                with zipfile.ZipFile(path) as zf, zf.open("3D/3dmodel.model", encoding="utf-8") as fh:
+                    return fh.read()
+            def member(zf: zipfile.ZipFile, name):
+                return zf.open(name, encoding="utf-8").read()
+            def chained(p):
+                return zipfile.ZipFile(p).open("x", encoding="utf-8").read()
+            def binary(p):
+                with open(p, "rb", encoding="utf-8") as f:
+                    f.read()
+                with Path(p).open("wb", encoding="utf-8") as f:
+                    f.write(b"x")
+            """
+        ),
+        encoding="utf-8",
+    )
+    (pkg / "good.py").write_text(
+        textwrap.dedent(
+            """
+            import io, zipfile
+            from pathlib import Path
+            def made_by_us(path):
+                with zipfile.ZipFile(path) as zf, zf.open("3D/3dmodel.model") as fh:
+                    return fh.read()
+            def as_text(path):
+                zf = zipfile.ZipFile(path)
+                with io.TextIOWrapper(zf.open("a.txt"), encoding="utf-8") as fh:
+                    return fh.read()
+            def nested(path):
+                with zipfile.ZipFile(path) as zf:
+                    def inner():
+                        return zf.open("a.txt").read()
+                    return inner()
+            def text(p):
+                with Path(p).open("r", encoding="utf-8") as f:
+                    f.read()
+            """
+        ),
+        encoding="utf-8",
+    )
+    misplaced = scan_package_for_misplaced_encodings(pkg)
+    assert [f.split(":")[0] for f in misplaced] == ["bad.py"] * 5, misplaced
+    assert any("3D/3dmodel.model" in f for f in misplaced)
+    # The member name is not a text mode: nothing asks for an encoding there.
+    assert scan_package(pkg) == [], scan_package(pkg)
 
 
 # ---------------------------------------------------------------------------
