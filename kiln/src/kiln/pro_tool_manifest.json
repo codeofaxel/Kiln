@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-13T09:47:16.993910+00:00",
-  "tool_count": 423,
+  "generated": "2026-10-13T17:20:08.689389+00:00",
+  "tool_count": 418,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -1271,57 +1271,6 @@
       "served": false
     },
     {
-      "name": "billing_delete_data",
-      "description": "Delete all your billing data (GDPR right-to-erasure).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "billing",
-      "parameters": {
-        "properties": {
-          "confirm": {
-            "default": "",
-            "title": "Confirm",
-            "type": "string"
-          }
-        },
-        "title": "billing_delete_dataArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "record"
-      },
-      "served": false
-    },
-    {
-      "name": "billing_export",
-      "description": "Export billing history for accounting.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "billing",
-      "parameters": {
-        "properties": {
-          "format": {
-            "default": "csv",
-            "title": "Format",
-            "type": "string"
-          },
-          "limit": {
-            "default": 100,
-            "title": "Limit",
-            "type": "integer"
-          }
-        },
-        "title": "billing_exportArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "read"
-      },
-      "served": false
-    },
-    {
       "name": "billing_history",
       "description": "Get recent billing charge history with payment outcomes.",
       "tier": "free",
@@ -1336,34 +1285,6 @@
           }
         },
         "title": "billing_historyArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "read"
-      },
-      "served": false
-    },
-    {
-      "name": "billing_invoice",
-      "description": "Generate an invoice/receipt for a billing charge.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "billing",
-      "parameters": {
-        "properties": {
-          "charge_id": {
-            "default": "",
-            "title": "Charge Id",
-            "type": "string"
-          },
-          "job_id": {
-            "default": "",
-            "title": "Job Id",
-            "type": "string"
-          }
-        },
-        "title": "billing_invoiceArguments",
         "type": "object"
       },
       "offline": {
@@ -1539,60 +1460,6 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
-      }
-    },
-    {
-      "name": "refund_payment",
-      "description": "Request a refund for a completed payment.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "billing",
-      "parameters": {
-        "properties": {
-          "payment_id": {
-            "title": "Payment Id",
-            "type": "string"
-          },
-          "reason": {
-            "default": "",
-            "title": "Reason",
-            "type": "string"
-          }
-        },
-        "required": [
-          "payment_id"
-        ],
-        "title": "refund_paymentArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "record"
-      },
-      "served": false
-    },
-    {
-      "name": "reissue_license",
-      "description": "Trigger a license-key reissue for a lost key.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "billing",
-      "parameters": {
-        "properties": {
-          "email": {
-            "title": "Email",
-            "type": "string"
-          }
-        },
-        "required": [
-          "email"
-        ],
-        "title": "reissue_licenseArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "record"
       }
     },
     {
