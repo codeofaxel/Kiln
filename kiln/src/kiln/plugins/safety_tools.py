@@ -28,6 +28,42 @@ def _limits_proposal_key(printer_model: str, profile: dict) -> tuple[str, str]:
     return f"limits for {printer_model}", digest
 
 
+def _needs_a_sign_in(printer_model: str) -> dict | None:
+    """The refusal a signed-out install gets for a limit above the floor on
+    a printer Kiln has no number for, or ``None`` when it is signed in.
+
+    The floor still prints; what a sign-in buys is Kiln standing behind a
+    ceiling it will enforce.  Counted on the account wall like every other
+    door a sign-in opens, so the dashboard sees it.
+    """
+    try:
+        from kiln.auth_session import resolve_api_bearer
+
+        if resolve_api_bearer().token:
+            return None
+    except Exception:  # noqa: BLE001 -- an unreadable session is not a sign-in
+        pass
+    try:
+        from kiln.daily_stats import record_account_wall
+
+        record_account_wall("add_safety_profile")
+    except Exception:  # noqa: BLE001
+        pass
+    from kiln.tiers_and_terms import signin_hint_fields
+
+    return {
+        "success": False,
+        "status": "error",
+        "code": "KILN_ACCOUNT_NOT_PAIRED",
+        "error": (
+            f"Kiln has no verified limits for {printer_model!r}, so these numbers would be the only ceiling "
+            "it enforces, and that takes a signed-in install. Sign in free (kiln_signin), then call this again: "
+            "a person confirms the limits with a code on this screen, as a print start is."
+        ),
+        **signin_hint_fields(),
+    }
+
+
 def _limits_confirmed_by_a_person(printer_model: str, profile: dict) -> Any:
     """``True`` when a person has typed the code shown for exactly these
     limits; otherwise the refusal that says what to do, after showing the
@@ -453,9 +489,8 @@ class _SafetyToolsPlugin:
         # ------------------------------------------------------------------
 
         @mcp.tool()
-        @_srv.requires_tier(_srv.LicenseTier.BUSINESS)
         def add_safety_profile(printer_model: str, profile: dict) -> dict:
-            """Add a local safety-profile override for a printer model.
+            """Add a local safety-profile override for a printer model.  Free at every tier.
 
             Validates the profile and saves it to this machine's override file
             (``~/.kiln/local_printer_overrides.json``; the older name
@@ -475,10 +510,12 @@ class _SafetyToolsPlugin:
             readout — Kiln never presents them as its own verified numbers.
 
             For a printer Kiln has no number for, a limit above its generic
-            floor is held until a PERSON confirms it: Kiln shows a code on
-            the screen of the machine it runs on, the person types it in the
-            chat, you pass it to ``give_print_code``, then call this again
-            with the same numbers.  Find the numbers on the maker's own spec
+            floor needs two things.  A signed-in install (a free account:
+            ``kiln_signin``), because Kiln vouches for ceilings it enforces
+            and a ceiling nobody set is held to the floor.  And a PERSON's
+            confirmation: Kiln shows a code on the screen of the machine it
+            runs on, the person types it in the chat, you pass it to
+            ``give_print_code``, then call this again with the same numbers.  Find the numbers on the maker's own spec
             page (maximum hotend and bed temperature, bed size) and say where
             they came from in ``notes``; never guess them, and never ask the
             person to type numbers they do not know.  The code is the
@@ -510,6 +547,8 @@ class _SafetyToolsPlugin:
                     )
                 confirmed = False
                 if limits_above_floor(printer_model, profile):
+                    if (wall := _needs_a_sign_in(printer_model)) is not None:
+                        return wall
                     answered = _limits_confirmed_by_a_person(printer_model, profile)
                     if answered is not True:
                         return answered

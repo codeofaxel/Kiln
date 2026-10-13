@@ -19,6 +19,8 @@ rows are, in kiln-pro's ``tests/test_printer_catalogue_numbers.py``.
 
 from __future__ import annotations
 
+import pathlib
+
 from typing import Any
 
 import pytest
@@ -216,6 +218,14 @@ def door(monkeypatch):
     monkeypatch.setattr(srv, "_check_auth", lambda *_a, **_k: None)
     monkeypatch.setattr(srv, "_audit", lambda *_a, **_k: None)
     monkeypatch.delenv("KILN_HOSTED_MULTITENANT", raising=False)
+    # A signed-in install (any free account): the person's code is the next
+    # question.  The signed-out wall has its own class below.
+    from kiln import auth_session
+
+    monkeypatch.setattr(
+        auth_session, "resolve_api_bearer",
+        lambda *a, **k: auth_session.ApiBearer(token="tok", state="license"),
+    )
     screen_code._reset_for_tests()
     shown: list[screen_code.Issued] = []
     monkeypatch.setattr(screen_code, "_show_hook", lambda issued: shown.append(issued) or True)
@@ -315,3 +325,59 @@ class TestAddSafetyProfileAsksThePerson:
         result = tools["add_safety_profile"]("foo_x2", _foo_x2())
         assert result["error"]["code"] == "NOT_HERE"
         assert shown == []
+
+
+class TestAddSafetyProfileNeedsASignIn:
+    """Free at every tier since 2026-10-12 (it was Business by a tier sweep
+    that recorded no reason), and a limit above the floor for a printer Kiln
+    has no number for takes a signed-in install before the person's code."""
+
+    def test_signed_out_is_the_account_wall_and_no_code_is_shown(self, monkeypatch, tmp_path):
+        import kiln.server as srv
+        from kiln import auth_session, daily_stats, screen_code
+
+        monkeypatch.setattr(srv, "_check_auth", lambda *_a, **_k: None)
+        monkeypatch.setattr(srv, "_audit", lambda *_a, **_k: None)
+        monkeypatch.setattr(daily_stats, "_STATS_PATH", tmp_path / "daily_stats.json")
+        monkeypatch.setattr(
+            auth_session, "resolve_api_bearer",
+            lambda *a, **k: auth_session.ApiBearer(token="", state="signed_out"),
+        )
+        shown: list = []
+        monkeypatch.setattr(screen_code, "_show_hook", lambda issued: shown.append(issued) or True)
+        out = _tools()["add_safety_profile"]("foo_x2", _foo_x2())
+        assert out["success"] is False and out["code"] == "KILN_ACCOUNT_NOT_PAIRED"
+        assert "Sign in free" in out["error"] and "kiln_signin" in out["error"]
+        assert shown == []
+        assert daily_stats.get_daily_stats()["account_wall"] == {"add_safety_profile": 1}
+
+    def test_a_limit_at_or_below_the_floor_needs_no_sign_in(self, monkeypatch, tmp_path):
+        import kiln.server as srv
+        from kiln import auth_session, safety_profiles as sp
+
+        monkeypatch.setattr(srv, "_check_auth", lambda *_a, **_k: None)
+        monkeypatch.setattr(srv, "_audit", lambda *_a, **_k: None)
+        monkeypatch.setattr(sp, "_LOCAL_OVERRIDE_FILE", tmp_path / "overrides.json")
+        monkeypatch.setattr(sp, "_LEGACY_OVERRIDE_FILE", tmp_path / "legacy.json")
+        monkeypatch.setattr(sp, "_LOCAL_DIR", tmp_path)
+        sp._local_override_cache.clear()
+        sp._local_overrides_loaded = False
+        monkeypatch.setattr(
+            auth_session, "resolve_api_bearer",
+            lambda *a, **k: auth_session.ApiBearer(token="", state="signed_out"),
+        )
+        floor = sp.get_profile("default")
+        out = _tools()["add_safety_profile"](
+            "foo_x2",
+            {"max_hotend_temp": floor.max_hotend_temp, "max_bed_temp": floor.max_bed_temp,
+             "max_feedrate": floor.max_feedrate, "build_volume": [200, 200, 200]},
+        )
+        assert out["success"] is True, out
+
+    def test_the_tool_carries_no_tier_gate(self):
+        from kiln.plugins import safety_tools
+
+        fn = _tools()["add_safety_profile"]
+        assert "Free at every tier" in (fn.__doc__ or "")
+        assert not getattr(fn, "_kiln_required_tier", None)
+        assert "requires_tier(_srv.LicenseTier.BUSINESS)\n        def add_safety_profile" not in pathlib.Path(safety_tools.__file__).read_text()

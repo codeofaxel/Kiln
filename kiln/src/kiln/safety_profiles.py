@@ -1019,10 +1019,9 @@ def warm_profile(printer_id: str) -> str | None:
       machine and is holding it to the generic floor only for want of a
       sign-in -- sign in free and it works to the real limits;
     * a printer the catalogue has no row for: Kiln holds it to the generic
-      floor; its bed can come from a slicer file, and limits above the floor
-      are custom safety profiles (a Business feature), confirmed with a code
-      on this screen, as a print start is.  No sign-in clause: signing in
-      changes nothing for such a printer today.
+      floor until a person states its limits (an agent may find them from
+      the maker's own page), on a signed-in install (free), confirmed with
+      a code on this screen, as a print start is.
 
     Offline or unanswered is neither: the record is fetched on the next
     command that needs it, and the floor stands meanwhile with nothing to
@@ -1061,19 +1060,27 @@ def warm_profile(printer_id: str) -> str | None:
             "Sign in free and Kiln works to that printer's real limits: hotend, bed and build volume."
         )
         _count_limits_offer("offered_limits", spelling)
-    else:
-        # A printer the catalogue has no row for.  Signing in changes nothing
-        # for it today (custom limits are a Business feature, and a bed from
-        # a slicer file needs no account), so this sentence asks for no
-        # sign-in and leaves no conversion marker: it is counted as shown.
+    elif cause == "signed_out":
+        # A printer the catalogue has no row for, on a signed-out install:
+        # limits above the floor take a signed-in install (free) and a
+        # person's code, so this sentence asks for the sign-in and leaves
+        # the conversion marker.
         sentence = (
             f"Kiln doesn't know the {spelling!r} yet, so it holds it to generic limits "
-            f"({hotend:g} C hotend, {bed:g} C bed). Set it up from a project saved in your slicer "
-            "with this printer chosen (set_printer_model with slicer_file) and Kiln takes its bed "
-            "from the file. Limits above the generic ones are custom safety profiles, a Business "
-            "feature (add_safety_profile), confirmed with a code on this screen, as a print start is."
+            f"({hotend:g} C hotend, {bed:g} C bed). Sign in free, and your agent can find its real "
+            "limits on the maker's own spec page (add_safety_profile) or you can enter them; you "
+            "confirm them with a code on this screen, as a print start is."
         )
-        _count_limits_offer("offered_limits_unknown", spelling, leads_to_signin=False)
+        _count_limits_offer("offered_limits_unknown", spelling)
+    else:
+        # The same printer on a signed-in install: nothing to sign in for,
+        # so no offer is counted.
+        sentence = (
+            f"Kiln doesn't know the {spelling!r} yet, so it holds it to generic limits "
+            f"({hotend:g} C hotend, {bed:g} C bed). Your agent can find its real limits on the "
+            "maker's own spec page (add_safety_profile) or you can enter them; you confirm them "
+            "with a code on this screen, as a print start is."
+        )
     _nudged.add(normalised)
     _pending_nudges.append(sentence)
     return sentence

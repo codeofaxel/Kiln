@@ -406,9 +406,7 @@ def test_a_limits_nudge_and_the_sign_in_it_led_to_reach_the_dashboard(
         assert daily_stats.get_daily_stats()["account_nudge"] == {
             "offered_limits": 1, "offered_limits_unknown": 1,
         }
-        # Only the catalogued printer's sentence asked for a sign-in, so the
-        # marker is its; the unknown printer's sentence leaves none.
-        assert json.loads(marker.read_text())["stage"] == "offered_limits"
+        assert json.loads(marker.read_text())["stage"] == "offered_limits_unknown"
 
         # Midnight passes; the person signs in from a terminal the next
         # morning, well inside the day the nudge is good for.
