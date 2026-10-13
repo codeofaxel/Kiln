@@ -601,8 +601,8 @@ def _load_3mf_stdlib(path: Path) -> Any:
         _KEEP,
         _PATH_ATTR,
         _EntityDeclarationRefused,
-        _RetainedBudget,
         _find_model_xml,
+        _RetainedBudget,
         _stream_part,
         open_untrusted_zip,
     )
