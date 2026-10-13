@@ -680,6 +680,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   file already in your library kept the original notes and quietly ignored
   new tags or a better prompt; it now takes the new ones.
 
+### Security
+
+- **Stronger protection against harmful 3MF files.**
+
 
 ## [1.4.1.1] - 2026-08-19
 
