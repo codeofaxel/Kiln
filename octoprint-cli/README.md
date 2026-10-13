@@ -1,6 +1,8 @@
 # octoprint-cli
 
-Agent-friendly command-line interface for [OctoPrint](https://octoprint.org/) 3D printer management.
+> **No longer maintained.** This package receives no further updates. Use [`kiln3d`](https://pypi.org/project/kiln3d/), which is compatible with OctoPrint and every other printer Kiln supports. Installed copies keep working.
+
+Agent-friendly command-line interface compatible with [OctoPrint](https://octoprint.org/) for 3D printer management.
 
 Designed for autonomous AI agent interaction with structured JSON outputs, clear exit codes, and safety guards for unattended operation.
 
@@ -217,3 +219,7 @@ octoprint-cli gcode G28 "M104 S200" "M140 S60" --json
 ## License
 
 MIT
+
+## Trademarks
+
+[OctoPrint is a registered trademark](https://octoprint.org). This package is not affiliated with or endorsed by OctoPrint or Gina Häußge.
