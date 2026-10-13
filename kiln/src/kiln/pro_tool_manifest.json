@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-13T17:20:08.689389+00:00",
-  "tool_count": 418,
+  "generated": "2026-10-13T17:33:02.213389+00:00",
+  "tool_count": 417,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -4584,41 +4584,6 @@
         "files": {
           "mesh_path_a": "one",
           "mesh_path_b": "one"
-        }
-      }
-    },
-    {
-      "name": "compute_mesh_diff_components",
-      "description": "Geometry-only mesh diff \u2014 returns three STL file paths (unchanged / removed / added) without rendering.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "design_versioning",
-      "parameters": {
-        "properties": {
-          "before_mesh_path": {
-            "title": "Before Mesh Path",
-            "type": "string"
-          },
-          "after_mesh_path": {
-            "title": "After Mesh Path",
-            "type": "string"
-          }
-        },
-        "required": [
-          "before_mesh_path",
-          "after_mesh_path"
-        ],
-        "title": "compute_mesh_diff_componentsArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "verdict"
-      },
-      "inputs": {
-        "files": {
-          "before_mesh_path": "one",
-          "after_mesh_path": "one"
         }
       }
     },
