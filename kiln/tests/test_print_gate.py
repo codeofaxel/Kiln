@@ -73,20 +73,20 @@ class TestNeverFalseBlocks:
 
 class TestTempCeiling:
     def test_too_hot_material_blocked(self, small):
-        # polycarbonate needs >=270C; ender3 hotend maxes at 260C
-        r = G(small, "ender3", material_id="polycarbonate")
+        # polycarbonate needs >=270C; the synthetic lined row's hotend maxes at 260C
+        r = G(small, "kilntest_ptfe", material_id="polycarbonate")
         assert r["blocked"] is True
         assert r["code"] == "MATERIAL_EXCEEDS_HOTEND"
 
     @pytest.mark.parametrize("material", ["pla", "nylon"])
     def test_reachable_material_passes(self, small, material):
-        assert G(small, "ender3", material_id=material)["blocked"] is False
+        assert G(small, "kilntest_ptfe", material_id=material)["blocked"] is False
 
     def test_unknown_material_soft_passes(self, small):
-        assert G(small, "ender3", material_id="unobtanium_x")["blocked"] is False
+        assert G(small, "kilntest_ptfe", material_id="unobtanium_x")["blocked"] is False
 
     def test_temp_override(self, small):
-        r = G(small, "ender3", material_id="polycarbonate", allow_oversize=True)
+        r = G(small, "kilntest_ptfe", material_id="polycarbonate", allow_oversize=True)
         assert r["blocked"] is False and r.get("overridden") is True
 
 
@@ -121,9 +121,9 @@ _FakeAdapter.__abstractmethods__ = frozenset()
 
 
 class _EnderAdapter(_FakeAdapter):
-    """Fake adapter reporting as an ender3 (260C hotend ceiling) for temp tests."""
+    """Fake adapter reporting as the synthetic lined row (260C hotend ceiling) for temp tests."""
 
-    printer_id = "ender3"
+    printer_id = "kilntest_ptfe"
 
 
 _EnderAdapter.__abstractmethods__ = frozenset()
@@ -199,34 +199,34 @@ class TestSwarmFixes:
         # min == max -> reachable -> NOT blocked (strict ">")
         monkeypatch.setattr(di, "get_printer_design_profile", lambda pid: _Printer(260))
         monkeypatch.setattr(di, "get_material_profile", lambda mid: _Mat(260, 310))
-        assert pg._temp_verdict("ender3", "x")[0] is False  # 260 > 260 is False
+        assert pg._temp_verdict("kilntest_ptfe", "x")[0] is False  # 260 > 260 is False
 
         # strictly above -> blocked
         monkeypatch.setattr(di, "get_material_profile", lambda mid: _Mat(270, 310))
-        assert pg._temp_verdict("ender3", "x")[0] is True
+        assert pg._temp_verdict("kilntest_ptfe", "x")[0] is True
 
         # zero min survives extraction (and 0 < 260 -> not blocked)
         monkeypatch.setattr(di, "get_material_profile", lambda mid: _Mat(0, 300))
-        assert pg._temp_verdict("ender3", "x")[0] is False
+        assert pg._temp_verdict("kilntest_ptfe", "x")[0] is False
 
 
 class TestSliceLayerTemp:
     """check_material_temp — the public slice-layer temperature gate."""
 
     def test_blocks_unreachable_material(self):
-        v = pg.check_material_temp("ender3", "polycarbonate")
+        v = pg.check_material_temp("kilntest_ptfe", "polycarbonate")
         assert v is not None and v["code"] == "MATERIAL_EXCEEDS_HOTEND"
         assert "force_print_oversize" in v["override_hint"]
 
     def test_allows_reachable_material(self):
-        assert pg.check_material_temp("ender3", "pla") is None
+        assert pg.check_material_temp("kilntest_ptfe", "pla") is None
 
     def test_normalizes_material_string(self):
-        assert pg.check_material_temp("ender3", " POLYCARBONATE ") is not None
+        assert pg.check_material_temp("kilntest_ptfe", " POLYCARBONATE ") is not None
 
     def test_soft_passes_without_printer_or_material(self):
         assert pg.check_material_temp(None, "polycarbonate") is None
-        assert pg.check_material_temp("ender3", None) is None
+        assert pg.check_material_temp("kilntest_ptfe", None) is None
 
 
 # ---------------------------------------------------------------------------

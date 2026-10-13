@@ -121,13 +121,13 @@ def test_pro_enrichment_has_envelope_and_split(big):
 
 
 def test_material_block_enriched_with_swap(small):
-    """polycarbonate (270C) on an Ender 3 (260C) — unmeltable -> swap fix."""
+    """polycarbonate (270C) on a 260C lined hotend — unmeltable -> swap fix."""
     lic = pytest.importorskip("kiln_pro.enterprise.licensing")
     pytest.importorskip("kiln_pro.print_fix.engine")
 
     tok = lic.set_caller_tier(lic.LicenseTier.PRO)
     try:
-        r = G(small, "ender3", material_id="polycarbonate")
+        r = G(small, "kilntest_ptfe", material_id="polycarbonate")
     finally:
         lic.reset_caller_tier(tok)
 

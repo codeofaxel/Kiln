@@ -72,9 +72,11 @@ class TestWhichSizeIsPicked:
         assert assumed_nozzle("bambu_a1").source == "stock"
 
     def test_the_models_stock_size_is_not_always_the_default(self):
-        answer = assumed_nozzle("aon_m2_plus")
+        # A synthetic row that ships a 0.6 (a real printer's stock size is
+        # its record's, pinned in kiln-pro).
+        answer = assumed_nozzle("kilntest_big")
         assert (answer.diameter_mm, answer.source) == (0.6, "stock")
-        assert assumed_nozzle("bambu_a1").source == "stock"
+        assert assumed_nozzle("kilntest_open").source == "stock"
 
     def test_a_printer_kiln_does_not_know_gets_the_default_and_says_so(self):
         answer = assumed_nozzle("a_printer_nobody_listed")
