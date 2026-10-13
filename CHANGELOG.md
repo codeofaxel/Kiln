@@ -45,6 +45,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Everything your AI makes stays tied to what you asked for.** Kiln Pro also checks the design against it.
+
 - **A saved printer's name is never written over by a different printer.**
 
 - **A printer Kiln doesn't know is held to cautious limits until you confirm its real ones.**
