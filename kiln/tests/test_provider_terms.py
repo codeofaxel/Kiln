@@ -113,3 +113,13 @@ def test_how_to_pay_is_said_once_beside_the_link():
 def test_a_service_with_no_tax_sentence_says_none():
     assert provider_terms.tax_note("nobody", "US") == ""
     assert server._provider_routing_metadata("nobody")["provider_tax_note"] == ""
+
+
+def test_a_paid_order_is_followed_on_its_own_status_page():
+    order_id = "20106a2d-1fc5-4a04-8393-6139e5803dfd"
+    assert provider_terms.order_status_url("Craftcloud", order_id) == (
+        f"https://craftcloud3d.com/order-status/{order_id}"
+    )
+    assert provider_terms.order_status_url("craftcloud", "") == ""
+    assert provider_terms.order_status_url("nobody", order_id) == ""
+    assert provider_terms.order_status_url("craftcloud", "a/b") == "https://craftcloud3d.com/order-status/a%2Fb"

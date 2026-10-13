@@ -31,6 +31,10 @@ CRAFTCLOUD_SUPPORT_EMAIL = "support@craftcloud3d.com"
 #: number the buyer quotes to support.
 CRAFTCLOUD_CHECKOUT_URL = "https://craftcloud3d.com/order/{order_id}/checkout"
 
+#: Where a buyer follows a paid order on Craftcloud, addressed by the same
+#: id as its checkout.
+CRAFTCLOUD_ORDER_STATUS_URL = "https://craftcloud3d.com/order-status/{order_id}"
+
 #: How a buyer can pay on Craftcloud's checkout, the ways most people
 #: reach for.  What a given buyer is offered depends on their country and
 #: device: Apple Pay shows only on Apple devices, and several are regional.
@@ -79,6 +83,10 @@ _TAX_NOTES: dict[str, dict[str, str]] = {
     "craftcloud": {"US": CRAFTCLOUD_TAX_AT_CHECKOUT, "": CRAFTCLOUD_TAX_ELSEWHERE},
 }
 
+_ORDER_STATUS_URLS: dict[str, str] = {
+    "craftcloud": CRAFTCLOUD_ORDER_STATUS_URL,
+}
+
 _CHECKOUT_URLS: dict[str, str] = {
     "craftcloud": CRAFTCLOUD_CHECKOUT_URL,
 }
@@ -111,7 +119,16 @@ def checkout_url(provider_name: str, provider_order_id: str) -> str:
     Blank for a service with no recorded checkout address and for an empty
     id: no link is better than a link to somebody else's order.
     """
-    template = _CHECKOUT_URLS.get(_normalized(provider_name), "")
+    return _order_page(_CHECKOUT_URLS, provider_name, provider_order_id)
+
+
+def order_status_url(provider_name: str, provider_order_id: str) -> str:
+    """Where the buyer follows ``provider_order_id`` once paid, or ``""``."""
+    return _order_page(_ORDER_STATUS_URLS, provider_name, provider_order_id)
+
+
+def _order_page(pages: dict[str, str], provider_name: str, provider_order_id: str) -> str:
+    template = pages.get(_normalized(provider_name), "")
     order_id = (provider_order_id or "").strip()
     if not template or not order_id:
         return ""
