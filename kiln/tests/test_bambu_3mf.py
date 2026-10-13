@@ -60,49 +60,13 @@ from kiln.printers.bambu_3mf import (
 # The 3MF builder reads the bed centre and the machine's top through that
 # record (``_bed_center``, ``_machine_top_mm``), so a file for a Bambu is
 # built here with the record SERVED, the way an install that set the printer
-# up has it.  The records are synthetic: every number is made up except the
-# bed geometry, which is read from the public slicer profile for the same
-# id (``bed_shape`` and ``max_print_height``) rather than typed a second
-# time, so the centre the end template is expanded with is the one the
-# slicer is told.  Public CI runs without kiln-pro and without a sign-in;
-# the session fixture seals the served door, and this one opens it for the
-# Bambu roster only.
-
-
-def _bambu_records_from_the_slicer_geometry() -> dict[str, dict]:
-    from kiln.printers.bed_fit import _load_printer_intelligence
-    from kiln.slicer_profiles import _DATA_FILE as _SLICER_FILE
-
-    slicer = json.loads(Path(_SLICER_FILE).read_text(encoding="utf-8"))
-    slicer = slicer.get("profiles", slicer)
-    records: dict[str, dict] = {}
-    for key, row in _load_printer_intelligence().items():
-        if not key.startswith("bambu_") or key not in slicer:
-            continue
-        settings = slicer[key]["settings"]
-        bed = re.fullmatch(r"0x0,(\d+)x0,\d+x(\d+),0x\d+", settings["bed_shape"])
-        assert bed, f"{key}: bed_shape is not a plain rectangle"
-        volume = [int(bed.group(1)), int(bed.group(2)), int(settings["max_print_height"])]
-        records[key] = {
-            "printer_id": key,
-            "matched_by": "exact",
-            "display_name": row.get("display_name") or key,
-            "safety": {
-                "max_hotend_temp": 240.0, "max_bed_temp": 80.0, "max_chamber_temp": None,
-                "max_feedrate": 10000.0, "min_safe_z": 0.0, "max_volumetric_flow": None,
-                "build_volume": list(volume), "notes": "Synthetic served record for a 3MF-builder test.",
-            },
-            "intel": {
-                "firmware": "bambu", "extruder_type": "direct_drive", "hotend_type": "all_metal",
-                "has_enclosure": False, "has_chamber_sensor": None, "has_abl": True,
-                "has_input_shaping": True, "build_volume_mm": list(volume),
-                "max_hotend_temp": 240, "max_bed_temp": 80, "materials": {},
-                "nozzle_clumping_probe": None,
-            },
-        }
-    assert records, "no Bambu roster rows with a slicer profile"
-    return records
-
+# up has it (``conftest.synthetic_roster_record``: every number is made up
+# except the machine's height, read from the public motion block's
+# ``z_travel_limit_mm`` where the firmware states one, with the bed a square
+# of it -- true of the two machines whose hardware captures the tests below
+# reproduce).  Since 2026-10-12 the real geometry is the served record's,
+# pinned in kiln-pro beside it.  Public CI runs without kiln-pro and without
+# a sign-in; the session fixture seals the served door, and this one opens it.
 
 def _forget_served_records() -> None:
     from kiln import _pro_catalogue_bridge as bridge
@@ -121,17 +85,9 @@ def _forget_served_records() -> None:
 
 @pytest.fixture(autouse=True)
 def _bambu_records_served(monkeypatch, tmp_path):
-    from kiln import _pro_catalogue_bridge as bridge
+    from .conftest import serve_synthetic_roster_records
 
-    records = _bambu_records_from_the_slicer_geometry()
-
-    def served(key: str):
-        record = records.get(key)
-        return (json.loads(json.dumps(record)), None) if record else (None, None)
-
-    monkeypatch.setattr(bridge, "available", lambda: False)
-    monkeypatch.setattr(bridge, "KEEP_DIR", tmp_path / "printer_catalogue")
-    monkeypatch.setattr(bridge, "_served", served)
+    serve_synthetic_roster_records(monkeypatch)
     _forget_served_records()
     yield
     _forget_served_records()
@@ -2523,22 +2479,20 @@ class TestBedCentreIsRead:
             assert _bed_center(model) == (volume[0] / 2.0, volume[1] / 2.0)
         assert _bed_center("bambu_a1") != _bed_center("bambu_a1_mini")
 
-    def test_a_roster_model_with_no_record_reads_the_public_profiles_bed(self, monkeypatch):
-        """With no record in hand (a signed-out install) the bundled slicer
-        profile's own bed geometry answers -- the same number, public today
-        -- so a person can still build a file for a machine Kiln lists.  A
-        roster name with neither is no centre, never a guessed one (and the
-        builder then refuses -- see ``_expand_end_template``)."""
+    def test_a_roster_model_with_no_record_has_no_centre_and_the_build_names_the_fix(self, monkeypatch):
+        """With no record in hand (a signed-out install) there is no centre
+        -- never a guessed one -- and the builder refuses with the fix named
+        (sign in), since 2026-10-12 when the slicer geometry left the public
+        file with the rest of the record."""
         from kiln import _pro_catalogue_bridge as bridge
-        from kiln.printers import bambu_3mf
-        from kiln.printers.bambu_3mf import _bed_center
+        from kiln.printers.bambu_3mf import _bed_center, _no_bed_on_record
         from kiln.served_answer import Miss
 
         monkeypatch.setattr(bridge, "_served", lambda key: (None, Miss("signed_out", "KILN_ACCOUNT_NOT_PAIRED")))
         _forget_served_records()
-        assert _bed_center("bambu_a1") == (128.0, 128.0)
-        monkeypatch.setattr(bambu_3mf, "_profile_bed", lambda model: None)
         assert _bed_center("bambu_a1") is None
+        sentence = _no_bed_on_record("bambu_a1")
+        assert "bambu_a1" in sentence and "sign in" in sentence.lower() and "guess" in sentence.lower()
 
     def test_unknown_model_gets_none_not_a_default_bed(self):
         """A wrong bed centre is a travel move to the wrong place."""

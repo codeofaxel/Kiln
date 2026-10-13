@@ -16,8 +16,10 @@ import json
 import pytest
 
 from kiln import _pro_catalogue_bridge as bridge
+from kiln import design_intelligence as di
 from kiln import printer_intelligence as pi
 from kiln import safety_profiles as sp
+from kiln import slicer_profiles as slp
 from kiln.printers import bed_fit
 from kiln.served_answer import Miss
 
@@ -58,6 +60,40 @@ RECORD = {
         "materials": {"PLA": {"hotend": 207, "bed": 58, "fan": 100}},
         "nozzle_clumping_probe": None,
     },
+    "design": {
+        "display_name": "Kilntest Served 200",
+        "manufacturer": "Kilntest",
+        "build_volume_mm": {"x": 200, "y": 200, "z": 210},
+        "max_hotend_temp_c": 280,
+        "max_bed_temp_c": 95,
+        "has_enclosure": False,
+        "has_direct_drive": True,
+        "supported_materials": ["pla"],
+        "typical_tolerance_mm": 0.15,
+        "max_print_speed_mm_s": 180,
+        "default_layer_heights_mm": [0.12, 0.16, 0.2, 0.28],
+        "chamber_temp_c": None,
+        "chamber_heated": False,
+    },
+    "slicer": {
+        "display_name": "Kilntest Served 200",
+        "slicer": "orcaslicer",
+        "notes": "Synthetic served slicer profile.",
+        "settings": {
+            "layer_height": "0.2", "first_layer_height": "0.25", "perimeters": "3",
+            "top_solid_layers": "4", "bottom_solid_layers": "4", "fill_density": "15%",
+            "fill_pattern": "gyroid", "infill_speed": "180", "perimeter_speed": "140",
+            "external_perimeter_speed": "100", "first_layer_speed": "35", "travel_speed": "260",
+            "support_material": "0", "skirts": "1", "skirt_distance": "3", "brim_width": "0",
+            "nozzle_diameter": "0.4", "filament_diameter": "1.75", "temperature": "207",
+            "first_layer_temperature": "212", "bed_temperature": "58", "first_layer_bed_temperature": "60",
+            "fan_always_on": "1", "min_fan_speed": "100", "max_fan_speed": "100", "bridge_fan_speed": "100",
+            "disable_fan_first_layers": "2", "retract_length": "0.8", "retract_speed": "35",
+            "retract_lift": "0.2", "gcode_flavor": "klipper", "bed_shape": "0x0,200x0,200x200,0x200",
+            "max_print_height": "210",
+        },
+        "tool_change": {"tool_change_seconds": 75, "tool_changer": "ams_lite", "tool_change_notes": "Synthetic."},
+    },
 }
 
 
@@ -72,6 +108,8 @@ def _reset_loaders() -> None:
     sp._nudged.clear()
     sp._pending_nudges.clear()
     pi._reset_caches()
+    slp._reset()
+    di._reset_knowledge_base()
     bed_fit._printer_intelligence_cache = None
     bridge.forget()
 
@@ -137,6 +175,45 @@ class TestServed:
         assert bed_fit.get_build_volume(SERVED_ID) == (200.0, 200.0, 210.0)
         assert bed_fit.resolve_build_volume(SERVED_ID) == (SERVED_ID, (200.0, 200.0, 210.0))
 
+    def test_the_record_reaches_the_slicer_profile(self, served):
+        profile = slp.get_slicer_profile(SERVED_ID)
+        assert profile.id == SERVED_ID and profile.slicer == "orcaslicer"
+        assert profile.settings["bed_shape"] == "0x0,200x0,200x200,0x200"
+        assert slp.raw_profile(SERVED_ID)["tool_change"]["tool_changer"] == "ams_lite"
+        origin = slp.profile_origin(slp.resolve_slicer_profile(SERVED_ID))
+        assert origin.printer_id == SERVED_ID and origin.standing_in_for is None
+        from kiln.pre_estimate import _get_printer_speeds, _get_printer_tool_change
+
+        assert _get_printer_speeds(SERVED_ID)["infill"] == 180.0
+        assert _get_printer_tool_change(SERVED_ID)["tool_changer"] == "ams_lite"
+        assert served == [SERVED_ID]
+
+    def test_cut_the_wire_and_the_slice_is_generic_and_says_so(self, served, monkeypatch):
+        """A/B for the slicer wire: the generic profile stands in, and the
+        file names the printer it stands in for."""
+        monkeypatch.setattr(slp, "_fetch_profile", lambda spelling: None)
+        assert slp.get_slicer_profile(SERVED_ID).id == "default"
+        origin = slp.profile_origin(slp.resolve_slicer_profile(SERVED_ID))
+        assert origin.printer_id == "default" and origin.standing_in_for == SERVED_ID
+        assert slp.raw_profile(SERVED_ID) is None
+
+    def test_the_record_reaches_the_design_profile(self, served):
+        profile = di.get_printer_design_profile(SERVED_ID)
+        assert profile is not None and profile.resolved_from == "curated"
+        assert profile.build_volume_mm == {"x": 200, "y": 200, "z": 210}
+        assert profile.max_hotend_temp_c == 280 and profile.manufacturer == "Kilntest"
+        listed = {p.printer_id: p for p in di.list_printer_profiles()}
+        assert listed[SERVED_ID].resolved_from == "curated"
+        assert served == [SERVED_ID]
+
+    def test_cut_the_wire_and_the_design_profile_is_the_marked_floor(self, served, monkeypatch):
+        """A/B for the design wire."""
+        monkeypatch.setattr(pi, "_fetch_row", lambda spelling: None)
+        profile = di.get_printer_design_profile(SERVED_ID)
+        assert profile is not None and profile.resolved_from == "generic"
+        assert profile.printer_id == SERVED_ID and profile.display_name == "Kilntest Served 200"
+        assert profile.max_hotend_temp_c == 240 and profile.build_volume_mm == {"x": 200, "y": 200, "z": 200}
+
     def test_the_variant_came_along_and_resolves(self, served):
         listed = sp.list_printer_variants(SERVED_ID)
         assert listed["known"] and set(listed["variants"]) == {"served_kit"}
@@ -146,8 +223,17 @@ class TestServed:
         sp.get_profile(SERVED_ID)
         pi.get_printer_intel(SERVED_ID)
         bed_fit.get_build_volume(SERVED_ID)
+        slp.get_slicer_profile(SERVED_ID)
+        di.get_printer_design_profile(SERVED_ID)
         sp.get_profile(SERVED_ID)
         assert served == [SERVED_ID]
+
+    def test_a_listing_never_asks_the_servers_for_the_roster(self, served):
+        """The per-printer wire is fenced per seat; a listing that walked the
+        roster through it would spend the fence on nothing."""
+        di.list_printer_profiles()
+        slp.roster_entries()
+        assert served == []
 
     def test_the_roster_states_a_firmware_family_before_any_record(self):
         assert pi.roster_firmware("bambu_a1") == "bambu"
@@ -306,21 +392,57 @@ class TestSignedOut:
 # ---------------------------------------------------------------------------
 
 
-class TestTheSignedOutFloorStillPrints:
-    """What an install with no record can still do: build a Bambu file for a
-    machine Kiln lists (the bundled slicer profile's own bed geometry is the
-    public floor), and slice under a stated flow ceiling."""
+class TestTheSignedOutInstall:
+    """What an install with no record can and cannot do for a machine Kiln
+    lists (Adam, 2026-10-12: the friction is a reason to sign up).  It
+    slices with the generic profile on the generic bed, and the file says
+    so; it has NO bed for the machine, so nothing is sized against a guess;
+    and a Bambu file, whose end sequence needs the bed centre, is refused
+    with the fix named.  The flow ceiling the generic row states still caps
+    the slice."""
 
-    def test_a_bambu_file_gets_its_bed_centre_from_the_public_profile(self, monkeypatch):
+    def test_a_roster_printer_has_no_bed_and_no_centre(self):
+        assert sp.get_profile(SERVED_ID).id == "default"  # signed out: no record
+        assert bed_fit.catalogue_printer_id(SERVED_ID) == SERVED_ID
+        assert bed_fit.get_build_volume(SERVED_ID) is None
+        assert bed_fit.resolve_build_volume(SERVED_ID) is None
         from kiln.printers import bambu_3mf
 
-        assert sp.get_profile("bambu_a1").id == "default"  # signed out: no record
-        assert bambu_3mf._bed_center("bambu_a1") == (128.0, 128.0)
-        assert bambu_3mf._machine_top_mm("bambu_a1") is not None
+        assert bambu_3mf._bed_center(SERVED_ID) is None
         assert bambu_3mf._bed_center("a printer nobody makes") is None
-        # A/B: the profile geometry is the only thing answering here.
-        monkeypatch.setattr(bambu_3mf, "_profile_bed", lambda model: None)
-        assert bambu_3mf._bed_center("bambu_a1") is None
+
+    def test_the_slice_is_generic_on_the_generic_bed_and_says_so(self):
+        profile = slp.get_slicer_profile(SERVED_ID)
+        assert profile.id == "default"
+        origin = slp.profile_origin(slp.resolve_slicer_profile(SERVED_ID))
+        assert origin.standing_in_for == SERVED_ID
+        # No bed is given to the generic profile for a catalogue printer: the
+        # owner-stated bed is for a printer OUTSIDE the catalogue only.
+        from kiln.slicer_orca import ini_to_settings
+
+        assert "bed_shape" not in ini_to_settings(slp.resolve_slicer_profile(SERVED_ID))
+        assert di.get_printer_design_profile(SERVED_ID).resolved_from == "generic"
+
+    def test_a_bambu_file_is_refused_with_the_fix_named(self, served, monkeypatch):
+        """The A1's end sequence parks around the bed centre.  With the record
+        in hand the template expands; signed out, the build is refused by a
+        sentence that says sign in -- never a guessed centre."""
+        from kiln.printers import bambu_3mf
+
+        template = "G1 X0 Y{first_layer_center_no_wipe_tower[1]} F18000\n"
+        # Signed out (the session seal): no record, no centre, the fix named.
+        sp._nudged.clear()
+        with pytest.raises(ValueError) as refused:
+            bambu_3mf._resolve_end_gcode(template, max_z=20.0, printer_model="bambu_a1")
+        assert "sign in" in str(refused.value).lower() and "bambu_a1" in str(refused.value)
+        assert "guess" in str(refused.value).lower()
+        # A/B: a record for the model and the same template expands.
+        volume = RECORD["intel"]["build_volume_mm"]
+        monkeypatch.setattr(pi, "build_volume_for", lambda model: ("bambu_a1", tuple(float(v) for v in volume)))
+        assert "Y100" in bambu_3mf._resolve_end_gcode(template, max_z=20.0, printer_model="bambu_a1")
+        # A printer the roster does not list is told so, not told to sign in.
+        unknown = bambu_3mf._no_bed_on_record("a printer nobody makes")
+        assert "no row" in unknown and "sign in" not in unknown.lower()
 
     def test_the_generic_row_states_a_flow_ceiling(self):
         """Before 2026-10-12 the generic row left the hotend's flow ceiling

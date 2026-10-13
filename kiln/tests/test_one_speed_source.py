@@ -42,8 +42,15 @@ _SPEEDS = (
 
 class TestTheFill:
     def test_a_printer_with_its_own_profile_gets_none(self) -> None:
+        from kiln.slicer_profiles import get_slicer_profile
+
+        # Since 2026-10-12 a real printer's profile is its served record;
+        # here that is the session's synthetic printers (and every printer,
+        # with kiln-pro's catalogue on this computer).  A roster printer
+        # with no record slices with the generic profile and DOES get the
+        # fill, which is the next test's case.
         for pid in list_slicer_profiles():
-            if pid == "default":
+            if pid == "default" or get_slicer_profile(pid).id != pid:
                 continue
             for printer_type in (None, *srv._PRINTER_SPEED_OVERRIDES):
                 assert srv._speed_fill_for_slice(pid, printer_type, caller_profile=False) == {}, (
@@ -114,14 +121,14 @@ def _profile_slice_and_print_hands_the_slicer(tmp_path: Path, printer_type: str,
 
 
 class TestTheDoorsPrintTheProfile:
-    def test_an_ender_3_v3_ke_prints_its_own_speeds(self, tmp_path: Path) -> None:
+    def test_an_ender_3_v3_ke_prints_its_own_speeds(self, tmp_path: Path, served_roster_records) -> None:
         """Not the original Ender 3's 45 mm/s through a prefix match."""
         printed = _profile_slice_and_print_hands_the_slicer(tmp_path, "prusalink", "ender3_v3_ke")
         own = ini_to_settings(resolve_slicer_profile("ender3_v3_ke"))
         for key in _SPEEDS:
             assert printed[key] == own[key], (key, printed[key], own[key])
 
-    def test_an_a1_prints_the_file_its_estimate_was_made_with(self, tmp_path: Path) -> None:
+    def test_an_a1_prints_the_file_its_estimate_was_made_with(self, tmp_path: Path, served_roster_records) -> None:
         printed = _profile_slice_and_print_hands_the_slicer(tmp_path, "bambu", "bambu_a1")
         own = ini_to_settings(resolve_slicer_profile("bambu_a1"))
         for key in _SPEEDS:
@@ -131,7 +138,7 @@ class TestTheDoorsPrintTheProfile:
         assert "default_acceleration" not in printed
 
     def test_the_reslice_door_hands_its_pipeline_no_table_speeds(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, served_roster_records,
     ) -> None:
         monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
         result = MagicMock()

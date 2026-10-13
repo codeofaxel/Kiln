@@ -1851,7 +1851,7 @@ class TestBedFitRulesThroughPrefix:
         "move", ["G1 X-5 Y10", "G1 Y-5 X10", "G1 X10 Y10 Z-1"]
     )
     def test_off_bed_move_blocked_through_prefix(self, interceptor, shape, move):
-        session = interceptor.create_session("ender3")
+        session = interceptor.create_session("kilntest_open")
         assert [r for r in session.rules if r.name.startswith("bed_fit_")]
         result = interceptor.intercept(session.session_id, shape.format(cmd=move))
         assert result.action == InterceptionAction.BLOCK

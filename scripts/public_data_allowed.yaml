@@ -44,27 +44,44 @@ files:
       printer at a time from kiln-pro; the default row is the generic floor.
 
   design_knowledge/printer_profiles.json:
-    classification: pending_move
-    by: 2026-11-15
+    classification: roster
+    fields: [printer_id, display_name]
+    full_rows: [default]
     why: >-
-      Per-printer hotend and bed ceilings, build volume, chamber, speed and
-      tolerance: the same per-model figures that moved out of
-      safety_profiles.json.
+      The printer capability roster: each printer's id and display name.
+      A printer's capability profile (ceilings, build volume, chamber,
+      tolerance, speed, layer ladder, materials) is its catalogue record,
+      served one printer at a time from kiln-pro; the default row is the
+      generic floor a printer with no record is answered from, so it stays
+      whole.
 
   slicer_profiles.json:
-    classification: pending_move
-    by: 2026-11-15
+    classification: roster
+    fields: [display_name]
+    full_rows: [default]
     why: >-
-      Per-printer bed shape, print height, speeds and temperatures inside each
-      slicer profile; slicing offline needs a profile, so part of this may be
-      re-decided as a safety_floor rather than moved.
+      The slicer-profile roster: each printer's display name.  A printer's
+      tuned slicer settings are its catalogue record, served one printer at
+      a time from kiln-pro; a roster printer with no record slices with the
+      generic default profile, which stays whole, and the multi-material
+      add-on table under _multi_material_addons is not keyed by printer.
 
   design_knowledge/printer_material_compatibility.json:
-    classification: pending_move
-    by: 2026-11-15
+    classification: safety_floor
+    fields: [abs, abs_esd, asa, cf_nylon, cf_petg, cf_pla, nylon, pa612_esd,
+             pa6_gf, pc_abs, pc_esd, peek, pei_1010, pei_9085, pei_esd, pekk,
+             pekk_esd, pet_cf, petg, petg_cf, petg_esd, petg_hf, pla, pla_esd,
+             pla_matte, pla_plus, pla_tough, polycarbonate, pp, pps, ppsu, pva,
+             pvb, silk_pla, tpu, tpu_85a, tpu_95a, wood_pla]
+    full_rows: [default]
     why: >-
-      A verdict per printer and material whose notes quote each printer's
-      ceilings, so the moved limits can be read back out of it.
+      The compatibility VERDICT per printer and material -- a status and the
+      upgrades it needs -- is the free floor every install answers "can this
+      printer run this material?" from, and the upgrade prompt; it is public
+      at every tier.  Each row's fields are the materials the matrix judges
+      (a new material is a conscious addition here).  The sentence explaining
+      each verdict, which quoted the printer's ceilings, is the Pro overlay's
+      since 2026-10-12; the default row keeps its notes, as the floor.
 
   material_catalog.json:
     classification: not_printer_keyed

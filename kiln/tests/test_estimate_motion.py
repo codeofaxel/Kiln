@@ -29,10 +29,16 @@ import kiln.slicer_profiles as sp_mod
 from kiln.printers.bambu_3mf import start_sequence_motion
 from kiln.slicer_orca import ini_to_settings
 from kiln.slicer_profiles import (
+    get_slicer_profile,
     list_slicer_profiles,
     resolve_multiextruder_profile,
     resolve_slicer_profile,
 )
+
+
+def _needs_the_a1_record() -> None:
+    if get_slicer_profile("bambu_a1").id != "bambu_a1":
+        pytest.skip("no record for the A1 here: public CI holds no real printer's profile")
 
 _LIMIT_KEYS = (
     "machine_max_acceleration_extruding",
@@ -89,7 +95,10 @@ class TestTheEstimateCarriesIt:
     def test_every_bambu_profile_carries_its_own_sequences_limits(self) -> None:
         """Read through the same reader the wrap's sequence is, never copied."""
         checked = 0
-        for pid in list_slicer_profiles():
+        held = [pid for pid in list_slicer_profiles() if get_slicer_profile(pid).id == pid]
+        if not any(start_sequence_motion(pid) for pid in held):
+            pytest.skip("no Bambu record in hand here: public CI holds no real printer's profile")
+        for pid in held:
             motion = start_sequence_motion(pid)
             settings = _ini(resolve_slicer_profile(pid))
             if motion is None:
@@ -105,10 +114,12 @@ class TestTheEstimateCarriesIt:
     def test_a_stated_role_acceleration_raises_the_working_one(self) -> None:
         """Stated accelerations are written into the print and the machine
         runs them, so the estimate must not clamp them down."""
+        _needs_the_a1_record()
         settings = _ini(resolve_slicer_profile("bambu_a1", overrides={"infill_acceleration": "8000"}))
         assert settings["machine_max_acceleration_extruding"] == "8000,8000"
 
     def test_the_multi_extruder_door(self) -> None:
+        _needs_the_a1_record()
         settings = _ini(resolve_multiextruder_profile("bambu_a1", 4))
         assert settings["machine_max_acceleration_extruding"] == "6000,6000"
 
@@ -181,7 +192,7 @@ def _feedrates(gcode: str) -> set[str]:
 
 @pytest.mark.skipif(_PRUSA is None, reason="PrusaSlicer not installed")
 class TestOnlyTheEstimateMoves:
-    def test_faster_estimate_same_gcode(self, tmp_path: Path) -> None:
+    def test_faster_estimate_same_gcode(self, tmp_path: Path, served_roster_records) -> None:
         """A/B against the slicer's own defaults -- what every Bambu profile
         was timed with before 2026-09-30."""
         model = _plate(tmp_path / "plate.stl")

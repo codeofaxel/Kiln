@@ -100,7 +100,7 @@ def _verdict(*, ok: bool, blanks: list[str] | None = None, sentences: list[str] 
 
 
 @pytest.fixture(autouse=True)
-def _isolated(tmp_path, monkeypatch):
+def _isolated(tmp_path, monkeypatch, served_roster_records):
     monkeypatch.setenv("KILN_HOME", str(tmp_path / "kiln-home"))
     monkeypatch.setenv("KILN_TELEMETRY", "true")
     for name in list(sys.modules):

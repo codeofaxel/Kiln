@@ -43,6 +43,13 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _DATA_DIR = Path(__file__).parent / "data" / "design_knowledge"
+#: The printer capability roster.  Since 2026-10-12 each printer's row is
+#: its id and display name; the capability profile itself is the printer's
+#: catalogue record's ``design`` block, fetched one printer at a time
+#: through :mod:`kiln._pro_catalogue_bridge` (see :func:`get_printer_design_profile`).
+#: The generic ``default`` row stays whole, as the floor.  Named on its own
+#: so the test suite can point the loader at a copy carrying synthetic rows.
+_PRINTER_PROFILES_FILE = _DATA_DIR / "printer_profiles.json"
 
 
 # ---------------------------------------------------------------------------
@@ -727,6 +734,13 @@ class PrinterDesignProfile:
     max_print_speed_mm_s: int
     default_layer_heights_mm: list[float]
     agent_notes: list[str] = field(default_factory=list)
+    #: Where the numbers came from: ``"curated"`` (the printer's own record,
+    #: or a bundled full row), ``"derived"`` (synthesised from a spec sheet
+    #: this process holds), or ``"generic"`` -- the floor standing in for a
+    #: roster printer whose record this install does not hold (signed out,
+    #: or set up offline).  A consumer that would quote a number as this
+    #: machine's reads this first.
+    resolved_from: str = "curated"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -955,7 +969,7 @@ class _DesignKnowledgeBase:
         ]
 
         for filename, attr in _tables:
-            path = _DATA_DIR / filename
+            path = _PRINTER_PROFILES_FILE if filename == "printer_profiles.json" else _DATA_DIR / filename
             if path.exists():
                 raw = json.loads(path.read_text(encoding="utf-8"))
                 setattr(self, attr, {k: v for k, v in raw.items() if not k.startswith("_")})
@@ -2871,17 +2885,77 @@ def _design_profile_from_intel(
     )
 
 
-def _all_design_profiles() -> dict[str, PrinterDesignProfile]:
-    """Build the full design-capability map: an entry for every printer
-    Kiln supports.  The curated ``printer_profiles.json`` carries a record
-    for every printer on the roster (``tests/test_printer_roster_consistency``
-    pins the five rosters identical), and it wins on its own id (hand-tuned
-    specs + the kiln-pro ``agent_notes`` overlay).  Underneath it, a profile
-    is derived from each spec sheet this process holds -- since 2026-10-12
-    the rows ``printer_intelligence`` has resolved from Kiln's catalogue,
-    never the roster rows, which carry no spec sheet to derive from.  This
-    keeps the design tools in sync with the rest of the system instead of
-    stranding supported printers behind an "Unknown printer" error.
+def _is_full_design_row(data: Any) -> bool:
+    """A bundled row a profile can be built from -- one that states its
+    envelope (the generic row; a fixture's rows).  A roster row (id and
+    name) never is: its profile is the catalogue record's."""
+    return isinstance(data, dict) and isinstance(data.get("build_volume_mm"), dict)
+
+
+def _profile_from_design_row(
+    printer_id: str,
+    data: dict[str, Any],
+    *,
+    display_name: str | None = None,
+    agent_notes: list[str] | None = None,
+    resolved_from: str = "curated",
+) -> PrinterDesignProfile:
+    """One capability profile from a design row: a bundled full row, or a
+    catalogue record's ``design`` block (the same keys, the printer's own
+    ``display_name`` and ``manufacturer`` riding along)."""
+    return PrinterDesignProfile(
+        printer_id=printer_id,
+        display_name=str(display_name or data.get("display_name") or printer_id),
+        manufacturer=str(data.get("manufacturer") or _derive_manufacturer(printer_id, str(data.get("display_name") or ""))),
+        build_volume_mm=dict(data["build_volume_mm"]),
+        max_hotend_temp_c=data["max_hotend_temp_c"],
+        max_bed_temp_c=data["max_bed_temp_c"],
+        has_enclosure=bool(data["has_enclosure"]),
+        has_direct_drive=bool(data["has_direct_drive"]),
+        supported_materials=list(data["supported_materials"]),
+        typical_tolerance_mm=data["typical_tolerance_mm"],
+        max_print_speed_mm_s=data["max_print_speed_mm_s"],
+        default_layer_heights_mm=list(data["default_layer_heights_mm"]),
+        agent_notes=list(agent_notes if agent_notes is not None else data.get("agent_notes", [])),
+        resolved_from=resolved_from,
+    )
+
+
+def _generic_design_profile(printer_id: str, display_name: str) -> PrinterDesignProfile | None:
+    """The generic floor standing in for roster printer *printer_id* whose
+    record this install does not hold: the ``default`` row's numbers under
+    the printer's own id and name, marked ``resolved_from="generic"`` so a
+    consumer never quotes them as the machine's.  The same posture
+    :mod:`kiln.safety_profiles` takes with its ceilings: a signed-out install
+    is held to the floor, and the setup nudge says sign in."""
+    generic = _get_kb().printers.get("default")
+    if not _is_full_design_row(generic):
+        return None
+    return _profile_from_design_row(
+        printer_id, generic, display_name=display_name, agent_notes=[], resolved_from="generic",
+    )
+
+
+def _all_design_profiles(*, resolve_roster: bool | None = None) -> dict[str, PrinterDesignProfile]:
+    """Build the design-capability map: an entry for every printer Kiln
+    supports.
+
+    Three sources, in rising precedence: a profile DERIVED from each spec
+    sheet this process holds (``printer_intelligence``'s full rows -- the
+    generic row, a fixture's, every record fetched); the catalogue records'
+    own ``design`` blocks, with the kiln-pro ``agent_notes`` overlay the
+    bundled roster row carries for that id merged on; and the bundled FULL
+    rows (the generic ``default`` row, a fixture's).  Every other roster
+    printer -- one whose record is not in hand -- gets the generic floor
+    under its own name, marked ``generic``.
+
+    *resolve_roster* says whether to FETCH the record of every roster
+    printer not yet held.  Left ``None`` it is decided by where the records
+    are: with kiln-pro's catalogue on this computer each is a dict read
+    away and the whole roster is resolved; on an install whose records are
+    served, a listing never asks the servers for every printer on the roster
+    -- that is the harvest the per-printer wire exists to prevent -- and a
+    single printer is fetched by :func:`get_printer_design_profile`.
     """
     from kiln import printer_intelligence as _pi
 
@@ -2893,41 +2967,55 @@ def _all_design_profiles() -> dict[str, PrinterDesignProfile]:
         if not raw.get("build_volume_mm"):  # no spec sheet held: nothing to derive
             continue
         profiles[pid] = _design_profile_from_intel(pid, raw)
+        profiles[pid].resolved_from = "derived"
 
-    # Curated records win on their own id (richer + carry agent_notes).
-    for cid, data in _get_kb().printers.items():
-        profiles[cid] = PrinterDesignProfile(
-            printer_id=cid,
-            display_name=data["display_name"],
-            manufacturer=data["manufacturer"],
-            build_volume_mm=data["build_volume_mm"],
-            max_hotend_temp_c=data["max_hotend_temp_c"],
-            max_bed_temp_c=data["max_bed_temp_c"],
-            has_enclosure=data["has_enclosure"],
-            has_direct_drive=data["has_direct_drive"],
-            supported_materials=data["supported_materials"],
-            typical_tolerance_mm=data["typical_tolerance_mm"],
-            max_print_speed_mm_s=data["max_print_speed_mm_s"],
-            default_layer_heights_mm=data["default_layer_heights_mm"],
-            agent_notes=list(data.get("agent_notes", [])),
-        )
+    bundled = _get_kb().printers
+    if resolve_roster is None:
+        resolve_roster = _pi.catalogue_here()
+    if resolve_roster:
+        for pid in bundled:
+            if pid != "default" and not _is_full_design_row(bundled[pid]):
+                _pi.catalogue_block(pid, "design", exact=True)
+    for pid, block in _pi.held_catalogue_blocks("design").items():
+        overlay_notes = bundled.get(pid, {}).get("agent_notes") if isinstance(bundled.get(pid), dict) else None
+        profiles[pid] = _profile_from_design_row(pid, block, agent_notes=list(overlay_notes or []))
+
+    # Bundled full rows win on their own id; a roster row with no record in
+    # hand is the floor under its own name.
+    for cid, data in bundled.items():
+        if _is_full_design_row(data):
+            profiles[cid] = _profile_from_design_row(cid, data)
+        elif cid not in profiles and cid != "default":
+            generic = _generic_design_profile(cid, str(data.get("display_name") or cid))
+            if generic is not None:
+                profiles[cid] = generic
     return profiles
 
 
 def get_printer_design_profile(printer_id: str) -> PrinterDesignProfile | None:
     """Get design capabilities for a specific printer.
 
-    Covers every supported printer: a curated ``printer_profiles.json``
-    record when one exists, otherwise a profile derived from
-    ``printer_intelligence.json``.  Returns ``None`` only for genuinely
-    unknown printer ids.
+    Covers every supported printer: the printer's own catalogue record
+    (fetched once through the bridge and held), a bundled full row, or a
+    profile derived from a spec sheet this process holds.  A roster printer
+    whose record this install cannot get is answered with the generic floor
+    under its own name (``resolved_from == "generic"``).  Returns ``None``
+    only for genuinely unknown printer ids.
     """
-    return _all_design_profiles().get(printer_id.lower())
+    from kiln import printer_intelligence as _pi
+
+    key = (printer_id or "").lower().replace("-", "_").strip()
+    if not key:
+        return None
+    if key != "default" and not _is_full_design_row(_get_kb().printers.get(key)):
+        _pi.catalogue_block(key, "design", exact=True)  # one printer: fetch it
+    return _all_design_profiles(resolve_roster=False).get(key)
 
 
 def list_printer_profiles() -> list[PrinterDesignProfile]:
-    """List design profiles for every supported printer (curated where
-    available, otherwise derived from printer_intelligence)."""
+    """List design profiles for every printer on the roster: curated where
+    the record is in hand, derived from a held spec sheet otherwise, and the
+    generic floor (marked) for a roster printer with no record here."""
     return [profile for _, profile in sorted(_all_design_profiles().items())]
 
 

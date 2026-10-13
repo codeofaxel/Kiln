@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "description": "Synthetic printers for public Kiln's own tests. No row is a real machine and every number is made up, so the public suite never carries Kiln's catalogue: a real printer's limits, variants and spec sheet are kiln-pro's and are pinned in kiln-pro's tests. conftest installs these rows into copies of the two bundled data files (safety_profiles.json takes each row's 'safety' block, printer_intelligence.json its 'intel' block) and points the loaders at the copies for the whole session. A row with no blocks is a ROSTER-ONLY printer: it exists by name and its record is served, which is what a catalogued printer looks like to an install without kiln-pro. kilntest_variants_se is a separately catalogued prefix relative of kilntest_variants; kilntest_hot is a 500 C class machine for the adapters whose protocol ceiling sits above the desktop limits.",
-    "shape": "The same two-block record kiln-pro's printer_catalogue.json carries per printer."
+    "description": "Synthetic printers for public Kiln's own tests. No row is a real machine and every number is made up, so the public suite never carries Kiln's catalogue: a real printer's limits, variants and spec sheet are kiln-pro's and are pinned in kiln-pro's tests. conftest installs these rows into copies of the four bundled data files (safety_profiles.json takes each row's 'safety' block, printer_intelligence.json its 'intel' block, design_knowledge/printer_profiles.json its 'design' block, slicer_profiles.json its 'slicer' block) and points the loaders at the copies for the whole session. A row with no blocks is a ROSTER-ONLY printer: it exists by name and its record is served, which is what a catalogued printer looks like to an install without kiln-pro. kilntest_variants_se is a separately catalogued prefix relative of kilntest_variants; kilntest_hot is a 500 C class machine for the adapters whose protocol ceiling sits above the desktop limits.",
+    "shape": "The same four-block record kiln-pro's printer_catalogue.json carries per printer."
   },
   "kilntest_open": {
     "display_name": "Kilntest Open 220",
@@ -57,6 +57,80 @@
         }
       },
       "nozzle_clumping_probe": null
+    },
+    "design": {
+      "display_name": "Kilntest Open 220",
+      "manufacturer": "Kilntest",
+      "build_volume_mm": {
+        "x": 220,
+        "y": 220,
+        "z": 250
+      },
+      "max_hotend_temp_c": 300,
+      "max_bed_temp_c": 110,
+      "has_enclosure": false,
+      "has_direct_drive": true,
+      "supported_materials": [
+        "abs",
+        "petg",
+        "pla",
+        "tpu"
+      ],
+      "typical_tolerance_mm": 0.2,
+      "max_print_speed_mm_s": 80,
+      "default_layer_heights_mm": [
+        0.12,
+        0.16,
+        0.2,
+        0.28
+      ],
+      "chamber_temp_c": null,
+      "chamber_heated": false
+    },
+    "slicer": {
+      "display_name": "Kilntest Open 220",
+      "slicer": "prusaslicer",
+      "notes": "Synthetic profile for the Kilntest Open 220; every number is made up. Not a real machine.",
+      "settings": {
+        "layer_height": "0.2",
+        "first_layer_height": "0.25",
+        "perimeters": "3",
+        "top_solid_layers": "4",
+        "bottom_solid_layers": "4",
+        "fill_density": "20%",
+        "fill_pattern": "gyroid",
+        "infill_speed": "80",
+        "perimeter_speed": "60",
+        "external_perimeter_speed": "45",
+        "first_layer_speed": "25",
+        "travel_speed": "150",
+        "support_material": "0",
+        "skirts": "1",
+        "skirt_distance": "3",
+        "brim_width": "0",
+        "nozzle_diameter": "0.4",
+        "filament_diameter": "1.75",
+        "temperature": "205",
+        "first_layer_temperature": "210",
+        "bed_temperature": "60",
+        "first_layer_bed_temperature": "65",
+        "fan_always_on": "1",
+        "min_fan_speed": "100",
+        "max_fan_speed": "100",
+        "bridge_fan_speed": "100",
+        "disable_fan_first_layers": "2",
+        "retract_length": "0.8",
+        "retract_speed": "35",
+        "retract_lift": "0.2",
+        "gcode_flavor": "marlin",
+        "bed_shape": "0x0,220x0,220x220,0x220",
+        "max_print_height": "250"
+      },
+      "tool_change": {
+        "tool_change_seconds": 90,
+        "tool_changer": "none",
+        "tool_change_notes": "Synthetic: manual swap assumed."
+      }
     }
   },
   "kilntest_enclosed": {
@@ -129,6 +203,84 @@
           "print by object"
         ]
       }
+    },
+    "design": {
+      "display_name": "Kilntest Enclosed 256",
+      "manufacturer": "Kilntest",
+      "build_volume_mm": {
+        "x": 256,
+        "y": 256,
+        "z": 256
+      },
+      "max_hotend_temp_c": 320,
+      "max_bed_temp_c": 120,
+      "has_enclosure": true,
+      "has_direct_drive": true,
+      "supported_materials": [
+        "abs",
+        "asa",
+        "pa-cf",
+        "petg",
+        "pla"
+      ],
+      "typical_tolerance_mm": 0.15,
+      "max_print_speed_mm_s": 200,
+      "default_layer_heights_mm": [
+        0.12,
+        0.16,
+        0.2,
+        0.28
+      ],
+      "chamber_temp_c": 60,
+      "chamber_heated": true
+    },
+    "slicer": {
+      "display_name": "Kilntest Enclosed 256",
+      "slicer": "orcaslicer",
+      "notes": "Synthetic profile for the Kilntest Enclosed 256; every number is made up. Not a real machine.",
+      "settings": {
+        "layer_height": "0.2",
+        "first_layer_height": "0.25",
+        "perimeters": "3",
+        "top_solid_layers": "4",
+        "bottom_solid_layers": "4",
+        "fill_density": "15%",
+        "fill_pattern": "gyroid",
+        "infill_speed": "200",
+        "perimeter_speed": "150",
+        "external_perimeter_speed": "120",
+        "first_layer_speed": "40",
+        "travel_speed": "300",
+        "support_material": "0",
+        "skirts": "1",
+        "skirt_distance": "3",
+        "brim_width": "0",
+        "nozzle_diameter": "0.4",
+        "filament_diameter": "1.75",
+        "temperature": "215",
+        "first_layer_temperature": "220",
+        "bed_temperature": "55",
+        "first_layer_bed_temperature": "60",
+        "fan_always_on": "1",
+        "min_fan_speed": "100",
+        "max_fan_speed": "100",
+        "bridge_fan_speed": "100",
+        "disable_fan_first_layers": "2",
+        "retract_length": "0.8",
+        "retract_speed": "35",
+        "retract_lift": "0.2",
+        "gcode_flavor": "klipper",
+        "bed_shape": "0x0,256x0,256x256,0x256",
+        "max_print_height": "256",
+        "use_relative_e_distances": "1",
+        "start_gcode": "",
+        "end_gcode": ""
+      },
+      "tool_change": {
+        "tool_change_seconds": 70,
+        "tool_changer": "ams_lite",
+        "tool_change_notes": "Synthetic: a changer Kiln drives."
+      }
     }
   },
   "kilntest_ptfe": {
@@ -175,6 +327,78 @@
         }
       },
       "nozzle_clumping_probe": null
+    },
+    "design": {
+      "display_name": "Kilntest Lined 235",
+      "manufacturer": "Kilntest",
+      "build_volume_mm": {
+        "x": 235,
+        "y": 235,
+        "z": 250
+      },
+      "max_hotend_temp_c": 260,
+      "max_bed_temp_c": 100,
+      "has_enclosure": false,
+      "has_direct_drive": false,
+      "supported_materials": [
+        "petg",
+        "pla"
+      ],
+      "typical_tolerance_mm": 0.2,
+      "max_print_speed_mm_s": 60,
+      "default_layer_heights_mm": [
+        0.12,
+        0.16,
+        0.2,
+        0.28
+      ],
+      "chamber_temp_c": null,
+      "chamber_heated": false
+    },
+    "slicer": {
+      "display_name": "Kilntest Lined 235",
+      "slicer": "prusaslicer",
+      "notes": "Synthetic profile for the Kilntest Lined 235; every number is made up. Not a real machine.",
+      "settings": {
+        "layer_height": "0.2",
+        "first_layer_height": "0.25",
+        "perimeters": "3",
+        "top_solid_layers": "4",
+        "bottom_solid_layers": "4",
+        "fill_density": "20%",
+        "fill_pattern": "gyroid",
+        "infill_speed": "60",
+        "perimeter_speed": "50",
+        "external_perimeter_speed": "40",
+        "first_layer_speed": "20",
+        "travel_speed": "120",
+        "support_material": "0",
+        "skirts": "1",
+        "skirt_distance": "3",
+        "brim_width": "0",
+        "nozzle_diameter": "0.4",
+        "filament_diameter": "1.75",
+        "temperature": "200",
+        "first_layer_temperature": "205",
+        "bed_temperature": "60",
+        "first_layer_bed_temperature": "65",
+        "fan_always_on": "1",
+        "min_fan_speed": "100",
+        "max_fan_speed": "100",
+        "bridge_fan_speed": "100",
+        "disable_fan_first_layers": "2",
+        "retract_length": "5.0",
+        "retract_speed": "45",
+        "retract_lift": "0.2",
+        "gcode_flavor": "marlin",
+        "bed_shape": "0x0,235x0,235x235,0x235",
+        "max_print_height": "250"
+      },
+      "tool_change": {
+        "tool_change_seconds": 90,
+        "tool_changer": "none",
+        "tool_change_notes": "Synthetic: manual swap assumed."
+      }
     }
   },
   "kilntest_variants": {
@@ -227,6 +451,77 @@
         }
       },
       "nozzle_clumping_probe": null
+    },
+    "design": {
+      "display_name": "Kilntest Lined 220 (upgradeable)",
+      "manufacturer": "Kilntest",
+      "build_volume_mm": {
+        "x": 220,
+        "y": 220,
+        "z": 240
+      },
+      "max_hotend_temp_c": 255,
+      "max_bed_temp_c": 105,
+      "has_enclosure": false,
+      "has_direct_drive": false,
+      "supported_materials": [
+        "pla"
+      ],
+      "typical_tolerance_mm": 0.2,
+      "max_print_speed_mm_s": 60,
+      "default_layer_heights_mm": [
+        0.12,
+        0.16,
+        0.2,
+        0.28
+      ],
+      "chamber_temp_c": null,
+      "chamber_heated": false
+    },
+    "slicer": {
+      "display_name": "Kilntest Lined 220 (upgradeable)",
+      "slicer": "prusaslicer",
+      "notes": "Synthetic profile for the Kilntest Lined 220 (upgradeable); every number is made up. Not a real machine.",
+      "settings": {
+        "layer_height": "0.2",
+        "first_layer_height": "0.25",
+        "perimeters": "3",
+        "top_solid_layers": "4",
+        "bottom_solid_layers": "4",
+        "fill_density": "20%",
+        "fill_pattern": "gyroid",
+        "infill_speed": "60",
+        "perimeter_speed": "50",
+        "external_perimeter_speed": "40",
+        "first_layer_speed": "20",
+        "travel_speed": "120",
+        "support_material": "0",
+        "skirts": "1",
+        "skirt_distance": "3",
+        "brim_width": "0",
+        "nozzle_diameter": "0.4",
+        "filament_diameter": "1.75",
+        "temperature": "200",
+        "first_layer_temperature": "205",
+        "bed_temperature": "60",
+        "first_layer_bed_temperature": "65",
+        "fan_always_on": "1",
+        "min_fan_speed": "100",
+        "max_fan_speed": "100",
+        "bridge_fan_speed": "100",
+        "disable_fan_first_layers": "2",
+        "retract_length": "5.0",
+        "retract_speed": "45",
+        "retract_lift": "0.2",
+        "gcode_flavor": "marlin",
+        "bed_shape": "0x0,220x0,220x220,0x220",
+        "max_print_height": "240"
+      },
+      "tool_change": {
+        "tool_change_seconds": 90,
+        "tool_changer": "none",
+        "tool_change_notes": "Synthetic: manual swap assumed."
+      }
     }
   },
   "kilntest_big": {
@@ -273,6 +568,83 @@
         }
       },
       "nozzle_clumping_probe": null
+    },
+    "design": {
+      "display_name": "Kilntest Big 350",
+      "manufacturer": "Kilntest",
+      "build_volume_mm": {
+        "x": 350,
+        "y": 350,
+        "z": 400
+      },
+      "max_hotend_temp_c": 300,
+      "max_bed_temp_c": 110,
+      "has_enclosure": false,
+      "has_direct_drive": true,
+      "supported_materials": [
+        "petg",
+        "pla"
+      ],
+      "typical_tolerance_mm": 0.15,
+      "max_print_speed_mm_s": 120,
+      "default_layer_heights_mm": [
+        0.12,
+        0.16,
+        0.2,
+        0.28
+      ],
+      "chamber_temp_c": null,
+      "chamber_heated": false
+    },
+    "slicer": {
+      "display_name": "Kilntest Big 350",
+      "slicer": "orcaslicer",
+      "notes": "Synthetic profile for the Kilntest Big 350; every number is made up. Not a real machine.",
+      "settings": {
+        "layer_height": "0.2",
+        "first_layer_height": "0.25",
+        "perimeters": "3",
+        "top_solid_layers": "4",
+        "bottom_solid_layers": "4",
+        "fill_density": "20%",
+        "fill_pattern": "gyroid",
+        "infill_speed": "120",
+        "perimeter_speed": "100",
+        "external_perimeter_speed": "80",
+        "first_layer_speed": "30",
+        "travel_speed": "200",
+        "support_material": "0",
+        "skirts": "1",
+        "skirt_distance": "3",
+        "brim_width": "0",
+        "nozzle_diameter": "0.6",
+        "filament_diameter": "1.75",
+        "temperature": "210",
+        "first_layer_temperature": "215",
+        "bed_temperature": "60",
+        "first_layer_bed_temperature": "65",
+        "fan_always_on": "1",
+        "min_fan_speed": "100",
+        "max_fan_speed": "100",
+        "bridge_fan_speed": "100",
+        "disable_fan_first_layers": "2",
+        "retract_length": "0.8",
+        "retract_speed": "35",
+        "retract_lift": "0.2",
+        "gcode_flavor": "klipper",
+        "bed_shape": "0x0,350x0,350x350,0x350",
+        "max_print_height": "400"
+      },
+      "tool_change": {
+        "tool_change_seconds": 80,
+        "tool_changer": "cfs",
+        "hardware_unverified": true,
+        "control_mode": "firmware_gcode_or_creality_print",
+        "tool_change_notes": "Synthetic CFS row.",
+        "warnings": [
+          "Synthetic CFS row: slot control is hardware-unverified in Kiln; verify the slot mapping before an unattended run."
+        ]
+      }
     }
   },
   "kilntest_small": {
@@ -314,6 +686,77 @@
         }
       },
       "nozzle_clumping_probe": null
+    },
+    "design": {
+      "display_name": "Kilntest Small 120",
+      "manufacturer": "Kilntest",
+      "build_volume_mm": {
+        "x": 120,
+        "y": 120,
+        "z": 120
+      },
+      "max_hotend_temp_c": 250,
+      "max_bed_temp_c": 80,
+      "has_enclosure": false,
+      "has_direct_drive": true,
+      "supported_materials": [
+        "pla"
+      ],
+      "typical_tolerance_mm": 0.15,
+      "max_print_speed_mm_s": 100,
+      "default_layer_heights_mm": [
+        0.12,
+        0.16,
+        0.2,
+        0.28
+      ],
+      "chamber_temp_c": null,
+      "chamber_heated": false
+    },
+    "slicer": {
+      "display_name": "Kilntest Small 120",
+      "slicer": "orcaslicer",
+      "notes": "Synthetic profile for the Kilntest Small 120; every number is made up. Not a real machine.",
+      "settings": {
+        "layer_height": "0.2",
+        "first_layer_height": "0.25",
+        "perimeters": "3",
+        "top_solid_layers": "4",
+        "bottom_solid_layers": "4",
+        "fill_density": "20%",
+        "fill_pattern": "gyroid",
+        "infill_speed": "100",
+        "perimeter_speed": "80",
+        "external_perimeter_speed": "60",
+        "first_layer_speed": "25",
+        "travel_speed": "150",
+        "support_material": "0",
+        "skirts": "1",
+        "skirt_distance": "3",
+        "brim_width": "0",
+        "nozzle_diameter": "0.4",
+        "filament_diameter": "1.75",
+        "temperature": "205",
+        "first_layer_temperature": "210",
+        "bed_temperature": "55",
+        "first_layer_bed_temperature": "60",
+        "fan_always_on": "1",
+        "min_fan_speed": "100",
+        "max_fan_speed": "100",
+        "bridge_fan_speed": "100",
+        "disable_fan_first_layers": "2",
+        "retract_length": "0.8",
+        "retract_speed": "35",
+        "retract_lift": "0.2",
+        "gcode_flavor": "klipper",
+        "bed_shape": "0x0,120x0,120x120,0x120",
+        "max_print_height": "120"
+      },
+      "tool_change": {
+        "tool_change_seconds": 0,
+        "tool_changer": "none",
+        "tool_change_notes": "Synthetic: single material, no changer."
+      }
     }
   },
   "kilntest_variants_se": {
@@ -355,6 +798,77 @@
         }
       },
       "nozzle_clumping_probe": null
+    },
+    "design": {
+      "display_name": "Kilntest Lined 220 SE",
+      "manufacturer": "Kilntest",
+      "build_volume_mm": {
+        "x": 220,
+        "y": 220,
+        "z": 240
+      },
+      "max_hotend_temp_c": 265,
+      "max_bed_temp_c": 105,
+      "has_enclosure": false,
+      "has_direct_drive": false,
+      "supported_materials": [
+        "pla"
+      ],
+      "typical_tolerance_mm": 0.2,
+      "max_print_speed_mm_s": 65,
+      "default_layer_heights_mm": [
+        0.12,
+        0.16,
+        0.2,
+        0.28
+      ],
+      "chamber_temp_c": null,
+      "chamber_heated": false
+    },
+    "slicer": {
+      "display_name": "Kilntest Lined 220 SE",
+      "slicer": "prusaslicer",
+      "notes": "Synthetic profile for the Kilntest Lined 220 SE; every number is made up. Not a real machine.",
+      "settings": {
+        "layer_height": "0.2",
+        "first_layer_height": "0.25",
+        "perimeters": "3",
+        "top_solid_layers": "4",
+        "bottom_solid_layers": "4",
+        "fill_density": "20%",
+        "fill_pattern": "gyroid",
+        "infill_speed": "65",
+        "perimeter_speed": "55",
+        "external_perimeter_speed": "45",
+        "first_layer_speed": "20",
+        "travel_speed": "130",
+        "support_material": "0",
+        "skirts": "1",
+        "skirt_distance": "3",
+        "brim_width": "0",
+        "nozzle_diameter": "0.4",
+        "filament_diameter": "1.75",
+        "temperature": "205",
+        "first_layer_temperature": "210",
+        "bed_temperature": "60",
+        "first_layer_bed_temperature": "65",
+        "fan_always_on": "1",
+        "min_fan_speed": "100",
+        "max_fan_speed": "100",
+        "bridge_fan_speed": "100",
+        "disable_fan_first_layers": "2",
+        "retract_length": "5.0",
+        "retract_speed": "45",
+        "retract_lift": "0.2",
+        "gcode_flavor": "marlin",
+        "bed_shape": "0x0,220x0,220x220,0x220",
+        "max_print_height": "240"
+      },
+      "tool_change": {
+        "tool_change_seconds": 95,
+        "tool_changer": "ercf",
+        "tool_change_notes": "Synthetic: a changer Kiln has never driven."
+      }
     }
   },
   "kilntest_hot": {
@@ -406,6 +920,197 @@
         }
       },
       "nozzle_clumping_probe": null
+    },
+    "design": {
+      "display_name": "Kilntest Hot 500",
+      "manufacturer": "Kilntest",
+      "build_volume_mm": {
+        "x": 300,
+        "y": 300,
+        "z": 300
+      },
+      "max_hotend_temp_c": 500,
+      "max_bed_temp_c": 200,
+      "has_enclosure": true,
+      "has_direct_drive": true,
+      "supported_materials": [
+        "abs",
+        "peek",
+        "pla"
+      ],
+      "typical_tolerance_mm": 0.15,
+      "max_print_speed_mm_s": 80,
+      "default_layer_heights_mm": [
+        0.12,
+        0.16,
+        0.2,
+        0.28
+      ],
+      "chamber_temp_c": 90,
+      "chamber_heated": true
+    },
+    "slicer": {
+      "display_name": "Kilntest Hot 500",
+      "slicer": "orcaslicer",
+      "notes": "Synthetic profile for the Kilntest Hot 500; every number is made up. Not a real machine.",
+      "settings": {
+        "layer_height": "0.2",
+        "first_layer_height": "0.25",
+        "perimeters": "3",
+        "top_solid_layers": "4",
+        "bottom_solid_layers": "4",
+        "fill_density": "20%",
+        "fill_pattern": "gyroid",
+        "infill_speed": "80",
+        "perimeter_speed": "60",
+        "external_perimeter_speed": "45",
+        "first_layer_speed": "25",
+        "travel_speed": "150",
+        "support_material": "0",
+        "skirts": "1",
+        "skirt_distance": "3",
+        "brim_width": "0",
+        "nozzle_diameter": "0.4",
+        "filament_diameter": "1.75",
+        "temperature": "210",
+        "first_layer_temperature": "215",
+        "bed_temperature": "60",
+        "first_layer_bed_temperature": "65",
+        "fan_always_on": "1",
+        "min_fan_speed": "100",
+        "max_fan_speed": "100",
+        "bridge_fan_speed": "100",
+        "disable_fan_first_layers": "2",
+        "retract_length": "0.8",
+        "retract_speed": "35",
+        "retract_lift": "0.2",
+        "gcode_flavor": "klipper",
+        "bed_shape": "0x0,300x0,300x300,0x300",
+        "max_print_height": "300"
+      },
+      "tool_change": {
+        "tool_change_seconds": 90,
+        "tool_changer": "none",
+        "tool_change_notes": "Synthetic: manual swap assumed."
+      }
+    }
+  },
+  "kilntest_wide": {
+    "display_name": "Kilntest Wide 240",
+    "safety": {
+      "max_hotend_temp": 290.0,
+      "max_bed_temp": 105.0,
+      "max_chamber_temp": null,
+      "max_feedrate": 11000.0,
+      "min_safe_z": 0.0,
+      "max_volumetric_flow": 15.0,
+      "build_volume": [
+        240,
+        200,
+        230
+      ],
+      "notes": "Synthetic wide-bed test printer: a bed that is not square. Not a real machine."
+    },
+    "intel": {
+      "firmware": "marlin",
+      "extruder_type": "direct_drive",
+      "hotend_type": "all_metal",
+      "has_enclosure": false,
+      "has_chamber_sensor": false,
+      "has_abl": true,
+      "has_input_shaping": true,
+      "build_volume_mm": [
+        240,
+        200,
+        230
+      ],
+      "max_hotend_temp": 290,
+      "max_bed_temp": 105,
+      "materials": {
+        "PLA": {
+          "hotend": 208,
+          "bed": 60,
+          "fan": 100
+        },
+        "PETG": {
+          "hotend": 238,
+          "bed": 78,
+          "fan": 50
+        }
+      },
+      "nozzle_clumping_probe": null
+    },
+    "design": {
+      "display_name": "Kilntest Wide 240",
+      "manufacturer": "Kilntest",
+      "build_volume_mm": {
+        "x": 240,
+        "y": 200,
+        "z": 230
+      },
+      "max_hotend_temp_c": 290,
+      "max_bed_temp_c": 105,
+      "has_enclosure": false,
+      "has_direct_drive": true,
+      "supported_materials": [
+        "petg",
+        "pla"
+      ],
+      "typical_tolerance_mm": 0.15,
+      "max_print_speed_mm_s": 110,
+      "default_layer_heights_mm": [
+        0.12,
+        0.16,
+        0.2,
+        0.28
+      ],
+      "chamber_temp_c": null,
+      "chamber_heated": false
+    },
+    "slicer": {
+      "display_name": "Kilntest Wide 240",
+      "slicer": "prusaslicer",
+      "notes": "Synthetic profile for the Kilntest Wide 240; every number is made up. Not a real machine.",
+      "settings": {
+        "layer_height": "0.2",
+        "first_layer_height": "0.25",
+        "perimeters": "3",
+        "top_solid_layers": "4",
+        "bottom_solid_layers": "4",
+        "fill_density": "20%",
+        "fill_pattern": "gyroid",
+        "infill_speed": "110",
+        "perimeter_speed": "90",
+        "external_perimeter_speed": "70",
+        "first_layer_speed": "28",
+        "travel_speed": "180",
+        "support_material": "0",
+        "skirts": "1",
+        "skirt_distance": "3",
+        "brim_width": "0",
+        "nozzle_diameter": "0.4",
+        "filament_diameter": "1.75",
+        "temperature": "208",
+        "first_layer_temperature": "213",
+        "bed_temperature": "60",
+        "first_layer_bed_temperature": "65",
+        "fan_always_on": "1",
+        "min_fan_speed": "100",
+        "max_fan_speed": "100",
+        "bridge_fan_speed": "100",
+        "disable_fan_first_layers": "2",
+        "retract_length": "0.8",
+        "retract_speed": "35",
+        "retract_lift": "0.2",
+        "gcode_flavor": "marlin",
+        "bed_shape": "0x0,240x0,240x200,0x200",
+        "max_print_height": "230"
+      },
+      "tool_change": {
+        "tool_change_seconds": 90,
+        "tool_changer": "none",
+        "tool_change_notes": "Synthetic: manual swap assumed."
+      }
     }
   },
   "kilntest_served": {

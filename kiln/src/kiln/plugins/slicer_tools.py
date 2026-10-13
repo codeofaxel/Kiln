@@ -3809,23 +3809,14 @@ class _SlicerToolsPlugin:
             if err := _srv._check_auth("slicer"):
                 return err
             try:
-                from kiln.slicer_profiles import get_slicer_profile, list_slicer_profiles
+                from kiln.slicer_profiles import roster_entries
 
-                ids = list_slicer_profiles()
-                profiles = []
-                for pid in ids:
-                    try:
-                        p = get_slicer_profile(pid)
-                        profiles.append(
-                            {
-                                "id": p.id,
-                                "display_name": p.display_name,
-                                "slicer": p.slicer,
-                                "tier": p.tier,
-                            }
-                        )
-                    except KeyError:
-                        continue
+                # The roster, never a fetch per printer: a profile's settings
+                # are served one printer at a time when that printer is
+                # asked for (get_slicer_profile), and a listing must not
+                # walk the catalogue.  ``slicer`` is null for a printer
+                # whose profile this install has not fetched.
+                profiles = roster_entries()
                 return {"success": True, "count": len(profiles), "profiles": profiles}
             except Exception as exc:
                 _logger.exception("Unexpected error in list_slicer_profiles_tool")
@@ -3837,12 +3828,15 @@ class _SlicerToolsPlugin:
 
         @mcp.tool(name="get_slicer_profile")
         def get_slicer_profile_tool(printer_id: str) -> dict:
-            """Get the full bundled slicer profile for a printer model.
+            """Get the full tuned slicer profile for a printer model.
 
             Returns all INI settings (layer height, speeds, temps, retraction, etc.)
-            and the recommended slicer.  Free-tier profiles (default, ender3,
-            prusa_mk3s, klipper_generic) are available to all users.  Premium
-            profiles require a Kiln Pro license.
+            and the recommended slicer.  A catalogued printer's profile is
+            served one printer per call and kept on this computer; a printer
+            whose record this install does not hold answers with the generic
+            ``default`` profile (``profile.id == "default"``).  Free-tier
+            profiles (default, ender3, prusa_mk3s, klipper_generic) are
+            available to all users.  Premium profiles require a Kiln Pro license.
 
             Args:
                 printer_id: Printer model identifier (e.g. ``"ender3"``,

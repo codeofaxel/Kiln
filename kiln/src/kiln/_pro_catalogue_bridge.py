@@ -1,14 +1,16 @@
 """Public-Kiln → kiln-pro bridge for ONE printer's catalogue record.
 
 The limits a print on a catalogued printer is held to, the curated hardware
-variants that may raise one, the spec sheet and the per-material recipes
-are kiln-pro's (https://kiln3d.com): one record per printer, served one
-printer at a time.  Public Kiln keeps the ROSTER -- which printers exist and
-what they are called -- the ``motion`` block and the generic ``default``
-row.  Its two loaders (:mod:`kiln.safety_profiles`,
-:mod:`kiln.printer_intelligence`) ask here for a row they do not hold and
-parse the answer into their own caches, so every door downstream resolves
-exactly as it did when the rows were bundled.
+variants that may raise one, the spec sheet and the per-material recipes,
+the design capability profile and the tuned slicer profile are kiln-pro's
+(https://kiln3d.com): one record per printer, served one printer at a time.
+Public Kiln keeps the ROSTER -- which printers exist and what they are
+called -- the ``motion`` block, the multi-material add-on table and the
+generic ``default`` rows.  Its four loaders (:mod:`kiln.safety_profiles`,
+:mod:`kiln.printer_intelligence`, :mod:`kiln.design_intelligence`,
+:mod:`kiln.slicer_profiles`) ask here for a row they do not hold and parse
+their block of the answer into their own caches, so every door downstream
+resolves exactly as it did when the rows were bundled.
 
 A record comes from one of four places, tried in order:
 
@@ -52,8 +54,11 @@ logger = logging.getLogger(__name__)
 
 #: The served tool that answers for one printer.
 WIRE_TOOL = "get_printer_record"
-#: The two blocks a record carries; each public loader parses one of them.
-BLOCKS = ("safety", "intel")
+#: The four blocks a record carries; each public loader parses one of them
+#: (safety_profiles / printer_intelligence / design_intelligence /
+#: slicer_profiles).  A kept record from before a block existed fails
+#: :func:`_is_record` and is asked for again, never read half.
+BLOCKS = ("safety", "intel", "design", "slicer")
 #: Where the same answer is read from when kiln-pro IS installed here
 #: (imported by name in :func:`_local`, never by a string, so a static
 #: reader of the call graph sees the crossing).
@@ -118,7 +123,8 @@ def _is_record(value: Any) -> bool:
 def printer_record(printer_id: Any) -> dict[str, Any] | None:
     """ONE printer's record for *printer_id*, or ``None``.
 
-    ``{"printer_id", "matched_by", "display_name", "safety", "intel"}`` --
+    ``{"printer_id", "matched_by", "display_name", "safety", "intel",
+    "design", "slicer"}`` --
     ``printer_id`` is the catalogue's own id, which may differ from the
     spelling asked (``creality_k1c`` is answered as ``k1c``), and is the key
     a loader caches under.  ``None`` is one of two things, told apart by

@@ -754,7 +754,7 @@ class TestDuplicateStlOnPlate:
         output = duplicate_stl_on_plate(
             stl_path,
             4,
-            printer_id="Creality K1 Max",
+            printer_id="Kilntest Big 350",
             output_path=os.path.join(str(tmp_path), "k1max.stl"),
         )
         assert os.path.isfile(output)

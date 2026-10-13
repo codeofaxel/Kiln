@@ -136,7 +136,13 @@ _MK4_BED = (250.0, 210.0, 220.0)
 
 @pytest.fixture(autouse=True)
 def _the_incident_bed(monkeypatch):
+    from .conftest import serve_synthetic_roster_records
+
     monkeypatch.setitem(bed_fit._BUILD_VOLUME_OVERRIDES, _MK4, _MK4_BED)
+    # The MK4's slicer profile is its served record since 2026-10-12: a
+    # synthetic one here, on the incident's bed, so every door slices
+    # against the same rectangle the scenario states.
+    serve_synthetic_roster_records(monkeypatch, volumes={_MK4: _MK4_BED})
 
 
 def _sliced(tmp_path: Path, slicer: _Slicer, profile: str | None, *, auto_center: bool | None = True):
