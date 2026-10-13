@@ -499,7 +499,6 @@ HOSTED_DOORS: dict[str, tuple[str, str]] = {
     "kiln.heartbeat": ("infrastructure", "the daily install heartbeat; never user-facing"),
     "kiln.auth_session": ("own_vocabulary", "token refresh; its states word the sign-in doors"),
     "kiln.cli.auth_commands": ("own_vocabulary", "kiln signin / pair / signout: the sign-in doors themselves"),
-    "kiln.cli.main": ("own_vocabulary", "kiln register: a sign-in door"),
     "kiln.cli.spend_caps_commands": ("own_vocabulary", "spend caps CLI: a terminal door with its own errors"),
     "kiln.plugins.tier_diagnostic_tools": ("infrastructure", "names the host in prose only; reads local state"),
     "kiln.runtime_env": ("infrastructure", "names the host in prose only"),
