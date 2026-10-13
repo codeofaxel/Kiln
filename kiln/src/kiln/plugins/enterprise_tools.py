@@ -288,27 +288,38 @@ class _EnterpriseToolsPlugin:
         # ------------------------------------------------------------------
 
         @mcp.tool()
-        @requires_tier(LicenseTier.ENTERPRISE)
         def printer_usage_summary() -> dict:
-            """Show printer count, included allowance, and overage charges.
+            """How many printers are registered with this Kiln, and what
+            they add to your bill on your plan, at the prices on
+            kiln3d.com/pricing.  Free on every plan.
 
-            Enterprise feature. Enterprise base includes 50 printers.
-            Additional printers are $15/month each.
+            Counts the machines registered here, so ask it on the computer
+            your printers are attached to.
             """
             if err := _srv._check_auth("read"):
                 return err
+            from kiln.licensing import get_tier
+            from kiln.tiers_and_terms import PRICING_URL
+
             try:
-                from kiln_pro.billing.printer_billing import PrinterUsageBilling
-
-                billing = PrinterUsageBilling()
-                active_count = _srv._get_registry().count
-                usage = billing.usage_summary(active_count)
-                estimate = billing.estimate_monthly_cost(active_count)
-
+                from kiln_pro.billing.printer_billing import extra_printer_cost
+            except ImportError:
+                extra_printer_cost = None
+            try:
+                printers = _srv._get_registry().count
+                plan = str(getattr(get_tier(), "value", "free"))
+                if extra_printer_cost is not None:
+                    return {"success": True, **extra_printer_cost(plan, printers)}
+                noun = "printer is" if printers == 1 else "printers are"
                 return {
                     "success": True,
-                    "usage": usage.to_dict(),
-                    "cost_estimate": estimate,
+                    "printers": printers,
+                    "your_plan": plan,
+                    "summary": (
+                        f"{printers} {noun} registered with this Kiln. What extra "
+                        f"printers cost on each plan: {PRICING_URL}"
+                    ),
+                    "pricing_url": PRICING_URL,
                 }
             except Exception as exc:
                 _logger.exception("Error in printer_usage_summary")
