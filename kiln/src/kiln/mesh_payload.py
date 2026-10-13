@@ -436,12 +436,12 @@ def _painted_3mf_mesh(
 
     from kiln.threemf_parser import (
         _scan_color_constructs,
-        open_guarded_3mf,
+        open_untrusted_zip,
         parse_colored_3mf,
     )
 
     try:
-        with open_guarded_3mf(str(path)) as zf:
+        with open_untrusted_zip(str(path)) as zf:
             has_palette, has_paint = _scan_color_constructs(zf)
     except (ValueError, OSError, KeyError, zipfile.BadZipFile):
         return None
@@ -575,9 +575,12 @@ def _load_3mf_stdlib(path: Path) -> Any:
       instanced twice appears twice;
     * geometry constructed with trimesh's defaults, as the loader's is.
 
-    Not mirrored: a component that references another model file inside
-    the archive (``p:path``), which no Kiln composer and no slicer export
-    writes.  This is THE 3MF path, on every install — not a fallback for
+    Components and build items that reference another model part of the
+    archive (``p:path``, where every BambuStudio / OrcaSlicer project keeps
+    its meshes) are followed into it; a part that is missing or will not
+    parse costs the objects that point into it.  Parts are streamed into
+    compact arrays, never into an element per vertex or triangle.  This is
+    THE 3MF path, on every install — not a fallback for
     the ones missing trimesh's extras.  It was a fallback for a day; the
     trouble with a fallback is that the machine running the tests has the
     extras and the user's machine does not, so the path users run was the
@@ -586,7 +589,6 @@ def _load_3mf_stdlib(path: Path) -> Any:
     Raises ``ValueError`` for an archive with no model XML or unparsable
     XML — the same refusals the loader makes.
     """
-    import re
     import xml.etree.ElementTree as ET
     import zipfile
 
@@ -596,106 +598,197 @@ def _load_3mf_stdlib(path: Path) -> Any:
 
     from kiln.threemf_parser import (
         _CORE_NS,
+        _KEEP,
+        _PATH_ATTR,
+        _EntityDeclarationRefused,
+        _RetainedBudget,
         _find_model_xml,
-        _parse_vertices,
-        open_guarded_3mf,
+        _stream_part,
+        open_untrusted_zip,
     )
 
+    ns = f"{{{_CORE_NS}}}"
+    budget = _RetainedBudget()
+
+    def _mesh(info: Any) -> Any:
+        """A Trimesh of one object's kept mesh, or None without a valid face."""
+        if info is None or not info.has_mesh:
+            return None
+        tri = info.tri_idx
+        faces = tri[((tri >= 0) & (tri < info.n_vertices)).all(axis=1)] if len(tri) else tri
+        if not len(faces):
+            return None
+        return trimesh.Trimesh(
+            vertices=np.array(info.vertices, dtype=np.float64),
+            faces=np.asarray(faces, dtype=np.int64),
+        )
+
     try:
-        # open_guarded_3mf returns an UntrustedZipFile — its read ceiling
-        # bounds this whole-member read even if the header lies — and applies
-        # the model-parse budget.
-        with open_guarded_3mf(str(path)) as zf:
-            raw = zf.read(_find_model_xml(zf))
-    except (zipfile.BadZipFile, KeyError, OSError) as exc:
-        raise ValueError(f"not a readable 3MF archive: {path.name}") from exc
-    # Same hardening the color parser applies to the slicer sidecar: the
-    # stdlib parser refuses external entities, and entity expansion needs a
-    # declaration no legitimate model file carries.
-    if re.search(rb"<!ENTITY", raw, re.IGNORECASE):
-        raise ValueError(f"refusing 3MF model XML with entity declarations: {path.name}")
-    try:
-        root = ET.fromstring(raw)
+        with open_untrusted_zip(str(path)) as zf:
+            root_name = _find_model_xml(zf)
+            names = {n.lower(): n for n in zf.namelist()}
+            with zf.open(root_name) as fh:
+                # Same hardening the color parser applies to the slicer
+                # sidecar: the stdlib parser refuses external entities, and
+                # entity expansion needs a declaration no legitimate model
+                # file carries.
+                root, root_meshes = _stream_part(fh, budget, _KEEP, refuse_entities=True)
+
+            def _part_of(el: Any, current: str) -> str:
+                ref = el.get(_PATH_ATTR)
+                if not ref:
+                    return current
+                stripped = ref.lstrip("/")
+                return names.get(stripped.lower(), stripped)
+
+            # The root part: names, geometry and components exactly as a
+            # whole-tree read gave them.
+            geometry: dict[str, Any] = {}
+            id_name: dict[str, str] = {}
+            consumed: set[str] = set()
+            counts: dict[str, int] = {}
+            #: (part, object id) -> geometry key, None when it has no face.
+            geom_of: dict[tuple[str, str], str | None] = {}
+            #: (part, object id) -> [(child id, matrix, child part)].
+            components: dict[tuple[str, str], list[tuple[str, Any, str]]] = {}
+            #: (part, object id) -> the object element.
+            objects: dict[tuple[str, str], Any] = {}
+            #: Other parts, loaded when a ``p:path`` first reaches them: object
+            #: id -> (element, mesh), or None for a part that cannot be read.
+            parts: dict[str, dict[str, tuple[Any, Any]] | None] = {}
+            resources = root.find(f"{ns}resources")
+            for obj in [] if resources is None else resources.findall(f"{ns}object"):
+                oid = obj.get("id")
+                if oid is None:
+                    continue
+                name = unique_name(obj.get("name") or oid, consumed, counts)
+                consumed.add(name)
+                id_name[oid] = name
+                objects[(root_name, oid)] = obj
+                mesh = _mesh(root_meshes.get(obj))
+                if mesh is not None:
+                    geometry[name] = mesh
+                geom_of[(root_name, oid)] = name if mesh is not None else None
+                comps_el = obj.find(f"{ns}components")
+                if comps_el is not None:
+                    components[(root_name, oid)] = [
+                        (comp.get("objectid"), _3mf_transform(comp.get("transform")), _part_of(comp, root_name))
+                        for comp in comps_el.findall(f"{ns}component")
+                        if comp.get("objectid")
+                    ]
+
+            def _load(part: str) -> dict[str, tuple[Any, Any]] | None:
+                """Another model part, reached through ``p:path``.  A part that
+                is missing, malformed or declares entities costs the objects
+                that point into it, not the file."""
+                if part not in parts:
+                    parts[part] = None
+                    try:
+                        with zf.open(part) as fh:
+                            part_root, metas = _stream_part(fh, budget, _KEEP, refuse_entities=True)
+                    except (KeyError, ET.ParseError, _EntityDeclarationRefused):
+                        return None
+                    found: dict[str, tuple[Any, Any]] = {}
+                    res = part_root.find(f"{ns}resources")
+                    for obj in [] if res is None else res.findall(f"{ns}object"):
+                        oid = obj.get("id")
+                        if oid is None:
+                            continue
+                        found[oid] = (obj, metas.get(obj))
+                        objects[(part, oid)] = obj
+                        comps_el = obj.find(f"{ns}components")
+                        if comps_el is not None:
+                            components[(part, oid)] = [
+                                (comp.get("objectid"), _3mf_transform(comp.get("transform")), _part_of(comp, part))
+                                for comp in comps_el.findall(f"{ns}component")
+                                if comp.get("objectid")
+                            ]
+                    parts[part] = found
+                return parts[part]
+
+            def _geometry_key(part: str, oid: str, holder: str | None) -> str | None:
+                if (part, oid) in geom_of:
+                    return geom_of[(part, oid)]
+                if part == root_name:
+                    return None
+                entry = (_load(part) or {}).get(oid)
+                mesh = _mesh(entry[1]) if entry is not None else None
+                key = None
+                if mesh is not None:
+                    # Named the way Kiln's colour readers key an object reached
+                    # through p:path — after the object holding the component,
+                    # else its own name, else its id — so a painted part's
+                    # colors find their geometry.
+                    key = unique_name(holder or entry[0].get("name") or oid, consumed, counts)
+                    consumed.add(key)
+                    geometry[key] = mesh
+                    scene.geometry[key] = mesh
+                geom_of[(part, oid)] = key
+                return key
+
+            scene = trimesh.Scene()
+            for name, mesh in geometry.items():
+                scene.geometry[name] = mesh
+            base = scene.graph.base_frame
+            used: set[str] = set()
+            used_counts: dict[str, int] = {}
+
+            def _place(
+                part: str,
+                oid: str,
+                matrix: Any,
+                partnumber: str | None,
+                seen: frozenset[tuple[str, str]],
+                holder: str | None,
+            ) -> None:
+                if (part, oid) in seen:
+                    return  # a component cycle — the file is malformed, not infinite
+                name = _geometry_key(part, oid, holder)
+                if name is not None:
+                    node = unique_name(partnumber or name, used, used_counts)
+                    used.add(node)
+                    scene.graph.update(
+                        frame_from=base, frame_to=node, matrix=matrix, geometry=name
+                    )
+                if part != root_name:
+                    _load(part)
+                obj = objects.get((part, oid))
+                for child, child_matrix, child_part in components.get((part, oid), ()):
+                    _place(
+                        child_part,
+                        child,
+                        matrix @ child_matrix,
+                        None,
+                        seen | {(part, oid)},
+                        (obj.get("name") or None) if obj is not None and child_part != part else None,
+                    )
+
+            build = root.find(f"{ns}build")
+            if build is None:
+                # No build section: nothing is placed by the spec, so place every
+                # mesh object at identity — the convention Kiln's color parser
+                # already uses for the same file, so colors and geometry agree.
+                for oid in id_name:
+                    if geom_of.get((root_name, oid)) is not None:
+                        _place(root_name, oid, np.eye(4), None, frozenset(), None)
+            else:
+                for item in build.findall(f"{ns}item"):
+                    oid = item.get("objectid")
+                    if oid:
+                        _place(
+                            _part_of(item, root_name),
+                            oid,
+                            _3mf_transform(item.get("transform")),
+                            item.get("partnumber"),
+                            frozenset(),
+                            None,
+                        )
+    except _EntityDeclarationRefused as exc:
+        raise ValueError(f"refusing 3MF model XML with entity declarations: {path.name}") from exc
     except ET.ParseError as exc:
         raise ValueError(f"unparsable 3MF model XML in {path.name}: {exc}") from exc
-
-    ns = f"{{{_CORE_NS}}}"
-    geometry: dict[str, Any] = {}
-    id_name: dict[str, str] = {}
-    components: dict[str, list[tuple[str, Any]]] = {}
-    consumed: set[str] = set()
-    counts: dict[str, int] = {}
-    resources = root.find(f"{ns}resources")
-    for obj in [] if resources is None else resources.findall(f"{ns}object"):
-        oid = obj.get("id")
-        if oid is None:
-            continue
-        name = unique_name(obj.get("name") or oid, consumed, counts)
-        consumed.add(name)
-        id_name[oid] = name
-        mesh_el = obj.find(f"{ns}mesh")
-        if mesh_el is not None:
-            vertices = _parse_vertices(mesh_el)
-            faces: list[tuple[int, int, int]] = []
-            tris_el = mesh_el.find(f"{ns}triangles")
-            for tri in [] if tris_el is None else tris_el.findall(f"{ns}triangle"):
-                try:
-                    idx = (int(tri.get("v1", "-1")), int(tri.get("v2", "-1")), int(tri.get("v3", "-1")))
-                except (TypeError, ValueError):
-                    continue
-                if all(0 <= i < len(vertices) for i in idx):
-                    faces.append(idx)
-            if faces:
-                geometry[name] = trimesh.Trimesh(
-                    vertices=np.asarray(vertices, dtype=np.float64),
-                    faces=np.asarray(faces, dtype=np.int64),
-                )
-        comps_el = obj.find(f"{ns}components")
-        if comps_el is not None:
-            components[oid] = [
-                (comp.get("objectid"), _3mf_transform(comp.get("transform")))
-                for comp in comps_el.findall(f"{ns}component")
-                if comp.get("objectid")
-            ]
-
-    scene = trimesh.Scene()
-    for name, mesh in geometry.items():
-        scene.geometry[name] = mesh
-    base = scene.graph.base_frame
-    used: set[str] = set()
-    used_counts: dict[str, int] = {}
-
-    def _place(oid: str, matrix: Any, partnumber: str | None, seen: frozenset[str]) -> None:
-        if oid in seen:
-            return  # a component cycle — the file is malformed, not infinite
-        name = id_name.get(oid)
-        if name is not None and name in geometry:
-            node = unique_name(partnumber or name, used, used_counts)
-            used.add(node)
-            scene.graph.update(
-                frame_from=base, frame_to=node, matrix=matrix, geometry=name
-            )
-        for child, child_matrix in components.get(oid, ()):
-            _place(child, matrix @ child_matrix, None, seen | {oid})
-
-    build = root.find(f"{ns}build")
-    if build is None:
-        # No build section: nothing is placed by the spec, so place every
-        # mesh object at identity — the convention Kiln's color parser
-        # already uses for the same file, so colors and geometry agree.
-        for oid, name in id_name.items():
-            if name in geometry:
-                _place(oid, np.eye(4), None, frozenset())
-    else:
-        for item in build.findall(f"{ns}item"):
-            oid = item.get("objectid")
-            if oid:
-                _place(
-                    oid,
-                    _3mf_transform(item.get("transform")),
-                    item.get("partnumber"),
-                    frozenset(),
-                )
+    except (zipfile.BadZipFile, KeyError, OSError) as exc:
+        raise ValueError(f"not a readable 3MF archive: {path.name}") from exc
     return scene
 
 

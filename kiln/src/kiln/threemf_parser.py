@@ -18,9 +18,11 @@ through it too, so a layout one reader understands the others cannot miss.
 from __future__ import annotations
 
 import contextlib
+import math
 import re
 import xml.etree.ElementTree as ET
 import zipfile
+from array import array
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -48,84 +50,390 @@ _DEFAULT_COLOR: tuple[int, int, int] = (170, 170, 170)
 
 
 # ---------------------------------------------------------------------------
-# A 3MF is untrusted input — bound its model parse
+# Streaming model parts — the structure kept, the mesh never materialized
 # ---------------------------------------------------------------------------
 #
-# Opening a 3MF means opening a ZIP a stranger produced.  The memory-safety of
-# that open — a read ceiling on every member so a lying header cannot balloon a
-# whole read, and a shape pre-check that refuses a bomb before a byte is
-# decompressed — lives in :mod:`kiln.untrusted_zip`, which EVERY reader of an
-# uploaded archive opens through.  This module adds the one budget specific to
-# PARSING a 3MF: the colour and geometry readers below build every triangle
-# into memory, and a model part parses to ~16-20x its own XML bytes (measured
-# 2026-10-13: an 82 MB model peaked ~1.3 GB, a 118 MB one ~2.1 GB).  So the
-# model parts a parse will read are capped at 48 MB of declared uncompressed
-# XML in total — the same ceiling kiln-pro's mesh facts settled on for a mesh
-# the hosted box reads whole — which keeps a parse's transient under ~1 GB,
-# well inside the 2 GB machine beside the API's own ~0.1-0.6 GB baseline.
-# gcode and thumbnails in a sliced ``.gcode.3mf`` are NOT counted: the colour
-# parser never reads them.
+# Opening a 3MF means opening a ZIP a stranger produced; :mod:`kiln.untrusted_zip`
+# bounds what that open can cost (a read ceiling on every member, a shape
+# pre-check that refuses a bomb).  What it cannot bound is a reader that holds
+# too much of an HONEST file: parsed into an ElementTree, a model part costs
+# ~16-20x its XML — an Element, an attribute dict and three strings per vertex
+# and per triangle — which took a 126 MB model to ~2 GB (measured 2026-10-13).
+# A model part is almost all mesh: the two real downloaded projects measured
+# that day hold 1.5 M and 2.2 M <vertex>/<triangle> elements beside 231 and 36
+# of everything else.
 #
-# Ordinary painted / multicolour files parse from model parts of a few MB; a
-# file this turns away (a 1.3 M-triangle scan, an 82 MB plate) would itself
-# have peaked past the box.
+# So a part is read with ElementTree's parser-target API.  The STRUCTURE —
+# objects, components, build items, palettes, everything a walk or a colour
+# lookup reads — is built as ordinary Elements; every <vertex> and <triangle>
+# is read from its attributes as it streams past and never becomes an Element;
+# and no text is kept (no 3MF reader reads element text).  Each reader then
+# chooses how much of the mesh to hold:
+#
+#   * KEEP — compact arrays per object (8 bytes a coordinate, 8 an index, 4 a
+#     colour signature): the readers that hand the whole mesh on (the stage
+#     preview, the validation geometry, the full colour parse);
+#   * FOLD — the mesh handed to the reader a chunk at a time and dropped: the
+#     readers whose answer is small (a bounding box, a colour set), which read a
+#     part twice — first its STRUCTURE (counts only), then a fold — so their
+#     memory does not grow with the mesh at all.
+#
+# The capture rules are the ones the tree readers used, so every reader sees
+# the file it saw before: an object's FIRST <mesh>, that mesh's FIRST
+# <vertices> and <triangles>, their DIRECT children; a vertex whose coordinates
+# will not parse is (0, 0, 0); a triangle index that is missing or will not
+# parse is -1, which every reader's range check already skips.
 
-#: The ``.model`` parts (and settings sidecar) a 3MF parse accumulates are
-#: capped at this many declared uncompressed bytes in total.
-_MAX_MODEL_PARSE_BYTES = 48 * 1024 * 1024
+_OBJECT_TAG = f"{{{_CORE_NS}}}object"
+_MESH_TAG = f"{{{_CORE_NS}}}mesh"
+_VERTICES_TAG = f"{{{_CORE_NS}}}vertices"
+_VERTEX_TAG = f"{{{_CORE_NS}}}vertex"
+_TRIANGLES_TAG = f"{{{_CORE_NS}}}triangles"
+_TRIANGLE_TAG = f"{{{_CORE_NS}}}triangle"
+_RESOURCES_TAG = f"{{{_CORE_NS}}}resources"
+
+#: Structure elements one archive walk may keep: objects, components, build
+#: items, palettes, metadata — never the mesh, which is not kept as elements.
+#: Measured 2026-10-13: the largest real project on hand (a 48-member
+#: downloaded project plate) keeps 231 across all its parts, ~450 bytes each.  A file
+#: of millions of tiny structure elements is a bomb no lean reader can absorb —
+#: the structure is what a walk must keep — so past 100 000 (>400x reality,
+#: ~45 MB) the archive is refused like any other bomb.
+_MAX_RETAINED_ELEMENTS = 100_000
+
+#: Bytes read from an archive member per parser feed.
+_STREAM_CHUNK_BYTES = 1 << 16
+
+#: Vertices (or triangles) handed to a FOLD reader at once.
+_FOLD_CHUNK = 1 << 16
+
+#: The byte run a model or sidecar refuses outright (see :func:`_stream_part`).
+_ENTITY_DECL_RE = re.compile(rb"<!ENTITY", re.IGNORECASE)
+
+_KEEP = "keep"
+_FOLD = "fold"
+_STRUCTURE = "structure"
+
+#: A triangle's colour signature: its ``pid``, its ``p1``, and its painting
+#: attribute — everything any colour reader looks at on a triangle.
+_TriangleSig = tuple[str | None, str | None, str | None]
 
 
-class ThreeMFArchiveTooLarge(UntrustedArchiveError):
-    """A 3MF whose model parts are too large to parse in bounded memory.
+class _EntityDeclarationRefused(ValueError):
+    """The member carries an ``<!ENTITY`` declaration the reader refuses."""
 
-    An :class:`~kiln.untrusted_zip.UntrustedArchiveError` (hence a
-    ``ValueError``) so every reader that already turns a bad archive into its
-    own decline — :func:`parse_colored_3mf` raising,
-    :func:`object_display_colors` returning ``{}``, the viewer payload's
-    ``payload_unavailable`` — treats an over-budget one exactly the same way.
+
+class _RetainedBudget:
+    """Counts the structure elements one archive walk keeps."""
+
+    __slots__ = ("left", "limit")
+
+    def __init__(self, limit: int = _MAX_RETAINED_ELEMENTS) -> None:
+        self.limit = limit
+        self.left = limit
+
+    def take(self) -> None:
+        self.left -= 1
+        if self.left < 0:
+            raise UntrustedArchiveError(
+                f"3MF model structure holds more than {self.limit} elements"
+            )
+
+
+@dataclass
+class _MeshInfo:
+    """The first ``<mesh>`` of one ``<object>``, as the stream found it.
+
+    *ordinal* is the object's position among its part's objects, the same on
+    every read of the part, so a FOLD pass can name the object a STRUCTURE
+    pass found.  The arrays are filled only when the part was read to KEEP.
     """
 
+    ordinal: int
+    has_mesh: bool = False
+    n_vertices: int = 0
+    n_triangles: int = 0
+    #: (N, 3) float64 vertex coordinates.
+    vertices: Any = None
+    #: (M, 3) int64 vertex indices; -1 where an index was missing or unparseable.
+    tri_idx: Any = None
+    #: (M,) int32 index into :attr:`signatures`, one per triangle.
+    tri_sig: Any = None
+    signatures: list[_TriangleSig] = field(default_factory=list)
 
-def _check_model_parse_budget(
-    zf: zipfile.ZipFile, *, max_bytes: int = _MAX_MODEL_PARSE_BYTES
-) -> None:
-    """Refuse a 3MF whose model parts would not parse in bounded memory.
 
-    Counts the ``.model`` parts and the slicer settings sidecar — the members
-    :func:`parse_colored_3mf` and the geometry walkers read and accumulate —
-    and raises :class:`ThreeMFArchiveTooLarge` when their declared uncompressed
-    total runs past *max_bytes*.  Reads only the central directory the archive
-    parsed at open; no member is decompressed here.
+def _numpy() -> Any:
+    import numpy as np
+
+    return np
+
+
+def _parse_index(value: str | None) -> int:
+    """A triangle's vertex index as the tree readers parsed it, -1 when it
+    would not parse (or is missing) — which their range checks skip."""
+    if value is None:
+        return -1
+    try:
+        index = int(value)
+    except ValueError:
+        return -1
+    return index if -(2**63) <= index < 2**63 else -1
+
+
+def _parse_vertex(attrib: Any) -> tuple[float, float, float]:
+    """A vertex the way the tree readers read one: (0, 0, 0) when any
+    coordinate will not parse."""
+    try:
+        return (
+            float(attrib.get("x", "0")),
+            float(attrib.get("y", "0")),
+            float(attrib.get("z", "0")),
+        )
+    except (ValueError, TypeError):
+        return (0.0, 0.0, 0.0)
+
+
+class _PartBuilder:
+    """``XMLParser`` target for one model part (see the section comment)."""
+
+    def __init__(
+        self,
+        budget: _RetainedBudget,
+        mode: str,
+        fold: Any = None,
+        *,
+        want_vertices: bool = True,
+        want_triangles: bool = True,
+    ) -> None:
+        self._budget = budget
+        self._mode = mode
+        self._fold = fold
+        self._want_v = mode == _KEEP or (mode == _FOLD and want_vertices)
+        self._want_t = mode == _KEEP or (mode == _FOLD and want_triangles)
+        # Open elements, innermost last; None marks a vertex / triangle,
+        # whose contents nothing reads.
+        self._stack: list[ET.Element | None] = []
+        self.root: ET.Element | None = None
+        self.meshes: dict[ET.Element, _MeshInfo] = {}
+        self._resources: ET.Element | None = None
+        self._ordinal = 0
+        self._new_object(None)
+
+    def _new_object(self, obj: ET.Element | None) -> None:
+        self._obj = obj
+        self._info: _MeshInfo | None = None
+        self._mesh: ET.Element | None = None
+        self._verts: ET.Element | None = None
+        self._tris: ET.Element | None = None
+        self._mesh_seen = self._verts_seen = self._tris_seen = False
+        self._vbuf = array("d")
+        self._tbuf = array("q")
+        self._sig_idx = array("i")
+        self._sig_list: list[_TriangleSig] = []
+        self._sig_index: dict[_TriangleSig, int] = {}
+
+    # -- XMLParser target interface -----------------------------------------
+
+    def start(self, tag: str, attrib: dict[str, str]) -> None:
+        stack = self._stack
+        if stack and stack[-1] is None:
+            stack.append(None)  # inside a vertex / triangle
+            return
+        parent = stack[-1] if stack else None
+        if tag == _VERTEX_TAG:
+            if parent is not None and parent is self._verts:
+                self._vertex(attrib)
+            stack.append(None)
+            return
+        if tag == _TRIANGLE_TAG:
+            if parent is not None and parent is self._tris:
+                self._triangle(attrib)
+            stack.append(None)
+            return
+        self._budget.take()
+        el = ET.Element(tag, attrib)
+        if parent is None:
+            self.root = el
+        else:
+            parent.append(el)
+        stack.append(el)
+        if parent is None:
+            return
+        if tag == _RESOURCES_TAG:
+            if parent is self.root and self._resources is None:
+                self._resources = el
+        elif tag == _OBJECT_TAG:
+            if parent is self._resources:
+                self._new_object(el)
+                self._info = self.meshes[el] = _MeshInfo(ordinal=self._ordinal)
+                self._ordinal += 1
+        elif tag == _MESH_TAG:
+            if parent is self._obj and not self._mesh_seen:
+                self._mesh = el
+                self._mesh_seen = True
+                self._info.has_mesh = True  # type: ignore[union-attr]
+        elif tag == _VERTICES_TAG:
+            if self._mesh is not None and parent is self._mesh and not self._verts_seen:
+                self._verts = el
+                self._verts_seen = True
+        elif (
+            tag == _TRIANGLES_TAG
+            and self._mesh is not None
+            and parent is self._mesh
+            and not self._tris_seen
+        ):
+            self._tris = el
+            self._tris_seen = True
+
+    def end(self, tag: str) -> None:
+        el = self._stack.pop()
+        if el is None:
+            return
+        if el is self._verts:
+            self._flush_vertices()
+            self._verts = None
+        elif el is self._tris:
+            self._flush_triangles()
+            self._tris = None
+        elif el is self._mesh:
+            self._mesh = None
+        elif el is self._obj:
+            self._end_object()
+
+    def data(self, text: str) -> None:
+        """Text is never read by a 3MF reader, so none is kept."""
+
+    def close(self) -> ET.Element | None:
+        return self.root
+
+    # -- the mesh, as it streams past ---------------------------------------
+
+    def _vertex(self, attrib: dict[str, str]) -> None:
+        self._info.n_vertices += 1  # type: ignore[union-attr]
+        if not self._want_v:
+            return
+        x, y, z = _parse_vertex(attrib)
+        buf = self._vbuf
+        buf.append(x)
+        buf.append(y)
+        buf.append(z)
+        if self._mode == _FOLD and len(buf) >= 3 * _FOLD_CHUNK:
+            self._flush_vertices()
+
+    def _triangle(self, attrib: dict[str, str]) -> None:
+        info = self._info
+        info.n_triangles += 1  # type: ignore[union-attr]
+        if not self._want_t:
+            return
+        get = attrib.get
+        buf = self._tbuf
+        buf.append(_parse_index(get("v1")))
+        buf.append(_parse_index(get("v2")))
+        buf.append(_parse_index(get("v3")))
+        sig = (get("pid"), get("p1"), _triangle_paint_attr(attrib))
+        if self._mode == _KEEP:
+            idx = self._sig_index.get(sig)
+            if idx is None:
+                idx = self._sig_index[sig] = len(info.signatures)  # type: ignore[union-attr]
+                info.signatures.append(sig)  # type: ignore[union-attr]
+            self._sig_idx.append(idx)
+        else:
+            self._sig_list.append(sig)
+            if len(self._sig_list) >= _FOLD_CHUNK:
+                self._flush_triangles()
+
+    def _flush_vertices(self) -> None:
+        if self._mode != _FOLD or not self._vbuf:
+            return
+        np = _numpy()
+        chunk = np.frombuffer(self._vbuf, dtype=np.float64).reshape(-1, 3)
+        self._fold(self._info.ordinal, "vertices", chunk)  # type: ignore[union-attr]
+        self._vbuf = array("d")
+
+    def _flush_triangles(self) -> None:
+        if self._mode != _FOLD or not self._sig_list:
+            return
+        np = _numpy()
+        idx = np.frombuffer(self._tbuf, dtype=np.int64).reshape(-1, 3)
+        self._fold(self._info.ordinal, "triangles", (idx, self._sig_list))  # type: ignore[union-attr]
+        self._tbuf = array("q")
+        self._sig_list = []
+
+    def _end_object(self) -> None:
+        info = self._info
+        if self._mode == _KEEP and info is not None:
+            np = _numpy()
+            info.vertices = np.frombuffer(self._vbuf, dtype=np.float64).reshape(-1, 3)
+            info.tri_idx = np.frombuffer(self._tbuf, dtype=np.int64).reshape(-1, 3)
+            info.tri_sig = np.frombuffer(self._sig_idx, dtype=np.int32)
+        self._new_object(None)
+
+
+def _stream_part(
+    fh: Any,
+    budget: _RetainedBudget,
+    mode: str,
+    fold: Any = None,
+    *,
+    want_vertices: bool = True,
+    want_triangles: bool = True,
+    refuse_entities: bool = False,
+) -> tuple[ET.Element, dict[ET.Element, _MeshInfo]]:
+    """Read one model part from the open member *fh* a chunk at a time.
+
+    Returns the part's structure tree and, per object found in its first
+    ``<resources>``, a :class:`_MeshInfo`.  *mode* is :data:`_KEEP`,
+    :data:`_FOLD` (with *fold* called as ``fold(ordinal, kind, payload)`` —
+    ``"vertices"`` with an (n, 3) float64 chunk, ``"triangles"`` with an
+    ``(indices, signatures)`` chunk — which must not hold the chunk past the
+    call) or :data:`_STRUCTURE`.  With *refuse_entities*, raises
+    :class:`_EntityDeclarationRefused` on an ``<!ENTITY`` declaration, the
+    refusal those readers made before parsing a whole member.  Raises
+    ``ET.ParseError`` for malformed XML and
+    :class:`~kiln.untrusted_zip.UntrustedArchiveError` past the structure
+    budget.
     """
-    total = 0
-    for info in zf.infolist():
-        name = info.filename.lower()
-        if name.endswith(".model") or name == _SLICER_SETTINGS_PATH.lower():
-            total += info.file_size
-            if info.file_size > max_bytes or total > max_bytes:
-                raise ThreeMFArchiveTooLarge(
-                    f"3MF model parts exceed {max_bytes} bytes of XML to parse "
-                    f"(at {info.filename!r})."
-                )
+    builder = _PartBuilder(
+        budget, mode, fold, want_vertices=want_vertices, want_triangles=want_triangles,
+    )
+    parser = ET.XMLParser(target=builder)
+    carry = b""
+    keep = len(b"<!ENTITY") - 1
+    while True:
+        chunk = fh.read(_STREAM_CHUNK_BYTES)
+        if not chunk:
+            break
+        if refuse_entities:
+            window = carry + chunk
+            if _ENTITY_DECL_RE.search(window):
+                raise _EntityDeclarationRefused("3MF XML declares entities")
+            carry = window[-keep:]
+        parser.feed(chunk)
+    root = parser.close()
+    return root, builder.meshes
 
 
-@contextlib.contextmanager
-def open_guarded_3mf(
-    file_path: Any, *, max_bytes: int = _MAX_MODEL_PARSE_BYTES
-) -> Iterator[zipfile.ZipFile]:
-    """Open a 3MF for a parse that reads its geometry, bounded in memory.
+def _member_tokens(zf: zipfile.ZipFile, member: Any, tokens: Sequence[bytes]) -> set[bytes]:
+    """Which of *tokens* occur in archive *member*, read a chunk at a time.
 
-    A thin wrapper over :func:`kiln.untrusted_zip.open_untrusted_zip` — which
-    bounds every member read and refuses a bomb-shaped archive at open — that
-    also applies the 3MF model-parse budget (:func:`_check_model_parse_budget`).
-    The one door the colour parser and the geometry walkers open through.
-    Raises :class:`ThreeMFArchiveTooLarge` (a ``ValueError``) for an over-budget
-    archive and ``zipfile.BadZipFile`` for a non-ZIP — the exceptions the
-    readers already handle.
+    Always reads to the end, so a damaged member fails its CRC here exactly as
+    a whole read would.
     """
-    with open_untrusted_zip(file_path) as zf:
-        _check_model_parse_budget(zf, max_bytes=max_bytes)
-        yield zf
+    found: set[bytes] = set()
+    keep = max(len(t) for t in tokens) - 1
+    carry = b""
+    with zf.open(member) as fh:
+        while True:
+            chunk = fh.read(_STREAM_CHUNK_BYTES)
+            if not chunk:
+                break
+            window = carry + chunk
+            for token in tokens:
+                if token not in found and token in window:
+                    found.add(token)
+            carry = window[-keep:] if keep else b""
+    return found
+
 
 #: Per-triangle painting attributes.  BambuStudio and OrcaSlicer write
 #: ``paint_color`` (un-namespaced); PrusaSlicer writes the namespaced
@@ -134,14 +442,9 @@ def open_guarded_3mf(
 _PAINT_ATTRS = ("paint_color", f"{{{_SLIC3RPE_NS}}}mmu_segmentation")
 
 #: Byte tokens whose absence proves the model XML carries no painting
-#: attribute — shared by every pre-scan gate that turns a file away
-#: before spending an XML parse on it.
+#: attribute — what the pre-scan (:func:`_scan_color_constructs`) looks for
+#: before spending an XML parse on a file.
 _PAINT_BYTE_TOKENS = (b"paint_color", b"mmu_segmentation")
-
-
-def _bytes_have_paint(raw: bytes) -> bool:
-    """Whether *raw* model XML could carry per-triangle painting attributes."""
-    return any(token in raw for token in _PAINT_BYTE_TOKENS)
 
 
 #: Colors assigned to painted filament states.  A slicer-painted 3MF
@@ -258,7 +561,7 @@ def _dominant_paint_state(weights: dict[int, float]) -> int:
     return min(weights, key=lambda state: (-weights[state], state))
 
 
-def _triangle_paint_attr(tri: ET.Element) -> str | None:
+def _triangle_paint_attr(tri: Any) -> str | None:
     """The triangle's painting attribute value, in either spelling.
 
     An empty string means "unpainted" upstream (PrusaSlicer's
@@ -452,32 +755,15 @@ def _resolve_color(
     return palette[pindex_int]
 
 
-def _parse_vertices(mesh_el: ET.Element) -> list[tuple[float, float, float]]:
-    """Extract vertex positions from a ``<vertices>`` element."""
-    verts: list[tuple[float, float, float]] = []
-    vertices_el = mesh_el.find(f"{{{_CORE_NS}}}vertices")
-    if vertices_el is None:
-        return verts
-    for v in vertices_el.findall(f"{{{_CORE_NS}}}vertex"):
-        try:
-            verts.append((
-                float(v.get("x", "0")),
-                float(v.get("y", "0")),
-                float(v.get("z", "0")),
-            ))
-        except (ValueError, TypeError):
-            verts.append((0.0, 0.0, 0.0))
-    return verts
-
-
 def _collect_object_triangles(
     obj_el: ET.Element,
+    info: _MeshInfo | None,
     color_lookup: dict[int, list[tuple[int, int, int]]],
     *,
     default_color: tuple[int, int, int],
     fallback_color: tuple[int, int, int] | None = None,
 ) -> tuple[list[ColoredTriangle], set[int], int]:
-    """Extract colored triangles from a single ``<object>`` element.
+    """Extract colored triangles from one ``<object>``'s kept mesh (*info*).
 
     Per-triangle priority: core-spec ``pid``/``p1`` property references
     first, then the slicer painting attribute (a whole-triangle state
@@ -494,84 +780,70 @@ def _collect_object_triangles(
     """
     states_seen: set[int] = set()
     split_faces = 0
-
-    mesh_el = obj_el.find(f"{{{_CORE_NS}}}mesh")
-    if mesh_el is None:
+    if info is None or info.n_vertices == 0:
         return [], states_seen, split_faces
 
-    vertices = _parse_vertices(mesh_el)
-    if not vertices:
-        return [], states_seen, split_faces
+    vertices = [tuple(v) for v in info.vertices.tolist()]
+    n = len(vertices)
 
     # Object-level color defaults: core spec first, then the sidecar
-    obj_pid = obj_el.get("pid")
-    obj_pindex = obj_el.get("pindex")
     obj_color = _resolve_color(
         color_lookup,
-        obj_pid,
-        obj_pindex,
+        obj_el.get("pid"),
+        obj_el.get("pindex"),
         default=fallback_color if fallback_color is not None else default_color,
     )
 
+    # Each distinct triangle signature resolves once; the per-triangle rule is
+    # the tree reader's, applied to the attributes the stream kept.
+    resolved = [
+        _signature_color(sig, color_lookup, obj_color) for sig in info.signatures
+    ]
     triangles: list[ColoredTriangle] = []
-    triangles_el = mesh_el.find(f"{{{_CORE_NS}}}triangles")
-    if triangles_el is None:
-        return triangles, states_seen, split_faces
-
-    for tri in triangles_el.findall(f"{{{_CORE_NS}}}triangle"):
-        try:
-            v1_idx = int(tri.get("v1", "-1"))
-            v2_idx = int(tri.get("v2", "-1"))
-            v3_idx = int(tri.get("v3", "-1"))
-        except (ValueError, TypeError):
+    for (a, b, c), s in zip(info.tri_idx.tolist(), info.tri_sig.tolist(), strict=True):
+        if a < 0 or b < 0 or c < 0 or a >= n or b >= n or c >= n:
             continue
-
-        if (
-            v1_idx < 0
-            or v2_idx < 0
-            or v3_idx < 0
-            or v1_idx >= len(vertices)
-            or v2_idx >= len(vertices)
-            or v3_idx >= len(vertices)
-        ):
-            continue
-
-        # Per-triangle color, strongest source first: core-spec property
-        # reference (p1 used for whole-face color), then the slicer
-        # painting attribute, then the object's own color.
-        tri_pid = tri.get("pid")
-        tri_p1 = tri.get("p1")
-        paint_state: int | None = None
-        if tri_pid is not None:
-            color = _resolve_color(
-                color_lookup, tri_pid, tri_p1, default=obj_color,
-            )
-        else:
-            paint = _triangle_paint_attr(tri)
-            decoded = _decode_paint_states(paint) if paint else None
-            if decoded is not None:
-                weights, is_split = decoded
-                states_seen.update(k for k in weights if k >= 1)
-                if is_split:
-                    split_faces += 1
-                paint_state = _dominant_paint_state(weights)
-                color = (
-                    _paint_state_color(paint_state)
-                    if paint_state >= 1
-                    else obj_color
-                )
-            else:
-                color = obj_color
-
+        color, paint_state, states, is_split = resolved[s]
+        states_seen.update(states)
+        if is_split:
+            split_faces += 1
         triangles.append(ColoredTriangle(
-            v0=vertices[v1_idx],
-            v1=vertices[v2_idx],
-            v2=vertices[v3_idx],
+            v0=vertices[a],
+            v1=vertices[b],
+            v2=vertices[c],
             color=color,
             paint_state=paint_state,
         ))
 
     return triangles, states_seen, split_faces
+
+
+def _signature_color(
+    sig: _TriangleSig,
+    color_lookup: dict[int, list[tuple[int, int, int]]],
+    obj_color: tuple[int, int, int] | None,
+) -> tuple[tuple[int, int, int] | None, int | None, tuple[int, ...], bool]:
+    """What a triangle with colour signature *sig* resolves to on an object
+    whose own color is *obj_color*: ``(color, paint_state, painted_states,
+    is_split)``.
+
+    Strongest source first: a core-spec property reference (``p1`` used for
+    the whole face), then the slicer painting attribute, then the object's
+    own color.
+    """
+    tri_pid, tri_p1, paint = sig
+    if tri_pid is not None:
+        return (
+            _resolve_color(color_lookup, tri_pid, tri_p1, default=obj_color),
+            None, (), False,
+        )
+    decoded = _decode_paint_states(paint) if paint else None
+    if decoded is None:
+        return obj_color, None, (), False
+    weights, is_split = decoded
+    paint_state = _dominant_paint_state(weights)
+    color = _paint_state_color(paint_state) if paint_state >= 1 else obj_color
+    return color, paint_state, tuple(k for k in weights if k >= 1), is_split
 
 
 def _find_model_xml(zf: zipfile.ZipFile) -> str:
@@ -594,8 +866,8 @@ def _find_model_xml(zf: zipfile.ZipFile) -> str:
     for name in names:
         if name.lower() == rels_path.lower():
             try:
-                rels_xml = zf.read(name)
-                rels_root = ET.fromstring(rels_xml)
+                with zf.open(name) as fh:
+                    rels_root, _ = _stream_part(fh, _RetainedBudget(), _STRUCTURE)
                 rels_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
                 for rel in rels_root.findall(f"{{{rels_ns}}}Relationship"):
                     target = rel.get("Target", "")
@@ -675,6 +947,106 @@ def _apply_3mf_transform(
     )
 
 
+def _transform_columns(m: _Transform3mf, pts: Any) -> tuple[Any, Any, Any]:
+    """:func:`_apply_3mf_transform` over an (n, 3) array, column by column.
+
+    The same products and sums in the same order, one IEEE operation at a
+    time, so every coordinate is bit-identical to the per-point function.
+    """
+    x, y, z = pts[:, 0], pts[:, 1], pts[:, 2]
+    return (
+        x * m[0] + y * m[3] + z * m[6] + m[9],
+        x * m[1] + y * m[4] + z * m[7] + m[10],
+        x * m[2] + y * m[5] + z * m[8] + m[11],
+    )
+
+
+def _first_extreme(col: Any, want_max: bool) -> float | None:
+    """What ``min()`` (or ``max()``) over *col* returns once its first item is
+    a number: the first occurrence of the extreme of the non-NaN values (so
+    the sign of a zero is the first one met).  ``None`` when there are none."""
+    np = _numpy()
+    valid = col[~np.isnan(col)]
+    if not len(valid):
+        return None
+    extreme = valid.max() if want_max else valid.min()
+    return float(col[int(np.argmax(col == extreme))])
+
+
+def _placed_vertex_bounds(
+    archive: _ModelArchive, root_transform: _Transform3mf,
+) -> tuple[list[float], list[float]] | None:
+    """``([x_min, y_min, z_min], [x_max, y_max, z_max])`` of every vertex the
+    build places, transformed — exactly what ``min()`` / ``max()`` over the
+    list of every placed, transformed vertex returned, without the list.
+
+    Two passes: the structure says which object each placement shows and
+    how; then each part's vertices stream past once, folded through every
+    placement of their object, so memory is one chunk and a few numbers per
+    placement, whatever the mesh.  Exact, not approximate: the transform is
+    applied per vertex with the per-point arithmetic, and the per-placement
+    results combine in build order with ``min()``'s own semantics — a NaN as
+    the very first coordinate wins, a NaN anywhere else is passed over, and
+    of equal extremes the first met is kept.  ``None`` when nothing is placed.
+    """
+    placements: list[tuple[str, int, _Transform3mf, int]] = []
+    for placed in archive.placements(root_transform=root_transform):
+        info = archive.mesh(placed)
+        if info is not None:
+            placements.append((placed.part, info.ordinal, placed.transform, info.n_vertices))
+    if not any(n for _part, _ordinal, _t, n in placements):
+        return None
+
+    # Per placement: its first transformed vertex, and per axis the running
+    # first-occurrence min and max of its non-NaN coordinates.
+    first: list[tuple[float, float, float] | None] = [None] * len(placements)
+    lows: list[list[float | None]] = [[None, None, None] for _ in placements]
+    highs: list[list[float | None]] = [[None, None, None] for _ in placements]
+    by_part: dict[str, dict[int, list[int]]] = {}
+    for i, (part, ordinal, _t, _n) in enumerate(placements):
+        by_part.setdefault(part, {}).setdefault(ordinal, []).append(i)
+
+    def fold_into(indices: dict[int, list[int]]) -> Any:
+        def fold(ordinal: int, kind: str, chunk: Any) -> None:
+            if kind != "vertices":
+                return
+            for i in indices.get(ordinal, ()):
+                cols = _transform_columns(placements[i][2], chunk)
+                if first[i] is None:
+                    first[i] = (float(cols[0][0]), float(cols[1][0]), float(cols[2][0]))
+                for axis, col in enumerate(cols):
+                    low = _first_extreme(col, want_max=False)
+                    high = _first_extreme(col, want_max=True)
+                    if low is not None and (lows[i][axis] is None or low < lows[i][axis]):
+                        lows[i][axis] = low
+                    if high is not None and (highs[i][axis] is None or high > highs[i][axis]):
+                        highs[i][axis] = high
+        return fold
+
+    for part, indices in by_part.items():
+        archive.fold(part, fold_into(indices), want_vertices=True)
+
+    start = next(i for i, (_p, _o, _t, n) in enumerate(placements) if n)
+    mins: list[float] = []
+    maxs: list[float] = []
+    for axis in range(3):
+        head = first[start][axis]  # type: ignore[index]
+        if math.isnan(head):
+            mins.append(head)
+            maxs.append(head)
+            continue
+        low = high = None
+        for i in range(len(placements)):
+            lo, hi = lows[i][axis], highs[i][axis]
+            if lo is not None and (low is None or lo < low):
+                low = lo
+            if hi is not None and (high is None or hi > high):
+                high = hi
+        mins.append(low)  # type: ignore[arg-type]
+        maxs.append(high)  # type: ignore[arg-type]
+    return mins, maxs
+
+
 def _compose_3mf_transforms(
     inner: _Transform3mf, outer: _Transform3mf
 ) -> _Transform3mf:
@@ -709,6 +1081,8 @@ class _ModelPart:
     name: str
     model_el: ET.Element
     objects: dict[int, ET.Element]
+    #: Each object's first mesh as the stream found it (see :class:`_MeshInfo`).
+    meshes: dict[ET.Element, _MeshInfo] = field(default_factory=dict)
 
     @property
     def resources_el(self) -> ET.Element | None:
@@ -749,12 +1123,22 @@ class _ModelArchive:
     walk continues, so one bad reference costs one object, not the file.
     A part that failed to load is remembered so it is reported once.
 
+    Parts are streamed (see "Streaming model parts"): with *keep_mesh* each
+    object's mesh is kept as compact arrays (:meth:`mesh`); without it only
+    the structure and the mesh's counts are kept, and a reader that needs the
+    mesh folds it in a second pass (:meth:`fold`).  Every part one walk loads
+    shares one structure budget.
+
     :raises ValueError: when the archive names no root model at all.
     """
 
-    def __init__(self, zf: zipfile.ZipFile, errors: list[str]) -> None:
+    def __init__(
+        self, zf: zipfile.ZipFile, errors: list[str], *, keep_mesh: bool = False,
+    ) -> None:
         self._zf = zf
         self.errors = errors
+        self._mode = _KEEP if keep_mesh else _STRUCTURE
+        self._budget = _RetainedBudget()
         self.root_part = _find_model_xml(zf)
         self._names = {name.lower(): name for name in zf.namelist()}
         self._parts: dict[str, _ModelPart | None] = {}
@@ -764,12 +1148,15 @@ class _ModelArchive:
             return self._parts[name]
         self._parts[name] = None
         try:
-            model_el = ET.fromstring(self._zf.read(name))
+            fh = self._zf.open(name)
         except KeyError:
             self.errors.append(
                 f"3MF references a model part missing from the archive: {name!r}"
             )
             return None
+        try:
+            with fh:
+                model_el, meshes = _stream_part(fh, self._budget, self._mode)
         except ET.ParseError as exc:
             self.errors.append(f"Corrupt 3MF model XML in {name!r}: {exc}")
             return None
@@ -779,9 +1166,35 @@ class _ModelArchive:
             for obj_el in resources_el.findall(f"{{{_CORE_NS}}}object"):
                 with contextlib.suppress(ValueError, TypeError):
                     objects[int(obj_el.get("id", ""))] = obj_el
-        loaded = _ModelPart(name=name, model_el=model_el, objects=objects)
+        loaded = _ModelPart(name=name, model_el=model_el, objects=objects, meshes=meshes)
         self._parts[name] = loaded
         return loaded
+
+    def mesh(self, placed: _PlacedObject) -> _MeshInfo | None:
+        """The first mesh of *placed*'s object, or ``None`` if it has none."""
+        part = self._parts.get(placed.part)
+        info = None if part is None else part.meshes.get(placed.element)
+        return info if info is not None and info.has_mesh else None
+
+    def fold(
+        self,
+        name: str,
+        fold: Any,
+        *,
+        want_vertices: bool = False,
+        want_triangles: bool = False,
+    ) -> None:
+        """Stream the already-loaded part *name* again, handing its mesh to
+        ``fold(ordinal, kind, payload)`` a chunk at a time (see
+        :func:`_stream_part`) — the second pass of a reader whose memory must
+        not grow with the mesh.  The same bytes parsed cleanly on the first
+        pass, so this pass cannot fail on them differently.
+        """
+        with self._zf.open(name) as fh:
+            _stream_part(
+                fh, _RetainedBudget(), _FOLD, fold,
+                want_vertices=want_vertices, want_triangles=want_triangles,
+            )
 
     @property
     def root(self) -> _ModelPart | None:
@@ -926,22 +1339,28 @@ def _scan_color_constructs(zf: zipfile.ZipFile) -> tuple[bool, bool]:
     has_palette = False
     has_paint = False
     for member in _model_part_members(zf):
+        # A chunk at a time (:func:`_member_tokens`): a whole read of a large
+        # part held ~2-3x its XML just to look for a word.
         try:
-            raw = zf.read(member)
+            found = _member_tokens(zf, member, _SCAN_TOKENS)
         except KeyError:
             continue
-        if b"colorgroup" in raw or b"basematerials" in raw:
+        if b"colorgroup" in found or b"basematerials" in found:
             has_palette = True
-        if _bytes_have_paint(raw):
+        if any(token in found for token in _PAINT_BYTE_TOKENS):
             has_paint = True
         if has_palette and has_paint:
             break
     if not has_palette:
         for member in zf.namelist():
             if member.lower() == _SLICER_SETTINGS_PATH.lower():
-                has_palette = b'key="color"' in zf.read(member)
+                has_palette = b'key="color"' in _member_tokens(zf, member, (b'key="color"',))
                 break
     return has_palette, has_paint
+
+
+#: What :func:`_scan_color_constructs` looks for in a model part.
+_SCAN_TOKENS = (b"colorgroup", b"basematerials", *_PAINT_BYTE_TOKENS)
 
 
 #: The BambuStudio / PrusaSlicer-family per-object settings sidecar — and
@@ -962,18 +1381,15 @@ def _slicer_config_colors(zf: zipfile.ZipFile) -> dict[int, tuple[int, int, int]
     )
     if name is None:
         return {}
+    # Streamed under its own structure budget, refusing <!ENTITY> declarations
+    # (the same hardening as the SVG path in mark_geometry: stdlib ElementTree
+    # refuses external entities, and billion-laughs needs <!ENTITY>
+    # declarations no legitimate settings file carries).  Any of those, or a
+    # settings file too large in structure to be real, contributes no color.
     try:
-        raw = zf.read(name)
-    except KeyError:
-        return {}
-    # Same XML hardening as the SVG path in mark_geometry: stdlib
-    # ElementTree refuses external entities, and billion-laughs needs
-    # <!ENTITY> declarations no legitimate settings file carries.
-    if re.search(rb"<!ENTITY", raw, re.IGNORECASE):
-        return {}
-    try:
-        root = ET.fromstring(raw)
-    except ET.ParseError:
+        with zf.open(name) as fh:
+            root, _ = _stream_part(fh, _RetainedBudget(), _STRUCTURE, refuse_entities=True)
+    except (KeyError, ET.ParseError, _EntityDeclarationRefused, UntrustedArchiveError):
         return {}
     out: dict[int, tuple[int, int, int]] = {}
     for obj in root.iter("object"):
@@ -1062,9 +1478,10 @@ def parse_colored_3mf(
         and per-object :class:`ObjectSegment` boundaries.
     :raises ValueError: If the archive has no model XML or the root model
         XML is corrupt.  A missing or corrupt ``p:path`` part costs its
-        objects, not the file.  :class:`ThreeMFArchiveTooLarge` (a
-        ``ValueError``) when the archive's declared size, member count,
-        ratio, or compression method could exhaust memory.
+        objects, not the file.  An archive :mod:`kiln.untrusted_zip` refuses
+        (or one whose model structure exceeds the walk's budget) raises
+        :class:`~kiln.untrusted_zip.UntrustedArchiveError`, which is both a
+        ``ValueError`` and a ``zipfile.BadZipFile``.
     :raises zipfile.BadZipFile: If *file_path* is not a valid ZIP.
     :raises FileNotFoundError: If *file_path* does not exist.
     """
@@ -1076,9 +1493,9 @@ def parse_colored_3mf(
     lookups: dict[str, dict[int, list[tuple[int, int, int]]]] = {}
     seen: set[tuple[str, int]] = set()
 
-    with open_guarded_3mf(file_path) as zf:
+    with open_untrusted_zip(file_path) as zf:
         errors: list[str] = []
-        archive = _ModelArchive(zf, errors)
+        archive = _ModelArchive(zf, errors, keep_mesh=True)
         sidecar_colors = _slicer_config_colors(zf)
         if archive.root is None:
             raise ValueError(
@@ -1107,6 +1524,7 @@ def parse_colored_3mf(
 
             tris, states, splits = _collect_object_triangles(
                 placed.element,
+                archive.mesh(placed),
                 lookup,
                 default_color=default_color,
                 fallback_color=_sidecar_color_for(placed, sidecar_colors),
@@ -1230,11 +1648,8 @@ def object_display_colors(file_path: str) -> dict[str, tuple[int, int, int]]:
     Never raises: color is enrichment (the caller keeps its mesh either way),
     so any archive trouble reads as ``{}``.
     """
-    out: dict[str, tuple[int, int, int]] = {}
-    lookups: dict[str, dict[int, list[tuple[int, int, int]]]] = {}
-    seen: set[tuple[str, int]] = set()
     try:
-        with open_guarded_3mf(file_path) as zf:
+        with open_untrusted_zip(file_path) as zf:
             # A byte scan over every model part turns away the files that
             # carry no color construct at all before an XML parse is spent
             # on a large mesh.  Painting attributes count (a painted object
@@ -1245,81 +1660,225 @@ def object_display_colors(file_path: str) -> dict[str, tuple[int, int, int]]:
                 return {}
             sidecar_colors = _slicer_config_colors(zf)
             archive = _ModelArchive(zf, [])
-            for placed in archive.placements():
-                if (placed.part, placed.object_id) in seen:
-                    continue
-                seen.add((placed.part, placed.object_id))
-                mesh_el = placed.element.find(f"{{{_CORE_NS}}}mesh")
-                if mesh_el is None:
-                    continue
-                if placed.key in out:
-                    return {}  # duplicate names — refuse to guess which part is which
-
-                lookup = lookups.get(placed.part)
-                if lookup is None:
-                    part = archive.part(placed.part)
-                    resources_el = part.resources_el if part is not None else None
-                    lookup = (
-                        _build_color_lookup(resources_el)
-                        if resources_el is not None else {}
-                    )
-                    lookups[placed.part] = lookup
-                color = _object_uniform_color(
-                    placed, mesh_el, lookup, sidecar_colors,
-                )
-                if color is not None:
-                    out[placed.key] = color
+            # The plate's structure first — which objects are placed, each
+            # one's base color and palette — then each part's triangles folded
+            # into a per-object color set that stops growing once a second
+            # color proves the object painted: memory follows the number of
+            # objects, never the number of triangles.
+            plan = _placed_color_plan(archive, sidecar_colors, base_default=None)
+            effective = _fold_display_colors(archive, plan)
     except (OSError, ValueError, KeyError, zipfile.BadZipFile, ET.ParseError):
         return {}
+    out: dict[str, tuple[int, int, int]] = {}
+    for entry in plan:
+        if entry.placed.key in out:
+            return {}  # duplicate names — refuse to guess which part is which
+        colors = effective[(entry.placed.part, entry.info.ordinal)]
+        if len(colors) > 1:
+            continue  # painted: no single color can honestly stand for it
+        color = next(iter(colors)) if colors else entry.base
+        if color is not None:
+            out[entry.placed.key] = color
     return out
 
 
-def _object_uniform_color(
-    placed: _PlacedObject,
-    mesh_el: ET.Element,
-    color_lookup: dict[int, list[tuple[int, int, int]]],
-    sidecar_colors: dict[int, tuple[int, int, int]],
-) -> tuple[int, int, int] | None:
-    """The ONE color of *placed*, or ``None`` when no single color can
-    honestly stand for it (see :func:`object_display_colors`)."""
-    obj_el = placed.element
-    base = _resolve_color(
-        color_lookup, obj_el.get("pid"), obj_el.get("pindex"), default=None,
-    )
-    if base is None:
-        base = _sidecar_color_for(placed, sidecar_colors)
+#: Distinct triangle signatures one object remembers how it resolved;
+#: past this a signature is resolved again rather than remembered, so a
+#: file of unique signatures cannot grow the memo.
+_SIG_MEMO_LIMIT = 4096
 
-    # Per-triangle property references resolve against the object's own
-    # color; painting attributes contribute every leaf state's palette
-    # color (state 0 = the base).  One effective color is a uniform
-    # part; more than one is a painted object no single color can
-    # honestly stand for.
-    effective: set[tuple[int, int, int] | None] = set()
-    triangles_el = mesh_el.find(f"{{{_CORE_NS}}}triangles")
-    triangle_els = (
-        [] if triangles_el is None
-        else triangles_el.findall(f"{{{_CORE_NS}}}triangle")
+
+@dataclass
+class _PlanEntry:
+    """One object the build places, deduplicated, with what its colors need."""
+
+    placed: _PlacedObject
+    info: _MeshInfo
+    lookup: dict[int, list[tuple[int, int, int]]]
+    #: The object's own color: core-spec ``pid``/``pindex``, else the slicer
+    #: sidecar, else *base_default* (see :func:`_placed_color_plan`).
+    base: tuple[int, int, int] | None
+
+
+def _placed_color_plan(
+    archive: _ModelArchive,
+    sidecar_colors: dict[int, tuple[int, int, int]],
+    *,
+    base_default: tuple[int, int, int] | None,
+    lookups: dict[str, dict[int, list[tuple[int, int, int]]]] | None = None,
+) -> list[_PlanEntry]:
+    """Every object the build places, once each, in build order, that has a
+    mesh — with its part's palette and its own color.
+
+    The walk, the deduplication (an object placed twice is ONE object, colored
+    by its first placement), the palette per part and the base color are the
+    full colour parse's; *lookups*, when given, receives the palette of every
+    part a placed object (meshed or not) lives in, as that parse builds them.
+    """
+    if lookups is None:
+        lookups = {}
+    plan: list[_PlanEntry] = []
+    seen: set[tuple[str, int]] = set()
+    for placed in archive.placements():
+        if (placed.part, placed.object_id) in seen:
+            continue
+        seen.add((placed.part, placed.object_id))
+        lookup = lookups.get(placed.part)
+        if lookup is None:
+            part = archive.part(placed.part)
+            resources_el = part.resources_el if part is not None else None
+            lookup = (
+                _build_color_lookup(resources_el)
+                if resources_el is not None else {}
+            )
+            lookups[placed.part] = lookup
+        info = archive.mesh(placed)
+        if info is None:
+            continue
+        sidecar = _sidecar_color_for(placed, sidecar_colors)
+        obj_el = placed.element
+        if base_default is None:
+            # Display colors: the object's own color, else the sidecar.
+            base = _resolve_color(
+                lookup, obj_el.get("pid"), obj_el.get("pindex"), default=None,
+            )
+            if base is None:
+                base = sidecar
+        else:
+            # The colour parse: own color, else the sidecar, else the default.
+            base = _resolve_color(
+                lookup, obj_el.get("pid"), obj_el.get("pindex"),
+                default=sidecar if sidecar is not None else base_default,
+            )
+        plan.append(_PlanEntry(placed=placed, info=info, lookup=lookup, base=base))
+    return plan
+
+
+def _display_contribution(
+    sig: _TriangleSig,
+    lookup: dict[int, list[tuple[int, int, int]]],
+    obj_pid: str | None,
+    base: tuple[int, int, int] | None,
+) -> tuple[tuple[int, int, int] | None, ...]:
+    """The colors one triangle adds to its object's display set.
+
+    Per-triangle property references resolve against the object's own
+    color; painting attributes contribute every leaf state's palette color
+    (state 0 = the base); anything else is the base.
+    """
+    tri_pid, tri_p1, paint = sig
+    if tri_pid is not None or tri_p1 is not None:
+        return (_resolve_color(
+            lookup, tri_pid if tri_pid is not None else obj_pid, tri_p1, default=base,
+        ),)
+    decoded = _decode_paint_states(paint) if paint else None
+    if decoded is None:
+        return (base,)
+    weights, _is_split = decoded
+    return tuple(
+        base if state == 0 else _paint_state_color(state) for state in weights
     )
-    for tri in triangle_els:
-        tri_pid, tri_p1 = tri.get("pid"), tri.get("p1")
-        if tri_pid is not None or tri_p1 is not None:
-            effective.add(_resolve_color(
-                color_lookup,
-                tri_pid if tri_pid is not None else obj_el.get("pid"),
-                tri_p1,
-                default=base,
-            ))
-            continue
-        paint = _triangle_paint_attr(tri)
-        decoded = _decode_paint_states(paint) if paint else None
-        if decoded is None:
-            effective.add(base)
-            continue
-        weights, _is_split = decoded
-        effective.update(
-            base if state == 0 else _paint_state_color(state)
-            for state in weights
+
+
+def _fold_display_colors(
+    archive: _ModelArchive, plan: list[_PlanEntry],
+) -> dict[tuple[str, int], set[tuple[int, int, int] | None]]:
+    """Each planned object's display color set, folded from its triangles.
+
+    Every triangle of the first triangle block counts (the display reader
+    never range-checked indices).  A set stops growing at two colors — the
+    object is then painted, which is all :func:`object_display_colors` needs
+    to know.
+    """
+    sets: dict[tuple[str, int], set[tuple[int, int, int] | None]] = {}
+    by_part: dict[str, dict[int, _PlanEntry]] = {}
+    for entry in plan:
+        sets[(entry.placed.part, entry.info.ordinal)] = set()
+        by_part.setdefault(entry.placed.part, {})[entry.info.ordinal] = entry
+    for part_name, entries in by_part.items():
+        memos: dict[int, dict[_TriangleSig, tuple[tuple[int, int, int] | None, ...]]] = {}
+
+        def fold(ordinal: int, kind: str, payload: Any, entries=entries, part_name=part_name, memos=memos) -> None:
+            entry = entries.get(ordinal)
+            if entry is None or kind != "triangles":
+                return
+            colors = sets[(part_name, ordinal)]
+            if len(colors) > 1:
+                return
+            memo = memos.setdefault(ordinal, {})
+            obj_pid = entry.placed.element.get("pid")
+            for sig in payload[1]:
+                contribution = memo.get(sig)
+                if contribution is None:
+                    contribution = _display_contribution(sig, entry.lookup, obj_pid, entry.base)
+                    if len(memo) < _SIG_MEMO_LIMIT:
+                        memo[sig] = contribution
+                colors.update(contribution)
+                if len(colors) > 1:
+                    return
+
+        archive.fold(part_name, fold, want_triangles=True)
+    return sets
+
+
+def summarize_3mf_colors(
+    file_path: str,
+    *,
+    default_color: tuple[int, int, int] = _DEFAULT_COLOR,
+) -> tuple[bool, int]:
+    """``(colors_found, color_count)`` exactly as :func:`parse_colored_3mf`
+    reports them, read without holding the mesh.
+
+    For a caller that needs only the count (a quote saying how many colors a
+    file carries): the plate's structure is read first, then each part's
+    triangles are folded into a set of the colors they resolve to, so memory
+    grows with the number of distinct colors, never with the number of
+    triangles.  Raises what :func:`parse_colored_3mf` raises for an archive it
+    cannot read.
+    """
+    with open_untrusted_zip(file_path) as zf:
+        errors: list[str] = []
+        archive = _ModelArchive(zf, errors)
+        sidecar_colors = _slicer_config_colors(zf)
+        if archive.root is None:
+            raise ValueError(
+                f"Failed to parse 3MF model XML in '{file_path}': "
+                + "; ".join(errors)
+            )
+        lookups: dict[str, dict[int, list[tuple[int, int, int]]]] = {}
+        plan = _placed_color_plan(
+            archive, sidecar_colors, base_default=default_color, lookups=lookups,
         )
-    if len(effective) > 1:
-        return None
-    return effective.pop() if effective else base
+        colors: set[tuple[int, int, int] | None] = set()
+        states_seen: set[int] = set()
+        by_part: dict[str, dict[int, _PlanEntry]] = {}
+        for entry in plan:
+            if entry.info.n_vertices:
+                by_part.setdefault(entry.placed.part, {})[entry.info.ordinal] = entry
+        for part_name, entries in by_part.items():
+            memos: dict[int, dict[_TriangleSig, Any]] = {}
+
+            def fold(ordinal: int, kind: str, payload: Any, entries=entries, memos=memos) -> None:
+                entry = entries.get(ordinal)
+                if entry is None or kind != "triangles":
+                    return
+                n = entry.info.n_vertices
+                memo = memos.setdefault(ordinal, {})
+                idx, sigs = payload
+                for (a, b, c), sig in zip(idx.tolist(), sigs, strict=True):
+                    if a < 0 or b < 0 or c < 0 or a >= n or b >= n or c >= n:
+                        continue
+                    resolved = memo.get(sig)
+                    if resolved is None:
+                        resolved = _signature_color(sig, entry.lookup, entry.base)
+                        if len(memo) < _SIG_MEMO_LIMIT:
+                            memo[sig] = resolved
+                    colors.add(resolved[0])
+                    states_seen.update(resolved[2])
+
+            archive.fold(part_name, fold, want_triangles=True)
+    has_non_default = any(c != default_color for c in colors)
+    found = (
+        any(lookups.values()) or bool(sidecar_colors) or bool(states_seen)
+    ) and has_non_default
+    return found, len(colors)

@@ -27,9 +27,10 @@ absurd declared total.  The caps are deliberately GENEROUS: this guard sits in
 front of EVERY untrusted archive, a large sliced print included, so it must
 never refuse a real file.  Measured 2026-10-13: the largest real archive total
 was 127 MB (a dense model), the largest sliced ``.gcode.3mf`` 15 MB; the upload
-doors already cap a file at 64-256 MB.  A reader that ACCUMULATES geometry (the
-3MF colour / mesh parse builds every triangle) layers a tighter,
-domain-specific budget on top — see ``kiln.threemf_parser.open_guarded_3mf``.
+doors already cap a file at 64-256 MB.  What a reader then HOLDS of an honest
+file is the reader's own business: the 3MF readers stream their model parts
+rather than building a tree per vertex (``kiln.threemf_parser``, "Streaming
+model parts"), so an honest file of any real size keeps every feature.
 
 **Honest bounds.**  The read ceiling bounds a whole ``read()``; a reader that
 asks for an explicit length (``read(n)``) or streams in blocks (``ET.parse``,
