@@ -101,9 +101,8 @@ class TestTheOffers:
 
 
 def _chat_tools():
-    from kiln.mcp_compat import FastMCP
-
     import kiln.plugins.auth_tools as at
+    from kiln.mcp_compat import FastMCP
 
     m = FastMCP("t")
     at.register(m)
@@ -276,6 +275,11 @@ def limits(stats, monkeypatch, tmp_path):
     monkeypatch.setattr(daily_stats, "_LIMITS_NUDGE_MARKER_PATH", marker)
     monkeypatch.setattr(bridge, "available", lambda: False)
     monkeypatch.setattr(bridge, "KEEP_DIR", tmp_path / "printer_catalogue")
+    # The signed-out posture, on purpose: the session default hands every
+    # roster printer its record, and the nudge is minted only without one.
+    from kiln.served_answer import Miss
+
+    monkeypatch.setattr(bridge, "_served", lambda key: (None, Miss("signed_out", "KILN_ACCOUNT_NOT_PAIRED")))
 
     def reset() -> None:
         sp._cache.clear()

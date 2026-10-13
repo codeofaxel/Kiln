@@ -382,10 +382,14 @@ def test_a_limits_nudge_and_the_sign_in_it_led_to_reach_the_dashboard(
     monkeypatch.setattr(daily_stats, "_LIMITS_NUDGE_MARKER_PATH", marker)
     monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
     monkeypatch.setattr("kiln.terms.sync_to_account", lambda **k: None)
-    # The install public CI is: no kiln-pro here, and the session fixture
-    # seals the served door as signed out.
+    # The signed-out install, on purpose: no kiln-pro here, nothing kept,
+    # and the served door answers signed out (the session default hands
+    # every roster printer its record, and the nudge is minted only without one).
+    from kiln.served_answer import Miss
+
     monkeypatch.setattr(bridge, "available", lambda: False)
     monkeypatch.setattr(bridge, "KEEP_DIR", tmp_path / "printer_catalogue")
+    monkeypatch.setattr(bridge, "_served", lambda key: (None, Miss("signed_out", "KILN_ACCOUNT_NOT_PAIRED")))
 
     def reset() -> None:
         sp._cache.clear()
