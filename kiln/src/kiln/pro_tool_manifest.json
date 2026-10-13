@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-13T09:47:16.993910+00:00",
+  "generated": "2026-10-13T17:24:39.925422+00:00",
   "tool_count": 423,
   "categories": {
     "product_generators": {
@@ -21164,9 +21164,9 @@
     },
     {
       "name": "get_product_color_roles",
-      "description": "Return semantic color roles for a product type.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Return semantic color roles for a product type.",
+      "tier": "free",
+      "access": "free",
       "category": "product_intelligence",
       "parameters": {
         "properties": {
