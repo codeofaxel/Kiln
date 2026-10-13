@@ -126,6 +126,12 @@ class _RecoveryToolsPlugin:
             failure history to classify the failure type and generate an
             actionable recovery plan.
 
+            With kiln-pro installed the answer can also carry
+            ``nozzle_wear_hypothesis``: whether the printer's nozzle wear
+            likely contributed.  That check is Kiln Pro
+            (https://kiln3d.com/pricing); below it, a failure wear could
+            explain carries ``nozzle_wear_hypothesis_gated`` saying so once.
+
             Args:
                 progress: Print progress at failure (0.0 - 1.0).
                 error_message: Error message from the printer or system.
@@ -166,34 +172,28 @@ class _RecoveryToolsPlugin:
                     ),
                 }
 
-                # kiln-pro contributing-factor hypothesis: when the
-                # printer's recorded nozzle is past its planning
-                # window AND drift attribution puts >= 30% of the
-                # deviation on wear, surface a structured
-                # ``nozzle_wear_hypothesis`` block so the user sees
-                # wear as a likely co-contributor.  Free tier (no
-                # kiln-pro installed) falls through silently via the
-                # ImportError branch.  Best-effort — any failure in
-                # the wear pipeline is swallowed so the primary
-                # classification still ships.  See kiln3d.com for
-                # the Pro+ tier that enables this signal.
+                # Nozzle-wear contributing factor.  kiln-pro decides, by
+                # the caller's tier, whether the block or a line saying
+                # what it would add rides on this answer; this door only
+                # merges what comes back.  A plain install has no kiln-pro
+                # and the answer is unchanged.  Best-effort: a fault there
+                # never costs the classification above.
                 try:
                     from kiln_pro.recovery.nozzle_wear_hypothesis import (
-                        build_wear_hypothesis,
+                        wear_hypothesis_fields,
                     )
 
-                    drift_kind = _classify_drift_kind_from_failure(
-                        failure_message=error_message,
-                        analysis=analysis,
+                    response.update(
+                        wear_hypothesis_fields(
+                            printer_id=printer_name,
+                            drift_kind=_classify_drift_kind_from_failure(
+                                failure_message=error_message,
+                                analysis=analysis,
+                            ),
+                        )
                     )
-                    hypothesis = build_wear_hypothesis(
-                        printer_id=printer_name,
-                        drift_kind=drift_kind,
-                    )
-                    if hypothesis is not None:
-                        response["nozzle_wear_hypothesis"] = hypothesis
                 except ImportError:
-                    pass  # kiln-pro not installed — free tier
+                    pass  # a plain install: no kiln-pro, nothing to merge
                 except Exception as exc:
                     _logger.debug(
                         "nozzle_wear_hypothesis failed (non-fatal): %s", exc,
@@ -803,6 +803,11 @@ class _RecoveryToolsPlugin:
             - Have a printer_name + job_id from a failed print? → ``plan_print_recovery``
             - Have a failure_id from ``detect_print_failure``? → ``plan_failure_recovery`` (this tool)
 
+            With kiln-pro installed the answer can also carry
+            ``nozzle_wear_hypothesis`` (Kiln Pro), or below Pro
+            ``nozzle_wear_hypothesis_gated``, as for
+            ``analyze_print_failure_smart``.
+
             Args:
                 failure_id: The failure_id from a detect_print_failure result.
                 printer_capabilities: Optional printer capabilities dict.
@@ -832,22 +837,13 @@ class _RecoveryToolsPlugin:
                 )
                 response: dict[str, Any] = {"success": True, "plan": plan.to_dict()}
 
-                # kiln-pro contributing-factor hypothesis: when the
-                # printer's recorded nozzle is past its planning
-                # window AND drift attribution puts >= 30% of the
-                # deviation on wear, surface a structured
-                # ``nozzle_wear_hypothesis`` block alongside the
-                # plan so the user sees wear as a likely
-                # co-contributor to the failure being recovered
-                # from.  Free tier (no kiln-pro installed) falls
-                # through silently via the ImportError branch.
-                # Best-effort — any failure in the wear pipeline
-                # is swallowed so the recovery plan still ships.
-                # See kiln3d.com for the Pro+ tier that enables
-                # this signal.
+                # Nozzle-wear contributing factor, decided and worded by
+                # kiln-pro exactly as in analyze_print_failure_smart; this
+                # door merges what comes back.  Best-effort: a fault there
+                # never costs the plan above.
                 try:
                     from kiln_pro.recovery.nozzle_wear_hypothesis import (
-                        build_wear_hypothesis,
+                        wear_hypothesis_fields,
                     )
 
                     # ``FailureReport`` carries the failure context as
@@ -860,18 +856,17 @@ class _RecoveryToolsPlugin:
                             *(getattr(failure, "evidence", []) or []),
                         ]
                     )
-                    drift_kind = _classify_drift_kind_from_failure(
-                        failure_message=failure_text,
-                        analysis=failure,
+                    response.update(
+                        wear_hypothesis_fields(
+                            printer_id=failure.printer_name,
+                            drift_kind=_classify_drift_kind_from_failure(
+                                failure_message=failure_text,
+                                analysis=failure,
+                            ),
+                        )
                     )
-                    hypothesis = build_wear_hypothesis(
-                        printer_id=failure.printer_name,
-                        drift_kind=drift_kind,
-                    )
-                    if hypothesis is not None:
-                        response["nozzle_wear_hypothesis"] = hypothesis
                 except ImportError:
-                    pass  # kiln-pro not installed — free tier
+                    pass  # a plain install: no kiln-pro, nothing to merge
                 except Exception as exc:
                     _logger.debug(
                         "nozzle_wear_hypothesis failed (non-fatal): %s", exc,
@@ -1142,29 +1137,30 @@ class _RecoveryToolsPlugin:
         ) -> dict:
             """Mark a recovery session as completed.
 
-            On failure (success=False) AND when ``alternative_printers``
-            is supplied AND kiln-pro is installed, the response carries
-            a ``reroute_recommendation`` block — the rerouter's seven-rule
-            verdict on whether the failed job should move to one of the
-            alternatives.  Recommendation only; the agent must run the
-            actual reroute via ``submit_job`` / ``start_print``.
+            On failure (success=False) with ``alternative_printers`` and
+            kiln-pro installed, the answer can carry a
+            ``reroute_recommendation``: whether the failed job should
+            move to one of those printers, and which.  Choosing between
+            printers is Kiln Business (https://kiln3d.com/pricing); below
+            it the answer says so once in ``reroute_recommendation_gated``.
+            A failure that needs hands-on inspection of the printer is
+            held where it is, in ``reroute_recommendation``, at every
+            tier.  Recommendation only; the agent runs any move itself
+            via ``submit_job`` / ``start_print``.
 
             Args:
                 session_id: The session_id to complete.
                 success: Whether the recovery was ultimately successful.
                 notes: Final notes about the recovery outcome.
-                alternative_printers: Optional fleet of alternative
-                    printer dicts (each with ``printer_id`` plus optional
+                alternative_printers: Optional other printers the job
+                    could move to (each with ``printer_id`` plus optional
                     ``is_idle``, ``supported_materials``,
-                    ``build_volume_mm``, ``success_rate``).  When
-                    supplied alongside ``success=False``, the response
-                    will include a ``reroute_recommendation`` from the
-                    Pro rerouter.  Single-printer
-                    setups can omit this.
+                    ``build_volume_mm``, ``success_rate``).  Read only
+                    when ``success=False``.  Single-printer setups can
+                    omit this.
                 completion_pct_at_failure: How far the failed print got
-                    (0.0–1.0).  Below 10% the rerouter prefers
-                    same-device restart over reroute.  Defaults to 0
-                    (treated as low progress).
+                    (0.0–1.0); the recommendation weighs it.  Defaults
+                    to 0.
             """
             import kiln.server as _srv
             from kiln.print_recovery import (
@@ -1224,32 +1220,32 @@ class _RecoveryToolsPlugin:
                         "kiln-pro outcome recording failed (non-fatal): %s", exc,
                     )
 
-                # Pro-tier reroute recommendation — only when the
-                # recovery FAILED and the caller supplied a fleet.
-                # Recommendation only; never auto-executes.  Best-effort
-                # — failures here must not break the recovery response.
-                reroute_recommendation: dict | None = None
-                if not success and alternative_printers:
+                # Whether the failed job should move to another printer —
+                # only when the recovery FAILED and the caller listed some.
+                # kiln-pro decides, by the caller's tier, what rides on this
+                # answer: the recommendation, a hold on a safety-critical
+                # failure, or one line saying what it would add; this door
+                # only merges what comes back.  Recommendation only; never
+                # moves anything.  Best-effort: a fault there never costs
+                # the completion.
+                reroute_fields: dict = {}
+                failure = session.failure
+                if not success and alternative_printers and failure is not None:
                     try:
-                        from kiln_pro.bridge import pro_features as _pf
+                        from kiln_pro.recovery.failure_rerouter import (
+                            reroute_fields_for_failure,
+                        )
 
-                        if _pf is not None and _pf.recovery is not None:
-                            from kiln_pro.recovery.failure_rerouter import get_rerouter
-
-                            failure = session.failure
-                            if failure is not None:
-                                rerouter = get_rerouter()
-                                decision = rerouter.evaluate_reroute(
-                                    original_printer_id=failure.printer_name,
-                                    original_job_id=failure.failure_id,
-                                    failure_type=failure.failure_type.value,
-                                    completion_pct=completion_pct_at_failure,
-                                    alternative_printers=alternative_printers,
-                                    material=failure.material_type,
-                                )
-                                reroute_recommendation = decision.to_dict()
+                        reroute_fields = reroute_fields_for_failure(
+                            original_printer_id=failure.printer_name,
+                            original_job_id=failure.failure_id,
+                            failure_type=failure.failure_type.value,
+                            completion_pct=completion_pct_at_failure,
+                            alternative_printers=alternative_printers,
+                            material=failure.material_type,
+                        )
                     except ImportError:
-                        pass  # kiln-pro not installed — free tier
+                        pass  # a plain install: no kiln-pro, nothing to merge
                     except Exception as exc:
                         _logger.debug(
                             "kiln-pro reroute evaluation failed (non-fatal): %s",
@@ -1263,8 +1259,7 @@ class _RecoveryToolsPlugin:
                 }
                 if pro_outcome is not None:
                     response["pro_outcome_recorded"] = True
-                if reroute_recommendation is not None:
-                    response["reroute_recommendation"] = reroute_recommendation
+                response.update(reroute_fields)
                 # Attach a quick inspection bundle so the user sees the
                 # mesh that just finished its recovery cycle.  Closes the
                 # recovery experience with visual confirmation.  Helper

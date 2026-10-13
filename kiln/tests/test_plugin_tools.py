@@ -753,11 +753,14 @@ class TestCompletePrintRecoveryProOutcome:
         _mock_auth,
         recovery_tools,
     ) -> None:
-        """Failed recovery + supplied fleet -> reroute_recommendation in response.
+        """Failed recovery + supplied fleet -> kiln-pro's answer is merged.
 
-        Covers the wiring from complete_print_recovery into the kiln-pro
-        rerouter.  Verifies the rerouter is consulted ONLY on failure
-        AND only when alternatives are supplied.
+        Covers the wiring from complete_print_recovery into kiln-pro's
+        reroute answer: consulted ONLY on failure AND only when
+        alternatives are supplied, handed the failure's own facts, and
+        whatever comes back -- the recommendation, a safety hold, or the
+        line a caller below the tier gets -- merged as given.  Which tier
+        gets which is kiln-pro's to decide and to pin.
         """
         from kiln.print_recovery import RecoveryStatus
 
@@ -767,17 +770,15 @@ class TestCompletePrintRecoveryProOutcome:
         mock_engine = MagicMock()
         mock_engine.complete_recovery.return_value = session
 
-        # Stub a rerouter whose evaluate_reroute returns an approved
-        # decision pointing at "voron-1".
-        mock_decision = MagicMock()
-        mock_decision.to_dict.return_value = {
-            "should_reroute": True,
-            "target_printer_id": "voron-1",
-            "blocked_by_rule": None,
-            "reason": "reroute approved -> 'voron-1'",
+        answer = {
+            "reroute_recommendation": {
+                "should_reroute": True,
+                "target_printer_id": "voron-1",
+                "blocked_by_rule": None,
+                "reason": "reroute approved -> 'voron-1'",
+            },
         }
-        mock_rerouter = MagicMock()
-        mock_rerouter.evaluate_reroute.return_value = mock_decision
+        reroute_fields = MagicMock(return_value=answer)
 
         fake_pro_features = MagicMock()
         fake_pro_features.recovery = MagicMock()  # truthy
@@ -797,7 +798,7 @@ class TestCompletePrintRecoveryProOutcome:
                         record_outcome=lambda **kw: {"recorded_at": 0.0},
                     ),
                     "kiln_pro.recovery.failure_rerouter": MagicMock(
-                        get_rerouter=lambda: mock_rerouter,
+                        reroute_fields_for_failure=reroute_fields,
                     ),
                 },
             ),
@@ -812,17 +813,16 @@ class TestCompletePrintRecoveryProOutcome:
             )
 
         assert result["success"] is True
-        assert "reroute_recommendation" in result
-        assert result["reroute_recommendation"]["should_reroute"] is True
-        assert result["reroute_recommendation"]["target_printer_id"] == "voron-1"
-        # Confirm the rerouter was actually called with the failure's
-        # printer + failure_type, not stale strings from the caller.
-        mock_rerouter.evaluate_reroute.assert_called_once()
-        call_kwargs = mock_rerouter.evaluate_reroute.call_args.kwargs
+        assert result["reroute_recommendation"] == answer["reroute_recommendation"]
+        # Handed the failure's own printer + failure_type, not stale
+        # strings from the caller.
+        reroute_fields.assert_called_once()
+        call_kwargs = reroute_fields.call_args.kwargs
         assert call_kwargs["original_printer_id"] == "bambu-a1"
         assert call_kwargs["failure_type"] == "layer_shift"
         assert call_kwargs["completion_pct"] == 0.45
         assert call_kwargs["material"] == "pla"
+        assert call_kwargs["alternative_printers"] == [{"printer_id": "voron-1", "is_idle": True}]
 
     @patch("kiln.server._check_auth", return_value=None)
     def test_reroute_recommendation_skipped_on_success(
@@ -838,7 +838,7 @@ class TestCompletePrintRecoveryProOutcome:
         mock_engine = MagicMock()
         mock_engine.complete_recovery.return_value = session
 
-        mock_rerouter = MagicMock()
+        reroute_fields = MagicMock(return_value={})
         fake_pro_features = MagicMock()
         fake_pro_features.recovery = MagicMock()
 
@@ -857,7 +857,7 @@ class TestCompletePrintRecoveryProOutcome:
                         record_outcome=lambda **kw: {"recorded_at": 0.0},
                     ),
                     "kiln_pro.recovery.failure_rerouter": MagicMock(
-                        get_rerouter=lambda: mock_rerouter,
+                        reroute_fields_for_failure=reroute_fields,
                     ),
                 },
             ),
@@ -871,8 +871,8 @@ class TestCompletePrintRecoveryProOutcome:
             )
 
         assert result["success"] is True
-        assert "reroute_recommendation" not in result
-        mock_rerouter.evaluate_reroute.assert_not_called()
+        assert not any(k.startswith("reroute_recommendation") for k in result)
+        reroute_fields.assert_not_called()
 
 
 class TestImproveGenerationPromptSanityGate:
