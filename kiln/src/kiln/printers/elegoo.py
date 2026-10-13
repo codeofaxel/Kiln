@@ -44,9 +44,9 @@ from typing import Any, ClassVar
 import requests
 
 from kiln.printers.base import (
-    CameraHandshake,
     STALE_STATE_WARN_AGE,
     ActiveSlotReading,
+    CameraHandshake,
     FilamentHandlingUnsupported,
     FilamentOpPlan,
     FilamentOpResult,
