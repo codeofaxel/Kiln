@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-13T17:35:13.459575+00:00",
+  "generated": "2026-10-13T18:00:12.086870+00:00",
   "tool_count": 417,
   "categories": {
     "product_generators": {
@@ -22103,9 +22103,9 @@
     },
     {
       "name": "list_my_orgs",
-      "description": "Return every org *tenant_id* belongs to (owner or member).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Return every org *tenant_id* belongs to (owner or member).",
+      "tier": "free",
+      "access": "free",
       "category": "teams",
       "parameters": {
         "properties": {
@@ -22127,9 +22127,9 @@
     },
     {
       "name": "list_my_teams",
-      "description": "List teams within *org_id* that *tenant_id* belongs to.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "List teams within *org_id* that *tenant_id* belongs to.",
+      "tier": "free",
+      "access": "free",
       "category": "teams",
       "parameters": {
         "properties": {
@@ -22156,9 +22156,9 @@
     },
     {
       "name": "list_org_members",
-      "description": "List every member of *org_id* with their role.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "List every member of *org_id* with their role.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business for the organisation (its owner's plan), not for you: everyone whose role may see it reads it, on any plan of their own.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
       "category": "teams",
       "parameters": {
         "properties": {
@@ -22196,9 +22196,9 @@
     },
     {
       "name": "list_scopes",
-      "description": "List grants for an org, optionally filtered by tenant OR team.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "List grants for an org, optionally filtered by tenant OR team.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business for the organisation (its owner's plan), not for you: everyone whose role may see it reads it, on any plan of their own.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
       "category": "teams",
       "parameters": {
         "properties": {
@@ -22244,9 +22244,9 @@
     },
     {
       "name": "list_team_members",
-      "description": "List every member of *team_id*.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "List every member of *team_id*.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business for the organisation (its owner's plan), not for you: everyone whose role may see it reads it, on any plan of their own.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
       "category": "teams",
       "parameters": {
         "properties": {
@@ -22268,9 +22268,9 @@
     },
     {
       "name": "list_teams",
-      "description": "List every team in *org_id*.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "List every team in *org_id*.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business for the organisation (its owner's plan), not for you: everyone whose role may see it reads it, on any plan of their own.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
       "category": "teams",
       "parameters": {
         "properties": {
