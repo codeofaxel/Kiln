@@ -7,6 +7,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Quotes and ordering, revamped.** Ask for a print-service quote and see exactly what you'll pay: printing, the shop's minimum, shipping, and a note that tax is added at checkout. Then place the order and pay on the print service's checkout however is easiest. Card, PayPal, Apple Pay and Google Pay all work. Order status follows your print from paid to delivered.
+
 - **Moves stay within your printer's real limits.** On Klipper printers, Kiln reads the limits from the printer itself.
 
 - **Clearer heat warnings.** Kiln tells you when your printer shuts off from heat, and warns about fumes from PTFE-lined hotends.
