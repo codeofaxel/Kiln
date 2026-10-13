@@ -302,9 +302,12 @@ customer.
   uptime-commitment misses) are governed by that SLA. Outside of
   SLA credits, statutory consumer rights, and the express refund
   paths in this §5.6, fees paid are non-refundable.
-- **Fulfillment orchestration fees:** if a fulfillment order
-  fails during manufacturing or is cancelled by the provider,
-  we refund the orchestration fee automatically. For delivery
+- **Fulfillment orchestration fees:** if a print order is
+  cancelled for any reason before it ships — because the print
+  service could not make it, because the print service cancelled
+  it, or because you arranged the cancellation with the print
+  service — we refund the orchestration fee automatically once the
+  print service reports the order as cancelled or failed. For delivery
   defects, contact the manufacturer for a reprint or refund of
   the manufacturing cost; we refund the orchestration fee upon
   confirmation the provider has issued their refund. The print
@@ -446,8 +449,8 @@ service agrees to a change after ordering it may keep a handling fee
 of up to 7% of the price and refund the rest. To cancel or change an
 order, write to the print service directly. Any refund of the
 manufacturing price comes from the print service under its terms;
-Kiln's orchestration fee is separate and is refunded as set out in
-§5.6.
+if the order is cancelled before it ships, for any reason, Kiln
+refunds its orchestration fee automatically as set out in §5.6.
 
 ### 6.2 Privacy, security, and data processing (DPA / SCCs)
 
