@@ -240,3 +240,36 @@ def test_the_refusal_says_what_still_works_for_that_kind_of_command(action, says
     inst = _bare(next(c for c in ADAPTERS if c is not PrinterAdapter and hasattr(c, action)))
     verdict = engagement.check_command(inst, action)
     assert verdict is not None and says in " ".join(verdict["suggestions"])
+
+
+def test_setting_up_a_second_printer_still_reads_its_id_and_its_camera(another_machine_is_driven):
+    """Registering is free at every tier, including while Kiln drives another
+    machine.  Every setup door reads the new printer's own id (so a printer
+    that moves is recognised) and asks whether its camera answers; both used
+    to be refused here, so the id was lost without a word and the camera line
+    said the handshake "failed unexpectedly".  The camera check a person asks
+    for later is a look at the machine, and stays refused."""
+    from unittest.mock import patch
+
+    from kiln.camera_check import camera_setup_line
+    from kiln.printers.base import CameraHandshake, read_machine_identity_bounded
+    from kiln.printers.moonraker import MoonrakerAdapter
+
+    second = MoonrakerAdapter(host="http://10.0.0.99")
+    replies = {
+        "/machine/system_info": {"result": {"system_info": {"cpu_info": {"serial_number": "PI-SERIAL-9"}}}},
+        "/server/webcams/list": {"result": {"webcams": [{"name": "cam", "stream_url": "/webcam/?action=stream"}]}},
+    }
+    answered = CameraHandshake(True, "moonraker_webcam_list", "The camera answered.")
+    with (
+        patch.object(second, "_get_json", side_effect=lambda path: replies.get(path, {"result": {}})),
+        patch("kiln.camera_check.handshake_probes", return_value=answered) as asked,
+    ):
+        identity = read_machine_identity_bounded(second.read_machine_identity)
+        handshake, line = camera_setup_line(second, door="tool")
+        with pytest.raises(PrinterEngagementError):
+            second.camera_probes()
+
+    assert identity is not None and identity.value == "PI-SERIAL-9"
+    assert handshake is answered and line == "Camera: answering (built-in)."
+    assert asked.call_args.args[0][0].probe_id == "moonraker_webcam_list"

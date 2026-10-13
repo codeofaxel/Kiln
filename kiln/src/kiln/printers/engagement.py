@@ -95,6 +95,11 @@ UNGATED_METHODS: dict[str, str] = {
     # Identity: read to register the printer.
     "get_printer_info": "identity, read to register the printer",
     "get_identity_channels": "identity, read to register the printer",
+    "read_machine_identity": "identity, read to register the printer",
+    # Setup: asked once by every door that saves a printer.  It learns only
+    # whether a camera answers, from headers, and never reads a frame; the
+    # camera check a person asks for later is gated (camera_probes).
+    "camera_handshake": "setup: whether the camera answers, no frame read",
     # Facts about the model, from the catalogue.  No machine is asked.
     "declared_printer_model": "the model the person told Kiln, not a reading",
     "motion_facts": "catalogue facts about the model",

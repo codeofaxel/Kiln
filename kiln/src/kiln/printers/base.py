@@ -6164,15 +6164,23 @@ class PrinterAdapter(ABC):
         printer's own camera is asked through :meth:`_own_camera_handshake`.
         Bounded to :data:`CAMERA_HANDSHAKE_BUDGET` seconds in all; never
         raises for anything the camera does.
+
+        Setting a printer up is free at every tier, so the one-printer rule
+        does not cover this (``engagement.UNGATED_METHODS``), and the
+        addresses it asks the printer for are read as part of the setup:
+        :meth:`camera_probes` stays gated for the camera check a person asks
+        for later, which is a look at the machine, not a setup.
         """
         from kiln.camera_check import handshake_external_camera
+        from kiln.printers.engagement import internal_read
 
         camera = self._external_camera
         if camera is not None:
             return handshake_external_camera(
                 camera, timeout=min(CAMERA_HANDSHAKE_ADDRESS_TIMEOUT, CAMERA_HANDSHAKE_BUDGET)
             )
-        return self._own_camera_handshake()
+        with internal_read():
+            return self._own_camera_handshake()
 
     def _own_camera_handshake(self) -> CameraHandshake:
         """The handshake for the printer's own camera.
