@@ -5633,11 +5633,21 @@ def order_quote(file_path: str, material: str, quantity: int, country: str, json
             )
         )
         quote_data = quote.to_dict()
+        kiln_fee = 0.0
         if BillingLedger is not None:
             ledger = BillingLedger()
             fee_calc = ledger.calculate_fee(quote.total_price, currency=quote.currency)
             quote_data["kiln_fee"] = fee_calc.to_dict()
             quote_data["total_with_fee"] = float(fee_calc.total_cost)
+            kiln_fee = float(getattr(fee_calc, "fee_amount", 0) + getattr(fee_calc, "tax_amount", 0))
+        # The one price sheet every door serves, built by the order service,
+        # so the total shown is the delivered total, shipping included.
+        sheet = getattr(service, "price_sheet", None)
+        if sheet is not None:
+            try:
+                quote_data["price_sheet"] = sheet(quote, kiln_fee=kiln_fee)
+            except Exception:
+                logger.warning("Could not build the price sheet for quote %s", quote.quote_id, exc_info=True)
         # The print service's terms ride every quote, as at every other door;
         # a quote is never lost to how its terms are read.
         try:
@@ -5845,13 +5855,28 @@ def _settle_order_fee(
 ) -> None:
     """Settle Kiln's fee on an order the print service has accepted.
 
+    The fee is charged on the printing only (:func:`kiln.fulfillment_service.fee_basis`),
+    never on the checkout total, which adds shipping and tax.
+
     The order exists by now, so nothing here may report it as failed: a fee
     step that cannot finish leaves the order reported as placed, with a
     warning that says the fee was not recorded.
     """
+    from kiln.fulfillment_service import fee_basis
+
+    basis = fee_basis(result)
+    if basis is None:
+        logger.warning("Order %s states no printing price; Kiln's fee was not worked out", result.order_id)
+        order_data.setdefault("payment", {"status": "not_recorded"})
+        order_data.setdefault("warnings", []).append(
+            f"Order {result.order_id} was placed, but the print service didn't say what the printing "
+            "costs, so Kiln didn't work out its fee (it is charged on the printing only, never on "
+            f"shipping or tax). Don't place it again; check it with: kiln order status {result.order_id}"
+        )
+        return
     try:
         fee_calc = ledger.calculate_fee(
-            result.total_price,
+            basis,
             currency=result.currency,
         )
         try:
@@ -5870,7 +5895,11 @@ def _settle_order_fee(
             )
             order_data["payment"] = {"status": "failed"}
         order_data["kiln_fee"] = fee_calc.to_dict()
-        order_data["total_with_fee"] = float(fee_calc.total_cost)
+        # What the person pays in all: the print service's checkout total
+        # (printing, shipping, tax) plus Kiln's fee and any tax on it.
+        order_data["total_with_fee"] = round(
+            float(result.total_price) + float(fee_calc.fee_amount) + float(fee_calc.tax_amount), 2,
+        )
     except Exception as exc:
         logger.warning("Order %s was placed but its fee was not recorded: %s", result.order_id, exc)
         order_data.setdefault("payment", {"status": "not_recorded"})

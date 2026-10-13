@@ -733,7 +733,7 @@ def _stand_in_fee_tools(
     ``"payments"``); ``record_charge_error`` makes the ledger fail to write
     a charge.  Returns the ledger and the payment manager the command gets.
     """
-    fee = MagicMock()
+    fee = MagicMock(fee_amount=4.0, tax_amount=0.0)
     fee.to_dict.return_value = {"fee_amount": 4.0, "waived": False}
     fee.total_cost = 44.0
     ledger = MagicMock()
@@ -756,9 +756,17 @@ def _stand_in_fee_tools(
     return ledger, manager
 
 
-def _placing_provider(total_price: float | None = 40.0) -> MagicMock:
-    """A print-service provider that accepts every order as ``ord-777``."""
-    placed = MagicMock(order_id="ord-777", total_price=total_price, currency="USD")
+def _placing_provider(
+    total_price: float | None = 40.0, production_price: float | None = 30.0,
+) -> MagicMock:
+    """A print-service provider that accepts every order as ``ord-777``.
+
+    ``total_price`` is the checkout total (printing, shipping and tax);
+    ``production_price`` the printing alone, as the print service states it.
+    """
+    placed = MagicMock(
+        order_id="ord-777", total_price=total_price, production_price=production_price, currency="USD",
+    )
     placed.to_dict.return_value = {
         "order_id": "ord-777",
         "status": "submitted",
@@ -889,13 +897,13 @@ class TestOrder:
         gcode = tmp_path / "model.gcode"
         gcode.write_text("G28\n")
         provider = MagicMock()
-        mock_quote = MagicMock()
-        mock_quote.total_price = 25.00
-        mock_quote.currency = "USD"
-        mock_quote.to_dict.return_value = {
+        quote_dict = {
             "total_price": 25.00, "unit_price": 25.00,
             "material": "PLA", "lead_time_days": 5,
         }
+        mock_quote = SimpleNamespace(
+            quote_id="q-1", total_price=25.00, currency="USD", to_dict=lambda: dict(quote_dict),
+        )
         provider.get_quote.return_value = mock_quote
         mock_ledger = MagicMock()
         mock_fee = MagicMock()
@@ -1184,7 +1192,7 @@ class TestOrder:
         order = json.loads(result.output)["data"]["order"]
         assert order["payment"] == payment
         assert order["kiln_fee"] == {"fee_amount": 4.0, "waived": False}
-        assert order["total_with_fee"] == 44.0
+        assert order["total_with_fee"] == 44.0  # checkout total 40 + fee 4
         assert "warnings" not in order
         if outcome == "no_rail":
             ledger.record_charge.assert_called_once_with("ord-777", ledger.calculate_fee.return_value)
@@ -1192,6 +1200,71 @@ class TestOrder:
             ledger.record_charge.assert_called_once_with(
                 "ord-777", ledger.calculate_fee.return_value, payment_status="failed",
             )
+
+    def test_the_fee_on_a_placed_order_is_charged_on_the_printing_never_shipping_or_tax(
+        self, runner, tmp_path, monkeypatch,
+    ):
+        # The test order placed 2026-10-12: printing 20.68, shipping 4.75,
+        # sales tax 2.12, checkout total 27.55.
+        ledger, _manager = _stand_in_fee_tools(monkeypatch)
+        provider = _placing_provider(total_price=27.55, production_price=20.68)
+        with patch("kiln.cli.main._get_fulfillment_provider", return_value=provider):
+            result = runner.invoke(cli, [*_place_argv(tmp_path), "--json"])
+        assert result.exit_code == 0, result.output
+        assert ledger.calculate_fee.call_args.args[0] == 20.68
+        order = json.loads(result.output)["data"]["order"]
+        assert order["total_with_fee"] == 31.55  # 27.55 at the checkout + Kiln's 4.00
+
+    def test_an_order_that_states_no_printing_price_is_charged_no_fee(
+        self, runner, tmp_path, monkeypatch,
+    ):
+        ledger, manager = _stand_in_fee_tools(monkeypatch)
+        manager.available_rails = ["stripe"]
+        provider = _placing_provider(total_price=27.55, production_price=None)
+        with patch("kiln.cli.main._get_fulfillment_provider", return_value=provider):
+            result = runner.invoke(cli, [*_place_argv(tmp_path), "--json"])
+        assert result.exit_code == 0, result.output
+        ledger.calculate_fee.assert_not_called()
+        manager.charge_fee.assert_not_called()
+        order = json.loads(result.output)["data"]["order"]
+        assert order["order_id"] == "ord-777"
+        assert "never on shipping or tax" in order["warnings"][0]
+
+    def test_the_quote_total_is_the_delivered_total_shipping_included(
+        self, runner, tmp_path, monkeypatch,
+    ):
+        model = tmp_path / "model.stl"
+        model.write_text("solid m\nendsolid m\n")
+        options = [
+            {"id": "s-2", "name": "Express", "price": 19.0},
+            {"id": "s-1", "name": "Standard", "price": 4.75},
+        ]
+        service = sys.modules["kiln.fulfillment"]
+        fields = {
+            "quote_id": "q-1", "provider": "craftcloud", "material": "pla", "quantity": 1,
+            "unit_price": 20.68, "total_price": 20.68, "currency": "USD", "lead_time_days": 5,
+        }
+        if hasattr(service, "Quote"):
+            # The real quote and the order service's own price sheet.
+            quote = service.Quote(
+                **fields, shipping_options=[service.ShippingOption(**o) for o in options],
+            )
+        else:
+            quote = SimpleNamespace(**fields)
+            quote.to_dict = lambda: {**fields, "shipping_options": options}
+        provider = MagicMock()
+        provider.name = "craftcloud"
+        provider.get_quote.return_value = quote
+        fee = MagicMock(fee_amount=2.07, tax_amount=0.0, total_cost=22.75)
+        fee.to_dict.return_value = {"fee_amount": 2.07, "waived": False}
+        billing = types.ModuleType("kiln.billing")
+        billing.BillingLedger = MagicMock(return_value=MagicMock(calculate_fee=MagicMock(return_value=fee)))
+        monkeypatch.setitem(sys.modules, "kiln.billing", billing)
+        with patch("kiln.cli.main._get_fulfillment_provider", return_value=provider):
+            result = runner.invoke(cli, ["order", "quote", str(model), "-m", "pla"])
+        assert result.exit_code == 0, result.output
+        # 20.68 printing + 4.75 cheapest shipping + 2.07 Kiln's fee.
+        assert "Total, delivered USD 27.50" in _flat(result.output)
 
 
 # ---------------------------------------------------------------------------

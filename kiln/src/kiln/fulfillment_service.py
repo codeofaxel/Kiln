@@ -49,3 +49,21 @@ def order_service() -> ModuleType | None:
     except ImportError:
         return None
     return sys.modules["kiln.fulfillment"]
+
+
+def fee_basis(priced: object) -> float | None:
+    """The amount Kiln's fee is charged on: the printing, and nothing else.
+
+    Kiln's fee on an order is charged on the production amount (the printing,
+    plus any print shop's minimum per order), never on shipping or tax, at
+    every door that quotes or charges it.  Quotes and placed orders both state
+    that amount as ``production_price``.  A placed order also states its
+    checkout total, which carries shipping and tax; that total is never read
+    here.  ``None`` when the print service did not state a production amount:
+    the fee is then not worked out, rather than worked out on the wrong
+    amount.
+    """
+    value = getattr(priced, "production_price", None)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
