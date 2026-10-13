@@ -34,6 +34,8 @@ kiln_pro.enterprise.licensing.verify_license_key
 kiln_pro.fasteners_intelligence
 kiln_pro.filament_colours
 kiln_pro.fleet_materials
+kiln_pro.hosted_generation_jobs
+kiln_pro.hosted_generation_jobs.job_record_store
 kiln_pro.hosted_intelligence
 kiln_pro.intent_verification
 kiln_pro.intent_verification.load_intent_sidecar

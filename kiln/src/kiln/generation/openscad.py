@@ -31,6 +31,7 @@ from kiln.generation.base import (
     GenerationResult,
     GenerationStatus,
 )
+from kiln.generation.job_records import JobRecord, MemoryJobRecords
 from kiln.openscad_runner import run_openscad
 from kiln.preview_render import downscale_png, effective_supersample
 
@@ -310,8 +311,8 @@ class OpenSCADProvider(GenerationProvider):
         # _find_openscad() raises GenerationError on failure, so
         # self._binary is always a valid path after this line.
         self._timeout = timeout
-        self._jobs: dict[str, GenerationJob] = {}
-        self._paths: dict[str, str] = {}
+        # Every job and its file (kiln.generation.job_records).
+        self._local_jobs = MemoryJobRecords()
 
     @property
     def name(self) -> str:
@@ -356,6 +357,9 @@ class OpenSCADProvider(GenerationProvider):
                 code="UNSUPPORTED_FORMAT",
             )
 
+        # Resolved first: a store that cannot keep the job refuses before
+        # anything is compiled.
+        records = self._job_records()
         job_id = f"openscad-{uuid.uuid4().hex[:12]}"
         from kiln.output_paths import kiln_output_dir
 
@@ -409,9 +413,9 @@ class OpenSCADProvider(GenerationProvider):
                         output_path=out_path,
                     )
                 except subprocess.TimeoutExpired:
-                    # Logged, not just stored on the job: the job record
-                    # is in-process only, and a durable log line is what
-                    # a later bug report has to go on.
+                    # Logged, not just stored on the job: a job record is
+                    # forgotten after a while, and a durable log line is
+                    # what a later bug report has to go on.
                     logger.error(
                         "OpenSCAD compile timed out after %ss (%s)",
                         self._timeout, scad_path,
@@ -426,7 +430,7 @@ class OpenSCADProvider(GenerationProvider):
                         format=format,
                         error=f"OpenSCAD compilation timed out after {self._timeout}s.",
                     )
-                    self._jobs[job_id] = job
+                    records.put(JobRecord.from_job(job))
                     return job
                 except OSError as exc:
                     raise GenerationError(
@@ -452,7 +456,7 @@ class OpenSCADProvider(GenerationProvider):
                     format=format,
                     error=f"OpenSCAD exited with code {result.returncode}: {stderr}",
                 )
-                self._jobs[job_id] = job
+                records.put(JobRecord.from_job(job))
                 return job
 
             if not os.path.isfile(out_path) or os.path.getsize(out_path) == 0:
@@ -467,10 +471,9 @@ class OpenSCADProvider(GenerationProvider):
                     format=format,
                     error="OpenSCAD produced no output file.",
                 )
-                self._jobs[job_id] = job
+                records.put(JobRecord.from_job(job))
                 return job
 
-            self._paths[job_id] = out_path
             job = GenerationJob(
                 id=job_id,
                 provider=self.name,
@@ -480,7 +483,9 @@ class OpenSCADProvider(GenerationProvider):
                 created_at=time.time(),
                 format=format,
             )
-            self._jobs[job_id] = job
+            record = JobRecord.from_job(job)
+            records.keep_result(record, out_path)
+            records.put(record)
             return job
 
         finally:
@@ -494,10 +499,10 @@ class OpenSCADProvider(GenerationProvider):
         OpenSCAD jobs are synchronous, so this simply returns the
         result from :meth:`generate`.
         """
-        job = self._jobs.get(job_id)
-        if not job:
+        record = self._job_records().get(self.name, job_id)
+        if record is None:
             raise GenerationError(f"Job {job_id!r} not found.", code="JOB_NOT_FOUND")
-        return job
+        return record.job()
 
     def download_result(
         self,
@@ -507,14 +512,18 @@ class OpenSCADProvider(GenerationProvider):
         """Return the path to the already-generated STL.
 
         For OpenSCAD, the file is generated synchronously during
-        :meth:`generate`, so this just verifies the file exists.
+        :meth:`generate`; this returns where the job's record says it is:
+        the path it was written to, or a copy in *output_dir* when the
+        record's store keeps the file itself
+        (:mod:`kiln.generation.job_records`).
         """
-        path = self._paths.get(job_id)
+        records = self._job_records()
+        record = records.get(self.name, job_id)
+        path = records.result_file(record, output_dir) if record is not None else None
         if not path or not os.path.isfile(path):
             raise GenerationError(f"No generated file for job {job_id!r}.", code="NO_RESULT")
 
-        job = self._jobs.get(job_id)
-        prompt = job.prompt if job else ""
+        prompt = record.prompt
 
         return GenerationResult(
             job_id=job_id,

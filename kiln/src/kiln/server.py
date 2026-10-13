@@ -6759,6 +6759,9 @@ _RETRYABLE_CODES = frozenset(
         "RATE_LIMITED",
         "TIMEOUT",
         "CONNECTION_ERROR",
+        # The place generation jobs are kept did not answer; nothing was
+        # started or changed (kiln.generation.job_records).
+        "JOB_STORE_UNAVAILABLE",
     }
 )
 
@@ -17601,8 +17604,10 @@ _generation_providers: dict[str, GenerationProvider] = {}
 def _get_generation_provider(provider: str = "meshy") -> GenerationProvider:
     """Get or create a generation provider by name.
 
-    Providers are cached so that state (model URLs, prompts) persists
-    across MCP tool calls within the same server session.
+    Providers are cached and shared: a job one tool call starts is read back
+    by later calls (status, wait, download), so each provider here keeps its
+    jobs where every later call can find them
+    (:func:`kiln.generation.job_records.share_records`).
     """
     if provider in _generation_providers:
         return _generation_providers[provider]
@@ -17623,6 +17628,9 @@ def _get_generation_provider(provider: str = "meshy") -> GenerationProvider:
             code="UNKNOWN_PROVIDER",
         )
 
+    from kiln.generation.job_records import share_records
+
+    share_records(inst)
     _generation_providers[provider] = inst
     return inst
 

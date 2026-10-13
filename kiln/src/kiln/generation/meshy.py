@@ -35,6 +35,7 @@ from kiln.generation.base import (
     GenerationResult,
     GenerationStatus,
 )
+from kiln.generation.job_records import JobRecord, JobRecordStore, MemoryJobRecords, made_from_part
 
 logger = logging.getLogger(__name__)
 
@@ -122,16 +123,15 @@ class MeshyProvider(GenerationProvider):
                 "Content-Type": "application/json",
             }
         )
-        # Cache model URLs for download after polling.
+        # Every job: its words, and which endpoint holds it -- text-to-3D,
+        # image-to-3D (its own polling endpoint), a refine, or a retexture
+        # (v1, its own polling endpoint).  A refine or retexture downloads
+        # its MTL and textures too (kiln.generation.job_records).
+        self._local_jobs = MemoryJobRecords()
+        # Download URLs from the last poll on this machine.  Signed by Meshy
+        # and asked for again on a miss, so never kept anywhere else.
         self._results: dict[str, dict[str, str]] = {}
-        self._prompts: dict[str, str] = {}
-        # Track image-to-3D jobs (different polling endpoint).
-        self._image_jobs: set[str] = set()
-        # Track refine jobs and their texture URLs.
-        self._refine_jobs: set[str] = set()
         self._texture_urls: dict[str, list[dict[str, str]]] = {}
-        # Track retexture jobs (v1 API, different polling endpoint).
-        self._retexture_jobs: set[str] = set()
 
     @property
     def name(self) -> str:
@@ -161,10 +161,13 @@ class MeshyProvider(GenerationProvider):
         Returns:
             :class:`GenerationJob` with ``PENDING`` status.
         """
+        # Resolved first: a store that cannot keep the job refuses before
+        # anything is asked of Meshy.
+        records = self._job_records()
         # Route to image-to-3D if an image_url is provided.
         image_url: str | None = kwargs.get("image_url")
         if image_url:
-            return self._generate_from_image(image_url, format=format, style=style)
+            return self._generate_from_image(records, image_url, format=format, style=style)
 
         body: dict[str, Any] = {
             "mode": "preview",
@@ -183,9 +186,7 @@ class MeshyProvider(GenerationProvider):
         if not task_id:
             raise GenerationError("Meshy API returned no task ID.", code="INVALID_RESPONSE")
 
-        self._prompts[task_id] = prompt
-
-        return GenerationJob(
+        job = GenerationJob(
             id=task_id,
             provider=self.name,
             prompt=prompt,
@@ -195,6 +196,8 @@ class MeshyProvider(GenerationProvider):
             format=format,
             style=style,
         )
+        records.put(JobRecord.from_job(job, route="text"))
+        return job
 
     def refine(
         self,
@@ -215,6 +218,10 @@ class MeshyProvider(GenerationProvider):
         Returns:
             :class:`GenerationJob` with ``PENDING`` status for the refine task.
         """
+        records = self._job_records()
+        # Only a preview this caller started can be refined: Meshy would
+        # refine any preview its key owns.
+        preview = self._known_job(records, preview_job_id)
         body: dict[str, Any] = {
             "mode": "refine",
             "preview_task_id": preview_job_id,
@@ -229,11 +236,8 @@ class MeshyProvider(GenerationProvider):
                 code="INVALID_RESPONSE",
             )
 
-        prompt = self._prompts.get(preview_job_id, f"[refine] {preview_job_id}")
-        self._prompts[refine_id] = prompt
-        self._refine_jobs.add(refine_id)
-
-        return GenerationJob(
+        prompt = preview.prompt if preview is not None else f"[refine] {preview_job_id}"
+        job = GenerationJob(
             id=refine_id,
             provider=self.name,
             prompt=prompt,
@@ -242,6 +246,10 @@ class MeshyProvider(GenerationProvider):
             created_at=time.time(),
             format=format,
         )
+        records.put(JobRecord.from_job(
+            job, route="refine", made_from=preview.made_from if preview is not None else None,
+        ))
+        return job
 
     def retexture(
         self,
@@ -271,6 +279,9 @@ class MeshyProvider(GenerationProvider):
                 code="FILE_NOT_FOUND",
             )
 
+        # Resolved first: a store that cannot keep the job refuses before
+        # anything is asked of Meshy.
+        records = self._job_records()
         with open(mesh_path, "rb") as f:
             raw = f.read()
         b64 = base64.b64encode(raw).decode("ascii")
@@ -293,12 +304,7 @@ class MeshyProvider(GenerationProvider):
                 code="INVALID_RESPONSE",
             )
 
-        self._prompts[task_id] = prompt
-        self._retexture_jobs.add(task_id)
-        # Mark as refine so download_result fetches textures.
-        self._refine_jobs.add(task_id)
-
-        return GenerationJob(
+        job = GenerationJob(
             id=task_id,
             provider=self.name,
             prompt=prompt,
@@ -307,9 +313,14 @@ class MeshyProvider(GenerationProvider):
             created_at=time.time(),
             format=format,
         )
+        # The part it was made from, by content: the textured model that
+        # comes back is that part's next version.
+        records.put(JobRecord.from_job(job, route="retexture", made_from=made_from_part(raw)))
+        return job
 
     def _generate_from_image(
         self,
+        records: JobRecordStore,
         image_url: str,
         *,
         format: str = "stl",
@@ -344,10 +355,7 @@ class MeshyProvider(GenerationProvider):
                 code="INVALID_RESPONSE",
             )
 
-        self._prompts[task_id] = f"{_IMAGE_PROMPT_PREFIX}{image_url}"
-        self._image_jobs.add(task_id)
-
-        return GenerationJob(
+        job = GenerationJob(
             id=task_id,
             provider=self.name,
             prompt=f"{_IMAGE_PROMPT_PREFIX}{image_url}",
@@ -357,6 +365,8 @@ class MeshyProvider(GenerationProvider):
             format=format,
             style=style,
         )
+        records.put(JobRecord.from_job(job, route="image"))
+        return job
 
     def get_job_status(self, job_id: str) -> GenerationJob:
         """Poll a Meshy generation task.
@@ -367,17 +377,19 @@ class MeshyProvider(GenerationProvider):
         Returns:
             Updated :class:`GenerationJob`.
         """
-        if job_id in self._retexture_jobs:
+        record = self._known_job(self._job_records(), job_id)
+        route = record.route if record is not None else ""
+        if route == "retexture":
             resp = self._request("GET", f"{_BASE_URL_V1}/retexture/{job_id}")
         else:
-            endpoint = "image-to-3d" if job_id in self._image_jobs else "text-to-3d"
+            endpoint = "image-to-3d" if route == "image" else "text-to-3d"
             resp = self._request("GET", f"{_BASE_URL}/{endpoint}/{job_id}")
 
         data = resp.json()
         status_str = data.get("status", "PENDING")
         status = _STATUS_MAP.get(status_str, GenerationStatus.PENDING)
         progress = data.get("progress", 0)
-        prompt = data.get("prompt", self._prompts.get(job_id, ""))
+        prompt = data.get("prompt", record.prompt if record is not None else "")
 
         # Cache model URLs for download.
         model_urls = data.get("model_urls")
@@ -422,6 +434,7 @@ class MeshyProvider(GenerationProvider):
             job_id: Task ID of a completed job.
             output_dir: Directory to save the file.
         """
+        record = self._known_job(self._job_records(), job_id)
         model_urls = self._results.get(job_id)
         if not model_urls:
             # Try polling once to populate.
@@ -466,11 +479,11 @@ class MeshyProvider(GenerationProvider):
             stand_up_gltf_frame_obj(out_path)
 
         file_size = os.path.getsize(out_path)
-        prompt = self._prompts.get(job_id, "")
+        prompt = record.prompt if record is not None else ""
 
         # For refined jobs: download MTL and textures alongside the OBJ
         # so auto_multicolor_from_texture can find them by convention.
-        if ext == "obj" and job_id in self._refine_jobs:
+        if ext == "obj" and record is not None and record.route in ("refine", "retexture"):
             # Download MTL
             mtl_url = model_urls.get("mtl")
             if mtl_url:
@@ -510,7 +523,7 @@ class MeshyProvider(GenerationProvider):
             format=ext,
             file_size_bytes=file_size,
             prompt=prompt,
-            source_image=_source_image(job_id in self._image_jobs, prompt),
+            source_image=_source_image(record is not None and record.route == "image", prompt),
         )
 
     def list_styles(self) -> list[str]:

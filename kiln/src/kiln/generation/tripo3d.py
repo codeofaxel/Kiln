@@ -36,6 +36,7 @@ from kiln.generation.base import (
     GenerationResult,
     GenerationStatus,
 )
+from kiln.generation.job_records import JobRecord, MemoryJobRecords
 
 logger = logging.getLogger(__name__)
 
@@ -109,9 +110,12 @@ class Tripo3DProvider(GenerationProvider):
                 "Content-Type": "application/json",
             }
         )
-        # Cache model URLs for download after polling.
+        # Every job and its words: Tripo's task answer does not carry the
+        # prompt (kiln.generation.job_records).
+        self._local_jobs = MemoryJobRecords()
+        # Download URLs from the last poll on this machine, asked for again
+        # on a miss.
         self._results: dict[str, dict[str, Any]] = {}
-        self._prompts: dict[str, str] = {}
 
     @property
     def name(self) -> str:
@@ -139,6 +143,9 @@ class Tripo3DProvider(GenerationProvider):
         Returns:
             :class:`GenerationJob` with ``PENDING`` status.
         """
+        # Resolved first: a store that cannot keep the job refuses before
+        # anything is asked of Tripo3D.
+        records = self._job_records()
         body: dict[str, Any] = {
             "prompt": prompt,
             "model": self._model,
@@ -154,9 +161,7 @@ class Tripo3DProvider(GenerationProvider):
                 code="INVALID_RESPONSE",
             )
 
-        self._prompts[task_id] = prompt
-
-        return GenerationJob(
+        job = GenerationJob(
             id=task_id,
             provider=self.name,
             prompt=prompt,
@@ -166,6 +171,8 @@ class Tripo3DProvider(GenerationProvider):
             format=format,
             style=style,
         )
+        records.put(JobRecord.from_job(job))
+        return job
 
     def get_job_status(self, job_id: str) -> GenerationJob:
         """Poll a Tripo3D generation task.
@@ -176,6 +183,7 @@ class Tripo3DProvider(GenerationProvider):
         Returns:
             Updated :class:`GenerationJob`.
         """
+        record = self._known_job(self._job_records(), job_id)
         resp = self._request("GET", f"{_BASE_URL}/tasks/{job_id}")
 
         task_data = self._envelope_data(resp)
@@ -192,7 +200,7 @@ class Tripo3DProvider(GenerationProvider):
             )
             status = GenerationStatus.PENDING
         progress = task_data.get("progress") or 0
-        prompt = self._prompts.get(job_id, "")
+        prompt = record.prompt if record is not None else ""
 
         # Cache output for download.
         output = task_data.get("output")
@@ -230,6 +238,7 @@ class Tripo3DProvider(GenerationProvider):
             job_id: Task ID of a completed job.
             output_dir: Directory to save the file.
         """
+        record = self._known_job(self._job_records(), job_id)
         output = self._results.get(job_id)
         if not output:
             # Try polling once to populate.
@@ -262,7 +271,7 @@ class Tripo3DProvider(GenerationProvider):
                 fh.write(chunk)
 
         file_size = os.path.getsize(out_path)
-        prompt = self._prompts.get(job_id, "")
+        prompt = record.prompt if record is not None else ""
 
         return GenerationResult(
             job_id=job_id,

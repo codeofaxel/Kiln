@@ -258,6 +258,13 @@ INFRASTRUCTURE: dict[str, str] = {
         "package's per-request tier, on a plain install the signed-in account's "
         "plan (kiln.account_plan); both answer per caller"
     ),
+    "kiln.generation.job_records": (
+        "where a generation job is kept between the call that starts it and "
+        "the calls that read it back: on Kiln's server the private package "
+        "supplies the caller's account store, on a plain install the import "
+        "fails and the provider keeps the one person's jobs in its own memory, "
+        "which is the right answer there -- no paid depth crosses here"
+    ),
 }
 
 #: A served bridge: a module named ``_pro_<thing>_bridge`` that is on

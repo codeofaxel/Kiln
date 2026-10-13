@@ -27,6 +27,7 @@ from kiln.generation.base import (
     GenerationResult,
     GenerationStatus,
 )
+from kiln.generation.job_records import JobRecord, MemoryJobRecords
 
 logger = logging.getLogger(__name__)
 
@@ -69,10 +70,8 @@ class StabilityProvider(GenerationProvider):
                 "Authorization": f"Bearer {self._api_key}",
             }
         )
-        # Store completed jobs and file paths.
-        self._jobs: dict[str, GenerationJob] = {}
-        self._paths: dict[str, str] = {}
-        self._prompts: dict[str, str] = {}
+        # Every job, its words and its file (kiln.generation.job_records).
+        self._local_jobs = MemoryJobRecords()
 
     @property
     def name(self) -> str:
@@ -104,6 +103,9 @@ class StabilityProvider(GenerationProvider):
         Returns:
             :class:`GenerationJob` with ``SUCCEEDED`` status.
         """
+        # Resolved first: a store that cannot keep the job refuses before
+        # anything is asked of Stability.
+        records = self._job_records()
         job_id = f"stability-{uuid.uuid4().hex[:12]}"
         from kiln.output_paths import kiln_output_dir
 
@@ -141,11 +143,8 @@ class StabilityProvider(GenerationProvider):
                 format="glb",
                 error="Stability AI returned an empty response.",
             )
-            self._jobs[job_id] = job
+            records.put(JobRecord.from_job(job))
             return job
-
-        self._paths[job_id] = out_path
-        self._prompts[job_id] = prompt
 
         job = GenerationJob(
             id=job_id,
@@ -157,7 +156,9 @@ class StabilityProvider(GenerationProvider):
             format="glb",
             style=style,
         )
-        self._jobs[job_id] = job
+        record = JobRecord.from_job(job)
+        records.keep_result(record, out_path)
+        records.put(record)
         return job
 
     def get_job_status(self, job_id: str) -> GenerationJob:
@@ -166,13 +167,13 @@ class StabilityProvider(GenerationProvider):
         Stability AI jobs are synchronous, so this simply returns the
         result from :meth:`generate`.
         """
-        job = self._jobs.get(job_id)
-        if not job:
+        record = self._job_records().get(self.name, job_id)
+        if record is None:
             raise GenerationError(
                 f"Job {job_id!r} not found.",
                 code="JOB_NOT_FOUND",
             )
-        return job
+        return record.job()
 
     def download_result(
         self,
@@ -182,16 +183,21 @@ class StabilityProvider(GenerationProvider):
         """Return the path to the already-generated model.
 
         For Stability AI, the file is generated synchronously during
-        :meth:`generate`, so this just verifies the file exists.
+        :meth:`generate`; this returns where the job's record says it is:
+        the path it was written to, or a copy in *output_dir* when the
+        record's store keeps the file itself
+        (:mod:`kiln.generation.job_records`).
         """
-        path = self._paths.get(job_id)
+        records = self._job_records()
+        record = records.get(self.name, job_id)
+        path = records.result_file(record, output_dir) if record is not None else None
         if not path or not os.path.isfile(path):
             raise GenerationError(
                 f"No generated file for job {job_id!r}.",
                 code="NO_RESULT",
             )
 
-        prompt = self._prompts.get(job_id, "")
+        prompt = record.prompt
 
         return GenerationResult(
             job_id=job_id,
