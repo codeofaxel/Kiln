@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-13T17:35:13.459575+00:00",
-  "tool_count": 417,
+  "generated": "2026-10-13T17:47:10.303254+00:00",
+  "tool_count": 416,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -14255,13 +14255,14 @@
     },
     {
       "name": "check_skin_contact_suitability",
-      "description": "Is a printed <material> part OK for <exposure> skin contact? -- honest, cited, tier-gated.\n\nFree door, tiered answer \u2014 Free: Flags \u2014 always free \u00b7 Pro: Flags \u00b7 Business: Sell-ready remediation steps \u00b7 Enterprise: + Market compliance checks (EU \u00b7 UK \u00b7 US \u00b7 Canada).\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Is a printed material OK against skin, and which materials are lower-risk for a use? -- honest, cited, tier-gated.\n\nFree door, tiered answer \u2014 Free: Flags \u2014 always free \u00b7 Pro: Flags \u00b7 Business: Sell-ready remediation steps \u00b7 Enterprise: + Market compliance checks (EU \u00b7 UK \u00b7 US \u00b7 Canada).\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "material_safety",
       "parameters": {
         "properties": {
           "material": {
+            "default": "",
             "title": "Material",
             "type": "string"
           },
@@ -14274,11 +14275,13 @@
             "default": false,
             "title": "Show Math",
             "type": "boolean"
+          },
+          "use": {
+            "default": "",
+            "title": "Use",
+            "type": "string"
           }
         },
-        "required": [
-          "material"
-        ],
         "title": "check_skin_contact_suitabilityArguments",
         "type": "object"
       },
@@ -14288,30 +14291,6 @@
         "pro": "Flags",
         "business": "Sell-ready remediation steps",
         "enterprise": "+ Market compliance checks (EU \u00b7 UK \u00b7 US \u00b7 Canada)"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "verdict"
-      }
-    },
-    {
-      "name": "recommend_material_for_skin_contact",
-      "description": "Recommend LOWER-RISK materials for a skin-contact use -- never a \"skin-safe\" green-light.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "material_safety",
-      "parameters": {
-        "properties": {
-          "use": {
-            "title": "Use",
-            "type": "string"
-          }
-        },
-        "required": [
-          "use"
-        ],
-        "title": "recommend_material_for_skin_contactArguments",
-        "type": "object"
       },
       "offline": {
         "schema_version": 1,
