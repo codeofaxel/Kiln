@@ -694,6 +694,12 @@ class _FulfillmentToolsPlugin:
             pay first, then the checkout total with any tax, the print
             service's order terms and a link to them. Pass every line on to
             the person word for word.
+
+            If the person asks whether they can pay with a particular method,
+            answer from ``provider_pay_methods`` in the reply: yes for one it
+            lists; for any other, say Kiln doesn't know and that the checkout
+            page shows every option for their country. Never claim a method
+            that isn't listed.
             """
             import kiln.server as _srv
 
@@ -1031,6 +1037,12 @@ class _FulfillmentToolsPlugin:
             pay, asks how to pay, or asks about an order that is not paid yet,
             call this right away for that order and give them the link to pay
             first, before anything else, without waiting to be asked for it.
+
+            If the person asks whether they can pay with a particular method,
+            answer from ``provider_pay_methods`` in the reply: yes for one it
+            lists; for any other, say Kiln doesn't know and that the checkout
+            page shows every option for their country. Never claim a method
+            that isn't listed.
             """
             import kiln.server as _srv
 

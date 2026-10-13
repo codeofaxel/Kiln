@@ -9,8 +9,8 @@ says the same thing.  A second copy of the address rotted silently once
 which is why nothing else may spell it out.
 
 Only facts a buyer needs belong here, in plain English: what they agree
-to, where they pay, where they write to cancel, and how long an unpaid
-order stays open.
+to, where and how they pay, where they write to cancel, and how long an
+unpaid order stays open.
 """
 
 from __future__ import annotations
@@ -31,9 +31,28 @@ CRAFTCLOUD_SUPPORT_EMAIL = "support@craftcloud3d.com"
 #: number the buyer quotes to support.
 CRAFTCLOUD_CHECKOUT_URL = "https://craftcloud3d.com/order/{order_id}/checkout"
 
+#: How a buyer can pay on Craftcloud's checkout, the ways most people
+#: reach for.  What a given buyer is offered depends on their country and
+#: device: Apple Pay shows only on Apple devices, and several are regional.
+CRAFTCLOUD_PAY_METHODS: tuple[str, ...] = (
+    "card", "PayPal", "Apple Pay", "Google Pay", "bank transfer",
+)
+
+#: The card networks and pay-later service the same checkout shows, so a
+#: buyer asking about one hears yes only for one it shows.
+CRAFTCLOUD_PAY_ALSO: tuple[str, ...] = (
+    "Visa", "Mastercard", "American Express", "Discover", "JCB", "UnionPay",
+    "Diners Club", "wire transfer", "Klarna (pay later)",
+)
+
 #: Days an order nobody pays for stays open at Craftcloud before it expires
 #: by itself.  An unpaid order is never made, so it has nothing to cancel.
 CRAFTCLOUD_UNPAID_EXPIRY_DAYS = 90
+
+#: Tax is not in a quote: the checkout adds it for the buyer's address,
+#: which a price request cannot carry.  Said beside the price, not only in
+#: the terms, because it is the one way the checkout total differs.
+CRAFTCLOUD_TAX_AT_CHECKOUT = "Sales tax, where it applies, is added at Craftcloud's checkout."
 
 #: What a buyer should know before ordering through Craftcloud, said at
 #: quote time so nobody has to go looking.
@@ -45,11 +64,15 @@ CRAFTCLOUD_ORDER_TERMS: tuple[str, ...] = (
     "Craftcloud refunds you in full if no print partner can make it or it "
     "ships much later than promised; Kiln refunds its own fee automatically.",
     "Customs, duties and import taxes are yours to pay.",
-    "Sales tax, where it applies, is added at Craftcloud's checkout.",
+    CRAFTCLOUD_TAX_AT_CHECKOUT,
 )
 
 _ORDER_TERMS: dict[str, tuple[str, ...]] = {
     "craftcloud": CRAFTCLOUD_ORDER_TERMS,
+}
+
+_TAX_NOTES: dict[str, str] = {
+    "craftcloud": CRAFTCLOUD_TAX_AT_CHECKOUT,
 }
 
 _CHECKOUT_URLS: dict[str, str] = {
@@ -58,6 +81,10 @@ _CHECKOUT_URLS: dict[str, str] = {
 
 _UNPAID_EXPIRY_DAYS: dict[str, int] = {
     "craftcloud": CRAFTCLOUD_UNPAID_EXPIRY_DAYS,
+}
+
+_PAY_METHODS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "craftcloud": (CRAFTCLOUD_PAY_METHODS, CRAFTCLOUD_PAY_ALSO),
 }
 
 
@@ -93,3 +120,31 @@ def unpaid_expiry_days(provider_name: str) -> int | None:
     ``None`` is "not recorded", never "it never expires".
     """
     return _UNPAID_EXPIRY_DAYS.get(_normalized(provider_name))
+
+
+def pay_methods(provider_name: str) -> list[str]:
+    """Every way the service's checkout offers to pay, as a buyer names them.
+
+    Empty for a service nobody has recorded: "not known", never "none".
+    What a given buyer sees still depends on their country and device.
+    """
+    main, also = _PAY_METHODS.get(_normalized(provider_name), ((), ()))
+    return [*main, *also]
+
+
+def pay_methods_line(provider_name: str) -> str:
+    """The one sentence said beside the link to pay, or ``""``."""
+    main, _also = _PAY_METHODS.get(_normalized(provider_name), ((), ()))
+    if not main:
+        return ""
+    ways = main[0] if len(main) == 1 else f"{', '.join(main[:-1])} or {main[-1]}"
+    return f"Pay however is easiest: {ways}; what's offered depends on your country and device."
+
+
+def tax_note(provider_name: str) -> str:
+    """The one sentence about tax said beside a quote's total, or ``""``.
+
+    One of the :func:`order_terms` too, so a surface that shows it beside
+    the total leaves it out of the terms rather than saying it twice.
+    """
+    return _TAX_NOTES.get(_normalized(provider_name), "")

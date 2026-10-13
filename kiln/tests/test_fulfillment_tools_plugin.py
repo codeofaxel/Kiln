@@ -558,3 +558,13 @@ def test_the_order_status_tool_tells_the_agent_to_hand_over_the_pay_link_unasked
     said = " ".join((registered_tools["fulfillment_order_status"].__doc__ or "").split())
     assert "When the person wants to pay, asks how to pay, or asks about an order that is not paid yet" in said
     assert "give them the link to pay first" in said
+
+
+@pytest.mark.parametrize("tool", ["fulfillment_order", "fulfillment_order_status"])
+def test_a_question_about_a_pay_method_is_answered_from_the_list(registered_tools, tool):
+    """Yes only for a listed method; otherwise "Kiln doesn't know" and the
+    checkout page shows every option for their country.  Never invented."""
+    said = " ".join((registered_tools[tool].__doc__ or "").split())
+    assert "answer from ``provider_pay_methods`` in the reply: yes for one it lists" in said
+    assert "say Kiln doesn't know and that the checkout page shows every option for their country" in said
+    assert "Never claim a method that isn't listed." in said

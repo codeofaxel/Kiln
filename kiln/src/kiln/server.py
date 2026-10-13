@@ -107,7 +107,7 @@ from kiln.print_consent import (
     unasked_look_noted,
     why_not_asked,
 )
-from kiln.provider_terms import CRAFTCLOUD_TERMS_URL, order_terms
+from kiln.provider_terms import CRAFTCLOUD_TERMS_URL, order_terms, pay_methods, tax_note
 from kiln.tool_args import parse_json_array, parse_json_object
 from kiln.untrusted_zip import UntrustedZipFile
 
@@ -5657,6 +5657,8 @@ def _provider_routing_metadata(
         "provider_order_id": provider_order_id,
         "provider_terms_url": _PROVIDER_TERMS_URLS.get(normalized, ""),
         "provider_order_terms": order_terms(normalized),
+        "provider_pay_methods": pay_methods(normalized),
+        "provider_tax_note": tax_note(normalized),
         "support_owner": "provider",
         "merchant_of_record": "provider",
     }

@@ -85,3 +85,26 @@ def test_every_quote_says_sales_tax_is_added_at_checkout():
 def test_how_long_an_unpaid_order_stays_open_is_recorded_once():
     assert provider_terms.unpaid_expiry_days("Craftcloud") == provider_terms.CRAFTCLOUD_UNPAID_EXPIRY_DAYS == 90
     assert provider_terms.unpaid_expiry_days("nobody") is None, "not recorded, never 'never expires'"
+
+
+def test_how_to_pay_is_said_once_beside_the_link():
+    """One sentence, from one list: a confident nudge, and honest that what
+    a buyer sees depends on their country and device."""
+    assert provider_terms.pay_methods_line("Craftcloud") == (
+        "Pay however is easiest: card, PayPal, Apple Pay, Google Pay or bank transfer; "
+        "what's offered depends on your country and device."
+    )
+    methods = provider_terms.pay_methods("craftcloud")
+    for method in ("card", "PayPal", "Apple Pay", "Google Pay", "bank transfer", "American Express", "Klarna (pay later)"):
+        assert method in methods
+    assert "Bitcoin" not in methods
+    assert provider_terms.pay_methods("nobody") == [] and provider_terms.pay_methods_line("nobody") == ""
+    assert server._provider_routing_metadata("craftcloud")["provider_pay_methods"] == methods
+
+
+def test_tax_is_one_term_and_said_beside_the_price():
+    note = provider_terms.tax_note("Craftcloud")
+    assert note == provider_terms.CRAFTCLOUD_TAX_AT_CHECKOUT
+    assert note in provider_terms.order_terms("craftcloud"), "still one of the terms"
+    assert server._provider_routing_metadata("craftcloud")["provider_tax_note"] == note
+    assert provider_terms.tax_note("nobody") == ""
