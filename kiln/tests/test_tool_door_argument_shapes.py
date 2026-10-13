@@ -247,6 +247,29 @@ def test_the_running_tool_name_is_visible_during_dispatch(monkeypatch):
     assert tool_context.current_tool_name() is None  # reset after the call
 
 
+def test_the_running_tools_arguments_are_visible_during_dispatch(monkeypatch):
+    """What the caller asked rides with the name -- the make doors' goal join
+    records a generator's material from it -- as a copy that is gone once
+    the call ends."""
+    from kiln import server, tool_context
+
+    seen: list[dict] = []
+    mgr = server.mcp._tool_manager
+
+    async def _peek(name, arguments, context=None, convert_result=False):
+        seen.append(tool_context.current_tool_arguments())
+        return {"success": True}
+
+    monkeypatch.setattr(mgr, "_kiln_request_context_capture_installed", False)
+    monkeypatch.setattr(mgr, "call_tool", _peek)
+    server._install_mcp_request_context_capture()
+    monkeypatch.setattr(server, "_terms_gate_blocks", lambda _n: False)
+    asyncio.run(mgr.call_tool("compile_scad", {"scad_code": "cube(1);"}))
+    assert seen == [{"scad_code": "cube(1);"}]
+    seen[0]["scad_code"] = "sphere(1);"  # a copy: nothing the tool holds moves
+    assert tool_context.current_tool_arguments() == {}  # gone after the call
+
+
 # ---------------------------------------------------------------------------
 # The sibling-name mismatch
 # ---------------------------------------------------------------------------

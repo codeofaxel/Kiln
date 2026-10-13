@@ -947,9 +947,9 @@ def _build_instructions() -> str:
         "patterns). Key tools:\n"
         "  - `design_session(verb=\"start\", idea=\"...\")` — user-facing entry point for any new design (captures saved goal at duty / environment / materials / safety layer)\n"
         "  - `analyze_design_requirements(requirements)` — internal functional-analysis lookup `design_session` calls into\n"
-        "  - `recommend_design_material(use_case)` — intelligent material selection\n"
+        "  - `recommend_design_material(requirements)` — intelligent material selection\n"
         f"  - `find_design_templates(use_case)` — search {_parts_n} ready-made parametric parts (brackets, bins, stands, cases, hooks, jigs, clamps). Call this FIRST when the user wants a functional part to their own dimensions\n"
-        "  - `generate_from_template(id, params)` — build one to a printable STL, locally and free, no AI provider needed\n"
+        "  - `generate_from_template(template_id, parameters)` — build one to a printable STL, locally and free, no AI provider needed\n"
         "  - `get_material_design_profile(material)` — material-specific rules\n"
         "  - `estimate_structural_load(...)` — load capacity analysis\n"
         "  - `validate_design_for_requirements(...)` — design verification\n"
@@ -1363,7 +1363,7 @@ def _install_mcp_request_context_capture() -> None:
         convert_result: bool = False,
     ):
         token = _current_mcp_request_context.set(context)
-        tool_token = _tool_context.enter_tool(name)
+        tool_token = _tool_context.enter_tool(name, arguments)
         consent_token = None
         # Which app is on the other end of this connection, counted once
         # per process on the first tool call to land — the handshake is
@@ -16378,7 +16378,7 @@ def list_design_templates() -> dict:
     Prefer ``find_design_templates(use_case)`` when you know what the
     user is making — it searches this library by use case and ranks
     matches, instead of returning all of them.  Then call
-    ``generate_from_template(id, {...})`` to render a printable STL.
+    ``generate_from_template(template_id, {...})`` to render a printable STL.
     """
     try:
         import json as _json
