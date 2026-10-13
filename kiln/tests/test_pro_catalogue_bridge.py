@@ -149,6 +149,13 @@ class TestServed:
         sp.get_profile(SERVED_ID)
         assert served == [SERVED_ID]
 
+    def test_the_roster_states_a_firmware_family_before_any_record(self):
+        assert pi.roster_firmware("bambu_a1") == "bambu"
+        assert pi.roster_firmware("creality_k1") == pi.roster_firmware("k1")
+        assert pi.roster_firmware("kilntest_open") == "marlin"  # the generic motion block's family
+        assert pi.roster_firmware("a printer nobody makes") is None
+        assert pi.roster_firmware("default") is None
+
     def test_a_roster_printer_is_a_catalogue_printer_before_its_record_arrives(self):
         assert bed_fit.catalogue_printer_id(SERVED_ID) == SERVED_ID
         assert bed_fit.catalogue_printer_id("a printer nobody makes") is None

@@ -1232,30 +1232,11 @@ _KILN_SPIRAL_MODE = False
 _KILN_PRINT_SEQUENCE = "by layer"
 
 def _profile_bed(printer_model: str) -> tuple[float, float, float] | None:
-    """``(x, y, z)`` from the bundled slicer profile's own bed geometry, or
-    ``None``: the public floor a Bambu owner's install has even before the
-    printer's record is fetched (a signed-out install, a first setup
-    offline).  Exact catalogue id only, like the record read."""
-    try:
-        from kiln.printer_intelligence import list_intel_profiles
-        from kiln.slicer_profiles import get_slicer_profile
+    """The bundled slicer profile's bed for the EXACT model, the public floor
+    an install has before the record is fetched (``bed_fit.bundled_profile_bed``)."""
+    from kiln.printers.bed_fit import bundled_profile_bed
 
-        model = _normalize_model(printer_model)
-        if model == "default" or model not in list_intel_profiles():
-            return None
-        settings = get_slicer_profile(model).settings
-    except Exception:  # noqa: BLE001 -- no profile, no bed
-        return None
-    corners = re.findall(r"(-?\d+(?:\.\d+)?)x(-?\d+(?:\.\d+)?)", str(settings.get("bed_shape") or ""))
-    if len(corners) < 4:
-        return None
-    try:
-        width = max(float(x) for x, _ in corners)
-        depth = max(float(y) for _, y in corners)
-        height = float(settings.get("max_print_height") or 0.0)
-    except (TypeError, ValueError):
-        return None
-    return (width, depth, height) if width > 0 and depth > 0 else None
+    return bundled_profile_bed(_normalize_model(printer_model))
 
 
 def _bed_center(printer_model: str) -> tuple[float, float] | None:

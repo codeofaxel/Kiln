@@ -17973,7 +17973,13 @@ def troubleshoot_printer(
             # A reading kiln-pro just put on the wire (a free row, served to
             # a signed-in caller of any tier) makes "can't read a fault code
             # here" a lie; that caller gets the generic line instead.
-            if named_signals and intel.firmware == "bambu" and not private_reading_attached:
+            # The firmware family is read off the public roster when the
+            # record is not in hand (a signed-out install resolves to the
+            # generic row), so the Bambu-specific line is still said.
+            from kiln.printer_intelligence import roster_firmware
+
+            firmware = intel.firmware if intel.id != "default" else (roster_firmware(printer_id) or intel.firmware)
+            if named_signals and firmware == "bambu" and not private_reading_attached:
                 # Leads with what the free tier does NOT do, then what it
                 # still DOES, then what Pro adds. That order is deliberate:
                 # opening by telling users they did something clever and

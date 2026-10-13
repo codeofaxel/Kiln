@@ -655,7 +655,17 @@ def _printer_intelligence_overlay_loaded() -> bool:
     """True when the printer_intelligence overlay is merged in."""
     try:
         import kiln.printer_intelligence as _mod
+        from kiln._pro_catalogue_bridge import available as _catalogue_here
         from kiln.printer_intelligence import get_printer_intel
+
+        # The overlay rides on a printer's record, which only kiln-pro here
+        # supplies at collection time.  Asking without it would send this
+        # probe to the served door, and that door's module (kiln.server)
+        # builds the MCP server on import, which configures root logging
+        # with a stdout handler before pytest's own are attached -- and
+        # every CLI test that parses JSON then reads log lines first.
+        if not _catalogue_here():
+            return False
         # Force a fresh load so a previous test that primed the
         # cache without the overlay doesn't poison this probe.
         _mod._reset_caches()
@@ -1476,7 +1486,7 @@ def _catalogue_bridge_never_reaches_the_network(monkeypatch):
 
     monkeypatch.setattr(_bridge, "_served", lambda key: (None, Miss("signed_out", "KILN_ACCOUNT_NOT_PAIRED")))
     _bridge.forget()
-    from kiln import safety_profiles as _sp
+    from kiln import printer_intelligence as _pi, safety_profiles as _sp
 
     _sp._nudged.clear()
     _sp._pending_nudges.clear()
@@ -1484,3 +1494,25 @@ def _catalogue_bridge_never_reaches_the_network(monkeypatch):
     _bridge.forget()
     _sp._nudged.clear()
     _sp._pending_nudges.clear()
+    # A record one test fetched (kiln-pro here, or a served stub) is not the
+    # next test's: drop the fetched rows and keep the bundled ones, so a test
+    # naming a real id cannot pass on the strength of a neighbour's fetch.
+    _forget_fetched_printer_rows(_sp, _pi)
+
+
+def _forget_fetched_printer_rows(_sp, _pi) -> None:
+    import json
+    from pathlib import Path
+
+    try:
+        bundled = {k for k in json.loads(Path(_sp._DATA_FILE).read_text(encoding="utf-8")) if not k.startswith("_")}
+    except Exception:  # noqa: BLE001
+        return
+    for key in [k for k in _sp._cache if k not in bundled]:
+        _sp._cache.pop(key, None)
+        _sp._variant_data.pop(key, None)
+        _sp._roster.pop(key, None)
+    if _pi._catalogue_rows:
+        _pi._catalogue_rows.clear()
+        _pi._rows_version += 1
+        _pi._full_rows_cache = None

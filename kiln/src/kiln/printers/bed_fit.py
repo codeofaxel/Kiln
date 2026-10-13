@@ -149,10 +149,41 @@ def _lookup_build_volume_exact(
         return None
     # A roster printer: its bed is in its catalogue record, fetched once
     # per printer (kiln.printer_intelligence reads it through the bridge).
+    # With no record in hand -- a signed-out install, a first setup offline
+    # -- the bundled slicer profile's own bed geometry answers: the same
+    # number, public today, so a print can still be laid out, a file built
+    # and a zone drawn for a machine Kiln lists.  Every bed reader comes
+    # through here, so the floor is one helper's, not a branch per door.
     from kiln.printer_intelligence import build_volume_for
 
     resolved = build_volume_for(candidate)
-    return resolved[1] if resolved is not None else None
+    if resolved is not None:
+        return resolved[1]
+    return bundled_profile_bed(candidate)
+
+
+def bundled_profile_bed(printer_id: str | None) -> tuple[float, float, float] | None:
+    """``(x, y, z)`` from the bundled slicer profile's own bed geometry for
+    the EXACT roster id *printer_id*, or ``None``.  Public at every tier and
+    in hand before any record is fetched; never the generic row's."""
+    if not printer_id or printer_id == "default" or printer_id not in _load_printer_intelligence():
+        return None
+    try:
+        from kiln.slicer_profiles import get_slicer_profile
+
+        settings = get_slicer_profile(printer_id).settings
+    except Exception:  # noqa: BLE001 -- no profile, no bed
+        return None
+    corners = re.findall(r"(-?\d+(?:\.\d+)?)x(-?\d+(?:\.\d+)?)", str(settings.get("bed_shape") or ""))
+    if len(corners) < 4:
+        return None
+    try:
+        width = max(float(x) for x, _ in corners)
+        depth = max(float(y) for _, y in corners)
+        height = float(settings.get("max_print_height") or 0.0)
+    except (TypeError, ValueError):
+        return None
+    return (width, depth, height) if width > 0 and depth > 0 else None
 
 
 def catalogue_printer_id(printer_id: str | None) -> str | None:

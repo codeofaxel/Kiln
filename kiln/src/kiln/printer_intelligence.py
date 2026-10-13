@@ -924,6 +924,25 @@ def _get_raw(printer_id: str) -> dict[str, Any] | None:
     return resolved[1] if resolved is not None else None
 
 
+def roster_firmware(printer_id: str) -> str | None:
+    """The coarse firmware label the public ROSTER states for *printer_id*
+    (its cited ``motion.firmware_family``), or ``None``.
+
+    Public at every tier and in hand before any record is fetched, so a door
+    that only needs to know the firmware family -- which free line to say --
+    reads it here rather than off a record a signed-out install does not
+    hold.  Exact roster id only, a vendor prefix tolerated.
+    """
+    from kiln.motion_facts import firmware_label
+
+    roster = _read_public_json()
+    for candidate in _candidates(printer_id or ""):
+        row = roster.get(candidate)
+        if isinstance(row, dict) and candidate != "default":
+            return firmware_label(row)
+    return None
+
+
 def row_for_exact(printer_id: str) -> dict[str, Any] | None:
     """The catalogue row for the EXACT roster id *printer_id*, or ``None``.
 

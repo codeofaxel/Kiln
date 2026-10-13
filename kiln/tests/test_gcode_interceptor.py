@@ -1750,13 +1750,13 @@ class TestTemperatureRuleScoping:
         ["M104 S200", "M104 S210", "M109 S240", "M104 S250"],
     )
     def test_normal_hotend_temps_are_allowed(self, interceptor, command):
-        session = interceptor.create_session("bambu_a1")
+        session = interceptor.create_session("kilntest_open")
         result = interceptor.intercept(session.session_id, command)
         assert result.action == InterceptionAction.ALLOW, result.reasons
 
     @pytest.mark.parametrize("command", ["M140 S60", "M190 S100"])
     def test_normal_bed_temps_are_allowed(self, interceptor, command):
-        session = interceptor.create_session("bambu_a1")
+        session = interceptor.create_session("kilntest_open")
         result = interceptor.intercept(session.session_id, command)
         assert result.action == InterceptionAction.ALLOW, result.reasons
 
@@ -1808,7 +1808,7 @@ class TestSafetyCoverageReporting:
         assert "bed-fit" in joined
 
     def test_known_model_has_bed_rules_and_no_warnings(self, interceptor):
-        session = interceptor.create_session("ender3")
+        session = interceptor.create_session("kilntest_open")
         bed_rules = [r for r in session.rules if r.name.startswith("bed_fit_")]
         assert bed_rules, "a known model must get bed-fit rules"
         assert session.coverage_warnings == []
@@ -1827,14 +1827,15 @@ class TestSafetyCoverageReporting:
         """A nickname must resolve through the registry to its model key."""
         import kiln.gcode_interceptor as gi
 
-        monkeypatch.setattr(gi, "_resolve_printer_model", lambda name: "ender3")
+        monkeypatch.setattr(gi, "_resolve_printer_model", lambda name: "kilntest_open")
         session = interceptor.create_session("Garage Printer")
-        assert session.resolved_model == "ender3"
+        assert session.resolved_model == "kilntest_open"
         assert [r for r in session.rules if r.name.startswith("bed_fit_")]
         assert session.coverage_warnings == []
-        # And it must inherit the ender3 ceiling, not the generic one.
-        result = interceptor.intercept(session.session_id, "M104 S280")
-        assert result.action == InterceptionAction.BLOCK
+        # And it must inherit that model's ceiling (300 C on the synthetic
+        # row), not the generic one: above it is blocked, below it allowed.
+        assert interceptor.intercept(session.session_id, "M104 S320").action == InterceptionAction.BLOCK
+        assert interceptor.intercept(session.session_id, "M104 S280").action == InterceptionAction.ALLOW
 
 
 class TestBedFitRulesThroughPrefix:
