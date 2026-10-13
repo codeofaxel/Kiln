@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-13T17:47:10.303254+00:00",
+  "generated": "2026-10-13T17:59:09.044768+00:00",
   "tool_count": 416,
   "categories": {
     "product_generators": {
@@ -3537,9 +3537,9 @@
     },
     {
       "name": "list_design_goals",
-      "description": "List saved design sessions (saved goals).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "List your saved design sessions (saved goals).",
+      "tier": "free",
+      "access": "free",
       "category": "design_session",
       "parameters": {
         "properties": {
@@ -3569,8 +3569,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      },
-      "served": false
+      }
     },
     {
       "name": "solve_sketch",
