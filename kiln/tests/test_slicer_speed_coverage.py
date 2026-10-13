@@ -218,7 +218,12 @@ def _pace_floor(settings: dict[str, str]) -> float:
 
 
 @pytest.fixture(autouse=True)
-def _fresh_profile_cache() -> Iterator[None]:
+def _fresh_profile_cache(signed_out_install) -> Iterator[None]:
+    # Signed out on purpose: this file judges the profiles REALLY in hand --
+    # the generic one and the session's synthetic rows here, every real
+    # printer's record where kiln-pro's catalogue is on the machine (the
+    # pre-push pace gate's run).  Serving 71 synthetic copies of one
+    # profile and slicing each would judge nothing about any printer.
     sp_mod._cache.clear()
     sp_mod._loaded = False
     sp_mod._temp_cache.clear()

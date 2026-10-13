@@ -303,6 +303,11 @@ class TestOffline:
 
 
 class TestSignedOut:
+    @pytest.fixture(autouse=True)
+    def _signed_out(self, signed_out_install):
+        """The posture under test, requested on purpose: records are the
+        session default."""
+
     """The session fixture seals the served door as a signed-out install."""
 
     def test_a_catalogued_printer_is_the_floor(self):
@@ -394,6 +399,11 @@ class TestSignedOut:
 
 
 class TestTheSignedOutInstall:
+    @pytest.fixture(autouse=True)
+    def _signed_out(self, signed_out_install):
+        """The posture under test, requested on purpose: records are the
+        session default."""
+
     """What an install with no record can and cannot do for a machine Kiln
     lists (Adam, 2026-10-12: the friction is a reason to sign up).  It
     slices with the generic profile on the generic bed, and the file says
@@ -454,6 +464,11 @@ class TestTheSignedOutInstall:
 
 
 class TestSetupChokepoint:
+    @pytest.fixture(autouse=True)
+    def _signed_out(self, signed_out_install):
+        """The posture under test, requested on purpose: records are the
+        session default."""
+
     def test_set_safety_profile_warms_and_mints_once(self):
         from kiln.printers.base import PrinterAdapter
 

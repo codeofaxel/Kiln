@@ -1097,17 +1097,16 @@ class TestPrinterProfiles:
         assert profile is not None
         assert profile.printer_id == "kilntest_enclosed"
 
-    def test_a_roster_printer_with_no_record_is_the_marked_floor(self):
+    def test_a_roster_printer_with_no_record_is_the_marked_floor(self, signed_out_install):
         """A machine Kiln lists whose record this install does not hold is
         answered from the generic row under its own name, and says so."""
         profile = get_printer_design_profile("bambu_x1c")
         assert profile is not None and profile.printer_id == "bambu_x1c"
-        assert profile.resolved_from in {"generic", "curated"}  # curated with kiln-pro here
-        if profile.resolved_from == "generic":
-            generic = get_printer_design_profile("default")
-            assert profile.max_hotend_temp_c == generic.max_hotend_temp_c
-            assert profile.build_volume_mm == generic.build_volume_mm
-            assert profile.agent_notes == []
+        assert profile.resolved_from == "generic"
+        generic = get_printer_design_profile("default")
+        assert profile.max_hotend_temp_c == generic.max_hotend_temp_c
+        assert profile.build_volume_mm == generic.build_volume_mm
+        assert profile.agent_notes == []
 
     def test_list_printers_includes_every_roster_printer(self):
         profiles = list_printer_profiles()

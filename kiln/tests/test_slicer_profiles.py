@@ -81,10 +81,10 @@ class TestGetSlicerProfile:
         profile = get_slicer_profile("creality_kilntest_big")
         assert profile.id == "kilntest_big"
 
-    def test_a_roster_printer_with_no_record_is_the_generic_profile(self) -> None:
-        """Every real printer is a roster row here (public CI holds no
-        record): it slices with the generic profile, and the file says
-        which printer it stands in for."""
+    def test_a_roster_printer_with_no_record_is_the_generic_profile(self, signed_out_install) -> None:
+        """Signed out, a real printer is a roster row with no record: it
+        slices with the generic profile, and the file says which printer it
+        stands in for."""
         from kiln.slicer_profiles import generic_stand_in, profile_origin
 
         profile = get_slicer_profile("ender3")

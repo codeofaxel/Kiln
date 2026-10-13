@@ -99,10 +99,10 @@ class TestBuildVolumeLookup:
     def test_a_bed_that_is_not_a_cube(self):
         assert get_build_volume("kilntest_open") == (220.0, 220.0, 250.0)
 
-    def test_a_roster_printer_whose_record_is_not_held_has_no_bed(self):
+    def test_a_roster_printer_whose_record_is_not_held_has_no_bed(self, signed_out_install):
         # A catalogue name resolves (it is on the roster), but with no record
-        # -- signed out, as the session fixture seals the served door -- the
-        # bed is unknown, never the generic 200 mm cube.
+        # -- signed out, on purpose -- the bed is unknown, never the generic
+        # 200 mm cube.
         from kiln.printers.bed_fit import catalogue_printer_id
 
         assert catalogue_printer_id("kilntest_served") == "kilntest_served"

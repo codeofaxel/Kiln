@@ -1521,21 +1521,33 @@ def _reset_printer_loaders() -> None:
 
 
 @pytest.fixture(autouse=True)
-def _catalogue_bridge_never_reaches_the_network(monkeypatch):
-    """No test asks Kiln's servers for a printer record.
+def _catalogue_bridge_never_reaches_the_network(monkeypatch, tmp_path_factory):
+    """No test asks Kiln's servers for a printer record -- and every roster
+    printer's record is in hand, synthetic.
 
-    A developer's shell may carry a sign-in or a license key, and the
-    bridge would then make a real call for every unknown spelling a test
-    tries.  Sealed here: the served door answers "signed out" at once, the
-    cause an install without an account gets, so a test that names a
-    roster printer with no kiln-pro here is held to the generic floor -- the
-    posture public CI is in.  A test of the served path replaces
-    ``_served`` itself; a test of the local path replaces ``available``.
+    A developer's shell may carry a sign-in or a license key, and the bridge
+    would then make a real call for every unknown spelling a test tries.  So
+    the served door is replaced for every test.  What it answers is the
+    design decision: the SESSION DEFAULT is the install that set its
+    printers up -- a record for every roster printer, served synthetic
+    (:func:`synthetic_roster_record`, every number made up) and never kept
+    on this computer's disk -- because that is what nearly every test that
+    names a real printer id means: an engine test on "a printer with a bed
+    and a profile".  Those tests say nothing about the signed-out posture,
+    and making the floor the default had them all pass or fail on a bed
+    they never asked about.  The SIGNED-OUT posture -- no record, the
+    generic floor, the sign-in nudge -- is the exceptional one, and a test
+    of it says so by requesting :func:`signed_out_install`, so that
+    posture is tested on purpose, never by accident.  With kiln-pro's
+    catalogue on this computer the local path still answers first (real
+    records, the hosted posture); a test that must see synthetic records
+    whatever is installed requests :func:`served_roster_records`.
     """
     from kiln import _pro_catalogue_bridge as _bridge
-    from kiln.served_answer import Miss
 
-    monkeypatch.setattr(_bridge, "_served", lambda key: (None, Miss("signed_out", "KILN_ACCOUNT_NOT_PAIRED")))
+    kept = tmp_path_factory.mktemp("kept-records") / "printer_catalogue"
+    monkeypatch.setattr(_bridge, "KEEP_DIR", kept)
+    monkeypatch.setattr(_bridge, "_served", _serve_synthetic_record)
     _bridge.forget()
     from kiln import printer_intelligence as _pi, safety_profiles as _sp
 
@@ -1555,6 +1567,39 @@ def _catalogue_bridge_never_reaches_the_network(monkeypatch):
 #: firmware Z limit (a printer with one gets a cube of that height, which
 #: reproduces the two Bambu hardware captures the 3MF tests replay).
 _SYNTHETIC_RECORD_CUBE_MM = 300
+
+
+def _serve_synthetic_record(key: str):
+    """The served door's answer in every test: a synthetic record for a
+    roster printer, a settled "no row" for anything else."""
+    import json
+
+    record = synthetic_roster_record(key)
+    return (json.loads(json.dumps(record)), None) if record else (None, None)
+
+
+@pytest.fixture
+def signed_out_install(monkeypatch, tmp_path):
+    """The SIGNED-OUT posture, on purpose: no kiln-pro here, nothing kept on
+    disk, and the served door answers "signed out" -- every roster printer
+    is held to the generic floor and the setup nudge is minted.  The
+    session default is the install that set its printers up (records in
+    hand); a test of the floor requests this so it is never passing on a
+    record it did not mean to have."""
+    from kiln import _pro_catalogue_bridge as _bridge
+    from kiln import printer_intelligence as _pi, safety_profiles as _sp
+    from kiln.served_answer import Miss
+
+    monkeypatch.setattr(_bridge, "available", lambda: False)
+    monkeypatch.setattr(_bridge, "KEEP_DIR", tmp_path / "printer_catalogue")
+    monkeypatch.setattr(_bridge, "_served", lambda key: (None, Miss("signed_out", "KILN_ACCOUNT_NOT_PAIRED")))
+    _bridge.forget()
+    _forget_fetched_printer_rows(_sp, _pi)
+    _sp._nudged.clear()
+    _sp._pending_nudges.clear()
+    yield
+    _bridge.forget()
+    _forget_fetched_printer_rows(_sp, _pi)
 
 
 def synthetic_roster_record(printer_id: str, *, volume: tuple[float, float, float] | None = None) -> dict | None:
@@ -1664,9 +1709,10 @@ def serve_synthetic_roster_records(patch, volumes: dict[str, tuple[float, float,
 @pytest.fixture
 def served_roster_records(monkeypatch):
     """Every roster printer's record SERVED as a synthetic four-block
-    record, for a test that names a real printer id and needs its profile,
-    bed or spec sheet in hand.  The session seal (signed out, the floor) is
-    the default; this is the install that set its printer up."""
+    record -- the session default, but with kiln-pro's local catalogue
+    hidden too, for a test that must see the synthetic numbers whatever is
+    installed on this computer (the install without kiln-pro that set its
+    printer up)."""
     from kiln import printer_intelligence as _pi, safety_profiles as _sp
 
     serve_synthetic_roster_records(monkeypatch)

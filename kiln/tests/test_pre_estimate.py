@@ -115,9 +115,9 @@ class TestGetPrinterSpeeds:
         speeds = _get_printer_speeds("kilntest_ptfe")
         assert speeds["infill"] == pytest.approx(60.0)
 
-    def test_a_roster_printer_with_no_record_gets_the_defaults(self):
-        """Public CI holds no real printer's record: the roster name answers
-        the generic figures, never a sibling's."""
+    def test_a_roster_printer_with_no_record_gets_the_defaults(self, signed_out_install):
+        """Signed out, a roster name answers the generic figures, never a
+        sibling's."""
         speeds = _get_printer_speeds("ender3")
         assert speeds == _get_printer_speeds(None)
 
@@ -182,7 +182,7 @@ class TestGetPrinterToolChange:
         assert tc["tool_changer"] == "none"
         assert tc["has_auto_tool_change"] is False
 
-    def test_a_roster_printer_with_no_record_has_no_changer_on_record(self):
+    def test_a_roster_printer_with_no_record_has_no_changer_on_record(self, signed_out_install):
         tc = _get_printer_tool_change("ender3")
         assert tc["tool_changer"] == "none"
         assert tc["has_auto_tool_change"] is False
