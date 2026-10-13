@@ -4,7 +4,7 @@ A 3MF / sliced-print / marketplace / printer file is a ZIP a stranger
 produced, and ``zipfile``'s whole-member ``read()`` decompresses the real
 stream however small the central directory claims the member is — so a raw
 ``zipfile.ZipFile(path)`` read of an untrusted archive is a memory-exhaustion
-door, an outage on the shared 2 GB hosted process (see
+door, an outage where one process serves many people (see
 ``kiln.untrusted_zip``).  Four readers were guarded by hand in 2026-10; this
 scan makes the whole class impossible to regrow: it fails when a read-mode
 ``zipfile.ZipFile(...)`` open appears anywhere in ``kiln/src`` outside the

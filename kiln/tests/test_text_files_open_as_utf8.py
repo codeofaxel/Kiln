@@ -70,12 +70,17 @@ _OPENERS = {"open", "read_text", "write_text"}
 _FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
 
 
+#: Calls that hand back a ``ZipFile``: the stock class, and the guarded opens
+#: every untrusted archive read goes through (``kiln.untrusted_zip``).
+_ZIPFILE_MAKERS = frozenset({"ZipFile", "UntrustedZipFile", "open_untrusted_zip"})
+
+
 def _is_zipfile(node: ast.AST) -> bool:
-    """``ZipFile(...)`` or ``zipfile.ZipFile(...)``."""
+    """``ZipFile(...)``, ``zipfile.ZipFile(...)``, or a guarded open."""
     if not isinstance(node, ast.Call):
         return False
     func = node.func
-    return (func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)) == "ZipFile"
+    return (func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)) in _ZIPFILE_MAKERS
 
 
 def _own_nodes(scope: ast.AST):

@@ -2,8 +2,7 @@
 size keeps every feature.
 
 Parsed into an ElementTree a model part costs ~16-20x its XML, which took a
-real 126 MB downloaded model to ~2 GB — an outage on the shared 2 GB hosted
-machine.  The readers now build only the structure as elements and read the
+real 126 MB downloaded model to ~2 GB.  The readers now build only the structure as elements and read the
 mesh as it streams past (``kiln.threemf_parser``, "Streaming model parts").
 These tests pin the three promises that make that safe to rely on:
 
@@ -233,6 +232,37 @@ def test_a_structure_bomb_is_refused(tmp_path):
         parse_colored_3mf(path)
     assert compute_3mf_geometry_bbox(path) is None
     assert object_display_colors(path) == {}
+
+
+
+def test_whole_mesh_readers_refuse_past_their_limit_and_bed_fit_still_answers(
+    tmp_path, monkeypatch,
+):
+    """A reader that hands the whole mesh on holds a bounded amount of it; a
+    model past that limit is refused there, while the bed-fit box (which holds
+    nothing per vertex) still answers for it."""
+    import kiln.threemf_parser as tp
+    from kiln.untrusted_zip import UntrustedArchiveError
+
+    body = "".join(
+        f'<object id="{i + 1}" type="model">{_tet(x=20.0 * i)}</object>' for i in range(10)
+    )
+    items = "".join(f'<item objectid="{i + 1}"/>' for i in range(10))
+    path = _write(tmp_path / "many.3mf", {
+        "3D/3dmodel.model": _model(f"<resources>{body}</resources><build>{items}</build>"),
+    })
+    # 10 tetrahedra hold 90 entries: 40 vertices, 40 triangles, and one
+    # colour signature per object.
+    monkeypatch.setattr(tp, "_MAX_KEPT_MESH_ENTRIES", 89)
+    with pytest.raises(UntrustedArchiveError, match="too large to hold whole"):
+        parse_colored_3mf(path)
+    with pytest.raises(ValueError, match="too large to hold whole"):
+        _load_3mf_stdlib(Path(path))
+    box = compute_3mf_geometry_bbox(path)
+    assert box is not None and box["x_max"] == pytest.approx(190.0)
+
+    monkeypatch.setattr(tp, "_MAX_KEPT_MESH_ENTRIES", 90)
+    assert len(parse_colored_3mf(path).triangles) == 40
 
 
 def test_bounded_readers_stay_flat_on_a_60_mb_model(tmp_path):

@@ -101,6 +101,16 @@ _RESOURCES_TAG = f"{{{_CORE_NS}}}resources"
 #: ~45 MB) the archive is refused like any other bomb.
 _MAX_RETAINED_ELEMENTS = 100_000
 
+#: Mesh entries one KEEP walk may hold — vertices, triangles and distinct
+#: triangle colour signatures together.  KEEP readers hand the whole mesh on,
+#: and their callers turn it into Python objects at ~10x the compact arrays,
+#: so an archive within the ZIP guard's caps could otherwise make them hold
+#: gigabytes.  The largest real model measured 2026-10-13 holds 2.2 M
+#: vertices and triangles; 6 M clears it ~3x.  FOLD readers (a bounding box,
+#: a colour count) hold nothing per element and have no such limit, so a
+#: model past it still gets its bed-fit check and colour count.
+_MAX_KEPT_MESH_ENTRIES = 6_000_000
+
 #: Bytes read from an archive member per parser feed.
 _STREAM_CHUNK_BYTES = 1 << 16
 
@@ -124,13 +134,24 @@ class _EntityDeclarationRefused(ValueError):
 
 
 class _RetainedBudget:
-    """Counts the structure elements one archive walk keeps."""
+    """Counts what one archive walk keeps: structure elements, and (KEEP mode)
+    mesh entries."""
 
-    __slots__ = ("left", "limit")
+    __slots__ = ("left", "limit", "mesh_left", "mesh_limit")
 
     def __init__(self, limit: int = _MAX_RETAINED_ELEMENTS) -> None:
         self.limit = limit
         self.left = limit
+        self.mesh_limit = _MAX_KEPT_MESH_ENTRIES
+        self.mesh_left = self.mesh_limit
+
+    def take_mesh(self) -> None:
+        self.mesh_left -= 1
+        if self.mesh_left < 0:
+            raise UntrustedArchiveError(
+                f"3MF mesh is too large to hold whole (more than {self.mesh_limit} "
+                "vertices and triangles)"
+            )
 
     def take(self) -> None:
         self.left -= 1
@@ -312,6 +333,8 @@ class _PartBuilder:
         self._info.n_vertices += 1  # type: ignore[union-attr]
         if not self._want_v:
             return
+        if self._mode == _KEEP:
+            self._budget.take_mesh()
         x, y, z = _parse_vertex(attrib)
         buf = self._vbuf
         buf.append(x)
@@ -332,8 +355,10 @@ class _PartBuilder:
         buf.append(_parse_index(get("v3")))
         sig = (get("pid"), get("p1"), _triangle_paint_attr(attrib))
         if self._mode == _KEEP:
+            self._budget.take_mesh()
             idx = self._sig_index.get(sig)
             if idx is None:
+                self._budget.take_mesh()
                 idx = self._sig_index[sig] = len(info.signatures)  # type: ignore[union-attr]
                 info.signatures.append(sig)  # type: ignore[union-attr]
             self._sig_idx.append(idx)

@@ -2,9 +2,8 @@
 
 A 3MF, a sliced-print file, a marketplace download, a file pulled off a
 printer — each is a ZIP a stranger produced, and nothing in the format bounds
-how large it unpacks.  On the shared hosted API (one process, a 2 GB machine,
-every customer) an in-process blow-up is an outage, not one slow request (the
-2026-08-24 render OOM took the whole API down).
+how large it unpacks.  Where one process serves many people, an in-process
+blow-up is an outage, not one slow request.
 
 **The primitive.**  ``zipfile``'s whole-member ``read()`` decompresses the
 REAL stream regardless of the size the central directory declares, so a member
@@ -20,8 +19,7 @@ with no change at any read site, because ``ZipFile.read`` itself goes through
 ``self.open``.
 
 **The shape pre-check** at open refuses, before a byte is decompressed: too
-many members (a central-directory flood), a member that expands past a sane
-ratio (an honest ratio bomb), a compression method where ``read(n)`` does NOT
+many members (a central-directory flood), a compression method where ``read(n)`` does NOT
 bound the decompressor (bzip2 / lzma — no 3MF or slicer writes them), and an
 absurd declared total.  The caps are deliberately GENEROUS: this guard sits in
 front of EVERY untrusted archive, a large sliced print included, so it must

@@ -606,6 +606,7 @@ def _load_3mf_stdlib(path: Path) -> Any:
         _stream_part,
         open_untrusted_zip,
     )
+    from kiln.untrusted_zip import UntrustedArchiveError
 
     ns = f"{{{_CORE_NS}}}"
     budget = _RetainedBudget()
@@ -787,6 +788,10 @@ def _load_3mf_stdlib(path: Path) -> Any:
         raise ValueError(f"refusing 3MF model XML with entity declarations: {path.name}") from exc
     except ET.ParseError as exc:
         raise ValueError(f"unparsable 3MF model XML in {path.name}: {exc}") from exc
+    except UntrustedArchiveError as exc:
+        # Its own words: an honest model too large to hold whole is not
+        # "unreadable".
+        raise ValueError(f"{path.name}: {exc}") from exc
     except (zipfile.BadZipFile, KeyError, OSError) as exc:
         raise ValueError(f"not a readable 3MF archive: {path.name}") from exc
     return scene
