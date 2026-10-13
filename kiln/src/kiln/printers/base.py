@@ -5038,14 +5038,21 @@ class PrinterAdapter(ABC):
         Only a backend that exposes Moonraker's ``configfile`` object can
         answer; every other backend answers ``None``, and so does a Klipper
         machine that could not be asked.  Nothing is written anywhere.
+
+        A setup read, so the one-printer rule does not cover it
+        (``engagement.UNGATED_METHODS``): a ceiling is a fact about the
+        model for a person to confirm, not a look at what the machine is
+        doing.  The config it asks for (``get_printer_config``) stays gated
+        on its own, so it is read here as Kiln's own read.
         """
         reader = getattr(self, "get_printer_config", None)
         if reader is None:
             return None
+        from kiln.printers.engagement import internal_read
+
         try:
-            config = reader()
-        except PrinterEngagementError:
-            raise  # the one-printer rule's refusal names the other machine; it is the answer
+            with internal_read():
+                config = reader()
         except Exception as exc:  # noqa: BLE001 -- a limit Kiln cannot read is one it does not propose
             logger.debug("limits: %s could not read its config: %s", self.name, exc)
             return None

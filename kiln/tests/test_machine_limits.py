@@ -125,20 +125,27 @@ class TestTheAdapterDoor:
 
         assert self._adapter(get_printer_config=boom).read_machine_limits() is None
 
-    def test_the_one_printer_rules_refusal_passes_through_whole(self):
-        from kiln.printers.base import PrinterEngagementError
-
-        def refused():
-            raise PrinterEngagementError({"reason": "Kiln is working with the other one", "code": "TIER_SINGLE_PRINTER_LIMIT"})
-
-        with pytest.raises(PrinterEngagementError):
-            self._adapter(get_printer_config=refused).read_machine_limits()
-
-    def test_the_read_is_on_the_one_printer_rules_roster(self):
+    def test_it_is_a_setup_read_the_one_printer_rule_does_not_cover(self):
         from kiln.printers import engagement
 
-        assert "read_machine_limits" in engagement.GATED_ACTIONS
-        assert engagement.is_gated("read_machine_limits")
+        assert "read_machine_limits" in engagement.UNGATED_METHODS
+        assert not engagement.is_gated("read_machine_limits")
+
+    def test_the_config_is_read_as_kilns_own_while_another_machine_is_driven(self):
+        """``get_printer_config`` stays gated on its own; the limits read
+        goes through it as an internal read, so setting up a second printer
+        while Kiln drives the first still gets its numbers."""
+        from kiln.printers import engagement
+
+        seen: list[bool] = []
+
+        def config():
+            seen.append(engagement._in_internal_read())
+            return VORON_LIKE
+
+        fake = self._adapter(get_printer_config=config)
+        assert fake.read_machine_limits()["profile"]["max_hotend_temp"] == 300.0
+        assert seen == [True]
 
 
 # ---------------------------------------------------------------------------
@@ -302,16 +309,6 @@ class TestAddSafetyProfileReadsThePrinter:
         printers["default"] = _FakePrinter(raises=PrinterError("connection refused"))
         result = tools["add_safety_profile"]("my_voron")
         assert result["error"]["code"] == "PRINTER_UNREACHABLE" and result["error"].get("retryable") is True
-
-    def test_the_other_machines_refusal_comes_back_in_its_own_words(self, door):
-        from kiln.printers.base import PrinterEngagementError
-
-        tools, _shown, printers = door
-        verdict = {"reason": "Kiln is working with ender right now.", "code": "TIER_SINGLE_PRINTER_LIMIT"}
-        printers["default"] = _FakePrinter(raises=PrinterEngagementError(verdict))
-        result = tools["add_safety_profile"]("my_voron")
-        assert result["success"] is False and result["error"]["code"] == "TIER_SINGLE_PRINTER_LIMIT"
-        assert "ender" in result["error"]["message"]
 
     def test_the_hosted_server_reads_no_printer(self, door, monkeypatch):
         tools, _shown, printers = door

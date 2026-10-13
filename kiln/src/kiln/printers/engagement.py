@@ -96,6 +96,10 @@ UNGATED_METHODS: dict[str, str] = {
     "get_printer_info": "identity, read to register the printer",
     "get_identity_channels": "identity, read to register the printer",
     "read_machine_identity": "identity, read to register the printer",
+    # Setup: the limits an unknown model's own config states, put in front of
+    # a person to confirm.  A ceiling is a fact about the model, not a look
+    # at what the machine is doing.
+    "read_machine_limits": "setup: the limits a printer states for itself, for a person to confirm",
     # Setup: asked once by every door that saves a printer.  It learns only
     # whether a camera answers, from headers, and never reads a frame; the
     # camera check a person asks for later is gated (camera_probes).
@@ -152,7 +156,6 @@ GATED_ACTIONS = frozenset(
         "read_nozzle_setting",
         "read_nozzle_clumping_detection",
         "get_printer_config",
-        "read_machine_limits",
         "get_bed_mesh",
         "homed_axes_now",
         "reported_firmware_version",
@@ -813,7 +816,6 @@ _READ_ACTIONS = frozenset(
         "read_nozzle_setting",
         "read_nozzle_clumping_detection",
         "get_printer_config",
-        "read_machine_limits",
         "get_bed_mesh",
         "homed_axes_now",
         "reported_firmware_version",

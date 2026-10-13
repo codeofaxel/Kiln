@@ -123,10 +123,11 @@ def _limits_read_off_the_printer(printer_model: str, printer_name: str) -> dict:
 
     A Klipper machine through Moonraker states its heater ceilings, travel
     and velocity in its own configuration; nothing else does.  Read on the
-    machine the printer is set up on, never the hosted server.
+    machine the printer is set up on, never the hosted server.  A setup
+    read: Kiln driving another printer does not refuse it.
     """
     import kiln.server as _srv
-    from kiln.printers.base import PrinterEngagementError, PrinterError
+    from kiln.printers.base import PrinterError
     from kiln.runtime_env import is_hosted_multitenant
 
     say_profile = "State the limits yourself in `profile` (from the maker's own spec page, never a guess)."
@@ -147,11 +148,6 @@ def _limits_read_off_the_printer(printer_model: str, printer_name: str) -> dict:
         )
     try:
         proposal = adapter.read_machine_limits()
-    except PrinterEngagementError as exc:
-        return _srv._error_dict(
-            _srv.engagement_refusal_words(exc.verdict),
-            code=str(exc.verdict.get("code") or "TIER_SINGLE_PRINTER_LIMIT"),
-        )
     except PrinterError as exc:
         return _srv._error_dict(
             f"{adapter.name} could not be asked for its configuration ({exc}). Try again when it is "
