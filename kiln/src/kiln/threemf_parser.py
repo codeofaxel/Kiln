@@ -25,6 +25,8 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from kiln.untrusted_zip import UntrustedArchiveError, open_untrusted_zip
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -43,6 +45,87 @@ _PATH_ATTR = f"{{{_PRODUCTION_NS}}}path"
 _HEX_COLOR_RE = re.compile(r"^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})?$")
 
 _DEFAULT_COLOR: tuple[int, int, int] = (170, 170, 170)
+
+
+# ---------------------------------------------------------------------------
+# A 3MF is untrusted input — bound its model parse
+# ---------------------------------------------------------------------------
+#
+# Opening a 3MF means opening a ZIP a stranger produced.  The memory-safety of
+# that open — a read ceiling on every member so a lying header cannot balloon a
+# whole read, and a shape pre-check that refuses a bomb before a byte is
+# decompressed — lives in :mod:`kiln.untrusted_zip`, which EVERY reader of an
+# uploaded archive opens through.  This module adds the one budget specific to
+# PARSING a 3MF: the colour and geometry readers below build every triangle
+# into memory, and a model part parses to ~16-20x its own XML bytes (measured
+# 2026-10-13: an 82 MB model peaked ~1.3 GB, a 118 MB one ~2.1 GB).  So the
+# model parts a parse will read are capped at 48 MB of declared uncompressed
+# XML in total — the same ceiling kiln-pro's mesh facts settled on for a mesh
+# the hosted box reads whole — which keeps a parse's transient under ~1 GB,
+# well inside the 2 GB machine beside the API's own ~0.1-0.6 GB baseline.
+# gcode and thumbnails in a sliced ``.gcode.3mf`` are NOT counted: the colour
+# parser never reads them.
+#
+# Ordinary painted / multicolour files parse from model parts of a few MB; a
+# file this turns away (a 1.3 M-triangle scan, an 82 MB plate) would itself
+# have peaked past the box.
+
+#: The ``.model`` parts (and settings sidecar) a 3MF parse accumulates are
+#: capped at this many declared uncompressed bytes in total.
+_MAX_MODEL_PARSE_BYTES = 48 * 1024 * 1024
+
+
+class ThreeMFArchiveTooLarge(UntrustedArchiveError):
+    """A 3MF whose model parts are too large to parse in bounded memory.
+
+    An :class:`~kiln.untrusted_zip.UntrustedArchiveError` (hence a
+    ``ValueError``) so every reader that already turns a bad archive into its
+    own decline — :func:`parse_colored_3mf` raising,
+    :func:`object_display_colors` returning ``{}``, the viewer payload's
+    ``payload_unavailable`` — treats an over-budget one exactly the same way.
+    """
+
+
+def _check_model_parse_budget(
+    zf: zipfile.ZipFile, *, max_bytes: int = _MAX_MODEL_PARSE_BYTES
+) -> None:
+    """Refuse a 3MF whose model parts would not parse in bounded memory.
+
+    Counts the ``.model`` parts and the slicer settings sidecar — the members
+    :func:`parse_colored_3mf` and the geometry walkers read and accumulate —
+    and raises :class:`ThreeMFArchiveTooLarge` when their declared uncompressed
+    total runs past *max_bytes*.  Reads only the central directory the archive
+    parsed at open; no member is decompressed here.
+    """
+    total = 0
+    for info in zf.infolist():
+        name = info.filename.lower()
+        if name.endswith(".model") or name == _SLICER_SETTINGS_PATH.lower():
+            total += info.file_size
+            if info.file_size > max_bytes or total > max_bytes:
+                raise ThreeMFArchiveTooLarge(
+                    f"3MF model parts exceed {max_bytes} bytes of XML to parse "
+                    f"(at {info.filename!r})."
+                )
+
+
+@contextlib.contextmanager
+def open_guarded_3mf(
+    file_path: Any, *, max_bytes: int = _MAX_MODEL_PARSE_BYTES
+) -> Iterator[zipfile.ZipFile]:
+    """Open a 3MF for a parse that reads its geometry, bounded in memory.
+
+    A thin wrapper over :func:`kiln.untrusted_zip.open_untrusted_zip` — which
+    bounds every member read and refuses a bomb-shaped archive at open — that
+    also applies the 3MF model-parse budget (:func:`_check_model_parse_budget`).
+    The one door the colour parser and the geometry walkers open through.
+    Raises :class:`ThreeMFArchiveTooLarge` (a ``ValueError``) for an over-budget
+    archive and ``zipfile.BadZipFile`` for a non-ZIP — the exceptions the
+    readers already handle.
+    """
+    with open_untrusted_zip(file_path) as zf:
+        _check_model_parse_budget(zf, max_bytes=max_bytes)
+        yield zf
 
 #: Per-triangle painting attributes.  BambuStudio and OrcaSlicer write
 #: ``paint_color`` (un-namespaced); PrusaSlicer writes the namespaced
@@ -979,7 +1062,9 @@ def parse_colored_3mf(
         and per-object :class:`ObjectSegment` boundaries.
     :raises ValueError: If the archive has no model XML or the root model
         XML is corrupt.  A missing or corrupt ``p:path`` part costs its
-        objects, not the file.
+        objects, not the file.  :class:`ThreeMFArchiveTooLarge` (a
+        ``ValueError``) when the archive's declared size, member count,
+        ratio, or compression method could exhaust memory.
     :raises zipfile.BadZipFile: If *file_path* is not a valid ZIP.
     :raises FileNotFoundError: If *file_path* does not exist.
     """
@@ -991,7 +1076,7 @@ def parse_colored_3mf(
     lookups: dict[str, dict[int, list[tuple[int, int, int]]]] = {}
     seen: set[tuple[str, int]] = set()
 
-    with zipfile.ZipFile(file_path, "r") as zf:
+    with open_guarded_3mf(file_path) as zf:
         errors: list[str] = []
         archive = _ModelArchive(zf, errors)
         sidecar_colors = _slicer_config_colors(zf)
@@ -1149,7 +1234,7 @@ def object_display_colors(file_path: str) -> dict[str, tuple[int, int, int]]:
     lookups: dict[str, dict[int, list[tuple[int, int, int]]]] = {}
     seen: set[tuple[str, int]] = set()
     try:
-        with zipfile.ZipFile(file_path, "r") as zf:
+        with open_guarded_3mf(file_path) as zf:
             # A byte scan over every model part turns away the files that
             # carry no color construct at all before an XML parse is spent
             # on a large mesh.  Painting attributes count (a painted object

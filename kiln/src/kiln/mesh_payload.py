@@ -434,10 +434,14 @@ def _painted_3mf_mesh(
     import numpy as np
     import trimesh
 
-    from kiln.threemf_parser import _scan_color_constructs, parse_colored_3mf
+    from kiln.threemf_parser import (
+        _scan_color_constructs,
+        open_guarded_3mf,
+        parse_colored_3mf,
+    )
 
     try:
-        with zipfile.ZipFile(str(path)) as zf:
+        with open_guarded_3mf(str(path)) as zf:
             has_palette, has_paint = _scan_color_constructs(zf)
     except (ValueError, OSError, KeyError, zipfile.BadZipFile):
         return None
@@ -590,10 +594,18 @@ def _load_3mf_stdlib(path: Path) -> Any:
     import trimesh
     from trimesh.util import unique_name
 
-    from kiln.threemf_parser import _CORE_NS, _find_model_xml, _parse_vertices
+    from kiln.threemf_parser import (
+        _CORE_NS,
+        _find_model_xml,
+        _parse_vertices,
+        open_guarded_3mf,
+    )
 
     try:
-        with zipfile.ZipFile(str(path)) as zf:
+        # open_guarded_3mf returns an UntrustedZipFile — its read ceiling
+        # bounds this whole-member read even if the header lies — and applies
+        # the model-parse budget.
+        with open_guarded_3mf(str(path)) as zf:
             raw = zf.read(_find_model_xml(zf))
     except (zipfile.BadZipFile, KeyError, OSError) as exc:
         raise ValueError(f"not a readable 3MF archive: {path.name}") from exc

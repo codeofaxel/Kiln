@@ -73,6 +73,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from kiln.untrusted_zip import UntrustedZipFile
+
 logger = logging.getLogger(__name__)
 
 _STORE_NAME = "plate_state.json"
@@ -1488,7 +1490,7 @@ def geometry_of(path: str, *, plate_number: int = 1) -> tuple[list[float] | None
     """
     try:
         if zipfile.is_zipfile(path):
-            with zipfile.ZipFile(path) as zf:
+            with UntrustedZipFile(path) as zf:
                 names = set(zf.namelist())
                 footprint: list[float] | None = None
                 objects_listed = False

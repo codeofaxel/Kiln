@@ -530,7 +530,13 @@ class TestEstimateFrom3MF:
         path = tmp_path / "bz.gcode.3mf"
         with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_BZIP2) as zf:
             zf.writestr("Metadata/plate_1.gcode", "G1 X10 E1\n")
-        with pytest.raises(ValueError, match="compressed in a way Kiln does not unpack"):
+        # Refused at the archive boundary now: the untrusted-zip guard turns a
+        # bzip2 member away at open (a method read(n) cannot bound), before the
+        # gcode reader's own "compressed in a way Kiln does not unpack" check.
+        with pytest.raises(
+            ValueError,
+            match="unsupported compression method|compressed in a way Kiln does not unpack",
+        ):
             CostEstimator().estimate_from_file(str(path))
 
     def test_a_member_that_lies_about_its_size_unpacks_within_a_bound(self, tmp_path):

@@ -109,6 +109,7 @@ from kiln.print_consent import (
 )
 from kiln.provider_terms import CRAFTCLOUD_TERMS_URL, order_terms
 from kiln.tool_args import parse_json_array, parse_json_object
+from kiln.untrusted_zip import UntrustedZipFile
 
 with contextlib.suppress(ImportError):
     import kiln_pro  # noqa: F401 — triggers compat shim installation
@@ -213,6 +214,7 @@ try:
     from kiln_pro.payments.manager import PaymentManager
 except ImportError:
     PaymentManager = None  # Available in kiln-pro
+from kiln.front_door import FRONT_DOOR_LINE as _FRONT_DOOR_LINE
 from kiln.hotend_safety import MOLTEN_FILAMENT_WARNING, needs_burn_warning
 from kiln.persistence import get_db
 from kiln.pipelines import (
@@ -279,9 +281,9 @@ from kiln.printers import (
     status_is_unreachable,
     stuck_job_note,
 )
+from kiln.printers import engagement as _engagement
 from kiln.printers.base import PrinterEngagementError, read_machine_identity_bounded
 from kiln.printers.command_verdict import CommandVerdict
-from kiln.printers import engagement as _engagement
 from kiln.printers.engagement import refusal_in_flight as engagement_refusal_in_flight
 from kiln.printers.engagement import refusal_words as engagement_refusal_words
 from kiln.queue import JobNotFoundError, JobStatus, PrintQueue
@@ -297,7 +299,6 @@ from kiln.thingiverse import (
     ThingiverseError,
     ThingiverseNotFoundError,
 )
-from kiln.front_door import FRONT_DOOR_LINE as _FRONT_DOOR_LINE
 from kiln.tiers_and_terms import (
     AGENT_ACCOUNT_NUDGE,
     OFFER_FIRST_LINE,
@@ -10999,10 +11000,9 @@ def set_fan(percent: int, node: str = "part") -> dict:
 
 def _wrapped_filament_type(threemf_path: str) -> str | None:
     """The first filament type a wrapped archive declares to the printer, or ``None``."""
-    import zipfile
 
     try:
-        with zipfile.ZipFile(threemf_path) as zf:
+        with UntrustedZipFile(threemf_path) as zf:
             info = zf.read("Metadata/slice_info.config").decode("utf-8", errors="replace")
     except Exception:  # noqa: BLE001 -- a report, never a failure of the wrap
         return None
@@ -17043,12 +17043,11 @@ def resolve_model_source(file_path: str) -> dict:
         # Fall back to generic 3MF metadata extraction
         import json as _json
         import xml.etree.ElementTree as ET
-        import zipfile
 
         model_xml: str | None = None
         plate_json_raw: bytes | None = None
 
-        with zipfile.ZipFile(file_path, "r") as zf:
+        with UntrustedZipFile(file_path, "r") as zf:
             for candidate in ["3D/3dmodel.model", "3d/3dmodel.model"]:
                 if candidate in zf.namelist():
                     model_xml = zf.read(candidate).decode("utf-8")

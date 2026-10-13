@@ -29,6 +29,8 @@ import xml.etree.ElementTree as ET
 import zipfile
 from typing import Any
 
+from kiln.untrusted_zip import UntrustedZipFile
+
 logger = logging.getLogger(__name__)
 
 # The primary model file inside a 3MF archive.
@@ -72,7 +74,7 @@ def extract_3mf_metadata(file_path: str) -> dict[str, Any]:
 
     # --- Open ZIP ---
     try:
-        zf = zipfile.ZipFile(file_path, "r")
+        zf = UntrustedZipFile(file_path, "r")
     except (zipfile.BadZipFile, OSError) as exc:
         logger.warning("Cannot open 3MF file as ZIP: %s (%s)", file_path, exc)
         return result

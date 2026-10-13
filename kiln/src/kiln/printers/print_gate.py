@@ -52,6 +52,7 @@ from typing import Any
 
 from kiln.nozzle_size_check import MISMATCH_CODE as NOZZLE_SIZE_MISMATCH
 from kiln.tiers_and_terms import upgrade_nudge_block
+from kiln.untrusted_zip import UntrustedZipFile
 
 _logger = logging.getLogger(__name__)
 
@@ -894,12 +895,11 @@ def _gcode_head(path: str, max_lines: int) -> list[str] | None:
     low = path.lower()
     try:
         if low.endswith(".3mf"):
-            import zipfile
 
             from kiln.gcode import _MAX_SCAN_BYTES
             from kiln.gcode_metadata import read_member_text, sliced_gcode_member
 
-            with zipfile.ZipFile(path) as zf:
+            with UntrustedZipFile(path) as zf:
                 member = sliced_gcode_member(zf)
                 if member is None:
                     return None

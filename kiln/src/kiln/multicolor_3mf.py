@@ -104,6 +104,7 @@ from pathlib import Path
 from typing import Any
 
 from kiln.preview_render import downscale_png, effective_supersample
+from kiln.untrusted_zip import UntrustedZipFile
 
 logger = logging.getLogger(__name__)
 
@@ -1945,7 +1946,7 @@ def detect_3mf_multicolor(input_path: str) -> dict[str, Any] | None:
         paint_states: set[int] = set()
         palette: list[str] = []
         palette_colors = 0
-        with zipfile.ZipFile(input_path) as zf:
+        with UntrustedZipFile(input_path) as zf:
             for member in zf.namelist():
                 low = member.lower()
                 if low in _SIDECAR_CONFIG_NAMES:

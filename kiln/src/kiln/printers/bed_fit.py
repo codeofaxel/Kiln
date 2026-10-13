@@ -34,6 +34,7 @@ from typing import Any
 from kiln import step_import
 from kiln.gcode import _MAX_SCAN_BYTES, GCODE_NUMBER, axis_value
 from kiln.gcode_metadata import read_member_text, sliced_gcode_member
+from kiln.untrusted_zip import UntrustedZipFile
 
 logger = logging.getLogger(__name__)
 
@@ -450,7 +451,7 @@ def _plate_gcode_file(threemf_path: str) -> Any:
     gcode_bytes: bytes | None = None
     if Path(threemf_path).is_file():
         try:
-            with zipfile.ZipFile(threemf_path) as zf:
+            with UntrustedZipFile(threemf_path) as zf:
                 member = sliced_gcode_member(zf)
                 if member is not None:
                     gcode_bytes = read_member_text(zf, member, _MAX_SCAN_BYTES).encode("utf-8")
@@ -494,12 +495,13 @@ def compute_3mf_geometry_bbox(threemf_path: str) -> dict[str, float] | None:
         _apply_3mf_transform,
         _ModelArchive,
         _parse_vertices,
+        open_guarded_3mf,
     )
 
     points: list[tuple[float, float, float]] = []
     errors: list[str] = []
     try:
-        with zipfile.ZipFile(threemf_path) as zf:
+        with open_guarded_3mf(threemf_path) as zf:
             archive = _ModelArchive(zf, errors)
             to_mm = archive.root_transform_mm()
             if to_mm is None:
@@ -955,7 +957,7 @@ def check_gcode_has_homing(
     gcode_text: str | None = None
     if p.suffix.lower() == ".3mf" or str(p).lower().endswith(".gcode.3mf"):
         try:
-            with zipfile.ZipFile(p) as zf:
+            with UntrustedZipFile(p) as zf:
                 member = sliced_gcode_member(zf)
                 if member is not None:
                     gcode_text = read_member_text(zf, member, _MAX_SCAN_BYTES)

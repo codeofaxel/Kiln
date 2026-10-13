@@ -95,6 +95,7 @@ from kiln.printers.base import (
 )
 from kiln.printers.command_verdict import CommandVerdict
 from kiln.printers.progress_motion import forget_job_start, job_elapsed_seconds
+from kiln.untrusted_zip import UntrustedZipFile
 
 logger = logging.getLogger(__name__)
 
@@ -4721,10 +4722,9 @@ class BambuAdapter(PrinterAdapter):
         or ``None`` if the file cannot be read.
         """
         import json
-        import zipfile
 
         try:
-            with zipfile.ZipFile(file_path, "r") as zf:
+            with UntrustedZipFile(file_path, "r") as zf:
                 meta_name = f"Metadata/plate_{plate_number}.json"
                 if meta_name not in zf.namelist():
                     return None
@@ -4849,10 +4849,9 @@ class BambuAdapter(PrinterAdapter):
             plate_number: Which plate's metadata to inspect.
         """
         import xml.etree.ElementTree as ET
-        import zipfile
 
         try:
-            with zipfile.ZipFile(file_path, "r") as zf:
+            with UntrustedZipFile(file_path, "r") as zf:
                 # 1. Check plate JSON metadata.
                 meta_name = f"Metadata/plate_{plate_number}.json"
                 if meta_name in zf.namelist():
@@ -4981,11 +4980,10 @@ class BambuAdapter(PrinterAdapter):
             plate_number: Which plate to inspect.
         """
         import json
-        import zipfile
 
         issues: list[str] = []
         try:
-            with zipfile.ZipFile(file_path, "r") as zf:
+            with UntrustedZipFile(file_path, "r") as zf:
                 meta_name = f"Metadata/plate_{plate_number}.json"
                 if meta_name not in zf.namelist():
                     return issues

@@ -51,6 +51,7 @@ from kiln.gcode_metadata import (
     sliced_gcode_member,
     unpacks_in_chunks,
 )
+from kiln.untrusted_zip import UntrustedZipFile
 
 logger = logging.getLogger(__name__)
 
@@ -289,7 +290,7 @@ def _extract_3mf_metadata(file_path: str) -> FileMetadata:
     )
 
     try:
-        with zipfile.ZipFile(file_path, "r") as zf:
+        with UntrustedZipFile(file_path, "r") as zf:
             # Try to read the core model for basic info
             model_path = _find_3mf_model_path(zf)
             if model_path is not None:
@@ -414,7 +415,7 @@ def slicer_settings(file_path: str) -> dict[str, str]:
     settings: dict[str, str] = {}
     if os.path.splitext(file_path)[1].lower() in _3MF_EXTENSIONS:
         try:
-            with zipfile.ZipFile(file_path) as zf:
+            with UntrustedZipFile(file_path) as zf:
                 for content in _settings_members(zf):
                     for key, value in _settings_of(content).items():
                         settings.setdefault(key, value)
@@ -489,7 +490,7 @@ def _extract_ufp_metadata(file_path: str) -> FileMetadata:
     )
 
     try:
-        with zipfile.ZipFile(file_path, "r") as zf:
+        with UntrustedZipFile(file_path, "r") as zf:
             # Find G-code file inside the package
             gcode_path: str | None = None
             for name in zf.namelist():
@@ -704,7 +705,7 @@ def sliced_gcode_lines(file_path: str) -> list[str] | None:
         if ext in _GCODE_EXTENSIONS:
             return read_head_and_tail(file_path)
         if ext in _3MF_EXTENSIONS:
-            with zipfile.ZipFile(file_path) as zf:
+            with UntrustedZipFile(file_path) as zf:
                 member = sliced_gcode_member(zf)
                 if member is None:
                     return None

@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 from kiln import _vec
 from kiln.generation.base import MeshAnalysis, MeshValidationResult
+from kiln.untrusted_zip import UntrustedZipFile
 
 if TYPE_CHECKING:
     import numpy
@@ -1055,12 +1056,13 @@ def _placed_3mf_meshes(
         _apply_3mf_transform,
         _ModelArchive,
         _parse_vertices,
+        open_guarded_3mf,
     )
 
     ns = f"{{{_CORE_NS}}}"
     out: list[tuple[Any, list[tuple[float, float, float]], list[tuple[tuple[float, ...], ...]]]] = []
     try:
-        with zipfile.ZipFile(path, "r") as zf:
+        with open_guarded_3mf(path) as zf:
             archive = _ModelArchive(zf, errors)
             to_mm = archive.root_transform_mm()
             if to_mm is None:
@@ -4943,7 +4945,7 @@ def extract_model_from_3mf(
 
     from kiln.threemf_parser import _find_model_xml
 
-    with zipfile.ZipFile(file_path, "r") as zf:
+    with UntrustedZipFile(file_path, "r") as zf:
         try:
             _find_model_xml(zf)
         except ValueError as exc:
@@ -5087,7 +5089,7 @@ def list_plate_objects(
     plate_json: dict[str, Any] | None = None
     gcode_header: str = ""
 
-    with zipfile.ZipFile(file_path, "r") as zf:
+    with UntrustedZipFile(file_path, "r") as zf:
         names = zf.namelist()
 
         # Scan for all available plates (plate_N.json in Metadata/)
@@ -5283,7 +5285,7 @@ def extract_plate_object_gcode(
 
     # Read the full gcode from the archive
     gcode_text: str | None = None
-    with zipfile.ZipFile(file_path, "r") as zf:
+    with UntrustedZipFile(file_path, "r") as zf:
         for candidate in [
             f"Metadata/plate_{plate_number}.gcode",
             f"metadata/plate_{plate_number}.gcode",
