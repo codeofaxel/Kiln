@@ -338,14 +338,16 @@ def test_a_cancel_the_order_service_words_in_full_is_said_as_it_is(registered_to
     assert reply["error"]["code"] == code
 
 
-def test_an_order_whose_checkout_adds_shipping_and_tax_is_not_a_price_change(
-    registered_tools, tmp_path, monkeypatch,
-):
-    """A quote's price is the printing alone; the placed order states the
-    checkout's total, which adds shipping and sales tax.  Compared as they
-    were, a 16.58 quote and a 27.55 checkout read as a 66% price jump and the
-    order -- already placed -- was reported blocked, its pay link never
-    shown.  Like with like: 16.58 + 8.85 shipping against 25.43 before tax."""
+def _place_order_through_the_tool(registered_tools, tmp_path, monkeypatch, placed, drift):
+    """``fulfillment_order`` end to end with a provider that answers ``placed``.
+
+    The quote priced 16.58 to print plus 8.85 for the chosen shipping;
+    ``drift`` stands in for the order service's price check and records what
+    it was asked to compare.  The pay step is worded by the order service as
+    "Pay here: <link>".
+    """
+    import sys
+
     service = order_service.provide(monkeypatch)
     import kiln.licensing
     import kiln.quote_cache
@@ -361,10 +363,6 @@ def test_an_order_whose_checkout_adds_shipping_and_tax_is_not_a_price_change(
         shipping_address=normalize_shipping_address(ADDRESS),
     ).token
 
-    placed = SimpleNamespace(
-        order_id="ord-1", total_price=27.55, checkout_net=25.43,
-        to_dict=lambda: {"order_id": "ord-1", "status": "submitted", "checkout_url": "https://pay.example"},
-    )
     provider = SimpleNamespace(name="proxy", place_order=lambda request: placed)
     monkeypatch.setattr(server, "_check_billing_auth", lambda scope="print": None)
     monkeypatch.setattr(kiln.licensing, "check_tier", lambda *a, **k: (True, ""))
@@ -378,17 +376,9 @@ def test_an_order_whose_checkout_adds_shipping_and_tax_is_not_a_price_change(
         lambda quote_id: SimpleNamespace(metadata={"shipping_options": [{"id": "ship-1", "price": 8.85}]}),
     )
     monkeypatch.setattr(service, "order_message", lambda r, routing: ["Pay here: https://pay.example"], raising=False)
-    compared: list[tuple[float, float]] = []
+    monkeypatch.setattr(sys.modules["kiln.fulfillment.intelligence"], "_check_price_drift", drift, raising=False)
 
-    def record_drift(quoted, placed):
-        compared.append((quoted, placed))
-        return None, False
-
-    import sys
-
-    monkeypatch.setattr(sys.modules["kiln.fulfillment.intelligence"], "_check_price_drift", record_drift, raising=False)
-
-    reply = registered_tools["fulfillment_order"](
+    return registered_tools["fulfillment_order"](
         quote_id="quote-1",
         shipping_option_id="ship-1",
         shipping_address=ADDRESS,
@@ -397,9 +387,93 @@ def test_an_order_whose_checkout_adds_shipping_and_tax_is_not_a_price_change(
         shipping_confirmation_token=shipping_token,
     )
 
+
+def _placed(**amounts):
+    return SimpleNamespace(
+        order_id="ord-1", currency="USD",
+        to_dict=lambda: {"order_id": "ord-1", "status": "submitted", "checkout_url": "https://pay.example"},
+        **amounts,
+    )
+
+
+#: The order service's price check at its harshest: it flags a change past
+#: its limit, in words that say "blocked".
+_BLOCKING = ("Price changed significantly. Order blocked — please request a new quote.", True)
+
+
+def test_an_order_whose_checkout_adds_shipping_and_tax_is_not_a_price_change(
+    registered_tools, tmp_path, monkeypatch,
+):
+    """A quote's price is the printing alone; the placed order states the
+    checkout's total, which adds shipping and sales tax.  Compared as they
+    were, a 16.58 quote and a 27.55 checkout read as a 66% price jump and the
+    order -- already placed -- was reported blocked, its pay link never
+    shown.  Like with like: 16.58 + 8.85 shipping against 25.43 before tax."""
+    compared: list[tuple[float, float]] = []
+
+    def record_drift(quoted, placed):
+        compared.append((quoted, placed))
+        return None, False
+
+    reply = _place_order_through_the_tool(
+        registered_tools, tmp_path, monkeypatch,
+        _placed(total_price=27.55, checkout_total=27.55, checkout_net=25.43), record_drift,
+    )
+
     assert reply["success"] is True, reply
     assert compared == [(pytest.approx(25.43), pytest.approx(25.43))], "printing + shipping vs before tax"
     assert reply["tell_the_person"] == ["Pay here: https://pay.example"]
+
+
+def test_a_real_price_change_on_a_placed_order_is_said_plainly_never_blocked(
+    registered_tools, tmp_path, monkeypatch,
+):
+    """The order exists whatever the check finds: the person hears the new
+    price and keeps the choice -- pay, or don't and it expires -- with the
+    link right after, never "blocked" and never an error."""
+    import json
+
+    reply = _place_order_through_the_tool(
+        registered_tools, tmp_path, monkeypatch,
+        _placed(total_price=34.50, checkout_total=34.50, checkout_net=32.00), lambda q, p: _BLOCKING,
+    )
+
+    assert reply["success"] is True, reply
+    assert reply["tell_the_person"] == [
+        "Your order was placed, but the checkout total before tax is 32.00 USD, not the quoted "
+        "25.43 USD. Pay only if that's fine; if not, just don't pay: an unpaid order is never "
+        "made and expires on its own. If you don't pay, any fee Kiln charged for it comes back "
+        "automatically once the order expires.",
+        "Pay here: https://pay.example",
+    ]
+    assert reply["order"]["price_change"] == {"quoted": 25.43, "checkout_before_tax": 32.0, "currency": "USD"}
+    assert "blocked" not in json.dumps(reply).lower()
+
+
+def test_prices_that_cannot_be_compared_are_stated_not_judged(registered_tools, tmp_path, monkeypatch):
+    """No total before tax came back (an older service, another provider):
+    nothing fair to compare, so nothing is judged and nothing is blocked --
+    the person hears what is known, after the pay step."""
+    import json
+
+    asked: list = []
+
+    def drift(quoted, placed):
+        asked.append((quoted, placed))
+        return _BLOCKING
+
+    reply = _place_order_through_the_tool(
+        registered_tools, tmp_path, monkeypatch, _placed(total_price=27.55), drift,
+    )
+
+    assert reply["success"] is True, reply
+    assert asked == [], "a print price is never compared with a total that adds shipping and tax"
+    assert reply["tell_the_person"] == [
+        "Pay here: https://pay.example",
+        "The print service's total for this order is 27.55 USD; the quoted 16.58 USD was the "
+        "print price alone, before shipping and tax. Check the total on its checkout before you pay.",
+    ]
+    assert "blocked" not in json.dumps(reply).lower()
 
 
 def _must_not_reach(*_args, **_kwargs):
@@ -434,3 +508,11 @@ def test_without_the_order_service_each_order_tool_says_where_ordering_lives(
     assert "https://kiln3d.com/docs/connector" in message
     assert "nothing was sent" in message
     assert "kiln-pro" not in message
+
+
+def test_the_order_status_tool_tells_the_agent_to_hand_over_the_pay_link_unasked(registered_tools):
+    """Kiln cannot pay for the person; it can make paying one click.  On any
+    sign they want to pay, the agent fetches the order and leads with the link."""
+    said = " ".join((registered_tools["fulfillment_order_status"].__doc__ or "").split())
+    assert "When the person wants to pay, asks how to pay, or asks about an order that is not paid yet" in said
+    assert "give them the link to pay first" in said

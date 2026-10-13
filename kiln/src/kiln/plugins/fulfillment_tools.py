@@ -75,27 +75,27 @@ def _normalize_save_profile_decision(raw: str) -> str:
     return ""
 
 
-def _drift_prices(
+def _like_for_like_prices(
     quoted_price: float,
     result: Any,
     *,
     quote_id: str,
     shipping_option_id: str,
-) -> tuple[float, float]:
-    """The quoted and placed prices to compare for a price change, like with like.
+) -> tuple[float, float] | None:
+    """The quoted and placed prices to compare for a price change, or ``None``.
 
-    A quote's price is the printing alone; a placed order states what the
-    print service's checkout charges, which adds shipping and any tax.  When
-    the order states its total before tax and the quote recorded the
-    shipping option that was chosen, the comparison is printing plus that
-    shipping against the checkout's total before tax: tax is added at the
-    checkout and is never a change of price.  Otherwise the comparison is
-    the one it has always been.
+    A quote's price is the print price alone; a placed order states what
+    the print service's checkout charges, which adds shipping and any tax.
+    They compare like with like only when the order states its total before
+    tax and the quote recorded the shipping option that was chosen: then
+    it is the print price plus that shipping against the checkout's total
+    before tax (tax is added at the checkout and is never a change of
+    price).  Otherwise there is nothing fair to compare, and ``None`` says
+    so rather than reading shipping and tax as a price change.
     """
-    placed = result.total_price
     before_tax = getattr(result, "checkout_net", None)
     if not isinstance(before_tax, (int, float)):
-        return quoted_price, placed
+        return None
     try:
         from kiln.quote_cache import get_cached_quote_by_id
 
@@ -112,8 +112,37 @@ def _drift_prices(
         None,
     )
     if not isinstance(shipping, (int, float)):
-        return quoted_price, placed
+        return None
     return quoted_price + float(shipping), float(before_tax)
+
+
+#: What a person who did not pay is told about Kiln's fee, when nothing was
+#: refunded on the spot: an unpaid order expires, and Kiln gives its fee back
+#: then (Terms §5.6).
+_FEE_IF_UNPAID = "If you don't pay, any fee Kiln charged for it comes back automatically once the order expires."
+
+
+def _price_change_line(quoted: float, placed: float, currency: str, fee_line: str) -> str:
+    """The order is placed and its price changed: say it plainly, keep the choice theirs."""
+    return (
+        f"Your order was placed, but the checkout total before tax is {placed:.2f} {currency}, "
+        f"not the quoted {quoted:.2f} {currency}. Pay only if that's fine; if not, just don't "
+        f"pay: an unpaid order is never made and expires on its own. {fee_line}"
+    ).strip()
+
+
+def _known_prices_line(quoted_price: float, result: Any, currency: str) -> str:
+    """What is known when the two prices cannot be compared like with like."""
+    if getattr(result, "checkout_total", None) is None and isinstance(result.total_price, (int, float)):
+        return (
+            f"The print service's total for this order is {result.total_price:.2f} {currency}; "
+            f"the quoted {quoted_price:.2f} {currency} was the print price alone, before "
+            "shipping and tax. Check the total on its checkout before you pay."
+        )
+    return (
+        f"The quoted {quoted_price:.2f} {currency} was the print price alone, before shipping "
+        "and tax. Check the total on the print service's checkout before you pay."
+    )
 
 
 def _validate_preview_confirmation(
@@ -926,7 +955,11 @@ class _FulfillmentToolsPlugin:
                                 result.order_id,
                             )
 
-                # 6. Price-drift check
+                # 6. The price, checked after placement: the order exists
+                #    whatever this finds, so it is never reported as
+                #    blocked.  A real change is said plainly with the pay
+                #    step kept; prices that cannot be compared like with
+                #    like are stated, never judged.
                 response_warnings: list[str] = []
                 if quote_validation and quote_validation.warnings:
                     response_warnings.extend(quote_validation.warnings)
@@ -934,37 +967,39 @@ class _FulfillmentToolsPlugin:
                 if result.total_price is not None and quote_validation:
                     from kiln.fulfillment.intelligence import _check_price_drift
 
-                    drift_warning, should_block = _check_price_drift(
-                        *_drift_prices(
-                            quote_validation.quoted_price,
-                            result,
-                            quote_id=quote_id,
-                            shipping_option_id=shipping_option_id,
-                        )
+                    currency = getattr(result, "currency", None) or quoted_currency
+                    prices = _like_for_like_prices(
+                        quote_validation.quoted_price,
+                        result,
+                        quote_id=quote_id,
+                        shipping_option_id=shipping_option_id,
                     )
-                    if should_block:
-                        _logger.error(
-                            "Price drift BLOCKED order for quote %s: %s",
-                            quote_id,
-                            drift_warning,
-                        )
-                        refund_warning = _srv._refund_after_order_failure(
-                            pay_result,
-                            payment_hold_id,
-                        )
-                        msg = drift_warning or "Price drift exceeded safety limit."
-                        if refund_warning:
-                            msg += f" {refund_warning}"
-                        else:
-                            msg += " Your payment has been refunded automatically."
-                        return _srv._error_dict(msg, code="PRICE_DRIFT_BLOCKED")
-                    if drift_warning:
-                        _logger.warning(
-                            "Price drift detected for quote %s: %s",
-                            quote_id,
-                            drift_warning,
-                        )
-                        response_warnings.append(drift_warning)
+                    if prices is None:
+                        known = _known_prices_line(quote_validation.quoted_price, result, currency)
+                        tell = [*tell[:1], known, *tell[1:]]
+                    else:
+                        quoted, placed = prices
+                        drift_warning, beyond_limit = _check_price_drift(quoted, placed)
+                        if drift_warning:
+                            fee_line = _FEE_IF_UNPAID
+                            if beyond_limit and (pay_result or payment_hold_id):
+                                # Kiln's own fee goes back now, as it always
+                                # has for a change this size.
+                                fee_line = _srv._refund_after_order_failure(
+                                    pay_result, payment_hold_id,
+                                ) or "Kiln's fee for it has been refunded."
+                            _logger.warning(
+                                "Price changed for quote %s: quoted %.2f, checkout before tax %.2f",
+                                quote_id, quoted, placed,
+                            )
+                            change = _price_change_line(quoted, placed, currency, fee_line)
+                            tell = [change, *tell]
+                            response_warnings.append(change)
+                            order_data["price_change"] = {
+                                "quoted": round(quoted, 2),
+                                "checkout_before_tax": round(placed, 2),
+                                "currency": currency,
+                            }
 
                 if response_warnings:
                     order_data["warnings"] = response_warnings
@@ -992,6 +1027,12 @@ class _FulfillmentToolsPlugin:
             The reply opens with ``tell_the_person``: where the order is and,
             while it is unpaid, the link to pay for it. Pass every line on to
             the person word for word.
+
+            Nothing is made until an order is paid on the print service's
+            checkout, and Kiln cannot pay it for them. When the person wants to
+            pay, asks how to pay, or asks about an order that is not paid yet,
+            call this right away for that order and give them the link to pay
+            first, before anything else, without waiting to be asked for it.
             """
             import kiln.server as _srv
 
