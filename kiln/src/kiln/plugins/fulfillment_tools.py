@@ -337,7 +337,9 @@ class _FulfillmentToolsPlugin:
                     quote_data["total_with_fee"] = float(fee_calc.total_cost)
                 # The one price sheet every door serves, built by the order
                 # service so this tool never folds its own total.
-                routing = _srv._provider_routing_metadata(provider.name)
+                routing = _srv._provider_routing_metadata(
+                    provider.name, shipping_country=shipping_country,
+                )
                 sheet = getattr(service, "price_sheet", None)
                 message = getattr(service, "quote_message", None)
                 tell: list[str] = []
@@ -928,6 +930,7 @@ class _FulfillmentToolsPlugin:
                 routing = _srv._provider_routing_metadata(
                     provider.name,
                     provider_order_id=result.order_id or "",
+                    shipping_country=str((normalized_shipping_address or {}).get("country") or ""),
                 )
                 order_data.update(routing)
                 message = getattr(service, "order_message", None)

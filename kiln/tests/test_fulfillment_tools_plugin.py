@@ -195,7 +195,7 @@ def test_fulfillment_quote_caches_provider_quote_id(registered_tools, tmp_path, 
     monkeypatch.setattr(server, "_get_fulfillment", lambda: MockProvider())
     monkeypatch.setattr(server, "_get_billing", lambda: MockBilling())
     monkeypatch.setattr(server, "_get_payment_mgr", lambda: MockPayments())
-    monkeypatch.setattr(server, "_provider_routing_metadata", lambda provider, provider_order_id="": {"provider": provider})
+    monkeypatch.setattr(server, "_provider_routing_metadata", lambda provider, provider_order_id="", **_kw: {"provider": provider})
 
     result = registered_tools["fulfillment_quote"](
         file_path=str(model),
@@ -237,7 +237,7 @@ def test_fulfillment_quote_leads_with_the_order_services_message(registered_tool
     monkeypatch.setattr(server, "_get_billing", lambda: None)
     monkeypatch.setattr(server, "_get_payment_mgr", lambda: SimpleNamespace(available_rails=[]))
     routing = {"provider_terms_url": "https://terms.example", "provider_order_terms": ["Customs are yours."]}
-    monkeypatch.setattr(server, "_provider_routing_metadata", lambda provider, provider_order_id="": dict(routing))
+    monkeypatch.setattr(server, "_provider_routing_metadata", lambda provider, provider_order_id="", **_kw: dict(routing))
 
     result = registered_tools["fulfillment_quote"](file_path=str(model), material_id="pla")
 
@@ -568,3 +568,44 @@ def test_a_question_about_a_pay_method_is_answered_from_the_list(registered_tool
     assert "answer from ``provider_pay_methods`` in the reply: yes for one it lists" in said
     assert "say Kiln doesn't know and that the checkout page shows every option for their country" in said
     assert "Never claim a method that isn't listed." in said
+
+
+
+@pytest.mark.parametrize(
+    ("country", "said"),
+    [
+        ("US", "Sales tax, where it applies, is added at Craftcloud's checkout."),
+        ("DE", "The checkout shows any tax for your country before you pay."),
+    ],
+)
+def test_a_quote_says_tax_by_where_it_ships(registered_tools, tmp_path, monkeypatch, country, said):
+    """Through the quote tool: a US quote hears that sales tax is added at
+    checkout; a German one, whose prices may already include tax, hears
+    only what is true there too.  Never a sales-tax claim in the terms."""
+    service = order_service.provide(monkeypatch)
+    import kiln.server as server
+
+    model = tmp_path / "model.stl"
+    model.write_bytes(b"solid test\nendsolid test\n")
+    quote = SimpleNamespace(
+        quote_id="q-1", material="pla", total_price=16.58, currency="USD", lead_time_days=4,
+        shipping_options=[], to_dict=lambda: {"quote_id": "q-1"},
+    )
+    seen: dict = {}
+
+    def fake_message(q, sheet, routing):
+        seen["routing"] = routing
+        return [routing["provider_tax_note"]]
+
+    monkeypatch.setattr(service, "price_sheet", lambda q, kiln_fee=0.0: {"total": 25.43}, raising=False)
+    monkeypatch.setattr(service, "quote_message", fake_message, raising=False)
+    monkeypatch.setattr(server, "_get_fulfillment", lambda: SimpleNamespace(name="craftcloud", get_quote=lambda r: quote))
+    monkeypatch.setattr(server, "_get_billing", lambda: None)
+    monkeypatch.setattr(server, "_get_payment_mgr", lambda: SimpleNamespace(available_rails=[]))
+
+    reply = registered_tools["fulfillment_quote"](file_path=str(model), material_id="pla", shipping_country=country)
+
+    assert reply["success"] is True, reply
+    assert reply["quote"]["provider_tax_note"] == said
+    assert reply["tell_the_person"] == [said]
+    assert not any("sales tax" in t.lower() for t in reply["quote"]["provider_order_terms"])

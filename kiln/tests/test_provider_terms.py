@@ -74,12 +74,20 @@ def test_the_pay_link_is_the_orders_own_checkout_page():
     ), "an id never reshapes the address"
 
 
-def test_every_quote_says_sales_tax_is_added_at_checkout():
-    """The quoted price is before tax; the checkout adds sales tax where it
-    applies, so the buyer hears it with the price."""
-    line = "Sales tax, where it applies, is added at Craftcloud's checkout."
-    assert line in provider_terms.order_terms("craftcloud")
-    assert line in server._provider_routing_metadata("craftcloud")["provider_order_terms"]
+def test_the_tax_sentence_follows_where_the_order_ships():
+    """A US quote carries no sales tax, and the checkout adds it.  Elsewhere
+    a quoted price may already include tax (a German price answer does), so
+    the sentence promises only what is true everywhere -- and the terms,
+    said to every buyer, carry no tax claim at all."""
+    us = "Sales tax, where it applies, is added at Craftcloud's checkout."
+    elsewhere = "The checkout shows any tax for your country before you pay."
+    assert provider_terms.tax_note("craftcloud", "US") == provider_terms.tax_note("Craftcloud", " us ") == us
+    for country in ("DE", "GB", "CA", ""):
+        assert provider_terms.tax_note("craftcloud", country) == elsewhere, country
+    assert not any("tax" in term.lower() and "import" not in term.lower()
+                   for term in provider_terms.order_terms("craftcloud"))
+    assert server._provider_routing_metadata("craftcloud", shipping_country="US")["provider_tax_note"] == us
+    assert server._provider_routing_metadata("craftcloud", shipping_country="DE")["provider_tax_note"] == elsewhere
 
 
 def test_how_long_an_unpaid_order_stays_open_is_recorded_once():
@@ -102,9 +110,6 @@ def test_how_to_pay_is_said_once_beside_the_link():
     assert server._provider_routing_metadata("craftcloud")["provider_pay_methods"] == methods
 
 
-def test_tax_is_one_term_and_said_beside_the_price():
-    note = provider_terms.tax_note("Craftcloud")
-    assert note == provider_terms.CRAFTCLOUD_TAX_AT_CHECKOUT
-    assert note in provider_terms.order_terms("craftcloud"), "still one of the terms"
-    assert server._provider_routing_metadata("craftcloud")["provider_tax_note"] == note
-    assert provider_terms.tax_note("nobody") == ""
+def test_a_service_with_no_tax_sentence_says_none():
+    assert provider_terms.tax_note("nobody", "US") == ""
+    assert server._provider_routing_metadata("nobody")["provider_tax_note"] == ""

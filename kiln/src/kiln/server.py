@@ -5645,6 +5645,7 @@ def _provider_routing_metadata(
     provider_name: str,
     *,
     provider_order_id: str = "",
+    shipping_country: str = "",
 ) -> dict[str, Any]:
     """Return normalized routing metadata for provider-managed orders.
 
@@ -5658,7 +5659,7 @@ def _provider_routing_metadata(
         "provider_terms_url": _PROVIDER_TERMS_URLS.get(normalized, ""),
         "provider_order_terms": order_terms(normalized),
         "provider_pay_methods": pay_methods(normalized),
-        "provider_tax_note": tax_note(normalized),
+        "provider_tax_note": tax_note(normalized, shipping_country),
         "support_owner": "provider",
         "merchant_of_record": "provider",
     }

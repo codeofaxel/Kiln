@@ -5535,7 +5535,9 @@ def _get_fulfillment_provider(service: Any) -> Any:
         ) from exc
 
 
-def _order_routing(provider_name: Any, provider_order_id: Any = "") -> dict[str, Any]:
+def _order_routing(
+    provider_name: Any, provider_order_id: Any = "", shipping_country: Any = "",
+) -> dict[str, Any]:
     """The print service's terms and ownership, as every order reply carries them.
 
     A provider without a plain-text name has no recorded terms: its reply
@@ -5546,6 +5548,7 @@ def _order_routing(provider_name: Any, provider_order_id: Any = "") -> dict[str,
     return _provider_routing_metadata(
         provider_name if isinstance(provider_name, str) else "",
         provider_order_id=provider_order_id if isinstance(provider_order_id, str) else "",
+        shipping_country=shipping_country if isinstance(shipping_country, str) else "",
     )
 
 
@@ -5638,14 +5641,16 @@ def order_quote(file_path: str, material: str, quantity: int, country: str, json
         # The print service's terms ride every quote, as at every other door;
         # a quote is never lost to how its terms are read.
         try:
-            routing = _order_routing(provider.name)
+            routing = _order_routing(provider.name, shipping_country=country)
         except Exception:
             logger.warning("Could not read the print service's terms", exc_info=True)
             routing = {}
         quote_data.update(routing)
         click.echo(format_quote(quote_data, json_mode=json_mode))
         if not json_mode:
-            terms = list(routing.get("provider_order_terms") or [])
+            tax = routing.get("provider_tax_note")
+            terms = [tax] if tax else []
+            terms.extend(routing.get("provider_order_terms") or [])
             if routing.get("provider_terms_url"):
                 terms.append(f"The print service's full terms: {routing['provider_terms_url']}")
             if terms:
@@ -6032,7 +6037,9 @@ def order_place(
         _settle_order_fee(order_data, result, *fee_tools)
     # The step that is left comes first: where to pay.
     try:
-        routing = _order_routing(provider.name, result.order_id)
+        routing = _order_routing(
+            provider.name, result.order_id, shipping_country=str(shipping_address.get("country") or ""),
+        )
     except Exception:
         logger.warning("Could not read the print service's terms", exc_info=True)
         routing = {}

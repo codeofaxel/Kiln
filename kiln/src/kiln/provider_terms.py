@@ -49,10 +49,14 @@ CRAFTCLOUD_PAY_ALSO: tuple[str, ...] = (
 #: by itself.  An unpaid order is never made, so it has nothing to cancel.
 CRAFTCLOUD_UNPAID_EXPIRY_DAYS = 90
 
-#: Tax is not in a quote: the checkout adds it for the buyer's address,
-#: which a price request cannot carry.  Said beside the price, not only in
-#: the terms, because it is the one way the checkout total differs.
+#: Tax, said beside a quote's price, by where the order ships.  In the US
+#: a quote carries no sales tax: the checkout adds it for the buyer's
+#: address, which a price request cannot carry.
 CRAFTCLOUD_TAX_AT_CHECKOUT = "Sales tax, where it applies, is added at Craftcloud's checkout."
+
+#: Anywhere else, what tax a quoted price already includes depends on the
+#: country, so the sentence promises only what is true everywhere.
+CRAFTCLOUD_TAX_ELSEWHERE = "The checkout shows any tax for your country before you pay."
 
 #: What a buyer should know before ordering through Craftcloud, said at
 #: quote time so nobody has to go looking.
@@ -64,15 +68,15 @@ CRAFTCLOUD_ORDER_TERMS: tuple[str, ...] = (
     "Craftcloud refunds you in full if no print partner can make it or it "
     "ships much later than promised; Kiln refunds its own fee automatically.",
     "Customs, duties and import taxes are yours to pay.",
-    CRAFTCLOUD_TAX_AT_CHECKOUT,
 )
 
 _ORDER_TERMS: dict[str, tuple[str, ...]] = {
     "craftcloud": CRAFTCLOUD_ORDER_TERMS,
 }
 
-_TAX_NOTES: dict[str, str] = {
-    "craftcloud": CRAFTCLOUD_TAX_AT_CHECKOUT,
+#: By provider, the tax sentence by ISO country; ``""`` is everywhere else.
+_TAX_NOTES: dict[str, dict[str, str]] = {
+    "craftcloud": {"US": CRAFTCLOUD_TAX_AT_CHECKOUT, "": CRAFTCLOUD_TAX_ELSEWHERE},
 }
 
 _CHECKOUT_URLS: dict[str, str] = {
@@ -141,10 +145,13 @@ def pay_methods_line(provider_name: str) -> str:
     return f"Pay however is easiest: {ways}; what's offered depends on your country and device."
 
 
-def tax_note(provider_name: str) -> str:
+def tax_note(provider_name: str, country: str = "") -> str:
     """The one sentence about tax said beside a quote's total, or ``""``.
 
-    One of the :func:`order_terms` too, so a surface that shows it beside
-    the total leaves it out of the terms rather than saying it twice.
+    By where the order ships (an ISO country code).  A country with no
+    sentence of its own, or none given, gets the one true everywhere.
     """
-    return _TAX_NOTES.get(_normalized(provider_name), "")
+    notes = _TAX_NOTES.get(_normalized(provider_name))
+    if not notes:
+        return ""
+    return notes.get((country or "").strip().upper()) or notes[""]
