@@ -2,8 +2,8 @@
 
 **Kiln is the open-source MCP server for 3D printing** — it lets AI agents
 (Claude, Codex, or any MCP client) design, slice, print, monitor, and recover
-real 3D prints on Bambu Lab, Creality, Prusa, Elegoo, Klipper/Moonraker,
-OctoPrint, and more.
+real 3D prints. It is compatible with Bambu Lab, Creality, Prusa, Elegoo,
+Klipper/Moonraker, OctoPrint, and more.
 
 This npm package is a thin **launcher**. The actual server is the Python
 package [`kiln3d`](https://pypi.org/project/kiln3d/); this just runs it for you
@@ -38,3 +38,7 @@ needs a new version.
 - Full guide: <https://kiln3d.com/install>
 
 License: AGPL-3.0. Source: <https://github.com/codeofaxel/Kiln>
+
+## Trademarks
+
+[OctoPrint is a registered trademark](https://octoprint.org). Other product and company names are trademarks of their respective owners; Kiln is not affiliated with or endorsed by them.

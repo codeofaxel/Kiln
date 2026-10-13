@@ -104,7 +104,7 @@ Eight backends. The name in backticks is the `KILN_PRINTER_TYPE` value.
 | **Prusa Link** (`prusalink`) | Prusa Link HTTP API | MK4, XL, Mini+ |
 | **Elegoo** (`elegoo`) | SDCP over WebSocket | Centauri Carbon and other SDCP machines. Neptune 4 and OrangeStorm Giga run Klipper — use `moonraker` for those |
 | **Moonraker / Klipper** (`moonraker`) | Moonraker HTTP API | Any Klipper printer — Voron, Rat Rig V-Core 3, Sovol SV07, QIDI X-Plus 3 |
-| **OctoPrint** (`octoprint`) | OctoPrint REST API | Any OctoPrint-connected printer |
+| **OctoPrint** (`octoprint`) | OctoPrint REST API | Compatible with any OctoPrint-connected printer |
 | **Duet / RepRapFirmware** (`duet`) | RepRapFirmware HTTP (RRF 2 and 3) | Duet 2 WiFi/Ethernet, Duet 3, and the machines built around them |
 | **Direct USB** (`usb`) | Marlin G-code over USB serial | Any Marlin printer — Ender 3, Prusa MK3S, CR-10 |
 
@@ -186,3 +186,7 @@ cd kiln && python3 -m pytest tests/ -v
 ## License
 
 AGPL-3.0-or-later. Commercial licensing is available for companies that need proprietary use — see [kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=pypi&utm_medium=package-page).
+
+## Trademarks
+
+[OctoPrint is a registered trademark](https://octoprint.org). Other product and company names are trademarks of their respective owners; Kiln is not affiliated with or endorsed by them.
