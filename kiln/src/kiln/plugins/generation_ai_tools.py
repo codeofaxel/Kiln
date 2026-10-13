@@ -313,6 +313,10 @@ class _GenerationAIToolsPlugin:
             **EXPERIMENTAL:** AI-generated models are experimental.  Always
             validate the mesh before printing.
 
+            ``reference_picture`` says what becomes of the picture: compared
+            with the model when it arrives and with every make on the goal it
+            is given to, or, where this install cannot compare, that you must.
+
             **Image tips:**
             - Use a clear, well-lit photo of the object.
             - Plain/solid backgrounds produce better results.
@@ -339,11 +343,16 @@ class _GenerationAIToolsPlugin:
             # back to your vision rather than nagging for a provider.
             import os
 
+            from kiln.reference_compare import PICTURE_PLAN_KEY, picture_plan
+
             if not os.environ.get("KILN_MESHY_API_KEY", "").strip():
                 return {
                     "success": True,
                     "needs_agent_vision": True,
                     "image_url": image_url,
+                    # What becomes of the picture: kept on the goal and
+                    # compared with every make, or said not to be.
+                    PICTURE_PLAN_KEY: picture_plan(image_url),
                     "message": (
                         "No image-to-3D provider is configured — and you don't "
                         "need one. You can SEE this image: study it and give it "
@@ -380,6 +389,9 @@ class _GenerationAIToolsPlugin:
                         "the mesh and check dimensions before printing."
                     ),
                     "message": f"Image-to-3D job submitted to {gen.display_name}.",
+                    PICTURE_PLAN_KEY: picture_plan(
+                        image_url, arrives_through="download_generated_model"
+                    ),
                 }
                 # No autofire bundle here — generate_model_from_image
                 # submits an ASYNC job and the response carries only
@@ -536,7 +548,11 @@ class _GenerationAIToolsPlugin:
                 # ``result.local_path`` — explicit source_path since
                 # the response nests the path under "result".
                 from kiln.front_door import join_goal
+                from kiln.reference_compare import compare_with_picture
 
+                # A model made FROM a picture is meant to look like it: compared
+                # with it here, before the goal's own pictures (join_goal).
+                compare_with_picture(response, result.source_image, result.local_path)
                 join_goal(brief_id, response, result.local_path)
                 try:
                     from kiln_pro.plugins.git_render_tools import (

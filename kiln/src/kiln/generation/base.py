@@ -98,6 +98,9 @@ class GenerationResult:
     format: str
     file_size_bytes: int
     prompt: str
+    #: The picture an image-to-3D job was made from ("" for any other job):
+    #: the make is meant to look like it, so it is compared with it.
+    source_image: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

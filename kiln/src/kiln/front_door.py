@@ -662,6 +662,10 @@ def join_goal(brief_id: str, result: Any, mesh_path: str | None = None) -> Any:
     (``GOAL_NOTES["opened"]``).  When no session can be opened the block
     falls back to saying what was skipped.  On a plain install a make that
     names no goal leaves the envelope untouched.
+
+    A make that joins its goal is also compared with any picture kept on the
+    goal (:func:`kiln.reference_compare.compare_with_goal`); on a plain
+    install the envelope says it was not.
     """
     envelope = _envelope_of(result)
     if envelope is None:
@@ -722,3 +726,9 @@ def _speak(brief_id: str, result: dict[str, Any], mesh_path: str | None) -> None
         "joined": outcome == "joined",
         "note": GOAL_NOTES[outcome].format(brief_id=brief_id),
     }
+    if outcome in ("joined", "unavailable") and _was_made(result):
+        # A picture kept on the goal is what the make is meant to look like:
+        # compared on every make that joins the goal, or said not to be.
+        from kiln.reference_compare import compare_with_goal
+
+        compare_with_goal(brief_id, result, mesh_path)

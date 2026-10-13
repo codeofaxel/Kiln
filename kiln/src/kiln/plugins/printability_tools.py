@@ -172,6 +172,15 @@ class _PrintabilityToolsPlugin:
                     )
 
                 return resp
+            except MemoryError as exc:
+                # The analysis needed more memory than the machine that ran
+                # it could give (see analyze_printability, "Where it runs").
+                return _srv._error_dict(
+                    str(exc)
+                    or "This model is too large to check for printability here: the "
+                    "check needed more memory than this machine could give it.",
+                    code="MESH_TOO_LARGE",
+                )
             except ValueError as exc:
                 return _srv._error_dict(
                     f"Failed to analyze printability: {exc}",

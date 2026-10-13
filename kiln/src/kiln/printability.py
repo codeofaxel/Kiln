@@ -4324,7 +4324,61 @@ def analyze_printability(
         :class:`~kiln.step_import.NoBackendError` carries ``remedy``).
         Raised, never swallowed: a CAD file nobody could read must not come
         back looking analysed.
+
+    Where it runs: with kiln-pro installed, the analysis goes through
+    kiln-pro's ``run_mesh_analysis``, which may run it outside the calling
+    process on a server that answers many people at once, so that one
+    large mesh cannot take that server's memory with it.  The arguments
+    and the report are the same either way.  Without kiln-pro, or without
+    that runner, it runs here.
     """
+    kwargs: dict[str, Any] = {
+        "nozzle_diameter": nozzle_diameter,
+        "layer_height": layer_height,
+        "max_overhang_angle": max_overhang_angle,
+        "build_volume": build_volume,
+        "material": material,
+        "infill_percent": infill_percent,
+        "include_hole_detection": include_hole_detection,
+        "printer_id": printer_id,
+        "slicer_style": slicer_style,
+    }
+    runner = _analysis_runner()
+    if runner is None:
+        return _analyze_printability_here(file_path, **kwargs)
+    return runner(_analyze_printability_here, file_path, **kwargs)
+
+
+def _analysis_runner() -> Callable[..., Any] | None:
+    """kiln-pro's runner for a whole-mesh analysis, or ``None``.
+
+    The contract: ``runner(fn, file_path, **kwargs)`` returns what
+    ``fn(file_path, **kwargs)`` returns and raises what it raises -- a
+    ``MemoryError`` when the analysis needed more memory than the machine
+    that ran it could give.  ``None`` on a plain install and on a kiln-pro
+    that has no runner, and the analysis then runs in this process.
+    """
+    try:
+        from kiln_pro.bridge import pro_features  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    return getattr(pro_features, "run_mesh_analysis", None)
+
+
+def _analyze_printability_here(
+    file_path: str,
+    *,
+    nozzle_diameter: float | None = None,
+    layer_height: float = 0.2,
+    max_overhang_angle: float | None = None,
+    build_volume: tuple[float, float, float] | None = None,
+    material: str = "pla",
+    infill_percent: float = 20.0,
+    include_hole_detection: bool = True,
+    printer_id: str | None = None,
+    slicer_style: Literal["grid", "snug", "organic", "tree"] = "grid",
+) -> PrintabilityReport:
+    """:func:`analyze_printability`'s work, wherever it is run."""
     from kiln.assumed_nozzle import assumed_nozzle
     from kiln.design_intelligence import load_pro_overlay_or_empty
 

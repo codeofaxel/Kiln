@@ -939,8 +939,10 @@ class _DesignReasoningToolsPlugin:
                 asked for" gate, the brief failure_history wiring, and
                 the ``compare_design_versions`` intent diff all light
                 up against the saved goal — without the user having to
-                re-attach the brief after every iteration round.
-                Best-effort: kiln-pro not installed silently skips.
+                re-attach the brief after every iteration round.  The
+                result is also compared with any picture kept on the goal
+                (``reference_check``); where this install cannot read the
+                goal, ``reference_check`` says the result was not compared.
             :returns: Dict with the best result and iteration history.
             """
             if err := _srv._check_auth("generate"):
