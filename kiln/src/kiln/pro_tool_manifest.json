@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-13T08:13:15.456476+00:00",
+  "generated": "2026-10-13T09:37:40.682846+00:00",
   "tool_count": 423,
   "categories": {
     "product_generators": {
@@ -1519,9 +1519,9 @@
     },
     {
       "name": "preview_overage_charge",
-      "description": "Preview the Enterprise printer-overage charge for the current billing cycle WITHOUT reporting usage to Stripe.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "What a number of printers would cost in extra-printer charges on your plan.  Free on every plan.",
+      "tier": "free",
+      "access": "free",
       "category": "billing",
       "parameters": {
         "properties": {
