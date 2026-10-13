@@ -22588,8 +22588,7 @@ def list_snapshots(
 # (export_audit_trail, lock_safety_profile, unlock_safety_profile,
 #  manage_team_member, printer_usage_summary, uptime_report,
 #  encryption_status, rotate_encryption_key, database_status,
-#  report_printer_overage, configure_sso, sso_login_url,
-#  sso_exchange_code, sso_status)
+#  configure_sso, sso_login_url, sso_exchange_code, sso_status)
 
 # ---------------------------------------------------------------------------
 # Print trend analysis & ambient safety
