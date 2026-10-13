@@ -77,6 +77,7 @@ class _GenerationToolsPlugin:
             max_overhang_angle: float = 45.0,
             timeout: int = 600,
             max_attempts: int = 2,
+            brief_id: str = "",
         ) -> dict:
             """Generate a printable design via an external AI provider.
 
@@ -112,6 +113,9 @@ class _GenerationToolsPlugin:
               or photo-based shapes OpenSCAD can't easily reach).
 
             Args:
+                brief_id: The saved goal's id from ``design_session``; pass it so
+                    this make joins the goal (recorded against it; Kiln Pro checks the
+                    result against it). Empty when there is no goal.
                 requirements: Natural-language description of the part to create.
                 provider: ``auto``, ``gemini``, ``meshy``, ``tripo3d``, or ``stability``.
                 material: Optional material target (e.g. ``"petg"``).
@@ -187,6 +191,9 @@ class _GenerationToolsPlugin:
                     result["bed_size_source"] = "printer_intelligence"
                     result["bed_size_model_id"] = resolved_model_id
                     result["bed_dims_mm"] = list(build_volume)
+                from kiln.front_door import join_goal
+
+                join_goal(brief_id, result, result.get("best_result_path"))
                 try:
                     from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
                     return attach_inspect_bundle(

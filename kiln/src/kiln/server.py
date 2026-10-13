@@ -16461,6 +16461,7 @@ def _fastener_advice_free(names: list[str]) -> dict[str, Any] | None:
 def generate_from_template(
     template_id: str,
     parameters: dict | None = None,
+    brief_id: str = "",
 ) -> dict:
     """Build a printable STL from a parametric part, to the user's dimensions.
 
@@ -16500,6 +16501,9 @@ def generate_from_template(
     Read its ``agent_instruction`` before repeating any of it to the user.
 
     Args:
+        brief_id: The saved goal's id from ``design_session``; pass it so
+            this make joins the goal (recorded against it; Kiln Pro checks the
+            result against it). Empty when there is no goal.
         template_id: Parametric part id, from ``find_design_templates``
             or ``list_design_templates`` (e.g. ``"shelf_bracket"``).
         parameters: Dict of parameter overrides carrying the user's own
@@ -16668,6 +16672,9 @@ def generate_from_template(
             except Exception:  # noqa: BLE001
                 pass
 
+            from kiln.front_door import join_goal
+
+            join_goal(brief_id, result_dict, dl.local_path)
             try:
                 from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
                 return attach_inspect_bundle(
@@ -17256,6 +17263,7 @@ def design_to_gcode_pipeline(
     printer_model: str = "",
     infill_percent: float = 20.0,
     placement: str | list[float] | None = None,
+    brief_id: str = "",
 ) -> dict:
     """End-to-end pipeline: description → template → STL → analysis → GCode.
 
@@ -17266,6 +17274,9 @@ def design_to_gcode_pipeline(
     4. Estimates weight
     5. Slices to G-code (if slicer available)
 
+    :param brief_id: The saved goal's id from ``design_session``; pass it so
+        this make joins the goal (recorded against it; Kiln Pro checks the
+        result against it). Empty when there is no goal.
     :param description: Natural-language design description.
     :param output_dir: Directory for output files (uses tempdir if empty).
     :param material: Material the slice is set for -- temperatures, melt
@@ -17289,7 +17300,12 @@ def design_to_gcode_pipeline(
             # plate refuses the slice step.  Same gate as slice_model.
             placement=placement if placement is not None else "auto",
         )
-        return {"success": result.success, **result.to_dict()}
+        result_dict = {"success": result.success, **result.to_dict()}
+        if result.success:
+            from kiln.front_door import join_goal
+
+            join_goal(brief_id, result_dict, result.stl_file)
+        return result_dict
     except Exception as exc:
         return _error_dict(f"Design-to-gcode pipeline failed: {exc}")
 

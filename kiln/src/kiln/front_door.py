@@ -167,6 +167,45 @@ NOT_A_MAKE_DOOR: dict[str, str] = {
     "iterate_decoration": "iterates a decoration, not an object",
 }
 
+#: The parameter a make door takes to join a saved goal: the goal's id, as
+#: ``design_session`` returns it.  Every make door takes it, or says in
+#: :data:`GOAL_NAMED_ELSEWHERE` where the goal is named instead -- so "an
+#: imported part joins the goal too" is a property of the roster, checked
+#: against the registry, not a sentence.
+GOAL_PARAM = "brief_id"
+
+#: Make doors that cannot take the goal themselves, and where it is named.
+#: Two shapes: a door that starts a cloud job (the mesh arrives through
+#: another door, which takes the goal), and a door that makes a BATCH of
+#: variants (one goal per make; the variant kept is made through its own
+#: door).  Each value is the sentence stamped on that door in place of the
+#: ``brief_id`` tail.
+GOAL_NAMED_ELSEWHERE: dict[str, str] = {
+    "generate_model": (
+        "The model arrives through `download_generated_model`; give that "
+        "call the goal's `brief_id` so the result joins it."
+    ),
+    "generate_model_from_image": (
+        "The model arrives through `download_generated_model`; give that "
+        "call the goal's `brief_id` so the result joins it."
+    ),
+    "optimize_template_params": (
+        "This makes a batch of variants, so it names no goal; make the one "
+        "the person keeps through `generate_from_template` with the goal's "
+        "`brief_id`."
+    ),
+    "generate_template_variations": (
+        "This makes a batch of variants, so it names no goal; make the one "
+        "the person keeps through `generate_from_template` with the goal's "
+        "`brief_id`."
+    ),
+    "batch_generate_products": (
+        "This makes a batch of products, so it names no goal; make the one "
+        "the person keeps through its own generator with the goal's "
+        "`brief_id`."
+    ),
+}
+
 #: A make-shaped tool name: the second anchor of :func:`make_door_candidates`.
 _MAKE_SHAPED_NAME = re.compile(r"^(?:generate|import|download|build|compose|iterate)_")
 
@@ -207,9 +246,7 @@ def make_door_candidates(
     for name, params in params_by_tool.items():
         if name == FRONT_DOOR:
             continue
-        if _MAKE_SHAPED_NAME.match(name):
-            out.add(name)
-        elif name in stage and not takes_a_file(params):
+        if _MAKE_SHAPED_NAME.match(name) or (name in stage and not takes_a_file(params)):
             out.add(name)
     return out
 
@@ -229,54 +266,73 @@ def registry_params(mcp: Any) -> dict[str, list[str]]:
 # The words -- defined once, composed per surface.
 # ---------------------------------------------------------------------------
 
-#: What the front door gives a person, said the same way everywhere.
+#: What the front door gives a person, said the same way everywhere, and
+#: true at every tier: the goal is kept free; checking a result against it
+#: is the paid layer (``design_session`` says the same of itself).
 _WHAT_IT_KEEPS = (
-    "it keeps the goal, the version history and the provenance, and checks "
-    "the result against what was asked"
+    "it keeps the goal (what was asked, the numbers settled, the picture "
+    "shown, what was ruled out) and every make against it, and on Kiln Pro "
+    "checks the result against that goal"
 )
 
 #: The marker every tool clause opens with; a test's one anchor.
 MAKE_DOOR_MARKER = "MAKE DOORS:"
 
-#: Stamped on every make door while the real front door is registered.
-ENGINE_CLAUSE = (
-    f"{MAKE_DOOR_MARKER} this tool is an engine `{FRONT_DOOR}` calls. An agent "
-    f"making something for a person starts with `{FRONT_DOOR}`, Kiln's front "
-    f"door for making an object -- {_WHAT_IT_KEEPS} -- and reaches this tool "
-    "through it; a part imported or downloaded joins a design_session the "
-    "same way."
+#: The head every make door's clause opens with while the real front door
+#: is registered.  The tail says how THIS door joins the goal (below).
+ENGINE_CLAUSE_HEAD = (
+    f"{MAKE_DOOR_MARKER} start with `{FRONT_DOOR}`, Kiln's front door for making "
+    f"an object — {_WHAT_IT_KEEPS}."
 )
 
+#: The tail for a door that takes the goal's id itself.
+ENGINE_CLAUSE_TAIL = (
+    f"Then make here with the goal's `{GOAL_PARAM}` so this result joins it; "
+    "an imported or downloaded part joins the same way."
+)
+
+#: The clause as the common case reads (``compile_scad``, every generator,
+#: every import); a door in :data:`GOAL_NAMED_ELSEWHERE` carries its own tail.
+ENGINE_CLAUSE = f"{ENGINE_CLAUSE_HEAD} {ENGINE_CLAUSE_TAIL}"
+
 #: Stamped on every make door when the front door is absent or a stub: the
-#: public fallback, where the keyless compile IS the loop.
+#: public fallback, where the keyless compile IS the loop.  A saved goal
+#: lives with the front door, so none can be joined on this install.
 FALLBACK_CLAUSE = (
     f"{MAKE_DOOR_MARKER} `{FRONT_DOOR}`, Kiln's front door for making an object, "
     "is not installed here (signed in to Kiln it runs on Kiln's servers). On "
-    f"this install `{FALLBACK_LOOP}` IS the make -> preview -> iterate loop -- "
-    "make it, show the preview, iterate -- and an imported or downloaded part "
-    "joins that loop the same way."
+    f"this install `{FALLBACK_LOOP}` IS the make → preview → iterate loop: make "
+    "it, show the preview, iterate."
 )
 
 #: The one sentence the server instructions open the make story with.
 FRONT_DOOR_LINE = (
     f"MAKE: a make starts with `{FRONT_DOOR}`, Kiln's front door for making an "
-    f"object -- {_WHAT_IT_KEEPS}. Every other make tool (the OpenSCAD compile, "
+    f"object — {_WHAT_IT_KEEPS}. Every other make tool (the OpenSCAD compile, "
     "the product generators, the template builders, the imports and the "
-    "marketplace download) is an engine it calls, and an imported part joins "
-    "a design_session too."
+    f"marketplace download) is a path it routes to: give that tool the goal's "
+    f"{GOAL_PARAM} so the result joins the goal, an imported or downloaded "
+    "part included."
 )
 
 #: The instructions' extra sentence on an install without the front door.
 FRONT_DOOR_FALLBACK_LINE = (
     f"On this install `{FRONT_DOOR}` is not installed (signed in to Kiln it runs "
-    f"on Kiln's servers), so `{FALLBACK_LOOP}` IS the make -> preview -> "
+    f"on Kiln's servers), so `{FALLBACK_LOOP}` IS the make → preview → "
     "iterate loop: make it, show the preview, iterate."
 )
 
 
-def make_door_clause(front_door_present: bool = True) -> str:
-    """The clause a make door's description carries on this install."""
-    return ENGINE_CLAUSE if front_door_present else FALLBACK_CLAUSE
+def make_door_clause(front_door_present: bool = True, name: str | None = None) -> str:
+    """The clause ``name``'s description carries on this install: the shared
+    head, then how this door joins the goal -- by ``brief_id``, or the
+    sentence :data:`GOAL_NAMED_ELSEWHERE` records for it."""
+    if not front_door_present:
+        return FALLBACK_CLAUSE
+    elsewhere = GOAL_NAMED_ELSEWHERE.get(name or "")
+    if elsewhere:
+        return f"{ENGINE_CLAUSE_HEAD} {elsewhere}"
+    return ENGINE_CLAUSE
 
 
 def front_door_line(front_door_present: bool = True) -> str:
@@ -305,6 +361,11 @@ def front_door_present(mcp: Any) -> bool:
     return module != _STUB_MODULE
 
 
+#: A make-door clause is one line that opens with the marker; replacing it
+#: keeps whatever stood before it, a space included.
+_CLAUSE_PARAGRAPH = re.compile(rf"{re.escape(MAKE_DOOR_MARKER)}[^\n]*")
+
+
 def with_make_door_clause(name: str, description: str, front_door_present: bool = True) -> str:
     """``description`` with this install's clause, for a make door; unchanged
     otherwise.  Idempotent, and a clause from another install (a stub's
@@ -312,13 +373,12 @@ def with_make_door_clause(name: str, description: str, front_door_present: bool 
     install speaks with one voice."""
     if name not in MAKE_DOOR_TOOLS:
         return description
-    clause = make_door_clause(front_door_present)
+    clause = make_door_clause(front_door_present, name)
     text = description or ""
-    for other in (ENGINE_CLAUSE, FALLBACK_CLAUSE):
-        if other != clause and other in text:
-            text = text.replace(other, clause)
     if clause in text:
         return text
+    if MAKE_DOOR_MARKER in text:
+        return _CLAUSE_PARAGRAPH.sub(clause, text, count=1)
     return f"{text}\n\n{clause}" if text else clause
 
 
@@ -351,3 +411,71 @@ def install(mcp: Any) -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         logger.warning("front door: make-door stamping failed", exc_info=True)
     return out
+
+
+
+# ---------------------------------------------------------------------------
+# Joining a goal -- the one helper every make door calls.
+# ---------------------------------------------------------------------------
+
+#: The key a make door's result carries the join under -- the quote's block
+#: about a file uses the same noun (``saved_goal``), so an agent reads one
+#: word for one thing.
+SAVED_GOAL_KEY = "saved_goal"
+
+#: What the result's ``saved_goal`` block says, per outcome.  Describes what
+#: Kiln did with the id it was handed, never where the file came from.
+GOAL_NOTES = {
+    "joined": "This make joins saved goal {brief_id}: it is recorded against the goal.",
+    "not_found": (
+        "This make could not be recorded against saved goal {brief_id} (no such "
+        "goal on this install, or no file to record), so it stands on its own; "
+        "it was made as asked."
+    ),
+    "unavailable": (
+        "Saved goals live with `design_session`, which is not installed here, so "
+        "this make could not join goal {brief_id}; it was made as asked."
+    ),
+}
+
+
+def join_goal(brief_id: str, result: Any, mesh_path: str | None = None) -> Any:
+    """Record ``result`` -- a make door's success envelope -- against the saved
+    goal ``brief_id``, and say in the envelope what happened.
+
+    The join itself is kiln-pro's (the goal store and the intent record are
+    the front door's own); this public helper is the one door every make
+    tool calls, so a plain install answers honestly instead of silently
+    dropping the id.  ``mesh_path`` names the file when the envelope keeps
+    it under a key the join does not read.  Never raises; an empty
+    ``brief_id`` leaves the envelope untouched.
+    """
+    if not brief_id or not isinstance(result, dict):
+        return result
+    outcome = "unavailable"
+    try:
+        from kiln_pro.design_brief.explicit_attach import attach_brief_id_to_result
+    except Exception:  # noqa: BLE001 -- a plain install
+        attach_brief_id_to_result = None
+    if attach_brief_id_to_result is not None:
+        probe: dict[str, Any] = dict(result)
+        if mesh_path:
+            probe["local_path"] = str(mesh_path)
+        try:
+            joined = bool(attach_brief_id_to_result(brief_id, probe))
+            if not joined and mesh_path:
+                # The join is idempotent: a goal sidecar already beside the
+                # file is a make already recorded, not a miss.
+                from kiln.original_design import _intent_sidecar_exists
+
+                joined = _intent_sidecar_exists(str(mesh_path))
+            outcome = "joined" if joined else "not_found"
+        except Exception:  # noqa: BLE001 -- a join must never cost the make
+            logger.debug("front door: goal join failed", exc_info=True)
+            outcome = "not_found"
+    result[SAVED_GOAL_KEY] = {
+        "brief_id": brief_id,
+        "joined": outcome == "joined",
+        "note": GOAL_NOTES[outcome].format(brief_id=brief_id),
+    }
+    return result

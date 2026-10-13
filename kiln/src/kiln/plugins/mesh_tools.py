@@ -1399,6 +1399,7 @@ class _MeshToolsPlugin:
             bed_x_mm: float = 256.0,
             bed_y_mm: float = 256.0,
             printer_id: str = "",
+            brief_id: str = "",
         ) -> dict:
             """Build a functional part by composing geometric primitives with booleans.
 
@@ -1442,6 +1443,9 @@ class _MeshToolsPlugin:
 
             Requires OpenSCAD installed on the system.
 
+            :param brief_id: The saved goal's id from ``design_session``; pass it so
+                this make joins the goal (recorded against it; Kiln Pro checks the
+                result against it). Empty when there is no goal.
             :param operations: List of operation dicts (primitive/boolean tree).
             :param output_path: Output path (defaults to temp file).
             :param center_on_bed: Translate output to bed-center (default True).
@@ -1504,6 +1508,9 @@ class _MeshToolsPlugin:
                 response = attach_fusion_report(
                     response, response.get("path"), expect_single_body=True,
                 )
+                from kiln.front_door import join_goal
+
+                join_goal(brief_id, response, response.get("path"))
                 try:
                     from kiln_pro.plugins.git_render_tools import (
                         attach_inspect_bundle,
