@@ -979,20 +979,18 @@ class _FulfillmentToolsPlugin:
                         tell = [*tell[:1], known, *tell[1:]]
                     else:
                         quoted, placed = prices
-                        drift_warning, beyond_limit = _check_price_drift(quoted, placed)
+                        drift_warning, _beyond_limit = _check_price_drift(quoted, placed)
                         if drift_warning:
-                            fee_line = _FEE_IF_UNPAID
-                            if beyond_limit and (pay_result or payment_hold_id):
-                                # Kiln's own fee goes back now, as it always
-                                # has for a change this size.
-                                fee_line = _srv._refund_after_order_failure(
-                                    pay_result, payment_hold_id,
-                                ) or "Kiln's fee for it has been refunded."
+                            # The order stays payable, so Kiln's fee follows
+                            # the order as it does everywhere: it comes back
+                            # when the order is cancelled or expires unpaid,
+                            # never on the spot.  A refund here would let the
+                            # order be paid and made with the fee returned.
                             _logger.warning(
                                 "Price changed for quote %s: quoted %.2f, checkout before tax %.2f",
                                 quote_id, quoted, placed,
                             )
-                            change = _price_change_line(quoted, placed, currency, fee_line)
+                            change = _price_change_line(quoted, placed, currency, _FEE_IF_UNPAID)
                             tell = [change, *tell]
                             response_warnings.append(change)
                             order_data["price_change"] = {

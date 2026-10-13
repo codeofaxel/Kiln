@@ -338,7 +338,7 @@ def test_a_cancel_the_order_service_words_in_full_is_said_as_it_is(registered_to
     assert reply["error"]["code"] == code
 
 
-def _place_order_through_the_tool(registered_tools, tmp_path, monkeypatch, placed, drift):
+def _place_order_through_the_tool(registered_tools, tmp_path, monkeypatch, placed, drift, **order_args):
     """``fulfillment_order`` end to end with a provider that answers ``placed``.
 
     The quote priced 16.58 to print plus 8.85 for the chosen shipping;
@@ -385,6 +385,7 @@ def _place_order_through_the_tool(registered_tools, tmp_path, monkeypatch, place
         preview_token=preview_token,
         preview_file_path=str(model),
         shipping_confirmation_token=shipping_token,
+        **order_args,
     )
 
 
@@ -448,6 +449,47 @@ def test_a_real_price_change_on_a_placed_order_is_said_plainly_never_blocked(
     ]
     assert reply["order"]["price_change"] == {"quoted": 25.43, "checkout_before_tax": 32.0, "currency": "USD"}
     assert "blocked" not in json.dumps(reply).lower()
+
+
+def test_a_price_change_past_the_limit_leaves_kilns_fee_with_the_order(
+    registered_tools, tmp_path, monkeypatch,
+):
+    """The order stays payable, so the fee is not handed back on the spot:
+    a person could take the refund and still pay, and the part would be made
+    with Kiln's fee returned.  The fee follows the order -- back only when it
+    is cancelled or expires unpaid -- and the reply says exactly that."""
+    import json
+
+    import kiln.server as server
+
+    refunds: list = []
+    charges: list = []
+    fee = SimpleNamespace(to_dict=lambda: {"fee_amount": 1.27, "waived": False}, total_cost=1.27, waived=False, fee_amount=1.27)
+    held = SimpleNamespace(
+        payment_id="pi_hold_1", rail=SimpleNamespace(value="stripe"), status=SimpleNamespace(value="completed"),
+        to_dict=lambda: {"payment_id": "pi_hold_1", "status": "completed"},
+    )
+    monkeypatch.setattr(server, "_refund_after_order_failure", lambda *a, **k: refunds.append(a))
+    monkeypatch.setattr(server, "_get_billing", lambda: SimpleNamespace(
+        calculate_fee=lambda *a, **k: fee,
+        record_charge=lambda *a, **k: charges.append(k),
+    ))
+    monkeypatch.setattr(server, "_get_payment_mgr", lambda: SimpleNamespace(
+        available_rails=["stripe"], capture_fee=lambda hold, quote_id, fee_calc: held,
+    ))
+    reply = _place_order_through_the_tool(
+        registered_tools, tmp_path, monkeypatch,
+        _placed(total_price=34.50, checkout_total=34.50, checkout_net=32.00), lambda q, p: _BLOCKING,
+        payment_hold_id="pi_hold_1",
+    )
+
+    assert reply["success"] is True, reply
+    assert refunds == [], "no refund while the order can still be paid"
+    assert reply["order"]["payment"]["status"] == "completed", "the fee is held, as charged"
+    assert [c.get("payment_status") for c in charges] == ["completed"], "the billing record says charged"
+    said = json.dumps(reply).lower()
+    assert "refunded" not in said
+    assert "comes back automatically once the order expires" in reply["tell_the_person"][0]
 
 
 def test_prices_that_cannot_be_compared_are_stated_not_judged(registered_tools, tmp_path, monkeypatch):
