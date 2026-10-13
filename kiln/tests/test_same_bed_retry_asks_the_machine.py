@@ -349,7 +349,7 @@ def test_a_refusal_is_logged_with_the_evidence(retry_file, caplog):
 
 def test_the_contract_does_not_rescue_a_material_the_hotend_cannot_reach(retry_file):
     class _Ender(_RetryAdapter):
-        printer_id = "ender3"
+        printer_id = "kilntest_ptfe"  # a 260 C lined hotend (the session's synthetic rows)
 
     _Ender.__abstractmethods__ = frozenset()
     adapter = _Ender()

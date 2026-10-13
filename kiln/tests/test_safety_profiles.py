@@ -164,11 +164,10 @@ class TestGetProfile:
         profile = get_profile("Kilntest Enclosed 256")
         assert profile.id == "kilntest_enclosed"
 
-    def test_a_roster_printer_whose_record_is_not_held_is_the_floor(self) -> None:
-        """A catalogue name with no record here (the session fixture seals
-        the served door as a signed-out install) is held to the generic
-        floor, never to a number nobody served.  The served path itself is
-        proved in test_pro_catalogue_bridge."""
+    def test_a_roster_printer_whose_record_is_not_held_is_the_floor(self, signed_out_install) -> None:
+        """A catalogue name with no record here (a signed-out install, on
+        purpose) is held to the generic floor, never to a number nobody
+        served.  The served path itself is proved in test_pro_catalogue_bridge."""
         profile = get_profile("kilntest_served")
         assert profile.id == "default"
         assert "kilntest_served" in list_profiles()

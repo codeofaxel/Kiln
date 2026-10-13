@@ -109,10 +109,10 @@ class TestGetPrinterIntel:
         assert intel.firmware == "klipper"
         assert intel.has_enclosure is False
 
-    def test_a_roster_printer_whose_record_is_not_held_is_generic(self) -> None:
-        """A catalogue name with no record here (the session fixture seals
-        the served door as a signed-out install) answers as the generic row;
-        the served path is proved in test_pro_catalogue_bridge."""
+    def test_a_roster_printer_whose_record_is_not_held_is_generic(self, signed_out_install) -> None:
+        """A catalogue name with no record here (a signed-out install, on
+        purpose) answers as the generic row; the served path is proved in
+        test_pro_catalogue_bridge."""
         intel = get_printer_intel("kilntest_served")
         assert intel.id == "default"
         assert "kilntest_served" in list_intel_profiles()

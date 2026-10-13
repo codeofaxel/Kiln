@@ -549,7 +549,7 @@ def _a_bambu_on_record(printer_id: str = "bambu_a1"):
         yield
 
 
-def test_the_nudge_is_specific_for_a_catalogued_bambu_with_no_record():
+def test_the_nudge_is_specific_for_a_catalogued_bambu_with_no_record(signed_out_install):
     """A signed-out install holds no record, so the printer resolves to the
     generic row -- but which firmware family a roster printer runs is on the
     public motion block, so the Bambu-specific line is still said.  A/B:
