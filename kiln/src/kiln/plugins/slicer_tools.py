@@ -2201,14 +2201,14 @@ def _maybe_overlay_calibration(
     input_path: str | None = None,
     slicer_name: str | None = None,
 ) -> tuple[dict[str, str], dict[str, Any] | None]:
-    """Inject a Pro+ user's calibrated slicer values into ``parsed_overrides``.
+    """Fill unset slicer settings from the person's own slicer calibration.
 
-    Lazy-imports ``kiln_pro.engineering.calibration_coach`` so this is
-    a no-op for free-tier installs that don't have kiln-pro present.
-    When kiln-pro is installed AND the user has a HIGH/MEDIUM-tier
-    calibrated slicer profile for ``printer_id`` (with material
-    matched when supplied; fallback to most-recent across all
-    materials when ``material`` is ``None``), the helper:
+    The values are the ones the person tuned in their own slicer app for
+    this printer, and they apply the same at every plan.  Reading them is
+    done by kiln-pro (https://kiln3d.com), imported lazily, so on an
+    install without it the overrides come back unchanged.  When a
+    calibrated profile is found for ``printer_id`` (matched to
+    ``material`` when supplied), the helper:
 
     - Fills in keys the caller did NOT already set in ``parsed_overrides``
       with the user's calibrated values (extrusion_multiplier,
@@ -2838,13 +2838,12 @@ class _SlicerToolsPlugin:
                     printer_id, printer_name,
                 )
 
-                # -- Calibration overlay: when kiln-pro is installed and the
-                # user has a calibrated slicer profile for (printer, material),
-                # inject those values into parsed_overrides BEFORE resolve so
-                # the slicer's print-time / cost estimates use values the
-                # user has personally verified.  No-op for free users.
-                # User-supplied overrides ALWAYS win — the helper only fills
-                # gaps.
+                # -- Calibration overlay: the settings the person tuned in
+                # their own slicer app for this printer go into
+                # parsed_overrides BEFORE resolve, so the slice prints with
+                # them.  The same at every plan; without kiln-pro installed
+                # nothing is read and nothing changes.  User-supplied
+                # overrides ALWAYS win — the helper only fills gaps.
                 cal_used: dict[str, Any] | None = None
                 if effective_printer_id:
                     # Passing input_path here triggers Pro+ slice-history
@@ -3200,14 +3199,15 @@ class _SlicerToolsPlugin:
                 # repaired copy that no longer carries the color story.
                 _multicolor_source = input_path
 
-                # --- Pro+ calibration overlay ---
-                # Mirror slice_model: when kiln-pro is installed AND the user
-                # has a HIGH/MEDIUM-tier calibrated profile for this printer,
-                # overlay calibrated values (extrusion_multiplier,
-                # filament_max_volumetric_speed, pressure_advance,
-                # xy_size_compensation, filament_retraction_length) onto the
-                # slicer args.  Free tier no-op.  Re-resolves the profile so
-                # the slicer call actually uses the calibrated values.
+                # --- Calibration overlay ---
+                # Same overlay as reslice_with_overrides: the settings the
+                # person tuned in their own slicer app for this printer
+                # (extrusion_multiplier, filament_max_volumetric_speed,
+                # pressure_advance, xy_size_compensation,
+                # filament_retraction_length) fill the slicer args.  The same
+                # at every plan; without kiln-pro installed nothing is read.
+                # Re-resolves the profile so the slicer call actually uses
+                # the calibrated values.
                 parsed_overrides: dict[str, str] = {}
                 cal_used = None
                 if effective_printer_id:
