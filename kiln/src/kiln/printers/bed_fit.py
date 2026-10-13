@@ -177,6 +177,39 @@ def catalogue_printer_id(printer_id: str | None) -> str | None:
     return None
 
 
+def no_bed_reason(
+    printer_id: str | None, *, instead: str | None, needed_for: str = "lay the part out on",
+) -> str:
+    """Why *printer_id* has no bed to lay a part out on, as a sentence that
+    names the fix.
+
+    Two different answers, told apart on purpose (2026-10-12): a printer
+    the roster does not list is UNKNOWN, and *instead* says what the caller
+    can do (pass the bed by hand, name a supported model); a roster printer
+    whose record this install does not hold is KNOWN -- the install is
+    signed out, or could not reach Kiln's servers at setup -- and is told
+    that sign-in is the fix.  Calling the second "unknown" sent a person
+    looking for a model id they already had right.  Never a guessed bed.
+    """
+    label = str(printer_id or "").strip()
+    listed = catalogue_printer_id(label) if label else None
+    if listed is None:
+        tail = f"; {instead}, or use a supported printer model id" if instead else ""
+        return f"Unknown printer_id {label!r}{tail}."
+    try:
+        from kiln._pro_catalogue_bridge import unanswered
+
+        why = unanswered(listed)
+    except Exception:  # noqa: BLE001
+        why = None
+    why = why or "sign in free and Kiln fetches it the next time this printer is set up"
+    tail = f"; {instead} to go on without it" if instead else ""
+    return (
+        f"Kiln knows the {listed} but this install holds no record for it, so it has no "
+        f"bed to {needed_for}: {why.rstrip('.')}. Nothing is guessed{tail}."
+    )
+
+
 def get_build_volume(printer_id: str | None) -> tuple[float, float, float] | None:
     """Return (x, y, z) build volume in mm for a known printer_id.
 

@@ -1073,10 +1073,10 @@ def auto_arrange_parts(
 
         resolved = resolve_build_volume(printer_id)
         if resolved is None:
+            from kiln.printers.bed_fit import no_bed_reason
+
             raise ValueError(
-                f"Unknown printer_id {printer_id!r}; omit printer_id and "
-                "pass plate_width/plate_depth explicitly, or use a "
-                "supported printer model id."
+                no_bed_reason(printer_id, instead="omit printer_id and pass plate_width/plate_depth explicitly")
             )
         _model_id, build_volume = resolved
         plate_width = build_volume[0]

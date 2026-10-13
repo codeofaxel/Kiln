@@ -659,10 +659,10 @@ def _resolve_plate_xy(
 
     resolved = resolve_build_volume(printer_id)
     if resolved is None:
+        from kiln.printers.bed_fit import no_bed_reason
+
         raise ValueError(
-            f"Unknown printer_id {printer_id!r}; omit printer_id and pass "
-            "bed_width_mm/bed_depth_mm explicitly, or use a supported "
-            "printer model id."
+            no_bed_reason(printer_id, instead="omit printer_id and pass bed_width_mm/bed_depth_mm explicitly")
         )
     _model_id, build_volume = resolved
     return build_volume[0], build_volume[1]

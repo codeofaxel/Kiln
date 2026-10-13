@@ -1264,7 +1264,7 @@ def _no_bed_on_record(printer_model: str | None) -> str:
     not catalogued.  Never a guessed number: the sentence ends the build.
     """
     model = _normalize_model(printer_model) if printer_model else ""
-    from kiln.printers.bed_fit import catalogue_printer_id
+    from kiln.printers.bed_fit import catalogue_printer_id, no_bed_reason
 
     listed = catalogue_printer_id(model) if model else None
     if listed is None:
@@ -1272,18 +1272,8 @@ def _no_bed_on_record(printer_model: str | None) -> str:
             f"Kiln's catalogue has no row for {model or 'this printer'!r}, so it has no bed "
             "centre to build the file's end sequence around and will not guess one."
         )
-    try:
-        from kiln._pro_catalogue_bridge import unanswered
-
-        reason = unanswered(listed)
-    except Exception:  # noqa: BLE001
-        reason = None
-    why = reason or "sign in free and Kiln fetches it the next time this printer is set up"
-    return (
-        f"Kiln knows the {listed} but this install holds no record for it, so it has no "
-        f"bed centre to build the file's end sequence around: {why.rstrip('.')}. "
-        "Nothing is guessed."
-    )
+    # The same sentence every bed door says, with what this door needs it for.
+    return no_bed_reason(listed, instead=None, needed_for="take the centre of, for the file's end sequence")
 
 
 def _format_template_number(value: float) -> str:

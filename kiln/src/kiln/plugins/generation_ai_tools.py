@@ -780,11 +780,18 @@ class _GenerationAIToolsPlugin:
                             bed_size_model_id, _build_vol = resolved
                             bed_size_source = "printer_intelligence"
                         elif printer_id:
+                            from kiln.printers.bed_fit import catalogue_printer_id, no_bed_reason
+
                             return _srv._error_dict(
-                                f"Unknown printer_id {printer_id!r}; use a supported "
-                                "printer model id or omit printer_id and pass an "
-                                "adapter with build-volume metadata.",
-                                code="UNKNOWN_PRINTER_MODEL",
+                                no_bed_reason(
+                                    printer_id,
+                                    instead="omit printer_id and pass an adapter with build-volume metadata",
+                                ),
+                                code=(
+                                    "PRINTER_RECORD_UNAVAILABLE"
+                                    if catalogue_printer_id(printer_id)
+                                    else "UNKNOWN_PRINTER_MODEL"
+                                ),
                             )
 
                     gate = gate_for_print(

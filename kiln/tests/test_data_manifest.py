@@ -272,9 +272,20 @@ class TestSafetyNotesAreRequired:
             for printer_id, materials in compatibility.items()
             if not printer_id.startswith("_") and printer_id != "default"
             for material, record in materials.items()
-            if record.get("notes")
+            if record.get("notes") and record.get("upgrades_needed")
         }
         assert not noted_elsewhere, (
             "a per-printer compatibility note is the Pro overlay's since "
             f"2026-10-12, never the public matrix's: {sorted(noted_elsewhere)[:5]}"
         )
+        # The one exception: a refusal with no upgrade path keeps a public
+        # reason, or the user is told "no" and nothing else (the ceiling it
+        # names stays unquoted; test_registry_mirror pins that).
+        bare = {
+            f"{printer_id}.{material}"
+            for printer_id, materials in compatibility.items()
+            if not printer_id.startswith("_")
+            for material, record in materials.items()
+            if record.get("status") == "not_compatible" and not record.get("upgrades_needed") and not record.get("notes")
+        }
+        assert not bare, f"refusals with no upgrade path and no reason: {sorted(bare)[:5]}"
