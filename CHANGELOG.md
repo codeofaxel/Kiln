@@ -7,6 +7,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Moves stay within your printer's real limits.** On Klipper printers, Kiln reads the limits from the printer itself.
+
+- **Clearer heat warnings.** Kiln tells you when your printer shuts off from heat, and warns about fumes from PTFE-lined hotends.
+
+- **Printer details stay current without updating** while you're signed in.
+
 - **Kiln recognises your printer after its address changes.**
 
 - **Setup tells you whether the camera answers, without taking a picture.**
