@@ -28,8 +28,8 @@ CRAFTCLOUD_ORDER_TERMS: tuple[str, ...] = (
     "becomes binding when you confirm the purchase there.",
     "A custom print can't be cancelled for a change of mind. A change after "
     "ordering is refunded minus a handling fee of up to 7%.",
-    "You get a full refund if no print partner can make it, or if it ships "
-    "much later than promised.",
+    "Craftcloud refunds you in full if no print partner can make it or it "
+    "ships much later than promised; Kiln refunds its own fee automatically.",
     "Customs, duties and import taxes are yours to pay.",
 )
 

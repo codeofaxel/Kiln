@@ -26,10 +26,20 @@ def test_routing_metadata_reads_the_single_copy():
     assert meta["merchant_of_record"] == "provider"
 
 
-def test_order_terms_cover_what_a_buyer_must_know_before_paying():
+def test_order_terms_say_who_refunds_what():
+    """The refund line names the refunder.  "You get a full refund" read as
+    if Kiln refunded the whole order; the print service refunds the
+    manufacturing price and Kiln refunds only its own fee (Terms §5.6)."""
     said = " ".join(provider_terms.order_terms("craftcloud")).lower()
-    for fact in ("nothing is made until you pay", "7%", "full refund", "customs"):
+    for fact in (
+        "nothing is made until you pay",
+        "7%",
+        "craftcloud refunds you in full",
+        "kiln refunds its own fee",
+        "customs",
+    ):
         assert fact in said, fact
+    assert "you get a full refund" not in said
 
 
 def test_unknown_provider_has_no_terms_recorded_not_a_blank_promise():
