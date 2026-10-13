@@ -67,8 +67,11 @@ version and leaves the goal sidecar beside the file; the result's
 ``saved_goal`` block says the session's id in one line, so the next make
 iterates inside it.  The make is never refused, held back or changed: when
 the opener is missing (an older kiln-pro) or fails, the failure is logged and
-the result carries the one-line note saying what was skipped.  A plain
-install is untouched, because there ``compile_scad`` IS the loop.
+the result carries the one-line note saying what was skipped; when the
+person's store does not take the session within the opener's short budget,
+the result says the make was not saved to their history, and no version is
+claimed.  A plain install is untouched, because there ``compile_scad`` IS
+the loop.
 """
 
 from __future__ import annotations
@@ -498,6 +501,12 @@ GOAL_NOTES = {
         "Saved goal {named} was not found here, so this make opened design "
         "session {brief_id} and " + _KEPT_IN_SESSION
     ),
+    # The session was built but the person's store did not take it in time:
+    # said plainly, so no agent claims a version that is not there.
+    "not_saved": (
+        "Kiln could not save this make to your history just now; it is still "
+        "yours below."
+    ),
     # Said on a make that named no goal when no session could be opened for
     # it (an older kiln-pro, or the opener failed): the moment the agent
     # compiled directly is the moment to say what it skipped.  Stateless and
@@ -556,7 +565,7 @@ def _open_session(result: dict[str, Any], mesh_path: str | None) -> dict[str, An
     except Exception:  # noqa: BLE001 -- the make is kept whatever the session does
         logger.warning("front door: opening a session for a make failed", exc_info=True)
         return None
-    if isinstance(opened, dict) and opened.get("brief_id"):
+    if isinstance(opened, dict) and (opened.get("brief_id") or opened.get("saved") is False):
         return opened
     return None
 
@@ -564,7 +573,15 @@ def _open_session(result: dict[str, Any], mesh_path: str | None) -> dict[str, An
 def _session_block(opened: dict[str, Any], named: str = "") -> dict[str, Any]:
     """The ``saved_goal`` block for a make kept in the session ``opened``
     names: a fresh one (the make is its first version), or the one a goal
-    sidecar beside the file already names."""
+    sidecar beside the file already names -- or none, when the person's
+    store did not take it in time."""
+    if opened.get("saved") is False:
+        return {
+            "brief_id": named,
+            "joined": False,
+            "saved": False,
+            "note": GOAL_NOTES["not_saved"],
+        }
     brief_id = str(opened["brief_id"])
     if opened.get("opened") is False:
         return {

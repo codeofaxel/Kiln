@@ -486,6 +486,21 @@ class TestAMakeWithNoGoalGetsASession:
             "brief_id": "", "joined": False, "note": GOAL_NOTES["none_named"],
         }
 
+    def test_a_session_the_store_did_not_take_is_said_and_never_claimed(self, monkeypatch):
+        """The person's store missed the opener's short budget: the make is
+        returned at once, the block says it was not saved to their history,
+        and no session id or version is claimed."""
+        _fake_opener(monkeypatch, {"brief_id": "", "saved": False})
+        env = {"success": True, "stl_path": "/x.stl"}
+        assert join_goal("", env, "/x.stl") is env
+        assert env[SAVED_GOAL_KEY] == {
+            "brief_id": "", "joined": False, "saved": False, "note": GOAL_NOTES["not_saved"],
+        }
+        assert GOAL_NOTES["not_saved"] == (
+            "Kiln could not save this make to your history just now; it is still yours below."
+        )
+        assert env["success"] is True and env["stl_path"] == "/x.stl"
+
     def test_a_goal_this_install_cannot_find_gets_a_session_too(self, monkeypatch, tmp_path):
         _fake_opener(monkeypatch, {"brief_id": "s2", "opened": True, "version": 1}, attach=False)
         env = {"success": True}
