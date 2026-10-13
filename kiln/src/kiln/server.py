@@ -297,6 +297,7 @@ from kiln.thingiverse import (
     ThingiverseError,
     ThingiverseNotFoundError,
 )
+from kiln.front_door import FRONT_DOOR_LINE as _FRONT_DOOR_LINE
 from kiln.tiers_and_terms import (
     AGENT_ACCOUNT_NUDGE,
     OFFER_FIRST_LINE,
@@ -760,6 +761,18 @@ def _build_instructions() -> str:
     # reach for tier-gated tools.  Shared constant -- see the static fallback.
     parts.append(_TIERS_AND_TERMS)
 
+    # The make story, one sentence, before any make tool is named: a make
+    # starts with design_session, and every other make tool is an engine it
+    # calls.  Judged against THIS registry -- a plain install has only the
+    # stub, and is told that compile_scad is the loop here.  Shared words --
+    # kiln.front_door is the one home; the hosted connector reads it too.
+    try:
+        from kiln.front_door import front_door_line, front_door_present
+
+        parts.append(front_door_line(front_door_present(mcp)))
+    except Exception:  # noqa: BLE001 -- instructions must never fail to build
+        parts.append(_FRONT_DOOR_LINE)
+
     # --- Update nudge (non-blocking; reads the cached PyPI check) ---
     # A new-version notice an agent reads on connect, so it can pass the
     # heads-up to the user.  Wrapped defensively: a nudge must never break
@@ -1060,6 +1073,7 @@ mcp = FastMCP(
         "hundreds of tools — use `ToolSearch(keyword)` to load schemas "
         "on demand instead of guessing names. Kiln — AI agent "
         "infrastructure for 3D printing.\n\n" + _TIERS_AND_TERMS
+        + "\n\n" + _FRONT_DOOR_LINE
     ),
 )
 
@@ -20115,6 +20129,16 @@ def _start() -> None:
         local_stage.install(mcp)
     except Exception:
         logger.debug("inline stage not installed", exc_info=True)
+
+    # The front door, said on every make door.  Same timing as the stage
+    # stamp and for the same reason: it reads the registry, and judges
+    # whether the REAL design_session is here or only its stub.
+    try:
+        from kiln import front_door
+
+        front_door.install(mcp)
+    except Exception:
+        logger.debug("front-door clause not stamped", exc_info=True)
 
     # restart_server's exec keeps the pipe but not the MCP handshake: this
     # records the handshake, lets the fresh process take it up, and, when

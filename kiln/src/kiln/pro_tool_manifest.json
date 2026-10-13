@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-12T16:49:24.526586+00:00",
+  "generated": "2026-10-13T01:06:32.398856+00:00",
   "tool_count": 423,
   "categories": {
     "product_generators": {
@@ -3451,7 +3451,7 @@
     },
     {
       "name": "build_organic_mesh",
-      "description": "Build a freeform/organic mesh from a smooth-blended primitive recipe. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).",
+      "description": "Build a freeform/organic mesh from a smooth-blended primitive recipe. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: this tool is an engine `design_session` calls. An agent making something for a person starts with `design_session`, Kiln's front door for making an object -- it keeps the goal, the version history and the provenance, and checks the result against what was asked -- and reaches this tool through it; a part imported or downloaded joins a design_session the same way.",
       "tier": "free",
       "access": "free",
       "category": "design_session",
@@ -3516,7 +3516,7 @@
     },
     {
       "name": "design_session",
-      "description": "Conversational design generator \u2014 describe what you want in plain English, answer a few quick questions, save the brief, generate an STL with a sidecar report of which design checks it passes. Verbs: start, update, save, generate. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).",
+      "description": "Kiln's front door for making an object. Describe what you want in plain English, answer a few quick questions, save the goal, generate an STL with a sidecar report of which design checks it passes; every other make tool is an engine this one calls. Verbs: start, update, save, generate. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).",
       "tier": "free",
       "access": "free",
       "category": "design_session",
@@ -5942,7 +5942,7 @@
     },
     {
       "name": "import_external_mesh",
-      "description": "Import external geometry (STL / OBJ / PLY / GLB / glTF / 3MF / STEP) as a first-class design version. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Import external geometry (STL / OBJ / PLY / GLB / glTF / 3MF / STEP) as a first-class design version. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: this tool is an engine `design_session` calls. An agent making something for a person starts with `design_session`, Kiln's front door for making an object -- it keeps the goal, the version history and the provenance, and checks the result against what was asked -- and reaches this tool through it; a part imported or downloaded joins a design_session the same way.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "design_versioning",
@@ -6008,7 +6008,7 @@
     },
     {
       "name": "import_model_parts",
-      "description": "Import a MULTI-PART model with its named parts intact. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).",
+      "description": "Import a MULTI-PART model with its named parts intact. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: this tool is an engine `design_session` calls. An agent making something for a person starts with `design_session`, Kiln's front door for making an object -- it keeps the goal, the version history and the provenance, and checks the result against what was asked -- and reaches this tool through it; a part imported or downloaded joins a design_session the same way.",
       "tier": "free",
       "access": "free",
       "category": "design_versioning",
@@ -19323,7 +19323,7 @@
     },
     {
       "name": "generate_ashtray",
-      "description": "Generate an ashtray with optional branding and a QR code (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 ashtrays/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate an ashtray with optional branding and a QR code (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: this tool is an engine `design_session` calls. An agent making something for a person starts with `design_session`, Kiln's front door for making an object -- it keeps the goal, the version history and the provenance, and checks the result against what was asked -- and reaches this tool through it; a part imported or downloaded joins a design_session the same way.\n\nFree tier: 3 ashtrays/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_metered",
       "category": "product_generators",
@@ -19418,7 +19418,7 @@
     },
     {
       "name": "generate_bookmark",
-      "description": "Generate a bookmark with optional decoration and page clip. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 bookmarks/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a bookmark with optional decoration and page clip. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: this tool is an engine `design_session` calls. An agent making something for a person starts with `design_session`, Kiln's front door for making an object -- it keeps the goal, the version history and the provenance, and checks the result against what was asked -- and reaches this tool through it; a part imported or downloaded joins a design_session the same way.\n\nFree tier: 3 bookmarks/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_metered",
       "category": "product_generators",
@@ -19506,7 +19506,7 @@
     },
     {
       "name": "generate_coaster",
-      "description": "Generate a coaster with optional branding and a QR code (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 coasters/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a coaster with optional branding and a QR code (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: this tool is an engine `design_session` calls. An agent making something for a person starts with `design_session`, Kiln's front door for making an object -- it keeps the goal, the version history and the provenance, and checks the result against what was asked -- and reaches this tool through it; a part imported or downloaded joins a design_session the same way.\n\nFree tier: 3 coasters/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_metered",
       "category": "product_generators",
@@ -19579,7 +19579,7 @@
     },
     {
       "name": "generate_fridge_magnet",
-      "description": "Generate a printable fridge magnet with front decoration. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 fridge magnets/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a printable fridge magnet with front decoration. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: this tool is an engine `design_session` calls. An agent making something for a person starts with `design_session`, Kiln's front door for making an object -- it keeps the goal, the version history and the provenance, and checks the result against what was asked -- and reaches this tool through it; a part imported or downloaded joins a design_session the same way.\n\nFree tier: 3 fridge magnets/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_metered",
       "category": "product_generators",
@@ -19677,7 +19677,7 @@
     },
     {
       "name": "generate_frisbee",
-      "description": "Generate a flying-disc frisbee with optional top decoration. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 frisbees/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a flying-disc frisbee with optional top decoration. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: this tool is an engine `design_session` calls. An agent making something for a person starts with `design_session`, Kiln's front door for making an object -- it keeps the goal, the version history and the provenance, and checks the result against what was asked -- and reaches this tool through it; a part imported or downloaded joins a design_session the same way.\n\nFree tier: 3 frisbees/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_metered",
       "category": "product_generators",
@@ -19760,7 +19760,7 @@
     },
     {
       "name": "generate_jewelry_tray",
-      "description": "Generate a jewelry tray with optional decoration and a QR code (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 jewelry trays/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a jewelry tray with optional decoration and a QR code (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: this tool is an engine `design_session` calls. An agent making something for a person starts with `design_session`, Kiln's front door for making an object -- it keeps the goal, the version history and the provenance, and checks the result against what was asked -- and reaches this tool through it; a part imported or downloaded joins a design_session the same way.\n\nFree tier: 3 jewelry trays/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_metered",
       "category": "product_generators",
@@ -19873,7 +19873,7 @@
     },
     {
       "name": "generate_keychain",
-      "description": "Generate a 3D-printable keychain. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 keychains/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a 3D-printable keychain. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: this tool is an engine `design_session` calls. An agent making something for a person starts with `design_session`, Kiln's front door for making an object -- it keeps the goal, the version history and the provenance, and checks the result against what was asked -- and reaches this tool through it; a part imported or downloaded joins a design_session the same way.\n\nFree tier: 3 keychains/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_metered",
       "category": "product_generators",
@@ -19966,7 +19966,7 @@
     },
     {
       "name": "generate_license_plate_frame",
-      "description": "Generate a license plate frame for a US or EU plate. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 license plate frames/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a license plate frame for a US or EU plate. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: this tool is an engine `design_session` calls. An agent making something for a person starts with `design_session`, Kiln's front door for making an object -- it keeps the goal, the version history and the provenance, and checks the result against what was asked -- and reaches this tool through it; a part imported or downloaded joins a design_session the same way.\n\nFree tier: 3 license plate frames/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_metered",
       "category": "product_generators",
@@ -20089,7 +20089,7 @@
     },
     {
       "name": "generate_nameplate",
-      "description": "Generate a desk nameplate with two-line raised text. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 nameplates/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a desk nameplate with two-line raised text. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: this tool is an engine `design_session` calls. An agent making something for a person starts with `design_session`, Kiln's front door for making an object -- it keeps the goal, the version history and the provenance, and checks the result against what was asked -- and reaches this tool through it; a part imported or downloaded joins a design_session the same way.\n\nFree tier: 3 nameplates/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_metered",
       "category": "product_generators",
@@ -20182,7 +20182,7 @@
     },
     {
       "name": "generate_ornament",
-      "description": "Generate a hanging ornament with optional decoration. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 ornaments/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a hanging ornament with optional decoration. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: this tool is an engine `design_session` calls. An agent making something for a person starts with `design_session`, Kiln's front door for making an object -- it keeps the goal, the version history and the provenance, and checks the result against what was asked -- and reaches this tool through it; a part imported or downloaded joins a design_session the same way.\n\nFree tier: 3 ornaments/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_metered",
       "category": "product_generators",
@@ -20270,7 +20270,7 @@
     },
     {
       "name": "generate_pen_cup",
-      "description": "Generate a desktop pen / brush cup with optional decoration and a QR code (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 pen cups/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a desktop pen / brush cup with optional decoration and a QR code (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: this tool is an engine `design_session` calls. An agent making something for a person starts with `design_session`, Kiln's front door for making an object -- it keeps the goal, the version history and the provenance, and checks the result against what was asked -- and reaches this tool through it; a part imported or downloaded joins a design_session the same way.\n\nFree tier: 3 pen cups/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_metered",
       "category": "product_generators",
@@ -20373,7 +20373,7 @@
     },
     {
       "name": "generate_pet_bowl",
-      "description": "Generate a tapered pet bowl optimized for FDM printing. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 pet bowls/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a tapered pet bowl optimized for FDM printing. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: this tool is an engine `design_session` calls. An agent making something for a person starts with `design_session`, Kiln's front door for making an object -- it keeps the goal, the version history and the provenance, and checks the result against what was asked -- and reaches this tool through it; a part imported or downloaded joins a design_session the same way.\n\nFree tier: 3 pet bowls/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_metered",
       "category": "product_generators",
@@ -20456,7 +20456,7 @@
     },
     {
       "name": "generate_pet_tag",
-      "description": "Generate a 3D-printable pet ID tag. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 pet tags/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a 3D-printable pet ID tag. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: this tool is an engine `design_session` calls. An agent making something for a person starts with `design_session`, Kiln's front door for making an object -- it keeps the goal, the version history and the provenance, and checks the result against what was asked -- and reaches this tool through it; a part imported or downloaded joins a design_session the same way.\n\nFree tier: 3 pet tags/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_metered",
       "category": "product_generators",
@@ -20551,7 +20551,7 @@
     },
     {
       "name": "generate_rolling_tray",
-      "description": "Generate a rolling tray \u2014 a shallow rectangular work tray with a concave *cove* inner wall, so loose contents sweep clean into a corner instead of catching a 90-degree edge.  Decorate the interior work surface and the exterior underside, both. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 rolling trays/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a rolling tray \u2014 a shallow rectangular work tray with a concave *cove* inner wall, so loose contents sweep clean into a corner instead of catching a 90-degree edge.  Decorate the interior work surface and the exterior underside, both. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: this tool is an engine `design_session` calls. An agent making something for a person starts with `design_session`, Kiln's front door for making an object -- it keeps the goal, the version history and the provenance, and checks the result against what was asked -- and reaches this tool through it; a part imported or downloaded joins a design_session the same way.\n\nFree tier: 3 rolling trays/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_metered",
       "category": "product_generators",
@@ -20654,7 +20654,7 @@
     },
     {
       "name": "generate_soap_dish",
-      "description": "Generate a draining soap dish with optional bottom branding. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 soap dishes/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a draining soap dish with optional bottom branding. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: this tool is an engine `design_session` calls. An agent making something for a person starts with `design_session`, Kiln's front door for making an object -- it keeps the goal, the version history and the provenance, and checks the result against what was asked -- and reaches this tool through it; a part imported or downloaded joins a design_session the same way.\n\nFree tier: 3 soap dishes/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_metered",
       "category": "product_generators",
@@ -20752,7 +20752,7 @@
     },
     {
       "name": "generate_wall_plaque",
-      "description": "Generate a wall-mountable photo plaque. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 wall plaques/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a wall-mountable photo plaque. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: this tool is an engine `design_session` calls. An agent making something for a person starts with `design_session`, Kiln's front door for making an object -- it keeps the goal, the version history and the provenance, and checks the result against what was asked -- and reaches this tool through it; a part imported or downloaded joins a design_session the same way.\n\nFree tier: 3 wall plaques/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_metered",
       "category": "product_generators",
@@ -20918,7 +20918,7 @@
     },
     {
       "name": "batch_generate_products",
-      "description": "Generate N decorated products from N photos in one call (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate N decorated products from N photos in one call (Pro). MAKE DOORS: this tool is an engine `design_session` calls. An agent making something for a person starts with `design_session`, Kiln's front door for making an object -- it keeps the goal, the version history and the provenance, and checks the result against what was asked -- and reaches this tool through it; a part imported or downloaded joins a design_session the same way.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "product_intelligence",
@@ -21014,7 +21014,7 @@
     },
     {
       "name": "generate_decorated_product",
-      "description": "Generate a fully decorated product from a photo in one step (Pro). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a fully decorated product from a photo in one step (Pro). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: this tool is an engine `design_session` calls. An agent making something for a person starts with `design_session`, Kiln's front door for making an object -- it keeps the goal, the version history and the provenance, and checks the result against what was asked -- and reaches this tool through it; a part imported or downloaded joins a design_session the same way.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "product_intelligence",
@@ -21086,7 +21086,7 @@
     },
     {
       "name": "generate_product_base",
-      "description": "Generate a 3D-printable product base shape from a template (Pro). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a 3D-printable product base shape from a template (Pro). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: this tool is an engine `design_session` calls. An agent making something for a person starts with `design_session`, Kiln's front door for making an object -- it keeps the goal, the version history and the provenance, and checks the result against what was asked -- and reaches this tool through it; a part imported or downloaded joins a design_session the same way.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "product_intelligence",
