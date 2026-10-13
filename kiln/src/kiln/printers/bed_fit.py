@@ -34,6 +34,7 @@ from typing import Any
 from kiln import step_import
 from kiln.gcode import _MAX_SCAN_BYTES, GCODE_NUMBER, axis_value
 from kiln.gcode_metadata import read_member_text, sliced_gcode_member
+from kiln.untrusted_zip import UntrustedZipFile
 
 logger = logging.getLogger(__name__)
 
@@ -503,7 +504,7 @@ def _plate_gcode_file(threemf_path: str) -> Any:
     gcode_bytes: bytes | None = None
     if Path(threemf_path).is_file():
         try:
-            with zipfile.ZipFile(threemf_path) as zf:
+            with UntrustedZipFile(threemf_path) as zf:
                 member = sliced_gcode_member(zf)
                 if member is not None:
                     gcode_bytes = read_member_text(zf, member, _MAX_SCAN_BYTES).encode("utf-8")
@@ -543,16 +544,17 @@ def compute_3mf_geometry_bbox(threemf_path: str) -> dict[str, float] | None:
     never as a failure.
     """
     from kiln.threemf_parser import (
-        _CORE_NS,
-        _apply_3mf_transform,
         _ModelArchive,
-        _parse_vertices,
+        _placed_vertex_bounds,
+        open_untrusted_zip,
     )
 
-    points: list[tuple[float, float, float]] = []
     errors: list[str] = []
     try:
-        with zipfile.ZipFile(threemf_path) as zf:
+        with open_untrusted_zip(threemf_path) as zf:
+            # Structure only: the vertices are folded into running bounds as
+            # they stream (see _placed_vertex_bounds), so this check costs
+            # the same memory for a 1 MB part and a 1 GB one.
             archive = _ModelArchive(zf, errors)
             to_mm = archive.root_transform_mm()
             if to_mm is None:
@@ -561,14 +563,7 @@ def compute_3mf_geometry_bbox(threemf_path: str) -> dict[str, float] | None:
                     threemf_path, "; ".join(errors),
                 )
                 return None
-            for placed in archive.placements(root_transform=to_mm):
-                mesh_el = placed.element.find(f"{{{_CORE_NS}}}mesh")
-                if mesh_el is None:
-                    continue
-                points.extend(
-                    _apply_3mf_transform(placed.transform, v)
-                    for v in _parse_vertices(mesh_el)
-                )
+            bounds = _placed_vertex_bounds(archive, to_mm)
     except (zipfile.BadZipFile, ValueError, KeyError, OSError) as exc:
         logger.warning("compute_3mf_geometry_bbox failed for %s: %s",
                        threemf_path, exc)
@@ -579,12 +574,13 @@ def compute_3mf_geometry_bbox(threemf_path: str) -> dict[str, float] | None:
             threemf_path, "; ".join(errors),
         )
 
-    if not points:
+    if bounds is None:
         return None
+    (x_min, y_min, z_min), (x_max, y_max, z_max) = bounds
     return {
-        "x_min": min(p[0] for p in points), "x_max": max(p[0] for p in points),
-        "y_min": min(p[1] for p in points), "y_max": max(p[1] for p in points),
-        "z_min": min(p[2] for p in points), "z_max": max(p[2] for p in points),
+        "x_min": x_min, "x_max": x_max,
+        "y_min": y_min, "y_max": y_max,
+        "z_min": z_min, "z_max": z_max,
     }
 
 
@@ -1008,7 +1004,7 @@ def check_gcode_has_homing(
     gcode_text: str | None = None
     if p.suffix.lower() == ".3mf" or str(p).lower().endswith(".gcode.3mf"):
         try:
-            with zipfile.ZipFile(p) as zf:
+            with UntrustedZipFile(p) as zf:
                 member = sliced_gcode_member(zf)
                 if member is not None:
                     gcode_text = read_member_text(zf, member, _MAX_SCAN_BYTES)

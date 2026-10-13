@@ -124,6 +124,7 @@ from kiln.gcode import (
     slicer_nozzle_diameters,
     slicer_print_time,
 )
+from kiln.untrusted_zip import UntrustedZipFile
 
 logger = logging.getLogger(__name__)
 
@@ -2372,7 +2373,7 @@ def carries_placeholder_model(path: str | os.PathLike[str]) -> bool:
     so a plain model 3MF is never mistaken for one.  Never raises.
     """
     try:
-        with zipfile.ZipFile(path) as zf:
+        with UntrustedZipFile(path) as zf:
             names = zf.namelist()
             if not any(n.startswith("Metadata/plate_") and n.endswith(".gcode") for n in names):
                 return False
@@ -2629,7 +2630,7 @@ def bambu_archive_problems(path: str | os.PathLike[str], *, name: str | None = N
     if Path(name or p.name).suffix.lower() != ".3mf":
         return []
     try:
-        zf = zipfile.ZipFile(str(p))
+        zf = UntrustedZipFile(str(p))
     except (OSError, zipfile.BadZipFile) as exc:
         return [f"{p.name} is not a readable 3MF archive ({exc})"]
     with zf:
@@ -2736,7 +2737,7 @@ def complete_bambu_archive(
     src = Path(path)
     dst = Path(output_path) if output_path else src
     slice_info: str | None = None
-    with zipfile.ZipFile(str(src)) as zf:
+    with UntrustedZipFile(str(src)) as zf:
         if "Metadata/plate_1.gcode" not in zf.namelist():
             raise ValueError(f"{src.name} is not a sliced plate (no Metadata/plate_1.gcode)")
         colors = _declared_plate_colors(zf)
@@ -2772,7 +2773,7 @@ def complete_bambu_archive(
     )
     replaced = set(rendered) | {KILN_PREVIEW_MARKER}
     tmp = dst.with_name(dst.name + ".completing")
-    with zipfile.ZipFile(str(src)) as src_zf, zipfile.ZipFile(str(tmp), "w", zipfile.ZIP_DEFLATED) as dst_zf:
+    with UntrustedZipFile(str(src)) as src_zf, zipfile.ZipFile(str(tmp), "w", zipfile.ZIP_DEFLATED) as dst_zf:
         for item in src_zf.infolist():
             if item.filename in replaced:
                 continue
@@ -3308,7 +3309,7 @@ def build_bambu_3mf(
     model_data: str = _MINIMAL_3D_MODEL
     if source_3mf_path and os.path.isfile(source_3mf_path):
         try:
-            with zipfile.ZipFile(source_3mf_path) as zf:
+            with UntrustedZipFile(source_3mf_path) as zf:
                 for name in zf.namelist():
                     if name.endswith(".png") and (
                         name.startswith("Metadata/")
@@ -3475,7 +3476,7 @@ def repackage_gcode_as_bambu_3mf(
     slice_info: str | None = None
     if source_3mf_path and os.path.isfile(source_3mf_path):
         try:
-            with zipfile.ZipFile(source_3mf_path) as zf:
+            with UntrustedZipFile(source_3mf_path) as zf:
                 for name in zf.namelist():
                     if name.endswith(".png") and (
                         name.startswith("Metadata/")

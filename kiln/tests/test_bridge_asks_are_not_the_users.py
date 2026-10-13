@@ -8,6 +8,11 @@ counts exactly that reach, so every served call a bridge makes passes
 ``_asked_by_user=False`` and :func:`kiln.server._pro_api_call` skips the
 count.  This pins the wiring for every bridge that asks the servers, a new
 one included, and :class:`TestTheFlag` pins what the flag does.
+
+A bridge that carries the person's OWN request -- it runs only because they
+asked for exactly what it fetches -- says so with ``_asked_by_user=True`` and
+is named in :data:`_PERSONS_OWN_ASK` with the reason.  Either way the flag is
+written out: a bridge never leaves who asked to the default.
 """
 
 from __future__ import annotations
@@ -35,6 +40,14 @@ def _served_calls(path: Path) -> list[ast.Call]:
 #: bridges) answer only from kiln-pro on this computer and send nothing.
 _SERVED = sorted(path for path in _BRIDGES if _served_calls(path))
 
+#: Bridges whose served call IS the person's ask, with why.
+_PERSONS_OWN_ASK = {
+    "_pro_material_rules_bridge": (
+        "runs only when the person names the rules on check_material_environment; "
+        "the per-requirement verdict is the feature they reached for"
+    ),
+}
+
 
 def test_every_served_bridge_on_disk_is_seen():
     assert {path.stem for path in _SERVED} >= {
@@ -52,9 +65,14 @@ def test_a_bridge_never_counts_its_ask_as_a_persons(path):
         flags = [kw.value for kw in call.keywords if kw.arg == "_asked_by_user"]
         assert len(flags) == 1, f"{path.name}:{call.lineno} does not say who asked"
         flag = flags[0]
-        assert isinstance(flag, ast.Constant) and flag.value is False, (
-            f"{path.name}:{call.lineno} must pass _asked_by_user=False"
+        expected = path.stem in _PERSONS_OWN_ASK
+        assert isinstance(flag, ast.Constant) and flag.value is expected, (
+            f"{path.name}:{call.lineno} must pass _asked_by_user={expected}"
         )
+
+
+def test_every_named_own_ask_is_a_served_bridge():
+    assert set(_PERSONS_OWN_ASK) <= {path.stem for path in _SERVED}
 
 
 class TestTheFlag:

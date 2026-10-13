@@ -22,6 +22,14 @@ from kiln.tool_annotations import creates
 _logger = logging.getLogger(__name__)
 
 
+
+def _keyless_make_line() -> str:
+    """The keyless make, in the one wording every map uses
+    (``kiln.front_door.KEYLESS_MAKE_LINE``)."""
+    from kiln.front_door import KEYLESS_MAKE_LINE
+
+    return KEYLESS_MAKE_LINE
+
 class _GenerationAIToolsPlugin:
     """AI generation pipeline tools.
 
@@ -289,9 +297,12 @@ class _GenerationAIToolsPlugin:
         ) -> dict:
             """Make a 3D model from a reference image.
 
-            DEFAULT (keyless): you (the agent) can SEE the image — study it
-            and write the OpenSCAD yourself, then compile_scad. You do NOT
-            need an image-to-3D provider, and with no key configured this
+            DEFAULT (keyless): you (the agent) can SEE the image — study it,
+            give it to ``design_session`` as ``reference_images`` (every later
+            make is checked against it), and write the OpenSCAD yourself for
+            ``design_session(verb="generate", scad_code=...)`` — or
+            ``compile_scad`` on an install without ``design_session``. You do
+            NOT need an image-to-3D provider, and with no key configured this
             tool hands the job back to your vision instead of erroring.
 
             OPT-IN cloud path: when the user has set their OWN
@@ -335,12 +346,12 @@ class _GenerationAIToolsPlugin:
                     "image_url": image_url,
                     "message": (
                         "No image-to-3D provider is configured — and you don't "
-                        "need one. You can SEE this image: study it and write "
-                        "the OpenSCAD to match the object, then compile it with "
-                        "compile_scad (free, no key). Show the user a preview "
-                        "and iterate. Cloud image-to-3D (Meshy) is an OPT-IN "
-                        "that needs the user's own KILN_MESHY_API_KEY — never "
-                        "required."
+                        "need one. You can SEE this image: study it and give it "
+                        "to design_session as reference_images, so every make is "
+                        "checked against it. " + _keyless_make_line() + " Show "
+                        "the user a preview and iterate. Cloud image-to-3D (Meshy) is an "
+                        "OPT-IN that needs the user's own KILN_MESHY_API_KEY — "
+                        "never required."
                     ),
                 }
             if provider != "meshy":
@@ -379,8 +390,9 @@ class _GenerationAIToolsPlugin:
             except GenerationAuthError as exc:
                 return _srv._error_dict(
                     f"Image-to-3D provider auth failed: {exc}. You don't need a "
-                    "provider — study the image and write the OpenSCAD yourself, "
-                    "then compile_scad. Cloud Meshy is opt-in via KILN_MESHY_API_KEY.",
+                    "provider — study the image. "
+                    + _keyless_make_line()
+                    + " Cloud Meshy is opt-in via KILN_MESHY_API_KEY.",
                     code="AUTH_ERROR",
                 )
             except GenerationError as exc:
@@ -440,6 +452,7 @@ class _GenerationAIToolsPlugin:
             job_id: str,
             provider: str = "meshy",
             output_path: str | None = None,
+            brief_id: str = "",
         ) -> dict:
             """Download a completed generated model, check it, and open it on the stage.
 
@@ -450,6 +463,9 @@ class _GenerationAIToolsPlugin:
             from, so the stage and design history can say so later.
 
             Args:
+                brief_id: The saved goal's id from ``design_session``; pass it so
+                    this make joins the goal (recorded against it; Kiln Pro checks the
+                    result against it). Empty when there is no goal.
                 job_id: Job ID of a completed generation job.
                 provider: Provider that owns the job (``"meshy"`` or ``"openscad"``).
                 output_path: Directory to save the file.  Defaults to
@@ -519,6 +535,9 @@ class _GenerationAIToolsPlugin:
                 # completed result).  The mesh path is
                 # ``result.local_path`` — explicit source_path since
                 # the response nests the path under "result".
+                from kiln.front_door import join_goal
+
+                join_goal(brief_id, response, result.local_path)
                 try:
                     from kiln_pro.plugins.git_render_tools import (
                         attach_inspect_bundle,
@@ -655,6 +674,7 @@ class _GenerationAIToolsPlugin:
             timeout: int = 600,
             material: str | None = None,
             placement: str | list[float] | None = None,
+            brief_id: str = "",
         ) -> dict:
             """Full pipeline: generate a model, validate, slice, and upload (preview).
 
@@ -668,6 +688,9 @@ class _GenerationAIToolsPlugin:
             (Thingiverse, MyMiniFactory) instead of generating new ones.
 
             Args:
+                brief_id: The saved goal's id from ``design_session``; pass it so
+                    this make joins the goal (recorded against it; Kiln Pro checks the
+                    result against it). Empty when there is no goal.
                 prompt: Text description of the 3D model to generate.
                 provider: Generation provider (``"meshy"`` or ``"openscad"``).
                 style: Optional style hint for cloud providers.
@@ -1065,6 +1088,9 @@ class _GenerationAIToolsPlugin:
                         f"to begin printing after review."
                     )
 
+                from kiln.front_door import join_goal
+
+                join_goal(brief_id, resp, result.local_path)
                 try:
                     from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
                     return attach_inspect_bundle(
@@ -1100,6 +1126,7 @@ class _GenerationAIToolsPlugin:
             material: str = "PLA",
             auto_reinforce: bool = False,
             printer_id: str | None = None,
+            brief_id: str = "",
         ) -> dict:
             """Generate from template + structural analysis + print settings (recommended for functional parts).
 
@@ -1115,6 +1142,9 @@ class _GenerationAIToolsPlugin:
             The agent can take the output and directly call ``reslice_with_overrides``
             or ``run_reslice_and_print`` with the recommended settings.
 
+            :param brief_id: The saved goal's id from ``design_session``; pass it so
+                this make joins the goal (recorded against it; Kiln Pro checks the
+                result against it). Empty when there is no goal.
             :param template_id: Template ID from ``list_design_templates``.
             :param parameters: Parameter overrides (e.g., ``{"phone_width": 80}``).
             :param material: Filament type for settings inference and for the
@@ -1191,6 +1221,9 @@ class _GenerationAIToolsPlugin:
                         "with these settings."
                     ),
                 }
+                from kiln.front_door import join_goal
+
+                join_goal(brief_id, response, stl_path)
                 try:
                     from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
                     return attach_inspect_bundle(response, level="quick")

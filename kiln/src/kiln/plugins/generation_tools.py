@@ -77,6 +77,7 @@ class _GenerationToolsPlugin:
             max_overhang_angle: float = 45.0,
             timeout: int = 600,
             max_attempts: int = 2,
+            brief_id: str = "",
         ) -> dict:
             """Generate a printable design via an external AI provider.
 
@@ -87,15 +88,17 @@ class _GenerationToolsPlugin:
 
             This is NOT the default. It needs a configured provider (the user
             supplies their own API key). For most custom objects the free,
-            keyless path is to author the OpenSCAD yourself and compile it with
-            ``compile_scad`` — no provider required. Reach for this tool when
-            the shape is organic or photo-derived and hard to express in
-            OpenSCAD AND a provider is configured.
+            keyless path is to author the OpenSCAD yourself and make it with
+            ``design_session(verb="generate", goal_id=..., scad_code=...)`` —
+            or ``compile_scad`` on an install without ``design_session`` — no
+            provider required. Reach for this tool when the shape is organic
+            or photo-derived and hard to express in OpenSCAD AND a provider is
+            configured.
 
             For the user-facing saved-goal flow (capturing duty / environment /
             materials / safety so the audit and post-print review can verify
             the result against the user's intent), call this through
-            ``design_session(verb="generate", session_id=...)`` rather than
+            ``design_session(verb="generate", goal_id=...)`` rather than
             calling ``generate_model_with_provider`` directly.
 
             Provider notes:
@@ -106,12 +109,16 @@ class _GenerationToolsPlugin:
             No-provider fallback:
             - If no cloud provider is configured this raises NO_PROVIDER. Do
               NOT ask the user to set an API key — fall back to writing the
-              OpenSCAD yourself and compiling it with compile_scad. That free,
+              OpenSCAD yourself and making it through design_session (or
+              compile_scad where design_session is not installed). That free,
               local path is the default for custom objects; cloud providers are
               an opt-in the user supplies their own key for (best for organic
               or photo-based shapes OpenSCAD can't easily reach).
 
             Args:
+                brief_id: The saved goal's id from ``design_session``; pass it so
+                    this make joins the goal (recorded against it; Kiln Pro checks the
+                    result against it). Empty when there is no goal.
                 requirements: Natural-language description of the part to create.
                 provider: ``auto``, ``gemini``, ``meshy``, ``tripo3d``, or ``stability``.
                 material: Optional material target (e.g. ``"petg"``).
@@ -187,6 +194,9 @@ class _GenerationToolsPlugin:
                     result["bed_size_source"] = "printer_intelligence"
                     result["bed_size_model_id"] = resolved_model_id
                     result["bed_dims_mm"] = list(build_volume)
+                from kiln.front_door import join_goal
+
+                join_goal(brief_id, result, result.get("best_result_path"))
                 try:
                     from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
                     return attach_inspect_bundle(

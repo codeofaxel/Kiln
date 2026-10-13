@@ -29,6 +29,7 @@ import logging
 from typing import Any
 
 from kiln.printers.base import NozzleClumpingDetection
+from kiln.untrusted_zip import UntrustedZipFile
 
 logger = logging.getLogger(__name__)
 
@@ -243,13 +244,12 @@ def file_facts(file_path: str) -> dict[str, Any] | None:
     import json
     import os
     import tempfile
-    import zipfile
 
     try:
         if not os.path.isfile(file_path):
             return None
         if file_path.casefold().endswith(".3mf"):
-            with zipfile.ZipFile(file_path) as zf:
+            with UntrustedZipFile(file_path) as zf:
                 names = zf.namelist()
                 gcode_members = sorted(n for n in names if n.casefold().endswith(".gcode"))
                 if not gcode_members:

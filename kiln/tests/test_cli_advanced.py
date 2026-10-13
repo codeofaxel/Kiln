@@ -1068,6 +1068,59 @@ class TestOrder:
             result = runner.invoke(cli, ["order", "cancel", "ord-1", "--json"])
         assert result.exit_code == 0
 
+    # The pay step reaches the terminal too: the words every ordering door
+    # says, worded by the order service, ahead of the details.
+
+    def test_order_place_opens_with_where_to_pay(self, runner, tmp_path, fee_tools, monkeypatch):
+        service = order_service.provide(monkeypatch)
+        pay = "To start order 1528, pay for it on the print service's checkout: https://pay.example"
+        monkeypatch.setattr(service, "order_message", lambda result, routing: [pay], raising=False)
+        with patch("kiln.cli.main._get_fulfillment_provider", return_value=_placing_provider()):
+            result = runner.invoke(cli, _place_argv(tmp_path))
+        assert result.exit_code == 0, result.output
+        assert result.output.splitlines()[0] == pay
+
+    def test_order_status_says_where_the_order_is_first(self, runner, monkeypatch):
+        service = order_service.provide(monkeypatch)
+        words = ["Order 1528 is waiting for payment. To start it, pay on the print service's checkout: https://pay.example"]
+        monkeypatch.setattr(service, "status_message", lambda result: list(words), raising=False)
+        provider = MagicMock()
+        provider.get_order_status.return_value.to_dict.return_value = {"order_id": "ord-1", "status": "submitted"}
+        with patch("kiln.cli.main._get_fulfillment_provider", return_value=provider):
+            result = runner.invoke(cli, ["order", "status", "ord-1"])
+            as_json = runner.invoke(cli, ["order", "status", "ord-1", "--json"])
+        assert result.exit_code == 0, result.output
+        assert result.output.splitlines()[0] == words[0]
+        assert json.loads(as_json.output)["data"]["order"]["tell_the_person"] == words
+
+    def test_order_cancel_says_a_worded_refusal_as_it_is(self, runner, monkeypatch):
+        service = order_service.provide(monkeypatch)
+        sentence = "Nothing to cancel: order 1528 is waiting for payment."
+        refusal = service.FulfillmentError(sentence)
+        refusal.code = "NOTHING_TO_CANCEL"
+        provider = MagicMock()
+        provider.cancel_order.side_effect = refusal
+        with patch("kiln.cli.main.FulfillmentError", service.FulfillmentError), \
+             patch("kiln.cli.main._get_fulfillment_provider", return_value=provider):
+            result = runner.invoke(cli, ["order", "cancel", "ord-1", "--json"])
+        error = json.loads(result.output)["error"]
+        assert error["message"] == sentence and error["code"] == "NOTHING_TO_CANCEL"
+
+    def test_order_quote_says_sales_tax_is_added_at_checkout(self, runner, tmp_path, monkeypatch):
+        model = tmp_path / "model.stl"
+        model.write_bytes(b"solid test\nendsolid test\n")
+        provider = MagicMock()
+        provider.name = "craftcloud"
+        provider.get_quote.return_value.total_price = 16.58
+        provider.get_quote.return_value.currency = "USD"
+        provider.get_quote.return_value.to_dict.return_value = {"total_price": 16.58, "quote_id": "q-1"}
+        billing = types.ModuleType("kiln.billing")
+        monkeypatch.setitem(sys.modules, "kiln.billing", billing)
+        with patch("kiln.cli.main._get_fulfillment_provider", return_value=provider):
+            result = runner.invoke(cli, ["order", "quote", str(model), "-m", "pla-white"])
+        assert result.exit_code == 0, result.output
+        assert "Sales tax, where it applies, is added at Craftcloud's checkout." in result.output
+
     def test_a_fee_step_that_fails_after_the_order_exists_reports_it_as_placed(
         self, runner, tmp_path, monkeypatch,
     ):

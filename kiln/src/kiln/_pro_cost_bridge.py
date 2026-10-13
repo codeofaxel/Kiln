@@ -48,6 +48,7 @@ import zipfile
 from typing import Any
 
 from kiln.served_answer import Miss, classify_answer, classify_transport_error, fields, sentence
+from kiln.untrusted_zip import UntrustedZipFile
 
 logger = logging.getLogger(__name__)
 
@@ -207,7 +208,7 @@ def _gcode_bytes(file_path: str) -> tuple[bytes | None, str]:
             from kiln.gcode import _MAX_SCAN_BYTES
             from kiln.gcode_metadata import read_member_text, sliced_gcode_member
 
-            with zipfile.ZipFile(file_path) as zf:
+            with UntrustedZipFile(file_path) as zf:
                 member = sliced_gcode_member(zf)
                 if member is None:
                     return None, "the file holds a model, not sliced G-code"

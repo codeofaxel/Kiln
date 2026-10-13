@@ -16,7 +16,7 @@
 
 **The open-source MCP server for 3D printing.**
 
-Kiln lets AI agents (Claude Desktop, Claude Code, Codex, or any custom MCP client) drive real 3D printers end to end — Bambu Lab, Creality, Prusa, Elegoo, Voron, Sovol, AnkerMake, Artillery, FlashForge, QIDI, RatRig, and SparkX, over OctoPrint, Moonraker/Klipper, PrusaLink, and Direct USB.
+Kiln lets AI agents (Claude Desktop, Claude Code, Codex, or any custom MCP client) drive real 3D printers end to end — Bambu Lab, Creality, Prusa, Elegoo, Voron, Sovol, AnkerMake, Artillery, FlashForge, QIDI, RatRig, and SparkX. It is compatible with OctoPrint, Moonraker/Klipper, PrusaLink, and Direct USB.
 
 In a single conversation, an agent can design a part, slice it, queue it on the right printer, monitor the camera, recover from failures, and ship the result. No human in the middle.
 
@@ -249,7 +249,7 @@ Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&ut
 
 ## Why Kiln?
 
-- **One control plane, any printer** — OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, Serial. Manage a mixed fleet from one place.
+- **One control plane, any printer** — compatible with OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, Serial. Manage a mixed fleet from one place.
 - **No printer? No problem** — Outsource jobs to Craftcloud's 150+ manufacturing services through the hosted proxy, or use direct mode with your own provider credentials.
 - **AI-native** — <!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 937 MCP capabilities and <!-- KILN_CLI_COUNT:OLD --> 247 CLI commands built for AI agents. Not a web UI with an API bolted on.
 - **Describe it, print it** — Natural-language to physical object pipeline: text or sketch → AI generation → validation → slice → print.
@@ -267,7 +267,7 @@ Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&ut
 
 | Backend | Status | Printers |
 |---------|--------|----------|
-| **OctoPrint** | Stable | Any OctoPrint-connected printer (Prusa, Ender, custom) |
+| **OctoPrint** | Stable | Compatible with any OctoPrint-connected printer (Prusa, Ender, custom) |
 | **Moonraker** | Stable | Klipper-based printers (Voron, Ratrig, etc.) |
 | **Creality** | Stable when Moonraker is reachable | SPARKX i7, K1/K1 Max/K1C/K1 SE, K2/K2 Pro/K2 Plus/K2 SE, Creality Hi, Ender-3 V4/V3 KE, Ender-5 Max, CR-10 SE via local Moonraker. Older Marlin Creality printers use `serial` or `octoprint`. |
 | **Bambu** | Stable | Bambu Lab X1C, X1E, P1S, P1P, P2S, A1, A1 Mini, A2L, H2S, H2D, H2D Pro, H2C, X2D (via LAN MQTT) |
@@ -674,3 +674,7 @@ By contributing, you agree to the [Contributor License Agreement](policies/CONTR
 ---
 
 Also listed on [Smithery](https://smithery.ai/servers/codeofaxel/kiln).
+
+## Trademarks
+
+[OctoPrint is a registered trademark](https://octoprint.org). Other product and company names are trademarks of their respective owners; Kiln is not affiliated with or endorsed by them.

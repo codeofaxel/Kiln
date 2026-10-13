@@ -108,7 +108,8 @@ import base64
 import gzip
 import logging
 import os
-from typing import Any, Iterable, Mapping
+from collections.abc import Iterable, Mapping
+from typing import Any
 
 from kiln import served_answer
 from kiln.plate_state import OCCUPANCY_KIND

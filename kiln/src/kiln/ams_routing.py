@@ -52,6 +52,7 @@ from kiln.bambu_trays import tray_name as _bambu_tray_name
 from kiln.colour_distance import delta_e_76, hex_to_lab, normalize_hex
 from kiln.gcode import slicer_filament_types
 from kiln.gcode_metadata import read_member_text, sliced_gcode_member
+from kiln.untrusted_zip import UntrustedZipFile
 
 __all__ = [
     "AmsPlan",
@@ -242,7 +243,7 @@ def read_file_filaments(path: str | None) -> FileFilaments:
     lower = path.lower()
     try:
         if lower.endswith(".3mf"):
-            with zipfile.ZipFile(path) as zf:
+            with UntrustedZipFile(path) as zf:
                 member = sliced_gcode_member(zf)
                 if member is not None:
                     from kiln.gcode import _MAX_SCAN_BYTES

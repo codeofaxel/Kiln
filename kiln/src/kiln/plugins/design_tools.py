@@ -854,7 +854,7 @@ class _DesignToolsPlugin:
 
             * ``generatable: true`` — a PARAMETRIC PART.  The result
               carries its parameters, so you can fill in the user's
-              dimensions and call ``generate_from_template(id, {...})``
+              dimensions and call ``generate_from_template(template_id, {...})``
               to render a printable STL.
             * ``generatable: false`` — a DESIGN PATTERN (snap fit, living
               hinge, press fit).  Guidance for OpenSCAD you write
@@ -1575,6 +1575,7 @@ class _DesignToolsPlugin:
             scad_path: str = "",
             timeout: int = 300,
             fastener: str = "",
+            brief_id: str = "",
         ) -> dict:
             """Compile OpenSCAD code into an STL file.
 
@@ -1599,6 +1600,9 @@ class _DesignToolsPlugin:
             its ``agent_instruction`` before repeating any of it.
 
             Args:
+                brief_id: The saved goal's id from ``design_session``; pass it so
+                    this make joins the goal (recorded against it; Kiln Pro checks the
+                    result against it). Empty when there is no goal.
                 scad_code: Valid OpenSCAD source code (provide this OR scad_path).
                 scad_path: Path to a .scad file (provide this OR scad_code).
                 timeout: Maximum compilation time in seconds (default 300).
@@ -1694,6 +1698,9 @@ class _DesignToolsPlugin:
                 from kiln.fusion_check import attach_fusion_report
 
                 response = attach_fusion_report(response, stl_path)
+                from kiln.front_door import join_goal
+
+                join_goal(brief_id, response, stl_path)
                 try:
                     from kiln_pro.plugins.git_render_tools import (
                         attach_inspect_bundle,
@@ -1714,6 +1721,7 @@ class _DesignToolsPlugin:
             parameter_name: str,
             new_value: float,
             material: str | None = None,
+            brief_id: str = "",
         ) -> dict:
             """Update a parameter in OpenSCAD code and recompile to STL.
 
@@ -1722,6 +1730,9 @@ class _DesignToolsPlugin:
             STL — all in one step. Perfect for "make it 5mm wider" requests.
 
             Args:
+                brief_id: The saved goal's id from ``design_session``; pass it so
+                    this make joins the goal (recorded against it; Kiln Pro checks the
+                    result against it). Empty when there is no goal.
                 scad_code: OpenSCAD source code.
                 parameter_name: Variable name to update (e.g. "wall_thickness").
                 new_value: New numeric value.
@@ -1746,6 +1757,9 @@ class _DesignToolsPlugin:
                         f"Updated {parameter_name}={new_value}, compiled to STL{suffix}."
                     ),
                 }
+                from kiln.front_door import join_goal
+
+                join_goal(brief_id, response, response.get("stl_path"))
                 # Same flush-attachment door as compile_scad: a tweak can
                 # slide a part to exact tangency; flag unfused contact.
                 from kiln.fusion_check import attach_fusion_report

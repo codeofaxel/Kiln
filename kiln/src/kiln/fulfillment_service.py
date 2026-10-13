@@ -35,6 +35,13 @@ NOT_INCLUDED = (
 )
 
 
+#: Cancel refusals the order service words for the person in full: there is
+#: nothing to cancel (an unpaid order is never made), or the print service
+#: cancels only on a written request and the refusal says where to write.
+#: Every door says them as they are, never wrapped in "Failed to cancel".
+WORDED_CANCEL_REFUSALS = frozenset({"NOTHING_TO_CANCEL", "CANCEL_NOT_SUPPORTED"})
+
+
 def order_service() -> ModuleType | None:
     """The order service when this install has one, else ``None``."""
     try:

@@ -1,6 +1,6 @@
 # Kiln Terms of Use
 
-*Last updated: 2026-10-08 · Version 3.1*
+*Last updated: 2026-10-12 · Version 3.2*
 
 > **Plain-English summary** — These terms govern your use of Kiln,
 > operated by Hadron Labs Inc. Kiln has two sides:
@@ -302,12 +302,16 @@ customer.
   uptime-commitment misses) are governed by that SLA. Outside of
   SLA credits, statutory consumer rights, and the express refund
   paths in this §5.6, fees paid are non-refundable.
-- **Fulfillment orchestration fees:** if a fulfillment order
-  fails during manufacturing or is cancelled by the provider,
-  we refund the orchestration fee automatically. For delivery
+- **Fulfillment orchestration fees:** if a print order is
+  cancelled for any reason before it ships — because the print
+  service could not make it, because the print service cancelled
+  it, or because you arranged the cancellation with the print
+  service — we refund the orchestration fee automatically once the
+  print service reports the order as cancelled or failed. For delivery
   defects, contact the manufacturer for a reprint or refund of
   the manufacturing cost; we refund the orchestration fee upon
-  confirmation the provider has issued their refund.
+  confirmation the provider has issued their refund. The print
+  service's own cancellation and refund rules are in §6.1.
 - **Refund requests** must be made within 30 days of the
   original charge.
 - Refunds are processed through the original payment method and
@@ -427,6 +431,27 @@ a **Business** subscription or higher, **regardless of the free
 allowance** — the fee-free orders do not grant a commercial-use
 right that §4.2 reserves to the Business and Enterprise tiers.
 
+**The print service is the seller.** When you route a print job
+through Kiln, the print service you choose (currently Craftcloud) is
+the seller and merchant of record for the manufactured part. You pay
+the manufacturing price to the print service, on its own checkout,
+under its terms; Kiln charges only the orchestration fee described
+above. Under the print service's terms, nothing is made until you
+pay there, and your order becomes binding when you confirm the
+purchase there. Kiln links to the print service's terms with every
+quote.
+
+**Cancelling or changing a print order.** Cancellation and
+change-of-mind rules for a print order are the print service's, not
+Kiln's. Under those rules a custom print cannot be cancelled for a
+change of mind once the purchase is confirmed, and if the print
+service agrees to a change after ordering it may keep a handling fee
+of up to 7% of the price and refund the rest. To cancel or change an
+order, write to the print service directly. Any refund of the
+manufacturing price comes from the print service under its terms;
+if the order is cancelled before it ships, for any reason, Kiln
+refunds its orchestration fee automatically as set out in §5.6.
+
 ### 6.2 Privacy, security, and data processing (DPA / SCCs)
 
 Our handling of personal data is governed by our
@@ -466,6 +491,12 @@ unless we are required by law to collect them. Tax on orchestration
 fees is calculated on the orchestration fee only, not on the
 manufacturing cost. The manufacturing provider is responsible for
 any taxes on their charges.
+
+**Customs, duties and import taxes.** When a print service ships a
+part to you across a border, any customs charges, import duties and
+import taxes on that shipment are yours to pay. They are not
+included in the print service's quoted price or in Kiln's
+orchestration fee.
 
 Preview the tax for any order with the `tax_estimate` tool before
 placing it. We display the full fee + tax breakdown before
@@ -775,7 +806,9 @@ MyMiniFactory, Cults3D, and others. Your use of those services
 is subject to each provider's own terms of use and privacy
 policy. We are not a party to the contract between you and any
 third-party service, and we are not responsible for acts,
-omissions, content, or availability of third-party services.
+omissions, content, or availability of third-party services. For a
+print order routed through Kiln, the print service is the seller of
+the part — see §6.1.
 
 Content downloaded from third-party marketplaces is governed by
 the respective marketplace's terms and the licenses attached to

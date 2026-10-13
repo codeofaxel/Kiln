@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 from kiln import _vec
 from kiln.generation.base import MeshAnalysis, MeshValidationResult
+from kiln.untrusted_zip import UntrustedZipFile
 
 if TYPE_CHECKING:
     import numpy
@@ -1050,41 +1051,34 @@ def _placed_3mf_meshes(
     and reads as an empty list.
     """
     from kiln.threemf_parser import (
-        _CORE_NS,
         _IDENTITY_3MF,
         _apply_3mf_transform,
         _ModelArchive,
-        _parse_vertices,
+        open_untrusted_zip,
     )
 
-    ns = f"{{{_CORE_NS}}}"
     out: list[tuple[Any, list[tuple[float, float, float]], list[tuple[tuple[float, ...], ...]]]] = []
     try:
-        with zipfile.ZipFile(path, "r") as zf:
-            archive = _ModelArchive(zf, errors)
+        with open_untrusted_zip(path) as zf:
+            # Each part streamed into compact arrays (no element per vertex or
+            # triangle); the lists below are this function's own contract.
+            archive = _ModelArchive(zf, errors, keep_mesh=True)
             to_mm = archive.root_transform_mm()
             if to_mm is None:
                 return []
             for placed in archive.placements(root_transform=to_mm):
-                mesh_el = placed.element.find(f"{ns}mesh")
-                if mesh_el is None:
+                info = archive.mesh(placed)
+                if info is None:
                     continue
-                verts = _parse_vertices(mesh_el)
+                verts = [tuple(v) for v in info.vertices.tolist()]
                 if placed.transform is not _IDENTITY_3MF:
                     verts = [_apply_3mf_transform(placed.transform, v) for v in verts]
-                tris: list[tuple[tuple[float, ...], ...]] = []
-                tris_el = mesh_el.find(f"{ns}triangles")
                 n_verts = len(verts)
-                for tri in (tris_el.findall(f"{ns}triangle") if tris_el is not None else ()):
-                    try:
-                        i0 = int(tri.get("v1", ""))
-                        i1 = int(tri.get("v2", ""))
-                        i2 = int(tri.get("v3", ""))
-                    except ValueError:
-                        continue
-                    if not (0 <= i0 < n_verts and 0 <= i1 < n_verts and 0 <= i2 < n_verts):
-                        continue
-                    tris.append((verts[i0], verts[i1], verts[i2]))
+                tris: list[tuple[tuple[float, ...], ...]] = [
+                    (verts[i0], verts[i1], verts[i2])
+                    for i0, i1, i2 in info.tri_idx.tolist()
+                    if 0 <= i0 < n_verts and 0 <= i1 < n_verts and 0 <= i2 < n_verts
+                ]
                 out.append((placed, verts, tris))
     except zipfile.BadZipFile:
         errors.append("Not a valid 3MF: the file is not a ZIP archive.")
@@ -4943,7 +4937,7 @@ def extract_model_from_3mf(
 
     from kiln.threemf_parser import _find_model_xml
 
-    with zipfile.ZipFile(file_path, "r") as zf:
+    with UntrustedZipFile(file_path, "r") as zf:
         try:
             _find_model_xml(zf)
         except ValueError as exc:
@@ -5087,7 +5081,7 @@ def list_plate_objects(
     plate_json: dict[str, Any] | None = None
     gcode_header: str = ""
 
-    with zipfile.ZipFile(file_path, "r") as zf:
+    with UntrustedZipFile(file_path, "r") as zf:
         names = zf.namelist()
 
         # Scan for all available plates (plate_N.json in Metadata/)
@@ -5283,7 +5277,7 @@ def extract_plate_object_gcode(
 
     # Read the full gcode from the archive
     gcode_text: str | None = None
-    with zipfile.ZipFile(file_path, "r") as zf:
+    with UntrustedZipFile(file_path, "r") as zf:
         for candidate in [
             f"Metadata/plate_{plate_number}.gcode",
             f"metadata/plate_{plate_number}.gcode",

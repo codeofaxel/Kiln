@@ -336,6 +336,7 @@ class _MarketplaceToolsPlugin:
             model_id: str | None = None,
             source: str = "thingiverse",
             download_all: bool = False,
+            brief_id: str = "",
         ) -> dict:
             """Download model file(s) from a marketplace to local storage.
 
@@ -346,6 +347,9 @@ class _MarketplaceToolsPlugin:
             hardware — prefer proven blueprints when possible.
 
             Args:
+                brief_id: The saved goal's id from ``design_session``; pass it so
+                    this make joins the goal (recorded against it; Kiln Pro checks the
+                    result against it). Empty when there is no goal.
                 file_id: Numeric file ID (from ``model_files`` results).  If
                     omitted and ``model_id`` is provided, downloads all files
                     for the model.
@@ -493,6 +497,16 @@ class _MarketplaceToolsPlugin:
                     if source == "thingiverse":
                         dl_resp["deprecation_notice"] = _THINGIVERSE_DEPRECATION_NOTICE
                     _arrive(dl_resp, downloaded, mkt=mkt, model_id=model_id)
+                    # A whole-model download joins the goal on the file the
+                    # stage draws first -- the one the person is shown.
+                    from kiln.front_door import join_goal
+
+                    join_goal(
+                        brief_id,
+                        dl_resp,
+                        dl_resp.get("stage_mesh_path")
+                        or (downloaded[0]["local_path"] if downloaded else None),
+                    )
                     if "came_from" in dl_resp:
                         dl_resp["message"] = (
                             f"{dl_resp['came_from']} {len(downloaded)} of {len(files)} "
@@ -530,6 +544,9 @@ class _MarketplaceToolsPlugin:
                 # whole-model download does.
                 _arrive(single, [single], mkt=mkt, model_id=model_id)
                 saved = single["local_path"]
+                from kiln.front_door import join_goal
+
+                join_goal(brief_id, single, saved)
                 single["message"] = (
                     f"{single['came_from']} Saved to {saved}." if "came_from" in single else f"Downloaded to {saved}"
                 )

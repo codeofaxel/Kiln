@@ -57,7 +57,15 @@ def _served(material: str, requirements: list[str]) -> dict[str, Any]:
     try:
         import kiln.server as _srv
 
-        answer = _srv._pro_api_call(WIRE_TOOL, material=material, requirements=list(requirements))
+        # The person's own ask: this runs only when they named the rules on
+        # check_material_environment, so a signed-out refusal is counted as
+        # someone reaching for the feature (``_asked_by_user``).
+        answer = _srv._pro_api_call(
+            WIRE_TOOL,
+            _asked_by_user=True,
+            material=material,
+            requirements=list(requirements),
+        )
     except Exception as exc:  # noqa: BLE001 -- the network is a miss to word, never a traceback
         logger.debug("%s request failed", WIRE_TOOL, exc_info=True)
         import kiln.server as _srv

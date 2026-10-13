@@ -53,6 +53,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from kiln.gcode import GCODE_NUMBER, axis_value
+from kiln.untrusted_zip import UntrustedZipFile
 
 logger = logging.getLogger(__name__)
 
@@ -217,7 +218,7 @@ def _job_gcode_lines(job_path: str):
             from kiln.gcode import _MAX_SCAN_BYTES
             from kiln.gcode_metadata import read_member_text, sliced_gcode_member
 
-            with zipfile.ZipFile(path) as zf:
+            with UntrustedZipFile(path) as zf:
                 member = sliced_gcode_member(zf)
                 if member is None:
                     return None

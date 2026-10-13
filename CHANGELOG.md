@@ -45,6 +45,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Everything your AI makes stays tied to what you asked for.** Kiln Pro also checks the design against it.
+
 - **A saved printer's name is never written over by a different printer.**
 
 - **A printer Kiln doesn't know is held to cautious limits until you confirm its real ones.**
@@ -679,6 +681,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Saving a model again updates what you told Kiln about it.** Re-saving a
   file already in your library kept the original notes and quietly ignored
   new tags or a better prompt; it now takes the new ones.
+
+### Security
+
+- **Stronger protection against harmful 3MF files.**
 
 
 ## [1.4.1.1] - 2026-08-19

@@ -26,6 +26,7 @@ import re
 import zipfile
 
 from kiln.threemf_parser import _3MF_UNIT_TO_MM, _find_model_xml
+from kiln.untrusted_zip import UntrustedZipFile
 
 _PREFIX = rb"(?:[A-Za-z_][\w.-]*:)?"
 #: The ``<build>...</build>`` span of the root model.  ``<build/>`` (no
@@ -113,7 +114,7 @@ def translate_3mf(src: str, dx_mm: float, dy_mm: float, dst: str) -> None:
     """
     if str(dst) == str(src):
         raise ValueError("translate_3mf writes a copy; dst must differ from src")
-    with zipfile.ZipFile(src) as zin:
+    with UntrustedZipFile(src) as zin:
         root_name = _find_model_xml(zin)
         edited = translate_model_xml(zin.read(root_name), dx_mm, dy_mm)
         with zipfile.ZipFile(dst, "w") as zout:

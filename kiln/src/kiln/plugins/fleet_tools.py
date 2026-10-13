@@ -432,12 +432,12 @@ class _FleetToolsPlugin:
             # main try so a failure is told apart from a laundered
             # ImportError, and so the handler names below still resolve.
             try:
+                import kiln.placement_fleet  # noqa: F401
                 from kiln.job_router import (
                     RoutingCriteria,
                     RoutingValidationError,
                     get_job_router,
                 )
-                import kiln.placement_fleet  # noqa: F401
                 engine_here = True
             except ImportError:
                 engine_here = False

@@ -36,6 +36,7 @@ from kiln.marketplaces.base import (
     ModelFile,
     ModelSummary,
 )
+from kiln.untrusted_zip import UntrustedZipFile
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,7 @@ def resolve_makerworld_source(file_path: str) -> dict[str, Any] | None:
     model_xml: str | None = None
     plate_json_raw: bytes | None = None
 
-    with zipfile.ZipFile(file_path, "r") as zf:
+    with UntrustedZipFile(file_path, "r") as zf:
         # Find the model XML
         for candidate in ["3D/3dmodel.model", "3d/3dmodel.model"]:
             if candidate in zf.namelist():

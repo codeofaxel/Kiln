@@ -107,8 +107,9 @@ from kiln.print_consent import (
     unasked_look_noted,
     why_not_asked,
 )
-from kiln.provider_terms import CRAFTCLOUD_TERMS_URL, order_terms
+from kiln.provider_terms import CRAFTCLOUD_TERMS_URL, order_terms, pay_methods, tax_note
 from kiln.tool_args import parse_json_array, parse_json_object
+from kiln.untrusted_zip import UntrustedZipFile
 
 with contextlib.suppress(ImportError):
     import kiln_pro  # noqa: F401 — triggers compat shim installation
@@ -213,6 +214,7 @@ try:
     from kiln_pro.payments.manager import PaymentManager
 except ImportError:
     PaymentManager = None  # Available in kiln-pro
+from kiln.front_door import FRONT_DOOR_LINE as _FRONT_DOOR_LINE
 from kiln.hotend_safety import MOLTEN_FILAMENT_WARNING, needs_burn_warning
 from kiln.persistence import get_db
 from kiln.pipelines import (
@@ -279,9 +281,9 @@ from kiln.printers import (
     status_is_unreachable,
     stuck_job_note,
 )
+from kiln.printers import engagement as _engagement
 from kiln.printers.base import PrinterEngagementError, read_machine_identity_bounded
 from kiln.printers.command_verdict import CommandVerdict
-from kiln.printers import engagement as _engagement
 from kiln.printers.engagement import refusal_in_flight as engagement_refusal_in_flight
 from kiln.printers.engagement import refusal_words as engagement_refusal_words
 from kiln.queue import JobNotFoundError, JobStatus, PrintQueue
@@ -760,6 +762,18 @@ def _build_instructions() -> str:
     # reach for tier-gated tools.  Shared constant -- see the static fallback.
     parts.append(_TIERS_AND_TERMS)
 
+    # The make story, one sentence, before any make tool is named: a make
+    # starts with design_session, and every other make tool is an engine it
+    # calls.  Judged against THIS registry -- a plain install has only the
+    # stub, and is told that compile_scad is the loop here.  Shared words --
+    # kiln.front_door is the one home; the hosted connector reads it too.
+    try:
+        from kiln.front_door import front_door_line, front_door_present
+
+        parts.append(front_door_line(front_door_present(mcp)))
+    except Exception:  # noqa: BLE001 -- instructions must never fail to build
+        parts.append(_FRONT_DOOR_LINE)
+
     # --- Update nudge (non-blocking; reads the cached PyPI check) ---
     # A new-version notice an agent reads on connect, so it can pass the
     # heads-up to the user.  Wrapped defensively: a nudge must never break
@@ -933,9 +947,9 @@ def _build_instructions() -> str:
         "patterns). Key tools:\n"
         "  - `design_session(verb=\"start\", idea=\"...\")` — user-facing entry point for any new design (captures saved goal at duty / environment / materials / safety layer)\n"
         "  - `analyze_design_requirements(requirements)` — internal functional-analysis lookup `design_session` calls into\n"
-        "  - `recommend_design_material(use_case)` — intelligent material selection\n"
+        "  - `recommend_design_material(requirements)` — intelligent material selection\n"
         f"  - `find_design_templates(use_case)` — search {_parts_n} ready-made parametric parts (brackets, bins, stands, cases, hooks, jigs, clamps). Call this FIRST when the user wants a functional part to their own dimensions\n"
-        "  - `generate_from_template(id, params)` — build one to a printable STL, locally and free, no AI provider needed\n"
+        "  - `generate_from_template(template_id, parameters)` — build one to a printable STL, locally and free, no AI provider needed\n"
         "  - `get_material_design_profile(material)` — material-specific rules\n"
         "  - `estimate_structural_load(...)` — load capacity analysis\n"
         "  - `validate_design_for_requirements(...)` — design verification\n"
@@ -1060,6 +1074,7 @@ mcp = FastMCP(
         "hundreds of tools — use `ToolSearch(keyword)` to load schemas "
         "on demand instead of guessing names. Kiln — AI agent "
         "infrastructure for 3D printing.\n\n" + _TIERS_AND_TERMS
+        + "\n\n" + _FRONT_DOOR_LINE
     ),
 )
 
@@ -1348,7 +1363,7 @@ def _install_mcp_request_context_capture() -> None:
         convert_result: bool = False,
     ):
         token = _current_mcp_request_context.set(context)
-        tool_token = _tool_context.enter_tool(name)
+        tool_token = _tool_context.enter_tool(name, arguments)
         consent_token = None
         # Which app is on the other end of this connection, counted once
         # per process on the first tool call to land — the handshake is
@@ -5630,6 +5645,7 @@ def _provider_routing_metadata(
     provider_name: str,
     *,
     provider_order_id: str = "",
+    shipping_country: str = "",
 ) -> dict[str, Any]:
     """Return normalized routing metadata for provider-managed orders.
 
@@ -5642,6 +5658,8 @@ def _provider_routing_metadata(
         "provider_order_id": provider_order_id,
         "provider_terms_url": _PROVIDER_TERMS_URLS.get(normalized, ""),
         "provider_order_terms": order_terms(normalized),
+        "provider_pay_methods": pay_methods(normalized),
+        "provider_tax_note": tax_note(normalized, shipping_country),
         "support_owner": "provider",
         "merchant_of_record": "provider",
     }
@@ -10985,10 +11003,9 @@ def set_fan(percent: int, node: str = "part") -> dict:
 
 def _wrapped_filament_type(threemf_path: str) -> str | None:
     """The first filament type a wrapped archive declares to the printer, or ``None``."""
-    import zipfile
 
     try:
-        with zipfile.ZipFile(threemf_path) as zf:
+        with UntrustedZipFile(threemf_path) as zf:
             info = zf.read("Metadata/slice_info.config").decode("utf-8", errors="replace")
     except Exception:  # noqa: BLE001 -- a report, never a failure of the wrap
         return None
@@ -16373,7 +16390,7 @@ def list_design_templates() -> dict:
     Prefer ``find_design_templates(use_case)`` when you know what the
     user is making — it searches this library by use case and ranks
     matches, instead of returning all of them.  Then call
-    ``generate_from_template(id, {...})`` to render a printable STL.
+    ``generate_from_template(template_id, {...})`` to render a printable STL.
     """
     try:
         import json as _json
@@ -16456,6 +16473,7 @@ def _fastener_advice_free(names: list[str]) -> dict[str, Any] | None:
 def generate_from_template(
     template_id: str,
     parameters: dict | None = None,
+    brief_id: str = "",
 ) -> dict:
     """Build a printable STL from a parametric part, to the user's dimensions.
 
@@ -16495,6 +16513,9 @@ def generate_from_template(
     Read its ``agent_instruction`` before repeating any of it to the user.
 
     Args:
+        brief_id: The saved goal's id from ``design_session``; pass it so
+            this make joins the goal (recorded against it; Kiln Pro checks the
+            result against it). Empty when there is no goal.
         template_id: Parametric part id, from ``find_design_templates``
             or ``list_design_templates`` (e.g. ``"shelf_bracket"``).
         parameters: Dict of parameter overrides carrying the user's own
@@ -16663,6 +16684,9 @@ def generate_from_template(
             except Exception:  # noqa: BLE001
                 pass
 
+            from kiln.front_door import join_goal
+
+            join_goal(brief_id, result_dict, dl.local_path)
             try:
                 from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
                 return attach_inspect_bundle(
@@ -17031,12 +17055,11 @@ def resolve_model_source(file_path: str) -> dict:
         # Fall back to generic 3MF metadata extraction
         import json as _json
         import xml.etree.ElementTree as ET
-        import zipfile
 
         model_xml: str | None = None
         plate_json_raw: bytes | None = None
 
-        with zipfile.ZipFile(file_path, "r") as zf:
+        with UntrustedZipFile(file_path, "r") as zf:
             for candidate in ["3D/3dmodel.model", "3d/3dmodel.model"]:
                 if candidate in zf.namelist():
                     model_xml = zf.read(candidate).decode("utf-8")
@@ -17251,6 +17274,7 @@ def design_to_gcode_pipeline(
     printer_model: str = "",
     infill_percent: float = 20.0,
     placement: str | list[float] | None = None,
+    brief_id: str = "",
 ) -> dict:
     """End-to-end pipeline: description → template → STL → analysis → GCode.
 
@@ -17261,6 +17285,9 @@ def design_to_gcode_pipeline(
     4. Estimates weight
     5. Slices to G-code (if slicer available)
 
+    :param brief_id: The saved goal's id from ``design_session``; pass it so
+        this make joins the goal (recorded against it; Kiln Pro checks the
+        result against it). Empty when there is no goal.
     :param description: Natural-language design description.
     :param output_dir: Directory for output files (uses tempdir if empty).
     :param material: Material the slice is set for -- temperatures, melt
@@ -17284,7 +17311,12 @@ def design_to_gcode_pipeline(
             # plate refuses the slice step.  Same gate as slice_model.
             placement=placement if placement is not None else "auto",
         )
-        return {"success": result.success, **result.to_dict()}
+        result_dict = {"success": result.success, **result.to_dict()}
+        if result.success:
+            from kiln.front_door import join_goal
+
+            join_goal(brief_id, result_dict, result.stl_file)
+        return result_dict
     except Exception as exc:
         return _error_dict(f"Design-to-gcode pipeline failed: {exc}")
 
@@ -20130,6 +20162,26 @@ def _start() -> None:
         local_stage.install(mcp)
     except Exception:
         logger.debug("inline stage not installed", exc_info=True)
+
+    # The front door, said on every make door.  Same timing as the stage
+    # stamp and for the same reason: it reads the registry, and judges
+    # whether the REAL design_session is here or only its stub.
+    try:
+        from kiln import front_door
+
+        front_door.install(mcp)
+    except Exception:
+        logger.debug("front-door clause not stamped", exc_info=True)
+
+    # An edit of a part keeps its result as that part's next version.  Same
+    # timing as the two above: it reads the registered tools.  A no-op
+    # without kiln-pro (see kiln.edit_lineage).
+    try:
+        from kiln import edit_lineage
+
+        edit_lineage.install(mcp)
+    except Exception:
+        logger.debug("edit lineage not installed", exc_info=True)
 
     # restart_server's exec keeps the pipe but not the MCP handshake: this
     # records the handshake, lets the fresh process take it up, and, when

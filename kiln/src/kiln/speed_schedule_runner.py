@@ -22,8 +22,9 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,7 @@ def parse_segments(schedule: Any) -> tuple[Segment, ...]:
             raise ScheduleRefused(f"segment {index}: speed_percent {seg.speed_percent} is outside 10-300")
         out.append(seg)
     out.sort(key=lambda s: s.from_layer)
-    for a, b in zip(out, out[1:]):
+    for a, b in zip(out, out[1:], strict=False):
         if b.from_layer <= a.to_layer:
             raise ScheduleRefused(f"segments overlap at layer {b.from_layer}")
     return tuple(out)
