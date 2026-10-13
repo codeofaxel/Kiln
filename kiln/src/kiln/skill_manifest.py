@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from kiln.curve_resolution import AGENT_ADVICE
+from kiln.front_door import KEYLESS_MAKE_LINE
 
 
 def design_template_counts() -> dict[str, int]:
@@ -148,37 +149,39 @@ class SkillManifest:
     workflows: dict[str, list[str]] = field(
         default_factory=lambda: {
             "create_custom_object_free": [
-                "DEFAULT for 'make me a ...': write OpenSCAD yourself, compile with compile_scad — free, no API key, works on every tier",
+                "DEFAULT for 'make me a ...': design_session(verb=\"start\", idea=\"...\") keeps the goal; free, no API key, every tier",
+                KEYLESS_MAKE_LINE,
                 AGENT_ADVICE,
                 "visualize_model(file_path) — show a preview image (MANDATORY, every iteration round)",
                 "iterate: edit the OpenSCAD, recompile, show a fresh preview each round; offer 'loop ~3 more then check in, or loop until it's done?'",
                 "validate_generated_mesh / analyze_printability — printability check (conservative defaults are free)",
-                "Cloud AI providers (the design_and_generate path) are opt-in and need the user's own API key — don't suggest unless asked or the shape is organic/photo-based",
-                "From a photo/sketch: SEE it yourself and write OpenSCAD to match — no image-to-3D provider needed; generate_model_from_image (Meshy) is opt-in only",
+                "Cloud AI providers are opt-in and need the user's own API key; design_session uses one only when one is configured and you pass no scad_code — don't suggest one unless asked or the shape is organic/photo-based",
+                "From a photo/sketch: SEE it yourself, pass it to design_session as reference_images (every later make is checked against it), and write OpenSCAD to match — no image-to-3D provider needed; generate_model_from_image (Meshy) is opt-in only",
                 "Organic/curvy shapes: use the bundled BOSL2 metaballs/skin in your OpenSCAD; expect a few refine rounds",
             ],
             "design_and_generate": [
                 "design_session(verb=\"start\", idea=\"...\") — capture the saved goal",
-                "design_session(verb=\"update\", session_id, answers) — answer any follow-up questions",
-                "design_session(verb=\"save\", session_id) — lock in the goal",
-                "design_session(verb=\"generate\", session_id) — produce the STL (drives audit + outcome tracker)",
-                "preview_generated_model(model_id) — multi-angle visual check (MANDATORY)",
-                "validate_generated_mesh(model_id) — printability safety check",
-                "slice_model(file_path) — slice to gcode",
+                "design_session(verb=\"update\", goal_id, answers) — answer any follow-up questions",
+                "design_session(verb=\"save\", goal_id) — lock in the goal",
+                "design_session(verb=\"generate\", goal_id, scad_code) — produce the STL from the OpenSCAD you wrote (drives audit + outcome tracker)",
+                "Another make tool for this goal (a product generator, a template, an import): pass the goal_id as its brief_id so the result joins the goal",
+                "preview_generated_model(file_path) — multi-angle visual check (MANDATORY)",
+                "validate_generated_mesh(file_path) — printability safety check",
+                "slice_model(input_path) — slice to gcode",
                 "preflight_check() — verify printer ready",
-                "start_print(file) — begin printing",
+                "start_print(file_name) — begin printing",
                 "monitor_print() — track progress, show snapshots and cost",
             ],
             "brand_a_product": [
                 "generate_<product>(...) — the result carries `decorate_next`: the decorate_surface face and settings for that product's canvas",
                 "decorate_surface(model_path=<output_stl>, content=<logo.svg | line-art PNG | 'text:...'>, face=<decorate_next.face>) — THE tool that carves a logo, wordmark, text or image into any mesh",
-                "visualize_model(output) — show the carve (MANDATORY)",
+                "visualize_model(file_path) — show the carve (MANDATORY)",
                 "Look-alikes: generate_decorated_product / generate_wall_plaque are PHOTO-relief pipelines (a picture as coin relief), not logo tools; apply_decoration replays a decoration you SAVED earlier and carves nothing new; resolve_template_decoration(template_id) resolves the same face/settings as decorate_next",
             ],
             "flat_part_from_relationships": [
                 "solve_sketch(sketch=\"...\") — describe a flat part by the relationships between its points and edges (lengths, angles, parallel, symmetric); returns solved coordinates as OpenSCAD (served by kiln-pro, free)",
-                "compile_scad(scad_code=<the returned OpenSCAD>) — compile it locally; pass the text through unchanged, its first line is a header the sketch tools read back",
-                "visualize_model(stl_path) — show a preview image (MANDATORY)",
+                "compile_scad(scad_code=<the returned OpenSCAD>, brief_id=<the goal_id, when the part belongs to a design_session goal>) — compile it locally; pass the text through unchanged, its first line is a header the sketch tools read back",
+                "visualize_model(file_path) — show a preview image (MANDATORY)",
                 "iterate: restate the relationship that was wrong, solve_sketch again, recompile, show a fresh preview",
             ],
             "monitor_active_print": [
@@ -196,15 +199,15 @@ class SkillManifest:
             ],
             "find_and_print": [
                 "search_all_models(query) — find models on Thingiverse etc.",
-                "download_and_upload(url) — download and send to printer",
+                "download_and_upload(file_id, source) — download and send to printer",
                 "preflight_check() — verify printer ready",
-                "start_print(file) — begin printing",
+                "start_print(file_name) — begin printing",
             ],
             "failure_recovery": [
-                "analyze_print_failure_smart(description) — automated root cause analysis",
-                "get_recovery_plan(failure_id) — recovery options",
-                "retry_print_with_fix(file, fixes) — re-slice with corrections",
-                "troubleshoot_print_issue(issue) — design intelligence diagnosis",
+                "analyze_print_failure_smart(error_message) — automated root cause analysis",
+                "get_recovery_plan(failure_type) — recovery options",
+                "retry_print_with_fix(model_path, custom_overrides) — re-slice with corrections",
+                "troubleshoot_print_issue(symptom) — design intelligence diagnosis",
             ],
             "design_intelligence": [
                 "design_session(verb=\"start\", idea=\"...\") — saved-goal Q&A entry point; drives audit + post-print review",
@@ -220,9 +223,9 @@ class SkillManifest:
                     + str(design_template_counts()['design_patterns'])
                     + " design patterns that are guidance only)"
                 ),
-                "generate_from_template(id, params) — render a parametric part to a printable STL, locally and free",
-                "estimate_structural_load(geometry, material) — load capacity analysis",
-                "validate_design_for_requirements(design, reqs) — verification",
+                "generate_from_template(template_id, parameters) — render a parametric part to a printable STL, locally and free",
+                "estimate_structural_load(cross_section_mm2, cantilever_length_mm, material) — load capacity analysis",
+                "validate_design_for_requirements(file_path, requirements) — verification",
                 "get_post_processing_guide(material) — finishing guidance",
             ],
             # Every entry here is Business+.  Running machines together is
@@ -232,7 +235,7 @@ class SkillManifest:
             "fleet_management (Business+)": [
                 "fleet_status() — all printers overview",
                 "fleet_pause() / fleet_resume() / fleet_cancel() — stop the fleet gracefully",
-                "route_print_job(file, requirements) — intelligent job routing",
+                "route_print_job(file_path, material, quality) — intelligent job routing",
                 "fleet_job_status(job_id) — track distributed jobs",
             ],
         }
@@ -255,12 +258,12 @@ class SkillManifest:
                 + str(design_template_counts()['design_patterns'])
                 + " design patterns (guidance only)"
             ),
-            "material_selection": "recommend_design_material(use_case) — intelligent material pick",
+            "material_selection": "recommend_design_material(requirements) — intelligent material pick",
             "material_rules": "get_material_design_profile(material) — constraints and rules",
-            "load_analysis": "estimate_structural_load(geometry, material) — strength validation",
-            "generation": "generate_model(description) — text-to-3D (Gemini, Meshy, Tripo3D, Stability)",
-            "generation_enhance": "build_generation_prompt(brief) — enhance with design intelligence",
-            "preview": "preview_generated_model(model_id) — multi-angle visual check (mandatory)",
+            "load_analysis": "estimate_structural_load(cross_section_mm2, cantilever_length_mm, material) — strength validation",
+            "generation": "generate_model(prompt) — text-to-3D (Gemini, Meshy, Tripo3D, Stability)",
+            "generation_enhance": "build_generation_prompt(requirements) — enhance with design intelligence",
+            "preview": "preview_generated_model(file_path) — multi-angle visual check (mandatory)",
             "show_in_3d": (
                 "show_on_stage(file_path) — open the interactive inline 3D "
                 "stage on an existing mesh or sliced .gcode.3mf, changing "
@@ -268,15 +271,15 @@ class SkillManifest:
                 "also opens it while importing a design; see "
                 "discovery.inline_3d_stage)"
             ),
-            "slicing": "slice_model(file_path) — STL/3MF to gcode",
-            "adaptive_slicing": "generate_adaptive_slicing_plan(file) — quality/time tradeoff",
-            "printing": "start_print(file) — begin a print job",
+            "slicing": "slice_model(input_path) — STL/3MF to gcode",
+            "adaptive_slicing": "generate_adaptive_slicing_plan(regions, material) — quality/time tradeoff (quick_adaptive_plan measures the regions for you)",
+            "printing": "start_print(file_name) — begin a print job",
             "safety": "preflight_check() — pre-print safety verification",
             "ams_colors": "ams_status() — check loaded AMS filaments and colors",
             "multi_material": "multi_material_print(objects_json) — different objects in different materials",
-            "failure_analysis": "analyze_print_failure_smart(description) — root cause analysis",
-            "recovery": "retry_print_with_fix(file, fixes) — re-slice with corrections",
-            "troubleshooting": "troubleshoot_print_issue(issue) — design intelligence diagnosis",
+            "failure_analysis": "analyze_print_failure_smart(error_message) — root cause analysis",
+            "recovery": "retry_print_with_fix(model_path, custom_overrides) — re-slice with corrections",
+            "troubleshooting": "troubleshoot_print_issue(symptom) — design intelligence diagnosis",
             "post_processing": "get_post_processing_guide(material) — finishing techniques",
             "server_restart": (
                 "restart_server() — hot-restart the MCP server after code, "
@@ -291,7 +294,7 @@ class SkillManifest:
             "self_update": "upgrade_kiln() — update Kiln itself, then restart_server() to run it",
             "sign_in": "kiln_signin() — browser sign-in for hosted features (poll with kiln_signin_poll())",
             "fleet": "fleet_status() — fleet overview and job routing (Business+; for one machine use printer_status(printer_name=...), free)",
-            "cost_estimate": "estimate_cost(file) — print cost estimation",
+            "cost_estimate": "estimate_cost(file_path) — print cost estimation",
         }
     )
 

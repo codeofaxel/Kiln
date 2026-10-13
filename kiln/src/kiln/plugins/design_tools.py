@@ -854,7 +854,7 @@ class _DesignToolsPlugin:
 
             * ``generatable: true`` — a PARAMETRIC PART.  The result
               carries its parameters, so you can fill in the user's
-              dimensions and call ``generate_from_template(id, {...})``
+              dimensions and call ``generate_from_template(template_id, {...})``
               to render a printable STL.
             * ``generatable: false`` — a DESIGN PATTERN (snap fit, living
               hinge, press fit).  Guidance for OpenSCAD you write

@@ -88,15 +88,17 @@ class _GenerationToolsPlugin:
 
             This is NOT the default. It needs a configured provider (the user
             supplies their own API key). For most custom objects the free,
-            keyless path is to author the OpenSCAD yourself and compile it with
-            ``compile_scad`` — no provider required. Reach for this tool when
-            the shape is organic or photo-derived and hard to express in
-            OpenSCAD AND a provider is configured.
+            keyless path is to author the OpenSCAD yourself and make it with
+            ``design_session(verb="generate", goal_id=..., scad_code=...)`` —
+            or ``compile_scad`` on an install without ``design_session`` — no
+            provider required. Reach for this tool when the shape is organic
+            or photo-derived and hard to express in OpenSCAD AND a provider is
+            configured.
 
             For the user-facing saved-goal flow (capturing duty / environment /
             materials / safety so the audit and post-print review can verify
             the result against the user's intent), call this through
-            ``design_session(verb="generate", session_id=...)`` rather than
+            ``design_session(verb="generate", goal_id=...)`` rather than
             calling ``generate_model_with_provider`` directly.
 
             Provider notes:
@@ -107,7 +109,8 @@ class _GenerationToolsPlugin:
             No-provider fallback:
             - If no cloud provider is configured this raises NO_PROVIDER. Do
               NOT ask the user to set an API key — fall back to writing the
-              OpenSCAD yourself and compiling it with compile_scad. That free,
+              OpenSCAD yourself and making it through design_session (or
+              compile_scad where design_session is not installed). That free,
               local path is the default for custom objects; cloud providers are
               an opt-in the user supplies their own key for (best for organic
               or photo-based shapes OpenSCAD can't easily reach).

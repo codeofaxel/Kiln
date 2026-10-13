@@ -44,6 +44,7 @@ from kiln.front_door import (
     front_door_present,
     join_goal,
     make_door_candidates,
+    record_inferred_goal,
     make_door_clause,
     registry_params,
     takes_a_file,
@@ -237,7 +238,7 @@ class TestStamp:
         assert desc.endswith(make_door_clause(True, "generate_model"))
         assert ENGINE_CLAUSE_HEAD in desc
         assert "download_generated_model" in desc
-        assert f"make here with the goal's `{GOAL_PARAM}`" not in desc
+        assert "Then make here with" not in desc  # its goal is named on another door
 
     def test_stamp_is_idempotent(self):
         mcp = _registry(front_door_module="a_real_plugin")
@@ -336,6 +337,23 @@ class TestJoinGoal:
         assert join_goal("", env, "/x.stl") is env
         assert SAVED_GOAL_KEY not in env
 
+    def test_an_inferred_goal_replaces_the_nudge(self, monkeypatch):
+        """Kiln's hosted service infers and keeps a goal for a make that named
+        none; the reply must then say which goal, not that none was kept."""
+        _fake_attach(monkeypatch, True)
+        env = {"success": True}
+        join_goal("", env, "/x.stl")
+        assert env[SAVED_GOAL_KEY]["note"] == GOAL_NOTES["none_named"]
+        record_inferred_goal(env, "g-inferred")
+        assert env[SAVED_GOAL_KEY] == {
+            "brief_id": "g-inferred",
+            "joined": True,
+            "inferred": True,
+            "note": GOAL_NOTES["inferred"].format(brief_id="g-inferred"),
+        }
+        assert 'goal_id="g-inferred"' in env[SAVED_GOAL_KEY]["note"]
+        assert record_inferred_goal({"success": True}, "") == {"success": True}
+
     def test_no_goal_where_the_front_door_is_installed_says_what_was_skipped(self, monkeypatch):
         """The incident's shape: a make with no goal named.  One line, at the
         moment it was skipped, never a refusal."""
@@ -428,6 +446,10 @@ class TestWords:
             assert FRONT_DOOR in clause
         assert FALLBACK_LOOP in FALLBACK_CLAUSE
         assert GOAL_PARAM in ENGINE_CLAUSE and "imported" in ENGINE_CLAUSE
+        # Both spellings, so the agent is carried from design_session's goal_id
+        # to the make door's brief_id.
+        assert "goal_id" in ENGINE_CLAUSE and "goal_id" in FRONT_DOOR_LINE
+        assert "goal_id" in GOAL_NOTES["none_named"]
 
     def test_the_paid_check_is_said_as_paid_and_the_goal_as_free(self):
         """Checking a result against the goal is a Kiln Pro feature;

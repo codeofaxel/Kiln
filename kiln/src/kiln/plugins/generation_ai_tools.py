@@ -22,6 +22,14 @@ from kiln.tool_annotations import creates
 _logger = logging.getLogger(__name__)
 
 
+
+def _keyless_make_line() -> str:
+    """The keyless make, in the one wording every map uses
+    (``kiln.front_door.KEYLESS_MAKE_LINE``)."""
+    from kiln.front_door import KEYLESS_MAKE_LINE
+
+    return KEYLESS_MAKE_LINE
+
 class _GenerationAIToolsPlugin:
     """AI generation pipeline tools.
 
@@ -289,9 +297,12 @@ class _GenerationAIToolsPlugin:
         ) -> dict:
             """Make a 3D model from a reference image.
 
-            DEFAULT (keyless): you (the agent) can SEE the image — study it
-            and write the OpenSCAD yourself, then compile_scad. You do NOT
-            need an image-to-3D provider, and with no key configured this
+            DEFAULT (keyless): you (the agent) can SEE the image — study it,
+            give it to ``design_session`` as ``reference_images`` (every later
+            make is checked against it), and write the OpenSCAD yourself for
+            ``design_session(verb="generate", scad_code=...)`` — or
+            ``compile_scad`` on an install without ``design_session``. You do
+            NOT need an image-to-3D provider, and with no key configured this
             tool hands the job back to your vision instead of erroring.
 
             OPT-IN cloud path: when the user has set their OWN
@@ -335,12 +346,12 @@ class _GenerationAIToolsPlugin:
                     "image_url": image_url,
                     "message": (
                         "No image-to-3D provider is configured — and you don't "
-                        "need one. You can SEE this image: study it and write "
-                        "the OpenSCAD to match the object, then compile it with "
-                        "compile_scad (free, no key). Show the user a preview "
-                        "and iterate. Cloud image-to-3D (Meshy) is an OPT-IN "
-                        "that needs the user's own KILN_MESHY_API_KEY — never "
-                        "required."
+                        "need one. You can SEE this image: study it and give it "
+                        "to design_session as reference_images, so every make is "
+                        "checked against it. " + _keyless_make_line() + " Show "
+                        "the user a preview and iterate. Cloud image-to-3D (Meshy) is an "
+                        "OPT-IN that needs the user's own KILN_MESHY_API_KEY — "
+                        "never required."
                     ),
                 }
             if provider != "meshy":
@@ -379,8 +390,9 @@ class _GenerationAIToolsPlugin:
             except GenerationAuthError as exc:
                 return _srv._error_dict(
                     f"Image-to-3D provider auth failed: {exc}. You don't need a "
-                    "provider — study the image and write the OpenSCAD yourself, "
-                    "then compile_scad. Cloud Meshy is opt-in via KILN_MESHY_API_KEY.",
+                    "provider — study the image. "
+                    + _keyless_make_line()
+                    + " Cloud Meshy is opt-in via KILN_MESHY_API_KEY.",
                     code="AUTH_ERROR",
                 )
             except GenerationError as exc:

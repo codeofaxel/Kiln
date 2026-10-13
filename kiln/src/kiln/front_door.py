@@ -183,26 +183,26 @@ GOAL_PARAM = "brief_id"
 GOAL_NAMED_ELSEWHERE: dict[str, str] = {
     "generate_model": (
         "The model arrives through `download_generated_model`; give that "
-        "call the goal's `brief_id` so the result joins it."
+        f"call `{GOAL_PARAM}` set to the goal_id, so the result joins the goal."
     ),
     "generate_model_from_image": (
         "The model arrives through `download_generated_model`; give that "
-        "call the goal's `brief_id` so the result joins it."
+        f"call `{GOAL_PARAM}` set to the goal_id, so the result joins the goal."
     ),
     "optimize_template_params": (
         "This makes a batch of variants, so it names no goal; make the one "
-        "the person keeps through `generate_from_template` with the goal's "
-        "`brief_id`."
+        "the person keeps through `generate_from_template` with "
+        f"`{GOAL_PARAM}` set to the goal_id."
     ),
     "generate_template_variations": (
         "This makes a batch of variants, so it names no goal; make the one "
-        "the person keeps through `generate_from_template` with the goal's "
-        "`brief_id`."
+        "the person keeps through `generate_from_template` with "
+        f"`{GOAL_PARAM}` set to the goal_id."
     ),
     "batch_generate_products": (
         "This makes a batch of products, so it names no goal; make the one "
-        "the person keeps through its own generator with the goal's "
-        "`brief_id`."
+        "the person keeps through its own generator with "
+        f"`{GOAL_PARAM}` set to the goal_id."
     ),
 }
 
@@ -285,10 +285,14 @@ ENGINE_CLAUSE_HEAD = (
     f"an object — {_WHAT_IT_KEEPS}."
 )
 
-#: The tail for a door that takes the goal's id itself.
+#: The tail for a door that takes the goal's id itself.  It names both
+#: spellings on purpose: design_session hands back a ``goal_id``, and the
+#: make doors took that id as ``brief_id`` long before this roster, so the
+#: sentence carries the agent from one name to the other.
 ENGINE_CLAUSE_TAIL = (
-    f"Then make here with the goal's `{GOAL_PARAM}` so this result joins it; "
-    "an imported or downloaded part joins the same way."
+    f"Then make here with `{GOAL_PARAM}` set to the goal_id it returned, so "
+    "this result joins the goal; an imported or downloaded part joins the "
+    "same way."
 )
 
 #: The clause as the common case reads (``compile_scad``, every generator,
@@ -310,9 +314,21 @@ FRONT_DOOR_LINE = (
     f"MAKE: a make starts with `{FRONT_DOOR}`, Kiln's front door for making an "
     f"object — {_WHAT_IT_KEEPS}. Every other make tool (the OpenSCAD compile, "
     "the product generators, the template builders, the imports and the "
-    f"marketplace download) is a path it routes to: give that tool the goal's "
-    f"{GOAL_PARAM} so the result joins the goal, an imported or downloaded "
-    "part included."
+    f"marketplace download) is a path it routes to: pass the goal_id it "
+    f"returned as that tool's {GOAL_PARAM}, so the result joins the goal, an "
+    "imported or downloaded part included."
+)
+
+#: The keyless make, in one place: what an agent does after starting a goal
+#: when it writes the design itself, and what it does on an install without
+#: the front door.  The skill manifest, get_started and the photo door's
+#: redirect read it, so the default path is said one way everywhere.
+KEYLESS_MAKE_LINE = (
+    f"Write the OpenSCAD yourself and make it with {FRONT_DOOR}"
+    '(verb="generate", goal_id=<the goal_id>, scad_code=<your OpenSCAD>): '
+    "Kiln compiles it locally, free, with no API key, on every tier. On an "
+    f"install without {FRONT_DOOR}, compile it with {FALLBACK_LOOP}, which "
+    "is the make → preview → iterate loop there."
 )
 
 #: The instructions' extra sentence on an install without the front door.
@@ -442,9 +458,33 @@ GOAL_NOTES = {
     "none_named": (
         f"No saved goal named. Start with `{FRONT_DOOR}` to keep the goal (free) "
         "and, on Kiln Pro, have the result checked against it; then make with "
-        f"its {GOAL_PARAM}."
+        f"{GOAL_PARAM} set to its goal_id."
+    ),
+    # Kiln's hosted service infers a goal from the request when a product or
+    # template make names none, and keeps it: the reply says which, instead
+    # of telling the agent no goal was kept.
+    "inferred": (
+        "Kiln kept a goal it inferred from this request (goal_id {brief_id}). "
+        f"Refine it with `{FRONT_DOOR}(verb=\"update\", goal_id=\"{{brief_id}}\")`, "
+        f"and make the next version with {GOAL_PARAM} set to that goal_id."
     ),
 }
+
+
+def record_inferred_goal(result: Any, brief_id: str) -> Any:
+    """Say in ``result`` that Kiln kept a goal it INFERRED for a make that
+    named none, replacing the "no goal named" nudge the make door wrote.
+    Called by whatever did the inferring (Kiln's hosted dispatcher); a no-op
+    without an id."""
+    if not isinstance(result, dict) or not brief_id:
+        return result
+    result[SAVED_GOAL_KEY] = {
+        "brief_id": brief_id,
+        "joined": True,
+        "inferred": True,
+        "note": GOAL_NOTES["inferred"].format(brief_id=brief_id),
+    }
+    return result
 
 
 def join_goal(brief_id: str, result: Any, mesh_path: str | None = None) -> Any:
