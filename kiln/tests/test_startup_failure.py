@@ -545,11 +545,12 @@ class TestEveryDoorIsGuarded:
             / "src"
             / "server.py"
         )
-        monkeypatch.setitem(sys.modules, "kiln", None)
-        monkeypatch.setitem(sys.modules, "kiln.server", None)
+        with monkeypatch.context() as broken_import:
+            broken_import.setitem(sys.modules, "kiln", None)
+            broken_import.setitem(sys.modules, "kiln.server", None)
 
-        with pytest.raises(ImportError) as exc_info:
-            runpy.run_path(str(entry), run_name="__main__")
+            with pytest.raises(ImportError) as exc_info:
+                runpy.run_path(str(entry), run_name="__main__")
 
         assert "kiln.server" in str(exc_info.value), (
             "the original import failure was masked by the fallback"

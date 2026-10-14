@@ -32,28 +32,9 @@ from kiln.untrusted_zip import (
     UntrustedZipFile,
     open_untrusted_zip,
 )
+from tests._child_memory import CHILD_PEAK_MB_FUNCTION
 
 _TINY_MODEL = b'<?xml version="1.0"?><model xmlns="x"><resources/></model>'
-
-#: Printed by a measuring child: its OWN peak memory in MB.  On Linux the
-#: child reads VmHWM, which belongs to the program it runs; ``ru_maxrss``
-#: there carries the forking parent's high-water mark across the exec, so in
-#: a pytest worker that has already run heavy tests it reports the worker's
-#: peak, not the child's.  macOS has no /proc and keeps no such carry-over.
-_PRINT_CHILD_PEAK_MB = (
-    "def _peak_mb():\n"
-    "    try:\n"
-    "        with open('/proc/self/status') as fh:\n"
-    "            for line in fh:\n"
-    "                if line.startswith('VmHWM:'):\n"
-    "                    return int(line.split()[1]) / 1024\n"
-    "    except OSError:\n"
-    "        pass\n"
-    "    r = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss\n"
-    "    return r / (1024 * 1024) if sys.platform == 'darwin' else r / 1024\n"
-    "print(_peak_mb())\n"
-)
-
 
 def _zip(path: Path, members: dict[str, bytes], *, method_overrides=None) -> str:
     overrides = method_overrides or {}
@@ -182,7 +163,8 @@ def test_hosted_readers_stay_bounded_on_a_bomb(tmp_path):
         "        fn(p)\n"
         "    except Exception:\n"
         "        pass\n"
-        + _PRINT_CHILD_PEAK_MB
+        + CHILD_PEAK_MB_FUNCTION
+        + "print(_peak_mb())\n"
     )
     env = {"PATH": os.environ.get("PATH", "")}
     out = subprocess.run(

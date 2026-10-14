@@ -189,6 +189,7 @@ def test_all_conditions_true_is_accepted_and_the_evidence_is_recorded(retry_file
     path = retry_file()
     with caplog.at_level(logging.INFO, logger="kiln.printers.print_gate"):
         verdict = pg.evaluate_same_bed_retry(adapter, path)
+        audit = [r.getMessage() for r in caplog.records if "same-bed retry" in r.getMessage()]
         assert pg.run_adapter_gate(adapter, path, {}) is None
     assert verdict["blocked"] is False and verdict["accepted"] is True
     evidence = verdict["homed_evidence"]
@@ -197,7 +198,6 @@ def test_all_conditions_true_is_accepted_and_the_evidence_is_recorded(retry_file
     assert evidence["read_at"].endswith("+00:00")  # an ISO-8601 UTC timestamp
     assert verdict["machine"] == MACHINE
     assert verdict["contract"]["safe_startup_policy_version"] == "same-bed-safe-prologue-v2"
-    audit = [r.getMessage() for r in caplog.records if "same-bed retry" in r.getMessage()]
     assert audit, "no audit line"
     assert all(s in audit[-1] for s in ("accepted", MACHINE, "x,y,z", "toolhead.homed_axes", evidence["read_at"]))
 

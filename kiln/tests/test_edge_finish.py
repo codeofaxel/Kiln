@@ -27,6 +27,7 @@ import pytest
 
 from kiln.edge_plan import CHAMFER, FILLET, PrintFrame, hanging_band_mm, parse_selector, place_of, plan_edges
 from kiln.mesh_edit_check import EDIT_REFUSED, TOO_LARGE_TO_CHECK, measure_mesh
+from tests._child_memory import CHILD_PEAK_MB_FUNCTION
 
 trimesh = pytest.importorskip("trimesh")
 
@@ -1246,7 +1247,6 @@ def test_the_kernel_child_stays_far_inside_a_two_gigabyte_machine(tmp_path):
     bound is loose (1 GB for a small part) so it never flakes; what it
     catches is an order of magnitude, not a margin."""
     import json
-    import resource
     import subprocess
 
     import kiln
@@ -1260,17 +1260,22 @@ def test_the_kernel_child_stays_far_inside_a_two_gigabyte_machine(tmp_path):
         "treatments": plan.treatments, "linear": 5e-3, "angular": 0.1, "search_s": 60,
     }))
     child = Path(kiln.__file__).with_name("cad_edge.py")
-    before = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
+    script = (
+        "import runpy, sys\n"
+        f"sys.path[:0] = {list(sys.path)!r}\n"
+        "sys.argv = sys.argv[1:]\n"
+        "runpy.run_path(sys.argv[0], run_name='__main__')\n"
+        + CHILD_PEAK_MB_FUNCTION
+        + "print(_peak_mb())\n"
+    )
     run = subprocess.run(
-        [sys.executable, str(child), str(request)], capture_output=True, text=True, timeout=180,
+        [sys.executable, "-c", script, str(child), str(request)], capture_output=True, text=True, timeout=180,
         env={"PATH": os.environ.get("PATH", ""), "PYTHONPATH": os.pathsep.join(p for p in sys.path if p)},
     )
     assert run.returncode == 0, run.stderr[-1000:]
-    assert json.loads(run.stdout.strip().splitlines()[-1])["applied"]
-    peak = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
-    # ru_maxrss is bytes on macOS and kilobytes on Linux.
-    peak_mb = peak / (1024 * 1024) if sys.platform == "darwin" else peak / 1024
-    assert peak >= before
+    lines = run.stdout.strip().splitlines()
+    assert json.loads(lines[-2])["applied"]
+    peak_mb = float(lines[-1])
     assert peak_mb < 1000, f"the kernel child peaked at {peak_mb:.0f} MB"
 
 

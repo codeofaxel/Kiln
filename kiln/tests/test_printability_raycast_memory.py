@@ -20,6 +20,7 @@ import pytest
 
 import kiln.printability as printability
 from kiln.printability import _raycast_min_distances, analyze_printability
+from tests._child_memory import CHILD_PEAK_MB_FUNCTION
 
 trimesh = pytest.importorskip("trimesh")
 
@@ -61,28 +62,23 @@ class TestTheBatchMovesMemoryOnly:
         assert reports[0] == reports[1]
 
 
-_MEASURE = """
-import resource, sys
+_MEASURE = CHILD_PEAK_MB_FUNCTION + """
 import numpy as np
 from kiln.printability import _raycast_min_distances
-
-def peak_mb():
-    v = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    return v / 2**20 if sys.platform == "darwin" else v / 1024
 
 rng = np.random.default_rng(0)
 T, R = 100_000, 1_000
 v0 = rng.uniform(-50, 50, (T, 3)); e1 = rng.uniform(-1, 1, (T, 3)); e2 = rng.uniform(-1, 1, (T, 3))
 o = rng.uniform(-50, 50, (R, 3)); d = rng.normal(size=(R, 3)); d /= np.linalg.norm(d, axis=1)[:, None]
 _raycast_min_distances(o[:2], d[:2], v0[:10], e1[:10], e2[:10], min_abs_perpendicular_dot=0.85)
-before = peak_mb()
+before = _peak_mb()
 _raycast_min_distances(o, d, v0, e1, e2, min_abs_perpendicular_dot=0.85)
-print(peak_mb() - before)
+print(_peak_mb() - before)
 """
 
 
 class TestTheCastFitsASmallHost:
-    """Measured in a child: ru_maxrss is a whole-process high-water mark."""
+    """Measured in a child using that child's own peak memory."""
 
     def test_the_cast_stays_near_its_budget_at_the_target_cap(self):
         # The parent's resolved sys.path, so the child measures the kiln the

@@ -1082,7 +1082,7 @@ def _no_print_watchdog_outlives_its_test(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _isolate_daily_stats(tmp_path, monkeypatch):
+def _isolate_daily_stats(tmp_path_factory, monkeypatch):
     """Point telemetry counters at a per-test file, never the real one.
 
     ``daily_stats`` writes ``~/.kiln/daily_stats.json``, and its counters
@@ -1106,11 +1106,12 @@ def _isolate_daily_stats(tmp_path, monkeypatch):
         yield
         return
 
-    monkeypatch.setattr(daily_stats, "_STATS_PATH", tmp_path / "daily_stats.json")
+    stats_home = tmp_path_factory.mktemp("kiln_daily_stats")
+    monkeypatch.setattr(daily_stats, "_STATS_PATH", stats_home / "daily_stats.json")
     # The limits-nudge marker is the same kind of per-install state: a nudge
     # one test minted must not be the sign-in conversion the next one counts.
     if hasattr(daily_stats, "_LIMITS_NUDGE_MARKER_PATH"):
-        monkeypatch.setattr(daily_stats, "_LIMITS_NUDGE_MARKER_PATH", tmp_path / "limits_nudge_pending.json")
+        monkeypatch.setattr(daily_stats, "_LIMITS_NUDGE_MARKER_PATH", stats_home / "limits_nudge_pending.json")
     yield
 
 
