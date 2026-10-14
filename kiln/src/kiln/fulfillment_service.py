@@ -67,3 +67,30 @@ def fee_basis(priced: object) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     return float(value)
+
+
+def server_takes_fee(provider: object) -> bool:
+    """Whether orders placed through ``provider`` have Kiln's fee charged by
+    Kiln's hosted server, so nothing on this machine may record or charge it.
+
+    The provider says so itself (``charges_kiln_fee``): Kiln's hosted
+    connector charges the fee on the server when it places the order.  This
+    is the provider's own contract, never a guess from which keys are set.
+    A door that charges before placing (the agent order tool) asks this; the
+    order it gets back then confirms it (:func:`fee_taken_by_server`).
+    """
+    return getattr(provider, "charges_kiln_fee", False) is True
+
+
+def fee_taken_by_server(order: object) -> dict | None:
+    """Kiln's fee as the hosted server already charged it, or ``None``.
+
+    An order placed through Kiln's hosted connector comes back saying what
+    the server charged (``kiln_fee_charged``).  Every door that records or
+    charges Kiln's fee on this machine asks this first: when it answers, the
+    door shows that fee, once, and records and charges nothing itself, so
+    the fee is never taken twice.  ``None`` means no server took it, and the
+    door settles the fee as it always has.
+    """
+    fee = getattr(order, "kiln_fee_charged", None)
+    return dict(fee) if isinstance(fee, dict) else None

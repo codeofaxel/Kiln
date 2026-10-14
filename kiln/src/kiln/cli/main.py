@@ -5862,8 +5862,18 @@ def _settle_order_fee(
     step that cannot finish leaves the order reported as placed, with a
     warning that says the fee was not recorded.
     """
-    from kiln.fulfillment_service import fee_basis
+    from kiln.fulfillment_service import fee_basis, fee_taken_by_server
 
+    # Kiln's hosted server placed the order and charged the fee itself:
+    # show that fee, and record and charge nothing here.
+    upstream = fee_taken_by_server(result)
+    if upstream is not None:
+        order_data["kiln_fee"] = upstream
+        order_data["payment"] = {"status": "charged_by_kiln_server"}
+        fee_now = float(upstream.get("fee_amount") or 0) + float(upstream.get("tax_amount") or 0)
+        if isinstance(result.total_price, (int, float)):
+            order_data["total_with_fee"] = round(float(result.total_price) + fee_now, 2)
+        return
     basis = fee_basis(result)
     if basis is None:
         logger.warning("Order %s states no printing price; Kiln's fee was not worked out", result.order_id)

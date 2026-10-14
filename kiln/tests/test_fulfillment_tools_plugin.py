@@ -338,7 +338,9 @@ def test_a_cancel_the_order_service_words_in_full_is_said_as_it_is(registered_to
     assert reply["error"]["code"] == code
 
 
-def _place_order_through_the_tool(registered_tools, tmp_path, monkeypatch, placed, drift, **order_args):
+def _place_order_through_the_tool(
+    registered_tools, tmp_path, monkeypatch, placed, drift, *, server_charges_fee=False, **order_args,
+):
     """``fulfillment_order`` end to end with a provider that answers ``placed``.
 
     The quote priced 16.58 to print plus 8.85 for the chosen shipping;
@@ -364,6 +366,8 @@ def _place_order_through_the_tool(registered_tools, tmp_path, monkeypatch, place
     ).token
 
     provider = SimpleNamespace(name="proxy", place_order=lambda request: placed)
+    if server_charges_fee:
+        provider.charges_kiln_fee = True
     monkeypatch.setattr(server, "_check_billing_auth", lambda scope="print": None)
     monkeypatch.setattr(kiln.licensing, "check_tier", lambda *a, **k: (True, ""))
     monkeypatch.setattr(server, "_get_fulfillment", lambda: provider)
@@ -490,6 +494,39 @@ def test_a_price_change_past_the_limit_leaves_kilns_fee_with_the_order(
     said = json.dumps(reply).lower()
     assert "refunded" not in said
     assert "comes back automatically once the order expires" in reply["tell_the_person"][0]
+
+
+def test_an_order_the_hosted_server_charged_the_fee_on_is_charged_nothing_here(
+    registered_tools, tmp_path, monkeypatch,
+):
+    """Through Kiln's hosted connector the server charges Kiln's fee when it
+    places the order.  The tool records, holds and charges nothing on this
+    machine, and shows the server's fee once."""
+    import kiln.server as server
+
+    local: list[str] = []
+    monkeypatch.setattr(server, "_get_billing", lambda: SimpleNamespace(
+        calculate_fee=lambda *a, **k: local.append("calculate_fee"),
+        calculate_and_record_fee=lambda *a, **k: local.append("calculate_and_record_fee"),
+        record_charge=lambda *a, **k: local.append("record_charge"),
+    ))
+    monkeypatch.setattr(server, "_get_payment_mgr", lambda: SimpleNamespace(
+        available_rails=["stripe"],
+        check_spend_limits=lambda *a: (local.append("check_spend_limits"), (True, ""))[1],
+        charge_fee=lambda *a, **k: local.append("charge_fee"),
+        capture_fee=lambda *a, **k: local.append("capture_fee"),
+    ))
+    server_fee = {"fee_amount": 0.83, "tax_amount": 0.0, "waived": False}
+    placed = _placed(total_price=27.55, checkout_total=27.55, checkout_net=25.43, kiln_fee_charged=server_fee)
+    reply = _place_order_through_the_tool(
+        registered_tools, tmp_path, monkeypatch, placed, lambda q, p: (None, False),
+        server_charges_fee=True, quoted_price=16.58,
+    )
+
+    assert reply["success"] is True, reply
+    assert local == [], "nothing recorded, held or charged on this machine"
+    assert reply["order"]["kiln_fee"] == server_fee, "the fee the server charged, shown once"
+    assert "payment" not in reply["order"]
 
 
 def test_prices_that_cannot_be_compared_are_stated_not_judged(registered_tools, tmp_path, monkeypatch):

@@ -766,6 +766,7 @@ def _placing_provider(
     """
     placed = MagicMock(
         order_id="ord-777", total_price=total_price, production_price=production_price, currency="USD",
+        kiln_fee_charged=None,
     )
     placed.to_dict.return_value = {
         "order_id": "ord-777",
@@ -1214,6 +1215,33 @@ class TestOrder:
         assert ledger.calculate_fee.call_args.args[0] == 20.68
         order = json.loads(result.output)["data"]["order"]
         assert order["total_with_fee"] == 31.55  # 27.55 at the checkout + Kiln's 4.00
+
+    def test_an_order_the_hosted_server_charged_is_not_charged_again_here(
+        self, runner, tmp_path, monkeypatch,
+    ):
+        # Through Kiln's hosted connector the server charges the fee and the
+        # order says so: nothing is recorded or charged here, and the fee is
+        # shown once.  Ordered directly, the fee is recorded here once.
+        server_fee = {"fee_amount": 1.03, "tax_amount": 0.0, "waived": False}
+        ledger, manager = _stand_in_fee_tools(monkeypatch)
+        manager.available_rails = ["stripe"]
+        hosted = _placing_provider(total_price=27.55, production_price=20.68)
+        hosted.place_order.return_value.kiln_fee_charged = server_fee
+        with patch("kiln.cli.main._get_fulfillment_provider", return_value=hosted):
+            result = runner.invoke(cli, _place_argv(tmp_path))
+        assert result.exit_code == 0, result.output
+        ledger.calculate_fee.assert_not_called()
+        ledger.record_charge.assert_not_called()
+        manager.charge_fee.assert_not_called()
+        flat = _flat(result.output)
+        assert flat.count("Kiln fee") == 1 and "USD 1.03" in flat
+        assert "Total USD 28.58" in flat  # 27.55 at the checkout + the 1.03 the server charged
+
+        ledger, manager = _stand_in_fee_tools(monkeypatch)
+        with patch("kiln.cli.main._get_fulfillment_provider", return_value=_placing_provider(27.55, 20.68)):
+            result = runner.invoke(cli, [*_place_argv(tmp_path), "--json"])
+        assert result.exit_code == 0, result.output
+        ledger.record_charge.assert_called_once_with("ord-777", ledger.calculate_fee.return_value)
 
     def test_an_order_that_states_no_printing_price_is_charged_no_fee(
         self, runner, tmp_path, monkeypatch,

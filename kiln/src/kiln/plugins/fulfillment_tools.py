@@ -388,7 +388,9 @@ class _FulfillmentToolsPlugin:
                 # Try to authorize (hold) the fee at quote time.
                 try:
                     mgr = _srv._get_payment_mgr()
-                    if fee_calc is not None and mgr.available_rails:
+                    from kiln.fulfillment_service import server_takes_fee
+
+                    if fee_calc is not None and mgr.available_rails and not server_takes_fee(provider):
                         auth_result = mgr.authorize_fee(
                             quote.quote_id,
                             fee_calc,
@@ -820,8 +822,13 @@ class _FulfillmentToolsPlugin:
                         code="SHIPPING_NOT_CONFIRMED",
                     )
 
-                # 2. Determine price and calculate fee BEFORE placing.
-                estimated_price = quoted_price
+                # 2. Determine price and calculate fee BEFORE placing.  When
+                #    Kiln's hosted server places the order it charges the fee
+                #    itself, so nothing here records, holds or charges it.
+                from kiln.fulfillment_service import fee_taken_by_server, server_takes_fee
+
+                server_fee = server_takes_fee(provider)
+                estimated_price = 0.0 if server_fee else quoted_price
                 currency = quoted_currency
                 pay_result = None
                 fee_calc = None
@@ -851,7 +858,7 @@ class _FulfillmentToolsPlugin:
                             )
 
                 # 3. Charge / capture payment BEFORE placing the order.
-                if payment_hold_id or estimated_price > 0:
+                if not server_fee and (payment_hold_id or estimated_price > 0):
                     billing = _srv._get_billing()
                     if billing is None:
                         return _srv._error_dict(
@@ -943,6 +950,14 @@ class _FulfillmentToolsPlugin:
                 if fee_calc:
                     order_data["kiln_fee"] = fee_calc.to_dict()
                     order_data["total_with_fee"] = float(fee_calc.total_cost)
+                upstream_fee = fee_taken_by_server(result)
+                if upstream_fee is not None:
+                    order_data["kiln_fee"] = upstream_fee
+                elif server_fee:
+                    order_data.setdefault("warnings", []).append(
+                        "Kiln's hosted service placed this order but didn't say what fee it charged; "
+                        "Kiln charged nothing for it on this machine."
+                    )
                 if pay_result:
                     order_data["payment"] = pay_result.to_dict()
 
@@ -1009,7 +1024,7 @@ class _FulfillmentToolsPlugin:
                             }
 
                 if response_warnings:
-                    order_data["warnings"] = response_warnings
+                    order_data["warnings"] = [*order_data.get("warnings", []), *response_warnings]
 
                 reply = {"success": True}
                 if tell:
