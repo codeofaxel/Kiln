@@ -156,11 +156,13 @@ def test_fulfillment_quote_caches_provider_quote_id(registered_tools, tmp_path, 
     get_quote_cache().invalidate_all()
     model = tmp_path / "model.stl"
     model.write_bytes(b"solid test\nendsolid test\n")
+    seen = {}
 
     class MockProvider:
         name = "craftcloud"
 
         def get_quote(self, request):
+            seen["file_name"] = request.file_name
             shipping = {"id": "ship-1", "name": "FedEx", "price": 21.42, "currency": "USD", "estimated_days": 5}
             quote = {
                 "quote_id": "provider-quote-1",
@@ -206,6 +208,7 @@ def test_fulfillment_quote_caches_provider_quote_id(registered_tools, tmp_path, 
 
     assert result["success"] is True
     assert result["quote"]["quote_id"] == "provider-quote-1"
+    assert seen["file_name"] == "model.stl"
     assert get_cached_quote_by_id("provider-quote-1") is not None
 
 

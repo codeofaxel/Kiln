@@ -5628,6 +5628,7 @@ def order_quote(file_path: str, material: str, quantity: int, country: str, json
             service.QuoteRequest(
                 file_path=file_path,
                 material_id=material,
+                file_name=Path(file_path).name,
                 quantity=quantity,
                 shipping_country=country,
             )

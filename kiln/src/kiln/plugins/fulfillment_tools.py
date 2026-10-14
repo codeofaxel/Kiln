@@ -12,6 +12,7 @@ no manual imports needed.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from kiln.fulfillment_profiles import (
@@ -321,6 +322,7 @@ class _FulfillmentToolsPlugin:
                     QuoteRequest(
                         file_path=file_path,
                         material_id=material_id,
+                        file_name=Path(file_path).name,
                         quantity=quantity,
                         shipping_country=shipping_country,
                     )

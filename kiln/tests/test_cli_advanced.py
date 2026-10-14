@@ -919,6 +919,7 @@ class TestOrder:
                 "order", "quote", str(gcode), "-m", "pla-white", "--json",
             ])
         assert result.exit_code == 0
+        assert provider.get_quote.call_args.args[0].file_name == "model.gcode"
 
     def test_order_status_json(self, runner):
         provider = MagicMock()
