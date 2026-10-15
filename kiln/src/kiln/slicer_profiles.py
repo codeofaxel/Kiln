@@ -12,7 +12,8 @@ add-on table stay bundled whole.  The settings are written to a temporary
 external profile files.
 
 A roster printer whose record is not in hand (a signed-out install, a first
-setup offline) slices with the generic profile on the generic bed, and the
+setup offline) slices with the generic profile on its own RATED bed (the
+roster's ``rated_build_volume_mm``, via :func:`_ensure_bed`), and the
 ``.ini`` says so on its origin line (:class:`ProfileOrigin.standing_in_for`),
 so no door mistakes the generic numbers for that machine's.
 
@@ -578,17 +579,22 @@ def _ensure_estimate_motion(settings: dict[str, str], profile_id: str) -> None:
 def _ensure_bed(settings: dict[str, str], profile_id: str, printer_id: str) -> None:
     """Give the generic profile the bed of the printer it is standing in for.
 
-    A printer with no bundled profile slices with the generic one, which
-    states no bed, so the slicer lays the part out for its own default bed
-    whatever the machine's is.  When its owner set *printer_id* up on this
-    machine with a bed, the generic profile is given that bed.  A bundled
+    A printer with no tuned profile in hand slices with the generic one,
+    which states no bed, so the slicer lays the part out for its own default
+    bed whatever the machine's is.  The generic profile is given the bed
+    every other door reads for *printer_id* -- a roster printer's rated bed
+    on a signed-out install, or the bed its owner stated for a printer the
+    roster does not list -- so the part is centred on the machine's own
+    plate and the print-start gate judges the same edges the slicer drew
+    for (2026-10-15: sliced for a 200 mm bed, a part the Voron 0 could print
+    was refused at the gate for hanging off a 120 mm one).  A tuned
     profile's own bed is never touched.
     """
     if profile_id != "default" or "bed_shape" in settings:
         return
-    from kiln.printers.bed_fit import owner_stated_build_volume
+    from kiln.printers.bed_fit import get_build_volume, owner_stated_build_volume
 
-    volume = owner_stated_build_volume(printer_id)
+    volume = get_build_volume(printer_id) or owner_stated_build_volume(printer_id)
     if volume is None:
         return
     x, y, z = (f"{side:g}" for side in volume)

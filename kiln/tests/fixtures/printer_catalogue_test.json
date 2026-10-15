@@ -1,7 +1,8 @@
 {
   "_meta": {
     "description": "Synthetic printers for public Kiln's own tests. No row is a real machine and every number is made up, so the public suite never carries Kiln's catalogue: a real printer's limits, variants and spec sheet are kiln-pro's and are pinned in kiln-pro's tests. conftest installs these rows into copies of the four bundled data files (safety_profiles.json takes each row's 'safety' block, printer_intelligence.json its 'intel' block, design_knowledge/printer_profiles.json its 'design' block, slicer_profiles.json its 'slicer' block) and points the loaders at the copies for the whole session. A row with no blocks is a ROSTER-ONLY printer: it exists by name and its record is served, which is what a catalogued printer looks like to an install without kiln-pro. kilntest_variants_se is a separately catalogued prefix relative of kilntest_variants; kilntest_hot is a 500 C class machine for the adapters whose protocol ceiling sits above the desktop limits.",
-    "shape": "The same four-block record kiln-pro's printer_catalogue.json carries per printer."
+    "shape": "The same four-block record kiln-pro's printer_catalogue.json carries per printer.",
+    "rated_build_volume_mm": "A roster row may carry its rated (marketed) bed, as every real roster row does since 2026-10-15; conftest writes it onto the intelligence copy (a row with a safety block gets that block's build_volume instead). kilntest_served states one and no safety block, so the signed-out posture has a bed and no record, as a real printer has."
   },
   "kilntest_open": {
     "display_name": "Kilntest Open 220",
@@ -1112,6 +1113,11 @@
     }
   },
   "kilntest_served": {
-    "display_name": "Kilntest Served 200"
+    "display_name": "Kilntest Served 200",
+    "rated_build_volume_mm": [
+      200,
+      200,
+      210
+    ]
   }
 }

@@ -106,7 +106,11 @@ class TestPublicProfileFields:
         for key, row in rows.items():
             assert set(row) == data_manifest.PUBLIC_PROFILE_FIELDS, key
         default = catalogue["default"]
-        assert set(default) > data_manifest.PUBLIC_PROFILE_FIELDS
+        # The generic row carries the spec sheet whole, and every roster
+        # field but the rated bed: its envelope is the floor's own
+        # build_volume_mm, never a printer's marketed bed.
+        assert set(default) > data_manifest.PUBLIC_PROFILE_FIELDS - {"rated_build_volume_mm"}
+        assert "rated_build_volume_mm" not in default
         assert "max_hotend_temp" in default
 
 

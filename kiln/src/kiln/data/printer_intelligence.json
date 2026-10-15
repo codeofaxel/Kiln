@@ -1,8 +1,8 @@
 {
   "_meta": {
     "version": "2.0.0",
-    "updated": "2026-10-12",
-    "description": "The roster of printers Kiln knows, keyed by the same printer_id as safety_profiles.json. Each named row carries display_name and the motion block. A printer's spec sheet (firmware, extruder and hotend type, enclosure, chamber sensor, bed levelling, input shaping, build volume, rated ceilings), its per-material temperature recipes and its nozzle-probe rectangle are served per printer from Kiln's catalogue when the printer is set up and merged into the row here. A row with no spec sheet is never a profile: a printer whose record this install does not hold answers as the generic 'default' row, which carries the full set of fields as the floor. Engineering depth (quirks, calibration recipes, known failure modes) is Kiln Pro's; see https://kiln3d.com/pricing.",
+    "updated": "2026-10-15",
+    "description": "The roster of printers Kiln knows, keyed by the same printer_id as safety_profiles.json. Each named row carries display_name, the motion block and rated_build_volume_mm, the marketed bed: the one number of a record that stays public, because the print-start bed check, the G-code bounds check and the park planner hold a signed-out install to it (the measured usable envelope is the record's). A printer's spec sheet (firmware, extruder and hotend type, enclosure, chamber sensor, bed levelling, input shaping, build volume, rated ceilings), its per-material temperature recipes and its nozzle-probe rectangle are served per printer from Kiln's catalogue when the printer is set up and merged into the row here. A row with no spec sheet is never a profile: a printer whose record this install does not hold answers as the generic 'default' row, which carries the full set of fields as the floor. Engineering depth (quirks, calibration recipes, known failure modes) is Kiln Pro's; see https://kiln3d.com/pricing.",
     "motion_note": "motion: the physical facts that decide whether Kiln may move the head on an idle machine that may still hold a part -- which part moves in Z (z_carrier, xy_layout), how Z finds its datum and where (z_home_method, z_home_xy_mm), whether the vendor's own homing routine travels sideways before Z is known (home_routine_travels_blind), the firmware family and what it does with an unhomed move (unhomed_move_policy: refused / clamped / unclamped), the commanded Z ceiling and what kind of source states it (z_travel_limit_mm, z_travel_limit_kind), the vendor's park verb and position (park_verb, park_position_mm, park_refuses_unhomed), and any vendor-stated purge or wipe station (purge_wipe_station; 'served_plan' on the Bambu rows whose station rides with the plan document Kiln Pro serves for that printer, never as public coordinates). Every field has a _sources entry {class, note}; class is the gate's real input: vendor_config / vendor_sentence / vendor_layout / vendor_slicer / firmware_docs settle a fact, community / not_found do not -- and a field on an unsettled class is null in this file, with the hearsay in the note. 'Descends onto the plate' is derived, never stored: false only for endstop_switch_off_plate, endstop_switch_top and nozzle_contact_strip. z_carrier may be inferred from a vendor layout name only under the rule in kiln.motion_facts.Z_CARRIER_FROM_LAYOUT, marked class vendor_layout so the plan text can say so. The note carries no link: the URL or file:line each fact was read from is research provenance and lives in Kiln Pro's motion provenance overlay, as every other research provenance does. Vocabulary, loader and derivations: kiln.motion_facts. Read 2026-09-16 from vendor firmware configs, vendor wikis and manuals, the vendors' own slicer profiles, and three vendor firmware images (Ender-3 V4, SPARKX i7, Neptune 4); the per-row refs say which.",
     "why_motion_stays_public": "The motion block is public at every tier and never served: the safe-motion gate must be able to refuse a blind move on an install with no record and no connection. Everything else about a machine can wait for its record; a move over a part still on the plate cannot."
   },
@@ -183,7 +183,12 @@
           "note": "Vendor firmware: `//#define NOZZLE_CLEAN_FEATURE` commented out; no vendor pad/chute documented. The vendor slicer start G-code draws a purge line at X2/X2.3 from Y10 to Y140 on the plate (`machine_start_gcode`) -- a slicer purge line, not a station."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      220,
+      220,
+      250
+    ]
   },
   "ender3_s1": {
     "display_name": "Creality Ender 3 S1",
@@ -262,7 +267,12 @@
           "note": "Vendor firmware: `//#define NOZZLE_CLEAN_FEATURE` commented out (G29_RETRY_AND_RECOVER's recover string `G28\\nG12 P0 S12 T0` cannot run G12 without it). No vendor pad."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      220,
+      220,
+      270
+    ]
   },
   "k1": {
     "display_name": "Creality K1",
@@ -345,7 +355,12 @@
           "note": "Nozzle-wipe strip ON THE PLATE, rear edge: X 95 -> 135, Y 221 -> 223 (`clr_noz_start_x/y`, `clr_noz_len_x/y`, `pa_clr_down_mm: -0.15` = nozzle pressed 0.15 mm below Z0); executed by the vendor `NOZZLE_CLEAR` command (prtouch wrapper `clear_nozzle`), invoked from START_PRINT / G29. No purge chute; the vendor purge line runs along X0.1-0.4, Y20-180."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      220,
+      220,
+      250
+    ]
   },
   "ender3_v2": {
     "display_name": "Creality Ender 3 V2",
@@ -424,7 +439,12 @@
           "note": "Vendor firmware: `//#define NOZZLE_CLEAN_FEATURE` commented out, so G12 is not compiled and no vendor pad or chute is documented. The slicer start G-code purge lines at X10.1/X10.4, Y20-Y145 run on the plate -- a slicer purge, not a station."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      220,
+      220,
+      250
+    ]
   },
   "sparkx_i7": {
     "display_name": "Creality SPARKX i7",
@@ -505,7 +525,12 @@
           "note": "box.cfg `extrude_pos_x: 277` (filament-switch purge) / `extrude_pos_y: 130`, off the plate's right edge (`[stepper_x] position_max: 279`), plus a Teflon wipe swing X258 Y3 -> X266 Y130; START_PRINT, PAUSE and END_PRINT_POINT visit it. The vendor names neither the receptacle type (bin vs chute) nor z. A second silicone-strip wipe behind the plate is `[nozzle_clear]`. Sibling C10/C14 configs say `extrude_pos_x: 278`."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      260,
+      260,
+      255
+    ]
   },
   "k1_max": {
     "display_name": "Creality K1 Max",
@@ -588,7 +613,12 @@
           "note": "Nozzle-wipe strip ON THE PLATE, rear edge: X 130 -> 170, Y 303 -> 305 (`clr_noz_start_x/y`, `clr_noz_len_x/y`, `pa_clr_down_mm: -0.15` = nozzle pressed 0.15 mm below Z0); executed by the vendor `NOZZLE_CLEAR` command (prtouch wrapper `clear_nozzle`), invoked from START_PRINT / G29. No purge chute; the vendor purge line runs along X0.1-0.4, Y20-180."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      300,
+      300,
+      300
+    ]
   },
   "k1c": {
     "display_name": "Creality K1C",
@@ -671,7 +701,12 @@
           "note": "Nozzle-wipe strip ON THE PLATE, rear edge: X 87 -> 133, Y 225 -> 226 (`clr_noz_start_x/y`, `clr_noz_len_x/y`, `pa_clr_down_mm: -0.15` = nozzle pressed 0.15 mm below Z0); executed by the vendor `NOZZLE_CLEAR` command (prtouch wrapper `clear_nozzle`), invoked from START_PRINT / G29. No purge chute; the vendor purge line runs along X0.1-0.4, Y20-180."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      220,
+      220,
+      250
+    ]
   },
   "k1_se": {
     "display_name": "Creality K1 SE",
@@ -754,7 +789,12 @@
           "note": "Nozzle-wipe strip ON THE PLATE, rear edge: X 87 -> 133, Y 225 -> 226 (`clr_noz_start_x/y`, `clr_noz_len_x/y`, `pa_clr_down_mm: -0.15` = nozzle pressed 0.15 mm below Z0); executed by the vendor `NOZZLE_CLEAR` command (prtouch wrapper `clear_nozzle`), invoked from START_PRINT / G29. No purge chute; the vendor purge line runs along X0.1-0.4, Y20-180."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      220,
+      220,
+      250
+    ]
   },
   "k2": {
     "display_name": "Creality K2",
@@ -836,7 +876,12 @@
           "note": "Purge point + silicone wiper behind the bed: box.cfg `extrude_pos_x: 115 / extrude_pos_y: 291.5` (filament-switch purge position); post-purge swing X127->137 at Y291.5, wiper pad `clean_pos_left_x: 145 / right_x:155 / middle_y:291.5`. Receptacle type not named (bin vs chute). Y is beyond the printable depth but inside stepper_y position_max; the vendor G28 override also visits it before the first Z home."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      260,
+      260,
+      260
+    ]
   },
   "k2_pro": {
     "display_name": "Creality K2 Pro",
@@ -918,7 +963,12 @@
           "note": "Purge point + silicone wiper behind the bed: box.cfg `extrude_pos_x: 124 / extrude_pos_y: 329` (filament-switch purge position); post-purge swing X138->173 at Y329, wiper pad `clean_pos_left_x: 157 / right_x:167 / middle_y:327`. Receptacle type not named (bin vs chute). Y is beyond the printable depth but inside stepper_y position_max; the vendor G28 override also visits it before the first Z home."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      300,
+      300,
+      300
+    ]
   },
   "k2_plus": {
     "display_name": "Creality K2 Plus",
@@ -1000,7 +1050,12 @@
           "note": "Purge + silicone wiper behind the bed: box.cfg `extrude_pos_x: 133 / extrude_pos_y: 378` (filament-switch purge), post-purge swing X135->160 at Y378, wiper pad `clean_pos_left_x: 160 / right_x:170 / middle_y:374`; M1501 wipes X132<->X170 at Y380. Receptacle type not named (bin vs chute). Y is beyond the printable depth but inside stepper_y position_max; the G28 override also visits it before the first Z home."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      350,
+      350,
+      350
+    ]
   },
   "k2_se": {
     "display_name": "Creality K2 SE",
@@ -1072,7 +1127,12 @@
           "note": "No vendor coordinates; the CPB start G-code draws the K2-shape slicer purge line (`G1 X0 Y150` -> `G1 X0 Y0 E9` -> `G1 X150 Y0 E9`)."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      220,
+      215,
+      245
+    ]
   },
   "creality_hi": {
     "display_name": "Creality Hi",
@@ -1154,7 +1214,12 @@
           "note": "Wipe pad behind the plate at Y266: `[nozzle_clear] start_pos: 98, 266 / clear_start: 148, 266 / clear_lenght: 14, 2` (Y position_max 273, plate 260), run as `NOZ_CLEAR` in `START_PRINT` and `G29`; the wiki lists a \"purge wiper\" and \"nozzle wiping kit\". x_mm is the wipe start `clear_start` (approach point X98); z not stated. The `NOZCLEAR_START_PRINT` purge line (X-2 -> X60 at Y-2) is not the pad."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      260,
+      260,
+      300
+    ]
   },
   "ender3_v4": {
     "display_name": "Creality Ender-3 V4",
@@ -1236,7 +1301,12 @@
           "note": "`[nozzle_clear]` wipe strip behind the plate: `clear_start:89,223` / `clear_lenght:42,3` -> X89-131, Y223-226 (plate is 220 deep; Y position_max 230), run as `NOZ_CLEAR` at START_PRINT; z not stated, and factory_printer.cfg carries `clear_start:129,223` instead. `[box]` also states a Teflon wipe swing X0 -> X5 at Y110 and a filament-switch purge at a runtime-detected X of -8..-5, Y110, off the plate's left edge."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      220,
+      220,
+      235
+    ]
   },
   "ender3_v3": {
     "display_name": "Creality Ender-3 V3",
@@ -1308,7 +1378,12 @@
           "note": "The vendor states none; a community config (not a vendor source) has a nozzle-clean strip X 85..135, Y 219..221 (rear edge of plate): `[prtouch_v2] clr_noz_start_x: 85 / clr_noz_start_y: 219 / clr_noz_len_x: 50 / clr_noz_len_y: 2`, invoked as `CX_NOZZLE_CLEAR` in START_PRINT (gcode_macro.cfg) and `NOZZLE_CLEAR` in G29."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      220,
+      220,
+      250
+    ]
   },
   "ender3_v3_ke": {
     "display_name": "Creality Ender-3 V3 KE",
@@ -1386,7 +1461,12 @@
           "note": "No purge/wipe station: no vendor wipe pad is documented and no standalone CLEAN_NOZZLE macro exists. The only vendor coordinates are a calibration-only nozzle-rub zone X -3..0, Y 20..70 off the plate's left edge (`[z_compensate] clr_noz_*`), used by `CRTENSE_NOZZLE_CLEAR` from `Z_COMPENSATE_TEST`, not by START_PRINT or G28. The slicer start G-code purge lines at X-2.0/X-1.7, Y20-Y145 are a slicer purge."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      220,
+      220,
+      240
+    ]
   },
   "ender3_v3_se": {
     "display_name": "Creality Ender-3 V3 SE",
@@ -1465,7 +1545,12 @@
           "note": "No purge/wipe station: no pad, no chute, `NOZZLE_CLEAN_FEATURE` off. The vendor firmware wipes the nozzle on the bed only during auto Z-offset: its clearByBed() heats to 200 C, finds plate contact by loadcell, drags the nozzle along X0 from Y15 to Y60 at contact minus 0.1 mm, then re-homes Z; run from getZOffset() (G212 / UI Leveling), never from G28 or G27. A brush path (`USE_AUTOZ_TOOL`) is compiled out."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      220,
+      220,
+      250
+    ]
   },
   "ender3_v3_plus": {
     "display_name": "Creality Ender-3 V3 Plus",
@@ -1537,7 +1622,12 @@
           "note": "Not stated by the vendor. A community config (not a vendor source) places a nozzle-clean strip at X 130..170, Y 303..305, behind the 300 mm plate: `[prtouch_v2] clr_noz_start_x: 130 / clr_noz_start_y: 303 / clr_noz_len_x: 40 / clr_noz_len_y: 2`."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      300,
+      300,
+      330
+    ]
   },
   "ender5_max": {
     "display_name": "Creality Ender-5 Max",
@@ -1609,7 +1699,12 @@
           "note": "Not stated by the vendor. A community config (not a vendor source) places a nozzle-clean zone at X -1..1, Y 50..80 on the left edge of the plate with quick-clean enabled: `[prtouch_v2] clr_noz_start_x: -1 / clr_noz_start_y: 50 / clr_noz_len_x: 2 / clr_noz_len_y: 30 / clr_noz_quick: True`. The vendor slicer's start G-code purge lines at X-1.0/X-0.6, Y120-Y245 are slicer purge, not a station."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      400,
+      400,
+      400
+    ]
   },
   "cr10_se": {
     "display_name": "Creality CR-10 SE",
@@ -1687,7 +1782,12 @@
           "note": "The vendor documents no purge or wipe station: `NOZZLE_CLEAR` appears only commented out in gcode_macro.cfg. The only vendor coordinates are a calibration-only nozzle-rub zone X -5..-0.5, Y 10..80 off the plate's left edge (`[z_compensate] clr_noz_start_x: -5 / clr_noz_start_y: 10 / clr_noz_len_x: 4.5 / clr_noz_len_y: 70`), and the vendor slicer's start G-code purge lines at X-2.0, Y20-Y145 are slicer purge."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      220,
+      220,
+      265
+    ]
   },
   "prusa_mk3s": {
     "display_name": "Prusa i3 MK3S / MK3S+",
@@ -1762,7 +1862,12 @@
           "note": "The MK3S has no purge or wipe station; the vendor documents none."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      250,
+      210,
+      210
+    ]
   },
   "prusa_mk4": {
     "display_name": "Prusa MK4 / MK4S",
@@ -1841,7 +1946,12 @@
           "note": "The vendor's MK4 firmware configuration has no wastebin or purge point; the `HAS_WASTEBIN()` / `HAS_INDX()` branches in the firmware's parking code apply to other Buddy printers. The MK4 has no purge or wipe station."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      250,
+      210,
+      220
+    ]
   },
   "prusa_mini": {
     "display_name": "Prusa Mini / Mini+",
@@ -1920,7 +2030,12 @@
           "note": "The Mini has no purge or wipe station; the vendor documents none."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      180,
+      180,
+      180
+    ]
   },
   "bambu_x1c": {
     "display_name": "Bambu Lab X1 Carbon",
@@ -1995,7 +2110,12 @@
           "note": "The vendor's own start sequence flushes at the rear row and wipes at the chute mouth, then hard-wipes on the steel; positions ride with the plan document served for this printer, never as public coordinates."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      256,
+      256,
+      256
+    ]
   },
   "bambu_x1e": {
     "display_name": "Bambu Lab X1E",
@@ -2070,7 +2190,12 @@
           "note": "The vendor's own start sequence flushes at the rear row and wipes at the chute mouth at its hotter flush temperature; positions ride with the plan document served for this printer, never as public coordinates."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      256,
+      256,
+      256
+    ]
   },
   "bambu_p1s": {
     "display_name": "Bambu Lab P1S",
@@ -2145,7 +2270,12 @@
           "note": "The vendor's own start sequence enters the chute by Y, wipes at its mouth and scrubs on the steel; positions ride with the plan document served for this printer, never as public coordinates."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      256,
+      256,
+      256
+    ]
   },
   "bambu_p2s": {
     "display_name": "Bambu Lab P2S",
@@ -2220,7 +2350,12 @@
           "note": "Not derivable from the vendor start file: the station is the G150.x firmware macro family with no published coordinates (the file only moves away from the trash bin at the back); what the vendor file does state rides with the served plan document."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      256,
+      256,
+      256
+    ]
   },
   "bambu_a1": {
     "display_name": "Bambu Lab A1",
@@ -2295,7 +2430,12 @@
           "note": "The vendor's own start sequence flushes into the chute and wipes on the pad behind the plate; where those sit rides with the plan document served for this printer, never as public coordinates. Its Z-home strip spot is in z_home_xy_mm."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      256,
+      256,
+      256
+    ]
   },
   "bambu_a2l": {
     "display_name": "Bambu Lab A2L",
@@ -2367,7 +2507,12 @@
           "note": "Not published: the station is the G150.x firmware macro family with no published coordinates. The vendor start template calls the `G150.3` chute, leaves it with `G1 X20 F12000 ; move away from the trash bin` (a +X departure, so the bin is on the left like the A1's negative-X chute), wipes with `G150 T{...}` and `G150.1`, and runs an 'enhance brush nozzle' relative sweep after a relative `G1 Z1.3 F1200`."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      330,
+      320,
+      325
+    ]
   },
   "bambu_h2s": {
     "display_name": "Bambu Lab H2S",
@@ -2442,7 +2587,12 @@
           "note": "Not derivable from the vendor start file: the station is the G150.x firmware macro family with no published coordinates (a trash-can anti-collision macro and the flush); what the vendor file does state rides with the served plan document."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      340,
+      320,
+      340
+    ]
   },
   "voron_2": {
     "display_name": "Voron 2.4",
@@ -2518,7 +2668,12 @@
           "note": "No CLEAN_NOZZLE, wipe or purge macro exists in either vendor 2.4 reference cfg; the vendor documents no station."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      300,
+      300,
+      300
+    ]
   },
   "voron_trident": {
     "display_name": "Voron Trident",
@@ -2590,7 +2745,12 @@
           "note": "No CLEAN_NOZZLE, wipe or purge macro exists in any of the 7 vendor files; the vendor documents no station."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      300,
+      300,
+      250
+    ]
   },
   "elegoo_neptune4": {
     "display_name": "Elegoo Neptune 4 / 4 Pro",
@@ -2668,7 +2828,12 @@
           "note": "No wipe, clean, purge, trash or brush macro exists in the vendor printer.cfg. The vendor slicer start G-code draws a purge line along the plate's front edge (`G1 X65 Y0.5`, `G1 Z0.4`, `G1 X165 E30 F400 ;Draw the first line`), a purge line, not a station."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      225,
+      225,
+      265
+    ]
   },
   "elegoo_centauri_carbon": {
     "display_name": "Elegoo Centauri Carbon",
@@ -2750,7 +2915,12 @@
           "note": "Purge chute at X202 Y264.5 (`[auto_leveling] extrude_feed_gcode`), then a wipe at Y261.5 sweeping X110<->X140 after `STRAINGAUGE_Z_HOME` at `G1 X128 Y254`. Station: rear-right corner, X≈168-204, Y≈250-264.5; z_mm omitted because the wipe runs 0.5 mm below the strain-gauge home. The slicer's on-plate purge (`G1 X128 Y-1.2`, L-shaped along the front and left edges) is a purge line, not the station."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      256,
+      256,
+      256
+    ]
   },
   "elegoo_centauri_carbon_2": {
     "display_name": "Elegoo Centauri Carbon 2 / Carbon 2 Combo",
@@ -2832,7 +3002,12 @@
           "note": "`[bed_mesh] clean_nozzle_gcode`: `G1 X203 Y250 F20000` then `G1 Y264 F3000` to the chute at the rear right, a purge, then a wipe at Y262 sweeping X168-187; a second pass at X202 Y264. The runout and load macros purge at the same chute (X204 Y264). Station: rear-right corner, X~168-204, Y~250-264. z_mm omitted: no absolute Z is stated."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      256,
+      256,
+      256
+    ]
   },
   "elegoo_orangestorm_giga": {
     "display_name": "Elegoo OrangeStorm Giga",
@@ -2910,7 +3085,12 @@
           "note": "The vendor product page promises \"one-click automatic leveling and a non-contact high-precision sensor\", no station, and none of the four shipped vendor printer.cfg variants (for 1 to 4 extruders) carries a wipe, clean, brush, purge or trash macro. RESUME purges `G1 E100 F200` and wiggles `G1 X-20 F15000 / G1 X20` three times at the park spot in the air, a purge, not a station."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      800,
+      800,
+      1000
+    ]
   },
   "qidi_x_plus3": {
     "display_name": "QIDI X-Plus 3",
@@ -2988,7 +3168,12 @@
           "note": "No CLEAN, CLEAR_NOZZLE, wipe, trash or purge macro in the vendor printer_Backup.cfg; no MOVE_TO_TRASH or wipe move in the X-3 vendor slicer profiles; the spec and comparison pages are silent, so the vendor names no station."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      280,
+      280,
+      270
+    ]
   },
   "klipper_generic": {
     "display_name": "Generic Klipper Printer (Moonraker)",
@@ -3060,7 +3245,12 @@
           "note": "Generic row: no vendor machine, so no wipe or purge station."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      220,
+      220,
+      250
+    ]
   },
   "ender5": {
     "display_name": "Creality Ender 5 / Ender 5 Plus",
@@ -3132,7 +3322,12 @@
           "note": "No vendor pad/chute; the Ender-5 Plus CPB start G-code draws a slicer purge line at X10.1/X10.4."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      220,
+      220,
+      300
+    ]
   },
   "cr10": {
     "display_name": "Creality CR-10 / CR-10S",
@@ -3207,7 +3402,12 @@
           "note": "No NOZZLE_CLEAN / G12 in either source; no vendor pad. CPB start G-code purge lines at X10.1 Y20-Y145 are a slicer purge line."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      300,
+      300,
+      400
+    ]
   },
   "voron_0": {
     "display_name": "Voron 0 / 0.2",
@@ -3279,7 +3479,12 @@
           "note": "No wipe / purge macro in the vendor cfg"
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      120,
+      120,
+      120
+    ]
   },
   "ratrig_vcore3": {
     "display_name": "Rat Rig V-Core 3 / V-Core 3.1",
@@ -3351,7 +3556,12 @@
           "note": "No fixed station in the vendor config; `_PARK LOCATION=primeblob` parks over the on-bed prime blob/line (`nozzle_prime_start_x/y` min|max|float, parking.cfg)."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      300,
+      300,
+      300
+    ]
   },
   "elegoo_neptune3": {
     "display_name": "Elegoo Neptune 3 / 3 Pro / 3 Plus",
@@ -3427,7 +3637,12 @@
           "note": "No vendor station: `//#define NOZZLE_CLEAN_FEATURE` is disabled; the slicer start G-code draws a purge line X65->X165 at Y0.5 (a line, not a station)."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      220,
+      220,
+      280
+    ]
   },
   "anker_m5": {
     "display_name": "AnkerMake M5 / M5C",
@@ -3506,7 +3721,12 @@
           "note": "A purge line and wipe behind the printable rear edge, run inside a HOT bare G28: `ANKER_HOMING_SCRIPT_ABSOLUTE` purges X130 -> X225 at Y237, then wipes X225 -> X140 at Y236 at Z0.2. Recorded point = the purge start. Z omitted: the purge runs 0.5 mm above the height probed at (50, 237), no stated station Z. Y236-237 is 1-2 mm beyond `Y_BED_SIZE 235`; the vendor names no pad or chute, so on_plate_strip."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      235,
+      235,
+      250
+    ]
   },
   "artillery_sw_x3": {
     "display_name": "Artillery Sidewinder X3 Pro",
@@ -3578,7 +3798,12 @@
           "note": "The station exists; coordinates unpublished. The manual's step 8: \"Use two M3 * 8 screws to install the wiping box.\" (drawn behind the bed); product page \"Auto Wiping Filament System\". A community slicer profile calls a bare \"NOZZLE_WIPE\", so the wipe path is a firmware routine in the unpublished V1.29 build. A community Klipper config for the Plus (not a vendor source) wipes at X220-285, Y320, Z0; none for the Pro."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      240,
+      240,
+      260
+    ]
   },
   "artillery_sw_x3_plus": {
     "display_name": "Artillery Sidewinder X3 Plus",
@@ -3650,7 +3875,12 @@
           "note": "The station exists; its coordinates are unpublished. The manual's step 8: \"Use two M3 * 8 screws to install the wiping box.\" (drawn behind the bed); product page \"Auto Wiping Filament System\". A community slicer profile calls a bare \"NOZZLE_WIPE\", so the wipe path is a firmware routine in the unpublished V1.29 build. A community Klipper config (not a vendor source) wipes at X220-285, Y320, Z0 in its own frame."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      300,
+      300,
+      400
+    ]
   },
   "sovol_sv06": {
     "display_name": "Sovol SV06",
@@ -3729,7 +3959,12 @@
           "note": "`//#define NOZZLE_CLEAN_FEATURE` off; no wipe/purge position in the vendor config; slicer purge lines are relative to the first-layer bbox"
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      220,
+      220,
+      250
+    ]
   },
   "sovol_sv06_plus": {
     "display_name": "Sovol SV06 Plus",
@@ -3808,7 +4043,12 @@
           "note": "No vendor station: `//#define NOZZLE_CLEAN_FEATURE` is off."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      300,
+      300,
+      340
+    ]
   },
   "sovol_sv07": {
     "display_name": "Sovol SV07",
@@ -3886,7 +4126,12 @@
           "note": "No CLEAN_NOZZLE / wipe macro in the vendor config; END_PRINT `G1 X5 Y5 F3000 ;Wipe out` is a relative move from wherever the print ended, not a station"
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      220,
+      220,
+      250
+    ]
   },
   "sovol_sv07_plus": {
     "display_name": "Sovol SV07 Plus",
@@ -3964,7 +4209,12 @@
           "note": "No wipe macro in the vendor config (END_PRINT relative `G1 X5 Y5` only)."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      300,
+      300,
+      350
+    ]
   },
   "flashforge_adventurer5m": {
     "display_name": "FlashForge Adventurer 5M / 5M Pro",
@@ -4036,7 +4286,12 @@
           "note": "Exists, position not stated: release 2.3.6-2.1.9-20231101 \"Add nozzle wiping before auto-leveling\". A community config (not a vendor source) puts it at the rear edge Y110: `G1 X50 Y110 Z5 F18000 ; get into position / PROBE / G91 / G1 X-40 F900 ; wipe move left`, then `G1 X-50 Y110 Z5` / `PROBE` / `G1 X40 F900`. The vendor slicer's start purge line along the plate's front edge (Y-110) is a line, not a station."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      220,
+      220,
+      220
+    ]
   },
   "prusa_xl": {
     "display_name": "Prusa XL",
@@ -4118,7 +4373,12 @@
           "note": "`Y_AXIS_PURGE_POS -7.0f ///< Position where slicer purges extruders on XL` -- the purge line on the sheet's front margin; X and Z unspecified. A tool-change purge Y also exists: `PURGE_Y_POSITION = 380.0f` (behind the print area, before the docks). No wipe pad in the original XL config; the XL+ page advertises a nozzle wiper (\"every nozzle is cleaned using the nozzle wiper\") -- XL+ only, coordinates not stated."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      360,
+      360,
+      360
+    ]
   },
   "bambu_p1p": {
     "display_name": "Bambu Lab P1P",
@@ -4193,7 +4453,12 @@
           "note": "The vendor's own start sequence flushes at the rear row, wipes at the chute mouth and scrubs on the steel; positions ride with the plan document served for this printer, never as public coordinates."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      256,
+      256,
+      256
+    ]
   },
   "bambu_a1_mini": {
     "display_name": "Bambu Lab A1 Mini",
@@ -4268,7 +4533,12 @@
           "note": "The vendor's own start sequence flushes into the chute and wipes on the pad; the chute approach sits on the plate edge, so the station is not usable over an idle plate that may hold a part. Positions ride with the served plan document, never as public coordinates."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      180,
+      180,
+      180
+    ]
   },
   "aon_m2_plus": {
     "display_name": "AON3D AON-M2+",
@@ -4340,7 +4610,12 @@
           "note": "A wipe station exists but its position is not stated: the vendor overview lists \"T0 T1 Wiper Brushes and Wiper Blades\" inside the machine, and no coordinates or macro are published."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      450,
+      450,
+      565
+    ]
   },
   "qidi_plus4": {
     "display_name": "QIDI Plus 4",
@@ -4422,7 +4697,12 @@
           "note": "`[gcode_macro CLEAR_NOZZLE]` purges at X95 Y324, wipes X58<->X78 at Y324->321.5 and X113<->X133 at Y319-324, and exits via Y312 to Y10 X10; `[gcode_macro MOVE_TO_TRASH]` is the chute at X95 Y324. Vendor blog: the head \"moves to the back of the machine, where it purges more filament and wipes itself on the cleaning pad on the right\" and again \"on the silicone brush pad\". z_mm omitted: no absolute station Z is stated."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      305,
+      305,
+      280
+    ]
   },
   "qidi_q1_pro": {
     "display_name": "QIDI Q1 Pro",
@@ -4504,7 +4784,12 @@
           "note": "`[gcode_macro CLEAR_NOZZLE]`: raise to Z35, `G1 X97`, `G1 Y243`, `G1 Y254 F800` = chute, wipe strokes X85<->X97 and X65<->X88 at Y254, exit `G1 Y240`, `Y120`, `X230`. z_mm omitted (the macro raises to Z35 before travelling; no station Z stated). The vendor wiki lists \"Nozzle wiper\" under optional printable components."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      245,
+      245,
+      240
+    ]
   },
   "qidi_x_max3": {
     "display_name": "QIDI X-Max 3",
@@ -4582,7 +4867,12 @@
           "note": "No clean, wipe, trash or purge macro exists in either vendor cfg; the spec pages are silent and the X-3 vendor slicer profiles carry no wipe move."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      325,
+      325,
+      315
+    ]
   },
   "qidi_q2": {
     "display_name": "QIDI Q2",
@@ -4664,7 +4954,12 @@
           "note": "`[gcode_macro MOVE_TO_TRASH]` goes to X85 Y287.5; `[gcode_macro CLEAR_NOZZLE]` purges there, then wipes X90<->X103 and X100<->X114 at that Y; `[gcode_macro SHAKE_OOZE]` runs at the trash position. z_mm omitted: no station Z stated. The slicer start G-code also purges on the plate's front edge (`G1 X108 Y1`, `G1 X154 Z-0.1`, nozzle commanded to Z-0.1), a purge line, not the station."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      270,
+      270,
+      256
+    ]
   },
   "qidi_plus5": {
     "display_name": "QIDI Plus 5",
@@ -4740,7 +5035,12 @@
           "note": "Station behind the plate's rear edge, X≈77-171, Y≈318-339. The recorded point is the vendor's nozzle-scrub pad in the slicer start G-code: `G1 Y318`, `G1 X151`, `G1 Y327`, then `probe samples=1` and a relative scrub (`G1 X20` / `G1 Y3` / `G1 X-20` / `G1 Y-3`). z_mm omitted: the scrub runs 0.1 mm above a probed height, not at a stated Z. The purge is at `MOVE_TO_TRASH`, whose coordinates sit inside the firmware."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      320,
+      320,
+      300
+    ]
   },
   "qidi_q2c": {
     "display_name": "QIDI Q2C",
@@ -4812,7 +5112,12 @@
           "note": "A station exists, X only: the vendor slicer `change_filament_gcode` calls `MOVE_TO_TRASH` with flush strokes `G1 X92 F9000`, `G1 X85 F9000`, `G1 X92 F9000`, then `CLEAR_OOZE` and exit `G1 Y270 F8000`; the trash Y is inside the firmware macro and unpublished for the Q2C, so no coordinate can be recorded. The vendor profile sets `\"bed_exclude_area\": [\"0x0,11x0,11x16,0x16\"]`."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      270,
+      270,
+      256
+    ]
   },
   "qidi_max4": {
     "display_name": "QIDI Max 4",
@@ -4895,7 +5200,12 @@
           "note": "`[gcode_macro MOVE_TO_TRASH]` goes to X{park_x}=135 Y{park_y}=403; `[gcode_macro CLEAR_NOZZLE]` wipes X143<->X162 at the trash, then dips to `G1 Z-0.2` for ±15 mm X / ±2 mm Y scrub circles on a pad at ~X173-203 Y393-397. The vendor slicer start G-code repeats it inline with wipes X145<->X163 where the firmware macro has X143<->X162 (2 mm apart). z_mm omitted: the Z-0.2 dip is relative; no station Z stated."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      390,
+      390,
+      340
+    ]
   },
   "qidi_x_smart3": {
     "display_name": "QIDI X-Smart 3",
@@ -4973,7 +5283,12 @@
           "note": "No clean, wipe, trash or purge macro exists in the vendor cfg, and the X-3 vendor slicer profiles carry no wipe move."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      175,
+      180,
+      170
+    ]
   },
   "ender3_s1_pro": {
     "display_name": "Creality Ender 3 S1 Pro",
@@ -5052,7 +5367,12 @@
           "note": "`//#define NOZZLE_CLEAN_FEATURE`. The manual auxiliary-leveling points (`MANUALL_BED_LEVEING_5POSITION {110,110, 30,30, 190,30, 190,190, 30,190}`) are plate points the vendor UI drives the nozzle to -- not a wipe station."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      220,
+      220,
+      270
+    ]
   },
   "aon_hylo": {
     "display_name": "AON3D Hylo",
@@ -5124,7 +5444,12 @@
           "note": "No purge or wipe station is documented by the vendor: the vendor has moved all Hylo documentation behind a customer login, and the public spec sheet has no motion-system statement -- it lists \"Dual Independent (Composite-ready)\" extruders, \"Auto-leveling with vacuum chuck\", \"X/Y/Z linear encoders\", a \"Nozzle force\" sensor and \"Independent active-leveling extruders\"."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      650,
+      450,
+      450
+    ]
   },
   "intamsys_610ht": {
     "display_name": "INTAMSYS FUNMAT PRO 610HT",
@@ -5196,7 +5521,12 @@
           "note": "A cleaning station exists but its position is not stated: the vendor page says \"Intelligent design with auto-cleaning nozzles, filament auto-reloading, filament jam warning, and filament absence warning\" and nothing more on motion; its brochure and manual downloads are form-gated."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      610,
+      508,
+      508
+    ]
   },
   "visionminer_22idex_v4": {
     "display_name": "Vision Miner 22 IDEX v4",
@@ -5277,7 +5607,12 @@
           "note": "`var x_center = -193`, `var u_center = 193`, `var y_center = -62` in nozzlewipe.g, whose comment reads \"Go to the center of purging bucket\": one bucket with brushes per head, outboard of the 350 mm plate. T0 purges at X-208 and Y-62, then wipes with relative `G1 X25` strokes at a random Y in [-72, -52]; T1 mirrors it at U. No Z is stated; the Y centre is user-adjustable -100...-50. The wipe refuses to run unhomed."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      350,
+      350,
+      450
+    ]
   },
   "bambu_h2d": {
     "display_name": "Bambu Lab H2D",
@@ -5352,7 +5687,12 @@
           "note": "The station is a G150.x firmware macro with no published coordinates. The vendor start template runs `G150.3` (chute) with `M972 S41 P0 T5000 ; trash can anti-collision`, exits with `G1 Y-16 F12000 ; move away from the trash bin` (bin at the back), and wipes with `G150 T{...}` and `G150.1 F18000 ; wipe mouth to avoid filament stick to heatbed`. The vendor wiki's nozzle-wiping-pad page documents no macro."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      300,
+      320,
+      320
+    ]
   },
   "bambu_h2d_pro": {
     "display_name": "Bambu Lab H2D Pro",
@@ -5427,7 +5767,12 @@
           "note": "The station is a G150.x firmware macro with no published coordinates. The vendor start template runs `G150.3`, `M972 S41 P0 T5000 ; trash can anti-collision`, `G1 Y-16 F12000 ; move away from the trash bin`, `G150 T{...}`, `G150.1 F18000 ; wipe mouth...` and `G150.1`/`G150.2` pairs; the vendor wiki documents no macro."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      300,
+      320,
+      320
+    ]
   },
   "bambu_h2c": {
     "display_name": "Bambu Lab H2C",
@@ -5502,7 +5847,12 @@
           "note": "The station is a G150.x firmware macro with no published coordinates. The vendor start template runs `G150.3`, `M972 S46 P0 T5000 ; vortek anti-collision`, `M972 S41 P0 T5000 ; trash can anti-collision`, `G1 Y-16 F12000 ; move away from the trash bin`, `G150 T{...}`, `G150.1 F18000 ; wipe mouth...` and `G150.1`/`G150.2` pairs; the vendor wiki documents no macro."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      300,
+      320,
+      320
+    ]
   },
   "bambu_x2d": {
     "display_name": "Bambu Lab X2D",
@@ -5577,6 +5927,11 @@
           "note": "The station is a G150.x firmware macro with no published coordinates. The vendor start template runs `G150.3` (chute), exits with `G1 Y-16 F12000 ; move away from the trash bin` (bin at the back), and wipes with `G150 T{...}`, `G150.1 F8000 ; wipe mouth to avoid filament stick to heatbed` and `G150.2`; the vendor wiki documents no macro."
         }
       }
-    }
+    },
+    "rated_build_volume_mm": [
+      235,
+      256,
+      256
+    ]
   }
 }

@@ -406,54 +406,66 @@ class TestTheSignedOutInstall:
 
     """What an install with no record can and cannot do for a machine Kiln
     lists (Adam, 2026-10-12: the friction is a reason to sign up).  It
-    slices with the generic profile on the generic bed, and the file says
-    so; it has NO bed for the machine, so nothing is sized against a guess;
-    and a Bambu file, whose end sequence needs the bed centre, is refused
-    with the fix named.  The flow ceiling the generic row states still caps
-    the slice."""
+    slices with the generic profile -- generic speeds, temperatures and
+    retraction -- and the file says so; the ceilings are the floor's.  What
+    it keeps (2026-10-15) is the machine's RATED bed from the roster, so
+    the print-start gate, the bounds check, the park planner and a Bambu
+    file's end sequence have the real edges: with no bed at all those
+    checks had switched themselves off.  The flow ceiling the generic row
+    states still caps the slice."""
 
-    def test_a_roster_printer_has_no_bed_and_no_centre(self):
+    def test_a_roster_printer_keeps_its_rated_bed_and_centre(self):
+        """Inverted 2026-10-15: signed out, the roster's RATED bed (the
+        fixture row's safety volume, as kiln-pro writes the real rows) stands
+        in for the record's, so the bed gates, the park planner and the
+        Bambu end sequence still have the machine's real edges.  The
+        ceilings stay generic; a printer the roster does not list has none."""
         assert sp.get_profile(SERVED_ID).id == "default"  # signed out: no record
         assert bed_fit.catalogue_printer_id(SERVED_ID) == SERVED_ID
-        assert bed_fit.get_build_volume(SERVED_ID) is None
-        assert bed_fit.resolve_build_volume(SERVED_ID) is None
+        assert bed_fit.get_build_volume(SERVED_ID) == (200.0, 200.0, 210.0)
+        assert bed_fit.resolve_build_volume(SERVED_ID) == (SERVED_ID, (200.0, 200.0, 210.0))
         from kiln.printers import bambu_3mf
 
-        assert bambu_3mf._bed_center(SERVED_ID) is None
+        assert bambu_3mf._bed_center(SERVED_ID) == (100.0, 100.0)
         assert bambu_3mf._bed_center("a printer nobody makes") is None
 
-    def test_the_slice_is_generic_on_the_generic_bed_and_says_so(self):
+    def test_the_slice_is_generic_on_the_printers_rated_bed_and_says_so(self):
+        """Inverted 2026-10-15: the generic profile is given the roster's
+        rated bed, so the part is centred on the machine's own plate and the
+        print-start gate judges the same edges the slicer drew for (on the
+        slicer's own 200 mm default a part the Voron 0 could print was
+        refused at the gate).  The settings stay generic and the file still
+        says whom it stands in for."""
         profile = slp.get_slicer_profile(SERVED_ID)
         assert profile.id == "default"
         origin = slp.profile_origin(slp.resolve_slicer_profile(SERVED_ID))
         assert origin.standing_in_for == SERVED_ID
-        # No bed is given to the generic profile for a catalogue printer: the
-        # owner-stated bed is for a printer OUTSIDE the catalogue only.
         from kiln.slicer_orca import ini_to_settings
 
-        assert "bed_shape" not in ini_to_settings(slp.resolve_slicer_profile(SERVED_ID))
+        settings = ini_to_settings(slp.resolve_slicer_profile(SERVED_ID))
+        assert settings["bed_shape"] == "0x0,200x0,200x200,0x200" and settings["max_print_height"] == "210"
         assert di.get_printer_design_profile(SERVED_ID).resolved_from == "generic"
 
-    def test_a_bambu_file_is_refused_with_the_fix_named(self, served, monkeypatch):
-        """The A1's end sequence parks around the bed centre.  With the record
-        in hand the template expands; signed out, the build is refused by a
-        sentence that says sign in -- never a guessed centre."""
-        from kiln.printers import bambu_3mf
+    def test_a_bambu_file_builds_around_the_rated_plate(self, served, monkeypatch):
+        """The A1's end sequence parks around the bed centre.  Inverted
+        2026-10-15: signed out, the template expands around the roster's
+        RATED plate (before, the build was refused and a signed-out Bambu
+        owner could not print through Kiln at all); with the record in hand
+        the record's centre wins; a printer the roster does not list is
+        refused, told so, and never handed a guess."""
+        from kiln.printers import bambu_3mf, bed_fit
 
         template = "G1 X0 Y{first_layer_center_no_wipe_tower[1]} F18000\n"
-        # Signed out (the session seal): no record, no centre, the fix named.
         sp._nudged.clear()
+        rated = bed_fit._load_printer_intelligence()["bambu_a1"]["rated_build_volume_mm"]
+        assert f"Y{rated[1] / 2.0:g}" in bambu_3mf._resolve_end_gcode(template, max_z=20.0, printer_model="bambu_a1")
+        # A/B: the record's bed wins over the rated one when it is in hand.
+        monkeypatch.setattr(pi, "build_volume_for", lambda model: ("bambu_a1", (150.0, 150.0, 150.0)))
+        assert "Y75" in bambu_3mf._resolve_end_gcode(template, max_z=20.0, printer_model="bambu_a1")
         with pytest.raises(ValueError) as refused:
-            bambu_3mf._resolve_end_gcode(template, max_z=20.0, printer_model="bambu_a1")
-        assert "sign in" in str(refused.value).lower() and "bambu_a1" in str(refused.value)
-        assert "guess" in str(refused.value).lower()
-        # A/B: a record for the model and the same template expands.
-        volume = RECORD["intel"]["build_volume_mm"]
-        monkeypatch.setattr(pi, "build_volume_for", lambda model: ("bambu_a1", tuple(float(v) for v in volume)))
-        assert "Y100" in bambu_3mf._resolve_end_gcode(template, max_z=20.0, printer_model="bambu_a1")
-        # A printer the roster does not list is told so, not told to sign in.
-        unknown = bambu_3mf._no_bed_on_record("a printer nobody makes")
-        assert "no row" in unknown and "sign in" not in unknown.lower()
+            bambu_3mf._resolve_end_gcode(template, max_z=20.0, printer_model="a printer nobody makes")
+        unknown = str(refused.value)
+        assert "no row" in unknown and "guess" in unknown.lower() and "sign in" not in unknown.lower()
 
     def test_the_generic_row_states_a_flow_ceiling(self):
         """Before 2026-10-12 the generic row left the hotend's flow ceiling

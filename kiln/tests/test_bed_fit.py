@@ -99,13 +99,27 @@ class TestBuildVolumeLookup:
     def test_a_bed_that_is_not_a_cube(self):
         assert get_build_volume("kilntest_open") == (220.0, 220.0, 250.0)
 
-    def test_a_roster_printer_whose_record_is_not_held_has_no_bed(self, signed_out_install):
-        # A catalogue name resolves (it is on the roster), but with no record
-        # -- signed out, on purpose -- the bed is unknown, never the generic
-        # 200 mm cube.
+    def test_a_roster_printer_whose_record_is_not_held_has_its_rated_bed(self, signed_out_install):
+        """Inverted 2026-10-15.  This asserted ``None`` signed out, and that
+        None switched the print-start bed check off for every roster
+        printer (check_bed_fit reads an unknown bed as "allow").  Now the
+        roster's rated bed stands in -- the fixture row's safety volume,
+        the way kiln-pro writes the real rows -- and never the generic
+        200 mm cube."""
         from kiln.printers.bed_fit import catalogue_printer_id
 
         assert catalogue_printer_id("kilntest_served") == "kilntest_served"
+        assert get_build_volume("kilntest_served") == (200.0, 200.0, 210.0)
+
+    def test_a_roster_row_with_no_rated_bed_is_unknown(self, signed_out_install, monkeypatch):
+        """Never a guess: a roster row that states no rated bed has none."""
+        import json
+
+        from kiln.printers import bed_fit
+
+        roster = json.loads(json.dumps(bed_fit._load_printer_intelligence()))
+        roster["kilntest_served"].pop("rated_build_volume_mm", None)
+        monkeypatch.setattr(bed_fit, "_printer_intelligence_cache", roster)
         assert get_build_volume("kilntest_served") is None
 
     def test_unknown_returns_none(self):

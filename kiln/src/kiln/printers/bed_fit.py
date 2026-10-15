@@ -146,19 +146,47 @@ def _lookup_build_volume_exact(
         return None
     if candidate in _BUILD_VOLUME_OVERRIDES:
         return _BUILD_VOLUME_OVERRIDES[candidate]
-    if candidate not in _load_printer_intelligence():
+    roster = _load_printer_intelligence()
+    if candidate not in roster:
         return None
     # A roster printer: its bed is in its catalogue record, fetched once
     # per printer (kiln.printer_intelligence reads it through the bridge).
-    # With no record in hand -- a signed-out install, a first setup offline
-    # -- there is NO bed: every reader treats the machine as unknown (a
-    # part is not sized against a guess, a file is not built around one),
-    # and the setup nudge says what fixes it.  Every bed reader comes
-    # through here, so that is one helper's answer, not a branch per door.
     from kiln.printer_intelligence import build_volume_for
 
     resolved = build_volume_for(candidate)
-    return resolved[1] if resolved is not None else None
+    if resolved is not None:
+        return resolved[1]
+    # With no record in hand -- a signed-out install, a first setup offline
+    # -- the roster's RATED bed (the marketed size, on the box) stands in,
+    # so the print-start gate, the bounds check and the park planner still
+    # hold the machine to its real edges (2026-10-15: with no bed at all they
+    # switched themselves off for every roster printer, and the make
+    # pipeline sized parts against a guessed 200 mm cube).  Never a guess:
+    # a roster row with no rated bed is unknown.  Every bed reader comes
+    # through here, so that is one helper's answer, not a branch per door.
+    return _rated_build_volume(roster.get(candidate))
+
+
+def _rated_build_volume(row: Any) -> tuple[float, float, float] | None:
+    """The roster row's ``rated_build_volume_mm`` as a tuple, or ``None``."""
+    volume = row.get("rated_build_volume_mm") if isinstance(row, dict) else None
+    if not isinstance(volume, (list, tuple)) or len(volume) != 3:
+        return None
+    try:
+        x, y, z = (float(v) for v in volume)
+    except (TypeError, ValueError):
+        return None
+    return (x, y, z) if min(x, y, z) > 0 else None
+
+
+def build_volume_exact(printer_id: str | None) -> tuple[float, float, float] | None:
+    """The bed for EXACTLY the roster id *printer_id* spells (normalised,
+    never a prefix match and never ``default``): the record's, else the
+    roster's rated bed.  For a caller whose number becomes a travel move
+    (:func:`kiln.printers.bambu_3mf._bed_center`), where answering a
+    neighbouring key would be a move to the wrong place."""
+    key = _normalise_printer_id(printer_id or "") if printer_id else ""
+    return _lookup_build_volume_exact(key) if key else None
 
 
 def catalogue_printer_id(printer_id: str | None) -> str | None:

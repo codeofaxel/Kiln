@@ -2479,20 +2479,29 @@ class TestBedCentreIsRead:
             assert _bed_center(model) == (volume[0] / 2.0, volume[1] / 2.0)
         assert _bed_center("bambu_a1") != _bed_center("bambu_a1_mini")
 
-    def test_a_roster_model_with_no_record_has_no_centre_and_the_build_names_the_fix(self, monkeypatch):
-        """With no record in hand (a signed-out install) there is no centre
-        -- never a guessed one -- and the builder refuses with the fix named
-        (sign in), since 2026-10-12 when the slicer geometry left the public
-        file with the rest of the record."""
+    def test_a_roster_model_with_no_record_centres_on_its_rated_plate(self, monkeypatch):
+        """Inverted 2026-10-15.  From 2026-10-12 this asserted that with no
+        record in hand (a signed-out install) there was no centre and the
+        build refused -- which left a signed-out Bambu owner unable to print
+        through Kiln at all.  The roster now carries each printer's RATED
+        plate (the marketed size, on the box), read through the one bed
+        helper, so the centre is the real plate's; a model the roster does
+        not list still has none, and the refusal still says so."""
         from kiln import _pro_catalogue_bridge as bridge
         from kiln.printers.bambu_3mf import _bed_center, _no_bed_on_record
         from kiln.served_answer import Miss
 
         monkeypatch.setattr(bridge, "_served", lambda key: (None, Miss("signed_out", "KILN_ACCOUNT_NOT_PAIRED")))
         _forget_served_records()
-        assert _bed_center("bambu_a1") is None
-        sentence = _no_bed_on_record("bambu_a1")
-        assert "bambu_a1" in sentence and "sign in" in sentence.lower() and "guess" in sentence.lower()
+        import json
+
+        from kiln.printers import bed_fit
+
+        rated = bed_fit._load_printer_intelligence()["bambu_a1"]["rated_build_volume_mm"]
+        assert _bed_center("bambu_a1") == (rated[0] / 2.0, rated[1] / 2.0)
+        assert _bed_center("a printer nobody makes") is None
+        unknown = _no_bed_on_record("a printer nobody makes")
+        assert "no row" in unknown and "guess" in unknown.lower()
 
     def test_unknown_model_gets_none_not_a_default_bed(self):
         """A wrong bed centre is a travel move to the wrong place."""

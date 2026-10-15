@@ -1235,24 +1235,26 @@ _KILN_PRINT_SEQUENCE = "by layer"
 def _bed_center(printer_model: str) -> tuple[float, float] | None:
     """Bed centre ``(x, y)`` in mm for a DECLARED model, or ``None`` if unknown.
 
-    Read from the printer's catalogue record -- the same spec sheet the rest
-    of Kiln reads (:func:`kiln.printer_intelligence.build_volume_for`) --
-    rather than copied into a table here, because a second copy of a
-    machine's bed size drifts silently and keeps answering confidently.
-    With no record in hand (a signed-out install) there is no centre, and
-    the build is refused with the fix named (:func:`_no_bed_on_record`):
-    nothing is guessed for a number that becomes a travel move.
+    Read through the one bed helper every door uses
+    (:func:`kiln.printers.bed_fit.build_volume_exact`: the catalogue record,
+    else the roster's rated plate) rather than copied into a table here,
+    because a second copy of a machine's bed size drifts silently and keeps
+    answering confidently.  A signed-out install therefore still builds the
+    file around the plate's real centre (2026-10-15; before that it refused,
+    which left a signed-out Bambu owner unable to print through Kiln at
+    all).  A model the roster does not list has no centre, and the build is
+    refused with that said (:func:`_no_bed_on_record`): nothing is guessed
+    for a number that becomes a travel move.
 
     Exact key only: no fuzzy prefix match and no ``"default"`` profile.  This
     number becomes a travel move, so an unrecognised model gets ``None`` and
     the caller refuses instead of parking the head somewhere plausible.
     """
-    from kiln.printer_intelligence import build_volume_for
+    from kiln.printers.bed_fit import build_volume_exact
 
-    resolved = build_volume_for(_normalize_model(printer_model))
-    if resolved is None:
+    volume = build_volume_exact(_normalize_model(printer_model))
+    if volume is None:
         return None
-    volume = resolved[1]
     return volume[0] / 2.0, volume[1] / 2.0
 
 

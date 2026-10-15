@@ -116,7 +116,7 @@ _DIALECT_ALLOWED: dict[GCodeDialect, set[str]] = {
 # Maximum temperature values in degrees Celsius.
 _MAX_HOTEND_TEMP: float = 300.0
 _MAX_BED_TEMP: float = 130.0
-_MAX_CHAMBER_TEMP: float = 80.0
+_MAX_CHAMBER_TEMP: float = 60.0
 
 # Minimum temperature for cold-extrusion protection.  Setting a hotend
 # below this value while extruding can jam the nozzle.
@@ -499,6 +499,21 @@ def validate_gcode(
     return result
 
 
+def _bed_for_bounds(profile: Any, printer_id: str | None) -> tuple[float, float, float] | None:
+    """The bed the bounds check measures *printer_id* against when *profile*
+    is the generic floor: the one every bed door reads (the record, else the
+    roster's rated bed), or ``None`` to keep the profile's own.  A profile
+    of the printer's own already carries its bed."""
+    if getattr(profile, "id", None) != "default" or not printer_id:
+        return None
+    try:
+        from kiln.printers.bed_fit import get_build_volume
+
+        return get_build_volume(printer_id)
+    except Exception:  # noqa: BLE001 -- a warning helper never stops validation
+        return None
+
+
 def validate_gcode_for_printer(
     commands: str | list[str],
     printer_id: str,
@@ -527,6 +542,7 @@ def validate_gcode_for_printer(
         profile = get_profile(printer_id)
     except KeyError:
         return validate_gcode(commands, dialect=dialect)
+    bed = _bed_for_bounds(profile, printer_id)
 
     if isinstance(commands, str):
         lines = commands.splitlines()
@@ -545,6 +561,7 @@ def validate_gcode_for_printer(
             result.blocked_commands,
             profile,
             dialect=dialect,
+            build_volume=bed,
         )
         if cleaned is not None:
             result.commands.append(cleaned)
@@ -641,8 +658,16 @@ def _validate_single_with_profile(
     blocked: list[str],
     profile: Any,
     dialect: GCodeDialect = GCodeDialect.GENERIC,
+    build_volume: tuple[float, float, float] | None = None,
 ) -> str | None:
     """Validate a single G-code line against a printer safety profile.
+
+    *build_volume*, when given, is the bed the bounds check reads instead of
+    the profile's own: the one every bed door reads (the record, else the
+    roster's rated bed), handed in by :func:`validate_gcode_for_printer` so
+    a roster printer held to the generic floor is still measured against
+    its own edges rather than the floor's 200 mm cube.  A Kiln-read bed, so
+    its warnings carry no provenance clause.
 
     Works like ``_validate_single`` but uses limits from *profile*
     instead of module-level constants.
@@ -798,27 +823,26 @@ def _validate_single_with_profile(
 
         # --- Build volume validation (WARNING) ---
         # Check XY/Z coordinates against the printer's build volume when known.
-        if profile.build_volume is not None and len(profile.build_volume) >= 3:
-            bv_x, bv_y, bv_z = profile.build_volume[0], profile.build_volume[1], profile.build_volume[2]
+        if build_volume is not None:
+            bed, whose, bed_suffix = build_volume, "the printer's rated", ""
+        else:
+            bed, whose = profile.build_volume, profile.display_name
+            bed_suffix = limit_provenance_suffix(profile, "build_volume")
+        if bed is not None and len(bed) >= 3:
+            bv_x, bv_y, bv_z = bed[0], bed[1], bed[2]
             x_val = _extract_param(cleaned, "X")
             y_val = _extract_param(cleaned, "Y")
             if x_val is not None and (x_val < 0 or x_val > bv_x):
                 warnings.append(
-                    f"{cmd} X{x_val:g} is outside {profile.display_name} "
-                    f"build volume (X: 0–{bv_x} mm)"
-                    + limit_provenance_suffix(profile, "build_volume")
+                    f"{cmd} X{x_val:g} is outside {whose} build volume (X: 0–{bv_x:g} mm)" + bed_suffix
                 )
             if y_val is not None and (y_val < 0 or y_val > bv_y):
                 warnings.append(
-                    f"{cmd} Y{y_val:g} is outside {profile.display_name} "
-                    f"build volume (Y: 0–{bv_y} mm)"
-                    + limit_provenance_suffix(profile, "build_volume")
+                    f"{cmd} Y{y_val:g} is outside {whose} build volume (Y: 0–{bv_y:g} mm)" + bed_suffix
                 )
             if z_val is not None and z_val > bv_z:
                 warnings.append(
-                    f"{cmd} Z{z_val:g} is outside {profile.display_name} "
-                    f"build volume (Z: 0–{bv_z} mm)"
-                    + limit_provenance_suffix(profile, "build_volume")
+                    f"{cmd} Z{z_val:g} is outside {whose} build volume (Z: 0–{bv_z:g} mm)" + bed_suffix
                 )
 
     # --- Arc command validation (G2/G3) ---
@@ -1243,6 +1267,7 @@ def scan_gcode_file(
             pass  # fall back to generic validation
 
     result = GCodeValidationResult()
+    bed = _bed_for_bounds(profile, printer_id) if profile is not None else None
 
     with open(abs_path, errors="replace", encoding="utf-8") as fh:
         for raw_line in fh:
@@ -1254,6 +1279,7 @@ def scan_gcode_file(
                     result.blocked_commands,
                     profile,
                     dialect=dialect,
+                    build_volume=bed,
                 )
             else:
                 cleaned = _validate_single(

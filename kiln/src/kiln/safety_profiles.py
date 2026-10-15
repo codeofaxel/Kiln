@@ -1057,7 +1057,8 @@ def warm_profile(printer_id: str) -> str | None:
         sentence = (
             f"Kiln knows the {listed} well, and is holding it to generic limits "
             f"({hotend:g} C hotend, {bed:g} C bed) only because this install is signed out. "
-            "Sign in free and Kiln works to that printer's real limits: hotend, bed and build volume."
+            "Sign in free and Kiln works to that printer's real limits (hotend and bed temperatures) "
+            "and slices with its tuned profile and material settings."
         )
         _count_limits_offer("offered_limits", spelling)
     elif cause == "signed_out":

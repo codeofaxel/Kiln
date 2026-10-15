@@ -522,7 +522,11 @@ class TestPrinterIntelligenceJSON:
         """The one bundled row every install holds with a spec sheet in it."""
         raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
         default = raw["default"]
-        assert set(default) >= PUBLIC_PROFILE_FIELDS
+        # Every roster field but the rated bed: the generic row's envelope is
+        # its own floor (build_volume_mm), never a printer's marketed bed,
+        # and bed_fit answers no bed for "default" by name.
+        assert set(default) >= PUBLIC_PROFILE_FIELDS - {"rated_build_volume_mm"}
+        assert "rated_build_volume_mm" not in default
         for field in ("max_hotend_temp", "max_bed_temp", "build_volume_mm", "materials", "hotend_type"):
             assert field in default, field
 

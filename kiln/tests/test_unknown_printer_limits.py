@@ -137,12 +137,12 @@ class TestWhatNeedsAPerson:
         assert limits_above_floor("foo_x2", _foo_x2()) == ("max_hotend_temp", "max_bed_temp")
 
     def test_limits_at_or_below_the_floor_do_not(self):
-        assert limits_above_floor("foo_x2", _foo_x2(max_hotend_temp=240.0, max_bed_temp=80.0, max_feedrate=10000.0)) == ()
+        assert limits_above_floor("foo_x2", _foo_x2(max_hotend_temp=240.0, max_bed_temp=80.0, max_feedrate=sp.get_profile("default").max_feedrate)) == ()
 
     def test_every_field_that_loosens_enforcement_needs_a_person_not_only_the_temperatures(self):
         # Speed, flow and the Z floor are enforced too; a typed number past
         # the generic one on any of them is a ceiling nobody at Kiln verified.
-        quiet = _foo_x2(max_hotend_temp=240.0, max_bed_temp=80.0, max_feedrate=10000.0)
+        quiet = _foo_x2(max_hotend_temp=240.0, max_bed_temp=80.0, max_feedrate=sp.get_profile("default").max_feedrate)
         assert limits_above_floor("foo_x2", {**quiet, "max_feedrate": 30000.0}) == ("max_feedrate",)
         assert limits_above_floor("foo_x2", {**quiet, "max_volumetric_flow": 40.0}) == ("max_volumetric_flow",)
         assert limits_above_floor("foo_x2", {**quiet, "min_safe_z": -1.0}) == ("min_safe_z",)

@@ -1458,6 +1458,12 @@ def _install_synthetic_printers() -> dict[str, str]:
                 # printer borrows the generic row's, which refuses a blind
                 # move like any machine nobody has described.
                 entry["motion"] = json.loads(json.dumps(data["default"]["motion"]))
+                # And its rated bed, as the real roster rows do (the safety
+                # block's build volume, the way kiln-pro writes it): what a
+                # signed-out install holds the machine to.
+                volume = row.get("rated_build_volume_mm") or (row.get("safety") or {}).get("build_volume")
+                if isinstance(volume, list) and len(volume) == 3:
+                    entry["rated_build_volume_mm"] = list(volume)
             data[key] = entry
         target = out_dir / name
         target.write_text(json.dumps(data, indent=1, ensure_ascii=False), encoding="utf-8")

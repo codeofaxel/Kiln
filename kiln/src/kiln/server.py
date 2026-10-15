@@ -18484,17 +18484,22 @@ def multi_copy_print(
             # Fallback: STL mesh duplication
             from kiln.auto_orient import duplicate_stl_on_plate
 
-            # Get bed dimensions from safety profiles if printer_id available
+            # The bed the copies are laid out on: the one helper every bed
+            # reader uses (the record, else the roster's rated bed, else
+            # the owner's stated one), never the generic profile's 200 mm
+            # cube -- which is what a roster printer with no record in hand
+            # was answered with, so two copies were arranged for a bed the
+            # machine does not have.
             bed_w = 256.0
             bed_d = 256.0
             if printer_id:
                 try:
-                    from kiln.safety_profiles import get_profile
+                    from kiln.printers.bed_fit import get_build_volume, owner_stated_build_volume
 
-                    profile = get_profile(printer_id)
-                    if profile and profile.build_volume:
-                        bed_w = float(profile.build_volume[0])
-                        bed_d = float(profile.build_volume[1])
+                    volume = get_build_volume(printer_id) or owner_stated_build_volume(printer_id)
+                    if volume:
+                        bed_w = float(volume[0])
+                        bed_d = float(volume[1])
                 except Exception:
                     pass
 

@@ -187,8 +187,12 @@ class TestGetProfile:
         assert profile.id == "default"
         assert profile.max_hotend_temp == 240.0
         assert profile.max_bed_temp == 80.0
-        assert profile.max_chamber_temp == 80.0
-        assert profile.max_feedrate == 10000.0
+        # 2026-10-15: chamber 80 -> 60 and speed 10000 -> 7500, the lowest
+        # catalogued figures (kiln-pro's test_printer_catalogue sweeps every
+        # ceiling); 29 enclosed printers are rated 60-70 C and an M141 S80
+        # on one of them, signed out, was accepted.
+        assert profile.max_chamber_temp == 60.0
+        assert profile.max_feedrate == 7500.0
         assert profile.display_name == "Generic / Unknown Printer"
 
     def test_nonexistent_falls_back_to_default(self) -> None:

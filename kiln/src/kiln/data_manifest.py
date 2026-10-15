@@ -125,6 +125,13 @@ PUBLIC_PROFILE_FIELDS: frozenset[str] = frozenset(
         # on a community post is stored as ``null`` with the hearsay in the
         # note.  Schema and vocabulary: kiln.motion_facts.
         "motion",
+        # The marketed bed, [x, y, z] mm: the one number of a printer's
+        # record that stays public, because the print-start bed check, the
+        # G-code bounds check and the park planner hold a SIGNED-OUT install
+        # to it (2026-10-15: without it they switched off for every roster
+        # printer).  Written from kiln-pro's catalogue by one script and
+        # pinned equal to it there; the measured usable envelope is served.
+        "rated_build_volume_mm",
     }
 )
 

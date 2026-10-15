@@ -35,13 +35,20 @@ files:
 
   printer_intelligence.json:
     classification: roster
-    fields: [display_name, motion]
+    fields: [display_name, motion, rated_build_volume_mm]
     full_rows: [default]
     why: >-
       The printer roster plus each printer's motion block, which stays public
       because the check that refuses a blind head move must work offline with
-      no kiln-pro installed.  Everything else about a printer is served one
-      printer at a time from kiln-pro; the default row is the generic floor.
+      no kiln-pro installed, and its rated (marketed) bed, which stays public
+      because the print-start bed check, the G-code bounds check and the park
+      planner must hold a SIGNED-OUT install to the real bed (2026-10-15:
+      without it they switched off for every roster printer).  The rated bed
+      is on the box; the measured usable envelope, the ceilings, the recipes
+      and the slicer profile are the record, served one printer at a time
+      from kiln-pro (kiln-pro's scripts/sync_public_rated_bed.py writes the
+      bed here and tests/test_printer_catalogue.py pins the two equal); the
+      default row is the generic floor.
 
   design_knowledge/printer_profiles.json:
     classification: roster
