@@ -306,6 +306,7 @@ from kiln.tiers_and_terms import (
     TIERS_AND_TERMS,
     UPGRADE_NUDGE_SCHEMA_VERSION,
     account_required_message,
+    paywall_fields,
     session_expired_message,
     signin_hint_fields,
     tag_pricing_links,
@@ -19036,6 +19037,7 @@ def _pro_api_call(
             "upgrade_url": upgrade_link(tool_name),
             "why": "signed_out",
             **signin_hint_fields(),
+            **paywall_fields(required_tier),
         }
         # Machine-readable twin of the sentence, for a caller that would rather
         # render the allowance its own way than parse prose.  Omitted entirely
@@ -23374,7 +23376,7 @@ def decorate_surface(
                         "Free tier supports PNG/JPG photos and text",
                     ),
                     code="PRO_REQUIRED",
-                    extra=signin_hint_fields(),
+                    extra={**signin_hint_fields(), **paywall_fields("pro")},
                 )
 
             from kiln.image_to_surface import prepare_svg_for_emboss

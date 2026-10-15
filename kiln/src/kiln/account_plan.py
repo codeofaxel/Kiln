@@ -298,6 +298,7 @@ def _refusal(subject: str, required: object) -> dict[str, Any]:
     from kiln.auth_session import _read_tokens, _rejected_verdict
     from kiln.tiers_and_terms import (
         plan_does_not_include_message,
+        paywall_fields,
         plan_unconfirmed_message,
         signin_hint_fields,
         tier_required_message,
@@ -315,6 +316,7 @@ def _refusal(subject: str, required: object) -> dict[str, Any]:
             "code": "TIER_REQUIRED",
             "upgrade_url": upgrade_link(subject if subject.isidentifier() else ""),
             **signin_hint_fields(),
+            **paywall_fields(needed),
         }
     rejected = _rejected_verdict(stored)
     if rejected is not None:
@@ -339,6 +341,7 @@ def _refusal(subject: str, required: object) -> dict[str, Any]:
         "code": "TIER_REQUIRED",
         "current_tier": saved.value,
         "upgrade_url": upgrade_link(subject if subject.isidentifier() else ""),
+        **paywall_fields(needed),
     }
 
 

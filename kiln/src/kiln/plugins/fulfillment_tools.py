@@ -778,11 +778,14 @@ class _FulfillmentToolsPlugin:
                 if getattr(provider, "name", "") != "proxy":
                     tier_ok, tier_msg = check_tier(LicenseTier.BUSINESS)
                     if not tier_ok:
+                        from kiln.tiers_and_terms import paywall_fields
+
                         return {
                             "success": False,
                             "error": tier_msg,
                             "code": "LICENSE_REQUIRED",
                             "required_tier": "business",
+                            **paywall_fields("business"),
                         }
 
                 # 0. Validate quote is still valid
@@ -1145,7 +1148,7 @@ class _FulfillmentToolsPlugin:
                 return err
             tier_ok, tier_msg = check_tier(LicenseTier.BUSINESS)
             if not tier_ok:
-                from kiln.tiers_and_terms import signin_hint_fields
+                from kiln.tiers_and_terms import paywall_fields, signin_hint_fields
 
                 return {
                     "success": False,
@@ -1153,6 +1156,7 @@ class _FulfillmentToolsPlugin:
                     "code": "LICENSE_REQUIRED",
                     "required_tier": "business",
                     **signin_hint_fields(),
+                    **paywall_fields("business"),
                 }
             try:
                 provider = _srv._get_fulfillment()

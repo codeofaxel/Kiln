@@ -3854,6 +3854,7 @@ class _SlicerToolsPlugin:
                     ok, message = _srv.check_tier(_srv.LicenseTier.PRO)
                     if not ok:
                         from kiln.tiers_and_terms import (
+                            paywall_fields,
                             signin_hint_fields,
                             tier_required_message,
                         )
@@ -3870,6 +3871,7 @@ class _SlicerToolsPlugin:
                             "required_tier": "pro",
                             "upgrade_url": "https://kiln3d.com/pricing",
                             **signin_hint_fields(),
+                            **paywall_fields("pro"),
                         }
 
                 return {"success": True, "profile": slicer_profile_to_dict(profile)}

@@ -111,6 +111,71 @@ SUBSTITUTION_LINE = (
     "always fine."
 )
 
+#: Refusal codes that mean "a paid tier lifts this".  One definition for
+#: every place that has to recognise a paywall in an answer: the refusals
+#: built here, the hosted dispatcher that serves every answer to a plain
+#: install, and the test that finds a refusal built without the line.  A
+#: sign-in, two-factor, the Terms gate or a bad argument is not here: nothing
+#: is being paid for, and the line would answer a question nobody asked.
+PAYWALL_CODES = frozenset({
+    "TIER_REQUIRED",
+    "PRO_REQUIRED",
+    "BUSINESS_REQUIRED",
+    "ENTERPRISE_REQUIRED",
+    "LICENSE_REQUIRED",
+    "QUOTA_EXCEEDED",
+    "ALLOWANCE_USED_UP",
+})
+
+
+def paywall_fields(tier: str) -> dict[str, str]:
+    """The agent-addressed field a refusal of a *tier* feature carries.
+
+    Splat into the refusal beside :func:`signin_hint_fields`.  Empty for the
+    free tier, so a sign-in wall in front of a free feature stays a sign-in
+    wall.  Until 2026-10-15 the two refusals a plain install meets most, the
+    sign-in wall in front of a paid tool and the hosted tier wall, carried
+    neither this nor anything like it, while every refusal that did carry it
+    was one only a kiln-pro install or the hosted connector ever sees.
+    """
+    level = str(tier or "").strip().lower()
+    if not level or level == "free":
+        return {}
+    return {"agent_guidance": SUBSTITUTION_LINE}
+
+
+def is_paywall_refusal(answer: object) -> bool:
+    """True when *answer* refuses something a paid tier would allow.
+
+    Either its code says so, or it is the sign-in wall in front of a paid
+    tool on a machine that was never signed in (that wall names the tier it
+    stands in front of).  A sign-in that lapsed is deliberately not one: its
+    owner may already pay for the tool, and is told to sign back in, never
+    to upgrade.
+    """
+    if not isinstance(answer, dict):
+        return False
+    code = str(answer.get("code") or "")
+    if code in PAYWALL_CODES:
+        return True
+    return code == "KILN_ACCOUNT_NOT_PAIRED" and bool(
+        paywall_fields(str(answer.get("required_tier") or ""))
+    )
+
+
+def with_paywall_guidance(answer: object) -> object:
+    """*answer*, carrying the line when it is a paywall refusal without one.
+
+    For a door that serves answers it did not build: the hosted dispatcher
+    passes every tool's answer through this on the way out, so a tool body's
+    own refusal gets the line without each one having to remember it.  An
+    answer that already carries guidance keeps its own; anything else comes
+    back as it was.  A copy, never a mutation: the answer may be shared.
+    """
+    if not is_paywall_refusal(answer) or answer.get("agent_guidance"):  # type: ignore[union-attr]
+        return answer
+    return {**answer, "agent_guidance": SUBSTITUTION_LINE}  # type: ignore[dict-item]
+
 # ---------------------------------------------------------------------------
 # Refusal copy — split by audience
 # ---------------------------------------------------------------------------
