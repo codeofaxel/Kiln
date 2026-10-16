@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -104,6 +105,17 @@ def run_in_child(
     return answer
 
 
+def _kill_tree(child: subprocess.Popen) -> None:
+    """Stop *child* and every process it started (it runs in its own session)."""
+    try:
+        if hasattr(os, "killpg"):
+            os.killpg(child.pid, signal.SIGKILL)
+        else:  # pragma: no cover - no process groups on this platform
+            child.kill()
+    except (OSError, ProcessLookupError):
+        pass
+
+
 def _run_watched(
     command: list[str],
     workdir: str,
@@ -115,8 +127,12 @@ def _run_watched(
 ) -> subprocess.CompletedProcess[str]:
     """Run *command*, looking at its memory as it goes."""
     started = time.monotonic()
+    # The child gets a session of its own, so stopping it stops anything it
+    # started too: a child left behind keeps the machine's memory and CPU
+    # after the caller has given up on it.
     with subprocess.Popen(
         command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=workdir, env=env,
+        start_new_session=True,
     ) as child:
         while True:
             try:
@@ -127,7 +143,7 @@ def _run_watched(
                 over = held is not None and held > max_memory_mb
                 if not over and time.monotonic() - started <= timeout_s:
                     continue
-                child.kill()
+                _kill_tree(child)
                 child.communicate()
                 if over:
                     raise ChildOverMemory(what, held, max_memory_mb) from None

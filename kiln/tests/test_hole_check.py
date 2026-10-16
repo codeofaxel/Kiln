@@ -59,6 +59,8 @@ def test_with_no_allowance_the_check_runs_in_this_process(two_bores, monkeypatch
 
 
 def test_under_an_allowance_a_process_of_its_own_gives_the_same_answer(two_bores, monkeypatch):
+    # The child path, which a part this small would otherwise skip.
+    monkeypatch.setattr(hole_check, "RUN_HERE_BELOW_TRIANGLES", 0)
     monkeypatch.delenv(hole_check.ALLOWANCE_ENV, raising=False)
     here_said: dict[str, int] = {}
     here = hole_check.find_holes(two_bores, diagnostics=here_said)
@@ -74,6 +76,8 @@ def test_under_an_allowance_a_process_of_its_own_gives_the_same_answer(two_bores
 
 
 def test_a_check_past_its_allowance_is_stopped(two_bores, monkeypatch):
+    # The child path, which a part this small would otherwise skip.
+    monkeypatch.setattr(hole_check, "RUN_HERE_BELOW_TRIANGLES", 0)
     monkeypatch.setenv(hole_check.ALLOWANCE_ENV, "5")  # less than an idle interpreter holds
     monkeypatch.setattr(child_interpreter, "_MEMORY_LOOK_S", 0.01)
     with pytest.raises(hole_check.HoleCheckStopped) as stopped:
@@ -103,6 +107,8 @@ def test_this_process_can_be_weighed():
 
 
 def test_an_analysis_whose_hole_check_was_stopped_says_so_and_tells_the_operator(two_bores, monkeypatch):
+    # The child path, which a part this small would otherwise skip.
+    monkeypatch.setattr(hole_check, "RUN_HERE_BELOW_TRIANGLES", 0)
     """Holes not checked is said in words, the rest of the report stands, and the machine's operator hears."""
     told: list[tuple[str, dict]] = []
     bridge = types.ModuleType("kiln_pro.bridge")
