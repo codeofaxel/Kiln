@@ -60,3 +60,40 @@ def test_the_hole_check_gives_up_inside_a_minute():
     from kiln import hole_check
 
     assert hole_check._CHILD_TIMEOUT_S <= 60
+
+
+def test_a_small_binary_stl_is_checked_in_process_even_with_an_allowance(tmp_path, monkeypatch):
+    """The child is for the model that could take a shared server down; a
+    small part pays the interpreter start for nothing."""
+    import struct
+
+    from kiln import hole_check
+
+    small = tmp_path / "small.stl"
+    small.write_bytes(b"\0" * 80 + struct.pack("<I", 1000) + b"\0" * 50 * 1000)
+    big = tmp_path / "big.stl"
+    big.write_bytes(b"\0" * 80 + struct.pack("<I", hole_check.RUN_HERE_BELOW_TRIANGLES + 1))
+    ascii_stl = tmp_path / "ascii.stl"
+    ascii_stl.write_text("solid x\nendsolid x\n" + " " * 80)
+    forged = tmp_path / "forged.stl"  # claims 1000 triangles, carries far more
+    forged.write_bytes(b"\0" * 80 + struct.pack("<I", 1000) + b"\0" * 50 * 5000)
+    assert hole_check._small_enough_to_run_here(str(small), 256) is True
+    assert hole_check._small_enough_to_run_here(str(big), 256) is False
+    assert hole_check._small_enough_to_run_here(str(ascii_stl), 256) is False
+    assert hole_check._small_enough_to_run_here(str(forged), 256) is False
+    # The allowance still rules: 1000 triangles is ~4 MB, over half of 6.
+    assert hole_check._small_enough_to_run_here(str(small), 6) is False
+
+    monkeypatch.setenv(hole_check.ALLOWANCE_ENV, "256")
+    seen: list[str] = []
+    monkeypatch.setattr(
+        "kiln.generation.validation.detect_holes",
+        lambda path, diagnostics=None: seen.append("inline") or [],
+    )
+    monkeypatch.setattr(
+        "kiln.child_interpreter.run_in_child",
+        lambda *a, **k: seen.append("child") or {"holes": [], "diagnostics": {}},
+    )
+    hole_check.find_holes(str(small))
+    hole_check.find_holes(str(big))
+    assert seen == ["inline", "child"]
