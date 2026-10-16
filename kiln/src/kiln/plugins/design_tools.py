@@ -584,6 +584,7 @@ class _DesignToolsPlugin:
                             "Kiln doesn't check load on the free plan, so treat this part as "
                             "unverified for the weight it will carry."
                             + (" PLA sags over time under a load left on it." if _is_pla_family(material.lower()) else "")
+                            + " Knocks, weight left on for months, humidity and any hardware bolted on all count against it."
                             + " Kiln Pro sizes it for the weight, how long it's held, and the way it's printed."
                         ),
                     }

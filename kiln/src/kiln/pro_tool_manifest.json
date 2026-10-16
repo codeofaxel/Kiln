@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-16T06:59:11.461585+00:00",
+  "generated": "2026-10-16T22:27:54.747234+00:00",
   "tool_count": 415,
   "categories": {
     "product_generators": {
@@ -9822,6 +9822,31 @@
             "default": "",
             "title": "Version Id",
             "type": "string"
+          },
+          "hardware": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Hardware"
+          },
+          "count_self_weight": {
+            "default": true,
+            "title": "Count Self Weight",
+            "type": "boolean"
           }
         },
         "required": [
@@ -13266,6 +13291,26 @@
             "default": "",
             "title": "Conditioning",
             "type": "string"
+          },
+          "hardware": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Hardware"
           }
         },
         "required": [
