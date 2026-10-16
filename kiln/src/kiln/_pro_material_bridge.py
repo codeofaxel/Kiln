@@ -2,8 +2,9 @@
 
 The verified brand filament profiles (a brand's nozzle and bed ranges and
 optimum, enclosure, hardened nozzle, AMS) and the derived safe-load figures
-are kiln-pro's (https://kiln3d.com): one record per material, served one
-material at a time.  Public Kiln keeps the FLOOR -- the material's own
+are kiln-pro's (https://kiln3d.com), part of Kiln Pro: one record per
+material, served one material at a time.  Below Pro the servers refuse, the
+loaders fall to the material's own range and the warning says so.  Public Kiln keeps the FLOOR -- the material's own
 temperatures and ranges, warping, the environment words, the design limits,
 the hazards -- and the ROSTER of brand profiles (which exist, what they are
 called, which family they belong to).  Its loaders in
@@ -156,12 +157,23 @@ def material_record(material_id: Any) -> dict[str, Any] | None:
     return None
 
 
+#: The hosted boundary's own exception for a read below the record's tier
+#: (kiln-pro's ``HostedIntelligencePolicyError``), known by name and wording
+#: because public Kiln cannot import the type.
+_TIER_REFUSAL = "not entitled"
+_PRO_REQUIRED = "Kiln Pro has the brand's own tune and the load figures"
+
+
 def _local(key: str) -> tuple[dict[str, Any] | None, Miss | None]:
     try:
         from kiln_pro.material_catalogue import material_record as local_record
 
         record = local_record(key)
     except Exception as exc:  # noqa: BLE001 -- a loader never fails for want of it
+        if type(exc).__name__ == "HostedIntelligencePolicyError" and _TIER_REFUSAL in str(exc):
+            # On the hosted server the caller's plan is below the record's:
+            # a refusal, worded as one, never "kiln-pro stopped".
+            return None, Miss("refused", "TIER_REQUIRED", _PRO_REQUIRED)
         logger.debug("material catalogue on this computer failed", exc_info=True)
         return None, Miss("unanswered", _NOT_ASKED, f"kiln-pro on this computer stopped: {exc}"[:400])
     return (record if _is_record(record) else None), None
