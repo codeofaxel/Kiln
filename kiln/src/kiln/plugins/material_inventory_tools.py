@@ -157,8 +157,7 @@ class _MaterialInventoryToolsPlugin:
             when nothing they have will do does it end with one offer of
             help finding a filament.  Relay that offer as written and never
             suggest buying filament unless the person asks or says yes;
-            then use ``find_closest_filaments`` or
-            ``get_material_purchase_urls``.  Suggestions that point at
+            then use ``find_closest_filaments``.  Suggestions that point at
             OTHER machines are a fleet-wide answer and need Kiln Business;
             the check itself — does THIS printer have enough — works on
             every tier.

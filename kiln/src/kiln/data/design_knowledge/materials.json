@@ -2,7 +2,7 @@
   "_meta": {
     "version": "1.3.0",
     "domain": "fdm",
-    "description": "Mechanical, thermal, and chemical properties for FDM materials with design limits. Includes brand-specific filament profiles with per-brand printing parameters. Agent-consumable — structured for constraint reasoning, not human reference.",
+    "description": "Mechanical, thermal, and chemical properties for FDM materials with design limits. Includes a roster of brand filament profiles (names only); the per-brand tune is Kiln Pro's catalogue record. Agent-consumable — structured for constraint reasoning, not human reference.",
     "_data_quality": {
       "last_audit_date": "2026-07-20",
       "primary_sources": [
@@ -15,7 +15,7 @@
     },
     "_split_note": "Safety-floor profiles for AI-controlled FDM printing.  Engineering depth (how strong each material really is, what it is good for, and how to print it well) is available in Kiln Pro.  See https://kiln3d.com/pricing.",
     "_slicing_note": "slicing.max_volumetric_speed_mm3s is the most plastic a second (mm³/s) a slice for the material pushes through a standard 0.4 mm nozzle: the lowest figure the major slicer makers state for it in their generic presets, or where they publish none, their own-brand presets for it. A floor that holds on every printer, so it is cautious on fast ones; a material with no figure here is held only by the printer's own ceiling. Applied at every slice (kiln.slicer_material).",
-    "brand_profiles": "A roster: which brand filaments exist and what they are called, keyed by profile id under the family they belong to. The figures (ranges, optimum, enclosure, hardened nozzle, AMS) are Kiln's catalogue record for the family, served one material at a time through kiln._pro_material_bridge."
+    "brand_profiles": "A roster: which brand filaments exist and what they are called, keyed by profile id under the family they belong to. The brand's own tune (ranges, optimum, enclosure, hardened nozzle, AMS) is Kiln's catalogue record for the family, part of Kiln Pro, served one material at a time through kiln._pro_material_bridge; a free install is warned at the family level (a filled filament is abrasive whoever makes it)."
   },
   "pla": {
     "display_name": "PLA (Polylactic Acid)",

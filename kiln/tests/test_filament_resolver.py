@@ -46,24 +46,12 @@ class TestResolveFilamentBrand:
         assert r.density_g_per_cm3 == pytest.approx(1.23)
 
     @requires_engineering_overlay
-    def test_polymaker_polyflex_resolves(self):
-        r = resolve_filament("polymaker_polyflex_tpu95")
-        assert r.is_brand_specific is True
-        assert r.nozzle_temp_optimal_c == 220
-
-    @requires_engineering_overlay
     def test_bambu_pa6_cf_resolves(self):
         r = resolve_filament("bambu_pa6_cf")
         assert r.is_brand_specific is True
         assert r.hardened_nozzle_required is True
         assert r.enclosure_required is True
         assert r.density_g_per_cm3 == pytest.approx(1.10)
-
-    @requires_engineering_overlay
-    def test_bambu_petg_cf_resolves(self):
-        r = resolve_filament("bambu_petg_cf")
-        assert r.is_brand_specific is True
-        assert r.hardened_nozzle_required is True
 
     def test_case_insensitive(self):
         r = resolve_filament("Bambu_PLA_Basic")
@@ -110,16 +98,6 @@ class TestResolveFilamentParent:
 class TestResolveFilamentCompat:
     """Tests for printer compatibility warning generation."""
 
-    @requires_engineering_overlay
-    def test_hardened_nozzle_warning(self):
-        r = resolve_filament("bambu_pa6_cf", printer_id="bambu_a1")
-        assert any("hardened" in w.lower() for w in r.warnings)
-
-    @requires_engineering_overlay
-    def test_ams_incompatible_warning(self):
-        r = resolve_filament("bambu_tpu_95a", printer_id="bambu_a1")
-        assert any("AMS" in w for w in r.warnings)
-
     def test_a_profile_that_needs_a_hardened_nozzle_warns_on_a_printer_without_one(self):
         """The warning code, with figures that belong to no brand: the real
         brand's flags are pinned in kiln-pro beside the catalogue."""
@@ -127,8 +105,8 @@ class TestResolveFilamentCompat:
 
         profile = BrandFilamentProfile(
             profile_id="kilntest_cf", brand="Kiln Test", product_name="CF", parent_material="petg_cf",
-            nozzle_temp_range_c=[240, 270], nozzle_temp_optimal_c=255, bed_temp_range_c=[60, 80],
-            bed_temp_optimal_c=70, max_volumetric_speed_mm3s=None, max_print_speed_mms=None,
+            nozzle_temp_range_c=[231, 263], nozzle_temp_optimal_c=247, bed_temp_range_c=[52, 83],
+            bed_temp_optimal_c=66, max_volumetric_speed_mm3s=None, max_print_speed_mms=None,
             density_g_cm3=None, drying_temp_c=None, drying_time_hours=None, enclosure_required=False,
             hardened_nozzle_required=True, ams_compatible=False, notes=None, source="",
         )
@@ -210,18 +188,6 @@ class TestProductSettingsReachTheSlice:
     the printer profile's PLA temperatures.  The same expectations now run
     through the resolver the slicing chokepoint uses.
     """
-
-    @requires_engineering_overlay
-    def test_brand_sets_the_temperatures(self):
-        values = material_needs("bambu_petg_cf").values()
-        assert values["temperature"] == "255"
-        assert values["bed_temperature"] == "70"
-
-    @requires_engineering_overlay
-    def test_prusament_tpu_temperatures(self):
-        values = material_needs("prusament_tpu_95a").values()
-        assert values["temperature"] == "230"
-        assert values["bed_temperature"] == "65"
 
     def test_generic_material_is_not_a_product(self):
         assert material_needs("PLA").product is False

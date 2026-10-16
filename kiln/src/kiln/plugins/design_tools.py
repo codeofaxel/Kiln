@@ -2098,20 +2098,30 @@ class _DesignToolsPlugin:
         def get_brand_filament_profile(profile_id: str) -> dict:
             """Get printing parameters for a specific brand filament.
 
-            Returns brand-specific nozzle temp, bed temp, speed, density,
-            drying requirements, and hardware requirements (hardened nozzle,
-            enclosure, AMS compatibility).
+            The names and the printer-damage flags (hardened nozzle,
+            enclosure) are always answered. The brand's own tune -- nozzle
+            and bed temperatures, speed, density, drying, AMS -- is part of
+            Kiln Pro; below it, or offline, those figures are null and
+            ``figures_unanswered`` says why.
 
             Args:
                 profile_id: Brand filament ID (e.g. "bambu_pla_basic",
                     "prusament_petg", "polymaker_polyterra_pla")
             """
-            from kiln.design_intelligence import get_brand_filament_profile as _get
+            from kiln.design_intelligence import brand_figures_unanswered, get_brand_filament_profile as _get
 
             profile = _get(profile_id)
             if profile is None:
                 return {"error": f"Brand filament profile '{profile_id}' not found", "status": "error"}
-            return {"status": "success", "data": profile.to_dict()}
+            out = {"status": "success", "data": profile.to_dict()}
+            if not profile.has_figures():
+                why = brand_figures_unanswered(profile.parent_material)
+                out["figures_unanswered"] = (
+                    f"{profile.brand} {profile.product_name}'s own tune is not in hand"
+                    + (f": {why}" if why else "")
+                    + "; the names and the printer-damage flags are answered."
+                )
+            return out
 
         def list_brand_filament_profiles(
             brand: str = "",
@@ -2119,24 +2129,36 @@ class _DesignToolsPlugin:
         ) -> dict:
             """List available brand-specific filament profiles.
 
-            Returns all known brand filament profiles, optionally filtered
-            by brand name or parent material type.
+            Returns every known brand filament profile -- names and the
+            printer-damage flags -- optionally filtered by brand name or
+            parent material. A brand's own tune is part of Kiln Pro and is
+            filled in one family at a time: filter by ``parent_material`` to
+            get that family's figures; an unfiltered list on an install
+            without kiln-pro is names only, and ``figures_unanswered`` names
+            each family whose figures are not in hand and why.
 
             Args:
                 brand: Filter by brand (e.g. "Bambu", "Prusament", "Polymaker")
                 parent_material: Filter by parent material (e.g. "pla", "petg", "abs")
             """
-            from kiln.design_intelligence import list_brand_filament_profiles as _list
+            from kiln.design_intelligence import brand_figures_unanswered, list_brand_filament_profiles as _list
 
             profiles = _list(
                 brand=brand or None,
                 parent_material=parent_material or None,
             )
-            return {
+            out = {
                 "status": "success",
                 "count": len(profiles),
                 "data": [p.to_dict() for p in profiles],
             }
+            missing = sorted({p.parent_material for p in profiles if not p.has_figures()})
+            if missing:
+                out["figures_unanswered"] = {
+                    family: (brand_figures_unanswered(family) or "the figures were not asked for in a list of every family; filter by parent_material")
+                    for family in missing
+                }
+            return out
 
         # ---------------------------------------------------------------
         # resolve_filament — unified filament resolver

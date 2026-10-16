@@ -218,13 +218,14 @@ class TestServed:
         the family's, and the warning says so."""
         monkeypatch.setattr(di, "_material_record", lambda material_id: None)
         resolved = di.resolve_filament(_pla_profile())
-        family = resolve_material("pla")
+        nozzle_range, nozzle_opt, bed_range, bed_opt = di._family_floor_ranges("pla")
         assert resolved.is_brand_specific is False
         assert resolved.brand_profile_id == _pla_profile()
-        assert resolved.nozzle_temp_optimal_c == int(family.tool_temp_default)
-        assert resolved.bed_temp_optimal_c == int(family.bed_temp_default)
+        # The FAMILY's own public range, never the cost table's generic default.
+        assert resolved.nozzle_temp_optimal_c == nozzle_opt and resolved.nozzle_temp_range_c == nozzle_range
+        assert resolved.bed_temp_optimal_c == bed_opt and resolved.bed_temp_range_c == bed_range
         [warning] = [w for w in resolved.warnings if "not in hand" in w]
-        assert f"the {family.name} range is used" in warning
+        assert "range is used" in warning
 
     def test_the_figures_reach_estimate_load_capacity(self, served):
         along = di.estimate_load_capacity("petg", 24.0, 100.0, load_across_layers=False)
@@ -350,7 +351,7 @@ class TestOffline:
         monkeypatch.setattr(bridge, "_served", lambda key: (None, Miss("offline", "SERVER_UNREACHABLE")))
         resolved = di.resolve_filament(_pla_profile())
         assert resolved.is_brand_specific is False
-        assert resolved.nozzle_temp_optimal_c == int(resolve_material("pla").tool_temp_default)
+        assert resolved.nozzle_temp_optimal_c == di._family_floor_ranges("pla")[1]
         [warning] = [w for w in resolved.warnings if "not in hand" in w]
         assert "because Kiln can't get this material's figures" in warning
         assert bridge.why_unanswered("pla") == "offline"
@@ -473,3 +474,44 @@ class TestLocal:
         assert "can't read this material's record" in (bridge.unanswered("pla") or "")
         assert di.estimate_load_capacity("pla", 24.0, 100.0) is None
         assert "can't read this material's record" in (di.load_figures_unanswered("pla") or "")
+
+
+class TestARefusalDropsTheKeptRecord:
+    """A lapsed plan does not keep the figures: a kept record is read on an
+    offline or silent miss, never on a refusal (A/B: before, a 30-day-old
+    kept record answered a TIER_REQUIRED refusal with the figures)."""
+
+    def _keep_old(self, bridge, key: str, days: float) -> None:
+        import json
+        import time
+
+        record = {"material_id": key, "matched_by": "exact", "display_name": key.upper(),
+                  "brands": {"kilntest_old": {"nozzle_temp_optimal_c": 999}}, "load": {}}
+        bridge.KEEP_DIR.mkdir(parents=True, exist_ok=True)
+        bridge._keep_path(key).write_text(
+            json.dumps({"kept_at": time.time() - days * 86400, "record": record}), encoding="utf-8"
+        )
+
+    def test_a_tier_refusal_drops_a_stale_kept_record(self, monkeypatch, tmp_path):
+        from kiln import _pro_material_bridge as bridge
+        from kiln.served_answer import Miss
+
+        monkeypatch.setattr(bridge, "available", lambda: False)
+        monkeypatch.setattr(bridge, "KEEP_DIR", tmp_path / "material_catalogue")
+        monkeypatch.setattr(bridge, "_served", lambda key: (None, Miss("refused", "TIER_REQUIRED", "needs Kiln Pro")))
+        bridge.forget()
+        self._keep_old(bridge, "petg", days=30)
+        assert bridge.material_record("petg") is None
+        assert bridge.kept_record("petg") is None, "the kept record outlived the refusal"
+        assert bridge.unanswered("petg") == "the brand's own tune and the load figures are part of Kiln Pro"
+
+    def test_an_offline_miss_still_reads_a_stale_kept_record(self, monkeypatch, tmp_path):
+        from kiln import _pro_material_bridge as bridge
+        from kiln.served_answer import Miss
+
+        monkeypatch.setattr(bridge, "available", lambda: False)
+        monkeypatch.setattr(bridge, "KEEP_DIR", tmp_path / "material_catalogue")
+        monkeypatch.setattr(bridge, "_served", lambda key: (None, Miss("offline", "OFFLINE")))
+        bridge.forget()
+        self._keep_old(bridge, "petg", days=30)
+        assert bridge.material_record("petg")["brands"]["kilntest_old"]["nozzle_temp_optimal_c"] == 999

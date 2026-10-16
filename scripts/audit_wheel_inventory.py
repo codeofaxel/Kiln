@@ -181,7 +181,6 @@ EXPECTED_GROUPS: list[GroupExpectation] = [
 # Top-level catalogs under kiln/data/.  Each is consumed by a specific
 # subsystem; a missing one breaks the corresponding feature at runtime.
 TOP_LEVEL_CATALOGS: list[tuple[str, str]] = [
-    ("material_catalog.json", "design intelligence / material recommendation"),
     ("component_catalog.json", "assembly composition"),
     ("printer_intelligence.json", "printer recommendation"),
     ("safety_profiles.json", "safety gate"),

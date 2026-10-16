@@ -392,8 +392,8 @@ class TestVerifiedRecords:
         """The three that slipped, settled 2026-10-16: the brand figures and
         the load grids moved to kiln-pro (materials.json keeps the floor and
         a names-only brand roster; load_tables.json is a roster the gate no
-        longer sees as a table), and the brand catalogue stays public as a
-        standard reference.  Nothing is pending."""
+        longer sees as a table), and the brand product list was retired the
+        same day.  Nothing is pending."""
         gate = _load_gate()
         ledger = gate.load_ledger()
         pending = sorted(rel for rel, row in ledger.items() if row.get("classification") == "pending_move")
@@ -401,5 +401,5 @@ class TestVerifiedRecords:
         materials = ledger["design_knowledge/materials.json"]
         assert materials["classification"] == "safety_floor"
         assert "brand_profiles" in materials["fields"]
-        assert ledger["material_catalog.json"]["classification"] == "standard_reference"
+        assert "material_catalog.json" not in ledger
         assert "design_knowledge/load_tables.json" not in ledger

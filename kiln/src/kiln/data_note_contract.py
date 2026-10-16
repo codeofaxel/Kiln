@@ -106,17 +106,10 @@ PROVENANCE_PATTERNS: tuple[tuple[str, str], ...] = (
     ("a private path or repository", r"/Users/|scratchpad|kiln-pro|kiln_pro"),
 ) + CAPTURE_PROVENANCE_PATTERNS
 
-#: The one place a bundled catalogue carries links on purpose: where a
-#: material can be bought, keyed under ``sources`` in the material catalogue.
-_LINK_BEARING = (("material_catalog.json", "sources"),)
-
-
-def provenance_findings(text: str, *, allow_links: bool = False) -> list[str]:
+def provenance_findings(text: str) -> list[str]:
     """Every provenance marker *text* carries; empty when it is a public note."""
     findings: list[str] = []
     for name, pattern in PROVENANCE_PATTERNS:
-        if allow_links and name == "a link":
-            continue
         match = re.search(pattern, text)
         if match:
             findings.append(f"{name}: {match.group(0)!r}")
@@ -154,8 +147,7 @@ def data_file_findings(
     """Every string in one bundled JSON that breaks the contract, by JSON path.
 
     ``_meta`` is skipped (it names Kiln's own pricing page); a motion
-    block's ``_sources`` notes get the stricter motion contract; the
-    material catalogue's ``sources`` block may carry links; a vendored
+    block's ``_sources`` notes get the stricter motion contract; a vendored
     library's JSON is upstream tooling config, not Kiln's prose.  A caller
     that loaded this file by path (the commit hook) passes the vendored
     directories from the same tree, so nothing here resolves through an
@@ -175,8 +167,7 @@ def data_file_findings(
         if relative_path == "printer_intelligence.json" and "_sources" in path and path[-1] == "note":
             findings = motion_note_findings(value)
         else:
-            allow = any(relative_path == file and key in path for file, key in _LINK_BEARING)
-            findings = provenance_findings(value, allow_links=allow)
+            findings = provenance_findings(value)
         if findings:
             broken[where] = findings
     return broken

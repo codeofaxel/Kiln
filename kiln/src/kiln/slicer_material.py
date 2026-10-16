@@ -292,11 +292,20 @@ def _resolve(word: str, *, printer_id: str | None, label: str | None, nozzle_mm:
         return material_value, SOURCE_MATERIAL, material_why
 
     needs: list[Need] = []
+    # A named spool whose own tune is not in hand (below Kiln Pro, signed
+    # out, offline) is sliced at its family's range, and the reason says so
+    # by name -- never a family figure passed off as the brand's.
+    tune_missing = ""
+    if product is not None and not product.has_figures():
+        from kiln.design_intelligence import brand_figures_unanswered
+
+        why_missing = brand_figures_unanswered(product.parent_material)
+        tune_missing = f"; {name}'s own tune is not in hand" + (f" ({why_missing})" if why_missing else "")
     nozzle, source, why = pick(
         product.nozzle_temp_optimal_c if product else None,
         on_printer.hotend if on_printer else None,
         _middle(nozzle_range),
-        material_why=f"the middle of {material_name}'s printing range",
+        material_why=f"the middle of {material_name}'s printing range{tune_missing}",
     )
     if nozzle is not None:
         nozzle, held = _hold(int(nozzle), limits.get("hotend"), "hotend", name)
@@ -305,7 +314,7 @@ def _resolve(word: str, *, printer_id: str | None, label: str | None, nozzle_mm:
         product.bed_temp_optimal_c if product else None,
         on_printer.bed if on_printer else None,
         _middle(bed_range),
-        material_why=f"the middle of {material_name}'s bed range",
+        material_why=f"the middle of {material_name}'s bed range{tune_missing}",
     )
     if bed is not None:
         bed, held = _hold(int(bed), limits.get("bed"), "bed", name)

@@ -6,9 +6,8 @@ Covers:
     - Tool wiring: valid inputs, invalid inputs, edge cases
     - External dependencies fully mocked (adapters, DB, engines)
 
-Note: material_catalog_tools and material_inventory_tools are tested in
-their own dedicated test files (test_material_catalog_tools.py and
-test_material_inventory_tools.py).
+Note: material_inventory_tools is tested in its own dedicated test file
+(test_material_inventory_tools.py).
 """
 
 from __future__ import annotations

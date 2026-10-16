@@ -299,7 +299,9 @@ class TestBuildBrandProfile:
         assert p.profile_id == "test_pla" and p.brand == "TestBrand" and p.parent_material == "pla"
         assert not p.has_figures()
         assert all(getattr(p, field) is None for field in _FIGURE_FIELDS)
-        assert p.enclosure_required is False and p.hardened_nozzle_required is False
+        # Not in hand is None, never a quiet False: the family answers.
+        assert p.enclosure_required is None and p.hardened_nozzle_required is None
+        assert p.needs_hardened_nozzle() is False and p.needs_enclosure() is False
         assert p.ams_compatible is None and p.notes is None and p.source == ""
 
     def test_minimal_figures(self):
@@ -319,8 +321,8 @@ class TestBuildBrandProfile:
         assert p.density_g_cm3 is None
         assert p.drying_temp_c is None
         assert p.drying_time_hours is None
-        assert p.enclosure_required is False
-        assert p.hardened_nozzle_required is False
+        assert p.enclosure_required is None
+        assert p.hardened_nozzle_required is None
         assert p.ams_compatible is None
         assert p.notes is None
 
@@ -350,3 +352,62 @@ class TestBuildBrandProfile:
         assert p.ams_compatible is False
         assert p.notes == "Test notes"
         assert p.max_volumetric_speed_mm3s == 15.0
+
+
+class TestTheRosterIsOnlyARoster:
+    """The guard against the figures coming back: every brand_profiles row
+    in the public file carries the names and nothing else.  A row that grows
+    a temperature or a flag is the leak this move closed, restored by hand."""
+
+    ROSTER_KEYS = {"brand", "product_name"}
+
+    def test_every_roster_row_carries_names_only(self):
+        import json
+
+        from kiln import design_intelligence as di
+
+        raw = json.loads(di._DATA_DIR.joinpath("materials.json").read_text(encoding="utf-8"))
+        rows = 0
+        for mid, material in raw.items():
+            if mid.startswith("_"):
+                continue
+            for pid, row in (material.get("brand_profiles") or {}).items():
+                assert set(row) == self.ROSTER_KEYS, f"{mid}.brand_profiles.{pid}: {sorted(row)}"
+                rows += 1
+        assert rows >= 60
+
+    def test_a_filled_family_brand_without_its_record_still_warns_at_the_family_level(self, signed_out_material_install):
+        """A/B: with the flag defaulting to False instead of asking the
+        family, a carbon-filled brand said no hardened nozzle was needed."""
+        from kiln import design_intelligence as di
+
+        filled = [p for p in di.list_brand_filament_profiles() if p.parent_material in ("cf_nylon", "petg_cf", "cf_petg", "cf_pla")]
+        assert filled, "no filled family carries a brand profile"
+        for profile in filled:
+            assert profile.hardened_nozzle_required is None, profile.profile_id
+            assert profile.needs_hardened_nozzle() is True, profile.profile_id
+            warnings = di._check_filament_printer_compat(profile, "bambu_a1")
+            assert any("hardened" in w.lower() for w in warnings), profile.profile_id
+
+    def test_a_high_temperature_brand_without_its_tune_prints_at_its_family_range(self, signed_out_material_install):
+        """A/B: with the cost-table default as the fallback, a high-temperature
+        family's brand came out at a PLA temperature under the brand's name."""
+        import json
+
+        from kiln import design_intelligence as di
+
+        raw = json.loads(di._DATA_DIR.joinpath("materials.json").read_text(encoding="utf-8"))
+        hot = [
+            (mid, pid)
+            for mid, m in raw.items()
+            if not mid.startswith("_") and (m.get("thermal") or {}).get("print_temp_range_c", [0, 0])[0] >= 300
+            for pid in (m.get("brand_profiles") or {})
+        ]
+        assert hot, "no high-temperature family carries a brand profile"
+        for mid, pid in hot:
+            lo, hi = raw[mid]["thermal"]["print_temp_range_c"]
+            resolved = di.resolve_filament(pid)
+            assert resolved.is_brand_specific is False, pid
+            assert lo <= resolved.nozzle_temp_optimal_c <= hi, (pid, resolved.nozzle_temp_optimal_c, lo, hi)
+            assert resolved.nozzle_temp_range_c == [lo, hi], pid
+            assert any("not in hand" in w for w in resolved.warnings), pid

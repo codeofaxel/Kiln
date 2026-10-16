@@ -229,16 +229,7 @@ def _get_purchase_urls(
     brand: str | None,
     color: str | None,
 ) -> dict[str, str]:
-    """Generate purchase URLs.  Lazy-imports material_catalog to avoid circular deps."""
-    try:
-        from kiln.material_catalog import find_matching_entry, get_purchase_urls
-
-        entry = find_matching_entry(vendor=brand, material_type=material_type)
-        if entry:
-            return get_purchase_urls(entry.id, color=color)
-    except ImportError:
-        pass
-    # Fallback: generate generic Amazon search URL
+    """A store search link for re-buying this spool, built from what the spool record says."""
     parts = [material_type]
     if brand:
         parts.insert(0, brand)
