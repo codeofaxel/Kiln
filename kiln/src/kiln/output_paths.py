@@ -114,7 +114,7 @@ _SYSTEM_ROOTS = tuple(
 )
 
 #: Folders directly under home that hold login items and app state.
-_HOME_PROTECTED = frozenset({"Library", "AppData"})
+_HOME_PROTECTED = frozenset({"library", "appdata"})
 
 _GUARD_MARK = "__kiln_output_path_guard__"
 
@@ -158,7 +158,15 @@ def _resolve(raw: str) -> Path:
 
 
 def _inside(path: Path, root: Path) -> bool:
-    return path == root or root in path.parents
+    """Whether *path* is *root* or under it, ignoring letter case.
+
+    macOS and Windows disks ignore case by default, so ``~/library`` IS
+    ``~/Library``; a case-sensitive comparison would wave it through.  On a
+    case-sensitive disk this can only refuse more, never less.
+    """
+    p = [part.casefold() for part in path.parts]
+    r = [part.casefold() for part in root.parts]
+    return p[: len(r)] == r
 
 
 def _temp_root() -> Path:
@@ -168,11 +176,12 @@ def _temp_root() -> Path:
 def _protected_reason(path: Path) -> str | None:
     """Why *path* is somewhere no caller-named output belongs, or None."""
     home = Path.home().resolve()
-    if _inside(path, home) and path != home:
-        rel = path.relative_to(home).parts
-        if rel and rel[0].startswith(".") and rel[0] != ".kiln":
+    if _inside(path, home) and len(path.parts) > len(home.parts):
+        # By position, not relative_to(): the spelling may differ in case.
+        rel = path.parts[len(home.parts):]
+        if rel and rel[0].startswith(".") and rel[0].casefold() != ".kiln":
             return f"it is inside the hidden folder ~/{rel[0]}"
-        if rel and rel[0] in _HOME_PROTECTED:
+        if rel and rel[0].casefold() in _HOME_PROTECTED:
             return f"it is inside ~/{rel[0]}, where login items and app settings live"
         # A hidden file or folder deeper down (~/project/.git/hooks/...).
         for part in rel[1:]:
@@ -217,7 +226,9 @@ def _name_reason(tool_name: str, param: str, raw: Any, folder: Any) -> str | Non
     if name.startswith("."):
         return f"{param} may not name a hidden file; got {raw!r}"
     base = _resolve(folder.strip()) if isinstance(folder, str) and folder.strip() else Path(tempfile.gettempdir()).resolve()
-    path = base / name
+    # Followed through any symlink already sitting at that name, exactly as
+    # a full path is: the file written is the one the link points at.
+    path = (base / name).resolve(strict=False)
     reason = _file_reason(tool_name, param, raw, path)
     if reason:
         return reason

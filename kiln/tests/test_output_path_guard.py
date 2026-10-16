@@ -327,3 +327,53 @@ class TestKilnsOwnState:
         assert output_paths.check_write_location(
             "export_audit_trail", "output_path", str(home / "Documents" / "audit.json")
         ) is None
+
+
+class TestSpellingAndLinks:
+    """macOS and Windows ignore letter case; a link at a name is followed."""
+
+    def test_a_differently_cased_login_items_folder_is_refused(self, home):
+        assert output_paths.check_write_location(
+            "slice_model", "output_dir", str(home / "library" / "LaunchAgents")
+        )
+
+    def test_a_differently_cased_system_folder_is_refused(self, home):
+        assert output_paths.check_write_location("slice_model", "output_dir", "/USR/local/kiln")
+
+    def test_kilns_state_rule_holds_under_another_spelling(self, home):
+        assert output_paths.check_write_location(
+            "backup_database", "output_path", str(home / ".KILN" / "kiln.db")
+        )
+
+    def test_a_file_name_that_is_a_link_is_judged_by_its_target(self, home):
+        target = home / ".zshrc"
+        target.write_text("export PATH=/usr/bin\n")
+        (home / "Documents" / "innocent.stl").symlink_to(target)
+        result = _registered("download_model").fn(
+            file_id=1, dest_dir=str(home / "Documents"), file_name="innocent.stl",
+        )
+        assert _refused(result), result
+        assert target.read_text() == "export PATH=/usr/bin\n"
+
+    def test_a_download_is_not_saved_over_a_link(self, tmp_path):
+        import responses
+
+        from kiln.thingiverse import ThingiverseClient, ThingiverseError
+
+        target = tmp_path / "victim.txt"
+        target.write_text("keep me")
+        (tmp_path / "dl").mkdir()
+        (tmp_path / "dl" / "benchy.stl").symlink_to(target)
+        with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
+            rsps.add(
+                responses.GET, "https://api.thingiverse.com/files/456",
+                json={"id": 456, "name": "benchy.stl",
+                      "download_url": "https://api.thingiverse.com/files/456/download"},
+            )
+            rsps.add(
+                responses.GET, "https://api.thingiverse.com/files/456/download",
+                body=b"echo pwned", content_type="application/octet-stream",
+            )
+            with pytest.raises(ThingiverseError):
+                ThingiverseClient(token="t").download_file(456, str(tmp_path / "dl"))
+        assert target.read_text() == "keep me"
