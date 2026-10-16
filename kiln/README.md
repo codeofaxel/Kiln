@@ -138,7 +138,7 @@ The full searchable list of **70 tuned printer profiles across 15 brands** is at
 - **Failure recovery** — 9 failure types classified, automated recovery planning
 - **Multi-printer splitting** — round-robin and assembly-based job distribution across fleets
 - **Generation feedback loop** — failed print → improved prompt with printability constraints
-- **Smart material routing** — intent-based material recommendations (45 brand-specific filament profiles across 11 material families, printer capability aware)
+- **Smart material routing** — intent-based material recommendations across 38 materials, printer capability aware; brand filament profiles for 69 brands and lines (the per-brand tune is part of Kiln Pro)
 - **Decoration engine** — QR codes, photos, logos, text, SVGs, and brand assets embossed or debossed onto any model with one command (patent pending)
 - **Procedural textures** — tiger stripe, marble, digital camo, snakeskin, wood grain, carbon fiber, honeycomb, lava — applied directly to any model for multicolor FDM printing (Pro)
 - **Product templates** — one-command generation of coasters, keychains, ornaments, pet tags, pet bowls, bookmarks, magnets, jewelry trays, wall plaques, and ashtrays with built-in decoration support (Pro)
