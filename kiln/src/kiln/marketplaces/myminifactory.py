@@ -191,10 +191,6 @@ class MyMiniFactoryAdapter(MarketplaceAdapter):
             raise MarketplaceError(str(exc)) from exc
         dest = Path(dest_dir)
         out_path = dest / name
-        if out_path.is_symlink():
-            # A link already sitting at the name would carry the download
-            # wherever it points.
-            raise MarketplaceError(f"Kiln does not save a download over the link {out_path}")
 
         from kiln.marketplaces.base import resumable_download
 

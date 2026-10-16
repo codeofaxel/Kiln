@@ -377,3 +377,71 @@ class TestSpellingAndLinks:
             with pytest.raises(ThingiverseError):
                 ThingiverseClient(token="t").download_file(456, str(tmp_path / "dl"))
         assert target.read_text() == "keep me"
+
+
+class TestAllowancesMatchExactly:
+    def test_the_confinement_folder_must_match_as_spelled(self, home, tmp_path, monkeypatch):
+        other_temp = tmp_path / "elsewhere-temp"
+        other_temp.mkdir()
+        monkeypatch.setattr(output_paths, "_temp_root", lambda: other_temp.resolve())
+        monkeypatch.setenv(output_paths.OUTPUT_DIR_ENV, str(home / "Documents" / "out"))
+        # A different spelling is a different folder on a case-sensitive
+        # disk, and the allowance must not stretch to cover it.
+        assert output_paths.check_write_location(
+            "repair_mesh", "output_path", str(home / "Documents" / "OUT" / "a.stl")
+        )
+
+
+class TestTheSharedDownloader:
+    """Every marketplace saves through one helper; links stop there."""
+
+    def _session(self, body: bytes):
+        class _Resp:
+            status_code = 200
+            headers: dict = {}
+
+            def iter_content(self, chunk_size=0):
+                yield body
+
+            def raise_for_status(self):
+                return None
+
+        class _Session:
+            def get(self, *a, **k):
+                return _Resp()
+
+        return _Session()
+
+    def test_a_link_at_the_temp_name_is_not_followed(self, tmp_path):
+        from kiln.marketplaces.base import resumable_download
+
+        target = tmp_path / "victim.txt"
+        target.write_text("keep me")
+        dl = tmp_path / "dl"
+        dl.mkdir()
+        (dl / "benchy.stl.part").symlink_to(target)
+        path = resumable_download(self._session(b"solid x"), "https://x", dl / "benchy.stl", max_retries=1)
+        assert target.read_text() == "keep me"
+        assert Path(path).read_bytes() == b"solid x"
+
+    def test_a_link_at_the_final_name_is_refused(self, tmp_path):
+        from kiln.marketplaces.base import MarketplaceError, resumable_download
+
+        target = tmp_path / "victim.txt"
+        target.write_text("keep me")
+        dl = tmp_path / "dl"
+        dl.mkdir()
+        (dl / "benchy.stl").symlink_to(target)
+        with pytest.raises(MarketplaceError):
+            resumable_download(self._session(b"echo pwned"), "https://x", dl / "benchy.stl", max_retries=1)
+        assert target.read_text() == "keep me"
+
+    def test_myminifactory_names_go_through_the_same_cleaner(self, tmp_path, monkeypatch):
+        from kiln.marketplaces import myminifactory
+        from kiln.marketplaces.base import MarketplaceError
+
+        adapter = myminifactory.MyMiniFactoryAdapter(api_key="k")
+        monkeypatch.setattr(adapter, "_request", lambda *a, **k: {"filename": ".zshrc", "download_url": "https://x"}, raising=False)
+        with pytest.raises(MarketplaceError):
+            adapter.download_file("1", str(tmp_path))
+        assert list(tmp_path.iterdir()) == []

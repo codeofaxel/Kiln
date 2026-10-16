@@ -160,13 +160,23 @@ def _resolve(raw: str) -> Path:
 def _inside(path: Path, root: Path) -> bool:
     """Whether *path* is *root* or under it, ignoring letter case.
 
-    macOS and Windows disks ignore case by default, so ``~/library`` IS
-    ``~/Library``; a case-sensitive comparison would wave it through.  On a
-    case-sensitive disk this can only refuse more, never less.
+    For REFUSALS only.  macOS and Windows disks ignore case by default, so
+    ``~/library`` IS ``~/Library``; an exact comparison would wave it
+    through.  On a case-sensitive disk this can only refuse more.
     """
     p = [part.casefold() for part in path.parts]
     r = [part.casefold() for part in root.parts]
     return p[: len(r)] == r
+
+
+def _inside_exact(path: Path, root: Path) -> bool:
+    """Whether *path* is *root* or under it, spelled exactly.
+
+    For ALLOWANCES only: on a case-sensitive disk ``/srv/OUT`` is a
+    different folder from ``/srv/out``, so a folder that grants permission
+    must match as written.
+    """
+    return path == root or root in path.parents
 
 
 def _temp_root() -> Path:
@@ -179,7 +189,8 @@ def _protected_reason(path: Path) -> str | None:
     if _inside(path, home) and len(path.parts) > len(home.parts):
         # By position, not relative_to(): the spelling may differ in case.
         rel = path.parts[len(home.parts):]
-        if rel and rel[0].startswith(".") and rel[0].casefold() != ".kiln":
+        # The ~/.kiln exception is an allowance, so it matches exactly.
+        if rel and rel[0].startswith(".") and rel[0] != ".kiln":
             return f"it is inside the hidden folder ~/{rel[0]}"
         if rel and rel[0].casefold() in _HOME_PROTECTED:
             return f"it is inside ~/{rel[0]}, where login items and app settings live"
@@ -251,7 +262,7 @@ def check_write_location(tool_name: str, param: str, raw: Any) -> str | None:
     confine = os.environ.get(OUTPUT_DIR_ENV, "").strip()
     if confine:
         root = _resolve(confine)
-        if not (_inside(path, root) or _inside(path, _temp_root())):
+        if not (_inside_exact(path, root) or _inside_exact(path, _temp_root())):
             return (
                 f"{param} must be inside {root} (set by {OUTPUT_DIR_ENV}) "
                 "or the system temp folder"
