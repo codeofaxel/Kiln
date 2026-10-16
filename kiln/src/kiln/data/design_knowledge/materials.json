@@ -2,7 +2,7 @@
   "_meta": {
     "version": "1.3.0",
     "domain": "fdm",
-    "description": "Mechanical, thermal, and chemical properties for FDM materials with design limits. Includes a roster of brand filament profiles (names and the printer-damage flags); the per-brand tune is Kiln Pro's catalogue record. Agent-consumable — structured for constraint reasoning, not human reference.",
+    "description": "Mechanical, thermal, and chemical properties for FDM materials with design limits. Includes a roster of brand filament profiles (names only); the per-brand tune is Kiln Pro's catalogue record. Agent-consumable — structured for constraint reasoning, not human reference.",
     "_data_quality": {
       "last_audit_date": "2026-07-20",
       "primary_sources": [
@@ -15,7 +15,7 @@
     },
     "_split_note": "Safety-floor profiles for AI-controlled FDM printing.  Engineering depth (how strong each material really is, what it is good for, and how to print it well) is available in Kiln Pro.  See https://kiln3d.com/pricing.",
     "_slicing_note": "slicing.max_volumetric_speed_mm3s is the most plastic a second (mm³/s) a slice for the material pushes through a standard 0.4 mm nozzle: the lowest figure the major slicer makers state for it in their generic presets, or where they publish none, their own-brand presets for it. A floor that holds on every printer, so it is cautious on fast ones; a material with no figure here is held only by the printer's own ceiling. Applied at every slice (kiln.slicer_material).",
-    "brand_profiles": "A roster: which brand filaments exist, what they are called, and the two flags that keep a printer from being damaged -- a hardened nozzle (abrasive) and an enclosure -- keyed by profile id under the family they belong to. The brand's own tune (ranges, optimum, AMS) is Kiln's catalogue record for the family, part of Kiln Pro, served one material at a time through kiln._pro_material_bridge."
+    "brand_profiles": "A roster: which brand filaments exist and what they are called, keyed by profile id under the family they belong to. The brand's own tune (ranges, optimum, enclosure, hardened nozzle, AMS) is Kiln's catalogue record for the family, part of Kiln Pro, served one material at a time through kiln._pro_material_bridge; a free install is warned at the family level (a filled filament is abrasive whoever makes it)."
   },
   "pla": {
     "display_name": "PLA (Polylactic Acid)",
@@ -56,21 +56,15 @@
     "brand_profiles": {
       "bambu_pla_basic": {
         "brand": "Bambu Lab",
-        "product_name": "PLA Basic",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "PLA Basic"
       },
       "prusament_pla": {
         "brand": "Prusa Research",
-        "product_name": "Prusament PLA",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "Prusament PLA"
       },
       "polymaker_polylite_pla": {
         "brand": "Polymaker",
-        "product_name": "PolyLite PLA",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "PolyLite PLA"
       }
     }
   },
@@ -113,21 +107,15 @@
     "brand_profiles": {
       "bambu_petg_basic": {
         "brand": "Bambu Lab",
-        "product_name": "PETG Basic",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "PETG Basic"
       },
       "prusament_petg": {
         "brand": "Prusa Research",
-        "product_name": "Prusament PETG",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "Prusament PETG"
       },
       "polymaker_polylite_petg": {
         "brand": "Polymaker",
-        "product_name": "PolyLite PETG",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "PolyLite PETG"
       }
     }
   },
@@ -172,15 +160,11 @@
     "brand_profiles": {
       "bambu_abs": {
         "brand": "Bambu Lab",
-        "product_name": "ABS",
-        "hardened_nozzle_required": false,
-        "enclosure_required": true
+        "product_name": "ABS"
       },
       "polymaker_polylite_abs": {
         "brand": "Polymaker",
-        "product_name": "PolyLite ABS",
-        "hardened_nozzle_required": false,
-        "enclosure_required": true
+        "product_name": "PolyLite ABS"
       }
     }
   },
@@ -223,21 +207,15 @@
     "brand_profiles": {
       "bambu_tpu_95a": {
         "brand": "Bambu Lab",
-        "product_name": "TPU 95A",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "TPU 95A"
       },
       "prusament_tpu_95a": {
         "brand": "Prusa Research",
-        "product_name": "Prusament TPU 95A",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "Prusament TPU 95A"
       },
       "polymaker_polyflex_tpu95": {
         "brand": "Polymaker",
-        "product_name": "PolyFlex TPU95",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "PolyFlex TPU95"
       }
     },
     "bonding": {
@@ -285,21 +263,15 @@
     "brand_profiles": {
       "bambu_asa": {
         "brand": "Bambu Lab",
-        "product_name": "ASA",
-        "hardened_nozzle_required": false,
-        "enclosure_required": true
+        "product_name": "ASA"
       },
       "prusament_asa": {
         "brand": "Prusa Research",
-        "product_name": "Prusament ASA",
-        "hardened_nozzle_required": false,
-        "enclosure_required": true
+        "product_name": "Prusament ASA"
       },
       "polymaker_polylite_asa": {
         "brand": "Polymaker",
-        "product_name": "PolyLite ASA",
-        "hardened_nozzle_required": false,
-        "enclosure_required": true
+        "product_name": "PolyLite ASA"
       }
     }
   },
@@ -344,27 +316,19 @@
     "brand_profiles": {
       "bambu_pa6_cf": {
         "brand": "Bambu Lab",
-        "product_name": "PA6-CF",
-        "hardened_nozzle_required": true,
-        "enclosure_required": true
+        "product_name": "PA6-CF"
       },
       "prusament_pa11_cf": {
         "brand": "Prusa Research",
-        "product_name": "Prusament PA11 Carbon Fiber",
-        "hardened_nozzle_required": true,
-        "enclosure_required": false
+        "product_name": "Prusament PA11 Carbon Fiber"
       },
       "polymaker_fiberon_pa6_gf": {
         "brand": "Polymaker",
-        "product_name": "Fiberon PA6-GF25",
-        "hardened_nozzle_required": true,
-        "enclosure_required": false
+        "product_name": "Fiberon PA6-GF25"
       },
       "polymaker_fiberon_pa12_cf": {
         "brand": "Polymaker",
-        "product_name": "Fiberon PA12-CF10",
-        "hardened_nozzle_required": true,
-        "enclosure_required": false
+        "product_name": "Fiberon PA12-CF10"
       }
     },
     "bonding": {
@@ -412,21 +376,15 @@
     "brand_profiles": {
       "bambu_pc": {
         "brand": "Bambu Lab",
-        "product_name": "PC",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "PC"
       },
       "prusament_pc_blend": {
         "brand": "Prusa Research",
-        "product_name": "Prusament PC Blend",
-        "hardened_nozzle_required": false,
-        "enclosure_required": true
+        "product_name": "Prusament PC Blend"
       },
       "polymaker_polymax_pc": {
         "brand": "Polymaker",
-        "product_name": "PolyMax PC",
-        "hardened_nozzle_required": false,
-        "enclosure_required": true
+        "product_name": "PolyMax PC"
       }
     }
   },
@@ -469,9 +427,7 @@
     "brand_profiles": {
       "bambu_pla_cf": {
         "brand": "Bambu Lab",
-        "product_name": "PLA-CF",
-        "hardened_nozzle_required": true,
-        "enclosure_required": false
+        "product_name": "PLA-CF"
       }
     }
   },
@@ -514,15 +470,11 @@
     "brand_profiles": {
       "bambu_petg_cf": {
         "brand": "Bambu Lab",
-        "product_name": "PETG-CF",
-        "hardened_nozzle_required": true,
-        "enclosure_required": false
+        "product_name": "PETG-CF"
       },
       "polymaker_fiberon_petg_rcf": {
         "brand": "Polymaker",
-        "product_name": "Fiberon PETG-rCF08",
-        "hardened_nozzle_required": true,
-        "enclosure_required": false
+        "product_name": "Fiberon PETG-rCF08"
       }
     }
   },
@@ -567,21 +519,15 @@
     "brand_profiles": {
       "bambu_pa6_cf": {
         "brand": "Bambu Lab",
-        "product_name": "PA6-CF",
-        "hardened_nozzle_required": true,
-        "enclosure_required": true
+        "product_name": "PA6-CF"
       },
       "prusament_pa11_cf": {
         "brand": "Prusa Research",
-        "product_name": "Prusament PA11-CF",
-        "hardened_nozzle_required": true,
-        "enclosure_required": true
+        "product_name": "Prusament PA11-CF"
       },
       "polymaker_polymide_pa6_cf": {
         "brand": "Polymaker",
-        "product_name": "PolyMide PA6-CF",
-        "hardened_nozzle_required": true,
-        "enclosure_required": false
+        "product_name": "PolyMide PA6-CF"
       }
     },
     "bonding": {
@@ -627,9 +573,7 @@
     "brand_profiles": {
       "polymaker_fiberon_pet_cf17": {
         "brand": "Polymaker",
-        "product_name": "Fiberon PET-CF17",
-        "hardened_nozzle_required": true,
-        "enclosure_required": false
+        "product_name": "Fiberon PET-CF17"
       }
     }
   },
@@ -672,9 +616,7 @@
     "brand_profiles": {
       "bambu_pla_silk": {
         "brand": "Bambu Lab",
-        "product_name": "PLA Silk",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "PLA Silk"
       }
     }
   },
@@ -717,15 +659,11 @@
     "brand_profiles": {
       "bambu_pla_wood": {
         "brand": "Bambu Lab",
-        "product_name": "PLA Wood",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "PLA Wood"
       },
       "polymaker_polywood": {
         "brand": "Polymaker",
-        "product_name": "PolyWood",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "PolyWood"
       }
     }
   },
@@ -768,21 +706,15 @@
     "brand_profiles": {
       "bambu_pva": {
         "brand": "Bambu Lab",
-        "product_name": "PVA",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "PVA"
       },
       "bambu_support_w": {
         "brand": "Bambu Lab",
-        "product_name": "Support W",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "Support W"
       },
       "polymaker_polydissolve_s1": {
         "brand": "Polymaker",
-        "product_name": "PolyDissolve S1",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "PolyDissolve S1"
       }
     }
   },
@@ -824,9 +756,7 @@
     "brand_profiles": {
       "polymaker_pc_abs": {
         "brand": "Polymaker",
-        "product_name": "Polymaker PC-ABS",
-        "hardened_nozzle_required": false,
-        "enclosure_required": true
+        "product_name": "Polymaker PC-ABS"
       }
     }
   },
@@ -866,21 +796,15 @@
     "brand_profiles": {
       "bambu_pla_basic": {
         "brand": "Bambu Lab",
-        "product_name": "PLA Basic",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "PLA Basic"
       },
       "polymaker_polylite_pla_pro": {
         "brand": "Polymaker",
-        "product_name": "PolyLite PLA Pro",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "PolyLite PLA Pro"
       },
       "esun_pla_plus": {
         "brand": "eSun",
-        "product_name": "PLA+",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "PLA+"
       }
     }
   },
@@ -923,15 +847,11 @@
     "brand_profiles": {
       "bambu_petg_cf": {
         "brand": "Bambu Lab",
-        "product_name": "PETG-CF",
-        "hardened_nozzle_required": true,
-        "enclosure_required": false
+        "product_name": "PETG-CF"
       },
       "prusament_petg_cf": {
         "brand": "Prusa Research",
-        "product_name": "Prusament PETG-CF",
-        "hardened_nozzle_required": true,
-        "enclosure_required": false
+        "product_name": "Prusament PETG-CF"
       }
     }
   },
@@ -976,9 +896,7 @@
     "brand_profiles": {
       "polymaker_polymide_pa6_gf": {
         "brand": "Polymaker",
-        "product_name": "PolyMide PA6-GF",
-        "hardened_nozzle_required": true,
-        "enclosure_required": false
+        "product_name": "PolyMide PA6-GF"
       }
     },
     "bonding": {
@@ -1024,15 +942,11 @@
     "brand_profiles": {
       "bambu_pla_matte": {
         "brand": "Bambu Lab",
-        "product_name": "PLA Matte",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "PLA Matte"
       },
       "polymaker_polyterra_pla": {
         "brand": "Polymaker",
-        "product_name": "PolyTerra PLA",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "PolyTerra PLA"
       }
     }
   },
@@ -1075,9 +989,7 @@
     "brand_profiles": {
       "bambu_petg_hf": {
         "brand": "Bambu Lab",
-        "product_name": "PETG High Flow",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "PETG High Flow"
       }
     }
   },
@@ -1120,9 +1032,7 @@
     "brand_profiles": {
       "bambu_pla_tough": {
         "brand": "Bambu Lab",
-        "product_name": "PLA Tough",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "PLA Tough"
       }
     }
   },
@@ -1165,15 +1075,11 @@
     "brand_profiles": {
       "bambu_tpu_95a": {
         "brand": "Bambu Lab",
-        "product_name": "TPU 95A",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "TPU 95A"
       },
       "polymaker_polyflex_tpu95": {
         "brand": "Polymaker",
-        "product_name": "PolyFlex TPU95",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "PolyFlex TPU95"
       }
     },
     "bonding": {
@@ -1219,9 +1125,7 @@
     "brand_profiles": {
       "bambu_tpu_85a": {
         "brand": "Bambu Lab",
-        "product_name": "TPU 85A",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "TPU 85A"
       }
     },
     "bonding": {
@@ -1267,15 +1171,11 @@
     "brand_profiles": {
       "prusament_pvb": {
         "brand": "Prusa Research",
-        "product_name": "Prusament PVB",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "Prusament PVB"
       },
       "polymaker_polysmooth_pvb": {
         "brand": "Polymaker",
-        "product_name": "PolySmooth PVB",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "PolySmooth PVB"
       }
     }
   },
@@ -1318,15 +1218,11 @@
     "brand_profiles": {
       "verbatim_pp": {
         "brand": "Verbatim",
-        "product_name": "PP",
-        "hardened_nozzle_required": false,
-        "enclosure_required": true
+        "product_name": "PP"
       },
       "formfutura_centaur_pp": {
         "brand": "Formfutura",
-        "product_name": "Centaur PP",
-        "hardened_nozzle_required": false,
-        "enclosure_required": true
+        "product_name": "Centaur PP"
       }
     },
     "bonding": {
@@ -1380,9 +1276,7 @@
     "brand_profiles": {
       "3dxtech_thermax_peek": {
         "brand": "3DXTech",
-        "product_name": "ThermaX PEEK",
-        "hardened_nozzle_required": false,
-        "enclosure_required": true
+        "product_name": "ThermaX PEEK"
       }
     }
   },
@@ -1429,9 +1323,7 @@
     "brand_profiles": {
       "3dxtech_thermax_pei_1010": {
         "brand": "3DXTech",
-        "product_name": "ThermaX PEI 1010",
-        "hardened_nozzle_required": false,
-        "enclosure_required": true
+        "product_name": "ThermaX PEI 1010"
       }
     }
   },
@@ -1478,9 +1370,7 @@
     "brand_profiles": {
       "3dxtech_thermax_pei_9085": {
         "brand": "3DXTech",
-        "product_name": "ThermaX PEI 9085",
-        "hardened_nozzle_required": false,
-        "enclosure_required": true
+        "product_name": "ThermaX PEI 9085"
       }
     }
   },
@@ -1531,9 +1421,7 @@
     "brand_profiles": {
       "kimya_pekk_a": {
         "brand": "Kimya",
-        "product_name": "PEKK-A",
-        "hardened_nozzle_required": false,
-        "enclosure_required": true
+        "product_name": "PEKK-A"
       }
     }
   },
@@ -1584,15 +1472,11 @@
     "brand_profiles": {
       "3dxtech_thermax_ppsu": {
         "brand": "3DXTech",
-        "product_name": "ThermaX PPSU",
-        "hardened_nozzle_required": false,
-        "enclosure_required": true
+        "product_name": "ThermaX PPSU"
       },
       "forward_am_ultrafuse_ppsu": {
         "brand": "Forward AM",
-        "product_name": "Ultrafuse PPSU",
-        "hardened_nozzle_required": false,
-        "enclosure_required": true
+        "product_name": "Ultrafuse PPSU"
       }
     }
   },
@@ -1642,9 +1526,7 @@
     "brand_profiles": {
       "3dxtech_thermax_pps": {
         "brand": "3DXTech",
-        "product_name": "ThermaX PPS",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "ThermaX PPS"
       }
     }
   },
@@ -1694,15 +1576,11 @@
     "brand_profiles": {
       "polymaker_fiberon_petg_esd": {
         "brand": "Polymaker",
-        "product_name": "Fiberon PETG-ESD",
-        "hardened_nozzle_required": true,
-        "enclosure_required": false
+        "product_name": "Fiberon PETG-ESD"
       },
       "3dxtech_3dxstat_esd_petg": {
         "brand": "3DXTech",
-        "product_name": "3DXSTAT ESD-PETG",
-        "hardened_nozzle_required": true,
-        "enclosure_required": false
+        "product_name": "3DXSTAT ESD-PETG"
       }
     }
   },
@@ -1753,15 +1631,11 @@
     "brand_profiles": {
       "3dxtech_3dxstat_esd_abs": {
         "brand": "3DXTech",
-        "product_name": "3DXSTAT ESD-ABS",
-        "hardened_nozzle_required": false,
-        "enclosure_required": true
+        "product_name": "3DXSTAT ESD-ABS"
       },
       "fiberlogy_esd_abs": {
         "brand": "Fiberlogy",
-        "product_name": "ESD ABS",
-        "hardened_nozzle_required": false,
-        "enclosure_required": true
+        "product_name": "ESD ABS"
       }
     }
   },
@@ -1816,9 +1690,7 @@
     "brand_profiles": {
       "polymaker_fiberon_pa612_esd": {
         "brand": "Polymaker",
-        "product_name": "Fiberon PA612-ESD",
-        "hardened_nozzle_required": true,
-        "enclosure_required": false
+        "product_name": "Fiberon PA612-ESD"
       }
     }
   },
@@ -1872,9 +1744,7 @@
     "brand_profiles": {
       "3dxtech_3dxstat_esd_pc": {
         "brand": "3DXTech",
-        "product_name": "3DXSTAT ESD-PC",
-        "hardened_nozzle_required": false,
-        "enclosure_required": true
+        "product_name": "3DXSTAT ESD-PC"
       }
     }
   },
@@ -1929,9 +1799,7 @@
     "brand_profiles": {
       "3dxtech_3dxstat_esd_pei_1010": {
         "brand": "3DXTech",
-        "product_name": "3DXSTAT ESD-PEI Ultem 1010",
-        "hardened_nozzle_required": true,
-        "enclosure_required": false
+        "product_name": "3DXSTAT ESD-PEI Ultem 1010"
       }
     }
   },
@@ -1982,15 +1850,11 @@
     "brand_profiles": {
       "3dxtech_3dxstat_esd_pla": {
         "brand": "3DXTech",
-        "product_name": "3DXSTAT ESD-PLA",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "3DXSTAT ESD-PLA"
       },
       "protopasta_static_dissipative_pla": {
         "brand": "Proto-Pasta",
-        "product_name": "Static Dissipative PLA",
-        "hardened_nozzle_required": false,
-        "enclosure_required": false
+        "product_name": "Static Dissipative PLA"
       }
     }
   },
@@ -2044,9 +1908,7 @@
     "brand_profiles": {
       "3dxtech_3dxstat_esd_pekk": {
         "brand": "3DXTech",
-        "product_name": "3DXSTAT ESD-PEKK",
-        "hardened_nozzle_required": true,
-        "enclosure_required": true
+        "product_name": "3DXSTAT ESD-PEKK"
       }
     }
   }

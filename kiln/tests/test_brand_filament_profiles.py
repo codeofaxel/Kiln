@@ -299,7 +299,9 @@ class TestBuildBrandProfile:
         assert p.profile_id == "test_pla" and p.brand == "TestBrand" and p.parent_material == "pla"
         assert not p.has_figures()
         assert all(getattr(p, field) is None for field in _FIGURE_FIELDS)
-        assert p.enclosure_required is False and p.hardened_nozzle_required is False
+        # Not in hand is None, never a quiet False: the family answers.
+        assert p.enclosure_required is None and p.hardened_nozzle_required is None
+        assert p.needs_hardened_nozzle() is False and p.needs_enclosure() is False
         assert p.ams_compatible is None and p.notes is None and p.source == ""
 
     def test_minimal_figures(self):
@@ -319,8 +321,8 @@ class TestBuildBrandProfile:
         assert p.density_g_cm3 is None
         assert p.drying_temp_c is None
         assert p.drying_time_hours is None
-        assert p.enclosure_required is False
-        assert p.hardened_nozzle_required is False
+        assert p.enclosure_required is None
+        assert p.hardened_nozzle_required is None
         assert p.ams_compatible is None
         assert p.notes is None
 
@@ -354,13 +356,12 @@ class TestBuildBrandProfile:
 
 class TestTheRosterIsOnlyARoster:
     """The guard against the figures coming back: every brand_profiles row
-    in the public file carries the names and the two printer-damage flags
-    and nothing else.  A row that grows a temperature is the leak this
-    move closed, restored by hand."""
+    in the public file carries the names and nothing else.  A row that grows
+    a temperature or a flag is the leak this move closed, restored by hand."""
 
-    ROSTER_KEYS = {"brand", "product_name", "hardened_nozzle_required", "enclosure_required"}
+    ROSTER_KEYS = {"brand", "product_name"}
 
-    def test_every_roster_row_carries_names_and_damage_flags_only(self):
+    def test_every_roster_row_carries_names_only(self):
         import json
 
         from kiln import design_intelligence as di
@@ -372,18 +373,21 @@ class TestTheRosterIsOnlyARoster:
                 continue
             for pid, row in (material.get("brand_profiles") or {}).items():
                 assert set(row) == self.ROSTER_KEYS, f"{mid}.brand_profiles.{pid}: {sorted(row)}"
-                assert isinstance(row["hardened_nozzle_required"], bool) and isinstance(row["enclosure_required"], bool), pid
                 rows += 1
         assert rows >= 60
 
-    def test_the_damage_flags_reach_the_profile_without_any_figures(self, signed_out_material_install):
+    def test_a_filled_family_brand_without_its_record_still_warns_at_the_family_level(self, signed_out_material_install):
+        """A/B: with the flag defaulting to False instead of asking the
+        family, a carbon-filled brand said no hardened nozzle was needed."""
         from kiln import design_intelligence as di
 
-        flagged = [p for p in di.list_brand_filament_profiles() if p.hardened_nozzle_required]
-        assert flagged, "no roster row needs a hardened nozzle: the flags did not reach the roster"
-        assert all(not p.has_figures() for p in flagged)
-        warnings = di._check_filament_printer_compat(flagged[0], "bambu_a1")
-        assert any("hardened" in w.lower() for w in warnings)
+        filled = [p for p in di.list_brand_filament_profiles() if p.parent_material in ("cf_nylon", "petg_cf", "cf_petg", "cf_pla")]
+        assert filled, "no filled family carries a brand profile"
+        for profile in filled:
+            assert profile.hardened_nozzle_required is None, profile.profile_id
+            assert profile.needs_hardened_nozzle() is True, profile.profile_id
+            warnings = di._check_filament_printer_compat(profile, "bambu_a1")
+            assert any("hardened" in w.lower() for w in warnings), profile.profile_id
 
     def test_a_high_temperature_brand_without_its_tune_prints_at_its_family_range(self, signed_out_material_install):
         """A/B: with the cost-table default as the fallback, a high-temperature

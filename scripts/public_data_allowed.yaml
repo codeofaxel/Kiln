@@ -103,11 +103,11 @@ files:
       words, the eight design limits and the hazards, because the free heat
       and food verdicts, the enclosure check, a signed-out slice and every
       free make's validation read them offline.  brand_profiles is a ROSTER
-      since 2026-10-16 (brand and product name per profile id, plus the two
-      printer-damage flags: hardened nozzle, enclosure); a brand's own tune
-      (ranges, optimum, AMS) is the family's catalogue record in kiln-pro,
-      part of Kiln Pro, served one material at a time through
-      kiln._pro_material_bridge.
+      since 2026-10-16 (brand and product name per profile id); a brand's own
+      tune (ranges, optimum, enclosure, hardened nozzle, AMS) is the family's
+      catalogue record in kiln-pro, part of Kiln Pro, served one material at
+      a time through kiln._pro_material_bridge; free is warned at the family
+      level (a filled filament is abrasive whoever makes it).
 
   material_catalog.json:
     classification: standard_reference

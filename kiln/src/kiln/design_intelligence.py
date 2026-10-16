@@ -906,11 +906,31 @@ class BrandFilamentProfile:
     density_g_cm3: float | None
     drying_temp_c: int | None
     drying_time_hours: int | None
-    enclosure_required: bool
-    hardened_nozzle_required: bool
+    #: ``None`` when the brand's record is not in hand: the FAMILY answers
+    #: then (:meth:`needs_hardened_nozzle`, :meth:`needs_enclosure`), never
+    #: a quiet ``False``.
+    enclosure_required: bool | None
+    hardened_nozzle_required: bool | None
     ams_compatible: bool | None
     notes: str | None
     source: str
+
+    def needs_hardened_nozzle(self) -> bool:
+        """The brand's own flag when in hand, else the family's: a filled
+        filament is abrasive whoever makes it (``material_safety``)."""
+        if self.hardened_nozzle_required is not None:
+            return bool(self.hardened_nozzle_required)
+        from kiln.material_safety import is_abrasive_filament
+
+        return is_abrasive_filament(self.parent_material) or is_abrasive_filament(self.product_name)
+
+    def needs_enclosure(self) -> bool:
+        """The brand's own flag when in hand, else whether the family's own
+        floor says it wants a heated chamber."""
+        if self.enclosure_required is not None:
+            return bool(self.enclosure_required)
+        thermal = (_get_kb().materials.get(self.parent_material) or {}).get("thermal") or {}
+        return bool(thermal.get("requires_heated_chamber"))
 
     def has_figures(self) -> bool:
         """True when the brand's own temperatures are in hand."""
@@ -2205,9 +2225,9 @@ def _recommend_material_for_design(
                 "bed_temp_optimal_c": bp.bed_temp_optimal_c,
                 "density_g_cm3": bp.density_g_cm3,
             }
-            if bp.hardened_nozzle_required:
+            if bp.needs_hardened_nozzle():
                 brand_entry["hardened_nozzle_required"] = True
-            if bp.enclosure_required:
+            if bp.needs_enclosure():
                 brand_entry["enclosure_required"] = True
             if bp.ams_compatible is not None:
                 brand_entry["ams_compatible"] = bp.ams_compatible
@@ -2358,8 +2378,8 @@ def _build_brand_profile(
         density_g_cm3=data.get("density_g_cm3"),
         drying_temp_c=data.get("drying_temp_c"),
         drying_time_hours=data.get("drying_time_hours"),
-        enclosure_required=data.get("enclosure_required", False),
-        hardened_nozzle_required=data.get("hardened_nozzle_required", False),
+        enclosure_required=data.get("enclosure_required"),
+        hardened_nozzle_required=data.get("hardened_nozzle_required"),
         ams_compatible=data.get("ams_compatible"),
         notes=data.get("notes"),
         source=data.get("source", ""),
@@ -2503,8 +2523,8 @@ def resolve_filament(
             max_print_speed_mms=brand.max_print_speed_mms,
             drying_temp_c=brand.drying_temp_c,
             drying_time_hours=brand.drying_time_hours,
-            enclosure_required=brand.enclosure_required,
-            hardened_nozzle_required=brand.hardened_nozzle_required,
+            enclosure_required=brand.needs_enclosure(),
+            hardened_nozzle_required=brand.needs_hardened_nozzle(),
             ams_compatible=brand.ams_compatible,
             warnings=warnings,
         )
@@ -2557,7 +2577,7 @@ def _check_filament_printer_compat(
         return warnings
 
     # Enclosure check
-    if brand.enclosure_required:
+    if brand.needs_enclosure():
         has_enclosure = getattr(intel, "has_enclosure", False)
         if not has_enclosure:
             warnings.append(
@@ -2566,7 +2586,7 @@ def _check_filament_printer_compat(
             )
 
     # Hardened nozzle check
-    if brand.hardened_nozzle_required:
+    if brand.needs_hardened_nozzle():
         warnings.append(
             f"{brand.brand} {brand.product_name} requires a hardened steel nozzle "
             f"(HRC >= 40). Printing with brass will destroy the nozzle rapidly."
