@@ -297,6 +297,20 @@ _PER_MATERIAL = "<a table keyed by material>"
 _NUMBER_PER_PRINTER = "<a number per printer>"
 _NOTE_PER_PRINTER = "<a note per printer>"
 
+#: THE SECOND SHAPE.  Everything above fires on PROSE and on PRINTER MAKERS.
+#: Verified data with neither passes it: 2026-10-16, a per-material table of
+#: 38 rows x 25 derived safe-load figures, 69 brand filament profiles (nozzle
+#: and bed ranges, flags, per product) and a 45-row brand catalogue sat in
+#: public with no vendor named in a key and no note in a row, and three gates
+#: said clean.  A compiled table of verified numbers is the year's work
+#: whether or not a sentence rides beside it.  So a table is ALSO judged when
+#: enough of its rows are verified records: ``_RECORD_ROWS_MIN`` rows, each
+#: carrying ``_RECORD_FIELDS_MIN`` measured fields (a number, a range, or a
+#: list of numbers, at any depth), or each naming a maker in a name field.
+_RECORD_ROWS_MIN = 10
+_RECORD_FIELDS_MIN = 3
+_VERIFIED_RECORDS = "<verified records>"
+
 _FIELD_CLASSES = frozenset({"roster", "safety_floor", "standard_reference"})
 _CLASSES = _FIELD_CLASSES | {"pending_move", "not_printer_keyed"}
 _LEDGER_KEYS = frozenset({"classification", "why", "fields", "full_rows", "by"})
@@ -406,6 +420,78 @@ def _limit_label(field: str) -> str | None:
     return None
 
 
+#: A parameter schema describes a knob a person turns (default, min, max,
+#: a unit), not a thing Kiln measured.  A mapping holding one is skipped
+#: whole, so a template or library catalogue is not read as a datasheet.
+_SCHEMA_KEYS = frozenset({"default", "min", "max", "unit", "type", "description"})
+
+
+def _is_parameter_schema(node: Any) -> bool:
+    return isinstance(node, dict) and "default" in node and len(_SCHEMA_KEYS & set(node)) >= 2
+
+
+def _measured_fields(node: Any, out: set[str], prefix: str = "") -> None:
+    """Field paths under *node* whose value is a measurement: a number, a
+    list of numbers, or a range.  A bool is a flag, not a measurement; a
+    string is prose or a label, judged elsewhere; a parameter schema is a
+    knob, not a reading."""
+    if isinstance(node, dict):
+        if _is_parameter_schema(node):
+            return
+        for key, value in node.items():
+            path = f"{prefix}.{key}" if prefix else str(key)
+            if isinstance(value, bool):
+                continue
+            if isinstance(value, (int, float)) or (
+                isinstance(value, list)
+                and value
+                and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in value)
+            ):
+                out.add(path)
+            elif isinstance(value, (dict, list)):
+                _measured_fields(value, out, path)
+    elif isinstance(node, list):
+        for value in node:
+            _measured_fields(value, out, prefix)
+
+
+def _row_is_record(key: str, row: Any) -> bool:
+    """A verified record: a mapping carrying enough measured fields; a row
+    that also names a maker in a name field (a brand's own product row)
+    needs only one.  A maker named beside no figure is a roster entry, which
+    the per-printer judge above already reads."""
+    if not isinstance(row, dict):
+        return False
+    measured: set[str] = set()
+    _measured_fields(row, measured)
+    floor = 1 if _row_vendors(key, row) else _RECORD_FIELDS_MIN
+    return len(measured) >= floor
+
+
+def _judge_records(name: str, rows: list[tuple[str, Any]]) -> dict | None:
+    """What the gate saw in a table of verified records, or None."""
+    records = [(k, r) for k, r in rows if _row_is_record(k, r)]
+    if len(records) < _RECORD_ROWS_MIN:
+        return None
+    vendors: set[str] = set()
+    measured: set[str] = set()
+    row_fields: set[str] = set()
+    for key, row in records:
+        vendors |= _row_vendors(key, row)
+        _measured_fields(row, measured)
+        row_fields.update(str(k) for k in row)
+    return {
+        "table": name,
+        "rows": len(rows),
+        "vendors": sorted(vendors),
+        "row_fields": sorted(row_fields),
+        "limit_fields": {
+            "verified records": [f"{len(records)} rows x {len(measured)} measured fields"]
+            + ([f"{len(vendors)} makers named"] if vendors else []),
+        },
+    }
+
+
 def _judge_table(name: str, rows: list[tuple[str, Any]]) -> dict | None:
     """What the gate saw in one table, or None when it is not a cross-vendor
     per-printer limit table."""
@@ -456,7 +542,7 @@ def _flagged(doc: Any) -> list[tuple[dict, list[tuple[str, Any]]]]:
     """Each per-printer limit table in a parsed file, with its rows."""
     out = []
     for name, rows in _tables(doc):
-        record = _judge_table(name, rows)
+        record = _judge_table(name, rows) or _judge_records(name, rows)
         if record is not None:
             out.append((record, rows))
     return out
@@ -651,8 +737,9 @@ def judge_data(
                 {
                     "file": rel,
                     "kind": "unclassified",
-                    "detail": "a table keyed by several printer makers, carrying "
-                    "limit-shaped fields, with no ledger row",
+                    "detail": "a table of per-printer limits, or of verified "
+                    "records (measured fields or a maker per row), with no "
+                    "ledger row",
                     "tables": seen,
                 }
             )
@@ -706,7 +793,8 @@ def judge_data(
                 "kind": "stale",
                 "detail": "the file is gone"
                 if gone
-                else "the file no longer carries a per-printer limit table; remove the row",
+                else "the file no longer carries a per-printer limit table or a "
+                "table of verified records; remove the row",
             }
         )
 
@@ -717,6 +805,15 @@ def judge_data(
         "classified": classified,
         "notes": _manifest_notes(flagged, ledger),
     }
+
+
+def _per_printer(tables: list[tuple[dict, list[tuple[str, Any]]]]) -> bool:
+    """True when any flagged table is keyed by printer makers, as opposed to
+    a table of verified records keyed by material or product."""
+    return any(
+        "verified records" not in record.get("limit_fields", {})
+        for record, _rows in tables
+    )
 
 
 def _manifest_notes(flagged: dict[str, Any], ledger: dict[str, dict]) -> list[str]:
@@ -734,7 +831,11 @@ def _manifest_notes(flagged: dict[str, Any], ledger: dict[str, dict]) -> list[st
                 f"{rel}: classified not_printer_keyed here, but data_manifest "
                 "lists it in PRINTER_KEYED_FILES"
             )
-        elif cls in _CLASSES - {"not_printer_keyed"} and rel not in keyed:
+        elif (
+            cls in _CLASSES - {"not_printer_keyed"}
+            and rel not in keyed
+            and _per_printer(flagged.get(rel) or [])
+        ):
             notes.append(
                 f"{rel}: classified {cls} here (a per-printer table), but "
                 "data_manifest does not list it in PRINTER_KEYED_FILES"

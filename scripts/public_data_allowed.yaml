@@ -90,8 +90,60 @@ files:
       each verdict, which quoted the printer's ceilings, is the Pro overlay's
       since 2026-10-12; the default row keeps its notes, as the floor.
 
-  material_catalog.json:
-    classification: not_printer_keyed
+  # ---- Tables of verified records (the second shape, judged from 2026-10-16):
+  # no maker in a key, no sentence in a row, and still the year's work.
+
+  design_knowledge/materials.json:
+    classification: pending_move
+    by: 2026-10-23
     why: >-
-      Filament products keyed by maker and product line; the maker names are
-      filament brands and no row describes a printer.
+      38 materials.  The floor stays here: softening and service temperatures,
+      print and bed ranges, warping, the UV / food / outgassing words, the eight
+      design limits and the hazards, because the free heat and food verdicts,
+      the enclosure check, a signed-out slice and every free make's validation
+      read them offline.  The 69 brand_profiles rows (brand x product: nozzle
+      and bed ranges and optimum, enclosure, hardened nozzle, AMS) are the
+      verified depth and move to kiln-pro, served one material per question,
+      free with sign-in; a signed-out slice uses the material's own range.
+
+  design_knowledge/load_tables.json:
+    classification: pending_move
+    by: 2026-10-23
+    why: >-
+      Per material, a grid of derived safe loads (5 spans x 5 sections,
+      pre-derated) and the tensile figure it is built from, 38 rows.  The grid,
+      its generator and the strength figures move to kiln-pro; the free tool
+      over it (estimate_structural_load) stops returning a figure and says the
+      load was not checked.  Nothing else in public reads this file.
+
+  material_catalog.json:
+    classification: pending_move
+    by: 2026-10-23
+    why: >-
+      45 brand products: vendor, line, price band, colour variants, purchase
+      links.  Verified by hand across a year; moves to kiln-pro, served one
+      product per question, free with sign-in.  The search and purchase-link
+      tools keep working signed in.
+
+  design_knowledge/environment_compatibility.json:
+    classification: standard_reference
+    fields: [uv_resistance, temperature_range, moisture, chemicals,
+             abrasion_resistance, vibration_fatigue]
+    why: >-
+      38 materials' qualitative survival ratings (poor / moderate / good) with a
+      few round figures; the file's own meta says "qualitative and intended for
+      fast agent triage".  The curated depth (hours to degradation per source,
+      the reasoning) is the environment overlay in kiln-pro.  Kept public as
+      the floor the free environment check runs offline; re-judge if a measured
+      field joins a row.
+
+  design_knowledge/material_troubleshooting.json:
+    classification: safety_floor
+    fields: [storage_requirements]
+    why: >-
+      Per material, the storage block (humidity sensitivity, a drying
+      temperature and time) is all that is left here.  Drying a spool wrong ruins
+      it and a wet spool jams the hotend, so the storage numbers are a floor
+      every install needs offline; the curated root causes and fixes are the
+      troubleshooting overlay in kiln-pro.
+

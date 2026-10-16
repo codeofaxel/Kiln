@@ -277,7 +277,7 @@ class TestDataTables:
         stale = {f["file"]: f["detail"] for f in result["failures"] if f["kind"] == "stale"}
         assert stale == {
             "gone.json": "the file is gone",
-            "harmless.json": "the file no longer carries a per-printer limit table; remove the row",
+            "harmless.json": "the file no longer carries a per-printer limit table or a table of verified records; remove the row",
         }
 
     def test_a_full_row_the_file_lost_is_stale(self, tmp_path: Path) -> None:
@@ -332,3 +332,65 @@ class TestDataTables:
 
         row = _load_gate().load_ledger()["printer_intelligence.json"]
         assert set(row["fields"]) <= data_manifest.PUBLIC_PROFILE_FIELDS
+
+
+def _records(n: int = 12, *, maker: bool = False) -> dict:
+    """A table of verified records keyed by material, no maker in a key and
+    no sentence in a row: the shape that passed every gate until
+    2026-10-16.  Every figure is a placeholder."""
+    rows: dict = {"_meta": {"version": 1}}
+    for i in range(n):
+        row: dict = {"thermal": {"glass_c": 1, "service_c": 1, "print_c": [1, 2]}}
+        if maker:
+            row = {"brand": "Prusa Research", "nozzle_c": [1, 2]}
+        rows[f"mat_{i}"] = row
+    return rows
+
+
+class TestVerifiedRecords:
+    """The second shape: a compiled table of measured figures is judged
+    whether or not a maker is named or a note rides beside it."""
+
+    def test_a_table_of_measured_rows_fails_the_day_it_lands(self, tmp_path: Path) -> None:
+        gate = _load_gate()
+        _plant(tmp_path, "design_knowledge/figures.json", _records())
+        [failure] = gate.judge_data(tmp_path, ledger={}, today=_TODAY)["failures"]
+        assert failure["kind"] == "unclassified"
+        [table] = failure["tables"]
+        assert table["vendors"] == []
+        assert table["limit_fields"]["verified records"][0].startswith("12 rows x 3")
+
+    def test_a_brand_product_row_needs_only_one_figure(self, tmp_path: Path) -> None:
+        gate = _load_gate()
+        _plant(tmp_path, "brands.json", _records(maker=True))
+        [failure] = gate.judge_data(tmp_path, ledger={}, today=_TODAY)["failures"]
+        assert "1 makers named" in failure["tables"][0]["limit_fields"]["verified records"]
+
+    def test_too_few_rows_is_not_a_table(self, tmp_path: Path) -> None:
+        gate = _load_gate()
+        _plant(tmp_path, "few.json", _records(n=9))
+        assert gate.judge_data(tmp_path, ledger={}, today=_TODAY)["failures"] == []
+
+    def test_a_parameter_schema_is_a_knob_not_a_reading(self, tmp_path: Path) -> None:
+        """A template or library catalogue describes knobs a person turns."""
+        gate = _load_gate()
+        rows = {f"t_{i}": {"parameters": {"w": {"default": 1, "min": 0, "max": 2, "unit": "mm"},
+                                          "h": {"default": 1, "min": 0, "max": 2, "unit": "mm"},
+                                          "d": {"default": 1, "min": 0, "max": 2, "unit": "mm"}}}
+                for i in range(12)}
+        _plant(tmp_path, "templates.json", rows)
+        assert gate.judge_data(tmp_path, ledger={}, today=_TODAY)["failures"] == []
+
+    def test_a_pending_move_row_quiets_it_until_its_date(self, tmp_path: Path) -> None:
+        gate = _load_gate()
+        _plant(tmp_path, "figures.json", _records())
+        row = {"classification": "pending_move", "by": "2026-06-30", "why": "moving"}
+        result = gate.judge_data(tmp_path, ledger={"figures.json": row}, today=_TODAY)
+        assert result["failures"] == [] and result["pending"][0]["file"] == "figures.json"
+
+    def test_the_shipped_material_tables_are_classified(self) -> None:
+        """The three that slipped: each has a dated row, none is quiet."""
+        gate = _load_gate()
+        ledger = gate.load_ledger()
+        for rel in ("design_knowledge/materials.json", "design_knowledge/load_tables.json", "material_catalog.json"):
+            assert ledger[rel]["classification"] == "pending_move", rel
