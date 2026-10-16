@@ -2,39 +2,32 @@
 
 A tool list that says "a brush-on two-part epoxy coating that self-levels"
 tells a person what to look for in any shop, in any country; a retail product
-name tells them one shelf.  Four technique names used to carry a product name,
-and a technique name is a lookup key, so the old spellings resolve through
-``RENAMED_POST_PROCESSING_TECHNIQUES``: an agent or saved note holding one
-still reaches the technique, with its safety note.
+name tells them one shelf.  Four technique names used to carry a product in
+brackets or after "with", and a technique name is a lookup key, so an old
+spelling still resolves: the lookup matches on the technique's CORE (the
+bracketed tail, a "with ..." tail and the form word dropped) rather than on a
+table of old names, which would keep the products in this repo.
 """
 
 from __future__ import annotations
 
 import json
-import re
 
 import pytest
 
 from kiln.design_intelligence import (
     _DATA_DIR,
-    RENAMED_POST_PROCESSING_TECHNIQUES,
     find_post_processing_technique,
     get_public_post_processing,
+    technique_core,
 )
 
-# The retail names the table carried until it was rewritten in generic terms.
-_RETIRED_PRODUCT_NAMES = re.compile(
-    r"xtc-?3d|\brit\b|dyemore|plasti ?dip|flex[ _]?seal|krylon|rust-?oleum"
-    r"|tamiya|loctite|\btulip\b|jacquard",
-    re.IGNORECASE,
-)
-
-# (material, a name the table used to carry, the name it carries now)
-_OLD_KEYS = [
-    ("pla", "Epoxy Coating (XTC-3D)", "Epoxy Coating"),
-    ("nylon", "Dyeing with Rit DyeMore", "Dyeing"),
-    ("tpu", "Flexible Paint (PlastiDip / Flex Seal)", "Flexible Rubber Paint"),
-    ("tpu_85a", "Flexible Coating (PlastiDip / Rubber Coating)", "Flexible Rubber Coating"),
+# (material, a spelling of the kind the table used to carry, the name it carries now)
+_OLD_SPELLINGS = [
+    ("pla", "Epoxy Coating (some product)", "Epoxy Coating"),
+    ("nylon", "Dyeing with some product", "Dyeing"),
+    ("tpu", "Flexible Paint (brand a / brand b)", "Flexible Rubber Paint"),
+    ("tpu_85a", "Flexible Coating (brand a / rubber coating)", "Flexible Rubber Coating"),
 ]
 
 
@@ -56,16 +49,8 @@ def guide_tool():
     return tools["get_post_processing_guide"]
 
 
-def test_the_shipped_table_names_no_retail_product():
-    text = (_DATA_DIR / "post_processing.json").read_text(encoding="utf-8")
-    found = sorted({m.group(0) for m in _RETIRED_PRODUCT_NAMES.finditer(text)})
-    assert not found, f"post_processing.json still names a product: {found}"
-
-
-@pytest.mark.parametrize(("material", "old", "new"), _OLD_KEYS)
-def test_an_old_technique_name_still_answers_through_the_tool(
-    guide_tool, material, old, new
-):
+@pytest.mark.parametrize(("material", "old", "new"), _OLD_SPELLINGS)
+def test_an_old_technique_spelling_still_answers_through_the_tool(guide_tool, material, old, new):
     result = guide_tool(material, old)
 
     assert result["success"] is True, result
@@ -75,20 +60,32 @@ def test_an_old_technique_name_still_answers_through_the_tool(
     assert str(technique.get("safety_notes") or "").strip()
 
 
-def test_old_names_resolve_in_any_case():
+def test_old_spellings_resolve_in_any_case():
     techniques = get_public_post_processing("pla").techniques
-    found = find_post_processing_technique(techniques, "  epoxy coating (xtc-3d) ")
+    found = find_post_processing_technique(techniques, "  epoxy COATING (anything at all) ")
     assert found is not None and found["name"] == "Epoxy Coating"
 
 
-def test_every_rename_points_at_a_name_the_table_carries():
-    carried = set()
-    retired = set(RENAMED_POST_PROCESSING_TECHNIQUES)
+def test_the_core_rule():
+    assert technique_core("Epoxy Coating (some product)") == "epoxy coating"
+    assert technique_core("Dyeing with some product") == "dyeing"
+    assert technique_core("Flexible Rubber Paint") == "flexible paint"
+    assert technique_core("  IPA Vapor Smoothing (Structural) ") == "ipa vapor smoothing"
+    assert technique_core("") == ""
+
+
+def test_no_two_techniques_of_one_material_share_a_core():
+    """The core is the lookup key for an old spelling: two techniques with one
+    core would make an old name ambiguous, and the lookup answers None."""
     raw = json.loads((_DATA_DIR / "post_processing.json").read_text(encoding="utf-8"))
     for key, record in raw.items():
         if key.startswith("_"):
             continue
-        for technique in record.get("techniques") or []:
-            carried.add(technique["name"])
-            assert technique["name"].casefold() not in retired, technique["name"]
-    assert set(RENAMED_POST_PROCESSING_TECHNIQUES.values()) <= carried
+        cores = [technique_core(t["name"]) for t in record.get("techniques") or []]
+        assert len(cores) == len(set(cores)), (key, sorted(cores))
+
+
+def test_an_ambiguous_old_spelling_answers_none_not_a_guess():
+    rows = [{"name": "Dyeing"}, {"name": "Dyeing with a brush"}]
+    assert find_post_processing_technique(rows, "Dyeing with anything") is None
+    assert find_post_processing_technique(rows, "Dyeing with a brush")["name"] == "Dyeing with a brush"

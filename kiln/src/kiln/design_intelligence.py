@@ -3957,34 +3957,41 @@ def list_compatibility_printers() -> list[str]:
 #: finish by its chemistry and form instead of a retail product, mapped to the
 #: name the table uses now.  An agent, a saved note or an older client holding
 #: one of these still reaches the technique.  Keys are casefolded.
-RENAMED_POST_PROCESSING_TECHNIQUES: dict[str, str] = {
-    "epoxy coating (xtc-3d)": "Epoxy Coating",
-    "dyeing with rit dyemore": "Dyeing",
-    "flexible paint (plastidip / flex seal)": "Flexible Rubber Paint",
-    "flexible coating (plastidip / rubber coating)": "Flexible Rubber Coating",
-}
+#: Technique names used to carry a product in brackets ("Epoxy Coating
+#: (<product>)", "Dyeing with <product>") and a form word ("Flexible Paint"
+#: became "Flexible Rubber Paint").  An agent or saved note may still hold
+#: an old spelling, so a lookup matches on the technique's CORE -- the name
+#: with any bracketed tail, any "with ..." tail and the form word "rubber"
+#: removed -- rather than on a table of old names, which would keep the
+#: products in this file.
+_TECHNIQUE_TAIL = re.compile(r"\s*\(.*\)\s*$|\s+with\s+.*$", re.IGNORECASE)
+_TECHNIQUE_FORM_WORDS = re.compile(r"\brubber\b", re.IGNORECASE)
 
 
-def current_technique_name(name: str) -> str:
-    """The table's current name for technique *name*, old spellings included."""
-    stripped = name.strip()
-    return RENAMED_POST_PROCESSING_TECHNIQUES.get(stripped.casefold(), stripped)
+def technique_core(name: str) -> str:
+    """The comparable core of technique *name*: brackets, a ``with ...``
+    tail and the form word dropped, whitespace folded, casefolded."""
+    core = _TECHNIQUE_TAIL.sub("", str(name or "").strip())
+    core = _TECHNIQUE_FORM_WORDS.sub(" ", core)
+    return " ".join(core.split()).casefold()
 
 
 def find_post_processing_technique(
     techniques: list[Any], name: str
 ) -> dict[str, Any] | None:
-    """The technique in *techniques* called *name* (any case, old names too)."""
-    wanted = current_technique_name(name).casefold()
+    """The technique in *techniques* called *name* (any case; an old
+    spelling that carried a product or a form word too).  An exact name
+    wins; otherwise the one technique with the same core."""
+    wanted = str(name or "").strip().casefold()
     if not wanted:
         return None
-    for technique in techniques:
-        if (
-            isinstance(technique, dict)
-            and str(technique.get("name", "")).strip().casefold() == wanted
-        ):
+    rows = [t for t in techniques if isinstance(t, dict)]
+    for technique in rows:
+        if str(technique.get("name", "")).strip().casefold() == wanted:
             return technique
-    return None
+    core = technique_core(name)
+    matches = [t for t in rows if technique_core(t.get("name", "")) == core]
+    return matches[0] if len(matches) == 1 else None
 
 
 def get_post_processing(material_id: str) -> PostProcessingGuide | None:
@@ -4017,14 +4024,13 @@ def _technique_safety_note(guide: PostProcessingGuide, method: str) -> str:
     "IPA Vapor Smoothing (Structural)" is the "IPA Vapor Smoothing" technique,
     so a tip that recommends it carries that technique's fire warning.
     """
-    wanted = current_technique_name(method).split(" (")[0].strip().casefold()
+    wanted = technique_core(method)
     if not wanted:
         return ""
     for technique in guide.techniques:
         if not isinstance(technique, dict):
             continue
-        name = str(technique.get("name", "")).split(" (")[0].strip().casefold()
-        if name == wanted:
+        if technique_core(technique.get("name", "")) == wanted:
             return str(technique.get("safety_notes") or "").strip()
     return ""
 
