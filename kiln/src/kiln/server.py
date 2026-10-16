@@ -1079,6 +1079,15 @@ mcp = FastMCP(
     ),
 )
 
+# Before any tool registers: every tool that takes a location to write to
+# refuses one a caller names in a hidden or system folder, or with a file
+# type the tool does not make.  Every door that runs a tool ends at the
+# tool's function, which is where this sits (see kiln.output_paths).
+from kiln import output_paths as _output_paths  # noqa: E402
+
+if not _output_paths.install(mcp):
+    logger.warning("output-path guard not installed: unrecognised tool registry")
+
 _current_mcp_request_context: ContextVar[Any | None] = ContextVar(
     "kiln_current_mcp_request_context",
     default=None,

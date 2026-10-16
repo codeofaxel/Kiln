@@ -19,8 +19,13 @@ from typing import Any
 #: The allowance, in MB.  Unset or not a positive number: no limit.
 ALLOWANCE_ENV = "KILN_HOLE_CHECK_MAX_MB"
 
-#: The check reads a 1.1M-triangle mesh in about 30 s; past this it is stuck.
-_CHILD_TIMEOUT_S = 300
+#: The check reads a 1.1M-triangle mesh in about 30 s on a laptop; past
+#: this it is stuck -- or starved: on the shared server a check that took
+#: 1 s elsewhere ran past six minutes under load (2026-10-16), and the
+#: person waiting had been told "no answer" by their chat at four.  A check
+#: that cannot finish inside a minute is stopped and SAID, and the part's
+#: printability is judged without it.
+_CHILD_TIMEOUT_S = 60
 
 
 class HoleCheckStopped(Exception):
