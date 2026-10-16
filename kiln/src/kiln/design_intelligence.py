@@ -3953,6 +3953,39 @@ def list_compatibility_printers() -> list[str]:
 # Public API — Post-Processing
 # ---------------------------------------------------------------------------
 
+#: Technique names the post-processing table used before it described each
+#: finish by its chemistry and form instead of a retail product, mapped to the
+#: name the table uses now.  An agent, a saved note or an older client holding
+#: one of these still reaches the technique.  Keys are casefolded.
+RENAMED_POST_PROCESSING_TECHNIQUES: dict[str, str] = {
+    "epoxy coating (xtc-3d)": "Epoxy Coating",
+    "dyeing with rit dyemore": "Dyeing",
+    "flexible paint (plastidip / flex seal)": "Flexible Rubber Paint",
+    "flexible coating (plastidip / rubber coating)": "Flexible Rubber Coating",
+}
+
+
+def current_technique_name(name: str) -> str:
+    """The table's current name for technique *name*, old spellings included."""
+    stripped = name.strip()
+    return RENAMED_POST_PROCESSING_TECHNIQUES.get(stripped.casefold(), stripped)
+
+
+def find_post_processing_technique(
+    techniques: list[Any], name: str
+) -> dict[str, Any] | None:
+    """The technique in *techniques* called *name* (any case, old names too)."""
+    wanted = current_technique_name(name).casefold()
+    if not wanted:
+        return None
+    for technique in techniques:
+        if (
+            isinstance(technique, dict)
+            and str(technique.get("name", "")).strip().casefold() == wanted
+        ):
+            return technique
+    return None
+
 
 def get_post_processing(material_id: str) -> PostProcessingGuide | None:
     """Get post-processing techniques for a material.
@@ -3984,7 +4017,7 @@ def _technique_safety_note(guide: PostProcessingGuide, method: str) -> str:
     "IPA Vapor Smoothing (Structural)" is the "IPA Vapor Smoothing" technique,
     so a tip that recommends it carries that technique's fire warning.
     """
-    wanted = method.split(" (")[0].strip().casefold()
+    wanted = current_technique_name(method).split(" (")[0].strip().casefold()
     if not wanted:
         return ""
     for technique in guide.techniques:

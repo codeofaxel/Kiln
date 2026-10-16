@@ -1115,6 +1115,9 @@ class _DesignToolsPlugin:
                 goal: Optional finishing goal or technique name.
             """
             from kiln.design_intelligence import (
+                find_post_processing_technique as _find_technique,
+            )
+            from kiln.design_intelligence import (
                 get_public_post_processing as _get_pp,
             )
 
@@ -1181,16 +1184,7 @@ class _DesignToolsPlugin:
                     answer = {"strengthening": guide.strengthening}
                     resolved_goal = "strengthen"
                 else:
-                    match = next(
-                        (
-                            technique
-                            for technique in guide.techniques
-                            if isinstance(technique, dict)
-                            and str(technique.get("name", "")).strip().lower()
-                            == goal.strip().lower()
-                        ),
-                        None,
-                    )
+                    match = _find_technique(guide.techniques, goal)
                     if match is None:
                         names = [
                             str(item["name"])

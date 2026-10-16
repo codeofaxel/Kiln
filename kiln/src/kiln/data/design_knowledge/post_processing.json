@@ -22,7 +22,7 @@
         "name": "Filler Primer + Spray Paint",
         "difficulty": "easy",
         "tools_needed": [
-          "filler primer (Rust-Oleum, Tamiya)",
+          "sandable filler primer spray",
           "spray paint",
           "fine sandpaper (400-600 grit)",
           "clear coat (optional)"
@@ -30,10 +30,10 @@
         "safety_notes": "Spray in well-ventilated area or outdoors. Wear a respirator when spraying."
       },
       {
-        "name": "Epoxy Coating (XTC-3D)",
+        "name": "Epoxy Coating",
         "difficulty": "moderate",
         "tools_needed": [
-          "XTC-3D epoxy (or generic brush-on epoxy)",
+          "brush-on two-part epoxy coating that self-levels",
           "mixing cups",
           "disposable brush",
           "nitrile gloves"
@@ -82,10 +82,10 @@
         "safety_notes": "Spray in well-ventilated area."
       },
       {
-        "name": "Epoxy Coating (XTC-3D)",
+        "name": "Epoxy Coating",
         "difficulty": "moderate",
         "tools_needed": [
-          "XTC-3D epoxy",
+          "brush-on two-part epoxy coating that self-levels",
           "mixing cups",
           "disposable brush",
           "nitrile gloves"
@@ -323,7 +323,7 @@
         "name": "Painting",
         "difficulty": "easy",
         "tools_needed": [
-          "plastic-specific primer (Krylon Fusion)",
+          "spray primer formulated to bond to plastic",
           "spray paint or acrylic",
           "fine sandpaper"
         ],
@@ -333,7 +333,7 @@
         "name": "Epoxy Coating",
         "difficulty": "moderate",
         "tools_needed": [
-          "brush-on epoxy or XTC-3D",
+          "brush-on two-part epoxy coating that self-levels",
           "mixing cups",
           "disposable brush",
           "nitrile gloves"
@@ -566,10 +566,10 @@
   "tpu": {
     "techniques": [
       {
-        "name": "Flexible Paint (PlastiDip / Flex Seal)",
+        "name": "Flexible Rubber Paint",
         "difficulty": "moderate",
         "tools_needed": [
-          "PlastiDip spray or Flex Seal",
+          "flexible rubber coating spray or liquid rubber sealant",
           "masking tape (if multi-color)"
         ],
         "safety_notes": "Spray in well-ventilated area. Rubber coating spray fumes are moderately toxic."
@@ -578,7 +578,7 @@
         "name": "Dyeing",
         "difficulty": "moderate",
         "tools_needed": [
-          "Rit DyeMore (synthetic fabric dye)",
+          "synthetic-fiber fabric dye (the kind made for polyester and nylon)",
           "pot of water",
           "stove or hot plate",
           "tongs"
@@ -589,8 +589,7 @@
     "paintability": {
       "primer_needed": false,
       "paint_types": [
-        "plastidip",
-        "flex_seal",
+        "rubber_coating",
         "fabric_paint"
       ]
     },
@@ -605,10 +604,10 @@
   "nylon": {
     "techniques": [
       {
-        "name": "Dyeing with Rit DyeMore",
+        "name": "Dyeing",
         "difficulty": "moderate",
         "tools_needed": [
-          "Rit DyeMore (synthetic fabric dye)",
+          "synthetic-fiber fabric dye (the kind made for polyester and nylon)",
           "large pot",
           "stove or hot plate",
           "tongs",
@@ -914,7 +913,7 @@
         "name": "Filler Primer + Spray Paint",
         "difficulty": "easy",
         "tools_needed": [
-          "filler primer (Rust-Oleum 2-in-1, Tamiya)",
+          "sandable filler primer spray",
           "spray paint",
           "clear coat (optional)"
         ],
@@ -932,10 +931,10 @@
         "safety_notes": "Wear a dust mask. PLA dust is not toxic but irritates lungs."
       },
       {
-        "name": "Epoxy Coating (XTC-3D)",
+        "name": "Epoxy Coating",
         "difficulty": "moderate",
         "tools_needed": [
-          "XTC-3D epoxy (or generic brush-on epoxy)",
+          "brush-on two-part epoxy coating that self-levels",
           "mixing cups",
           "disposable brush",
           "nitrile gloves"
@@ -976,7 +975,7 @@
         "name": "Painting",
         "difficulty": "easy",
         "tools_needed": [
-          "plastic-specific primer (Krylon Fusion)",
+          "spray primer formulated to bond to plastic",
           "spray paint or acrylic",
           "fine sandpaper (400-600 grit)"
         ],
@@ -986,7 +985,7 @@
         "name": "Epoxy Coating",
         "difficulty": "moderate",
         "tools_needed": [
-          "brush-on epoxy or XTC-3D",
+          "brush-on two-part epoxy coating that self-levels",
           "mixing cups",
           "disposable brush",
           "nitrile gloves"
@@ -1032,7 +1031,7 @@
         "name": "Filler Primer + Spray Paint",
         "difficulty": "easy",
         "tools_needed": [
-          "filler primer (Rust-Oleum 2-in-1, Tamiya)",
+          "sandable filler primer spray",
           "spray paint",
           "fine sandpaper (400-600 grit)",
           "clear coat (optional)"
@@ -1040,10 +1039,10 @@
         "safety_notes": "Spray in well-ventilated area or outdoors. Wear a respirator when spraying."
       },
       {
-        "name": "Epoxy Coating (XTC-3D)",
+        "name": "Epoxy Coating",
         "difficulty": "moderate",
         "tools_needed": [
-          "XTC-3D epoxy (or generic brush-on epoxy)",
+          "brush-on two-part epoxy coating that self-levels",
           "mixing cups",
           "disposable brush",
           "nitrile gloves"
@@ -1070,10 +1069,10 @@
   "tpu_95a": {
     "techniques": [
       {
-        "name": "Flexible Paint (PlastiDip / Flex Seal)",
+        "name": "Flexible Rubber Paint",
         "difficulty": "moderate",
         "tools_needed": [
-          "PlastiDip spray or Flex Seal",
+          "flexible rubber coating spray or liquid rubber sealant",
           "isopropyl alcohol",
           "masking tape (if multi-color)"
         ],
@@ -1083,7 +1082,7 @@
         "name": "Dyeing",
         "difficulty": "moderate",
         "tools_needed": [
-          "Rit DyeMore (synthetic fabric dye)",
+          "synthetic-fiber fabric dye (the kind made for polyester and nylon)",
           "pot of water",
           "stove or hot plate",
           "tongs"
@@ -1094,7 +1093,7 @@
         "name": "Fabric Paint",
         "difficulty": "easy",
         "tools_needed": [
-          "fabric paint (Tulip, Jacquard)",
+          "flexible acrylic fabric paint",
           "fine brush"
         ],
         "safety_notes": "Minimal safety concerns. Water-based fabric paints are non-toxic."
@@ -1103,8 +1102,7 @@
     "paintability": {
       "primer_needed": false,
       "paint_types": [
-        "plastidip",
-        "flex_seal",
+        "rubber_coating",
         "fabric_paint"
       ]
     },
@@ -1119,10 +1117,10 @@
   "tpu_85a": {
     "techniques": [
       {
-        "name": "Flexible Coating (PlastiDip / Rubber Coating)",
+        "name": "Flexible Rubber Coating",
         "difficulty": "moderate",
         "tools_needed": [
-          "PlastiDip spray or liquid rubber coating",
+          "flexible rubber coating spray or brush-on liquid rubber",
           "isopropyl alcohol"
         ],
         "safety_notes": "Spray in well-ventilated area. Rubber coating spray fumes are moderately toxic."
@@ -1131,7 +1129,7 @@
         "name": "Dyeing",
         "difficulty": "moderate",
         "tools_needed": [
-          "Rit DyeMore (synthetic fabric dye)",
+          "synthetic-fiber fabric dye (the kind made for polyester and nylon)",
           "pot of water",
           "stove or hot plate",
           "tongs"
@@ -1142,7 +1140,6 @@
     "paintability": {
       "primer_needed": false,
       "paint_types": [
-        "plastidip",
         "rubber_coating"
       ]
     },
@@ -1232,7 +1229,7 @@
         "name": "PP-Compatible Adhesive Bonding",
         "difficulty": "advanced",
         "tools_needed": [
-          "PP-bonding primer (e.g., Loctite 770)",
+          "polyolefin primer for cyanoacrylate glue (made for PP and PE)",
           "cyanoacrylate or structural adhesive",
           "nitrile gloves",
           "isopropyl alcohol for surface prep"
