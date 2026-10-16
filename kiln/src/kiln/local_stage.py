@@ -222,7 +222,6 @@ VIEWER_TOOLS: frozenset[str] = frozenset(
         "compose_part_from_primitives",
         "decorate_during_print",
         "decorate_surface",
-        "design_session",
         "design_to_gcode_pipeline",
         "download_generated_model",
         "download_model",
