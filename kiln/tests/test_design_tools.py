@@ -273,6 +273,10 @@ class TestEstimateStructuralLoad:
         assert "doesn't check load on the free plan" in result["message"]
         assert "unverified" in result["message"]
         assert "Kiln Pro sizes it" in result["message"]
+        assert (
+            "Knocks, weight left on for months, humidity and any hardware "
+            "bolted on all count against it." in result["message"]
+        )
         assert "sags" not in result["message"]
         assert "upgrade_recommendation" in result
         assert "safe_load_kg" not in result and "max_load_n" not in result
