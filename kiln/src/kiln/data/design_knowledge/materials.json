@@ -11,7 +11,7 @@
         "Empirically validated FDM-printed values"
       ],
       "update_cadence": "annual for established materials (PLA, PETG, ABS), semi-annual for newer composites (CF-Nylon, PA6-GF, PET-CF); high-performance polymers (PEI, PEEK, PEKK, PPSU, PPS) annual — their datasheets change rarely, but vendor process windows do",
-      "methodology": "Conservative/worst-case values used for composites where manufacturer specs vary. Mechanical values represent typical FDM-printed properties (not injection-molded datasheets). Design limits empirically validated where possible."
+      "methodology": "Conservative/worst-case values used for composites where manufacturer specs vary. Mechanical values represent typical FDM-printed properties (not moulded-part datasheets). Design limits empirically validated where possible."
     },
     "_split_note": "Safety-floor profiles for AI-controlled FDM printing.  Engineering depth (how strong each material really is, what it is good for, and how to print it well) is available in Kiln Pro.  See https://kiln3d.com/pricing.",
     "_slicing_note": "slicing.max_volumetric_speed_mm3s is the most plastic a second (mm³/s) a slice for the material pushes through a standard 0.4 mm nozzle: the lowest figure the major slicer makers state for it in their generic presets, or where they publish none, their own-brand presets for it. A floor that holds on every printer, so it is cautious on fast ones; a material with no figure here is held only by the printer's own ceiling. Applied at every slice (kiln.slicer_material).",
@@ -504,7 +504,7 @@
       "biodegradable": false,
       "outgassing": "moderate",
       "ventilation_required": true,
-      "handling_warning": "Releases caprolactam vapour while printing - ventilate the working area - and the carbon fill makes sanding, drilling or machining a finished part a respirable-dust hazard. Wear respiratory protection for that work, not just for the print."
+      "handling_warning": "Releases caprolactam vapour while printing - ventilate the working area - and the carbon fill makes sanding, drilling or cutting a finished part a respirable-dust hazard. Wear respiratory protection for that work, not just for the print."
     },
     "design_limits": {
       "min_wall_thickness_mm": 1.2,
@@ -881,7 +881,7 @@
       "biodegradable": false,
       "outgassing": "moderate",
       "ventilation_required": true,
-      "handling_warning": "Releases caprolactam vapour while printing - ventilate the working area - and the glass fill makes sanding, drilling or machining a finished part a respirable-dust hazard. Wear respiratory protection for that work."
+      "handling_warning": "Releases caprolactam vapour while printing - ventilate the working area - and the glass fill makes sanding, drilling or cutting a finished part a respirable-dust hazard. Wear respiratory protection for that work."
     },
     "design_limits": {
       "min_wall_thickness_mm": 1.2,
@@ -1779,7 +1779,7 @@
       "esd_charge_generation_note": "Being dissipative controls how charge LEAVES the part. It says nothing about whether the part GENERATES charge -- ANSI/ESD S541 states plainly that there is no correlation between resistance and low-charging behaviour, and no ANSI-approved pass/fail triboelectric test for a material exists, so this property cannot be certified by any vendor.",
       "esd_qualification_note": "The number on a spool describes the filament, not your part. Printed resistance moves with nozzle temperature, layer height, wall count and build orientation, and it is measurably worse across the layers than along them. Qualify a coupon printed with your production settings on your production machine; a datasheet value narrows the candidate list, it does not qualify the part.",
       "esd_process_sensitivity_note": "The vendor states outright that this compound's resistance can be tuned by extruder temperature. That makes the electrical property a process output rather than something delivered on the spool. Fix an extruder temperature, qualify a part printed at it, and re-qualify whenever the profile changes.",
-      "flame_rating_note": "This grade publishes NO flame or fire-smoke-toxicity rating. The certified fire performance associated with this polymer family belongs to a different grade and to the unfilled resin, and such certification is awarded to a part at a thickness by an approved laboratory, not to a filament. Carbon loading changes burn behaviour. Do not assume this material carries a fire rating; if a programme requires one, it must be tested on the actual printed part.",
+      "flame_rating_note": "This grade publishes NO flame or fire-smoke-toxicity rating. The certified fire performance associated with this polymer family belongs to a different grade and to the unfilled base polymer, and such certification is awarded to a part at a thickness by an approved laboratory, not to a filament. Carbon loading changes burn behaviour. Do not assume this material carries a fire rating; if a programme requires one, it must be tested on the actual printed part.",
       "service_temp_note": "No vendor publishes a continuous service temperature. The 170C figure is derived, not measured: it carries a conservative margin below the 217C glass transition. The published 205C is heat deflection at the lighter 0.45 MPa load, a short-term test rather than a service rating, and no figure is published at the heavier load.",
       "handling_warning": "Extruded near 390C, far above commodity filaments. Ventilate; thermal decomposition products of this polymer family are hazardous to inhale, and parts leave the machine hot enough to burn."
     },

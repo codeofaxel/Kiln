@@ -1126,10 +1126,13 @@ class _DesignToolsPlugin:
                         "error": f"No post-processing data for '{material}'.",
                     }
 
+                # A technique is never named without how not to get hurt
+                # doing it, so the overview carries each safety note too.
                 technique_overview = [
                     {
                         "name": technique.get("name"),
                         "difficulty": technique.get("difficulty"),
+                        "safety_notes": technique.get("safety_notes"),
                     }
                     for technique in guide.techniques
                     if isinstance(technique, dict)

@@ -714,7 +714,7 @@ class TestGetPostProcessingGuide:
             "strengthen",
         ]
         assert result["techniques"] == [
-            {"name": "Sanding", "difficulty": "easy"},
+            {"name": "Sanding", "difficulty": "easy", "safety_notes": None},
         ]
         mock_fn.assert_called_once_with("pla")
 

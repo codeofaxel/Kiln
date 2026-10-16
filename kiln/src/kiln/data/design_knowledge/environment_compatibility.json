@@ -7,8 +7,7 @@
   },
   "pla": {
     "uv_resistance": {
-      "rating": "poor",
-      "hours_to_noticeable_degradation": 80
+      "rating": "poor"
     },
     "temperature_range": {
       "min_service_c": -10,
@@ -36,8 +35,7 @@
   },
   "petg": {
     "uv_resistance": {
-      "rating": "moderate",
-      "hours_to_noticeable_degradation": 500
+      "rating": "moderate"
     },
     "temperature_range": {
       "min_service_c": -20,
@@ -65,8 +63,7 @@
   },
   "abs": {
     "uv_resistance": {
-      "rating": "poor",
-      "hours_to_noticeable_degradation": 200
+      "rating": "poor"
     },
     "temperature_range": {
       "min_service_c": -20,
@@ -94,8 +91,7 @@
   },
   "tpu": {
     "uv_resistance": {
-      "rating": "moderate",
-      "hours_to_noticeable_degradation": 600
+      "rating": "moderate"
     },
     "temperature_range": {
       "min_service_c": -30,
@@ -123,8 +119,7 @@
   },
   "asa": {
     "uv_resistance": {
-      "rating": "excellent",
-      "hours_to_noticeable_degradation": 2500
+      "rating": "excellent"
     },
     "temperature_range": {
       "min_service_c": -30,
@@ -152,8 +147,7 @@
   },
   "nylon": {
     "uv_resistance": {
-      "rating": "moderate",
-      "hours_to_noticeable_degradation": 700
+      "rating": "moderate"
     },
     "temperature_range": {
       "min_service_c": -40,
@@ -181,8 +175,7 @@
   },
   "polycarbonate": {
     "uv_resistance": {
-      "rating": "moderate",
-      "hours_to_noticeable_degradation": 800
+      "rating": "moderate"
     },
     "temperature_range": {
       "min_service_c": -40,
@@ -210,8 +203,7 @@
   },
   "pvb": {
     "uv_resistance": {
-      "rating": "poor",
-      "hours_to_noticeable_degradation": 60
+      "rating": "poor"
     },
     "temperature_range": {
       "min_service_c": -5,
@@ -239,8 +231,7 @@
   },
   "pla_plus": {
     "uv_resistance": {
-      "rating": "poor",
-      "hours_to_noticeable_degradation": 80
+      "rating": "poor"
     },
     "temperature_range": {
       "min_service_c": -10,
@@ -268,8 +259,7 @@
   },
   "pla_matte": {
     "uv_resistance": {
-      "rating": "poor",
-      "hours_to_noticeable_degradation": 80
+      "rating": "poor"
     },
     "temperature_range": {
       "min_service_c": -10,
@@ -297,8 +287,7 @@
   },
   "pla_tough": {
     "uv_resistance": {
-      "rating": "poor",
-      "hours_to_noticeable_degradation": 80
+      "rating": "poor"
     },
     "temperature_range": {
       "min_service_c": -10,
@@ -326,8 +315,7 @@
   },
   "silk_pla": {
     "uv_resistance": {
-      "rating": "poor",
-      "hours_to_noticeable_degradation": 80
+      "rating": "poor"
     },
     "temperature_range": {
       "min_service_c": -10,
@@ -355,8 +343,7 @@
   },
   "wood_pla": {
     "uv_resistance": {
-      "rating": "poor",
-      "hours_to_noticeable_degradation": 60
+      "rating": "poor"
     },
     "temperature_range": {
       "min_service_c": -10,
@@ -384,8 +371,7 @@
   },
   "cf_pla": {
     "uv_resistance": {
-      "rating": "moderate",
-      "hours_to_noticeable_degradation": 300
+      "rating": "moderate"
     },
     "temperature_range": {
       "min_service_c": -10,
@@ -413,8 +399,7 @@
   },
   "pla_esd": {
     "uv_resistance": {
-      "rating": "moderate",
-      "hours_to_noticeable_degradation": 300
+      "rating": "moderate"
     },
     "temperature_range": {
       "min_service_c": -10,
@@ -442,8 +427,7 @@
   },
   "petg_hf": {
     "uv_resistance": {
-      "rating": "moderate",
-      "hours_to_noticeable_degradation": 500
+      "rating": "moderate"
     },
     "temperature_range": {
       "min_service_c": -20,
@@ -471,8 +455,7 @@
   },
   "cf_petg": {
     "uv_resistance": {
-      "rating": "moderate",
-      "hours_to_noticeable_degradation": 500
+      "rating": "moderate"
     },
     "temperature_range": {
       "min_service_c": -20,
@@ -500,8 +483,7 @@
   },
   "petg_cf": {
     "uv_resistance": {
-      "rating": "moderate",
-      "hours_to_noticeable_degradation": 500
+      "rating": "moderate"
     },
     "temperature_range": {
       "min_service_c": -20,
@@ -529,8 +511,7 @@
   },
   "pet_cf": {
     "uv_resistance": {
-      "rating": "moderate",
-      "hours_to_noticeable_degradation": 500
+      "rating": "moderate"
     },
     "temperature_range": {
       "min_service_c": -20,
@@ -558,8 +539,7 @@
   },
   "petg_esd": {
     "uv_resistance": {
-      "rating": "moderate",
-      "hours_to_noticeable_degradation": 500
+      "rating": "moderate"
     },
     "temperature_range": {
       "min_service_c": -20,
@@ -587,8 +567,7 @@
   },
   "abs_esd": {
     "uv_resistance": {
-      "rating": "moderate",
-      "hours_to_noticeable_degradation": 1000
+      "rating": "moderate"
     },
     "temperature_range": {
       "min_service_c": -20,
@@ -616,8 +595,7 @@
   },
   "pc_abs": {
     "uv_resistance": {
-      "rating": "poor",
-      "hours_to_noticeable_degradation": 200
+      "rating": "poor"
     },
     "temperature_range": {
       "min_service_c": -30,
@@ -645,8 +623,7 @@
   },
   "pc_esd": {
     "uv_resistance": {
-      "rating": "moderate",
-      "hours_to_noticeable_degradation": 800
+      "rating": "moderate"
     },
     "temperature_range": {
       "min_service_c": -40,
@@ -674,8 +651,7 @@
   },
   "cf_nylon": {
     "uv_resistance": {
-      "rating": "moderate",
-      "hours_to_noticeable_degradation": 1000
+      "rating": "moderate"
     },
     "temperature_range": {
       "min_service_c": -40,
@@ -703,8 +679,7 @@
   },
   "pa6_gf": {
     "uv_resistance": {
-      "rating": "moderate",
-      "hours_to_noticeable_degradation": 700
+      "rating": "moderate"
     },
     "temperature_range": {
       "min_service_c": -40,
@@ -732,8 +707,7 @@
   },
   "pa612_esd": {
     "uv_resistance": {
-      "rating": "moderate",
-      "hours_to_noticeable_degradation": 700
+      "rating": "moderate"
     },
     "temperature_range": {
       "min_service_c": -40,
@@ -761,8 +735,7 @@
   },
   "tpu_85a": {
     "uv_resistance": {
-      "rating": "moderate",
-      "hours_to_noticeable_degradation": 600
+      "rating": "moderate"
     },
     "temperature_range": {
       "min_service_c": -30,
@@ -790,8 +763,7 @@
   },
   "tpu_95a": {
     "uv_resistance": {
-      "rating": "moderate",
-      "hours_to_noticeable_degradation": 600
+      "rating": "moderate"
     },
     "temperature_range": {
       "min_service_c": -30,
@@ -819,8 +791,7 @@
   },
   "pp": {
     "uv_resistance": {
-      "rating": "poor",
-      "hours_to_noticeable_degradation": 150
+      "rating": "poor"
     },
     "temperature_range": {
       "min_service_c": 0,
@@ -848,8 +819,7 @@
   },
   "pva": {
     "uv_resistance": {
-      "rating": "poor",
-      "hours_to_noticeable_degradation": 100
+      "rating": "poor"
     },
     "temperature_range": {
       "min_service_c": -10,
@@ -877,8 +847,7 @@
   },
   "peek": {
     "uv_resistance": {
-      "rating": "poor",
-      "hours_to_noticeable_degradation": 300
+      "rating": "poor"
     },
     "temperature_range": {
       "min_service_c": -40,
@@ -906,8 +875,7 @@
   },
   "pei_1010": {
     "uv_resistance": {
-      "rating": "excellent",
-      "hours_to_noticeable_degradation": 1000
+      "rating": "excellent"
     },
     "temperature_range": {
       "min_service_c": -40,
@@ -935,8 +903,7 @@
   },
   "pei_9085": {
     "uv_resistance": {
-      "rating": "moderate",
-      "hours_to_noticeable_degradation": 800
+      "rating": "moderate"
     },
     "temperature_range": {
       "min_service_c": -40,
@@ -964,8 +931,7 @@
   },
   "pei_esd": {
     "uv_resistance": {
-      "rating": "moderate",
-      "hours_to_noticeable_degradation": 800
+      "rating": "moderate"
     },
     "temperature_range": {
       "min_service_c": -40,
@@ -993,8 +959,7 @@
   },
   "pekk": {
     "uv_resistance": {
-      "rating": "excellent",
-      "hours_to_noticeable_degradation": 1000
+      "rating": "excellent"
     },
     "temperature_range": {
       "min_service_c": -54,
@@ -1022,8 +987,7 @@
   },
   "pekk_esd": {
     "uv_resistance": {
-      "rating": "moderate",
-      "hours_to_noticeable_degradation": 800
+      "rating": "moderate"
     },
     "temperature_range": {
       "min_service_c": -54,
@@ -1051,8 +1015,7 @@
   },
   "pps": {
     "uv_resistance": {
-      "rating": "poor",
-      "hours_to_noticeable_degradation": 300
+      "rating": "poor"
     },
     "temperature_range": {
       "min_service_c": -40,
@@ -1080,8 +1043,7 @@
   },
   "ppsu": {
     "uv_resistance": {
-      "rating": "poor",
-      "hours_to_noticeable_degradation": 300
+      "rating": "poor"
     },
     "temperature_range": {
       "min_service_c": -40,

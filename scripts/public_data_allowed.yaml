@@ -127,10 +127,10 @@ files:
     why: >-
       38 materials' qualitative survival ratings (poor / moderate / good) with a
       few round figures; the file's own meta says "qualitative and intended for
-      fast agent triage".  The curated depth (hours to degradation per source,
-      the reasoning) is the environment overlay in kiln-pro.  Kept public as
-      the floor the free environment check runs offline; re-judge if a measured
-      field joins a row.
+      fast agent triage".  The curated depth (the hours to noticeable UV
+      degradation, moved out 2026-10-16, and the reasoning) is the environment
+      overlay in kiln-pro.  Kept public as the floor the free environment check
+      runs offline; re-judge if a measured field joins a row.
 
   design_knowledge/material_troubleshooting.json:
     classification: safety_floor

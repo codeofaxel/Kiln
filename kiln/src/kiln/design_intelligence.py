@@ -3926,8 +3926,31 @@ def get_post_processing(material_id: str) -> PostProcessingGuide | None:
     )
 
 
+def _technique_safety_note(guide: PostProcessingGuide, method: str) -> str:
+    """The safety note of the technique a strengthening *method* names, or ``""``.
+
+    "IPA Vapor Smoothing (Structural)" is the "IPA Vapor Smoothing" technique,
+    so a tip that recommends it carries that technique's fire warning.
+    """
+    wanted = method.split(" (")[0].strip().casefold()
+    if not wanted:
+        return ""
+    for technique in guide.techniques:
+        if not isinstance(technique, dict):
+            continue
+        name = str(technique.get("name", "")).split(" (")[0].strip().casefold()
+        if name == wanted:
+            return str(technique.get("safety_notes") or "").strip()
+    return ""
+
+
 def get_public_post_processing(material_id: str) -> PostProcessingGuide | None:
-    """Get the public post-processing floor without optional enrichment."""
+    """Get the public post-processing floor without optional enrichment.
+
+    Each technique keeps its ``safety_notes``: the fire, fume and dust
+    warnings are the floor, so an offline or signed-out install still says
+    them.
+    """
     raw = json.loads(
         (_DATA_DIR / "post_processing.json").read_text(encoding="utf-8")
     )
@@ -3939,7 +3962,7 @@ def get_public_post_processing(material_id: str) -> PostProcessingGuide | None:
     techniques = [
         {
             key: item[key]
-            for key in ("name", "difficulty", "tools_needed")
+            for key in ("name", "difficulty", "tools_needed", "safety_notes")
             if key in item
         }
         for item in (data.get("techniques") or [])
@@ -4136,10 +4159,14 @@ def get_print_diagnostic(
     if pp_guide and pp_guide.strengthening:
         for s in pp_guide.strengthening:
             if s.get("applicable"):
-                pp_tips.append(
+                tip = (
                     f"{s.get('method', 'Unknown')}: ~{s.get('strength_gain_pct', 0)}% "
                     f"strength gain. {s.get('tradeoffs', '')}"
                 )
+                safety = _technique_safety_note(pp_guide, str(s.get("method", "")))
+                if safety:
+                    tip = f"{tip.rstrip()} Safety: {safety}"
+                pp_tips.append(tip)
 
     # Build combined guidance
     combined: list[str] = []
