@@ -2261,6 +2261,22 @@ def brand_figures_unanswered(parent_material: str) -> str | None:
     return _figures_unanswered(parent_material)
 
 
+def _family_floor_ranges(parent_material: str) -> tuple[list[int], int, list[int], int] | None:
+    """``(nozzle range, nozzle optimum, bed range, bed optimum)`` from the
+    family's own public floor (``materials.json`` thermal ranges, optimum at
+    the midpoint), or ``None`` when the family states no print range."""
+    thermal = (_get_kb().materials.get((parent_material or "").lower()) or {}).get("thermal") or {}
+    nozzle = thermal.get("print_temp_range_c")
+    if not (isinstance(nozzle, list) and len(nozzle) == 2):
+        return None
+    bed = thermal.get("bed_temp_range_c")
+    if not (isinstance(bed, list) and len(bed) == 2):
+        bed = [60, 60]
+    nozzle_range = [int(nozzle[0]), int(nozzle[1])]
+    bed_range = [int(bed[0]), int(bed[1])]
+    return nozzle_range, (nozzle_range[0] + nozzle_range[1]) // 2, bed_range, (bed_range[0] + bed_range[1]) // 2
+
+
 def _brand_figures(parent_material: str, record: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
     """The family's brand figures from *record*, keyed by profile id."""
     brands = (record or {}).get("brands") if isinstance(record, dict) else None
@@ -2440,20 +2456,36 @@ def resolve_filament(
         if printer_id:
             warnings = _check_filament_printer_compat(brand, printer_id)
 
-        # A brand whose own figures are not in hand (signed out, offline)
-        # prints at its family's range, and the warning says so: a brand
-        # name must never read as a brand tune it did not get.
+        # A brand whose own figures are not in hand (below Kiln Pro, signed
+        # out, offline) prints at its FAMILY's own range -- the floor public
+        # materials.json carries for every family, never the cost table's
+        # generic default, which is PLA's for a family it lacks (2026-10-16:
+        # a high-temperature brand came out at 210C that way) -- and the
+        # warning says so: a brand name must never read as a tune it did
+        # not get.
         if not brand.has_figures():
             why = brand_figures_unanswered(brand.parent_material)
+            family = _family_floor_ranges(brand.parent_material)
+            family_name = _get_kb().materials.get(brand.parent_material, {}).get("display_name") or parent_row.name
             warnings.append(
                 f"{brand.brand} {brand.product_name}'s own temperatures are not in hand"
                 + (f" because {why}" if why else "")
-                + f"; the {parent_row.name} range is used."
+                + f"; the {family_name} range is used."
             )
-        nozzle_opt = brand.nozzle_temp_optimal_c if brand.has_figures() else int(parent_row.tool_temp_default)
-        nozzle_range = list(brand.nozzle_temp_range_c) if brand.has_figures() else [nozzle_opt - 20, nozzle_opt + 20]
-        bed_opt = (brand.bed_temp_optimal_c or 60) if brand.has_figures() else int(parent_row.bed_temp_default)
-        bed_range = list(brand.bed_temp_range_c) if brand.bed_temp_range_c else [bed_opt - 10, bed_opt + 10]
+        else:
+            family = None
+        if brand.has_figures():
+            nozzle_opt = brand.nozzle_temp_optimal_c
+            nozzle_range = list(brand.nozzle_temp_range_c)
+            bed_opt = brand.bed_temp_optimal_c or 60
+            bed_range = list(brand.bed_temp_range_c) if brand.bed_temp_range_c else [bed_opt - 10, bed_opt + 10]
+        elif family is not None:
+            nozzle_range, nozzle_opt, bed_range, bed_opt = family
+        else:
+            nozzle_opt = int(parent_row.tool_temp_default)
+            nozzle_range = [nozzle_opt - 20, nozzle_opt + 20]
+            bed_opt = int(parent_row.bed_temp_default)
+            bed_range = [bed_opt - 10, bed_opt + 10]
 
         return ResolvedFilament(
             material_id=brand.parent_material,
@@ -2549,7 +2581,7 @@ def _check_filament_printer_compat(
 
     # Temperature check
     max_hotend = getattr(intel, "max_hotend_temp", None)
-    if max_hotend and brand.nozzle_temp_optimal_c > max_hotend:
+    if max_hotend and brand.nozzle_temp_optimal_c is not None and brand.nozzle_temp_optimal_c > max_hotend:
         warnings.append(
             f"{brand.brand} {brand.product_name} needs {brand.nozzle_temp_optimal_c}°C "
             f"but '{printer_id}' max hotend is {max_hotend}°C."
@@ -2751,8 +2783,8 @@ def estimate_load_capacity(
         safety_factor=3.0,
         derating_applied=derating,
         reasoning=reasoning,
-        # The number is the same at every tier; the material's own caveats
-        # are not.  When they could not be read, say so rather than hand
+        # The number is the catalogue's (Kiln Pro's); the material's own
+        # caveats are the floor's.  When they could not be read, say so rather than hand
         # back a bare figure that reads as a clearance.
         caution=(
             ""

@@ -350,3 +350,60 @@ class TestBuildBrandProfile:
         assert p.ams_compatible is False
         assert p.notes == "Test notes"
         assert p.max_volumetric_speed_mm3s == 15.0
+
+
+class TestTheRosterIsOnlyARoster:
+    """The guard against the figures coming back: every brand_profiles row
+    in the public file carries the names and the two printer-damage flags
+    and nothing else.  A row that grows a temperature is the leak this
+    move closed, restored by hand."""
+
+    ROSTER_KEYS = {"brand", "product_name", "hardened_nozzle_required", "enclosure_required"}
+
+    def test_every_roster_row_carries_names_and_damage_flags_only(self):
+        import json
+
+        from kiln import design_intelligence as di
+
+        raw = json.loads(di._DATA_DIR.joinpath("materials.json").read_text(encoding="utf-8"))
+        rows = 0
+        for mid, material in raw.items():
+            if mid.startswith("_"):
+                continue
+            for pid, row in (material.get("brand_profiles") or {}).items():
+                assert set(row) == self.ROSTER_KEYS, f"{mid}.brand_profiles.{pid}: {sorted(row)}"
+                assert isinstance(row["hardened_nozzle_required"], bool) and isinstance(row["enclosure_required"], bool), pid
+                rows += 1
+        assert rows >= 60
+
+    def test_the_damage_flags_reach_the_profile_without_any_figures(self, signed_out_material_install):
+        from kiln import design_intelligence as di
+
+        flagged = [p for p in di.list_brand_filament_profiles() if p.hardened_nozzle_required]
+        assert flagged, "no roster row needs a hardened nozzle: the flags did not reach the roster"
+        assert all(not p.has_figures() for p in flagged)
+        warnings = di._check_filament_printer_compat(flagged[0], "bambu_a1")
+        assert any("hardened" in w.lower() for w in warnings)
+
+    def test_a_high_temperature_brand_without_its_tune_prints_at_its_family_range(self, signed_out_material_install):
+        """A/B: with the cost-table default as the fallback, a high-temperature
+        family's brand came out at a PLA temperature under the brand's name."""
+        import json
+
+        from kiln import design_intelligence as di
+
+        raw = json.loads(di._DATA_DIR.joinpath("materials.json").read_text(encoding="utf-8"))
+        hot = [
+            (mid, pid)
+            for mid, m in raw.items()
+            if not mid.startswith("_") and (m.get("thermal") or {}).get("print_temp_range_c", [0, 0])[0] >= 300
+            for pid in (m.get("brand_profiles") or {})
+        ]
+        assert hot, "no high-temperature family carries a brand profile"
+        for mid, pid in hot:
+            lo, hi = raw[mid]["thermal"]["print_temp_range_c"]
+            resolved = di.resolve_filament(pid)
+            assert resolved.is_brand_specific is False, pid
+            assert lo <= resolved.nozzle_temp_optimal_c <= hi, (pid, resolved.nozzle_temp_optimal_c, lo, hi)
+            assert resolved.nozzle_temp_range_c == [lo, hi], pid
+            assert any("not in hand" in w for w in resolved.warnings), pid

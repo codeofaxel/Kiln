@@ -24,8 +24,10 @@ A record comes from one of four places, tried in order:
 3. **served**: Kiln's servers answer through :data:`WIRE_TOOL`, asked through
    the door every served tool uses (:func:`kiln.server._pro_api_call`), and
    the answer is kept (2).
-4. **kept, however old**: on any miss (offline, signed out, the service
-   silent) the record this computer was last told is still the record.
+4. **kept, however old**: on a miss that is not a refusal (offline, signed
+   out, the service silent) the record this computer was last told is still
+   the record.  A REFUSAL (the plan no longer covers it) drops the kept
+   record: a lapsed subscription does not keep the figures.
 
 No record is a miss, worded by :func:`why_unanswered` from the four served
 causes (:mod:`kiln.served_answer`), and the loaders fall back to the floor:
@@ -152,6 +154,11 @@ def material_record(material_id: Any) -> dict[str, Any] | None:
         return answer
     _last_miss[key] = miss
     _retry_after[key] = time.monotonic() + MISS_RETRY_S
+    if miss.cause == "refused":
+        # The servers answered and said no: the plan does not cover the
+        # record.  A kept copy is not this install's to read any more.
+        _forget_kept(key)
+        return None
     if kept is not None:
         return kept[0]
     return None
@@ -258,6 +265,13 @@ def _keep(key: str, record: dict[str, Any]) -> None:
         logger.debug("material record not kept", exc_info=True)
 
 
+def _forget_kept(key: str) -> None:
+    try:
+        _keep_path(key).unlink(missing_ok=True)
+    except Exception:  # noqa: BLE001 -- a copy that would not delete is read again next ask and refused again
+        logger.debug("kept material record not removed", exc_info=True)
+
+
 def kept_record(material_id: Any) -> dict[str, Any] | None:
     """The record this computer was last told for *material_id*, however
     old, or ``None``.  Never asks anything."""
@@ -293,6 +307,12 @@ def unanswered(material_id: Any) -> str | None:
         return None
     if miss.code == _NOT_ASKED:
         return f"Kiln can't read this material's record ({miss.detail.rstrip('. ')})"
+    if miss.cause == "refused" and miss.code == "TIER_REQUIRED":
+        # A plan answer, not a transient one: said plainly, without the
+        # pricing paragraph the servers attach to a refusal.
+        return "the brand's own tune and the load figures are part of Kiln Pro"
+    if miss.cause == "signed_out":
+        return clause(miss, feature="servers", cannot="get this material's figures", then="sign in to a Kiln Pro account and ask again")
     return clause(miss, feature="servers", cannot="get this material's figures", then="ask again")
 
 
