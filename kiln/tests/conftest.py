@@ -1753,13 +1753,22 @@ def _forget_fetched_printer_rows(_sp, _pi) -> None:
     from pathlib import Path
 
     try:
-        bundled = {k for k in json.loads(Path(_sp._DATA_FILE).read_text(encoding="utf-8")) if not k.startswith("_")}
+        rows = json.loads(Path(_sp._DATA_FILE).read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         return
-    for key in [k for k in _sp._cache if k not in bundled]:
+    named = {k for k in rows if not k.startswith("_")}
+    # A roster row names a printer and states no limits; a fetched record
+    # for it lands in the cache under the same key.  Judging "fetched" by
+    # "not in the file" kept every one of those, so after any test fetched
+    # the roster (the slicer-profile sweep does), a signed-out test saw a
+    # record it never had.  Full rows are the ones the loader parses as
+    # profiles: they state a hotend limit.
+    full = {k for k in named if isinstance(rows[k], dict) and "max_hotend_temp" in rows[k]}
+    for key in [k for k in _sp._cache if k not in full]:
         _sp._cache.pop(key, None)
         _sp._variant_data.pop(key, None)
-        _sp._roster.pop(key, None)
+        if key not in named:
+            _sp._roster.pop(key, None)
     if _pi._catalogue_rows or _pi._catalogue_records:
         _pi._catalogue_rows.clear()
         _pi._catalogue_records.clear()
