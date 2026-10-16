@@ -452,7 +452,7 @@
     "category": "thermoplastic",
     "thermal": {
       "glass_transition_c": 70,
-      "max_service_temp_c": 80,
+      "max_service_temp_c": 58,
       "print_temp_range_c": [
         240,
         270
@@ -561,7 +561,7 @@
     "category": "thermoplastic",
     "thermal": {
       "glass_transition_c": 147,
-      "max_service_temp_c": 120,
+      "max_service_temp_c": 104,
       "print_temp_range_c": [
         270,
         310
@@ -1805,7 +1805,7 @@
     "category": "specialty",
     "thermal": {
       "glass_transition_c": null,
-      "max_service_temp_c": 100,
+      "max_service_temp_c": 54,
       "print_temp_range_c": [
         220,
         260

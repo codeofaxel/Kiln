@@ -472,7 +472,7 @@ class TestMaterialProfiles:
     def test_get_polycarbonate(self):
         p = get_material_profile("polycarbonate")
         assert p is not None
-        assert p.thermal["max_service_temp_c"] == 120
+        assert p.thermal["max_service_temp_c"] == 104
 
     def test_unknown_material_returns_none(self):
         assert get_material_profile("unobtanium") is None
