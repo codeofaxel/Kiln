@@ -1006,6 +1006,26 @@ def _isolate_decoration_quota(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_slice_ledger(tmp_path, monkeypatch):
+    """Give each test its own slice ledger and Monitor twin folder.
+
+    The ledger lives under HOME, and HOME is per worker process, not per
+    test, so every slice one test made was still on record for the next.
+    The ledger joins by base name, and a test's ``part.gcode`` found an
+    earlier test's ``part.gcode``: two spool-count tests failed on whichever
+    CI worker happened to run a slicing test first, and passed alone.  The
+    same class as the database singleton below.  A test that points the
+    ledger somewhere itself still wins: its monkeypatch runs after this one.
+    """
+    from kiln import monitor_twin
+
+    twin = tmp_path / "monitor_twin"
+    monkeypatch.setattr(monitor_twin, "_TWIN_DIR", twin)
+    monkeypatch.setattr(monitor_twin, "_SLICES_FILE", twin / "slices.json")
+    monkeypatch.setattr(monitor_twin, "_ACTIVE_FILE", twin / "active.json")
+
+
+@pytest.fixture(autouse=True)
 def _isolate_kiln_db(tmp_path, monkeypatch):
     """Keep the suite out of the developer's real ``~/.kiln/kiln.db``.
 

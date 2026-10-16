@@ -126,6 +126,29 @@ class TestTheLocalFile:
         gcode = _gcode(tmp_path, "G1 X1\n")
         assert bridge.local_sliced_path(gcode) == gcode
 
+    def test_a_full_path_is_never_answered_by_a_same_named_slice(self, tmp_path, monkeypatch):
+        """The ledger joins by base name; another slice called part.gcode is
+        another file, and its figures are not this print's."""
+        (tmp_path / "mine").mkdir()
+        (tmp_path / "other").mkdir()
+        mine = _gcode(tmp_path / "mine", "; filament used [g] = 4.0\n")
+        other = _gcode(tmp_path / "other", "G28\n")
+        monkeypatch.setattr(
+            "kiln.monitor_twin.sliced_entry_for",
+            lambda name: {"output": other, "wrapped": None},
+        )
+        assert bridge.local_sliced_path(mine) == mine
+
+    def test_kilns_own_wrap_still_reads_the_gcode_it_wraps(self, tmp_path, monkeypatch):
+        gcode = _gcode(tmp_path, "; total filament change = 2\n")
+        wrap = tmp_path / "part.gcode.3mf"
+        wrap.write_bytes(b"PK")
+        monkeypatch.setattr(
+            "kiln.monitor_twin.sliced_entry_for",
+            lambda name: {"output": gcode, "wrapped": str(wrap)},
+        )
+        assert bridge.local_sliced_path(str(wrap)) == gcode
+
     def test_a_start_reports_through_the_retained_file(self, tmp_path, local_counter, monkeypatch):
         gcode = _gcode(tmp_path, "; total filament weight [g] : 8.0\n; total filament change = 3\n")
         monkeypatch.setattr("kiln.monitor_twin.sliced_entry_for", lambda name: {"output": gcode, "wrapped": None})

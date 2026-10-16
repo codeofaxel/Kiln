@@ -127,8 +127,13 @@ def local_sliced_path(file_name: str | None) -> str | None:
     A start names the file as the PRINTER knows it (``part.gcode.3mf``);
     the totals line lives in the G-code Kiln sliced, which the slice
     ledger joins back to that name (the same join the Monitor's twin and
-    the plate record use).  A name that is already a readable path is
-    taken as it is.
+    the plate record use).  A full path to a file on this disk names that
+    file, and is taken as it is: the ledger joins by base name, and another
+    slice that happens to share the name is a different file.  Only when
+    the ledger records that very file (Kiln's own wrap of a slice) does its
+    G-code answer instead.  (2026-10-15: a print of ``/a/part.gcode`` was
+    counted from an older ``/b/part.gcode`` with no figures in it, so its
+    spools were never charged.)
     """
     if not file_name or not isinstance(file_name, str):
         return None
@@ -138,6 +143,14 @@ def local_sliced_path(file_name: str | None) -> str | None:
         entry = sliced_entry_for(file_name)
     except Exception:  # noqa: BLE001 -- a ledger miss is not a failure
         entry = None
+    if entry and os.path.isabs(file_name) and os.path.isfile(file_name):
+        mine = os.path.realpath(file_name)
+        if not any(
+            isinstance(entry.get(key), str) and entry.get(key)
+            and os.path.realpath(entry[key]) == mine
+            for key in ("output", "wrapped")
+        ):
+            return file_name
     if entry:
         for key in ("output", "wrapped"):
             path = entry.get(key)
