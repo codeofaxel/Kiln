@@ -431,7 +431,7 @@ def test_the_whole_tracked_tree_is_watched() -> None:
     ]
     assert unwatched == [], unwatched
     for must in ("tests/test_paywall_visibility.py", "plugins/kiln", "octoprint-cli/src", "policies/TERMS_OF_USE.md",
-                 ".github/workflows/ci.yml", "kiln/scripts/generate_load_tables.py"):
+                 ".github/workflows/ci.yml", "kiln/scripts/"):
         assert any(p.startswith(must) for p in _GATE._tree_paths()), must
         assert all(_GATE._in_scope(p) for p in _GATE._tree_paths() if p.startswith(must)), must
 

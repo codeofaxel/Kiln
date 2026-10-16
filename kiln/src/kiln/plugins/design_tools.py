@@ -555,9 +555,39 @@ class _DesignToolsPlugin:
                     direction; full table value). If unsure, leave True:
                     it is the conservative default.
             """
+            from kiln.account_plan import LicenseTier, check_tier
             from kiln.design_intelligence import estimate_load_capacity
 
             try:
+                from kiln.design_intelligence import load_table_materials, resolve_material_key
+
+                known = resolve_material_key(material, {m: None for m in load_table_materials()})
+                if known is None:
+                    return {
+                        "success": False,
+                        "error": f"Unknown load table material: {material}. "
+                        f"Available: {', '.join(load_table_materials())}.",
+                    }
+                # The figure is Kiln Pro's (tiering decision of 2026-10-16):
+                # free is told, in words, that the load was not checked --
+                # never a number it could read as a clearance.
+                tier_ok, _tier_msg = check_tier(LicenseTier.PRO)
+                if not tier_ok:
+                    from kiln.design_intelligence import _is_pla_family
+                    from kiln.load_bearing_detector import attach_load_bearing_nudge
+
+                    unchecked = {
+                        "success": True,
+                        "material": material,
+                        "load_checked": False,
+                        "message": (
+                            "Kiln doesn't check load on the free plan, so treat this part as "
+                            "unverified for the weight it will carry."
+                            + (" PLA sags over time under a load left on it." if _is_pla_family(material.lower()) else "")
+                            + " Kiln Pro sizes it for the weight, how long it's held, and the way it's printed."
+                        ),
+                    }
+                    return attach_load_bearing_nudge(unchecked, force=True, material=material)
                 estimate = estimate_load_capacity(
                     material,
                     cross_section_mm2,
@@ -569,10 +599,7 @@ class _DesignToolsPlugin:
                     # different limit. It deflects out of the way long before
                     # it breaks, so answer the question that actually applies
                     # instead of returning nothing.
-                    from kiln.design_intelligence import (
-                        estimate_deflection_limited_load,
-                        load_table_materials,
-                    )
+                    from kiln.design_intelligence import estimate_deflection_limited_load
 
                     flex = estimate_deflection_limited_load(
                         material, cross_section_mm2, cantilever_length_mm
@@ -590,6 +617,13 @@ class _DesignToolsPlugin:
                             "not by expecting more of the polymer."
                         )
                         return flex
+                    from kiln.design_intelligence import load_figures_unanswered
+
+                    why = load_figures_unanswered(material)
+                    if why:
+                        # The roster knows the material; its figures could not
+                        # be had (offline, signed out, the servers silent).
+                        return {"success": False, "code": "LOAD_FIGURES_UNAVAILABLE", "error": f"Kiln can't size {material} right now: {why}."}
                     return {
                         "success": False,
                         "error": f"Unknown load table material: {material}. "

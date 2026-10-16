@@ -14,7 +14,8 @@
       "methodology": "Conservative/worst-case values used for composites where manufacturer specs vary. Mechanical values represent typical FDM-printed properties (not injection-molded datasheets). Design limits empirically validated where possible."
     },
     "_split_note": "Safety-floor profiles for AI-controlled FDM printing.  Engineering depth (how strong each material really is, what it is good for, and how to print it well) is available in Kiln Pro.  See https://kiln3d.com/pricing.",
-    "_slicing_note": "slicing.max_volumetric_speed_mm3s is the most plastic a second (mm³/s) a slice for the material pushes through a standard 0.4 mm nozzle: the lowest figure the major slicer makers state for it in their generic presets, or where they publish none, their own-brand presets for it. A floor that holds on every printer, so it is cautious on fast ones; a material with no figure here is held only by the printer's own ceiling. Applied at every slice (kiln.slicer_material)."
+    "_slicing_note": "slicing.max_volumetric_speed_mm3s is the most plastic a second (mm³/s) a slice for the material pushes through a standard 0.4 mm nozzle: the lowest figure the major slicer makers state for it in their generic presets, or where they publish none, their own-brand presets for it. A floor that holds on every printer, so it is cautious on fast ones; a material with no figure here is held only by the printer's own ceiling. Applied at every slice (kiln.slicer_material).",
+    "brand_profiles": "A roster: which brand filaments exist and what they are called, keyed by profile id under the family they belong to. The figures (ranges, optimum, enclosure, hardened nozzle, AMS) are Kiln's catalogue record for the family, served one material at a time through kiln._pro_material_bridge."
   },
   "pla": {
     "display_name": "PLA (Polylactic Acid)",
@@ -55,52 +56,15 @@
     "brand_profiles": {
       "bambu_pla_basic": {
         "brand": "Bambu Lab",
-        "product_name": "PLA Basic",
-        "nozzle_temp_range_c": [
-          190,
-          240
-        ],
-        "nozzle_temp_optimal_c": 220,
-        "bed_temp_range_c": [
-          40,
-          55
-        ],
-        "bed_temp_optimal_c": 55,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false,
-        "ams_compatible": true
+        "product_name": "PLA Basic"
       },
       "prusament_pla": {
         "brand": "Prusa Research",
-        "product_name": "Prusament PLA",
-        "nozzle_temp_range_c": [
-          200,
-          220
-        ],
-        "nozzle_temp_optimal_c": 210,
-        "bed_temp_range_c": [
-          40,
-          60
-        ],
-        "bed_temp_optimal_c": 60,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false
+        "product_name": "Prusament PLA"
       },
       "polymaker_polylite_pla": {
         "brand": "Polymaker",
-        "product_name": "PolyLite PLA",
-        "nozzle_temp_range_c": [
-          190,
-          230
-        ],
-        "nozzle_temp_optimal_c": 205,
-        "bed_temp_range_c": [
-          25,
-          60
-        ],
-        "bed_temp_optimal_c": 40,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false
+        "product_name": "PolyLite PLA"
       }
     }
   },
@@ -143,52 +107,15 @@
     "brand_profiles": {
       "bambu_petg_basic": {
         "brand": "Bambu Lab",
-        "product_name": "PETG Basic",
-        "nozzle_temp_range_c": [
-          230,
-          270
-        ],
-        "nozzle_temp_optimal_c": 255,
-        "bed_temp_range_c": [
-          55,
-          70
-        ],
-        "bed_temp_optimal_c": 70,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false,
-        "ams_compatible": true
+        "product_name": "PETG Basic"
       },
       "prusament_petg": {
         "brand": "Prusa Research",
-        "product_name": "Prusament PETG",
-        "nozzle_temp_range_c": [
-          240,
-          260
-        ],
-        "nozzle_temp_optimal_c": 250,
-        "bed_temp_range_c": [
-          70,
-          90
-        ],
-        "bed_temp_optimal_c": 90,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false
+        "product_name": "Prusament PETG"
       },
       "polymaker_polylite_petg": {
         "brand": "Polymaker",
-        "product_name": "PolyLite PETG",
-        "nozzle_temp_range_c": [
-          230,
-          240
-        ],
-        "nozzle_temp_optimal_c": 240,
-        "bed_temp_range_c": [
-          70,
-          80
-        ],
-        "bed_temp_optimal_c": 80,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false
+        "product_name": "PolyLite PETG"
       }
     }
   },
@@ -233,36 +160,11 @@
     "brand_profiles": {
       "bambu_abs": {
         "brand": "Bambu Lab",
-        "product_name": "ABS",
-        "nozzle_temp_range_c": [
-          240,
-          280
-        ],
-        "nozzle_temp_optimal_c": 270,
-        "bed_temp_range_c": [
-          80,
-          90
-        ],
-        "bed_temp_optimal_c": 90,
-        "enclosure_required": true,
-        "hardened_nozzle_required": false,
-        "ams_compatible": true
+        "product_name": "ABS"
       },
       "polymaker_polylite_abs": {
         "brand": "Polymaker",
-        "product_name": "PolyLite ABS",
-        "nozzle_temp_range_c": [
-          245,
-          265
-        ],
-        "nozzle_temp_optimal_c": 255,
-        "bed_temp_range_c": [
-          90,
-          100
-        ],
-        "bed_temp_optimal_c": 100,
-        "enclosure_required": true,
-        "hardened_nozzle_required": false
+        "product_name": "PolyLite ABS"
       }
     }
   },
@@ -305,52 +207,15 @@
     "brand_profiles": {
       "bambu_tpu_95a": {
         "brand": "Bambu Lab",
-        "product_name": "TPU 95A",
-        "nozzle_temp_range_c": [
-          200,
-          250
-        ],
-        "nozzle_temp_optimal_c": 230,
-        "bed_temp_range_c": [
-          35,
-          45
-        ],
-        "bed_temp_optimal_c": 45,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false,
-        "ams_compatible": false
+        "product_name": "TPU 95A"
       },
       "prusament_tpu_95a": {
         "brand": "Prusa Research",
-        "product_name": "Prusament TPU 95A",
-        "nozzle_temp_range_c": [
-          220,
-          240
-        ],
-        "nozzle_temp_optimal_c": 230,
-        "bed_temp_range_c": [
-          55,
-          75
-        ],
-        "bed_temp_optimal_c": 65,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false
+        "product_name": "Prusament TPU 95A"
       },
       "polymaker_polyflex_tpu95": {
         "brand": "Polymaker",
-        "product_name": "PolyFlex TPU95",
-        "nozzle_temp_range_c": [
-          210,
-          230
-        ],
-        "nozzle_temp_optimal_c": 220,
-        "bed_temp_range_c": [
-          25,
-          60
-        ],
-        "bed_temp_optimal_c": 50,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false
+        "product_name": "PolyFlex TPU95"
       }
     },
     "bonding": {
@@ -398,52 +263,15 @@
     "brand_profiles": {
       "bambu_asa": {
         "brand": "Bambu Lab",
-        "product_name": "ASA",
-        "nozzle_temp_range_c": [
-          240,
-          280
-        ],
-        "nozzle_temp_optimal_c": 270,
-        "bed_temp_range_c": [
-          90,
-          100
-        ],
-        "bed_temp_optimal_c": 100,
-        "enclosure_required": true,
-        "hardened_nozzle_required": false,
-        "ams_compatible": true
+        "product_name": "ASA"
       },
       "prusament_asa": {
         "brand": "Prusa Research",
-        "product_name": "Prusament ASA",
-        "nozzle_temp_range_c": [
-          250,
-          270
-        ],
-        "nozzle_temp_optimal_c": 260,
-        "bed_temp_range_c": [
-          105,
-          115
-        ],
-        "bed_temp_optimal_c": 110,
-        "enclosure_required": true,
-        "hardened_nozzle_required": false
+        "product_name": "Prusament ASA"
       },
       "polymaker_polylite_asa": {
         "brand": "Polymaker",
-        "product_name": "PolyLite ASA",
-        "nozzle_temp_range_c": [
-          240,
-          260
-        ],
-        "nozzle_temp_optimal_c": 260,
-        "bed_temp_range_c": [
-          75,
-          95
-        ],
-        "bed_temp_optimal_c": 80,
-        "enclosure_required": true,
-        "hardened_nozzle_required": false
+        "product_name": "PolyLite ASA"
       }
     }
   },
@@ -488,68 +316,19 @@
     "brand_profiles": {
       "bambu_pa6_cf": {
         "brand": "Bambu Lab",
-        "product_name": "PA6-CF",
-        "nozzle_temp_range_c": [
-          260,
-          300
-        ],
-        "nozzle_temp_optimal_c": 275,
-        "bed_temp_range_c": [
-          90,
-          100
-        ],
-        "bed_temp_optimal_c": 100,
-        "enclosure_required": true,
-        "hardened_nozzle_required": true,
-        "ams_compatible": true
+        "product_name": "PA6-CF"
       },
       "prusament_pa11_cf": {
         "brand": "Prusa Research",
-        "product_name": "Prusament PA11 Carbon Fiber",
-        "nozzle_temp_range_c": [
-          275,
-          295
-        ],
-        "nozzle_temp_optimal_c": 285,
-        "bed_temp_range_c": [
-          100,
-          120
-        ],
-        "bed_temp_optimal_c": 110,
-        "enclosure_required": false,
-        "hardened_nozzle_required": true
+        "product_name": "Prusament PA11 Carbon Fiber"
       },
       "polymaker_fiberon_pa6_gf": {
         "brand": "Polymaker",
-        "product_name": "Fiberon PA6-GF25",
-        "nozzle_temp_range_c": [
-          280,
-          300
-        ],
-        "nozzle_temp_optimal_c": 300,
-        "bed_temp_range_c": [
-          40,
-          50
-        ],
-        "bed_temp_optimal_c": 40,
-        "enclosure_required": false,
-        "hardened_nozzle_required": true
+        "product_name": "Fiberon PA6-GF25"
       },
       "polymaker_fiberon_pa12_cf": {
         "brand": "Polymaker",
-        "product_name": "Fiberon PA12-CF10",
-        "nozzle_temp_range_c": [
-          280,
-          300
-        ],
-        "nozzle_temp_optimal_c": 300,
-        "bed_temp_range_c": [
-          40,
-          50
-        ],
-        "bed_temp_optimal_c": 40,
-        "enclosure_required": false,
-        "hardened_nozzle_required": true
+        "product_name": "Fiberon PA12-CF10"
       }
     },
     "bonding": {
@@ -597,52 +376,15 @@
     "brand_profiles": {
       "bambu_pc": {
         "brand": "Bambu Lab",
-        "product_name": "PC",
-        "nozzle_temp_range_c": [
-          260,
-          290
-        ],
-        "nozzle_temp_optimal_c": 280,
-        "bed_temp_range_c": [
-          100,
-          110
-        ],
-        "bed_temp_optimal_c": 110,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false,
-        "ams_compatible": true
+        "product_name": "PC"
       },
       "prusament_pc_blend": {
         "brand": "Prusa Research",
-        "product_name": "Prusament PC Blend",
-        "nozzle_temp_range_c": [
-          265,
-          285
-        ],
-        "nozzle_temp_optimal_c": 275,
-        "bed_temp_range_c": [
-          100,
-          120
-        ],
-        "bed_temp_optimal_c": 115,
-        "enclosure_required": true,
-        "hardened_nozzle_required": false
+        "product_name": "Prusament PC Blend"
       },
       "polymaker_polymax_pc": {
         "brand": "Polymaker",
-        "product_name": "PolyMax PC",
-        "nozzle_temp_range_c": [
-          250,
-          270
-        ],
-        "nozzle_temp_optimal_c": 260,
-        "bed_temp_range_c": [
-          90,
-          105
-        ],
-        "bed_temp_optimal_c": 105,
-        "enclosure_required": true,
-        "hardened_nozzle_required": false
+        "product_name": "PolyMax PC"
       }
     }
   },
@@ -685,20 +427,7 @@
     "brand_profiles": {
       "bambu_pla_cf": {
         "brand": "Bambu Lab",
-        "product_name": "PLA-CF",
-        "nozzle_temp_range_c": [
-          210,
-          250
-        ],
-        "nozzle_temp_optimal_c": 220,
-        "bed_temp_range_c": [
-          40,
-          55
-        ],
-        "bed_temp_optimal_c": 55,
-        "enclosure_required": false,
-        "hardened_nozzle_required": true,
-        "ams_compatible": true
+        "product_name": "PLA-CF"
       }
     }
   },
@@ -741,36 +470,11 @@
     "brand_profiles": {
       "bambu_petg_cf": {
         "brand": "Bambu Lab",
-        "product_name": "PETG-CF",
-        "nozzle_temp_range_c": [
-          240,
-          270
-        ],
-        "nozzle_temp_optimal_c": 255,
-        "bed_temp_range_c": [
-          65,
-          75
-        ],
-        "bed_temp_optimal_c": 70,
-        "enclosure_required": false,
-        "hardened_nozzle_required": true,
-        "ams_compatible": true
+        "product_name": "PETG-CF"
       },
       "polymaker_fiberon_petg_rcf": {
         "brand": "Polymaker",
-        "product_name": "Fiberon PETG-rCF08",
-        "nozzle_temp_range_c": [
-          240,
-          270
-        ],
-        "nozzle_temp_optimal_c": 270,
-        "bed_temp_range_c": [
-          60,
-          70
-        ],
-        "bed_temp_optimal_c": 70,
-        "enclosure_required": false,
-        "hardened_nozzle_required": true
+        "product_name": "Fiberon PETG-rCF08"
       }
     }
   },
@@ -815,52 +519,15 @@
     "brand_profiles": {
       "bambu_pa6_cf": {
         "brand": "Bambu Lab",
-        "product_name": "PA6-CF",
-        "nozzle_temp_range_c": [
-          260,
-          300
-        ],
-        "nozzle_temp_optimal_c": 275,
-        "bed_temp_range_c": [
-          90,
-          100
-        ],
-        "bed_temp_optimal_c": 100,
-        "enclosure_required": true,
-        "hardened_nozzle_required": true,
-        "ams_compatible": true
+        "product_name": "PA6-CF"
       },
       "prusament_pa11_cf": {
         "brand": "Prusa Research",
-        "product_name": "Prusament PA11-CF",
-        "nozzle_temp_range_c": [
-          280,
-          290
-        ],
-        "nozzle_temp_optimal_c": 285,
-        "bed_temp_range_c": [
-          100,
-          120
-        ],
-        "bed_temp_optimal_c": 115,
-        "enclosure_required": true,
-        "hardened_nozzle_required": true
+        "product_name": "Prusament PA11-CF"
       },
       "polymaker_polymide_pa6_cf": {
         "brand": "Polymaker",
-        "product_name": "PolyMide PA6-CF",
-        "nozzle_temp_range_c": [
-          280,
-          300
-        ],
-        "nozzle_temp_optimal_c": 300,
-        "bed_temp_range_c": [
-          40,
-          50
-        ],
-        "bed_temp_optimal_c": 50,
-        "enclosure_required": false,
-        "hardened_nozzle_required": true
+        "product_name": "PolyMide PA6-CF"
       }
     },
     "bonding": {
@@ -906,19 +573,7 @@
     "brand_profiles": {
       "polymaker_fiberon_pet_cf17": {
         "brand": "Polymaker",
-        "product_name": "Fiberon PET-CF17",
-        "nozzle_temp_range_c": [
-          270,
-          300
-        ],
-        "nozzle_temp_optimal_c": 300,
-        "bed_temp_range_c": [
-          70,
-          80
-        ],
-        "bed_temp_optimal_c": 70,
-        "enclosure_required": false,
-        "hardened_nozzle_required": true
+        "product_name": "Fiberon PET-CF17"
       }
     }
   },
@@ -961,20 +616,7 @@
     "brand_profiles": {
       "bambu_pla_silk": {
         "brand": "Bambu Lab",
-        "product_name": "PLA Silk",
-        "nozzle_temp_range_c": [
-          190,
-          240
-        ],
-        "nozzle_temp_optimal_c": 230,
-        "bed_temp_range_c": [
-          40,
-          55
-        ],
-        "bed_temp_optimal_c": 55,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false,
-        "ams_compatible": true
+        "product_name": "PLA Silk"
       }
     }
   },
@@ -1017,36 +659,11 @@
     "brand_profiles": {
       "bambu_pla_wood": {
         "brand": "Bambu Lab",
-        "product_name": "PLA Wood",
-        "nozzle_temp_range_c": [
-          190,
-          240
-        ],
-        "nozzle_temp_optimal_c": 220,
-        "bed_temp_range_c": [
-          40,
-          55
-        ],
-        "bed_temp_optimal_c": 55,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false,
-        "ams_compatible": true
+        "product_name": "PLA Wood"
       },
       "polymaker_polywood": {
         "brand": "Polymaker",
-        "product_name": "PolyWood",
-        "nozzle_temp_range_c": [
-          190,
-          210
-        ],
-        "nozzle_temp_optimal_c": 210,
-        "bed_temp_range_c": [
-          25,
-          60
-        ],
-        "bed_temp_optimal_c": 50,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false
+        "product_name": "PolyWood"
       }
     }
   },
@@ -1089,53 +706,15 @@
     "brand_profiles": {
       "bambu_pva": {
         "brand": "Bambu Lab",
-        "product_name": "PVA",
-        "nozzle_temp_range_c": [
-          210,
-          250
-        ],
-        "nozzle_temp_optimal_c": 220,
-        "bed_temp_range_c": [
-          40,
-          55
-        ],
-        "bed_temp_optimal_c": 55,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false,
-        "ams_compatible": true
+        "product_name": "PVA"
       },
       "bambu_support_w": {
         "brand": "Bambu Lab",
-        "product_name": "Support W",
-        "nozzle_temp_range_c": [
-          190,
-          240
-        ],
-        "nozzle_temp_optimal_c": 220,
-        "bed_temp_range_c": [
-          40,
-          55
-        ],
-        "bed_temp_optimal_c": 55,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false,
-        "ams_compatible": true
+        "product_name": "Support W"
       },
       "polymaker_polydissolve_s1": {
         "brand": "Polymaker",
-        "product_name": "PolyDissolve S1",
-        "nozzle_temp_range_c": [
-          215,
-          225
-        ],
-        "nozzle_temp_optimal_c": 220,
-        "bed_temp_range_c": [
-          25,
-          60
-        ],
-        "bed_temp_optimal_c": null,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false
+        "product_name": "PolyDissolve S1"
       }
     }
   },
@@ -1177,19 +756,7 @@
     "brand_profiles": {
       "polymaker_pc_abs": {
         "brand": "Polymaker",
-        "product_name": "Polymaker PC-ABS",
-        "nozzle_temp_range_c": [
-          250,
-          270
-        ],
-        "nozzle_temp_optimal_c": 260,
-        "bed_temp_range_c": [
-          90,
-          105
-        ],
-        "bed_temp_optimal_c": 100,
-        "enclosure_required": true,
-        "hardened_nozzle_required": false
+        "product_name": "Polymaker PC-ABS"
       }
     }
   },
@@ -1229,53 +796,15 @@
     "brand_profiles": {
       "bambu_pla_basic": {
         "brand": "Bambu Lab",
-        "product_name": "PLA Basic",
-        "nozzle_temp_range_c": [
-          190,
-          240
-        ],
-        "nozzle_temp_optimal_c": 220,
-        "bed_temp_range_c": [
-          35,
-          65
-        ],
-        "bed_temp_optimal_c": 55,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false,
-        "ams_compatible": true
+        "product_name": "PLA Basic"
       },
       "polymaker_polylite_pla_pro": {
         "brand": "Polymaker",
-        "product_name": "PolyLite PLA Pro",
-        "nozzle_temp_range_c": [
-          190,
-          220
-        ],
-        "nozzle_temp_optimal_c": 205,
-        "bed_temp_range_c": [
-          30,
-          60
-        ],
-        "bed_temp_optimal_c": 45,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false
+        "product_name": "PolyLite PLA Pro"
       },
       "esun_pla_plus": {
         "brand": "eSun",
-        "product_name": "PLA+",
-        "nozzle_temp_range_c": [
-          210,
-          230
-        ],
-        "nozzle_temp_optimal_c": 220,
-        "bed_temp_range_c": [
-          45,
-          60
-        ],
-        "bed_temp_optimal_c": 55,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false,
-        "ams_compatible": true
+        "product_name": "PLA+"
       }
     }
   },
@@ -1318,36 +847,11 @@
     "brand_profiles": {
       "bambu_petg_cf": {
         "brand": "Bambu Lab",
-        "product_name": "PETG-CF",
-        "nozzle_temp_range_c": [
-          240,
-          270
-        ],
-        "nozzle_temp_optimal_c": 255,
-        "bed_temp_range_c": [
-          55,
-          70
-        ],
-        "bed_temp_optimal_c": 70,
-        "enclosure_required": false,
-        "hardened_nozzle_required": true,
-        "ams_compatible": true
+        "product_name": "PETG-CF"
       },
       "prusament_petg_cf": {
         "brand": "Prusa Research",
-        "product_name": "Prusament PETG-CF",
-        "nozzle_temp_range_c": [
-          255,
-          275
-        ],
-        "nozzle_temp_optimal_c": 265,
-        "bed_temp_range_c": [
-          80,
-          100
-        ],
-        "bed_temp_optimal_c": 90,
-        "enclosure_required": false,
-        "hardened_nozzle_required": true
+        "product_name": "Prusament PETG-CF"
       }
     }
   },
@@ -1392,19 +896,7 @@
     "brand_profiles": {
       "polymaker_polymide_pa6_gf": {
         "brand": "Polymaker",
-        "product_name": "PolyMide PA6-GF",
-        "nozzle_temp_range_c": [
-          280,
-          300
-        ],
-        "nozzle_temp_optimal_c": 300,
-        "bed_temp_range_c": [
-          40,
-          50
-        ],
-        "bed_temp_optimal_c": 50,
-        "enclosure_required": false,
-        "hardened_nozzle_required": true
+        "product_name": "PolyMide PA6-GF"
       }
     },
     "bonding": {
@@ -1450,36 +942,11 @@
     "brand_profiles": {
       "bambu_pla_matte": {
         "brand": "Bambu Lab",
-        "product_name": "PLA Matte",
-        "nozzle_temp_range_c": [
-          190,
-          240
-        ],
-        "nozzle_temp_optimal_c": 220,
-        "bed_temp_range_c": [
-          40,
-          55
-        ],
-        "bed_temp_optimal_c": 55,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false,
-        "ams_compatible": true
+        "product_name": "PLA Matte"
       },
       "polymaker_polyterra_pla": {
         "brand": "Polymaker",
-        "product_name": "PolyTerra PLA",
-        "nozzle_temp_range_c": [
-          190,
-          230
-        ],
-        "nozzle_temp_optimal_c": 200,
-        "bed_temp_range_c": [
-          25,
-          60
-        ],
-        "bed_temp_optimal_c": 60,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false
+        "product_name": "PolyTerra PLA"
       }
     }
   },
@@ -1522,20 +989,7 @@
     "brand_profiles": {
       "bambu_petg_hf": {
         "brand": "Bambu Lab",
-        "product_name": "PETG High Flow",
-        "nozzle_temp_range_c": [
-          230,
-          270
-        ],
-        "nozzle_temp_optimal_c": 245,
-        "bed_temp_range_c": [
-          55,
-          70
-        ],
-        "bed_temp_optimal_c": 70,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false,
-        "ams_compatible": true
+        "product_name": "PETG High Flow"
       }
     }
   },
@@ -1578,20 +1032,7 @@
     "brand_profiles": {
       "bambu_pla_tough": {
         "brand": "Bambu Lab",
-        "product_name": "PLA Tough",
-        "nozzle_temp_range_c": [
-          190,
-          240
-        ],
-        "nozzle_temp_optimal_c": 220,
-        "bed_temp_range_c": [
-          40,
-          55
-        ],
-        "bed_temp_optimal_c": 55,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false,
-        "ams_compatible": true
+        "product_name": "PLA Tough"
       }
     }
   },
@@ -1634,36 +1075,11 @@
     "brand_profiles": {
       "bambu_tpu_95a": {
         "brand": "Bambu Lab",
-        "product_name": "TPU 95A",
-        "nozzle_temp_range_c": [
-          200,
-          250
-        ],
-        "nozzle_temp_optimal_c": 230,
-        "bed_temp_range_c": [
-          30,
-          35
-        ],
-        "bed_temp_optimal_c": 35,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false,
-        "ams_compatible": false
+        "product_name": "TPU 95A"
       },
       "polymaker_polyflex_tpu95": {
         "brand": "Polymaker",
-        "product_name": "PolyFlex TPU95",
-        "nozzle_temp_range_c": [
-          210,
-          230
-        ],
-        "nozzle_temp_optimal_c": 225,
-        "bed_temp_range_c": [
-          25,
-          60
-        ],
-        "bed_temp_optimal_c": 50,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false
+        "product_name": "PolyFlex TPU95"
       }
     },
     "bonding": {
@@ -1709,20 +1125,7 @@
     "brand_profiles": {
       "bambu_tpu_85a": {
         "brand": "Bambu Lab",
-        "product_name": "TPU 85A",
-        "nozzle_temp_range_c": [
-          200,
-          240
-        ],
-        "nozzle_temp_optimal_c": 225,
-        "bed_temp_range_c": [
-          30,
-          35
-        ],
-        "bed_temp_optimal_c": 35,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false,
-        "ams_compatible": false
+        "product_name": "TPU 85A"
       }
     },
     "bonding": {
@@ -1768,35 +1171,11 @@
     "brand_profiles": {
       "prusament_pvb": {
         "brand": "Prusa Research",
-        "product_name": "Prusament PVB",
-        "nozzle_temp_range_c": [
-          205,
-          225
-        ],
-        "nozzle_temp_optimal_c": 215,
-        "bed_temp_range_c": [
-          70,
-          80
-        ],
-        "bed_temp_optimal_c": 75,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false
+        "product_name": "Prusament PVB"
       },
       "polymaker_polysmooth_pvb": {
         "brand": "Polymaker",
-        "product_name": "PolySmooth PVB",
-        "nozzle_temp_range_c": [
-          190,
-          220
-        ],
-        "nozzle_temp_optimal_c": 220,
-        "bed_temp_range_c": [
-          25,
-          70
-        ],
-        "bed_temp_optimal_c": 60,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false
+        "product_name": "PolySmooth PVB"
       }
     }
   },
@@ -1839,37 +1218,11 @@
     "brand_profiles": {
       "verbatim_pp": {
         "brand": "Verbatim",
-        "product_name": "PP",
-        "nozzle_temp_range_c": [
-          220,
-          240
-        ],
-        "nozzle_temp_optimal_c": 230,
-        "bed_temp_range_c": [
-          85,
-          100
-        ],
-        "bed_temp_optimal_c": 90,
-        "enclosure_required": true,
-        "hardened_nozzle_required": false,
-        "ams_compatible": false
+        "product_name": "PP"
       },
       "formfutura_centaur_pp": {
         "brand": "Formfutura",
-        "product_name": "Centaur PP",
-        "nozzle_temp_range_c": [
-          220,
-          250
-        ],
-        "nozzle_temp_optimal_c": 235,
-        "bed_temp_range_c": [
-          85,
-          100
-        ],
-        "bed_temp_optimal_c": 95,
-        "enclosure_required": true,
-        "hardened_nozzle_required": false,
-        "ams_compatible": false
+        "product_name": "Centaur PP"
       }
     },
     "bonding": {
@@ -1923,20 +1276,7 @@
     "brand_profiles": {
       "3dxtech_thermax_peek": {
         "brand": "3DXTech",
-        "product_name": "ThermaX PEEK",
-        "nozzle_temp_range_c": [
-          375,
-          410
-        ],
-        "nozzle_temp_optimal_c": 400,
-        "bed_temp_range_c": [
-          130,
-          145
-        ],
-        "bed_temp_optimal_c": 140,
-        "enclosure_required": true,
-        "hardened_nozzle_required": false,
-        "ams_compatible": false
+        "product_name": "ThermaX PEEK"
       }
     }
   },
@@ -1983,20 +1323,7 @@
     "brand_profiles": {
       "3dxtech_thermax_pei_1010": {
         "brand": "3DXTech",
-        "product_name": "ThermaX PEI 1010",
-        "nozzle_temp_range_c": [
-          380,
-          400
-        ],
-        "nozzle_temp_optimal_c": 390,
-        "bed_temp_range_c": [
-          130,
-          140
-        ],
-        "bed_temp_optimal_c": 135,
-        "enclosure_required": true,
-        "hardened_nozzle_required": false,
-        "ams_compatible": false
+        "product_name": "ThermaX PEI 1010"
       }
     }
   },
@@ -2043,20 +1370,7 @@
     "brand_profiles": {
       "3dxtech_thermax_pei_9085": {
         "brand": "3DXTech",
-        "product_name": "ThermaX PEI 9085",
-        "nozzle_temp_range_c": [
-          365,
-          385
-        ],
-        "nozzle_temp_optimal_c": 375,
-        "bed_temp_range_c": [
-          130,
-          140
-        ],
-        "bed_temp_optimal_c": 135,
-        "enclosure_required": true,
-        "hardened_nozzle_required": false,
-        "ams_compatible": false
+        "product_name": "ThermaX PEI 9085"
       }
     }
   },
@@ -2107,20 +1421,7 @@
     "brand_profiles": {
       "kimya_pekk_a": {
         "brand": "Kimya",
-        "product_name": "PEKK-A",
-        "nozzle_temp_range_c": [
-          370,
-          380
-        ],
-        "nozzle_temp_optimal_c": 375,
-        "bed_temp_range_c": [
-          110,
-          125
-        ],
-        "bed_temp_optimal_c": 120,
-        "enclosure_required": true,
-        "hardened_nozzle_required": false,
-        "ams_compatible": false
+        "product_name": "PEKK-A"
       }
     }
   },
@@ -2171,37 +1472,11 @@
     "brand_profiles": {
       "3dxtech_thermax_ppsu": {
         "brand": "3DXTech",
-        "product_name": "ThermaX PPSU",
-        "nozzle_temp_range_c": [
-          390,
-          410
-        ],
-        "nozzle_temp_optimal_c": 400,
-        "bed_temp_range_c": [
-          130,
-          150
-        ],
-        "bed_temp_optimal_c": 140,
-        "enclosure_required": true,
-        "hardened_nozzle_required": false,
-        "ams_compatible": false
+        "product_name": "ThermaX PPSU"
       },
       "forward_am_ultrafuse_ppsu": {
         "brand": "Forward AM",
-        "product_name": "Ultrafuse PPSU",
-        "nozzle_temp_range_c": [
-          390,
-          410
-        ],
-        "nozzle_temp_optimal_c": 410,
-        "bed_temp_range_c": [
-          200,
-          220
-        ],
-        "bed_temp_optimal_c": 220,
-        "enclosure_required": true,
-        "hardened_nozzle_required": false,
-        "ams_compatible": false
+        "product_name": "Ultrafuse PPSU"
       }
     }
   },
@@ -2251,20 +1526,7 @@
     "brand_profiles": {
       "3dxtech_thermax_pps": {
         "brand": "3DXTech",
-        "product_name": "ThermaX PPS",
-        "nozzle_temp_range_c": [
-          335,
-          345
-        ],
-        "nozzle_temp_optimal_c": 340,
-        "bed_temp_range_c": [
-          110,
-          130
-        ],
-        "bed_temp_optimal_c": 120,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false,
-        "ams_compatible": false
+        "product_name": "ThermaX PPS"
       }
     }
   },
@@ -2314,37 +1576,11 @@
     "brand_profiles": {
       "polymaker_fiberon_petg_esd": {
         "brand": "Polymaker",
-        "product_name": "Fiberon PETG-ESD",
-        "nozzle_temp_range_c": [
-          250,
-          290
-        ],
-        "nozzle_temp_optimal_c": 270,
-        "bed_temp_range_c": [
-          70,
-          80
-        ],
-        "bed_temp_optimal_c": 75,
-        "enclosure_required": false,
-        "hardened_nozzle_required": true,
-        "ams_compatible": true
+        "product_name": "Fiberon PETG-ESD"
       },
       "3dxtech_3dxstat_esd_petg": {
         "brand": "3DXTech",
-        "product_name": "3DXSTAT ESD-PETG",
-        "nozzle_temp_range_c": [
-          230,
-          260
-        ],
-        "nozzle_temp_optimal_c": 250,
-        "bed_temp_range_c": [
-          60,
-          90
-        ],
-        "bed_temp_optimal_c": 70,
-        "enclosure_required": false,
-        "hardened_nozzle_required": true,
-        "ams_compatible": false
+        "product_name": "3DXSTAT ESD-PETG"
       }
     }
   },
@@ -2395,37 +1631,11 @@
     "brand_profiles": {
       "3dxtech_3dxstat_esd_abs": {
         "brand": "3DXTech",
-        "product_name": "3DXSTAT ESD-ABS",
-        "nozzle_temp_range_c": [
-          220,
-          240
-        ],
-        "nozzle_temp_optimal_c": 230,
-        "bed_temp_range_c": [
-          100,
-          110
-        ],
-        "bed_temp_optimal_c": 105,
-        "enclosure_required": true,
-        "hardened_nozzle_required": false,
-        "ams_compatible": false
+        "product_name": "3DXSTAT ESD-ABS"
       },
       "fiberlogy_esd_abs": {
         "brand": "Fiberlogy",
-        "product_name": "ESD ABS",
-        "nozzle_temp_range_c": [
-          250,
-          265
-        ],
-        "nozzle_temp_optimal_c": 255,
-        "bed_temp_range_c": [
-          90,
-          110
-        ],
-        "bed_temp_optimal_c": 100,
-        "enclosure_required": true,
-        "hardened_nozzle_required": false,
-        "ams_compatible": false
+        "product_name": "ESD ABS"
       }
     }
   },
@@ -2480,20 +1690,7 @@
     "brand_profiles": {
       "polymaker_fiberon_pa612_esd": {
         "brand": "Polymaker",
-        "product_name": "Fiberon PA612-ESD",
-        "nozzle_temp_range_c": [
-          280,
-          300
-        ],
-        "nozzle_temp_optimal_c": 300,
-        "bed_temp_range_c": [
-          40,
-          50
-        ],
-        "bed_temp_optimal_c": 50,
-        "enclosure_required": false,
-        "hardened_nozzle_required": true,
-        "ams_compatible": true
+        "product_name": "Fiberon PA612-ESD"
       }
     }
   },
@@ -2547,20 +1744,7 @@
     "brand_profiles": {
       "3dxtech_3dxstat_esd_pc": {
         "brand": "3DXTech",
-        "product_name": "3DXSTAT ESD-PC",
-        "nozzle_temp_range_c": [
-          260,
-          300
-        ],
-        "nozzle_temp_optimal_c": 295,
-        "bed_temp_range_c": [
-          110,
-          120
-        ],
-        "bed_temp_optimal_c": 115,
-        "enclosure_required": true,
-        "hardened_nozzle_required": false,
-        "ams_compatible": false
+        "product_name": "3DXSTAT ESD-PC"
       }
     }
   },
@@ -2615,20 +1799,7 @@
     "brand_profiles": {
       "3dxtech_3dxstat_esd_pei_1010": {
         "brand": "3DXTech",
-        "product_name": "3DXSTAT ESD-PEI Ultem 1010",
-        "nozzle_temp_range_c": [
-          360,
-          390
-        ],
-        "nozzle_temp_optimal_c": 375,
-        "bed_temp_range_c": [
-          140,
-          160
-        ],
-        "bed_temp_optimal_c": 150,
-        "enclosure_required": false,
-        "hardened_nozzle_required": true,
-        "ams_compatible": false
+        "product_name": "3DXSTAT ESD-PEI Ultem 1010"
       }
     }
   },
@@ -2679,37 +1850,11 @@
     "brand_profiles": {
       "3dxtech_3dxstat_esd_pla": {
         "brand": "3DXTech",
-        "product_name": "3DXSTAT ESD-PLA",
-        "nozzle_temp_range_c": [
-          230,
-          260
-        ],
-        "nozzle_temp_optimal_c": 240,
-        "bed_temp_range_c": [
-          55,
-          80
-        ],
-        "bed_temp_optimal_c": 60,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false,
-        "ams_compatible": true
+        "product_name": "3DXSTAT ESD-PLA"
       },
       "protopasta_static_dissipative_pla": {
         "brand": "Proto-Pasta",
-        "product_name": "Static Dissipative PLA",
-        "nozzle_temp_range_c": [
-          210,
-          230
-        ],
-        "nozzle_temp_optimal_c": 220,
-        "bed_temp_range_c": [
-          55,
-          60
-        ],
-        "bed_temp_optimal_c": 60,
-        "enclosure_required": false,
-        "hardened_nozzle_required": false,
-        "ams_compatible": true
+        "product_name": "Static Dissipative PLA"
       }
     }
   },
@@ -2763,20 +1908,7 @@
     "brand_profiles": {
       "3dxtech_3dxstat_esd_pekk": {
         "brand": "3DXTech",
-        "product_name": "3DXSTAT ESD-PEKK",
-        "nozzle_temp_range_c": [
-          355,
-          385
-        ],
-        "nozzle_temp_optimal_c": 375,
-        "bed_temp_range_c": [
-          120,
-          140
-        ],
-        "bed_temp_optimal_c": 140,
-        "enclosure_required": true,
-        "hardened_nozzle_required": true,
-        "ams_compatible": false
+        "product_name": "3DXSTAT ESD-PEKK"
       }
     }
   }

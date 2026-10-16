@@ -883,15 +883,23 @@ class PrintDiagnostic:
 
 @dataclass
 class BrandFilamentProfile:
-    """Brand-specific filament profile with printing parameters."""
+    """Brand-specific filament profile with printing parameters.
+
+    The names come from the public roster (``materials.json``, each family's
+    ``brand_profiles``); the figures are the family's catalogue record,
+    served one material at a time through :mod:`kiln._pro_material_bridge`.
+    A profile whose figures could not be had (signed out, offline) carries
+    its names and ``None`` for every figure -- :meth:`has_figures` says
+    which, and :func:`brand_figures_unanswered` says why.
+    """
 
     profile_id: str
     brand: str
     product_name: str
     parent_material: str
-    nozzle_temp_range_c: list[int]
-    nozzle_temp_optimal_c: int
-    bed_temp_range_c: list[int]
+    nozzle_temp_range_c: list[int] | None
+    nozzle_temp_optimal_c: int | None
+    bed_temp_range_c: list[int] | None
     bed_temp_optimal_c: int | None
     max_volumetric_speed_mm3s: float | None
     max_print_speed_mms: int | None
@@ -903,6 +911,10 @@ class BrandFilamentProfile:
     ams_compatible: bool | None
     notes: str | None
     source: str
+
+    def has_figures(self) -> bool:
+        """True when the brand's own temperatures are in hand."""
+        return self.nozzle_temp_optimal_c is not None and bool(self.nozzle_temp_range_c)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -1504,6 +1516,19 @@ def _is_tpu_family(material_id: str) -> bool:
     return material_id.lower().startswith(_TPU_FAMILY_PREFIXES)
 
 
+def _load_judgement_is_paid() -> bool:
+    """True for a caller below Kiln Pro: the recommender's load judgement
+    is Pro's (2026-10-16), and free is told so in words.  A tier that
+    cannot be read is treated as free, the direction that promises less."""
+    try:
+        from kiln.account_plan import LicenseTier, check_tier
+
+        tier_ok, _msg = check_tier(LicenseTier.PRO)
+        return not tier_ok
+    except Exception:  # noqa: BLE001
+        return True
+
+
 def _is_pla_family(material_id: str) -> bool:
     """True if the material id is a PLA variant (low-Tg, brittle, creeps)."""
     return material_id.lower() in _PLA_FAMILY_IDS
@@ -1768,7 +1793,10 @@ def _recommend_from_safety_floor(
                 )
             elif max_service_temp >= 65 and warping in ("low", "moderate", "none"):
                 score += 12
-                reasons.append("dimensional stability suitable for sustained-load applications.")
+                if _load_judgement_is_paid():
+                    warnings.append("Load not checked: Kiln Pro sizes the part for the weight and how long it's held.")
+                else:
+                    reasons.append("dimensional stability suitable for sustained-load applications.")
 
         if needs_hot_load and (_is_pla_family(mid) or mid.startswith("petg")):
             # Hot environment + load — eliminate PLA AND PETG (PETG
@@ -2205,16 +2233,55 @@ def _recommend_material_for_design(
 # ---------------------------------------------------------------------------
 
 
+def _material_record(material_id: str) -> dict[str, Any] | None:
+    """ONE material's catalogue record -- its brand figures and load figures
+    -- through :mod:`kiln._pro_material_bridge`, or ``None`` (no row, or a
+    miss the bridge words).  Never raises."""
+    try:
+        from kiln import _pro_material_bridge as _bridge
+
+        return _bridge.material_record(material_id)
+    except Exception:  # noqa: BLE001 -- a door never fails for want of the figures
+        logger.debug("material record unavailable", exc_info=True)
+        return None
+
+
+def _figures_unanswered(material_id: str) -> str | None:
+    try:
+        from kiln import _pro_material_bridge as _bridge
+
+        return _bridge.unanswered(material_id)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def brand_figures_unanswered(parent_material: str) -> str | None:
+    """Why a family's brand figures could not be had, as a clause, or
+    ``None`` when they were (or the family has no catalogue row)."""
+    return _figures_unanswered(parent_material)
+
+
+def _brand_figures(parent_material: str, record: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    """The family's brand figures from *record*, keyed by profile id."""
+    brands = (record or {}).get("brands") if isinstance(record, dict) else None
+    return brands if isinstance(brands, dict) else {}
+
+
 def get_brand_filament_profile(profile_id: str) -> BrandFilamentProfile | None:
     """Get a specific brand filament profile by ID.
+
+    The roster says which family the profile belongs to; the family's
+    catalogue record supplies the figures (one material, one record).
 
     :param profile_id: Profile key (e.g. ``"bambu_pla_basic"``, ``"prusament_petg"``).
     """
     kb = _get_kb()
-    for _mid, mat_data in kb.materials.items():
-        brand_profiles = mat_data.get("brand_profiles", {})
-        if profile_id.lower() in brand_profiles:
-            return _build_brand_profile(profile_id.lower(), _mid, brand_profiles[profile_id.lower()])
+    pid = profile_id.lower()
+    for mid, mat_data in kb.materials.items():
+        roster = mat_data.get("brand_profiles", {})
+        if pid in roster:
+            figures = _brand_figures(mid, _material_record(mid)).get(pid) or {}
+            return _build_brand_profile(pid, mid, {**roster[pid], **figures})
     return None
 
 
@@ -2225,18 +2292,33 @@ def list_brand_filament_profiles(
 ) -> list[BrandFilamentProfile]:
     """List brand filament profiles, optionally filtered by brand or parent material.
 
+    A list for ONE family carries that family's figures (one record).  An
+    unfiltered list on an install without kiln-pro is the roster -- names,
+    no figures -- because filling it would ask Kiln's servers for every
+    family's record in one call; with kiln-pro here every family is read.
+
     :param brand: Filter by brand name (case-insensitive partial match).
     :param parent_material: Filter by parent material ID (e.g. ``"pla"``, ``"petg"``).
     """
     kb = _get_kb()
     results: list[BrandFilamentProfile] = []
+    try:
+        from kiln._pro_material_bridge import available as _catalogue_here
+
+        every_family = _catalogue_here()
+    except Exception:  # noqa: BLE001
+        every_family = False
     for mid, mat_data in sorted(kb.materials.items()):
         if parent_material and mid != parent_material.lower():
             continue
-        for pid, pdata in sorted(mat_data.get("brand_profiles", {}).items()):
+        roster = mat_data.get("brand_profiles", {})
+        if not roster:
+            continue
+        figures = _brand_figures(mid, _material_record(mid)) if (parent_material or every_family) else {}
+        for pid, pdata in sorted(roster.items()):
             if brand and brand.lower() not in pdata.get("brand", "").lower():
                 continue
-            results.append(_build_brand_profile(pid, mid, pdata))
+            results.append(_build_brand_profile(pid, mid, {**pdata, **(figures.get(pid) or {})}))
     return results
 
 
@@ -2251,9 +2333,9 @@ def _build_brand_profile(
         brand=data["brand"],
         product_name=data["product_name"],
         parent_material=parent_material,
-        nozzle_temp_range_c=data["nozzle_temp_range_c"],
-        nozzle_temp_optimal_c=data["nozzle_temp_optimal_c"],
-        bed_temp_range_c=data["bed_temp_range_c"],
+        nozzle_temp_range_c=data.get("nozzle_temp_range_c"),
+        nozzle_temp_optimal_c=data.get("nozzle_temp_optimal_c"),
+        bed_temp_range_c=data.get("bed_temp_range_c"),
         bed_temp_optimal_c=data.get("bed_temp_optimal_c"),
         max_volumetric_speed_mm3s=data.get("max_volumetric_speed_mm3s"),
         max_print_speed_mms=data.get("max_print_speed_mms"),
@@ -2358,18 +2440,33 @@ def resolve_filament(
         if printer_id:
             warnings = _check_filament_printer_compat(brand, printer_id)
 
+        # A brand whose own figures are not in hand (signed out, offline)
+        # prints at its family's range, and the warning says so: a brand
+        # name must never read as a brand tune it did not get.
+        if not brand.has_figures():
+            why = brand_figures_unanswered(brand.parent_material)
+            warnings.append(
+                f"{brand.brand} {brand.product_name}'s own temperatures are not in hand"
+                + (f" because {why}" if why else "")
+                + f"; the {parent_row.name} range is used."
+            )
+        nozzle_opt = brand.nozzle_temp_optimal_c if brand.has_figures() else int(parent_row.tool_temp_default)
+        nozzle_range = list(brand.nozzle_temp_range_c) if brand.has_figures() else [nozzle_opt - 20, nozzle_opt + 20]
+        bed_opt = (brand.bed_temp_optimal_c or 60) if brand.has_figures() else int(parent_row.bed_temp_default)
+        bed_range = list(brand.bed_temp_range_c) if brand.bed_temp_range_c else [bed_opt - 10, bed_opt + 10]
+
         return ResolvedFilament(
             material_id=brand.parent_material,
             brand_profile_id=brand.profile_id,
             display_name=f"{brand.brand} {brand.product_name}",
-            is_brand_specific=True,
+            is_brand_specific=brand.has_figures(),
             density_g_per_cm3=brand.density_g_cm3 or parent_row.density_g_per_cm3,
             cost_per_kg_usd=cost,
             filament_diameter_mm=diameter,
-            nozzle_temp_optimal_c=brand.nozzle_temp_optimal_c,
-            nozzle_temp_range_c=brand.nozzle_temp_range_c,
-            bed_temp_optimal_c=brand.bed_temp_optimal_c or 60,
-            bed_temp_range_c=brand.bed_temp_range_c,
+            nozzle_temp_optimal_c=nozzle_opt,
+            nozzle_temp_range_c=nozzle_range,
+            bed_temp_optimal_c=bed_opt,
+            bed_temp_range_c=bed_range,
             max_volumetric_speed_mm3s=brand.max_volumetric_speed_mm3s,
             max_print_speed_mms=brand.max_print_speed_mms,
             drying_temp_c=brand.drying_temp_c,
@@ -2488,9 +2585,11 @@ def estimate_deflection_limited_load(
     the limit that actually governs, clearly labelled so it can never be read
     as a strength value.
     """
-    rec = _get_kb().load_tables.get((material_id or "").lower())
+    key = (material_id or "").lower()
+    rec = _get_kb().load_tables.get(key)
     if not isinstance(rec, dict) or rec.get("limit_mode") != "deflection":
         return None
+    rec = {**rec, **_load_figures(key)}
     rows = sorted(
         rec.get("cross_section_vs_deflection_load", []),
         key=lambda r: float(r.get("cantilever_length_mm", 0.0)),
@@ -2513,6 +2612,24 @@ def estimate_deflection_limited_load(
     }
 
 
+def _load_figures(material_key: str) -> dict[str, Any]:
+    """The material's load figures from its catalogue record (the tensile
+    capacity, the cross-section vs load grid, the orientation derating), or
+    ``{}`` when they could not be had -- :func:`load_figures_unanswered`
+    says why."""
+    record = _material_record(material_key)
+    load = record.get("load") if isinstance(record, dict) else None
+    return dict(load) if isinstance(load, dict) else {}
+
+
+def load_figures_unanswered(material_id: str) -> str | None:
+    """Why *material_id*'s load figures could not be had, as a clause, or
+    ``None`` when they were (or the roster has no such material)."""
+    kb = _get_kb()
+    key = resolve_material_key(material_id, kb.load_tables) or (material_id or "").lower()
+    return _figures_unanswered(key)
+
+
 def estimate_load_capacity(
     material_id: str,
     cross_section_mm2: float,
@@ -2521,6 +2638,12 @@ def estimate_load_capacity(
     load_across_layers: bool = True,
 ) -> LoadEstimate | None:
     """Estimate max safe load for a given cantilever geometry.
+
+    The roster (``load_tables.json``) says the material is one the lookup
+    answers for; its figures are the catalogue record, served one material
+    at a time.  ``None`` is an unknown material, an elastomer (see
+    :func:`estimate_deflection_limited_load`) or figures not in hand --
+    :func:`load_figures_unanswered` tells the last apart.
 
     Orientation convention (fixed 2026-07-16 — the pair was previously
     inverted): ``load_across_layers=True`` means the load pulls the
@@ -2531,15 +2654,16 @@ def estimate_load_capacity(
     layer planes — the strong direction (full table value).  ``True``
     is the conservative default.
 
-    The table itself is DERIVED data (square-section bending math; see
-    kiln/scripts/generate_load_tables.py) — wide or flat sections are
-    weaker than the square basis, and the reasoning says so.
+    The grid itself is DERIVED data (square-section bending math, generated
+    and pinned in kiln-pro beside the catalogue record) — wide or flat
+    sections are weaker than the square basis, and the reasoning says so.
     """
     kb = _get_kb()
     material_key = resolve_material_key(material_id, kb.load_tables) or material_id.lower()
     material_data = kb.load_tables.get(material_key)
     if material_data is None:
         return None
+    material_data = {**material_data, **_load_figures(material_key)}
 
     reasoning: list[str] = []
 

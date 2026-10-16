@@ -898,34 +898,50 @@ class TestDesignBrief:
 # ---------------------------------------------------------------------------
 
 
+def _synthetic_cell(cross_section_mm2: float, cantilever_length_mm: float) -> float:
+    """One cell of the grid the session serves for every rigid material
+    (``conftest.synthetic_material_record``): the bending formula
+    ``capacity x A^1.5 / 6 / L`` with the made-up capacity of 10 N/mm^2,
+    floored to 2 decimals.  Recomputed here so the tests below exercise
+    the lookup, the interpolation and the derating against figures that
+    belong to no real material -- the real grids are kiln-pro's and are
+    pinned there."""
+    import math
+
+    return math.floor(10.0 * (cross_section_mm2 ** 1.5 / 6.0) / cantilever_length_mm * 100.0) / 100.0
+
+
 class TestLoadEstimation:
-    def test_known_petg_load_at_100mm(self):
-        # Derived table (2026-07-16): PETG capacity 15.0 N/mm^2, so
-        # A=24 at L=100 → 15.0 x (24^1.5/6) / 100 = 2.93 N (floor2),
-        # then the default weak-orientation derate (0.4).
+    def test_known_petg_load_at_100mm(self, served_material_records):
+        # A grid cell (A=24 at L=100) straight from the served record, then
+        # the default weak-orientation derate (0.4).
         estimate = estimate_load_capacity("petg", 24.0, 100.0)
         assert isinstance(estimate, LoadEstimate)
         assert estimate is not None
-        assert estimate.max_load_n == pytest.approx(2.93 * 0.4, abs=0.01)
+        assert estimate.max_load_n == pytest.approx(_synthetic_cell(24.0, 100.0) * 0.4, abs=0.01)
         assert estimate.derating_applied == pytest.approx(0.4)
 
     def test_unknown_material_returns_none(self):
         assert estimate_load_capacity("unobtanium", 20.0, 100.0) is None
 
-    def test_cross_section_interpolation(self):
+    def test_cross_section_interpolation(self, served_material_records):
         estimate = estimate_load_capacity("petg", 30.0, 100.0)
         assert estimate is not None
-        # Interpolated between 24 mm^2 (2.93N) and 36 mm^2 (5.40N),
+        # Interpolated between the 24 mm^2 and 36 mm^2 cells at 100 mm,
         # then the default weak-orientation derate (0.4).
-        assert estimate.max_load_n == pytest.approx((2.93 + 5.40) / 2 * 0.4, abs=0.01)
+        expected = (_synthetic_cell(24.0, 100.0) + _synthetic_cell(36.0, 100.0)) / 2 * 0.4
+        assert estimate.max_load_n == pytest.approx(expected, abs=0.01)
+        assert any("100 mm" in msg for msg in estimate.reasoning)
 
-    def test_cantilever_length_interpolation(self):
+    def test_cantilever_length_interpolation(self, served_material_records):
         estimate = estimate_load_capacity("petg", 24.0, 75.0)
         assert estimate is not None
-        # Interpolated between 50 mm (5.87N) and 100 mm (2.93N),
-        # then the default weak-orientation derate (0.4); the function
-        # rounds to 2 decimals.
-        assert estimate.max_load_n == pytest.approx((5.87 + 2.93) / 2 * 0.4, abs=0.01)
+        # Interpolated between the 50 mm and 100 mm rows at 24 mm^2, then
+        # the default weak-orientation derate (0.4); the function floors
+        # to 2 decimals.
+        expected = (_synthetic_cell(24.0, 50.0) + _synthetic_cell(24.0, 100.0)) / 2 * 0.4
+        assert estimate.max_load_n == pytest.approx(expected, abs=0.01)
+        assert any("Interpolated between 50 mm and 100 mm" in msg for msg in estimate.reasoning)
 
     def test_longer_cantilever_reduces_capacity(self):
         short_arm = estimate_load_capacity("nylon", 24.0, 50.0)

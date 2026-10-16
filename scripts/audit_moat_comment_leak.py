@@ -338,7 +338,6 @@ _ALLOWLIST: tuple[tuple[str, str], ...] = (
     ("original_design.py", "Run a harsh audit of an original design"),
     ("slicer_tools.py", "Attach Pro+ enrichment to an EXCEEDS_BED"),
     ("print_recovery.py", "Stamp gcode_path so kiln-pro's resume engine"),
-    ("generate_load_tables.py", "kiln-pro pins them against its own"),
 )
 
 

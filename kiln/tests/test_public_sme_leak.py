@@ -389,8 +389,17 @@ class TestVerifiedRecords:
         assert result["failures"] == [] and result["pending"][0]["file"] == "figures.json"
 
     def test_the_shipped_material_tables_are_classified(self) -> None:
-        """The three that slipped: each has a dated row, none is quiet."""
+        """The three that slipped, settled 2026-10-16: the brand figures and
+        the load grids moved to kiln-pro (materials.json keeps the floor and
+        a names-only brand roster; load_tables.json is a roster the gate no
+        longer sees as a table), and the brand catalogue stays public as a
+        standard reference.  Nothing is pending."""
         gate = _load_gate()
         ledger = gate.load_ledger()
-        for rel in ("design_knowledge/materials.json", "design_knowledge/load_tables.json", "material_catalog.json"):
-            assert ledger[rel]["classification"] == "pending_move", rel
+        pending = sorted(rel for rel, row in ledger.items() if row.get("classification") == "pending_move")
+        assert pending == []
+        materials = ledger["design_knowledge/materials.json"]
+        assert materials["classification"] == "safety_floor"
+        assert "brand_profiles" in materials["fields"]
+        assert ledger["material_catalog.json"]["classification"] == "standard_reference"
+        assert "design_knowledge/load_tables.json" not in ledger

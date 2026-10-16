@@ -62,7 +62,8 @@ REFERENCE_DATA_FILES: dict[str, str] = {
         "requirement vocabulary, keyed by requirement"
     ),
     "design_knowledge/load_tables.json": (
-        "structural load tables, keyed by geometry and material"
+        "load-lookup roster: which limit governs each material; the figures "
+        "are Kiln's catalogue record, served one material at a time"
     ),
     "design_knowledge/material_troubleshooting.json": (
         "print-defect guidance, keyed by symptom and material"

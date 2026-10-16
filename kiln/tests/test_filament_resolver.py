@@ -45,6 +45,7 @@ class TestResolveFilamentBrand:
         assert r.material_id == "tpu"
         assert r.density_g_per_cm3 == pytest.approx(1.23)
 
+    @requires_engineering_overlay
     def test_polymaker_polyflex_resolves(self):
         r = resolve_filament("polymaker_polyflex_tpu95")
         assert r.is_brand_specific is True
@@ -58,6 +59,7 @@ class TestResolveFilamentBrand:
         assert r.enclosure_required is True
         assert r.density_g_per_cm3 == pytest.approx(1.10)
 
+    @requires_engineering_overlay
     def test_bambu_petg_cf_resolves(self):
         r = resolve_filament("bambu_petg_cf")
         assert r.is_brand_specific is True
@@ -108,13 +110,31 @@ class TestResolveFilamentParent:
 class TestResolveFilamentCompat:
     """Tests for printer compatibility warning generation."""
 
+    @requires_engineering_overlay
     def test_hardened_nozzle_warning(self):
         r = resolve_filament("bambu_pa6_cf", printer_id="bambu_a1")
         assert any("hardened" in w.lower() for w in r.warnings)
 
+    @requires_engineering_overlay
     def test_ams_incompatible_warning(self):
         r = resolve_filament("bambu_tpu_95a", printer_id="bambu_a1")
         assert any("AMS" in w for w in r.warnings)
+
+    def test_a_profile_that_needs_a_hardened_nozzle_warns_on_a_printer_without_one(self):
+        """The warning code, with figures that belong to no brand: the real
+        brand's flags are pinned in kiln-pro beside the catalogue."""
+        from kiln.design_intelligence import BrandFilamentProfile, _check_filament_printer_compat
+
+        profile = BrandFilamentProfile(
+            profile_id="kilntest_cf", brand="Kiln Test", product_name="CF", parent_material="petg_cf",
+            nozzle_temp_range_c=[240, 270], nozzle_temp_optimal_c=255, bed_temp_range_c=[60, 80],
+            bed_temp_optimal_c=70, max_volumetric_speed_mm3s=None, max_print_speed_mms=None,
+            density_g_cm3=None, drying_temp_c=None, drying_time_hours=None, enclosure_required=False,
+            hardened_nozzle_required=True, ams_compatible=False, notes=None, source="",
+        )
+        warnings = _check_filament_printer_compat(profile, "bambu_a1")
+        assert any("hardened" in w.lower() for w in warnings)
+        assert any("AMS" in w for w in warnings)
 
     def test_no_warnings_for_compatible(self):
         r = resolve_filament("bambu_pla_basic", printer_id="bambu_a1")
@@ -191,11 +211,13 @@ class TestProductSettingsReachTheSlice:
     through the resolver the slicing chokepoint uses.
     """
 
+    @requires_engineering_overlay
     def test_brand_sets_the_temperatures(self):
         values = material_needs("bambu_petg_cf").values()
         assert values["temperature"] == "255"
         assert values["bed_temperature"] == "70"
 
+    @requires_engineering_overlay
     def test_prusament_tpu_temperatures(self):
         values = material_needs("prusament_tpu_95a").values()
         assert values["temperature"] == "230"
