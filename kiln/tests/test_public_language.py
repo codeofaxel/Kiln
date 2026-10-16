@@ -144,12 +144,16 @@ class TestBundledDataProvenanceDoor:
         clean = '{"ender3": {"notes": "the vendor states the bed moves in Z"}}'
         assert gate.data_note_findings("kiln/src/kiln/data/safety_profiles.json", clean) == []
 
-    def test_only_bundled_data_json_is_judged_and_a_material_may_link_its_maker(self):
+    def test_only_bundled_data_json_is_judged_and_no_bundled_file_may_link(self):
         gate = _load_gate()
         assert gate.data_note_findings("kiln/src/kiln/server.py", "https://example.com") == []
         assert gate.data_note_findings("kiln/src/kiln/data/scad_libraries/x.json", '{"a": "https://x.com"}') == []
-        bought = '{"pla": {"sources": {"manufacturer": "https://www.example.com"}}}'
-        assert gate.data_note_findings("kiln/src/kiln/data/material_catalog.json", bought) == []
+        # The brand product list that once carried store links under ``sources``
+        # was retired 2026-10-16; no bundled data file may link anywhere now.
+        linked = '{"pla": {"sources": {"manufacturer": "https://www.example.com"}}}'
+        found = gate.data_note_findings("kiln/src/kiln/data/materials.json", linked)
+        assert [f.text for f in found] == ["materials.json:pla.sources.manufacturer"]
+        assert "a link" in found[0].rule
 
     def test_a_motion_note_is_also_held_to_its_length(self):
         gate = _load_gate()

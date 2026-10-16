@@ -108,18 +108,6 @@ files:
       family's catalogue record in kiln-pro, served one material at a time
       through kiln._pro_material_bridge, free with sign-in.
 
-  material_catalog.json:
-    classification: standard_reference
-    fields: [compatible_with, diameter_mm, material_family, material_type, notes, price_range_usd, sources, variants, vendor, weight_options_kg]
-    why: >-
-      45 brand products: vendor, line, diameter, spool sizes, a price band,
-      colour variants, Kiln's own store links and the generic family each
-      matches.  What any store shows, verified by hand; kept public on
-      purpose (2026-10-16) because the links are there to be followed and
-      the hosted egress scrub would strip them from a served record.  The
-      verified depth behind a brand -- its temperatures -- is the catalogue
-      record, not this file.
-
   design_knowledge/environment_compatibility.json:
     classification: standard_reference
     fields: [uv_resistance, temperature_range, moisture, chemicals,

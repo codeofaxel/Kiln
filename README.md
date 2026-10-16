@@ -591,7 +591,6 @@ Entry-point plugins are **default-deny** in production (`KILN_PLUGIN_POLICY=stri
 | `consumer.py` | Consumer workflow for non-printer users (address validation, material recommendations, timeline/price estimation, onboarding) |
 | `cost_estimator.py` | Print cost estimation from G-code analysis |
 | `materials.py` | Multi-material and spool tracking |
-| `material_catalog.py` | Material brand catalog, properties, and purchase-link metadata |
 | `material_inventory.py` | Fleet material inventory and assignment tracking |
 | `bed_leveling.py` | Automated bed leveling trigger system |
 | `streaming.py` | MJPEG webcam streaming proxy |

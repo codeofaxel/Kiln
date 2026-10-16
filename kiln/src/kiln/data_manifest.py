@@ -49,7 +49,6 @@ REFERENCE_DATA_FILES: dict[str, str] = {
     ),
     "component_catalog.json": "COTS component dimensions, keyed by component",
     "design_templates.json": "parametric template definitions, keyed by template",
-    "material_catalog.json": "material properties, keyed by material",
     "support_profiles.json": "support-generation presets, keyed by strategy",
     "tool_safety.json": "tool-call safety rules for the agent surface",
     "design_knowledge/design_templates.json": (

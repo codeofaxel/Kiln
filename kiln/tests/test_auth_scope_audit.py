@@ -339,14 +339,6 @@ READ_ONLY_TOOLS: set[str] = {
     "search_all_models",
     "search_models",
 
-    # material_catalog_tools.py -- catalog queries
-    "find_material_match",
-    "get_compatible_materials",
-    "get_material_info",
-    "get_material_purchase_urls",
-    "list_material_catalog",
-    "search_material_catalog",
-
     # material_inventory_tools.py -- inventory queries and pure
     # assignment/swap recommendations (nothing is submitted)
     "check_material_sufficiency",
