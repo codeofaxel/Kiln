@@ -374,7 +374,11 @@ class OpenSCADProvider(GenerationProvider):
 
             binary = self._require_binary()
             lib_path = _get_bundled_library_path()
-            cmd = [binary, "-o", out_path]
+            # Binary STL: the same triangles at a sixth of the bytes.  An
+            # ASCII file is parsed, uploaded and previewed at that cost on
+            # every step after the compile (a twisted pen cup wrote 26 MB
+            # of text for 4 MB of triangles, 2026-10-16).
+            cmd = [binary, "--export-format", "binstl", "-o", out_path]
             # Use Manifold backend on OpenSCAD 2024+ for faster booleans.
             # Opt-out: KILN_OPENSCAD_BACKEND=cgal
             _backend = os.environ.get("KILN_OPENSCAD_BACKEND", "manifold")

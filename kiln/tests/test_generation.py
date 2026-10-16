@@ -469,7 +469,7 @@ class TestOpenSCADProvider:
             def create_output(*args, **kwargs):
                 # Extract the output path from the command.
                 cmd = args[0]
-                out_path = cmd[2]  # -o <path>
+                out_path = cmd[cmd.index("-o") + 1]  # -o <path>
                 os.makedirs(os.path.dirname(out_path), exist_ok=True)
                 with open(out_path, "wb") as f:
                     f.write(make_binary_stl(cube_triangles()))
@@ -556,7 +556,7 @@ class TestOpenSCADProvider:
         with patch("kiln.generation.openscad.subprocess.run") as mock_run:
             def create_output(*args, **kwargs):
                 cmd = args[0]
-                out_path = cmd[2]
+                out_path = cmd[cmd.index("-o") + 1]
                 os.makedirs(os.path.dirname(out_path), exist_ok=True)
                 with open(out_path, "wb") as f:
                     f.write(make_binary_stl(cube_triangles()))
