@@ -379,11 +379,15 @@ class ThingiverseClient:
                 status_code=None,
             )
 
-        raw_name = file_name or meta.get("name", f"file_{file_id}")
-        # Sanitize: strip directory components to prevent path traversal
-        name = os.path.basename(raw_name)
-        if not name or name in {".", ".."}:
-            name = f"file_{file_id}"
+        raw_name = file_name or meta.get("name") or ""
+        # The name comes from outside (the marketplace or the caller): no
+        # folders, no hidden file, only a type Kiln saves.
+        from kiln.output_paths import safe_saved_name
+
+        try:
+            name = safe_saved_name(raw_name, f"file_{file_id}")
+        except ValueError as exc:
+            raise ThingiverseError(str(exc)) from exc
         dest = Path(dest_dir)
         out_path = dest / name
 

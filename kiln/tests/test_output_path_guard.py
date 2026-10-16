@@ -223,3 +223,107 @@ class TestEveryDoor:
             assert _refused(tool.fn(output_path=os.path.expanduser("~/.bashrc")))
         finally:
             server.mcp._tool_manager._tools.pop("late_tool_for_guard_test", None)
+
+
+class TestDownloadNames:
+    """A download's saved name is part of where it writes.
+
+    The bytes of a marketplace file are whatever its uploader chose, so a
+    name that lands them in a shell startup file or a login item would run
+    them.  The folder alone was checked; the name beside it was not.
+    """
+
+    def _download(self, **kwargs):
+        return _registered("download_model").fn(file_id=1, **kwargs)
+
+    def test_a_hidden_file_name_is_refused(self, home):
+        result = self._download(dest_dir=str(home), file_name=".zshrc")
+        assert _refused(result), result
+        assert not (home / ".zshrc").exists()
+
+    def test_a_login_item_name_is_refused(self, home):
+        result = self._download(dest_dir=str(home / "Documents"), file_name="com.evil.plist")
+        assert _refused(result), result
+
+    def test_a_path_in_the_name_is_refused(self, home):
+        result = self._download(dest_dir=str(home / "Documents"), file_name="../.ssh/x.stl")
+        assert _refused(result), result
+
+    def test_the_login_items_folder_is_refused(self, home):
+        agents = home / "Library" / "LaunchAgents"
+        result = self._download(dest_dir=str(agents), file_name="part.stl")
+        assert _refused(result), result
+
+    def test_an_ordinary_name_passes_the_guard(self, home):
+        assert output_paths.refusal_for_call("download_model", {
+            "dest_dir": str(home / "Documents"), "file_name": "bracket.zip",
+        }) is None
+
+
+class TestMarketplaceSuppliedNames:
+    """The name a marketplace reports for a file is outside input too."""
+
+    BASE = "https://api.thingiverse.com"
+
+    def _serve(self, name: str) -> None:
+        import responses
+
+        responses.add(
+            responses.GET, f"{self.BASE}/files/456",
+            json={"id": 456, "name": name, "download_url": f"{self.BASE}/files/456/download"},
+        )
+        responses.add(
+            responses.GET, f"{self.BASE}/files/456/download",
+            body=b"echo pwned", content_type="application/octet-stream",
+        )
+
+    def test_a_hidden_script_name_from_the_marketplace_is_not_saved(self, tmp_path):
+        import responses
+
+        from kiln.thingiverse import ThingiverseClient, ThingiverseError
+
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.GET, f"{self.BASE}/files/456",
+                json={"id": 456, "name": ".zshrc", "download_url": f"{self.BASE}/files/456/download"},
+            )
+            with pytest.raises(ThingiverseError):
+                ThingiverseClient(token="t").download_file(456, str(tmp_path))
+        assert list(tmp_path.iterdir()) == []
+
+    def test_a_leading_dot_is_dropped_from_a_model_name(self, tmp_path):
+        import responses
+
+        from kiln.thingiverse import ThingiverseClient
+
+        with responses.RequestsMock() as rsps:
+            rsps.add(
+                responses.GET, f"{self.BASE}/files/456",
+                json={"id": 456, "name": ".benchy.stl", "download_url": f"{self.BASE}/files/456/download"},
+            )
+            rsps.add(
+                responses.GET, f"{self.BASE}/files/456/download",
+                body=b"solid x", content_type="application/octet-stream",
+            )
+            path = ThingiverseClient(token="t").download_file(456, str(tmp_path))
+        assert Path(path).name == "benchy.stl"
+
+
+class TestKilnsOwnState:
+    def test_an_export_cannot_replace_kilns_token_file(self, home):
+        assert output_paths.check_write_location(
+            "export_audit_trail", "output_path", str(home / ".kiln" / "auth_tokens.json")
+        )
+
+    def test_a_backup_cannot_replace_kilns_live_database(self, home):
+        assert output_paths.check_write_location(
+            "backup_database", "output_path", str(home / ".kiln" / "kiln.db")
+        )
+
+    def test_an_export_never_replaces_an_existing_file(self, home):
+        existing = home / "Documents" / "package.json"
+        existing.write_text("{}")
+        assert output_paths.check_write_location("export_audit_trail", "output_path", str(existing))
+        assert output_paths.check_write_location(
+            "export_audit_trail", "output_path", str(home / "Documents" / "audit.json")
+        ) is None
