@@ -62,6 +62,15 @@ def plain_install(monkeypatch, tmp_path):
     monkeypatch.setattr(sp, "_locked_profiles", set())
     monkeypatch.setattr(sp, "_locks_loaded", False)
 
+    # The plugin takes its tier gate from the server module, which bound it
+    # at import: kiln-pro's own gate wherever kiln-pro is installed.  That one
+    # reads the machine's real licence, so on a developer's Mac signed in on
+    # Enterprise the "plain install" refused nothing and the gate test went
+    # red there while CI, which has no kiln-pro, stayed green.  A plain
+    # install's gate is the account plan's.
+    monkeypatch.setattr(srv, "requires_tier", account_plan.requires_tier)
+    monkeypatch.setattr(srv, "LicenseTier", account_plan.LicenseTier)
+
     def tools(*, enterprise: bool) -> dict[str, Any]:
         monkeypatch.setattr(account_plan, "_covers", lambda required: enterprise)
         mcp = _FakeMCP()
