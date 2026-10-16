@@ -297,8 +297,8 @@ def _refusal(subject: str, required: object) -> dict[str, Any]:
     """
     from kiln.auth_session import _read_tokens, _rejected_verdict
     from kiln.tiers_and_terms import (
-        plan_does_not_include_message,
         paywall_fields,
+        plan_does_not_include_message,
         plan_unconfirmed_message,
         signin_hint_fields,
         tier_required_message,

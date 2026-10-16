@@ -208,7 +208,7 @@ def _paywall_refusals_without_the_line(root: Path) -> list[str]:
         for node in ast.walk(tree):
             code = None
             if isinstance(node, ast.Dict):
-                for key, value in zip(node.keys, node.values):
+                for key, value in zip(node.keys, node.values, strict=True):
                     if isinstance(key, ast.Constant) and key.value == "code":
                         code = value
             elif isinstance(node, ast.Call):
