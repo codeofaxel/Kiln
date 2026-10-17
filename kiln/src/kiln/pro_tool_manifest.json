@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-17T22:09:29.572758+00:00",
+  "generated": "2026-10-17T22:38:10.032987+00:00",
   "tool_count": 415,
   "categories": {
     "product_generators": {
@@ -4455,6 +4455,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "bisect"
+        ]
       }
     },
     {
@@ -4479,6 +4486,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "bisect"
+        ]
       }
     },
     {
@@ -4503,6 +4517,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "bisect"
+        ]
       }
     },
     {
@@ -4539,6 +4560,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "bisect"
+        ]
       }
     },
     {
@@ -4575,6 +4603,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "bisect"
+        ]
       }
     },
     {
@@ -4638,6 +4673,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "bisect"
+        ]
       }
     },
     {
@@ -6063,7 +6105,13 @@
         "schema_version": 1,
         "kind": "read"
       },
-      "served": false
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "reflog"
+        ]
+      }
     },
     {
       "name": "get_regression_alerts",
@@ -6341,7 +6389,13 @@
         "schema_version": 1,
         "kind": "read"
       },
-      "served": false
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "bisect"
+        ]
+      }
     },
     {
       "name": "list_cherry_pick_candidates",
@@ -7481,6 +7535,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "reflog"
+        ]
       }
     },
     {
@@ -8252,7 +8313,13 @@
         "schema_version": 1,
         "kind": "made"
       },
-      "served": false
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "reflog"
+        ]
+      }
     },
     {
       "name": "retire_decoration_preset_branch",
@@ -8831,7 +8898,13 @@
         "schema_version": 1,
         "kind": "read"
       },
-      "served": false
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "reflog"
+        ]
+      }
     },
     {
       "name": "sign_decoration_preset_release",
@@ -9296,7 +9369,13 @@
         "schema_version": 1,
         "kind": "made"
       },
-      "served": false
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "reflog"
+        ]
+      }
     },
     {
       "name": "verify_decoration_preset_release",

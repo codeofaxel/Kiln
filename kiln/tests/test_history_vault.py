@@ -657,3 +657,81 @@ class TestALibraryPush:
         assert answer["status"] == "success", answer
         vault = _vault(home)
         assert vault.has_library_item("presets", "p9")
+
+
+def _log_entry(branch_id: str, old, new, *, design_id="mug", reflog_id=None, when=1.0, artifact_type="design"):
+    return {
+        "reflog_id": reflog_id or hashlib.sha256(f"{branch_id}{old}{new}{when}".encode()).hexdigest()[:32],
+        "artifact_type": artifact_type, "artifact_id": design_id, "branch_id": branch_id,
+        "branch_name": "main", "old_head": old, "new_head": new, "operation": "append_version",
+        "operator": "me", "created_at": when, "metadata": {},
+    }
+
+
+class TestTheHistoryLogIsKeptHere:
+    """The log (every head move Kiln's servers made for this computer) and
+    each bisect's place come back in a served call's answer and go out with
+    the calls that read them."""
+
+    def test_entries_come_back_and_an_entry_kept_here_is_never_rewritten(self, home):
+        vault = _vault(home)
+        first = _log_entry("b1", None, "v1", when=1.0)
+        courier.take_delta({"status": "success", "history_delta": {"designs": [], "reflog": [first]}}, {}, vault=vault)
+        rewrite = {**first, "new_head": "planted"}
+        answer = courier.take_delta(
+            {"status": "success", "history_delta": {"designs": [], "reflog": [rewrite, _log_entry("b1", "v1", "v2", when=2.0)]}},
+            {}, vault=vault,
+        )
+        assert answer["history_kept"]["log_entries"] == 1
+        assert [e["new_head"] for e in vault.log_entries()] == ["v2", "v1"]
+
+    def test_an_undo_sends_its_branchs_entries_and_the_design_it_moves(self, home):
+        _library(home, "mug", [MESH_V1, MESH_V2])
+        vault = _vault(home)
+        vault.sync_from_library("mug")
+        main = vault.branch_named("mug", "main")
+        vault.apply_log_delta({"reflog": [
+            _log_entry(main["branch_id"], "v1", main["head_version_id"], when=2.0),
+            _log_entry("other-branch", None, "x", when=3.0, design_id="other"),
+        ]})
+        sent = courier.records_for_call(
+            {"artifact_type": "design", "branch_id": main["branch_id"]},
+            vault, kinds=("reflog",), tool="undo_last_head_change",
+        )
+        assert [e["branch_id"] for e in sent["reflog"]] == [main["branch_id"]]
+        assert [b["design_id"] for b in sent["designs"]] == ["mug"] and sent["named"] == ["mug"]
+
+    def test_a_restore_sends_the_one_entry_it_names(self, home):
+        _library(home, "mug", [MESH_V1])
+        vault = _vault(home)
+        vault.sync_from_library("mug")
+        entry = _log_entry(vault.branch_named("mug", "main")["branch_id"], None, "v1")
+        vault.apply_log_delta({"reflog": [entry, _log_entry("b2", None, "w1", when=5.0)]})
+        sent = courier.records_for_call(
+            {"reflog_id": entry["reflog_id"]}, vault, kinds=("reflog",), tool="restore_from_reflog_entry",
+        )
+        assert [e["reflog_id"] for e in sent["reflog"]] == [entry["reflog_id"]]
+        assert [b["design_id"] for b in sent["designs"]] == ["mug"]
+
+    def test_a_search_keeps_its_place_and_sends_only_itself(self, home):
+        vault = _vault(home)
+        session = {"session_id": "s1", "artifact_type": "design", "artifact_id": "mug",
+                   "chain": ["v1", "v2", "v3"], "good_set": ["v1"], "bad_set": ["v3"],
+                   "skip_set": [], "candidate": "v2", "status": "active", "notes": {}}
+        ended = {**session, "session_id": "s2", "status": "ended"}
+        courier.take_delta({"status": "success", "history_delta": {"designs": [], "bisect": [session, ended]}}, {}, vault=vault)
+        moved = {**session, "good_set": ["v1", "v2"], "candidate": None}
+        courier.take_delta({"status": "success", "history_delta": {"designs": [], "bisect": [moved]}}, {}, vault=vault)
+        one = courier.records_for_call({"session_id": "s1"}, vault, kinds=("bisect",), tool="bisect_good")
+        assert one["bisect"] == [moved] and one["designs"] == []
+        listed = courier.records_for_call({}, vault, kinds=("bisect",), tool="list_bisect_sessions")
+        assert [s["session_id"] for s in listed["bisect"]] == ["s1"]
+
+    def test_rows_that_are_not_log_entries_are_skipped(self, home):
+        vault = _vault(home)
+        kept = vault.apply_log_delta({
+            "reflog": [{"reflog_id": "r", "artifact_type": "printer", "artifact_id": "x", "branch_id": "b"}, "junk"],
+            "bisect": [{"session_id": "", "artifact_type": "design", "artifact_id": "x"}],
+        })
+        assert kept == {"log_entries": 0, "bisect_sessions": 0}
+        assert vault.log_entries() == [] and vault.bisect_sessions() == []

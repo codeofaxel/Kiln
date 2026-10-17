@@ -101,6 +101,17 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _NOT_ID_CHARS = re.compile(r"[^A-Za-z0-9_-]")
 
 
+#: What a log entry or a bisect session is about.
+_ARTIFACT_TYPES = ("design", "preset", "feature")
+
+
+def _number(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _sha(value: Any) -> str | None:
     return value if isinstance(value, str) and _SHA256.match(value) else None
 
@@ -233,6 +244,22 @@ class HistoryVault:
             CREATE TABLE IF NOT EXISTS checkouts (
                 design_id TEXT PRIMARY KEY,
                 branch_id TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS log_entries (
+                reflog_id TEXT PRIMARY KEY,
+                artifact_type TEXT NOT NULL,
+                artifact_id TEXT NOT NULL,
+                branch_id TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                record TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_hv_log_branch ON log_entries(branch_id, created_at);
+            CREATE TABLE IF NOT EXISTS bisect_sessions (
+                session_id TEXT PRIMARY KEY,
+                artifact_type TEXT NOT NULL,
+                artifact_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                record TEXT NOT NULL
             );
             """
         )
@@ -751,6 +778,79 @@ class HistoryVault:
                 "versions": len(bundle["versions"]), "releases": len(bundle["releases"])}
 
     # -- the design library -----------------------------------------------------
+
+    # -- the history log and bisect sessions --------------------------------
+    #
+    # The log is every head move Kiln's servers made for this computer (the
+    # undo list); a bisect session is one search's place.  Both come back in
+    # a served call's delta and go out with the calls that read them.
+
+    def log_entries(self, *, branch_id: str | None = None, limit: int = 2000) -> list[dict[str, Any]]:
+        """Log entries, newest first; one branch's when *branch_id* is given."""
+        if branch_id:
+            rows = self._conn.execute(
+                "SELECT record FROM log_entries WHERE branch_id = ? ORDER BY created_at DESC LIMIT ?",
+                (branch_id, int(limit)),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT record FROM log_entries ORDER BY created_at DESC LIMIT ?", (int(limit),),
+            ).fetchall()
+        return [json.loads(r["record"]) for r in rows]
+
+    def log_entry(self, reflog_id: str) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT record FROM log_entries WHERE reflog_id = ?", (reflog_id,)
+        ).fetchone()
+        return json.loads(row["record"]) if row else None
+
+    def bisect_sessions(self, *, active_only: bool = False) -> list[dict[str, Any]]:
+        q = "SELECT record FROM bisect_sessions"
+        if active_only:
+            q += " WHERE status = 'active'"
+        return [json.loads(r["record"]) for r in self._conn.execute(q + " ORDER BY session_id").fetchall()]
+
+    def bisect_session(self, session_id: str) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT record FROM bisect_sessions WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        return json.loads(row["record"]) if row else None
+
+    def apply_log_delta(self, delta: dict[str, Any]) -> dict[str, int]:
+        """Keep the log entries and bisect sessions a served call answered with.
+
+        A log entry is only ever added (one already here is left as it is); a
+        bisect session is replaced by its newer state.  A row that is not one
+        is skipped.
+        """
+        entries = sessions = 0
+        with self._lock:
+            for e in delta.get("reflog") or []:
+                if not (isinstance(e, dict) and e.get("artifact_type") in _ARTIFACT_TYPES
+                        and all(isinstance(e.get(k), str) and e.get(k)
+                                for k in ("reflog_id", "artifact_id", "branch_id"))):
+                    continue
+                cur = self._conn.execute(
+                    "INSERT OR IGNORE INTO log_entries "
+                    "(reflog_id, artifact_type, artifact_id, branch_id, created_at, record) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (e["reflog_id"], e["artifact_type"], e["artifact_id"], e["branch_id"],
+                     _number(e.get("created_at")), _canonical(_no_paths(e))),
+                )
+                entries += cur.rowcount
+            for b in delta.get("bisect") or []:
+                if not (isinstance(b, dict) and b.get("artifact_type") in _ARTIFACT_TYPES
+                        and all(isinstance(b.get(k), str) and b.get(k) for k in ("session_id", "artifact_id"))):
+                    continue
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO bisect_sessions "
+                    "(session_id, artifact_type, artifact_id, status, record) VALUES (?, ?, ?, ?, ?)",
+                    (b["session_id"], b["artifact_type"], b["artifact_id"],
+                     "ended" if b.get("status") == "ended" else "active", _canonical(_no_paths(b))),
+                )
+                sessions += 1
+            self._conn.commit()
+        return {"log_entries": entries, "bisect_sessions": sessions}
 
     def sync_from_library(self, design_id: str) -> int:
         """Record the library's versions of *design_id* that are not recorded yet.

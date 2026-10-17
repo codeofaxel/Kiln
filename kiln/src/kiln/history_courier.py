@@ -162,10 +162,67 @@ def records_for_call(
             items = library_items_for_call(vault, kind, arguments, tool)
             out[kind] = [vault.library_bundle(kind, i, budget=budget) for i in items if vault.has_library_item(kind, i)]
             out[f"named_{kind}"] = items
+        if "reflog" in kinds or "bisect" in kinds:
+            _add_log_rows(vault, out, arguments, tool)
         return out
     finally:
         if own:
             vault.close()
+
+
+#: The most log entries one call sends, matching what the server takes.
+_MAX_LOG_ENTRIES = 2000
+#: Which library kind a log entry's ``artifact_type`` names.
+_LOG_KINDS = {"feature": "features", "preset": "presets"}
+
+
+def _add_log_rows(vault: Any, out: dict[str, Any], arguments: dict[str, Any], tool: str) -> None:
+    """Add the log entries and bisect sessions a history-log or bisect call reads.
+
+    With them goes the one design, feature or preset a head move or a new
+    search is about: an undo needs the branch it moves, a search the versions
+    it walks.  A listing sends every entry or every open search; a call about
+    one entry or one search sends that one.
+    """
+    artifact: tuple[str, str] | None = None
+    reflog: list[dict[str, Any]] = []
+    sessions: list[dict[str, Any]] = []
+    reflog_id = str(arguments.get("reflog_id") or "")
+    if tool in ("show_reflog", "get_reflog_entry", "push_reflog_to_cloud"):
+        reflog = vault.log_entries(limit=_MAX_LOG_ENTRIES)
+    elif tool == "restore_from_reflog_entry":
+        entry = vault.log_entry(reflog_id) if reflog_id else None
+        reflog = [entry] if entry else []
+        if entry:
+            artifact = (entry["artifact_type"], entry["artifact_id"])
+    elif tool == "undo_last_head_change":
+        branch_id = str(arguments.get("branch_id") or "")
+        reflog = vault.log_entries(branch_id=branch_id, limit=50) if branch_id else []
+        if reflog:
+            artifact = (reflog[0]["artifact_type"], reflog[0]["artifact_id"])
+    elif tool == "bisect_start":
+        if isinstance(arguments.get("artifact_type"), str) and isinstance(arguments.get("artifact_id"), str):
+            artifact = (arguments["artifact_type"], arguments["artifact_id"])
+    elif tool == "list_bisect_sessions":
+        sessions = vault.bisect_sessions(active_only=True)
+    else:   # a call about one search
+        session = vault.bisect_session(str(arguments.get("session_id") or ""))
+        sessions = [session] if session else []
+    out["reflog"] = reflog
+    out["bisect"] = sessions
+    if artifact is None:
+        return
+    kind, item_id = artifact
+    if kind == "design":
+        vault.sync_from_library(item_id)
+        if vault.has_design(item_id) and not any(b.get("design_id") == item_id for b in out["designs"]):
+            out["designs"].append(vault.bundle(item_id, meshes_for=set(), mesh_budget=_MESH_BUDGET))
+        out["named"] = list(dict.fromkeys([*out.get("named", []), item_id]))
+    elif kind in _LOG_KINDS:
+        library = _LOG_KINDS[kind]
+        if vault.has_library_item(library, item_id):
+            out[library] = [vault.library_bundle(library, item_id, budget=[8 * 1024 * 1024])]
+        out[f"named_{library}"] = [item_id]
 
 
 #: The tools whose new branch this computer's saves continue, as
@@ -202,6 +259,7 @@ def take_delta(
     try:
         summaries = [vault.apply_delta(d) for d in deltas]
         library = _take_library_deltas(vault, delta, sent)
+        log = vault.apply_log_delta(delta)
         continues = None
         made = answer.get("branch") if isinstance(answer.get("branch"), dict) else {}
         if tool in _CHECKS_OUT and made.get("branch_id") and summaries:
@@ -210,10 +268,13 @@ def take_delta(
     finally:
         if own:
             vault.close()
-    if summaries or library:
+    if summaries or library or any(log.values()):
         kept: dict[str, Any] = {"where": "on this computer"}
         if summaries:
             kept["designs"] = [s["design_id"] for s in summaries]
+        for key, count in log.items():
+            if count:
+                kept[key] = count
         for kind in ("features", "presets"):
             items = [s["item_id"] for s in library if s["kind"] == kind]
             if items:
