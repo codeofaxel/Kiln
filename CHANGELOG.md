@@ -341,6 +341,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Elegoo cameras open at the address the printer gives.** Kiln asks the printer for its video address instead of guessing one, and says when a feed can't be relayed.
 - **Cancelling a print on an older USB-connected printer no longer claims it stopped when it didn't.** Kiln pauses it, turns the heaters off, and tells you to press Stop on the printer.
 
 - **A printer Kiln finds on your network is saved at the port it answered on.**
