@@ -59,6 +59,8 @@ _RECIPE_HEAD = ".kiln_recipe.json"
 _MESH_SUFFIXES = (".stl", ".3mf", ".obj", ".ply", ".glb")
 _MESH_KEY = "mesh_bytes_b64"
 _MAIN = "main"
+#: The largest mesh a library version contributes to the records.
+_MAX_LIBRARY_MESH = 64 * 1024 * 1024
 
 
 def _kiln_home() -> Path:
@@ -101,6 +103,25 @@ def _file_tag(version_id: str) -> str:
     """A version id made safe to put in a file name."""
     tag = _NOT_ID_CHARS.sub("", version_id)[:12]
     return tag or hashlib.sha256(version_id.encode("utf-8")).hexdigest()[:12]
+
+
+def _library_mesh(folder: Path, stl_path: Any) -> Path | None:
+    """The mesh a library recipe names, when it is one this design keeps.
+
+    The version tools copy a saved mesh into the design's own folder, so a
+    path anywhere else is not this design's mesh, whoever wrote it there:
+    it is never read, whatever it names.
+    """
+    if not isinstance(stl_path, str) or not stl_path:
+        return None
+    real = os.path.realpath(stl_path)
+    if os.path.dirname(real) != os.path.realpath(folder):
+        return None
+    if Path(real).suffix.lower() not in _MESH_SUFFIXES or not os.path.isfile(real):
+        return None
+    if os.path.getsize(real) > _MAX_LIBRARY_MESH:
+        return None
+    return Path(real)
 
 
 def _rows(items: Any, *keys: str) -> list[dict[str, Any]]:
@@ -355,6 +376,16 @@ class HistoryVault:
 
     # -- writing ---------------------------------------------------------------
 
+    _ID_COLUMN = {"versions": "version_id", "branches": "branch_id", "releases": "release_id"}
+
+    def _is_designs(self, table: str, row_id: str, design_id: str) -> bool:
+        """Whether *row_id* is free here or already *design_id*'s: an answer
+        about one design never rewrites another design's records."""
+        row = self._conn.execute(
+            f"SELECT design_id FROM {table} WHERE {self._ID_COLUMN[table]} = ?", (row_id,)
+        ).fetchone()
+        return row is None or row["design_id"] == design_id
+
     def _put_mesh(self, data: bytes, suffix: str = ".stl") -> str:
         sha = hashlib.sha256(data).hexdigest()
         if self.mesh_path(sha) is None:
@@ -434,19 +465,19 @@ class HistoryVault:
         written: list[dict[str, Any]] = []
         with self._lock:
             for v in _rows(delta.get("versions"), "version_id"):
+                if not self._is_designs("versions", v["version_id"], design_id):
+                    continue
                 self._put_version(design_id, v, dict(recipes.get(v["version_id"]) or {}))
                 written.append(self.version(v["version_id"]) or {})
             for update in _rows(delta.get("recipe_updates"), "version_id"):
-                if self.version(update["version_id"]) is None:
-                    continue
                 recipe = update.get("recipe_dict") if isinstance(update.get("recipe_dict"), dict) else {}
                 self._conn.execute(
-                    "UPDATE versions SET recipe = ? WHERE version_id = ?",
-                    (_canonical(dict(recipe)), update["version_id"]),
+                    "UPDATE versions SET recipe = ? WHERE version_id = ? AND design_id = ?",
+                    (_canonical(dict(recipe)), update["version_id"], design_id),
                 )
             expected = delta.get("expected_heads") if isinstance(delta.get("expected_heads"), dict) else {}
             for branch in _rows(delta.get("branches"), "branch_id"):
-                if branch.get("design_id") not in (None, design_id):
+                if branch.get("design_id") != design_id or not self._is_designs("branches", branch["branch_id"], design_id):
                     continue
                 current = self.branch(branch["branch_id"])
                 if branch["branch_id"] in expected:
@@ -458,8 +489,12 @@ class HistoryVault:
             for m in _rows(delta.get("memberships"), "branch_id", "version_id"):
                 if m["branch_id"] in moved_here or self.design_of_branch(m["branch_id"]) != design_id:
                     continue
+                if self.design_of_version(m["version_id"]) not in (None, design_id):
+                    continue
                 self._put_membership(m)
             for release in _rows(delta.get("releases"), "release_id"):
+                if not self._is_designs("releases", release["release_id"], design_id):
+                    continue
                 self._put_release({**release, "design_id": design_id})
             self._conn.commit()
         library = self._write_library(design_id, [w for w in written if w])
@@ -485,11 +520,16 @@ class HistoryVault:
             r["version_id"]: r.get("recipe_dict") if isinstance(r.get("recipe_dict"), dict) else {}
             for r in _rows(bundle_like["provenance_sidecars"], "version_id")
         }
-        branches = [b for b in _rows(bundle_like["branches"], "branch_id") if b.get("design_id") in (None, design_id)]
+        branches = [
+            b for b in _rows(bundle_like["branches"], "branch_id")
+            if b.get("design_id") in (None, design_id) and self._is_designs("branches", b["branch_id"], design_id)
+        ]
         bundle_like["branches"] = branches
         written = []
         with self._lock:
             for v in _rows(bundle_like["versions"], "version_id"):
+                if not self._is_designs("versions", v["version_id"], design_id):
+                    continue
                 self._put_version(design_id, v, dict(recipes.get(v["version_id"]) or {}))
                 written.append(self.version(v["version_id"]) or {})
             for b in branches:
@@ -497,8 +537,12 @@ class HistoryVault:
             for m in _rows(bundle_like["memberships"], "branch_id", "version_id"):
                 if self.design_of_branch(m["branch_id"]) != design_id:
                     continue
+                if self.design_of_version(m["version_id"]) not in (None, design_id):
+                    continue
                 self._put_membership({**m, "added_at": m.get("added_at") or time.time()})
             for r in _rows(bundle_like["releases"], "release_id"):
+                if not self._is_designs("releases", r["release_id"], design_id):
+                    continue
                 self._put_release({**r, "design_id": design_id})
             self._conn.commit()
         self._write_library(design_id, [w for w in written if w])
@@ -559,9 +603,9 @@ class HistoryVault:
                 vid = vid or uuid.uuid4().hex
                 recipe = dict(recipe)
                 recipe["version_id"] = vid
-                stl = recipe.get("stl_path")
-                if isinstance(stl, str) and stl and os.path.isfile(stl):
-                    recipe[_MESH_KEY] = base64.b64encode(Path(stl).read_bytes()).decode("ascii")
+                mesh = _library_mesh(folder, recipe.get("stl_path"))
+                if mesh is not None:
+                    recipe[_MESH_KEY] = base64.b64encode(mesh.read_bytes()).decode("ascii")
                 self._put_version(
                     design_id,
                     {"version_id": vid, "parent_version_id": head, "created_at": _created_at(recipe, path)},
@@ -643,13 +687,27 @@ def _read(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _no_paths(value: Any) -> Any:
+    """*value* without a file path anywhere in it.
+
+    A recipe written into the library from a server's answer names a file on
+    this computer only where this module put one (the local copy of its
+    mesh); a path the answer carried is dropped, so no later read follows it.
+    """
+    if isinstance(value, dict):
+        return {k: _no_paths(v) for k, v in value.items() if k not in _PATH_KEYS}
+    if isinstance(value, list):
+        return [_no_paths(v) for v in value]
+    return value
+
+
 def _library_recipe(version: dict[str, Any], design_id: str) -> dict[str, Any]:
     """A recorded version as a library recipe file the version tools can load.
 
     The fields every recipe file carries (``name``, ``created``) are filled
     from the version's own record when its recipe does not state them.
     """
-    recipe = dict(version.get("recipe") or {})
+    recipe = _no_paths(dict(version.get("recipe") or {}))
     recipe["version_id"] = version["version_id"]
     recipe.setdefault("name", recipe.get("design_id") or design_id)
     if not isinstance(recipe.get("created"), str):

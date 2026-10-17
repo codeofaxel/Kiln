@@ -323,6 +323,60 @@ class TestAHostileAnswer:
         written = [p for p in folder.glob(".kiln_recipe.*.json") if json.loads(p.read_text()).get("version_id") == odd]
         assert len(written) == 1 and written[0].parent == folder
 
+    def test_a_path_a_server_answer_names_never_reaches_the_library(self, home):
+        secret = home / "secret.txt"
+        secret.write_text("not yours")
+        folder = _library(home, "mug", [MESH_V1])
+        vault = _vault(home)
+        vault.sync_from_library("mug")
+        delta = _new_version_delta(vault, "mug")
+        recipe = delta["provenance_sidecars"][0]["recipe_dict"]
+        recipe.pop("mesh_bytes_b64")
+        recipe["stl_path"] = str(secret)
+        recipe["parts"] = [{"stl_path": str(secret)}]
+        courier.take_delta({"history_delta": {"designs": [delta]}}, {"named": ["mug"]}, vault=vault)
+        assert str(secret) not in " ".join(p.read_text() for p in folder.glob(".kiln_recipe*.json"))
+
+    def test_a_library_recipe_naming_a_file_outside_its_folder_sends_nothing_of_it(self, home):
+        secret = home / "secret.stl"
+        secret.write_bytes(b"not yours")
+        folder = home / ".kiln" / "designs" / "mug"
+        folder.mkdir(parents=True)
+        (folder / ".kiln_recipe.v1.json").write_text(json.dumps({
+            "name": "mug", "created": "2026-10-01T00:00:00+00:00", "version": 1, "stl_path": str(secret),
+        }))
+        vault = _vault(home)
+        vault.sync_from_library("mug")
+        sent = json.dumps(vault.bundle("mug"))
+        assert base64.b64encode(b"not yours").decode() not in sent
+        assert vault.version(vault.branch_named("mug", "main")["head_version_id"])["mesh_sha256"] is None
+
+    def test_an_answer_about_one_design_never_rewrites_anothers_records(self, home):
+        _library(home, "mug", [MESH_V1])
+        _library(home, "bowl", [MESH_V1])
+        vault = _vault(home)
+        vault.sync_from_library("mug")
+        vault.sync_from_library("bowl")
+        bowl_main = vault.branch_named("bowl", "main")
+        bowl_head = bowl_main["head_version_id"]
+        before = vault.version(bowl_head)
+        vault._put_release({"release_id": "r-bowl", "design_id": "bowl", "name": "1.0.0"})
+        vault._conn.commit()
+        delta = {
+            "design_id": "mug",
+            "versions": [{"version_id": bowl_head, "parent_version_id": None, "created_at": 1.0}],
+            "provenance_sidecars": [{"version_id": bowl_head, "recipe_dict": {"source_scad": "hijacked();"}}],
+            "recipe_updates": [{"version_id": bowl_head, "recipe_dict": {"source_scad": "hijacked();"}}],
+            "branches": [{**bowl_main, "design_id": "mug", "head_version_id": "x" * 32}],
+            "memberships": [{"branch_id": bowl_main["branch_id"], "version_id": "x" * 32, "position": 9}],
+            "releases": [{"release_id": "r-bowl", "name": "hijacked"}],
+        }
+        courier.take_delta({"history_delta": {"designs": [delta]}}, {"named": ["mug"]}, vault=vault)
+        assert vault.version(bowl_head) == before
+        assert vault.branch(bowl_main["branch_id"]) == bowl_main
+        assert vault.design_of_release("r-bowl") == "bowl"
+        assert [m["version_id"] for m in vault.memberships(bowl_main["branch_id"])] == [bowl_head]
+
     def test_rows_missing_their_ids_are_skipped_not_fatal(self, home):
         _library(home, "mug", [MESH_V1])
         vault = _vault(home)
