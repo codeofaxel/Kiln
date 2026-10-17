@@ -20472,42 +20472,37 @@ def find_material_substitute(
 
         subs = find_substitutes(material, "fdm", reason=reason_enum, min_score=min_score)
         sub_dicts = [s.to_dict() for s in subs]
-        # Food-safety preservation (kiln-pro feature; free-tier silently
-        # skips): if the source material is food_safe=yes, mark any
-        # substitute that ISN'T food_safe=yes as a safety regression so
-        # callers don't silently swap a pet bowl's PETG for ABS.
-        try:
-            from kiln_pro.material_safety import assess_food_safety  # noqa: WPS433
-        except ImportError:
-            assess_food_safety = None  # type: ignore[assignment]
+        # Food-safety preservation: if the source material is rated food
+        # safe, mark any substitute that is NOT as a safety regression so
+        # callers don't silently swap a pet bowl's PETG for ABS.  Public
+        # Kiln's rating, so every install flags the same swaps.
+        from kiln.material_safety import food_safe_rating
+
         food_safety_check: dict | None = None
-        if assess_food_safety is not None:
-            source_verdict = assess_food_safety(material)
-            if source_verdict["food_safe"] == "yes":
-                regressions: list[str] = []
-                for d in sub_dicts:
-                    sub_name = (
-                        d.get("substitute_material")
-                        or d.get("substitute")
-                        or d.get("material")
-                        or d.get("name")
-                    )
-                    if not sub_name:
-                        continue
-                    sub_verdict = assess_food_safety(str(sub_name))
-                    sub_food_safe = sub_verdict["food_safe"]
-                    d["food_safe"] = sub_food_safe
-                    if sub_food_safe != "yes":
-                        regressions.append(str(sub_name))
-                food_safety_check = {
-                    "source_food_safe": "yes",
-                    "regressions": regressions,
-                    "warning": (
-                        "Source material is food_safe=yes but some substitutes are "
-                        f"NOT: {regressions}. Do not silently swap for food-contact "
-                        "products (pet bowls, kitchen items). Filter or disclose."
-                    ) if regressions else None,
-                }
+        if food_safe_rating(material) == "yes":
+            regressions: list[str] = []
+            for d in sub_dicts:
+                sub_name = (
+                    d.get("substitute_material")
+                    or d.get("substitute")
+                    or d.get("material")
+                    or d.get("name")
+                )
+                if not sub_name:
+                    continue
+                sub_food_safe = food_safe_rating(str(sub_name))
+                d["food_safe"] = sub_food_safe
+                if sub_food_safe != "yes":
+                    regressions.append(str(sub_name))
+            food_safety_check = {
+                "source_food_safe": "yes",
+                "regressions": regressions,
+                "warning": (
+                    "Source material is food_safe=yes but some substitutes are "
+                    f"NOT: {regressions}. Do not silently swap for food-contact "
+                    "products (pet bowls, kitchen items). Filter or disclose."
+                ) if regressions else None,
+            }
         result = {
             "success": True,
             "material": material,

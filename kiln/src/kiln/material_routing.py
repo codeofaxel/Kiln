@@ -589,26 +589,21 @@ def recommend_material(
         if budget_filtered:
             candidates = budget_filtered
 
-    # Food-safety overlay (kiln-pro feature; free-tier silently skips):
-    # when the user's intent implies food / pet / mouth contact, drop
-    # candidates whose chemical.food_safe rating is "no".  Conditional
-    # materials (PLA) stay in but rank below food_safe=yes options
-    # because the scorer doesn't know about food-safety on its own.
-    try:
-        from kiln_pro.material_safety import (  # noqa: WPS433
-            filter_materials_by_food_safety,
-            use_case_implies_food_contact,
-        )
-    except ImportError:
-        filter_materials_by_food_safety = None  # type: ignore[assignment]
-        use_case_implies_food_contact = None  # type: ignore[assignment]
-    if (
-        use_case_implies_food_contact is not None
-        and use_case_implies_food_contact(intent)
-    ):
-        names = [getattr(m, "name", str(m)) for m in candidates]
+    # Food-safety floor: when the intent implies food, drink, mouth or pet
+    # contact, drop candidates rated food_safe="no" (or unrated).  Conditional
+    # materials (PLA) stay in; the rating and the rule are public Kiln's own,
+    # so every install filters the same way.
+    from kiln.material_safety import (
+        filter_food_safe_materials,
+        use_case_implies_food_contact,
+    )
+
+    if use_case_implies_food_contact(intent):
         safe_set = set(
-            filter_materials_by_food_safety(names, require="yes_or_conditional")
+            filter_food_safe_materials(
+                [getattr(m, "name", str(m)) for m in candidates],
+                require="yes_or_conditional",
+            )
         )
         food_filtered = [
             m for m in candidates
