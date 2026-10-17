@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-17T20:24:19.435857+00:00",
+  "generated": "2026-10-17T21:06:40.514283+00:00",
   "tool_count": 414,
   "categories": {
     "product_generators": {
@@ -13874,7 +13874,18 @@
         "schema_version": 1,
         "kind": "action"
       },
-      "served": false
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "every_job"
+            ]
+          }
+        ],
+        "acts": true
+      }
     },
     {
       "name": "fleet_colour_match",
@@ -14170,7 +14181,18 @@
         "schema_version": 1,
         "kind": "action"
       },
-      "served": false
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "every_job"
+            ]
+          }
+        ],
+        "acts": true
+      }
     },
     {
       "name": "fleet_thermal_posture",

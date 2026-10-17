@@ -74,15 +74,16 @@ def _act(tool: str, step_id: str, **args) -> dict:
 
 
 class TestTheFence:
-    def test_the_allow_list_is_the_five_decided_tools_and_nothing_hot(self):
+    def test_the_allow_list_is_the_decided_tools_and_nothing_hot(self):
         """Adding a tool a server may run on a printer is a decision, and
-        this is where it is recorded."""
+        this is where it is recorded.  The cancel and the skip joined on
+        2026-10-17 (Adam), behind the same approve-the-exact-list step."""
         assert set(served_steps.ACT_TOOLS) == {
             "upload_file", "start_print", "pause_print", "resume_print", "set_speed_profile",
-            "run_speed_schedule",
+            "run_speed_schedule", "cancel_print", "skip_print_objects",
         }
         for forbidden in ("send_gcode", "set_temperature", "update_printer_firmware",
-                          "emergency_stop", "cancel_print", "register_printer", "confirm_action"):
+                          "emergency_stop", "register_printer", "confirm_action"):
             assert forbidden not in served_steps.ACT_TOOLS
 
     @pytest.mark.parametrize(
@@ -91,7 +92,6 @@ class TestTheFence:
             _act("send_gcode", "g", commands="M104 S300"),
             _act("set_temperature", "t", tool_temp=300),
             _act("update_printer_firmware", "f"),
-            _act("cancel_print", "c"),
             _act("emergency_stop", "e"),
             {"kind": "act", "id": "x", "tool": None, "args": {}},
             {"kind": "act", "id": "x", "args": {}},
@@ -129,6 +129,16 @@ class TestTheFence:
             _act("set_speed_profile", "v", percent=5),
             _act("set_speed_profile", "v", percent="115"),
             _act("set_speed_profile", "v", percent=True),
+            _act("cancel_print", "c", printer_name="voron", expected_tool_target=300),
+            _act("cancel_print", "c", printer_name="voron", preserve_temperatures="yes"),
+            # an object id never carries a second argument or command
+            _act("skip_print_objects", "k", object_ids=["Part1 RESET=1"]),
+            _act("skip_print_objects", "k", object_ids=["Part1\nM104 S300"]),
+            _act("skip_print_objects", "k", object_ids=["a;M112"]),
+            _act("skip_print_objects", "k", object_ids=[]),
+            _act("skip_print_objects", "k", object_ids=[757]),
+            _act("skip_print_objects", "k", object_ids="757"),
+            _act("skip_print_objects", "k", object_ids=[str(i) for i in range(40)]),
             _act("run_speed_schedule", "r", schedule=[{"from_layer": 1, "to_layer": 5, "speed_percent": 100},
                                                       {"from_layer": 3, "to_layer": 8, "speed_percent": 100}]),
             _act("run_speed_schedule", "r", schedule=[{"from_layer": 1, "to_layer": 5, "speed_percent": 900}]),
@@ -206,6 +216,25 @@ class TestThroughTheDoor:
             ("run_speed_schedule", {"schedule": segments, "printer_name": "voron", "action": "run"}),
         ]
         assert done["speed"]["data"]["percent"] == 115 and done["sched"]["data"]["active"] is True
+
+    def test_a_checked_cancel_and_a_checked_skip_reach_their_doors(self, doors, monkeypatch):
+        """The fleet cancel and the fleet skip reach each machine through
+        this install's own cancel_print and skip_print_objects."""
+        import kiln.server as server
+
+        calls, _ = doors
+        monkeypatch.setattr(server, "cancel_print", lambda **kw: calls.append(("cancel_print", kw)) or {"success": True, "message": "cancelled"})
+        monkeypatch.setattr(server, "skip_print_objects", lambda **kw: calls.append(("skip_print_objects", kw)) or {"success": True, "skipped_objects": kw["object_ids"], "outcome": "accepted"})
+        done, refused = served_steps.carry_out("t", [
+            _act("cancel_print", "cancel", printer_name="voron", preserve_temperatures=True),
+            _act("skip_print_objects", "skip", object_ids=["757", "Part_2.stl_id_1"], printer_name="a1", plate_number=2),
+        ], _send, act=True)
+        assert refused is None
+        assert calls == [
+            ("cancel_print", {"printer_name": "voron", "preserve_temperatures": True}),
+            ("skip_print_objects", {"object_ids": ["757", "Part_2.stl_id_1"], "printer_name": "a1", "plate_number": 2}),
+        ]
+        assert done["skip"]["data"] == {"ran": True, "success": True, "outcome": "accepted"}
 
     def test_an_action_runs_the_tool_with_exactly_the_checked_arguments(self, doors, handed_file):
         calls, _ = doors

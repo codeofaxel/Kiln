@@ -10142,7 +10142,9 @@ def pause_print(keep_temps: bool = True, printer_name: str | None = None) -> dic
 
 @mcp.tool()
 @requires_tier(LicenseTier.PRO)
-def skip_print_objects(object_ids: list[str], plate_number: int = 1) -> dict:
+def skip_print_objects(
+    object_ids: list[str], plate_number: int = 1, printer_name: str | None = None,
+) -> dict:
     """Abandon one or more failed objects on a multi-object plate, mid-print.
 
     When one part on a full plate fails — spaghetti, a knocked-loose object, a
@@ -10180,6 +10182,8 @@ def skip_print_objects(object_ids: list[str], plate_number: int = 1) -> dict:
         object_ids: Backend-specific object identifiers to abandon (see above).
         plate_number: Which plate the ids came from (1-based, default 1).
             Recorded for context; the ids are what the printer acts on.
+        printer_name: Which printer is printing the plate.  Omit for the
+            default printer.
 
     Returns:
         Dict with the skipped objects and a confirmation message, or an error
@@ -10196,7 +10200,10 @@ def skip_print_objects(object_ids: list[str], plate_number: int = 1) -> dict:
             code="NO_OBJECTS",
         )
     try:
-        adapter = _get_adapter()
+        try:
+            adapter, target_name = _resolve_control_target(printer_name)
+        except PrinterNotFoundError:
+            return _unknown_printer_error(printer_name, "skip objects on")
         skip = getattr(adapter, "skip_objects", None)
         if not callable(skip):
             return _error_dict(
@@ -10227,6 +10234,7 @@ def skip_print_objects(object_ids: list[str], plate_number: int = 1) -> dict:
         )
         return {
             "success": verdict.ok,
+            "printer_name": target_name,
             "skipped_objects": list(object_ids),
             "plate_number": plate_number,
             **verdict.to_dict(),

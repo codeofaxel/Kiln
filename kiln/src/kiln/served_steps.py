@@ -542,12 +542,20 @@ ACT_KIND = "act"
 #: characters, no path separators -- a file on the printer is named, never
 #: located.
 _PLAIN_NAME = re.compile(r"[^\x00-\x1f/\\]{1,160}")
+#: An object a skip names: a Bambu label id, an M486 index or a Klipper
+#: object label.  No spaces, ``=`` or ``;``, so an id can never carry a second
+#: argument or a second command into the line the printer is sent.
+_OBJECT_ID = re.compile(r"[A-Za-z0-9_.:+\-]{1,80}")
+_MAX_OBJECT_IDS = 32
 #: The arguments of each tool a served tool may ask this computer to run,
 #: and the shape each value must have.  A tool or an argument not here is
 #: refused, so the list is the fence: nothing commands firmware, sends
 #: G-code, sets a temperature, names a file the servers did not hand over,
 #: or speaks for the person (``hardware_confirmed`` is a person's word and
-#: is never a server's to give).
+#: is never a server's to give).  A cancel and a skip are on it since
+#: 2026-10-17 (Adam): an action runs only once the person's agent has shown
+#: the exact list and they approved it, and each goes through this install's
+#: own door with every check that door makes.
 ACT_TOOLS: dict[str, dict[str, Any]] = {
     "upload_file": {"file_path": "handed_file", "printer_name": "name"},
     "start_print": {
@@ -562,6 +570,8 @@ ACT_TOOLS: dict[str, dict[str, Any]] = {
         "plate_number": "small_int",
     },
     "pause_print": {"printer_name": "name", "keep_temps": bool},
+    "cancel_print": {"printer_name": "name", "preserve_temperatures": bool},
+    "skip_print_objects": {"object_ids": "object_ids", "printer_name": "name", "plate_number": "small_int"},
     "resume_print": {"printer_name": "name", "force": bool},
     "set_speed_profile": {
         "profile": ("silent", "standard", "sport", "ludicrous"),
@@ -645,6 +655,12 @@ def _checked_act_args(shape: dict[str, Any], args: Any) -> dict[str, Any] | None
             if (
                 not isinstance(value, list) or len(value) > 16
                 or any(isinstance(v, bool) or not isinstance(v, int) or not -1 <= v <= 255 for v in value)
+            ):
+                return None
+        elif want == "object_ids":
+            if (
+                not isinstance(value, list) or not 1 <= len(value) <= _MAX_OBJECT_IDS
+                or any(not isinstance(v, str) or not _OBJECT_ID.fullmatch(v) for v in value)
             ):
                 return None
         elif want == "percent":
