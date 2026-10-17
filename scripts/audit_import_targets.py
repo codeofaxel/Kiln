@@ -28,6 +28,22 @@ sits: at module level, in a function, behind ``try/except ImportError``
   fallback that is always taken (judged only where both trees are present).
 * ``skips_forever``   a test skips on a first-party module that exists in no
   tree (``pytest.importorskip``, or a guarded import), so it never runs.
+* ``in_process``      a public source file reaches the private package
+  in-process: imports it, imports a ``kiln.*`` path only it provides, or reads
+  a ``pro_features.<attr>`` off its bridge, guarded or not.
+
+``in_process`` is the class the other three cannot see.  A guarded import
+does not crash, so it passed every check here for as long as this file has
+existed; but a customer's ``pip install kiln3d`` has no private package, so
+the guard's fallback is what every customer gets, paying or not.  Measured
+2026-10-17: about 150 of 206 such sites answered a paying customer with the
+free result, silently.  Public Kiln reaches paid depth over the network
+(``kiln.served_answer``), never by importing it.  Two places may still cross,
+and both are named: a served bridge on ``served_answer.HOSTED_DOORS``, whose
+miss falls back to Kiln's servers (:func:`served_bridges`), and the short
+:data:`INFRASTRUCTURE` list.  Every other site that existed on 2026-10-17 is
+in :data:`KNOWN_IN_PROCESS`, keyed by file, function and target (never a line
+number, which churns); serving one removes its entry, and a stale entry fails.
 
 A module whose top package is not a tree handed in is UNJUDGED and counted,
 never passed: public Kiln's own run cannot see kiln-pro, so its imports of
@@ -48,6 +64,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,6 +82,224 @@ KNOWN: frozenset[tuple[str, str, str]] = frozenset({
     ("kiln/src/kiln/cli/main.py", "kiln.job_router", ""),
 })
 
+#: ``in_process`` sites present when that finding landed (2026-10-17), as
+#: ``(path relative to its tree's parent, function, target)``.  ``function``
+#: is the dotted name of the enclosing def (``"<module>"`` at module level);
+#: ``target`` is the private module, the ``kiln.*`` path only it provides, or
+#: ``<bridge>.pro_features.<attr>``.  Shrink only: serve the capability, then
+#: delete its line.
+KNOWN_IN_PROCESS: frozenset[tuple[str, str, str]] = frozenset({
+    ('kiln/src/kiln/_pro_fault_bridge.py', 'available', 'kiln_pro.device_intelligence.hms_catalog'),
+    ('kiln/src/kiln/_pro_fault_bridge.py', 'decode_fault', 'kiln_pro.device_intelligence.hms_catalog'),
+    ('kiln/src/kiln/_pro_guide_bridge.py', '_reader', 'kiln_pro.device_intelligence'),
+    ('kiln/src/kiln/_pro_guide_bridge.py', 'available', 'kiln_pro.device_intelligence.maintenance_guides'),
+    ('kiln/src/kiln/assembly.py', '_adhesive_hint_for_joint', 'kiln_pro.adhesives'),
+    ('kiln/src/kiln/assembly.py', '_calibration_view_for_clearance', 'kiln_pro.engineering.calibration_coach'),
+    ('kiln/src/kiln/assembly.py', '_running_clearance_view', 'kiln_pro.engineering.running_clearance'),
+    ('kiln/src/kiln/assembly.py', '_screw_hole_detail_for_joint', 'kiln_pro.fasteners_intelligence'),
+    ('kiln/src/kiln/cli/main.py', '<module>', 'kiln.fulfillment.base'),
+    ('kiln/src/kiln/cli/main.py', '<module>', 'kiln_pro.cli.pro_commands'),
+    ('kiln/src/kiln/cli/main.py', '_order_fee_tools', 'kiln.billing'),
+    ('kiln/src/kiln/cli/main.py', '_order_fee_tools', 'kiln_pro.payments.base'),
+    ('kiln/src/kiln/cli/main.py', '_order_fee_tools', 'kiln_pro.payments.manager'),
+    ('kiln/src/kiln/cli/main.py', '_render_smart_monitoring_panel', 'kiln_pro.recovery.auto_recover_engine'),
+    ('kiln/src/kiln/cli/main.py', '_route_printer_for_job', 'kiln.job_router'),
+    ('kiln/src/kiln/cli/main.py', 'order_quote', 'kiln.billing'),
+    ('kiln/src/kiln/community_outbox.py', 'ensure_senders', 'kiln_pro.bridge'),
+    ('kiln/src/kiln/community_outbox.py', 'ensure_senders', 'kiln_pro.bridge.pro_features.register_community_senders'),
+    ('kiln/src/kiln/decoration/managed_assets.py', '_preset_lineage', 'kiln_pro.decoration.preset_lineage'),
+    ('kiln/src/kiln/design_intelligence.py', '_engineering_overlay_loaded', 'kiln_pro.hosted_intelligence'),
+    ('kiln/src/kiln/design_intelligence.py', '_load_pro_overlay_if_available', 'kiln_pro.data_overlays'),
+    ('kiln/src/kiln/design_intelligence.py', '_upgrade_product_name', 'kiln_pro.hosted_intelligence'),
+    ('kiln/src/kiln/design_intelligence.py', 'get_material_profile', 'kiln_pro.bridge'),
+    ('kiln/src/kiln/design_intelligence.py', 'get_material_profile', 'kiln_pro.bridge.pro_features.get_ingested_material_profile'),
+    ('kiln/src/kiln/design_intelligence.py', 'load_pro_overlay_or_empty', 'kiln_pro.data_overlays'),
+    ('kiln/src/kiln/design_reasoning.py', '_edge_policy', 'kiln_pro.bridge'),
+    ('kiln/src/kiln/design_reasoning.py', '_edge_policy', 'kiln_pro.bridge.pro_features.edge_intelligence'),
+    ('kiln/src/kiln/edit_lineage.py', 'Edit.__init__', 'kiln_pro.design_versions.edit_lineage'),
+    ('kiln/src/kiln/edit_lineage.py', 'install', 'kiln_pro.design_versions.edit_lineage'),
+    ('kiln/src/kiln/emboss_generator.py', 'generate_qr_openscad_module', 'kiln_pro.decoration.qr_openscad'),
+    ('kiln/src/kiln/emergency.py', 'EmergencyCoordinator._build_ams_stop_command', 'kiln_pro.device_intelligence.bambu_ams'),
+    ('kiln/src/kiln/front_door.py', '_open_session', 'kiln_pro.design_brief.explicit_attach'),
+    ('kiln/src/kiln/front_door.py', '_speak', 'kiln_pro.design_brief.explicit_attach'),
+    ('kiln/src/kiln/fulfillment_service.py', 'order_service', 'kiln.fulfillment'),
+    ('kiln/src/kiln/generation/validation.py', '_conversion_sentence', 'kiln_pro.mesh_conversion_record'),
+    ('kiln/src/kiln/heartbeat.py', '_is_pro_installed', 'kiln_pro'),
+    ('kiln/src/kiln/original_design.py', 'audit_original_design', 'kiln_pro.bridge'),
+    ('kiln/src/kiln/original_design.py', 'audit_original_design', 'kiln_pro.bridge.pro_features.design_brief'),
+    ('kiln/src/kiln/original_design.py', 'audit_original_design', 'kiln_pro.bridge.pro_features.intent_verification'),
+    ('kiln/src/kiln/original_design.py', 'audit_original_design', 'kiln_pro.bridge.pro_features.printability_overlay'),
+    ('kiln/src/kiln/plate_state.py', 'plan_motion_around_plate', 'kiln_pro.bridge'),
+    ('kiln/src/kiln/plugins/assembly_tools.py', '_AssemblyToolsPlugin.register.compose_assembly_parts', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/color_tools.py', '_ColorToolsPlugin.register.auto_color_by_height', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/color_tools.py', '_ColorToolsPlugin.register.auto_color_by_region', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/consumer_tools.py', '_ConsumerToolsPlugin.register.tax_estimate', 'kiln_pro.tax'),
+    ('kiln/src/kiln/plugins/consumer_tools.py', '_ConsumerToolsPlugin.register.tax_jurisdiction_lookup', 'kiln_pro.tax'),
+    ('kiln/src/kiln/plugins/consumer_tools.py', '_ConsumerToolsPlugin.register.tax_jurisdictions', 'kiln_pro.tax'),
+    ('kiln/src/kiln/plugins/decoration_library_tools.py', '_DecorationLibraryPlugin.register.apply_decoration', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/decoration_library_tools.py', '_DecorationLibraryPlugin.register.list_decorations', 'kiln_pro.design_versions.decoration_presets'),
+    ('kiln/src/kiln/plugins/decoration_library_tools.py', '_DecorationLibraryPlugin.register.save_decoration', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/decoration_library_tools.py', '_not_found_error', 'kiln_pro.decoration.decoration_lookup'),
+    ('kiln/src/kiln/plugins/design_reasoning_tools.py', '_DesignReasoningToolsPlugin.register.apply_design_reinforcements', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/design_reasoning_tools.py', '_DesignReasoningToolsPlugin.register.check_print_readiness', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/design_reasoning_tools.py', '_DesignReasoningToolsPlugin.register.iterate_design', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/design_reasoning_tools.py', '_DesignReasoningToolsPlugin.register.optimize_print_orientation', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/design_reasoning_tools.py', '_DesignReasoningToolsPlugin.register.optimize_template_params', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/design_rebuild_tools.py', '_DesignRebuildPlugin.register.rebuild_design', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/design_tools.py', '_DesignToolsPlugin.register.compile_scad', 'kiln_pro.bridge'),
+    ('kiln/src/kiln/plugins/design_tools.py', '_DesignToolsPlugin.register.compile_scad', 'kiln_pro.bridge.pro_features.fastener_hole_advice'),
+    ('kiln/src/kiln/plugins/design_tools.py', '_DesignToolsPlugin.register.compile_scad', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/design_tools.py', '_DesignToolsPlugin.register.recommend_design_material', 'kiln_pro.skin_contact'),
+    ('kiln/src/kiln/plugins/design_tools.py', '_DesignToolsPlugin.register.tweak_and_compile_scad', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/enterprise_tools.py', '_EnterpriseToolsPlugin.register.configure_sso', 'kiln.sso'),
+    ('kiln/src/kiln/plugins/enterprise_tools.py', '_EnterpriseToolsPlugin.register.encryption_status', 'kiln.gcode_encryption'),
+    ('kiln/src/kiln/plugins/enterprise_tools.py', '_EnterpriseToolsPlugin.register.manage_team_member', 'kiln.teams'),
+    ('kiln/src/kiln/plugins/enterprise_tools.py', '_EnterpriseToolsPlugin.register.printer_usage_summary', 'kiln_pro.billing.printer_billing'),
+    ('kiln/src/kiln/plugins/enterprise_tools.py', '_EnterpriseToolsPlugin.register.rotate_encryption_key', 'kiln.gcode_encryption'),
+    ('kiln/src/kiln/plugins/enterprise_tools.py', '_EnterpriseToolsPlugin.register.sso_exchange_code', 'kiln.sso'),
+    ('kiln/src/kiln/plugins/enterprise_tools.py', '_EnterpriseToolsPlugin.register.sso_login_url', 'kiln.sso'),
+    ('kiln/src/kiln/plugins/enterprise_tools.py', '_EnterpriseToolsPlugin.register.sso_status', 'kiln.sso'),
+    ('kiln/src/kiln/plugins/enterprise_tools.py', '_EnterpriseToolsPlugin.register.uptime_report', 'kiln.uptime'),
+    ('kiln/src/kiln/plugins/fleet_tools.py', '_FleetToolsPlugin.register.fleet_job_status', 'kiln.fleet_orchestrator'),
+    ('kiln/src/kiln/plugins/fleet_tools.py', '_FleetToolsPlugin.register.fleet_submit_job', 'kiln.fleet_orchestrator'),
+    ('kiln/src/kiln/plugins/fleet_tools.py', '_FleetToolsPlugin.register.fleet_utilization', 'kiln.fleet_orchestrator'),
+    ('kiln/src/kiln/plugins/fleet_tools.py', '_FleetToolsPlugin.register.route_print_job', 'kiln.job_router'),
+    ('kiln/src/kiln/plugins/fleet_tools.py', '_FleetToolsPlugin.register.route_print_job', 'kiln.placement_fleet'),
+    ('kiln/src/kiln/plugins/fleet_tools.py', '_survey_plates', 'kiln.placement_fleet'),
+    ('kiln/src/kiln/plugins/fulfillment_tools.py', '_FulfillmentToolsPlugin.register.fulfillment_order', 'kiln.fulfillment.intelligence'),
+    ('kiln/src/kiln/plugins/fulfillment_tools.py', '_FulfillmentToolsPlugin.register.fulfillment_order', 'kiln_pro.payments.base'),
+    ('kiln/src/kiln/plugins/fulfillment_tools.py', '_FulfillmentToolsPlugin.register.fulfillment_quote', 'kiln_pro.payments.base'),
+    ('kiln/src/kiln/plugins/generation_ai_tools.py', '_GenerationAIToolsPlugin.register.download_generated_model', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/generation_ai_tools.py', '_GenerationAIToolsPlugin.register.generate_and_print', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/generation_ai_tools.py', '_GenerationAIToolsPlugin.register.generate_template_variations', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/generation_ai_tools.py', '_GenerationAIToolsPlugin.register.smart_generate_from_template', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/generation_tools.py', '_GenerationToolsPlugin.register.generate_model_with_provider', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/learning_tools.py', '_plate_rooms', 'kiln.placement_fleet'),
+    ('kiln/src/kiln/plugins/learning_tools.py', '_recommend_calibration_overlay', 'kiln_pro.engineering.calibration_coach'),
+    ('kiln/src/kiln/plugins/mesh_tools.py', '_MeshToolsPlugin.register._repair_mesh_impl', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/mesh_tools.py', '_MeshToolsPlugin.register.boolean_mesh_op', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/mesh_tools.py', '_MeshToolsPlugin.register.center_model_on_bed', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/mesh_tools.py', '_MeshToolsPlugin.register.compose_models', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/mesh_tools.py', '_MeshToolsPlugin.register.compose_part_from_primitives', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/mesh_tools.py', '_MeshToolsPlugin.register.extract_model_from_3mf', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/mesh_tools.py', '_MeshToolsPlugin.register.hollow_mesh_model', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/mesh_tools.py', '_MeshToolsPlugin.register.merge_mesh_files', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/mesh_tools.py', '_MeshToolsPlugin.register.mirror_mesh_model', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/mesh_tools.py', '_MeshToolsPlugin.register.remove_mesh_floating_regions', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/mesh_tools.py', '_MeshToolsPlugin.register.rescale_model', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/mesh_tools.py', '_MeshToolsPlugin.register.scale_mesh_to_fit', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/mesh_tools.py', '_MeshToolsPlugin.register.simplify_mesh_model', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/mesh_tools.py', '_MeshToolsPlugin.register.splice_mesh_at_z', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/mesh_tools.py', '_MeshToolsPlugin.register.split_mesh_by_component', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/mesh_tools.py', '_MeshToolsPlugin.register.thicken_mesh_walls', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/mesh_tools.py', '_finish_edges_tool', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/printability_tools.py', '_PrintabilityToolsPlugin.register.analyze_printability', 'kiln_pro.bridge'),
+    ('kiln/src/kiln/plugins/printability_tools.py', '_PrintabilityToolsPlugin.register.analyze_printability', 'kiln_pro.bridge.pro_features.fastener_hole_advice'),
+    ('kiln/src/kiln/plugins/recovery_tools.py', '_RecoveryToolsPlugin.register.analyze_print_failure_smart', 'kiln_pro.recovery.nozzle_wear_hypothesis'),
+    ('kiln/src/kiln/plugins/recovery_tools.py', '_RecoveryToolsPlugin.register.complete_print_recovery', 'kiln_pro.bridge'),
+    ('kiln/src/kiln/plugins/recovery_tools.py', '_RecoveryToolsPlugin.register.complete_print_recovery', 'kiln_pro.bridge.pro_features.recovery'),
+    ('kiln/src/kiln/plugins/recovery_tools.py', '_RecoveryToolsPlugin.register.complete_print_recovery', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/recovery_tools.py', '_RecoveryToolsPlugin.register.complete_print_recovery', 'kiln_pro.recovery.failure_rerouter'),
+    ('kiln/src/kiln/plugins/recovery_tools.py', '_RecoveryToolsPlugin.register.complete_print_recovery', 'kiln_pro.recovery.outcome_learning'),
+    ('kiln/src/kiln/plugins/recovery_tools.py', '_RecoveryToolsPlugin.register.plan_failure_recovery', 'kiln_pro.recovery.nozzle_wear_hypothesis'),
+    ('kiln/src/kiln/plugins/recovery_tools.py', '_RecoveryToolsPlugin.register.start_print_recovery', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/slicer_tools.py', '_maybe_auto_assembly_manual', 'kiln_pro.manuals.auto_trigger'),
+    ('kiln/src/kiln/plugins/slicer_tools.py', '_maybe_overlay_calibration', 'kiln_pro.bridge'),
+    ('kiln/src/kiln/plugins/slicer_tools.py', '_maybe_overlay_calibration', 'kiln_pro.bridge.pro_features.record_slice_for_input'),
+    ('kiln/src/kiln/plugins/slicer_tools.py', '_maybe_overlay_calibration', 'kiln_pro.engineering.calibration_coach'),
+    ('kiln/src/kiln/plugins/step_tools.py', '_StepToolsPlugin.register.import_step_file', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/step_tools.py', '_StepToolsPlugin.register.import_step_file', 'kiln_pro.step_facts'),
+    ('kiln/src/kiln/plugins/tier_diagnostic_tools.py', '_walk_resolution_chain', 'kiln_pro.enterprise.licensing'),
+    ('kiln/src/kiln/plugins/validation_pipeline_tools.py', '_ValidationPipelinePlugin.register.prepare_ai_model_for_print', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/version_tools.py', '_VersionToolsPlugin.register.rollback_design_version', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/plugins/version_tools.py', '_VersionToolsPlugin.register.save_design_version', 'kiln_pro.bridge'),
+    ('kiln/src/kiln/plugins/version_tools.py', '_VersionToolsPlugin.register.save_design_version', 'kiln_pro.bridge.pro_features.enrich_version'),
+    ('kiln/src/kiln/plugins/version_tools.py', '_VersionToolsPlugin.register.save_design_version', 'kiln_pro.bridge.pro_features.register_saved_version'),
+    ('kiln/src/kiln/plugins/version_tools.py', '_VersionToolsPlugin.register.save_design_version', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/print_health_monitor.py', 'PrintHealthMonitor._build_jsonl_envelope', 'kiln_pro.recovery.auto_recover_engine'),
+    ('kiln/src/kiln/print_health_monitor.py', 'PrintHealthMonitor._maybe_record_predictive_signals', 'kiln_pro.recovery.predictive'),
+    ('kiln/src/kiln/printability.py', '_analysis_runner', 'kiln_pro.bridge'),
+    ('kiln/src/kiln/printability.py', '_analysis_runner', 'kiln_pro.bridge.pro_features.run_mesh_analysis'),
+    ('kiln/src/kiln/printability.py', '_analyze_printability_here', 'kiln_pro.bridge'),
+    ('kiln/src/kiln/printability.py', '_analyze_printability_here', 'kiln_pro.bridge.pro_features.printability_overlay'),
+    ('kiln/src/kiln/printability.py', '_material_physics_from_overlay', 'kiln_pro.bridge'),
+    ('kiln/src/kiln/printability.py', '_material_physics_from_overlay', 'kiln_pro.bridge.pro_features.printability_overlay'),
+    ('kiln/src/kiln/printability.py', '_material_wall_floor', 'kiln_pro.bridge'),
+    ('kiln/src/kiln/printability.py', '_material_wall_floor', 'kiln_pro.bridge.pro_features.printability_overlay'),
+    ('kiln/src/kiln/printability.py', '_tell_whoever_runs_this_machine', 'kiln_pro.bridge'),
+    ('kiln/src/kiln/printability.py', '_tell_whoever_runs_this_machine', 'kiln_pro.bridge.pro_features.ops_alert'),
+    ('kiln/src/kiln/printer_intelligence.py', '_overlay_for_caller', 'kiln_pro.data_overlays'),
+    ('kiln/src/kiln/printers/bambu.py', 'BambuAdapter._on_message', 'kiln_pro.nozzle_intelligence.sensor_signal'),
+    ('kiln/src/kiln/printers/elegoo.py', 'ElegooAdapter._handle_message', 'kiln_pro.nozzle_intelligence.sensor_signal'),
+    ('kiln/src/kiln/printers/moonraker.py', 'MoonrakerWebSocketMonitor._maybe_record_flow_anomaly', 'kiln_pro.nozzle_intelligence.sensor_signal'),
+    ('kiln/src/kiln/printers/octoprint.py', 'OctoPrintAdapter._fire_extrusion_event', 'kiln_pro.nozzle_intelligence.sensor_signal'),
+    ('kiln/src/kiln/printers/print_gate.py', '_maybe_enrich_block', 'kiln_pro.print_fix.engine'),
+    ('kiln/src/kiln/printers/prusalink.py', 'PrusaLinkAdapter._maybe_fire_flow_anomaly', 'kiln_pro.nozzle_intelligence.sensor_signal'),
+    ('kiln/src/kiln/reference_compare.py', 'compare_with_goal', 'kiln_pro.design_brief.explicit_attach'),
+    ('kiln/src/kiln/reference_compare.py', 'compare_with_picture', 'kiln_pro.design_brief.explicit_attach'),
+    ('kiln/src/kiln/reference_compare.py', 'comparison_available', 'kiln_pro.design_brief.explicit_attach'),
+    ('kiln/src/kiln/server.py', '<module>', 'kiln.billing'),
+    ('kiln/src/kiln/server.py', '<module>', 'kiln.billing_alerts'),
+    ('kiln/src/kiln/server.py', '<module>', 'kiln.fulfillment'),
+    ('kiln/src/kiln/server.py', '<module>', 'kiln_pro'),
+    ('kiln/src/kiln/server.py', '<module>', 'kiln_pro.payments.base'),
+    ('kiln/src/kiln/server.py', '<module>', 'kiln_pro.payments.manager'),
+    ('kiln/src/kiln/server.py', '_auto_derive_brief_id', 'kiln_pro.intent_verification'),
+    ('kiln/src/kiln/server.py', '_ensure_internal_tool_plugins_registered', 'kiln_pro'),
+    ('kiln/src/kiln/server.py', '_finish_decoration_result', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/server.py', '_get_fulfillment_monitor', 'kiln.fulfillment_monitor'),
+    ('kiln/src/kiln/server.py', '_get_payment_mgr', 'kiln_pro.payments.circle_provider'),
+    ('kiln/src/kiln/server.py', '_get_payment_mgr', 'kiln_pro.payments.stripe_provider'),
+    ('kiln/src/kiln/server.py', '_pro_bridge', 'kiln_pro.bridge'),
+    ('kiln/src/kiln/server.py', '_record_local_tool_call', 'kiln_pro.bridge'),
+    ('kiln/src/kiln/server.py', '_record_local_tool_call', 'kiln_pro.bridge.pro_features.record_local_tool_call'),
+    ('kiln/src/kiln/server.py', '_resolve_brief_context', 'kiln_pro.design_brief.context'),
+    ('kiln/src/kiln/server.py', 'client_cost_report', 'kiln.project_costs'),
+    ('kiln/src/kiln/server.py', 'create_project', 'kiln.project_costs'),
+    ('kiln/src/kiln/server.py', 'decorate_surface', 'kiln_pro.bridge'),
+    ('kiln/src/kiln/server.py', 'decorate_surface', 'kiln_pro.bridge.pro_features.wall_text'),
+    ('kiln/src/kiln/server.py', 'generate_from_template', 'kiln_pro.bridge'),
+    ('kiln/src/kiln/server.py', 'generate_from_template', 'kiln_pro.bridge.pro_features.fastener_hole_advice'),
+    ('kiln/src/kiln/server.py', 'generate_from_template', 'kiln_pro.bridge.pro_features.intent_verification'),
+    ('kiln/src/kiln/server.py', 'generate_from_template', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/server.py', 'log_project_cost', 'kiln.project_costs'),
+    ('kiln/src/kiln/server.py', 'merge_stl', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/server.py', 'monitor_print', 'kiln_pro.recovery.auto_recover_engine'),
+    ('kiln/src/kiln/server.py', 'preflight_check', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/server.py', 'project_cost_summary', 'kiln.project_costs'),
+    ('kiln/src/kiln/server.py', 'rotate_model', 'kiln_pro.plugins.git_render_tools'),
+    ('kiln/src/kiln/server.py', 'smart_reprint', 'kiln_pro.intent_verification'),
+    ('kiln/src/kiln/slicer_profiles.py', 'start_gcode_override_from_printer', 'kiln_pro.bridge'),
+    ('kiln/src/kiln/slicer_profiles.py', 'start_gcode_override_from_printer', 'kiln_pro.bridge.pro_features.start_gcode_override'),
+    ('kiln/src/kiln/start_narrative.py', '_pro_block', 'kiln_pro.bridge'),
+    ('kiln/src/kiln/start_narrative.py', '_pro_block', 'kiln_pro.bridge.pro_features.device_intelligence'),
+    ('kiln/src/kiln/start_narrative.py', 'start_stage_line', 'kiln_pro.bridge'),
+    ('kiln/src/kiln/start_narrative.py', 'start_stage_line', 'kiln_pro.bridge.pro_features.device_intelligence'),
+    ('kiln/src/kiln/store_scope.py', 'current_tier', 'kiln_pro'),
+    ('kiln/src/kiln/store_scope.py', 'read_cloud_half', 'kiln_pro.bridge'),
+})
+
+#: Public modules whose JOB is to hand a name over to the private package
+#: where it is installed, so their crossing is the mechanism rather than a
+#: capability.  Each says why; keep this list short.
+INFRASTRUCTURE: dict[str, str] = {
+    "kiln.licensing": (
+        "the plan every gate imports: on Kiln's server it is the private "
+        "package's per-request tier, on a plain install the signed-in account's "
+        "plan (kiln.account_plan); both answer per caller"
+    ),
+}
+
+#: A served bridge: a module named ``_pro_<thing>_bridge`` that is on
+#: ``served_answer.HOSTED_DOORS`` as ``served_answer``.  Other modules on that
+#: roster (the server, a plugin) carry a served door AND other code, so their
+#: crossings are judged like anyone's.
+_BRIDGE_NAME = re.compile(r"(?:^|\.)_pro_\w+_bridge$")
+
+#: Bridge attributes that ask a presence or process question, not for a
+#: capability; the tier-seam check owns the second.
+_BRIDGE_PROBES = frozenset({"is_available", "has_valid_license"})
+
 #: The two first-party top packages: public Kiln, and the private package.
 PUBLIC_TOP = "kiln"
 PRIVATE_TOP = "kiln_pro"
@@ -80,12 +315,18 @@ class Finding:
     module: str
     name: str
     guarded: bool
+    function: str = ""
 
     @property
     def key(self) -> tuple[str, str, str]:
+        if self.kind == "in_process":
+            return (self.path, self.function, self.module)
         return (self.path, self.module, self.name)
 
     def __str__(self) -> str:
+        if self.kind == "in_process":
+            return (f"{self.kind:14s} {self.path}:{self.line}  {self.function} -> {self.module}"
+                    "  (a plain install never runs this; serve it through kiln.served_answer)")
         what = f"{self.module}.{self.name}" if self.name else self.module
         how = " (inside try/except, so it fails silently)" if self.guarded else ""
         return f"{self.kind:14s} {self.path}:{self.line}  {what}{how}"
@@ -119,6 +360,9 @@ class _Index:
                 dotted = ".".join([top, *folder.relative_to(root).parts])
                 self.files.setdefault(dotted, folder)
         self._names: dict[str, set[str] | None] = {}
+        public_root = self.trees.get(PUBLIC_TOP)
+        #: Served bridges exempt from ``in_process`` (see :func:`served_bridges`).
+        self.bridges = served_bridges(public_root) if public_root else frozenset()
 
     def judged(self, module: str) -> bool:
         return module.split(".")[0] in self.trees
@@ -400,6 +644,96 @@ def _judge_import(
     return []
 
 
+def served_bridges(public_root: Path) -> frozenset[str]:
+    """The served bridges named on ``served_answer.HOSTED_DOORS``, read from
+    the public tree's own file without importing it."""
+    path = public_root / "served_answer.py"
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, UnicodeDecodeError):
+        return frozenset()
+    for node in tree.body:
+        target = node.target if isinstance(node, ast.AnnAssign) else (node.targets[0] if isinstance(node, ast.Assign) and len(node.targets) == 1 else None)
+        if isinstance(target, ast.Name) and target.id == "HOSTED_DOORS" and isinstance(node.value, ast.Dict):
+            found = set()
+            for key, value in zip(node.value.keys, node.value.values):
+                kind = value.elts[0] if isinstance(value, ast.Tuple) and value.elts else None
+                if (
+                    isinstance(key, ast.Constant) and isinstance(key.value, str)
+                    and isinstance(kind, ast.Constant) and kind.value == "served_answer"
+                    and _BRIDGE_NAME.search(key.value)
+                ):
+                    found.add(key.value)
+            return frozenset(found)
+    return frozenset()
+
+
+def _crossing_target(index: _Index, target: str) -> str | None:
+    """*target* when importing it reaches the private package, else ``None``."""
+    top = target.split(".")[0]
+    if top == PRIVATE_TOP:
+        return target
+    if top == PUBLIC_TOP and not index.exists(target):
+        # A kiln.* path the public tree does not hold: one only the private
+        # package provides (a compat shim), or one nothing provides.
+        return target
+    return None
+
+
+def _in_process(tree: ast.Module, path: Path, shown: str, index: _Index, module: str) -> list[Finding]:
+    """Every in-process crossing in one public source file, with the dotted
+    name of the def it sits in."""
+    package = module if path.name == "__init__.py" else module.rpartition(".")[0]
+    bridge_names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module and _absolute(node, package).split(".")[0] == PRIVATE_TOP:
+            for alias in node.names:
+                if alias.name == "pro_features":
+                    bridge_names.add(alias.asname or alias.name)
+    found: list[Finding] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add(node: ast.AST, function: str, target: str) -> None:
+        if (function, target) not in seen:
+            seen.add((function, target))
+            found.append(Finding("in_process", shown, node.lineno, target, "", False, function))
+
+    def walk(node: ast.AST, stack: list[str]) -> None:
+        for child in ast.iter_child_nodes(node):
+            here = stack
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                here = [*stack, child.name]
+            function = ".".join(stack) or "<module>"
+            if isinstance(child, ast.If) and _is_type_checking(child.test):
+                for sub in child.orelse:
+                    walk(sub, stack)
+                continue
+            if isinstance(child, ast.Import):
+                for alias in child.names:
+                    hit = _crossing_target(index, alias.name)
+                    if hit:
+                        add(child, function, hit)
+            elif isinstance(child, ast.ImportFrom):
+                source = _absolute(child, package)
+                hit = _crossing_target(index, source) if source else None
+                if hit:
+                    add(child, function, hit)
+            elif isinstance(child, ast.Attribute) and isinstance(child.value, ast.Name) and child.value.id in bridge_names:
+                if child.attr not in _BRIDGE_PROBES:
+                    add(child, function, f"{PRIVATE_TOP}.bridge.pro_features.{child.attr}")
+            elif (
+                isinstance(child, ast.Call) and isinstance(child.func, ast.Name) and child.func.id == "getattr"
+                and len(child.args) >= 2 and isinstance(child.args[0], ast.Name) and child.args[0].id in bridge_names
+                and isinstance(child.args[1], ast.Constant) and isinstance(child.args[1].value, str)
+                and child.args[1].value not in _BRIDGE_PROBES
+            ):
+                add(child, function, f"{PRIVATE_TOP}.bridge.pro_features.{child.args[1].value}")
+            walk(child, here)
+
+    walk(tree, [])
+    return found
+
+
 def _scan_file(path: Path, shown: str, index: _Index, *, is_test: bool, unjudged: set[str]) -> list[Finding]:
     """Findings for one file.  On a plain install only public Kiln exists, so
     a public file's unguarded import of anything the private package
@@ -424,6 +758,13 @@ def _scan_file(path: Path, shown: str, index: _Index, *, is_test: bool, unjudged
                 if mark not in seen:
                     seen.add(mark)
                     found.append(finding)
+    if (
+        not is_test
+        and index.is_public(path)
+        and module not in INFRASTRUCTURE
+        and module not in index.bridges
+    ):
+        found += _in_process(tree, path, shown, index, module)
     if is_test:
         for call in ast.walk(tree):
             if (
@@ -496,10 +837,25 @@ def read_shims(path: Path) -> dict[str, str]:
     raise ValueError(f"no _COMPAT_SHIMS literal in {path}")
 
 
-def judge(found: list[Finding], known: frozenset[tuple[str, str, str]]) -> tuple[list[Finding], list[tuple[str, str, str]]]:
-    """``(new findings, stale known entries)``."""
-    keys = {f.key for f in found}
-    return [f for f in found if f.key not in known], sorted(k for k in known if k not in keys)
+def judge(
+    found: list[Finding],
+    known: frozenset[tuple[str, str, str]],
+    known_in_process: frozenset[tuple[str, str, str]] = frozenset(),
+) -> tuple[list[Finding], list[tuple[str, str, str]]]:
+    """``(new findings, stale known entries)``, each kind against its own list."""
+    crossing = [f for f in found if f.kind == "in_process"]
+    other = [f for f in found if f.kind != "in_process"]
+    keys = {f.key for f in other}
+    crossing_keys = {f.key for f in crossing}
+    new = [f for f in other if f.key not in known] + [f for f in crossing if f.key not in known_in_process]
+    stale = sorted(k for k in known if k not in keys) + sorted(k for k in known_in_process if k not in crossing_keys)
+    return new, stale
+
+
+def seed_in_process(found: list[Finding]) -> str:
+    """The :data:`KNOWN_IN_PROCESS` body for today's crossings, one per line."""
+    keys = sorted({f.key for f in found if f.kind == "in_process"})
+    return "\n".join(f"    {key!r}," for key in keys)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -508,6 +864,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tests", action="append", default=[], help="extra test folder")
     parser.add_argument("--known-from", default="", help="Python file whose KNOWN replaces this one's")
     parser.add_argument("--shims-from", default="", help="the private package's __init__.py, read for its compat-shim map")
+    parser.add_argument("--seed-in-process", action="store_true", help="print the KNOWN_IN_PROCESS body for today's crossings and exit")
     args = parser.parse_args(argv)
 
     trees = {"kiln": PUBLIC_TREE}
@@ -516,15 +873,19 @@ def main(argv: list[str] | None = None) -> int:
         top, _, path = spec.partition("=")
         trees[top] = Path(path)
     tests += [Path(t) for t in args.tests]
-    known = KNOWN
+    known, known_in_process = KNOWN, KNOWN_IN_PROCESS
     if args.known_from:
         namespace: dict = {}
         exec(compile(Path(args.known_from).read_text(encoding="utf-8"), args.known_from, "exec"), namespace)
         known = frozenset(namespace["KNOWN"])
+        known_in_process = frozenset(namespace.get("KNOWN_IN_PROCESS", ()))
 
     shims = read_shims(Path(args.shims_from)) if args.shims_from else None
     found, unjudged = scan(trees, test_dirs=tests, shown_from=REPO, provided=shims)
-    new, stale = judge(found, known)
+    if args.seed_in_process:
+        print(seed_in_process(found))
+        return 0
+    new, stale = judge(found, known, known_in_process)
     for finding in new:
         print(f"NEW    {finding}")
     for entry in stale:

@@ -48,7 +48,13 @@ def _tree(tmp_path: Path, files: dict[str, str]) -> Path:
 
 
 def _kinds(found) -> list[tuple[str, str, str]]:
-    return sorted((f.kind, f.module, f.name) for f in found)
+    """The crash and dead-fallback kinds.  Every one of these fixtures also
+    crosses in-process, which ``TestInProcessCrossings`` judges on its own."""
+    return sorted((f.kind, f.module, f.name) for f in found if f.kind != "in_process")
+
+
+def _crossings(found) -> list[tuple[str, str]]:
+    return sorted((f.function, f.module) for f in found if f.kind == "in_process")
 
 
 ORDER_COMMAND = '''
@@ -63,7 +69,7 @@ class TestTheLiveTree:
         found, _ = gate.scan(
             {"kiln": gate.PUBLIC_TREE}, test_dirs=[gate.PUBLIC_TESTS], shown_from=_REPO_ROOT,
         )
-        new, stale = gate.judge(found, gate.KNOWN)
+        new, stale = gate.judge(found, gate.KNOWN, gate.KNOWN_IN_PROCESS)
         assert not new, "a public import names something a plain install does not have:\n" + "\n".join(map(str, new))
         assert not stale, f"fixed — delete from KNOWN in scripts/audit_import_targets.py: {stale}"
 
@@ -102,14 +108,20 @@ class TestTheIncident:
 
 
 class TestWhatAPlainInstallHas:
-    def test_a_guarded_import_of_the_private_package_is_the_allowed_pattern(self, tmp_path):
+    def test_a_guarded_import_of_the_private_package_is_an_in_process_crossing(self, tmp_path):
+        """This case used to assert the guarded import was ALLOWED: it does
+        not crash.  It was inverted on 2026-10-17, not deleted, because the
+        guard's fallback is what every customer's install runs, paying or
+        not, and about 150 such sites were answering paying customers with
+        the free result.  A guard still keeps it out of ``needs_private``."""
         root = _tree(tmp_path, {"kiln/__init__.py": "", "kiln/a.py": (
             f"try:\n    from {PRO}.bridge import pro_features\nexcept ImportError:\n    pro_features = None\n"
             "import contextlib\n"
             f"with contextlib.suppress(ImportError):\n    import {PRO}\n"
         )})
         found, unjudged = gate.scan({"kiln": root})
-        assert found == []
+        assert _kinds(found) == []
+        assert _crossings(found) == [("<module>", PRO), ("<module>", f"{PRO}.bridge")]
         assert {f"{PRO}.bridge", PRO} <= unjudged
 
     def test_an_unguarded_import_of_the_private_package_is_caught(self, tmp_path):
@@ -153,6 +165,92 @@ class TestWhatAPlainInstallHas:
         assert _kinds(found) == [("needs_private", "kiln.server", "gone")]
 
 
+class TestInProcessCrossings:
+    """Public Kiln reaches paid depth over the network, never in-process."""
+
+    def test_each_kind_of_crossing_is_named_with_the_def_it_sits_in(self, tmp_path):
+        root = _tree(tmp_path, {"kiln/__init__.py": "", "kiln/a.py": (
+            "def recommend(text):\n"
+            "    try:\n"
+            f"        from {PRO}.depth import advise\n"
+            "    except ImportError:\n"
+            "        return None\n"
+            "    return advise(text)\n"
+            "class Planner:\n"
+            "    def plan(self):\n"
+            f"        from {PRO}.bridge import pro_features as pf\n"
+            "        return pf.recovery.plan(), getattr(pf, 'fleet', None), pf.is_available\n"
+            "def route():\n"
+            "    try:\n"
+            "        from kiln.job_router import route\n"
+            "    except ImportError:\n"
+            "        return None\n"
+        )})
+        found, _ = gate.scan({"kiln": root}, shown_from=tmp_path)
+        crossings = sorted((f.function, f.module) for f in found if f.kind == "in_process")
+        assert crossings == [
+            ("Planner.plan", f"{PRO}.bridge"),
+            ("Planner.plan", f"{PRO}.bridge.pro_features.fleet"),
+            ("Planner.plan", f"{PRO}.bridge.pro_features.recovery"),
+            ("recommend", f"{PRO}.depth"),
+            ("route", "kiln.job_router"),
+        ]
+
+    def test_a_served_bridge_on_the_roster_and_the_named_infrastructure_may_cross(self, tmp_path):
+        crossing = f"try:\n    import {PRO}.depth\nexcept ImportError:\n    pass\n"
+        root = _tree(tmp_path, {
+            "kiln/__init__.py": "",
+            "kiln/served_answer.py": (
+                "HOSTED_DOORS: dict = {\n"
+                "    'kiln._pro_depth_bridge': ('served_answer', 'depth; a miss asks the servers'),\n"
+                "    'kiln._pro_quiet_bridge': ('infrastructure', 'not a served answer'),\n"
+                "    'kiln.plugins.mixed': ('served_answer', 'a served door beside other code'),\n"
+                "}\n"
+            ),
+            "kiln/_pro_depth_bridge.py": crossing,
+            "kiln/_pro_quiet_bridge.py": crossing,
+            "kiln/plugins/__init__.py": "",
+            "kiln/plugins/mixed.py": crossing,
+            "kiln/_pro_unlisted_bridge.py": crossing,
+            "kiln/licensing.py": crossing,
+        })
+        found, _ = gate.scan({"kiln": root}, shown_from=tmp_path)
+        judged = sorted(f.path for f in found if f.kind == "in_process")
+        assert judged == [
+            "kiln/_pro_quiet_bridge.py",
+            "kiln/_pro_unlisted_bridge.py",
+            "kiln/plugins/mixed.py",
+        ]
+
+    def test_the_known_list_is_keyed_by_function_not_line(self, tmp_path):
+        body = f"def a():\n    try:\n        import {PRO}.x\n    except ImportError:\n        pass\n"
+        root = _tree(tmp_path, {"kiln/__init__.py": "", "kiln/m.py": "\n\n\n" + body})
+        found, _ = gate.scan({"kiln": root}, shown_from=tmp_path)
+        known = frozenset({("kiln/m.py", "a", f"{PRO}.x")})
+        assert gate.judge(found, frozenset(), known) == ([], [])
+
+    def test_a_crossing_that_was_served_is_stale_until_its_line_goes(self):
+        known = frozenset({("kiln/src/kiln/m.py", "a", f"{PRO}.x")})
+        new, stale = gate.judge([], frozenset(), known)
+        assert new == [] and stale == [("kiln/src/kiln/m.py", "a", f"{PRO}.x")]
+
+    def test_a_new_crossing_beside_a_known_one_is_new(self, tmp_path):
+        body = (
+            f"def a():\n    try:\n        import {PRO}.x\n    except ImportError:\n        pass\n"
+            f"def b():\n    try:\n        import {PRO}.x\n    except ImportError:\n        pass\n"
+        )
+        root = _tree(tmp_path, {"kiln/__init__.py": "", "kiln/m.py": body})
+        found, _ = gate.scan({"kiln": root}, shown_from=tmp_path)
+        new, _ = gate.judge(found, frozenset(), frozenset({("kiln/m.py", "a", f"{PRO}.x")}))
+        assert [(f.function, f.module) for f in new] == [("b", f"{PRO}.x")]
+
+    def test_the_live_roster_exempts_only_bridges(self):
+        bridges = gate.served_bridges(gate.PUBLIC_TREE)
+        assert bridges, "no served bridge read from served_answer.HOSTED_DOORS"
+        assert all(b.rsplit(".", 1)[-1].startswith("_pro_") for b in bridges)
+        assert "kiln.server" not in bridges
+
+
 class TestWithBothTrees:
     """The run that has the private package's tree too: kiln-pro's."""
 
@@ -177,7 +275,10 @@ class TestWithBothTrees:
             {"kiln/a.py": "try:\n    from kiln.ordering import base\nexcept ImportError:\n    base = None\n"},
             {f"{PRO}/ordering/__init__.py": "", f"{PRO}/ordering/base.py": ""},
         )
-        assert found == []
+        assert _kinds(found) == []
+        # It resolves, and it is still a crossing: the shim path exists only
+        # where the private package is installed.
+        assert _crossings(found) == [("<module>", "kiln.ordering")]
 
     def test_a_test_that_skips_on_a_module_that_exists_nowhere_never_runs(self, tmp_path):
         found, _ = self._both(tmp_path, {}, {}, {"tests/test_x.py": "import pytest\nmod = pytest.importorskip('kiln.gone_forever')\n"})
@@ -203,10 +304,10 @@ class TestTheKnownList:
         root = _tree(tmp_path, {"kiln/__init__.py": "", "kiln/cli.py": ORDER_COMMAND + f"\ndef other():\n    import {PRO}.ledger\n"})
         found, _ = gate.scan({"kiln": root}, shown_from=tmp_path)
         known = frozenset({("kiln/cli.py", "kiln.fulfillment", "")})
-        new, _ = gate.judge(found, known)
+        new, _ = gate.judge(found, known, frozenset(f.key for f in found if f.kind == "in_process"))
         assert [f.module for f in new] == [f"{PRO}.ledger"]
 
 
-@pytest.mark.parametrize("kind", ["needs_private", "missing_module", "skips_forever"])
+@pytest.mark.parametrize("kind", ["needs_private", "missing_module", "skips_forever", "in_process"])
 def test_every_kind_is_explained_in_the_checks_own_words(kind):
     assert kind in (gate.__doc__ or "")
