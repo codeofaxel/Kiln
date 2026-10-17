@@ -91,6 +91,7 @@ from kiln.printers.base import (
     diagnosed_state,
     find_ffmpeg,
     format_error_code,
+    is_resume_mode_3mf,
     outcome_printer_name,
 )
 from kiln.printers.command_verdict import CommandVerdict
@@ -5162,6 +5163,12 @@ class BambuAdapter(PrinterAdapter):
             # respect, so the plate's own mapping supersedes it; an
             # explicit mapping long enough to address every filament is
             # left exactly as the caller gave it.
+            #
+            # How many filaments the plate uses, read from its own record;
+            # ``None`` when there is no local copy or the record will not
+            # read (see filament_count_3mf), and then nothing below may
+            # assume the plate is single-colour.
+            declared: int | None = None
             if local_path and os.path.isfile(local_path):
                 declared = self.filament_count_3mf(local_path, plate_num)
                 too_short = (
@@ -5268,6 +5275,31 @@ class BambuAdapter(PrinterAdapter):
             # ``list(mapping or [])``).
             if ams_mapping is None or not isinstance(ams_mapping, list):
                 ams_mapping = [0] if use_ams else []
+
+            # The AMS is about to feed this plate from at most one tray, and
+            # Kiln could not read how many filaments the plate uses: a
+            # multi-colour plate would print every colour after the first
+            # from that tray.  Kiln does not guess; it says so and sends
+            # nothing.  A resume continues a print that is already running
+            # and is never stopped here.
+            if (
+                use_ams
+                and declared is None
+                and len(ams_mapping) <= 1
+                and not kwargs.get("resume_from_paused")
+                and not is_resume_mode_3mf(basename)
+            ):
+                return PrintResult(
+                    success=False,
+                    message=(
+                        f"Kiln could not read which filaments {basename} uses (plate {plate_num}'s "
+                        "record could not be read), so it cannot tell which AMS tray should feed "
+                        "each one, and it did not start the print on a guess. Start it from the "
+                        "printer's own screen, where you choose the trays, or slice it again "
+                        "through Kiln and start the new file."
+                    ),
+                    refused_before_send=True,
+                )
 
             # Validate ams_mapping length covers all filament_ids in the 3MF.
             # If the mapping is too short, filament IDs beyond the mapping

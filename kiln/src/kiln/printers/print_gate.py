@@ -444,6 +444,24 @@ def _resolve_local_job(file_name: str, kwargs: dict[str, Any]) -> str | None:
     return None
 
 
+def with_judged_plate(file_name: str, kwargs: dict[str, Any], kept: list[str]) -> dict[str, Any]:
+    """The start's arguments, with the plate the gate judged named as
+    ``local_file_path`` when the door named none -- the door's own copy, else
+    the printer's copy the gate read back (*kept*, see :func:`run_adapter_gate`).
+
+    The adapter routes a plate from that copy the way it does for any start
+    that hands it one (the Bambu adapter builds the AMS mapping from the
+    plate's own record).  Until 2026-10-17 a start by printer-side name
+    reached the adapter with no copy, and a three-colour plate was sent with a
+    one-tray mapping.  A resume continuation is passed on exactly as its door
+    sent it.
+    """
+    if kwargs.get("local_file_path") or _is_resume_print(file_name, kwargs):
+        return kwargs
+    plate = _resolve_local_job(file_name, kwargs) or (kept[0] if kept else None)
+    return {**kwargs, "local_file_path": plate} if plate else kwargs
+
+
 class _ReadBackFailed(Exception):
     """A backend that CAN read a file back could not, this time.
 
@@ -987,24 +1005,23 @@ def _chute_verdict(adapter: Any, job_path: str, name: str) -> dict[str, Any] | N
 
 
 def _slots_verdict(adapter: Any, name: str, colours: list[str]) -> dict[str, Any] | None:
-    """Refuse a plate that needs more distinct colours than the filament
-    unit Kiln drives on this printer has slots.
+    """Refuse a plate that uses more filaments than the filament unit Kiln
+    drives on this printer has slots.
 
-    Counts what the plate USES (its own plate record), one per distinct
-    colour -- two entries in the same colour can share a spool -- against
-    the unit's physical slots, loaded or not.  That count is never above
-    the one the Bambu adapter's own slot check makes when a door hands it
-    the local copy (the plate's highest filament position against the tray
-    count), so a door with a local copy loses nothing it had, and a door
-    that starts a plate by name now meets the same floor.  Like that check,
-    it counts the unit's trays only, not an external spool.  Not judged when
-    Kiln cannot see a unit it drives: no unit reported, a read that failed,
-    or a unit whose own tool map routes the changes.
+    Counts the filaments the plate uses (its own plate record), one tray
+    each: Kiln routes every filament to a tray of its own, by colour or by
+    position, so two filaments in the same colour still take two trays.
+    That is never stricter than the Bambu adapter's own slot check on a
+    local copy (the plate's highest filament position against the tray
+    count), so a door that hands over a local copy is judged as before, and
+    a door that starts a plate by name now meets the same floor.  Like that
+    check, it counts the unit's trays, loaded or not, and not an external
+    spool.  Not judged when Kiln cannot see a unit it drives: no unit
+    reported, a read that failed, or a unit whose own tool map routes the
+    changes.
     """
-    from kiln.colour_distance import normalize_hex
-
-    distinct = {c for c in (normalize_hex(raw) for raw in colours) if c}
-    if len(distinct) < 2:
+    needed = len(colours)
+    if needed < 2:
         return None
     try:
         from kiln.multi_material import multi_material_status
@@ -1013,24 +1030,24 @@ def _slots_verdict(adapter: Any, name: str, colours: list[str]) -> dict[str, Any
     except Exception:  # noqa: BLE001 -- a unit Kiln cannot read is not counted
         return None
     slots = unit.num_slots or 0
-    if not unit.driven_by_kiln or slots < 1 or len(distinct) <= slots:
+    if not unit.driven_by_kiln or slots < 1 or needed <= slots:
         return None
     return {
         "ok": False,
         "blocked": True,
         "code": FILAMENT_SLOTS_CODE,
         "reason": (
-            f"{name} uses {len(distinct)} different filament colours, and this printer's "
-            f"{unit.label} has {slots} slots, so it cannot load them all at once. Kiln did not "
-            f"start it. Slice it again with {slots} colours or fewer, or split the parts across "
-            "plates by colour and print each plate with its colours loaded."
+            f"{name} uses {needed} filaments, and this printer's {unit.label} has {slots} slots, "
+            "so it cannot load them all at once. Kiln did not start it. Slice it again with "
+            f"{slots} filaments or fewer (parts in the same colour can share one filament), or "
+            "split the parts across plates by colour and print each plate with its filaments loaded."
         ),
-        "filament_colours": len(distinct),
+        "filaments": needed,
         "slots": slots,
         "multi_material": unit.to_dict(),
         "suggestions": [
-            f"Slice it again with {slots} colours or fewer.",
-            "Or split the parts across plates by colour, and print each plate with its colours loaded.",
+            f"Slice it again with {slots} filaments or fewer; parts in the same colour can share one.",
+            "Or split the parts across plates by colour, and print each plate with its filaments loaded.",
         ],
     }
 
@@ -1680,7 +1697,7 @@ def _same_bed_or_original(
 
 
 def run_adapter_gate(
-    adapter: Any, file_name: str, kwargs: dict[str, Any],
+    adapter: Any, file_name: str, kwargs: dict[str, Any], *, keep: list[str] | None = None,
 ) -> dict[str, Any] | None:
     """Universal print-time backstop, called from ``PrinterAdapter.start_print``.
 
@@ -1688,6 +1705,11 @@ def run_adapter_gate(
     allow.  Soft-passes (``None``) whenever the model, local file, or material
     can't be determined, and for resume-mode continuations — the backstop only
     refuses what it can prove impossible.
+
+    :param keep: When given, the printer's own copy this gate read back is
+        appended to it rather than deleted, and the caller deletes it: the
+        start template hands it to the adapter as the plate to route from
+        (:func:`with_judged_plate`).
     """
     # Resume-mode prints are committed continuations — never re-gate them.
     if _is_resume_print(file_name, kwargs):
@@ -1788,7 +1810,9 @@ def run_adapter_gate(
             if sized is not None:
                 verdict = sized
     finally:
-        if fetched:
+        if fetched and keep is not None:
+            keep.append(fetched)
+        elif fetched:
             with contextlib.suppress(OSError):
                 os.unlink(fetched)
     if fetched:

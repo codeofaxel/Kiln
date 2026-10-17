@@ -18,6 +18,10 @@ measured through the real start template before this was written:
   block sends the head to a chute before it purges.  A plate Kiln wrote for
   an A1 still started on a printer declared as a P1S, sending the P1S head to
   the A1's chute.
+* **A start by name routed on a guess.**  The gate read the printer's copy
+  back and threw it away; the adapter, handed no copy, could not route the
+  plate from its own record, so a three-colour plate was sent with a
+  one-tray mapping.
 
 Each test drives the real start template (and, for a Bambu, the real
 adapter with its MQTT client stubbed), and asserts on what reached the
@@ -270,7 +274,7 @@ class TestAPlateTheUnitCannotFeed:
         assert result.refused_before_send is True
         assert _started(a1) is None
         assert SLOTS_REFUSAL in result.message
-        assert "uses 9 different filament colours" in result.message
+        assert "uses 9 filaments" in result.message
         assert "has 4 slots" in result.message
         # Nothing about the file itself is wrong, so it is not told to be
         # deleted from the printer.
@@ -302,13 +306,24 @@ class TestAPlateTheUnitCannotFeed:
         assert a1.start_print(plate.name).success is True
         assert _started(a1) is not None
 
-    def test_a_colour_listed_twice_is_one_spool(self, tmp_path, monkeypatch):
-        """Five filament entries, two of them the same white: four spools."""
+    def test_a_colour_used_twice_still_takes_two_trays(self, tmp_path, monkeypatch):
+        """Five filaments, two of them the same white.  Kiln routes every
+        filament to a tray of its own, so five trays are needed and a
+        four-slot unit cannot feed it.  The gate and the adapter say the same
+        thing whichever door started it: refused, with the way out named."""
         colours = ["#E53935", "#F2F2F2", "#1E88E5", "#F2F2F2", "#1A1A1A"]
         plate = _kiln_plate(tmp_path, colours)
-        a1 = _bambu(tmp_path, monkeypatch, model="bambu_a1", ams=AMS_LITE, on_printer=plate)
-        assert a1.start_print(plate.name).success is True
-        assert _started(a1) is not None
+        for door in ("by_name", "local_copy"):
+            a1 = _bambu(
+                tmp_path, monkeypatch, model="bambu_a1", ams=AMS_LITE,
+                on_printer=plate if door == "by_name" else None,
+            )
+            kwargs = {} if door == "by_name" else {"local_file_path": str(plate)}
+            result = a1.start_print(plate.name, **kwargs)
+            assert result.success is False and result.refused_before_send is True, door
+            assert "uses 5 filaments" in result.message, door
+            assert "parts in the same colour can share one filament" in result.message, door
+            assert _started(a1) is None, door
 
     def test_a_printer_with_no_unit_is_not_judged(self, tmp_path, monkeypatch):
         """No multi-material unit reported: Kiln cannot count slots it cannot
@@ -394,3 +409,103 @@ class TestAColourChangeWrittenForAnotherMachine:
         p1s = _bambu(tmp_path, monkeypatch, model="bambu_p1s", ams=P1S_AMS, on_printer=plate)
         assert p1s.start_print(plate.name).success is True
         assert _started(p1s) is not None
+
+
+# ---------------------------------------------------------------------------
+# A start by name routes the plate from its own record
+# ---------------------------------------------------------------------------
+
+#: The words the adapter refuses with when it cannot read the plate.
+UNREAD_PLATE_REFUSAL = "Kiln could not read which filaments"
+
+THREE = ["#E53935", "#1E88E5", "#F2F2F2"]
+
+
+def _without_plate_record(plate: Path, tmp_path: Path) -> Path:
+    """Kiln's own plate with its ``Metadata/plate_1.json`` taken out: the
+    one record the AMS mapping is built from, and nothing else changed."""
+    stripped = tmp_path / f"unread_{plate.name}"
+    with zipfile.ZipFile(plate) as src, zipfile.ZipFile(stripped, "w") as dst:
+        for item in src.infolist():
+            if item.filename != "Metadata/plate_1.json":
+                dst.writestr(item, src.read(item.filename))
+    return stripped
+
+
+class TestAPlateStartedByNameRoutesFromItsOwnRecord:
+    def test_the_start_tools_one_tray_mapping_gives_way_to_the_plates_own(self, tmp_path, monkeypatch):
+        """What the start tool sends for a file this process did not upload:
+        its auto-routing's one loaded tray.  The plate on the printer says
+        three filaments, so the plate's own mapping goes out -- the mapping
+        the same plate gets when the door hands over a local copy."""
+        plate = _kiln_plate(tmp_path, THREE)
+        a1 = _bambu(tmp_path, monkeypatch, model="bambu_a1", ams=AMS_LITE, on_printer=plate)
+        assert a1.start_print(plate.name, use_ams=True, ams_mapping=[0]).success is True
+        sent = _started(a1)
+        own = BambuAdapter._build_ams_mapping_from_3mf(str(plate))
+        assert own is not None and len(own) == 3
+        assert sent["use_ams"] is True
+        assert sent["ams_mapping"] == own
+
+    def test_the_queues_bare_start_by_name_gets_the_plates_own_mapping(self, tmp_path, monkeypatch):
+        plate = _kiln_plate(tmp_path, THREE)
+        a1 = _bambu(tmp_path, monkeypatch, model="bambu_a1", ams=AMS_LITE, on_printer=plate)
+        assert a1.start_print(plate.name).success is True
+        sent = _started(a1)
+        assert sent["use_ams"] is True
+        assert sent["ams_mapping"] == BambuAdapter._build_ams_mapping_from_3mf(str(plate))
+
+    def test_by_name_and_with_a_local_copy_send_the_same_command(self, tmp_path, monkeypatch):
+        plate = _kiln_plate(tmp_path, THREE)
+        by_name = _bambu(tmp_path, monkeypatch, model="bambu_a1", ams=AMS_LITE, on_printer=plate)
+        local = _bambu(tmp_path, monkeypatch, model="bambu_a1", ams=AMS_LITE)
+        by_name.start_print(plate.name, use_ams=True, ams_mapping=[0])
+        local.start_print(plate.name, local_file_path=str(plate), use_ams=True, ams_mapping=[0])
+        assert _started(by_name)["ams_mapping"] == _started(local)["ams_mapping"]
+        assert _started(by_name)["md5"] == _started(local)["md5"] != ""
+
+    def test_a_one_colour_plate_by_name_keeps_its_one_tray(self, tmp_path, monkeypatch):
+        plate = _kiln_plate(tmp_path, ["#E53935"])
+        a1 = _bambu(tmp_path, monkeypatch, model="bambu_a1", ams=AMS_LITE, on_printer=plate)
+        assert a1.start_print(plate.name, use_ams=True, ams_mapping=[0]).success is True
+        assert _started(a1)["ams_mapping"] == [0]
+
+    def test_a_plate_whose_record_will_not_read_is_refused_not_guessed(self, tmp_path, monkeypatch):
+        unread = _without_plate_record(_kiln_plate(tmp_path, THREE), tmp_path)
+        a1 = _bambu(tmp_path, monkeypatch, model="bambu_a1", ams=AMS_LITE, on_printer=unread)
+        result = a1.start_print(unread.name, use_ams=True, ams_mapping=[0])
+        assert result.success is False
+        assert result.refused_before_send is True
+        assert UNREAD_PLATE_REFUSAL in result.message
+        assert "printer's own screen" in result.message
+        assert _started(a1) is None
+
+    def test_a_copy_that_could_not_be_read_back_is_refused_even_after_the_override(self, tmp_path, monkeypatch):
+        """A person may wave the read-back refusal through for the one start;
+        Kiln still has no plate to route from, so it says so rather than
+        sending one tray for every colour."""
+        a1 = _bambu(tmp_path, monkeypatch, model="bambu_a1", ams=AMS_LITE)
+
+        def _unreadable(name):
+            raise PrinterError("550 no such file")
+
+        a1.read_print_file = _unreadable  # type: ignore[method-assign]
+        pg.grant_oversize_override("bambu_a1", ttl_seconds=60)
+        result = a1.start_print("plate3.gcode.3mf")
+        assert result.success is False and UNREAD_PLATE_REFUSAL in result.message
+        assert _started(a1) is None
+
+    def test_a_caller_who_names_every_tray_is_respected(self, tmp_path, monkeypatch):
+        unread = _without_plate_record(_kiln_plate(tmp_path, THREE), tmp_path)
+        a1 = _bambu(tmp_path, monkeypatch, model="bambu_a1", ams=AMS_LITE, on_printer=unread)
+        assert a1.start_print(unread.name, use_ams=True, ams_mapping=[2, 0, 1]).success is True
+        assert _started(a1)["ams_mapping"] == [2, 0, 1]
+
+    def test_a_resume_continuation_is_never_stopped_here(self, tmp_path, monkeypatch):
+        """A resume continues a print already running; the gate skips it and
+        so does this refusal, whatever the plate says."""
+        unread = _without_plate_record(_kiln_plate(tmp_path, THREE), tmp_path)
+        resume = unread.with_name("transformed_resume_abc123.3mf")
+        unread.rename(resume)
+        a1 = _bambu(tmp_path, monkeypatch, model="bambu_a1", ams=AMS_LITE, on_printer=resume)
+        assert a1.start_print(resume.name, use_ams=True, ams_mapping=[0]).success is True

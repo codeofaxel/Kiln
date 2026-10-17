@@ -130,16 +130,26 @@ class TestShortMappingIsSuperseded:
         )
         assert _published_mapping(adapter)["ams_mapping"] == [2]
 
-    def test_unreadable_plate_keeps_the_supplied_mapping(
+    def test_unreadable_plate_is_refused_rather_than_fed_from_one_tray(
         self, adapter, tmp_path,
     ):
+        """Inverted on 2026-10-17, deliberately.  This test used to pin that
+        a plate whose record will not read keeps a one-tray mapping and is
+        sent.  Kiln cannot tell such a plate from a multi-colour one, and a
+        multi-colour plate fed from one tray prints every colour after the
+        first from it, so the start is now refused with what to do instead.
+        A mapping that names a tray for several filaments is still sent as
+        given (see test_print_gate_judges_the_machine_it_starts)."""
         junk = tmp_path / "junk.3mf"
         junk.write_bytes(b"not a zip")
-        adapter.start_print(
+        result = adapter.start_print(
             "junk.3mf", local_file_path=str(junk), ams_mapping=[1],
             use_ams=True,
         )
-        assert _published_mapping(adapter)["ams_mapping"] == [1]
+        assert result.success is False
+        assert result.refused_before_send is True
+        assert "could not read which filaments" in result.message
+        assert adapter._mqtt_client.publish.call_args is None
 
     def test_the_user_is_told_when_their_mapping_was_replaced(
         self, adapter, tmp_path,
