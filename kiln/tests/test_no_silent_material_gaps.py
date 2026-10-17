@@ -40,12 +40,6 @@ from kiln import design_intelligence as di
 
 DATA = Path(__file__).parent.parent / "src" / "kiln" / "data" / "design_knowledge"
 
-# A representative geometry — small enough to be realistic, large enough that
-# no surface can dodge the question by treating it as degenerate.
-_AREA_MM2 = 24.0
-_LENGTH_MM = 50.0
-
-
 def _materials() -> list[str]:
     raw = json.loads((DATA / "materials.json").read_text(encoding="utf-8"))
     return sorted(k for k in raw if not k.startswith("_"))
@@ -77,26 +71,21 @@ def test_skin_contact_always_answers(material: str):
 
 
 @pytest.mark.parametrize("material", MATERIALS)
-def test_load_question_always_answers(material: str):
-    """Strength OR deflection — every material gets one of the two.
+def test_load_question_always_names_its_limit(material: str):
+    """Strength OR deflection — every material is governed by one of the two.
 
     An elastomer is not 'unknown': it is governed by deflection rather than
     rupture. Returning nothing for it told users the material was unsupported
-    when the honest answer was that they were asking the wrong question.
+    when the honest answer was that they were asking the wrong question.  The
+    figure itself is kiln-pro's, one part at a time (kiln._pro_load_bridge),
+    and kiln-pro's tests ask it for every material on this roster; what this
+    repo holds is the roster, so every material must name its limit here.
     """
-    strength = di.estimate_load_capacity(material, _AREA_MM2, _LENGTH_MM)
-    if strength is not None:
-        assert strength.max_load_n >= 0.0
-        return
-    flex = di.estimate_deflection_limited_load(material, _AREA_MM2, _LENGTH_MM)
-    assert flex is not None, (
-        f"{material}: neither a strength nor a deflection answer. Every "
-        "material must be answerable by one model or the other, and the "
-        "answer must name which."
+    roster = json.loads((DATA / "load_tables.json").read_text(encoding="utf-8"))
+    assert roster.get(material, {}).get("limit_mode") in ("strength", "deflection"), (
+        f"{material}: the load roster names no limit for it, so the load "
+        "door cannot say which question it is answering"
     )
-    assert flex["limit_mode"] == "deflection"
-    assert flex["load_at_deflection_limit_n"] >= 0.0
-    assert flex["reasoning"], f"{material}: deflection answer with no explanation"
 
 
 def test_load_tool_never_advertises_a_stale_material_list():

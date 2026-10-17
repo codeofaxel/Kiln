@@ -242,27 +242,42 @@ class TestEstimatePrintCostFromMesh:
 # ---------------------------------------------------------------------------
 
 
+def _caller_plan(monkeypatch, paid: bool) -> None:
+    """The CALLER's plan, as the load door reads it: ``kiln.licensing``
+    (kiln-pro's caller-aware licensing when it is installed, the account's
+    plan when not)."""
+    import kiln.licensing as licensing
+
+    monkeypatch.setattr(
+        licensing, "check_tier",
+        lambda required, *a, **k: (True, None) if paid else (False, "This feature requires Kiln Pro."),
+    )
+
+
 @pytest.fixture
 def pro_plan(monkeypatch):
-    """The caller holds Kiln Pro.  ``check_tier`` -> ``_covers`` reads the
-    plan through the module-level ``get_tier`` (``kiln.account_plan``), so
-    that one name is what a Pro caller looks like to every gate."""
-    from kiln.account_plan import LicenseTier
+    """The caller holds Kiln Pro."""
+    _caller_plan(monkeypatch, True)
 
-    monkeypatch.setattr("kiln.account_plan.get_tier", lambda: LicenseTier.PRO)
+
+@pytest.fixture
+def free_plan(monkeypatch):
+    """The caller is on the free plan."""
+    _caller_plan(monkeypatch, False)
 
 
 class TestEstimateStructuralLoad:
     """Tests for estimate_structural_load MCP tool.
 
     The figure is Kiln Pro's (2026-10-16): the free plan is told, in words,
-    that the load was not checked, and the engine is only reached at Pro.
+    that the load was not checked, and the figure is only asked for at Pro,
+    one part at a time (``kiln._pro_load_bridge``; the bridge and its misses
+    are tests/test_pro_load_bridge.py).
     """
 
-    @patch("kiln.design_intelligence.estimate_load_capacity")
-    def test_happy_path(self, mock_fn, registered_tools):
-        """Free (the test session's plan): no figure, the message, the nudge,
-        and the engine is never called."""
+    @patch("kiln._pro_load_bridge.load_figure")
+    def test_happy_path(self, mock_fn, registered_tools, free_plan):
+        """Free: no figure, the message, the nudge, and nothing is asked."""
         result = registered_tools["estimate_structural_load"](
             "petg", 50.0, 100.0, load_across_layers=True,
         )
@@ -282,52 +297,46 @@ class TestEstimateStructuralLoad:
         assert "safe_load_kg" not in result and "max_load_n" not in result
         mock_fn.assert_not_called()
 
-    @patch("kiln.design_intelligence.estimate_load_capacity")
-    def test_free_pla_is_told_it_sags(self, mock_fn, registered_tools):
+    @patch("kiln._pro_load_bridge.load_figure")
+    def test_free_pla_is_told_it_sags(self, mock_fn, registered_tools, free_plan):
         result = registered_tools["estimate_structural_load"]("PLA", 50.0, 100.0)
 
         assert result["success"] is True and result["load_checked"] is False
         assert "PLA sags over time under a load left on it." in result["message"]
         mock_fn.assert_not_called()
 
-    @patch("kiln.design_intelligence.estimate_load_capacity")
+    @patch("kiln._pro_load_bridge.load_figure")
     def test_pro_gets_the_figure(self, mock_fn, registered_tools, pro_plan):
-        mock_fn.return_value = SimpleNamespace(
-            to_dict=lambda: {"safe_load_kg": 5.2, "safety_factor": 3.0},
-        )
+        mock_fn.return_value = ({"max_load_n": 5.2, "safety_factor": 3.0}, None)
 
         result = registered_tools["estimate_structural_load"](
             "petg", 50.0, 100.0, load_across_layers=True,
         )
 
         assert result["success"] is True
-        assert result["safe_load_kg"] == 5.2
+        assert result["max_load_n"] == 5.2
         assert "load_checked" not in result
         mock_fn.assert_called_once_with("petg", 50.0, 100.0, load_across_layers=True)
 
-    @patch("kiln.design_intelligence.estimate_load_capacity")
-    def test_unknown_material(self, mock_fn, registered_tools):
+    @patch("kiln._pro_load_bridge.load_figure")
+    def test_unknown_material(self, mock_fn, registered_tools, free_plan):
         """An unknown material is refused before the plan is read: free and
         Pro get the same error."""
-        mock_fn.return_value = None
-
         result = registered_tools["estimate_structural_load"]("unobtanium", 10.0, 50.0)
 
         assert result["success"] is False
         assert "unobtanium" in result["error"]
         mock_fn.assert_not_called()
 
-    @patch("kiln.design_intelligence.estimate_load_capacity")
+    @patch("kiln._pro_load_bridge.load_figure")
     def test_unknown_material_at_pro(self, mock_fn, registered_tools, pro_plan):
-        mock_fn.return_value = None
-
         result = registered_tools["estimate_structural_load"]("unobtanium", 10.0, 50.0)
 
         assert result["success"] is False
         assert "unobtanium" in result["error"]
         mock_fn.assert_not_called()
 
-    @patch("kiln.design_intelligence.estimate_load_capacity", side_effect=RuntimeError("boom"))
+    @patch("kiln._pro_load_bridge.load_figure", side_effect=RuntimeError("boom"))
     def test_exception(self, mock_fn, registered_tools, pro_plan):
         result = registered_tools["estimate_structural_load"]("pla", 10.0, 50.0)
 

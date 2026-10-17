@@ -1,16 +1,21 @@
 """Public-Kiln → kiln-pro bridge for ONE material's catalogue record.
 
 The verified brand filament profiles (a brand's nozzle and bed ranges and
-optimum, enclosure, hardened nozzle, AMS) and the derived safe-load figures
-are kiln-pro's (https://kiln3d.com), part of Kiln Pro: one record per
-material, served one material at a time.  Below Pro the servers refuse, the
-loaders fall to the material's own range and the warning says so.  Public Kiln keeps the FLOOR -- the material's own
-temperatures and ranges, warping, the environment words, the design limits,
-the hazards -- and the ROSTER of brand profiles (which exist, what they are
-called, which family they belong to).  Its loaders in
+optimum, enclosure, hardened nozzle, AMS) are kiln-pro's
+(https://kiln3d.com), part of Kiln Pro: one record per material, served one
+material at a time.  Below Pro the servers refuse, the loaders fall to the
+material's own range and the warning says so.  Public Kiln keeps the FLOOR --
+the material's own temperatures and ranges, warping, the environment words,
+the design limits, the hazards -- and the ROSTER of brand profiles (which
+exist, what they are called, which family they belong to).  Its loaders in
 :mod:`kiln.design_intelligence` ask here for a family's figures and merge
 them onto the roster rows, so every door downstream resolves exactly as it
 did when the figures were bundled.
+
+A record carries the brand figures only.  How much weight a part can carry
+is answered one part at a time (:mod:`kiln._pro_load_bridge`), so no load
+figure of any material comes here or is kept here; a record kept before that
+change is read without its load block, and rewritten without it.
 
 A record comes from one of four places, tried in order:
 
@@ -53,10 +58,11 @@ logger = logging.getLogger(__name__)
 
 #: The served tool that answers for one material.
 WIRE_TOOL = "get_material_record"
-#: The two blocks a record carries: the brand profiles' figures and the load
-#: figures.  A kept record from before a block existed fails
-#: :func:`_is_record` and is asked for again, never read half.
-BLOCKS = ("brands", "load")
+#: The block a record carries: the brand profiles' figures.  A kept record
+#: from before a block existed fails :func:`_is_record` and is asked for
+#: again, never read half; a block this list does not name is dropped
+#: (:func:`_only_blocks`), from what is answered and from what is kept.
+BLOCKS = ("brands",)
 #: Where the same answer is read from when kiln-pro IS installed here
 #: (imported by name in :func:`_local`, never by a string, so a static
 #: reader of the call graph sees the crossing).
@@ -118,7 +124,7 @@ def _is_record(value: Any) -> bool:
 def material_record(material_id: Any) -> dict[str, Any] | None:
     """ONE material's record for *material_id*, or ``None``.
 
-    ``{"material_id", "matched_by", "display_name", "brands", "load"}`` --
+    ``{"material_id", "matched_by", "display_name", "brands"}`` --
     ``material_id`` is the catalogue's own id, which may differ from the
     spelling asked (``pc`` is answered as ``polycarbonate``; a brand profile
     id is answered as its family).  ``None`` is one of two things, told
@@ -168,7 +174,7 @@ def material_record(material_id: Any) -> dict[str, Any] | None:
 #: (kiln-pro's ``HostedIntelligencePolicyError``), known by name and wording
 #: because public Kiln cannot import the type.
 _TIER_REFUSAL = "not entitled"
-_PRO_REQUIRED = "Kiln Pro has the brand's own tune and the load figures"
+_PRO_REQUIRED = "Kiln Pro has the brand's own tune"
 
 
 def _local(key: str) -> tuple[dict[str, Any] | None, Miss | None]:
@@ -183,7 +189,17 @@ def _local(key: str) -> tuple[dict[str, Any] | None, Miss | None]:
             return None, Miss("refused", "TIER_REQUIRED", _PRO_REQUIRED)
         logger.debug("material catalogue on this computer failed", exc_info=True)
         return None, Miss("unanswered", _NOT_ASKED, f"kiln-pro on this computer stopped: {exc}"[:400])
-    return (record if _is_record(record) else None), None
+    return (_only_blocks(record) if _is_record(record) else None), None
+
+
+def _only_blocks(record: dict[str, Any]) -> dict[str, Any]:
+    """*record* with nothing but the identity fields and :data:`BLOCKS`."""
+    return {
+        "material_id": record["material_id"],
+        "matched_by": str(record.get("matched_by") or ""),
+        "display_name": str(record.get("display_name") or record["material_id"]),
+        **{block: dict(record[block]) for block in BLOCKS},
+    }
 
 
 def _served(key: str) -> tuple[dict[str, Any] | None, Miss | None]:
@@ -207,12 +223,7 @@ def _served(key: str) -> tuple[dict[str, Any] | None, Miss | None]:
         if answer.get("known") is False:
             return None, None
         if _is_record(answer):
-            return {
-                "material_id": answer["material_id"],
-                "matched_by": str(answer.get("matched_by") or ""),
-                "display_name": str(answer.get("display_name") or answer["material_id"]),
-                **{block: dict(answer[block]) for block in BLOCKS},
-            }, None
+            return _only_blocks(answer), None
         return None, Miss("unanswered", detail="an answer with no record in it")
     miss = classify_answer(answer) or Miss("unanswered", detail="an answer that did not say it succeeded")
     if isinstance(answer, dict) and answer.get("code") == "SERVER_UNREACHABLE":
@@ -248,16 +259,25 @@ def _kept(key: str) -> tuple[dict[str, Any], float] | None:
         kept_at = float(raw.get("kept_at") or 0.0)
     except (TypeError, ValueError):
         kept_at = 0.0
-    return record, max(0.0, time.time() - kept_at)
+    trimmed = _only_blocks(record)
+    if trimmed != record:
+        # Kept before the load figures stopped leaving Kiln's servers: the
+        # extra block is not this install's to keep, so the file is rewritten
+        # without it (same age, so it is asked for again when it would have been).
+        _keep(key, trimmed, kept_at=kept_at)
+    return trimmed, max(0.0, time.time() - kept_at)
 
 
-def _keep(key: str, record: dict[str, Any]) -> None:
+def _keep(key: str, record: dict[str, Any], *, kept_at: float | None = None) -> None:
     try:
         KEEP_DIR.mkdir(parents=True, exist_ok=True)
         path = _keep_path(key)
         tmp = path.with_suffix(".json.tmp")
         tmp.write_text(
-            json.dumps({"kept_at": time.time(), "record": record}, indent=2, ensure_ascii=False),
+            json.dumps(
+                {"kept_at": time.time() if kept_at is None else kept_at, "record": _only_blocks(record)},
+                indent=2, ensure_ascii=False,
+            ),
             encoding="utf-8",
         )
         os.replace(tmp, path)
@@ -310,7 +330,7 @@ def unanswered(material_id: Any) -> str | None:
     if miss.cause == "refused" and miss.code == "TIER_REQUIRED":
         # A plan answer, not a transient one: said plainly, without the
         # pricing paragraph the servers attach to a refusal.
-        return "the brand's own tune and the load figures are part of Kiln Pro"
+        return "the brand's own tune is part of Kiln Pro"
     if miss.cause == "signed_out":
         return clause(miss, feature="servers", cannot="get this material's figures", then="sign in to a Kiln Pro account and ask again")
     return clause(miss, feature="servers", cannot="get this material's figures", then="ask again")

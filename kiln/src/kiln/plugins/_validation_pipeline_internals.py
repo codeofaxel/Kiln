@@ -1117,29 +1117,18 @@ def _step_printability(
 
 
 def _step_structural(report: _PipelineReport) -> None:
-    """Step 6: structural assessment."""
+    """Step 6: structural assessment, from the part's bounding box.
+
+    Geometric risk factors only: how tall the part stands on its base, its
+    smallest section, how shell-like it is.  How much weight a part can carry
+    is a separate question (``estimate_structural_load``).
+    """
     _struct_dims = report.model_info.get("dimensions_mm") or report.model_info.get("bounding_box", {})
     s_w = float(_struct_dims.get("x", _struct_dims.get("width_mm", 0)) or 0)
     s_d = float(_struct_dims.get("y", _struct_dims.get("depth_mm", 0)) or 0)
     s_h = float(_struct_dims.get("z", _struct_dims.get("height_mm", 0)) or 0)
 
     try:
-        from kiln.design_intelligence import estimate_load_capacity
-
-        est = estimate_load_capacity(
-            width_mm=s_w, depth_mm=s_d, height_mm=s_h,
-        )
-        est_dict = est.to_dict() if hasattr(est, "to_dict") else {}
-        safe_load = est_dict.get("safe_load_n", 0)
-        report.model_info["structural_estimate"] = est_dict
-        report.checks.append(_CheckResult(
-            name="structural",
-            passed=True,
-            details=f"Estimated safe load {safe_load:.1f} N (via design_intelligence)",
-        ))
-    except (ImportError, TypeError):
-        # Fallback: inline geometric risk factors from bounding box
-
         if s_w > 0 and s_d > 0 and s_h > 0:
             # Aspect ratio: height / min horizontal dim — tall = tippy
             min_horiz = min(s_w, s_d)

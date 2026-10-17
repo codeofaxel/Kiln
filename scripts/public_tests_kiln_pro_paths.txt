@@ -36,6 +36,7 @@ kiln_pro.filament_colours
 kiln_pro.hosted_intelligence
 kiln_pro.intent_verification
 kiln_pro.intent_verification.load_intent_sidecar
+kiln_pro.load_capacity
 kiln_pro.material_catalogue
 kiln_pro.motion
 kiln_pro.nozzle_intelligence

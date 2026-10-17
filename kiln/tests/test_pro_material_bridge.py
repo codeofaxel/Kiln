@@ -1,23 +1,22 @@
 """A material's record reaches every public door, and a miss is worded once.
 
-The bundled data files are a roster: ``materials.json`` names each family's
-brand profiles, ``load_tables.json`` says which limit governs each material.
-A brand's figures and a material's load figures come through
-``kiln._pro_material_bridge`` -- kiln-pro here, else served and kept on this
-computer, else the record last kept, else the floor: the family's own range
-for a brand, and no load figure at all, each door saying why.  Each wire is
-proved A/B: the same call with the wire cut gives the floor.
+The bundled ``materials.json`` is a roster: it names each family's brand
+profiles.  A brand's figures come through ``kiln._pro_material_bridge`` --
+kiln-pro here, else served and kept on this computer, else the record last
+kept, else the floor: the family's own range, the door saying why.  Each wire
+is proved A/B: the same call with the wire cut gives the floor.  A record
+carries no load figures: a part's load is asked for one part at a time
+(``kiln._pro_load_bridge``, tests/test_pro_load_bridge.py), and a record that
+arrives or was kept with a load block is read without it.
 
-The records below belong to no brand and no material -- one made-up tensile
-capacity, one made-up modulus, temperatures chosen to differ from the
-session's synthetic record -- so a figure arriving at a door proves THIS
+The records below belong to no brand -- temperatures chosen to differ from
+the session's synthetic record -- so a figure arriving at a door proves THIS
 record was read, not the session's or a real one.
 """
 
 from __future__ import annotations
 
 import json
-import math
 
 import pytest
 
@@ -26,52 +25,11 @@ from kiln import design_intelligence as di
 from kiln.cost_estimator import resolve_material
 from kiln.served_answer import Miss
 
-#: The made-up figures: a capacity no material has, temperatures no family's
-#: range gives as its midpoint.
-CAPACITY_N_PER_MM2 = 12.5
-YOUNGS_MPA = 64.0
-RATIO = 10.0
-SECTIONS = (12, 24, 36, 48, 60)
-LENGTHS = (25, 50, 100, 150, 200)
+#: The made-up figures: temperatures no family's range gives as its midpoint.
 PLA_NOZZLE = ([197, 223], 213)
 PLA_BED = ([47, 63], 57)
 PETG_NOZZLE = ([227, 253], 243)
 PETG_BED = ([73, 87], 81)
-
-
-def _cell(area: float, length: float) -> float:
-    return math.floor(CAPACITY_N_PER_MM2 * (area ** 1.5 / 6.0) / length * 100.0) / 100.0
-
-
-def _flex_cell(area: float, length: float) -> float:
-    return math.floor(YOUNGS_MPA * area ** 2 / (4.0 * RATIO * length ** 2) * 10000.0) / 10000.0
-
-
-def _strength_grid() -> dict:
-    return {
-        "tensile_capacity_n_per_mm2": CAPACITY_N_PER_MM2,
-        "cross_section_vs_load": [
-            {"cantilever_length_mm": L, "entries": [{"cross_section_mm2": A, "max_load_n": _cell(A, L)} for A in SECTIONS]}
-            for L in LENGTHS
-        ],
-        "layer_orientation_derating": {"across_layers": 0.4, "along_layers": 1.0},
-    }
-
-
-def _deflection_grid() -> dict:
-    return {
-        "limit_mode": "deflection",
-        "youngs_modulus_mpa": YOUNGS_MPA,
-        "deflection_limit_ratio": RATIO,
-        "cross_section_vs_deflection_load": [
-            {
-                "cantilever_length_mm": L,
-                "allowable_deflection_mm": round(L / RATIO, 2),
-                "entries": [{"cross_section_mm2": A, "load_at_deflection_limit_n": _flex_cell(A, L)} for A in SECTIONS],
-            }
-            for L in LENGTHS
-        ],
-    }
 
 
 def _roster(family: str) -> list[str]:
@@ -95,20 +53,19 @@ def _brand_block(family: str, nozzle: tuple[list[int], int], bed: tuple[list[int
 
 
 def _records() -> dict[str, dict]:
-    """Three families' records: two strength-limited, one elastomer.  Every
-    other family is a settled "no row"."""
+    """Three families' records.  Every other family is a settled "no row"."""
     return {
         "pla": {
             "material_id": "pla", "matched_by": "exact", "display_name": "PLA",
-            "brands": _brand_block("pla", PLA_NOZZLE, PLA_BED), "load": _strength_grid(),
+            "brands": _brand_block("pla", PLA_NOZZLE, PLA_BED),
         },
         "petg": {
             "material_id": "petg", "matched_by": "exact", "display_name": "PETG",
-            "brands": _brand_block("petg", PETG_NOZZLE, PETG_BED), "load": _strength_grid(),
+            "brands": _brand_block("petg", PETG_NOZZLE, PETG_BED),
         },
         "tpu": {
             "material_id": "tpu", "matched_by": "exact", "display_name": "TPU",
-            "brands": {}, "load": _deflection_grid(),
+            "brands": {},
         },
     }
 
@@ -120,24 +77,6 @@ def _pla_profile() -> str:
 def _reset_loaders() -> None:
     di._reset_knowledge_base()
     bridge.forget()
-
-
-def _structural_load_tool():
-    """The registered ``estimate_structural_load`` tool, off a fake MCP."""
-    from kiln.plugins.design_tools import plugin
-
-    tools: dict = {}
-
-    class FakeMCP:
-        def tool(self_mcp, **_kwargs):
-            def decorator(fn):
-                tools[fn.__name__] = fn
-                return fn
-
-            return decorator
-
-    plugin.register(FakeMCP())
-    return tools["estimate_structural_load"]
 
 
 @pytest.fixture(autouse=True)
@@ -164,15 +103,6 @@ def served(monkeypatch):
 
     monkeypatch.setattr(bridge, "_served", answer)
     return calls
-
-
-@pytest.fixture
-def pro_plan(monkeypatch):
-    """The caller holds Kiln Pro: ``check_tier`` -> ``_covers`` reads the
-    module-level ``get_tier``."""
-    from kiln.account_plan import LicenseTier
-
-    monkeypatch.setattr("kiln.account_plan.get_tier", lambda: LicenseTier.PRO)
 
 
 # ---------------------------------------------------------------------------
@@ -227,43 +157,11 @@ class TestServed:
         [warning] = [w for w in resolved.warnings if "not in hand" in w]
         assert "range is used" in warning
 
-    def test_the_figures_reach_estimate_load_capacity(self, served):
-        along = di.estimate_load_capacity("petg", 24.0, 100.0, load_across_layers=False)
-        across = di.estimate_load_capacity("petg", 24.0, 100.0)
-        assert along is not None and across is not None
-        assert along.max_load_n == pytest.approx(_cell(24.0, 100.0), abs=0.01)
-        assert across.max_load_n == pytest.approx(_cell(24.0, 100.0) * 0.4, abs=0.01)
-        assert any(f"{CAPACITY_N_PER_MM2} N/mm^2" in msg for msg in across.reasoning)
-        assert di.load_figures_unanswered("petg") is None
-        assert served == ["petg"]
-
-    def test_cut_the_wire_and_the_load_is_unanswered_and_says_why(self, served, monkeypatch):
-        """A/B for the load wire: no figure, never the floor's."""
-        monkeypatch.setattr(bridge, "_served", lambda key: (None, Miss("unanswered", "SERVER_UNREACHABLE")))
-        assert di.estimate_load_capacity("petg", 24.0, 100.0) is None
-        why = di.load_figures_unanswered("petg")
-        assert why and "can't get this material's figures" in why
-
-    def test_the_figures_reach_estimate_deflection_limited_load(self, served):
-        flex = di.estimate_deflection_limited_load("tpu", 24.0, 100.0)
-        assert flex is not None
-        assert flex["limit_mode"] == "deflection" and flex["youngs_modulus_mpa"] == YOUNGS_MPA
-        assert flex["load_at_deflection_limit_n"] == pytest.approx(_flex_cell(24.0, 100.0), abs=1e-4)
-        assert flex["allowable_deflection_mm"] == 10.0
-        assert served == ["tpu"]
-
-    def test_cut_the_wire_and_the_deflection_load_is_unanswered(self, served, monkeypatch):
-        monkeypatch.setattr(bridge, "_served", lambda key: (None, Miss("offline", "SERVER_UNREACHABLE")))
-        assert di.estimate_deflection_limited_load("tpu", 24.0, 100.0) is None
-        assert di.load_figures_unanswered("tpu")
-
     def test_one_ask_per_family_whatever_the_spelling_of_the_door(self, served):
         """A brand id and its family id are one fetch."""
         di.get_brand_filament_profile(_pla_profile())
         di.list_brand_filament_profiles(parent_material="pla")
         di.resolve_filament(_pla_profile().upper())
-        di.estimate_load_capacity("PLA", 24.0, 100.0)
-        di.estimate_load_capacity("pla", 24.0, 100.0, load_across_layers=False)
         di.get_brand_filament_profile(_pla_profile())
         assert served == ["pla"]
 
@@ -277,14 +175,53 @@ class TestServed:
     def test_the_record_is_kept_on_this_computer(self, served):
         di.get_brand_filament_profile(_pla_profile())
         kept = bridge.kept_record("pla")
-        assert kept is not None and kept["load"]["tensile_capacity_n_per_mm2"] == CAPACITY_N_PER_MM2
+        assert kept is not None and kept["brands"][_pla_profile()]["nozzle_temp_optimal_c"] == PLA_NOZZLE[1]
         assert (bridge.KEEP_DIR / "pla.json").exists()
 
-    def test_the_tool_hands_pro_the_figure(self, served, pro_plan):
-        result = _structural_load_tool()("petg", 24.0, 100.0, load_across_layers=False)
-        assert result["success"] is True and "load_checked" not in result
-        assert result["max_load_n"] == pytest.approx(_cell(24.0, 100.0), abs=0.01)
-        assert served == ["petg"]
+
+# ---------------------------------------------------------------------------
+# No load figure arrives in a record, or stays in one kept on disk
+# ---------------------------------------------------------------------------
+
+#: A load block in the shape the servers sent until 2026-10-17, with figures
+#: that belong to no material.
+_OLD_LOAD_BLOCK = {"kilntest_grid": [[1, 2], [3, 4]], "kilntest_capacity": 1.5}
+
+
+class TestNoLoadBlock:
+    def test_a_served_answer_is_read_and_kept_without_its_load_block(self, monkeypatch, tmp_path):
+        """The real served path (the session replaces ``_served``, so the
+        bridge is loaded fresh from its source), its answer carrying a load
+        block.  A/B: before 2026-10-17 the block was read and kept on disk."""
+        import importlib.util
+
+        import kiln.server as srv
+
+        answer = {"success": True, "status": "ok", "known": True, **_records()["petg"], "load": dict(_OLD_LOAD_BLOCK)}
+        monkeypatch.setattr(srv, "_pro_api_call", lambda *a, **k: json.loads(json.dumps(answer)))
+        spec = importlib.util.spec_from_file_location("_fresh_material_bridge", bridge.__file__)
+        fresh = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fresh)
+        fresh.available = lambda: False
+        fresh.KEEP_DIR = tmp_path / "kept"
+        record = fresh.material_record("petg")
+        assert record is not None and set(record) == {"material_id", "matched_by", "display_name", "brands"}
+        assert record["brands"] == _records()["petg"]["brands"]
+        on_disk = (fresh.KEEP_DIR / "petg.json").read_text(encoding="utf-8")
+        assert "kilntest_grid" not in on_disk and '"load"' not in on_disk
+
+    def test_a_record_kept_before_is_rewritten_without_its_load_block(self):
+        import time
+
+        old = {**_records()["pla"], "load": dict(_OLD_LOAD_BLOCK)}
+        bridge.KEEP_DIR.mkdir(parents=True, exist_ok=True)
+        kept_at = time.time() - 3600
+        bridge._keep_path("pla").write_text(json.dumps({"kept_at": kept_at, "record": old}), encoding="utf-8")
+        record = bridge.material_record("pla")
+        assert record is not None and "load" not in record
+        on_disk = json.loads(bridge._keep_path("pla").read_text(encoding="utf-8"))
+        assert "load" not in on_disk["record"] and "kilntest_grid" not in json.dumps(on_disk)
+        assert on_disk["kept_at"] == pytest.approx(kept_at)  # same age: asked again when it would have been
 
 
 # ---------------------------------------------------------------------------
@@ -311,12 +248,9 @@ class TestUnknown:
         profiles = di.list_brand_filament_profiles(parent_material="abs")
         assert profiles and all(not p.has_figures() for p in profiles)
         assert di.brand_figures_unanswered("abs") is None
-        assert di.estimate_load_capacity("abs", 24.0, 100.0) is None
-        assert di.load_figures_unanswered("abs") is None
         assert served == ["abs"]
 
     def test_a_material_off_the_roster_never_reaches_the_wire(self, served):
-        assert di.estimate_load_capacity("unobtanium", 24.0, 100.0) is None
         assert di.get_brand_filament_profile("nobody_makes_this") is None
         assert served == []
 
@@ -333,9 +267,6 @@ class TestOffline:
         monkeypatch.setattr(bridge, "_served", lambda key: (_ for _ in ()).throw(ConnectionError("down")))
         profile = di.get_brand_filament_profile(_pla_profile())
         assert profile is not None and profile.nozzle_temp_optimal_c == PLA_NOZZLE[1]
-        assert di.estimate_load_capacity("pla", 24.0, 100.0, load_across_layers=False).max_load_n == pytest.approx(
-            _cell(24.0, 100.0), abs=0.01
-        )
         assert bridge.why_unanswered("pla") == ""  # fresh: nothing was asked
 
     def test_a_stale_kept_record_still_answers_when_the_ask_fails(self, served, monkeypatch):
@@ -355,8 +286,6 @@ class TestOffline:
         [warning] = [w for w in resolved.warnings if "not in hand" in w]
         assert "because Kiln can't get this material's figures" in warning
         assert bridge.why_unanswered("pla") == "offline"
-        assert di.estimate_load_capacity("pla", 24.0, 100.0) is None
-        assert di.load_figures_unanswered("pla")
 
 
 class TestSignedOut:
@@ -376,28 +305,6 @@ class TestSignedOut:
         assert bridge.why_unanswered("pla") == "signed_out"
         assert "signed out" in (di.brand_figures_unanswered("pla") or "")
 
-    def test_estimate_structural_load_at_pro_names_the_sign_out(self, pro_plan):
-        tool = _structural_load_tool()
-        for material in ("petg", "tpu"):
-            result = tool(material, 24.0, 100.0)
-            assert result["success"] is False, result
-            assert result["code"] == "LOAD_FIGURES_UNAVAILABLE"
-            assert material in result["error"] and "signed out" in result["error"]
-            assert "max_load_n" not in result and "load_at_deflection_limit_n" not in result
-
-    def test_free_is_told_the_load_is_unchecked_before_any_ask(self, monkeypatch):
-        calls: list[str] = []
-        refused = bridge._served
-
-        def counting(key: str):
-            calls.append(key)
-            return refused(key)
-
-        monkeypatch.setattr(bridge, "_served", counting)
-        result = _structural_load_tool()("petg", 24.0, 100.0)
-        assert result["success"] is True and result["load_checked"] is False
-        assert calls == []
-
     def test_a_signed_out_miss_is_not_asked_again_on_every_call(self, monkeypatch):
         calls: list[str] = []
 
@@ -408,7 +315,7 @@ class TestSignedOut:
         monkeypatch.setattr(bridge, "_served", refused)
         for _ in range(5):
             di.get_brand_filament_profile(_pla_profile())
-            di.estimate_load_capacity("pla", 24.0, 100.0)
+            di.resolve_filament(_pla_profile())
         assert calls == ["pla"]
 
     def test_the_bridge_is_on_the_hosted_doors_roster(self):
@@ -449,9 +356,7 @@ class TestLocal:
         monkeypatch.setattr(bridge, "_served", lambda key: (_ for _ in ()).throw(AssertionError("asked the servers")))
         profile = di.get_brand_filament_profile(_pla_profile())
         assert profile is not None and profile.nozzle_temp_optimal_c == PLA_NOZZLE[1]
-        assert di.estimate_load_capacity("petg", 24.0, 100.0, load_across_layers=False).max_load_n == pytest.approx(
-            _cell(24.0, 100.0), abs=0.01
-        )
+        assert di.resolve_filament(_roster("petg")[0]).nozzle_temp_optimal_c == PETG_NOZZLE[1]
         assert bridge.kept_record("pla") is None and bridge.kept_record("petg") is None
 
     def test_with_kiln_pro_here_every_family_is_listed_with_figures(self, monkeypatch):
@@ -472,8 +377,6 @@ class TestLocal:
         profile = di.get_brand_filament_profile(_pla_profile())
         assert profile is not None and not profile.has_figures()
         assert "can't read this material's record" in (bridge.unanswered("pla") or "")
-        assert di.estimate_load_capacity("pla", 24.0, 100.0) is None
-        assert "can't read this material's record" in (di.load_figures_unanswered("pla") or "")
 
 
 class TestARefusalDropsTheKeptRecord:
@@ -486,7 +389,7 @@ class TestARefusalDropsTheKeptRecord:
         import time
 
         record = {"material_id": key, "matched_by": "exact", "display_name": key.upper(),
-                  "brands": {"kilntest_old": {"nozzle_temp_optimal_c": 999}}, "load": {}}
+                  "brands": {"kilntest_old": {"nozzle_temp_optimal_c": 999}}}
         bridge.KEEP_DIR.mkdir(parents=True, exist_ok=True)
         bridge._keep_path(key).write_text(
             json.dumps({"kept_at": time.time() - days * 86400, "record": record}), encoding="utf-8"
@@ -503,7 +406,7 @@ class TestARefusalDropsTheKeptRecord:
         self._keep_old(bridge, "petg", days=30)
         assert bridge.material_record("petg") is None
         assert bridge.kept_record("petg") is None, "the kept record outlived the refusal"
-        assert bridge.unanswered("petg") == "the brand's own tune and the load figures are part of Kiln Pro"
+        assert bridge.unanswered("petg") == "the brand's own tune is part of Kiln Pro"
 
     def test_an_offline_miss_still_reads_a_stale_kept_record(self, monkeypatch, tmp_path):
         from kiln import _pro_material_bridge as bridge

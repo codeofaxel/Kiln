@@ -12,7 +12,6 @@ Public API:
     get_material_profile      — full property sheet for a material
     list_material_profiles    — all materials in a domain
     recommend_material        — best material for functional requirements
-    estimate_load_capacity    — safe load estimate for cantilever geometry
     check_environment_compatibility — survivability check by environment
     get_printer_design_profile — capability profile for a printer
     list_printer_profiles     — all known printer capability profiles
@@ -27,7 +26,6 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
-import math
 import re
 from dataclasses import asdict, dataclass, field
 from functools import lru_cache
@@ -662,28 +660,6 @@ class MaterialRecommendation:
         data = asdict(self)
         data["material"] = self.material.to_dict()
         return data
-
-
-@dataclass
-class LoadEstimate:
-    """Estimated safe load capacity for a specific cantilever geometry.
-
-    ``caution`` is set when this material's own caveats could not be read
-    (the public load table carries ``notes`` for only a few materials; the
-    rest live in the kiln-pro overlay).  Empty means the caveats are either
-    present in ``reasoning`` or genuinely absent — never that the number
-    needs no caveat.  See :func:`unestablished_caution`.
-    """
-
-    material: str
-    max_load_n: float
-    safety_factor: float
-    derating_applied: float
-    reasoning: list[str]
-    caution: str = ""
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
 
 
 @dataclass
@@ -1538,10 +1514,12 @@ def _is_tpu_family(material_id: str) -> bool:
 
 def _load_judgement_is_paid() -> bool:
     """True for a caller below Kiln Pro: the recommender's load judgement
-    is Pro's (2026-10-16), and free is told so in words.  A tier that
-    cannot be read is treated as free, the direction that promises less."""
+    is Pro's (2026-10-16), and free is told so in words.  The CALLER's plan
+    (``kiln.licensing``: on Kiln's servers the person asking, never the
+    server's own sign-in).  A tier that cannot be read is treated as free,
+    the direction that promises less."""
     try:
-        from kiln.account_plan import LicenseTier, check_tier
+        from kiln.licensing import LicenseTier, check_tier
 
         tier_ok, _msg = check_tier(LicenseTier.PRO)
         return not tier_ok
@@ -2254,9 +2232,9 @@ def _recommend_material_for_design(
 
 
 def _material_record(material_id: str) -> dict[str, Any] | None:
-    """ONE material's catalogue record -- its brand figures and load figures
-    -- through :mod:`kiln._pro_material_bridge`, or ``None`` (no row, or a
-    miss the bridge words).  Never raises."""
+    """ONE material's catalogue record -- its brand figures -- through
+    :mod:`kiln._pro_material_bridge`, or ``None`` (no row, or a miss the
+    bridge words).  Never raises."""
     try:
         from kiln import _pro_material_bridge as _bridge
 
@@ -2623,206 +2601,6 @@ def load_table_materials() -> list[str]:
     table carried thirty-five.
     """
     return sorted(k for k in _get_kb().load_tables if not k.startswith("_"))
-
-
-def estimate_deflection_limited_load(
-    material_id: str,
-    cross_section_mm2: float,
-    cantilever_length_mm: float,
-) -> dict[str, Any] | None:
-    """Serviceability answer for an elastomer, or ``None`` if not one.
-
-    An elastomer does not fail in bending at these loads — it deflects out of
-    the way. This returns the load at which the section bends L/10, which is
-    the limit that actually governs, clearly labelled so it can never be read
-    as a strength value.
-    """
-    key = (material_id or "").lower()
-    rec = _get_kb().load_tables.get(key)
-    if not isinstance(rec, dict) or rec.get("limit_mode") != "deflection":
-        return None
-    rec = {**rec, **_load_figures(key)}
-    rows = sorted(
-        rec.get("cross_section_vs_deflection_load", []),
-        key=lambda r: float(r.get("cantilever_length_mm", 0.0)),
-    )
-    if not rows or cross_section_mm2 <= 0 or cantilever_length_mm <= 0:
-        return None
-    e_mpa = float(rec.get("youngs_modulus_mpa", 0.0))
-    ratio = float(rec.get("deflection_limit_ratio", 10.0))
-    if e_mpa <= 0:
-        return None
-    # Same closed form the generator uses: F = E * A^2 / (4 * ratio * L^2)
-    load = e_mpa * (cross_section_mm2 ** 2) / (4.0 * ratio * (cantilever_length_mm ** 2))
-    return {
-        "material": (material_id or "").lower(),
-        "limit_mode": "deflection",
-        "load_at_deflection_limit_n": math.floor(load * 10000.0) / 10000.0,
-        "allowable_deflection_mm": round(cantilever_length_mm / ratio, 2),
-        "youngs_modulus_mpa": e_mpa,
-        "reasoning": list(rec.get("notes", [])),
-    }
-
-
-def _load_figures(material_key: str) -> dict[str, Any]:
-    """The material's load figures from its catalogue record (the tensile
-    capacity, the cross-section vs load grid, the orientation derating), or
-    ``{}`` when they could not be had -- :func:`load_figures_unanswered`
-    says why."""
-    record = _material_record(material_key)
-    load = record.get("load") if isinstance(record, dict) else None
-    return dict(load) if isinstance(load, dict) else {}
-
-
-def load_figures_unanswered(material_id: str) -> str | None:
-    """Why *material_id*'s load figures could not be had, as a clause, or
-    ``None`` when they were (or the roster has no such material)."""
-    kb = _get_kb()
-    key = resolve_material_key(material_id, kb.load_tables) or (material_id or "").lower()
-    return _figures_unanswered(key)
-
-
-def estimate_load_capacity(
-    material_id: str,
-    cross_section_mm2: float,
-    cantilever_length_mm: float,
-    *,
-    load_across_layers: bool = True,
-) -> LoadEstimate | None:
-    """Estimate max safe load for a given cantilever geometry.
-
-    The roster (``load_tables.json``) says the material is one the lookup
-    answers for; its figures are the catalogue record, served one material
-    at a time.  ``None`` is an unknown material, an elastomer (see
-    :func:`estimate_deflection_limited_load`) or figures not in hand --
-    :func:`load_figures_unanswered` tells the last apart.
-
-    Orientation convention (fixed 2026-07-16 — the pair was previously
-    inverted): ``load_across_layers=True`` means the load pulls the
-    layer interfaces apart (load along the build/Z direction) — the
-    WEAK direction for FDM, so the table capacity is derated (0.4, the
-    worst per-material interlayer ratio, so one conservative pair
-    covers every material).  ``False`` means the load acts within the
-    layer planes — the strong direction (full table value).  ``True``
-    is the conservative default.
-
-    The grid itself is DERIVED data (square-section bending math, generated
-    and pinned in kiln-pro beside the catalogue record) — wide or flat
-    sections are weaker than the square basis, and the reasoning says so.
-    """
-    kb = _get_kb()
-    material_key = resolve_material_key(material_id, kb.load_tables) or material_id.lower()
-    material_data = kb.load_tables.get(material_key)
-    if material_data is None:
-        return None
-    material_data = {**material_data, **_load_figures(material_key)}
-
-    reasoning: list[str] = []
-
-    if cross_section_mm2 <= 0:
-        reasoning.append("Cross-section must be positive. Returning zero safe load.")
-        return LoadEstimate(
-            material=material_key,
-            max_load_n=0.0,
-            safety_factor=3.0,
-            derating_applied=0.0,
-            reasoning=reasoning,
-        )
-
-    length_tables = sorted(
-        material_data.get("cross_section_vs_load", []),
-        key=lambda row: float(row.get("cantilever_length_mm", 0.0)),
-    )
-    if not length_tables:
-        return None
-
-    lower_row, upper_row = _select_length_rows(length_tables, cantilever_length_mm)
-    lower_length = float(lower_row.get("cantilever_length_mm", 0.0))
-    upper_length = float(upper_row.get("cantilever_length_mm", 0.0))
-
-    lower_load = _interpolate_cross_section_load(
-        lower_row.get("entries", []),
-        cross_section_mm2,
-    )
-    upper_load = _interpolate_cross_section_load(
-        upper_row.get("entries", []),
-        cross_section_mm2,
-    )
-
-    if lower_length == upper_length:
-        base_load = lower_load
-        reasoning.append(f"Used lookup row at {lower_length:.0f} mm cantilever.")
-    else:
-        ratio = (cantilever_length_mm - lower_length) / (upper_length - lower_length)
-        base_load = lower_load + (upper_load - lower_load) * ratio
-        reasoning.append(
-            f"Interpolated between {lower_length:.0f} mm and "
-            f"{upper_length:.0f} mm cantilever tables."
-        )
-
-    if cantilever_length_mm < lower_length:
-        reasoning.append(
-            f"Requested cantilever ({cantilever_length_mm:.1f} mm) is shorter than table "
-            f"minimum ({lower_length:.0f} mm); estimate uses conservative minimum row."
-        )
-    elif cantilever_length_mm > upper_length:
-        reasoning.append(
-            f"Requested cantilever ({cantilever_length_mm:.1f} mm) exceeds table maximum "
-            f"({upper_length:.0f} mm); estimate uses conservative maximum row."
-        )
-
-    orientation_derating = material_data.get("layer_orientation_derating", {})
-    orientation_key = "across_layers" if load_across_layers else "along_layers"
-    derating = float(orientation_derating.get(orientation_key, 1.0))
-    max_load_n = max(0.0, base_load * derating)
-
-    tensile_capacity = material_data.get("tensile_capacity_n_per_mm2")
-    if tensile_capacity is not None:
-        reasoning.append(
-            f"Base material tension capacity: {tensile_capacity} N/mm^2 "
-            "(already includes safety factor)."
-        )
-    reasoning.append(
-        f"Applied layer-orientation derating ({orientation_key}) = {derating:.2f}."
-    )
-    reasoning.append(
-        "Assumes a compact (square) cross-section — wide or flat sections "
-        "are weaker. For shape-aware sizing, factor of safety by "
-        "application class, and fatigue/creep checks, use Kiln Pro's "
-        "design_for_load."
-    )
-    notes = material_data.get("notes", [])
-    reasoning.extend(notes)
-
-    return LoadEstimate(
-        material=material_key,
-        # Floor, not round: a safe-load figure must never round toward
-        # MORE capacity (banker's rounding could add up to 5 mN above
-        # the derived limit).
-        max_load_n=int(max_load_n * 100) / 100.0,
-        safety_factor=3.0,
-        derating_applied=derating,
-        reasoning=reasoning,
-        # The number is the catalogue's (Kiln Pro's); the material's own
-        # caveats are the floor's.  When they could not be read, say so rather than hand
-        # back a bare figure that reads as a clearance.
-        caution=(
-            ""
-            if notes
-            else unestablished_caution(
-                "load_tables",
-                "This is the geometry calculation only. What most often "
-                "breaks a real part — a load left sitting on it for weeks, "
-                "repeated bending, or filament that has soaked up moisture — "
-                "is not in this number, and no caution specific to "
-                f"{material_key} was established here. Treat it as unchecked "
-                "for this material and test the part before you rely on it.",
-                curated_entry_exists=curated_entry_exists(
-                    "load_tables", material_key
-                ),
-            )
-        ),
-    )
 
 
 def check_environment_compatibility(
@@ -4299,65 +4077,6 @@ def get_print_diagnostic(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
-
-
-def _select_length_rows(
-    rows: list[dict[str, Any]],
-    cantilever_length_mm: float,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Return the two rows that bound a requested cantilever length."""
-    if not rows:
-        return {}, {}
-
-    if cantilever_length_mm <= float(rows[0].get("cantilever_length_mm", 0.0)):
-        return rows[0], rows[0]
-
-    if cantilever_length_mm >= float(rows[-1].get("cantilever_length_mm", 0.0)):
-        return rows[-1], rows[-1]
-
-    for idx in range(len(rows) - 1):
-        current_len = float(rows[idx].get("cantilever_length_mm", 0.0))
-        next_len = float(rows[idx + 1].get("cantilever_length_mm", 0.0))
-        if current_len <= cantilever_length_mm <= next_len:
-            return rows[idx], rows[idx + 1]
-
-    return rows[-1], rows[-1]
-
-
-def _interpolate_cross_section_load(
-    entries: list[dict[str, Any]],
-    cross_section_mm2: float,
-) -> float:
-    """Interpolate or extrapolate max load from section-area lookup points."""
-    if not entries:
-        return 0.0
-
-    points = sorted(
-        (
-            float(row.get("cross_section_mm2", 0.0)),
-            float(row.get("max_load_n", 0.0)),
-        )
-        for row in entries
-    )
-    points = [(x, y) for x, y in points if x > 0]
-    if not points or cross_section_mm2 <= 0:
-        return 0.0
-
-    first_x, first_y = points[0]
-    if cross_section_mm2 <= first_x:
-        return first_y * (cross_section_mm2 / first_x)
-
-    for idx in range(len(points) - 1):
-        x0, y0 = points[idx]
-        x1, y1 = points[idx + 1]
-        if x0 <= cross_section_mm2 <= x1:
-            if x1 == x0:
-                return y0
-            t = (cross_section_mm2 - x0) / (x1 - x0)
-            return y0 + t * (y1 - y0)
-
-    last_x, last_y = points[-1]
-    return last_y * (cross_section_mm2 / last_x)
 
 
 def _extract_temperatures_c(text: str) -> list[float]:
