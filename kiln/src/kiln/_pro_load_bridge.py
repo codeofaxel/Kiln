@@ -121,6 +121,8 @@ def _served(
     try:
         answer = _pro_api_call(
             WIRE_TOOL,
+            # The person asked for exactly this figure (estimate_structural_load).
+            _asked_by_user=True,
             material=material,
             cross_section_mm2=float(cross_section_mm2),
             cantilever_length_mm=float(cantilever_length_mm),
