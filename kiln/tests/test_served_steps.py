@@ -211,7 +211,7 @@ class TestThroughTheStub:
                 return register
 
         server._register_pro_tool_stubs(_Registry())
-        monkeypatch.setattr(served_makes, "_upload_file", lambda p: (f"tok-{p.suffix[1:]}-0123456789abcdef", ""))
+        monkeypatch.setattr(served_makes, "_upload_file", lambda p, **_k: (f"tok-{p.suffix[1:]}-0123456789abcdef", ""))
         return server, registered["add_feature_during_print"]
 
     def _files(self, tmp_path):

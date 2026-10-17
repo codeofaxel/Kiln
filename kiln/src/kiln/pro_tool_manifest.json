@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-17T11:08:22.251144+00:00",
+  "generated": "2026-10-17T19:17:01.336154+00:00",
   "tool_count": 415,
   "categories": {
     "product_generators": {
@@ -24238,5 +24238,84 @@
         "kind": "record"
       }
     }
-  ]
+  ],
+  "served_public": {
+    "schema_version": 1,
+    "tools": {
+      "add_mesh_chamfer": {
+        "inputs": {
+          "files": {
+            "file_path": "one"
+          },
+          "outputs": {
+            "output_path": "file"
+          }
+        }
+      },
+      "add_mesh_fillet": {
+        "inputs": {
+          "files": {
+            "file_path": "one"
+          },
+          "outputs": {
+            "output_path": "file"
+          }
+        }
+      },
+      "analyze_printability": {
+        "inputs": {
+          "files": {
+            "file_path": "one"
+          }
+        }
+      },
+      "apply_design_reinforcements": {
+        "inputs": {
+          "files": {
+            "file_path": "one"
+          },
+          "outputs": {
+            "output_path": "file"
+          }
+        }
+      },
+      "check_print_readiness": {
+        "inputs": {
+          "files": {
+            "file_path": "one"
+          },
+          "outputs": {
+            "output_path": "file"
+          }
+        }
+      },
+      "compile_scad": {
+        "inputs": {
+          "text": {
+            "scad_path": "scad_code"
+          }
+        }
+      },
+      "generate_from_template": {},
+      "import_step_file": {
+        "inputs": {
+          "files": {
+            "file_path": "one"
+          },
+          "outputs": {
+            "output_dir": "folder"
+          }
+        }
+      },
+      "recommend_design_material": {},
+      "recommend_material": {
+        "stays_here_when": {
+          "on_hand_only": [
+            true
+          ]
+        }
+      },
+      "tax_estimate": {}
+    }
+  }
 }

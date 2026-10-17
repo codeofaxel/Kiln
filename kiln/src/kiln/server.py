@@ -1357,6 +1357,43 @@ def _invalid_arguments_result(
         return None
 
 
+async def _served_or_here(
+    tool_mgr: Any,
+    call_here: Any,
+    name: str,
+    arguments: dict[str, Any],
+    context: Any,
+    convert_result: bool,
+) -> Any:
+    """Run *name* on Kiln's servers when the bundled manifest says a
+    signed-in install does (:mod:`kiln.served_public`), else here.
+
+    A call the servers did not answer runs here, and the first such answer
+    per cause says why.  A call whose arguments this tool would refuse runs
+    here too, so the refusal is the one it always was.
+    """
+    from kiln import served_public
+
+    entry = served_public.plan(name, arguments)
+    tool = (getattr(tool_mgr, "_tools", None) or {}).get(name) if entry is not None else None
+    if tool is None or not _arguments_validate(tool, arguments):
+        return await call_here(name, arguments, context=context, convert_result=convert_result)
+    answer, miss = await asyncio.to_thread(served_public.ask, name, arguments, entry)
+    if answer is None:
+        answer = await call_here(name, arguments, context=context, convert_result=False)
+        answer = served_public.say_once(name, answer, miss)
+    return tool.fn_metadata.convert_result(answer) if convert_result else answer
+
+
+def _arguments_validate(tool: Any, arguments: dict[str, Any]) -> bool:
+    """Whether *arguments* pass *tool*'s own argument model."""
+    try:
+        tool.fn_metadata.arg_model.model_validate(arguments)
+    except Exception:  # noqa: BLE001 -- the call runs here and says why
+        return False
+    return True
+
+
 def _install_mcp_request_context_capture() -> None:
     """Capture current MCP request context so auth can read per-request metadata."""
     tool_mgr = mcp._tool_manager
@@ -1408,11 +1445,8 @@ def _install_mcp_request_context_capture() -> None:
             # kiln.tool_args.  Everything else pydantic still judges.
             arguments = _coerce_arguments(self, name, arguments or {})
             try:
-                result = await original_call_tool(
-                    name,
-                    arguments,
-                    context=context,
-                    convert_result=convert_result,
+                result = await _served_or_here(
+                    self, original_call_tool, name, arguments, context, convert_result,
                 )
             except Exception as exc:
                 # A tool that RAISES was invisible to every counter here:
@@ -18959,10 +18993,36 @@ def _served_wait_seconds(tool_name: str) -> float:
     return _SERVED_MAKE_WAIT_S if kind == "made" else _SERVED_WAIT_S
 
 
+def _served_bearer() -> tuple[str, str | None]:
+    """``(bearer, None)`` for the served door, ``("", None)`` when this
+    install was never signed in, or ``("", sentence)`` when a session exists
+    but can no longer be renewed (the sign-in state's own words)."""
+    try:
+        from kiln.auth_session import resolve_api_bearer
+
+        resolved = resolve_api_bearer()
+    except Exception:
+        resolved = None
+    if resolved is None:
+        # Resolver unreachable (broken install).  Fall back to the raw
+        # stored token rather than claiming an unpaired account at a
+        # machine that plainly has a session on disk.
+        return (
+            os.environ.get("KILN_LICENSE_KEY", "").strip() or _raw_paired_access_token(),
+            None,
+        )
+    if resolved.token:
+        return resolved.token, None
+    if resolved.state == "needs_signin":
+        return "", resolved.detail
+    return "", None
+
+
 def _pro_api_call(
     tool_name: str,
     _timeout: float | None = None,
     _asked_by_user: bool = True,
+    _http: dict | None = None,
     **kwargs,
 ) -> dict:
     """Call a hosted kiln-pro tool through the public REST API.
@@ -18976,6 +19036,10 @@ def _pro_api_call(
     pre-flight.  Without a sign-in it gets the same answer, but it is not
     counted as someone reaching for the feature: that counter
     (:func:`kiln.daily_stats.record_account_wall`) means a person asked.
+
+    ``_http``, when given, is filled with ``status``: the HTTP status the
+    answer came with, so a caller can tell a tool's own answer (200) from
+    the servers turning the call away.  Left empty when no HTTP answer came.
 
     Bearer-token resolution order:
       1. ``KILN_LICENSE_KEY`` env var (operator-supplied license)
@@ -18995,23 +19059,8 @@ def _pro_api_call(
     of its own comes back untouched.
     """
     api_url = (os.environ.get("KILN_API_URL") or "").strip() or _HOSTED_KILN_API_URL
-    try:
-        from kiln.auth_session import resolve_api_bearer
-
-        resolved = resolve_api_bearer()
-    except Exception:
-        resolved = None
-    if resolved is None:
-        # Resolver unreachable (broken install).  Fall back to the raw
-        # stored token rather than claiming an unpaired account at a
-        # machine that plainly has a session on disk.
-        bearer = (
-            os.environ.get("KILN_LICENSE_KEY", "").strip()
-            or _raw_paired_access_token()
-        )
-    elif resolved.token:
-        bearer = resolved.token
-    elif resolved.state == "needs_signin":
+    bearer, expired = _served_bearer()
+    if expired is not None:
         # A session exists but its refresh token was rejected —
         # distinct from never having paired, and the fix is one
         # command.  Without this branch the stale bearer used to
@@ -19019,14 +19068,12 @@ def _pro_api_call(
         # or a silent free-tier downgrade.
         return {
             "status": "error",
-            "error": resolved.detail,
+            "error": expired,
             "code": "KILN_SESSION_EXPIRED",
             "tool": tool_name,
             "why": "signed_out",
             **signin_hint_fields(),
         }
-    else:
-        bearer = ""
     if not bearer and tool_name in _ANONYMOUS_OK_TOOLS:
         # Telling us Kiln is broken must not require an account.  Everything
         # else here can wait for a sign-in; a bug report cannot, because the
@@ -19148,11 +19195,16 @@ def _pro_api_call(
             try:
                 with urllib.request.urlopen(req, timeout=wait_s) as resp:
                     answer = json.loads(resp.read())
-                    accepted = getattr(resp, "status", 200) == 202
+                    status = getattr(resp, "status", 200)
+                    accepted = status == 202
                 if accepted and isinstance(answer, dict) and answer.get("job_id"):
-                    return _await_served_job(tool_name, api_url, headers, answer)
+                    return _await_served_job(tool_name, api_url, headers, answer, _http=_http)
+                if _http is not None:
+                    _http["status"] = status
                 return answer
             except urllib.error.HTTPError as exc:
+                if _http is not None:
+                    _http["status"] = exc.code
                 # Preserve the server's own error body when present — it
                 # usually carries a structured ``code`` + ``error`` the agent
                 # can act on (e.g. tier-gate denials, quota-exhaustion
@@ -19193,17 +19245,26 @@ _SERVED_FILES_HEADER = "X-Kiln-Result-Files"
 _SERVED_STEPS_HEADER = "X-Kiln-Local-Steps"
 #: How long a job is waited for: the servers stop one at fifteen minutes.
 _SERVED_JOB_WAIT_S = 15 * 60 + 30
+#: How often a job is asked about: soon after it is accepted (many finish
+#: in under a second), then less often, up to every few seconds.
+_SERVED_JOB_FIRST_POLL_S = 0.5
 _SERVED_JOB_POLL_S = 3.0
 
 
 def _await_served_job(
-    tool_name: str, api_url: str, headers: dict[str, str], accepted: dict
+    tool_name: str,
+    api_url: str,
+    headers: dict[str, str],
+    accepted: dict,
+    *,
+    _http: dict | None = None,
 ) -> dict:
     """Wait for a job the servers accepted, and return the tool's answer.
 
     The job lives on the one machine that took it, so each poll names that
     machine.  The answer is the tool's own, exactly as a direct call would
     have returned it; a miss is worded the way every served miss is.
+    ``_http`` is filled as :func:`_pro_api_call` fills it.
     """
     import json
     import time
@@ -19227,8 +19288,10 @@ def _await_served_job(
             "waiting. Nothing was charged."
         ),
     }
+    pause = min(_SERVED_JOB_FIRST_POLL_S, _SERVED_JOB_POLL_S)
     while time.monotonic() <= deadline:
-        time.sleep(_SERVED_JOB_POLL_S)
+        time.sleep(pause)
+        pause = min(pause * 2, _SERVED_JOB_POLL_S)
         # A job outlives a sign-in token (they last an hour and are renewed
         # near their end), so each poll carries the current one.
         try:
@@ -19245,6 +19308,7 @@ def _await_served_job(
         try:
             with urllib.request.urlopen(req, timeout=_SERVED_WAIT_S) as resp:
                 answer = json.loads(resp.read())
+                status = getattr(resp, "status", 200)
         except urllib.error.HTTPError as exc:
             try:
                 body = json.loads(exc.read().decode("utf-8"))
@@ -19253,16 +19317,22 @@ def _await_served_job(
             if exc.code >= 500 and not (isinstance(body, dict) and body.get("code")):
                 # The machine is busy with the job itself; ask again.
                 continue
+            if _http is not None:
+                _http["status"] = exc.code
             return envelope_for_http(tool_name, exc.code, body, kind=kind)
         except Exception:
             # One poll that got no answer says nothing about the job: the
             # machine running a heavy make can be slow to answer anything.
             continue
         if not (isinstance(answer, dict) and answer.get("status") == "running"):
+            if _http is not None:
+                _http["status"] = status
             return answer
     # The whole wait passed with no answer.  Whatever the last poll did, what
     # the person needs to hear is that the make ran out of time, not that a
     # minute's wait will fix it.
+    if _http is not None:
+        _http["status"] = 504
     return envelope_for_http(tool_name, 504, too_long, kind=kind)
 
 
@@ -19337,6 +19407,11 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
     except Exception as exc:
         logger.warning("Failed to load pro tool manifest: %s", exc)
         return
+
+    # Public tools a signed-in install runs on Kiln's servers.
+    from kiln import served_public
+
+    served_public.load(manifest.get("served_public"))
 
     tools = manifest.get("tools", [])
     if not tools:

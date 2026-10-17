@@ -644,7 +644,7 @@ class TestThroughTheStub:
                 return register
 
         server._register_pro_tool_stubs(_Registry())
-        monkeypatch.setattr(served_makes, "_upload_file", lambda p: (f"tok-{p.suffix[1:]}-0123456789abcdef", ""))
+        monkeypatch.setattr(served_makes, "_upload_file", lambda p, **_k: (f"tok-{p.suffix[1:]}-0123456789abcdef", ""))
         monkeypatch.setattr(served_makes, "_bring_files", lambda answer, trip: None)
         monkeypatch.setattr(server, "_read_config_printers", lambda: {
             "default": {"type": "bambu", "printer_model": "bambu_a1", "host": "10.0.0.5"}})
