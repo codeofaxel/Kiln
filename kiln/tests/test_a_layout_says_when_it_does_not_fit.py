@@ -12,6 +12,9 @@ this was written:
 * ``multi_copy_print`` and the CLI's ``--copies`` hand PrusaSlicer
   ``--duplicate``, which sliced the four copies that fit, left the other
   five out without a word and exited 0.
+* The grid those doors lay out themselves when the slicer cannot charged a
+  gap after the last column, so it refused two 120 mm parts with a 10 mm
+  gap on a 256 mm bed -- a fit they do have.
 
 Every one of these is now judged by :func:`kiln.printers.bed_fit.plate_fit`,
 which is :func:`kiln.printers.bed_fit.check_bed_fit` -- the judgment the
@@ -245,3 +248,46 @@ class TestCopiesTheSlicerLaysOut:
         text = Path(result.output_path).read_text(encoding="utf-8", errors="replace")
         return float(re.search(r"; filament used \[mm\] = ([\d.]+)", text).group(1))
 
+
+# ---------------------------------------------------------------------------
+# The grid the copy doors lay out when the slicer does not
+# ---------------------------------------------------------------------------
+
+
+class TestTheCopyGridCountsItsGapsOnce:
+    """N copies take N widths and N - 1 gaps.  The grid charged a gap after
+    the last column too, so it told a person two 120 mm parts with a 10 mm
+    gap do not fit a 256 mm bed, when they take 250 mm."""
+
+    def test_two_parts_that_fit_side_by_side_are_laid_out(self, tmp_path):
+        from kiln.auto_orient import duplicate_stl_on_plate
+
+        model = _part(tmp_path, "tile", size=(120.0, 120.0, 5.0))
+        merged = duplicate_stl_on_plate(model, 2, spacing_mm=10.0, bed_width_mm=256.0, bed_depth_mm=256.0)
+        bounds = trimesh.load(merged).bounds
+        assert bounds[1][0] - bounds[0][0] == pytest.approx(250.0, abs=0.01)
+        assert bounds[0][0] >= 0.0 and bounds[1][0] <= 256.0
+
+    def test_a_count_past_the_grid_is_refused_with_the_true_maximum(self, tmp_path):
+        from kiln.auto_orient import duplicate_stl_on_plate
+
+        model = _part(tmp_path, "tile", size=(120.0, 120.0, 5.0))
+        with pytest.raises(ValueError, match=r"Max 4 copies \(2 cols x 2 rows\)"):
+            duplicate_stl_on_plate(model, 5, spacing_mm=10.0, bed_width_mm=256.0, bed_depth_mm=256.0)
+
+    @pytest.mark.skipif(_real_prusaslicer() is None, reason="needs a real PrusaSlicer")
+    def test_the_multicolour_copy_grid_lays_out_the_same_two(self, tmp_path, monkeypatch):
+        from kiln import monitor_twin
+        from kiln.slicer import slice_multicolor_copies
+
+        monkeypatch.setenv("KILN_HOME", str(tmp_path / "home"))
+        twin = tmp_path / "twin"
+        monkeypatch.setattr(monitor_twin, "_TWIN_DIR", twin)
+        monkeypatch.setattr(monitor_twin, "_SLICES_FILE", twin / "slices.json")
+        monkeypatch.setattr(monitor_twin, "_ACTIVE_FILE", twin / "active.json")
+        model = _part(tmp_path, "tile", size=(120.0, 120.0, 5.0))
+        result = slice_multicolor_copies(
+            model, 2, spacing_mm=10.0, bed_width_mm=256.0, bed_depth_mm=256.0,
+            slicer_path=_real_prusaslicer(), output_dir=str(tmp_path / "out"),
+        )
+        assert os.path.isfile(result.output_path)

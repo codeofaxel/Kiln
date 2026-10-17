@@ -740,8 +740,11 @@ def duplicate_stl_on_plate(
     cell_w = model_width + spacing_mm
     cell_d = model_depth + spacing_mm
 
-    cols = int(bed_width_mm // cell_w)
-    rows = int(bed_depth_mm // cell_d)
+    # N copies take N widths and N - 1 gaps, so the gap after the last
+    # column is not charged against the bed.  Charging it refused, for one,
+    # two 120 mm parts with a 10 mm gap on a 256 mm bed, which take 250 mm.
+    cols = int((bed_width_mm + spacing_mm) // cell_w)
+    rows = int((bed_depth_mm + spacing_mm) // cell_d)
 
     if cols < 1 or rows < 1:
         raise ValueError(
