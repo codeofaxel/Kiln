@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-16T22:27:54.747234+00:00",
+  "generated": "2026-10-17T11:08:22.251144+00:00",
   "tool_count": 415,
   "categories": {
     "product_generators": {
@@ -2400,14 +2400,40 @@
       "category": "decoration",
       "parameters": {
         "properties": {
-          "arguments": {
-            "additionalProperties": true,
-            "title": "Arguments",
-            "type": "object"
+          "model_path": {
+            "title": "Model Path",
+            "type": "string"
+          },
+          "num_feet": {
+            "default": 4,
+            "title": "Num Feet",
+            "type": "integer"
+          },
+          "foot_diameter_mm": {
+            "default": 8.0,
+            "title": "Foot Diameter Mm",
+            "type": "number"
+          },
+          "foot_height_mm": {
+            "default": 1.5,
+            "title": "Foot Height Mm",
+            "type": "number"
+          },
+          "output_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Output Path"
           }
         },
         "required": [
-          "arguments"
+          "model_path"
         ],
         "title": "auto_add_rubber_feetArguments",
         "type": "object"
@@ -2415,6 +2441,12 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "mesh": "model_path",
+        "outputs": {
+          "output_path": "file"
+        }
       }
     },
     {
@@ -2513,14 +2545,40 @@
       "category": "decoration",
       "parameters": {
         "properties": {
-          "arguments": {
-            "additionalProperties": true,
-            "title": "Arguments",
-            "type": "object"
+          "model_path": {
+            "title": "Model Path",
+            "type": "string"
+          },
+          "face": {
+            "default": "bottom",
+            "title": "Face",
+            "type": "string"
+          },
+          "pocket_depth_mm": {
+            "default": 1.2,
+            "title": "Pocket Depth Mm",
+            "type": "number"
+          },
+          "pocket_inset_mm": {
+            "default": 3.0,
+            "title": "Pocket Inset Mm",
+            "type": "number"
+          },
+          "output_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Output Path"
           }
         },
         "required": [
-          "arguments"
+          "model_path"
         ],
         "title": "auto_recess_pocketArguments",
         "type": "object"
@@ -2528,6 +2586,12 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "mesh": "model_path",
+        "outputs": {
+          "output_path": "file"
+        }
       }
     },
     {
@@ -2538,14 +2602,58 @@
       "category": "decoration",
       "parameters": {
         "properties": {
-          "arguments": {
-            "additionalProperties": true,
-            "title": "Arguments",
-            "type": "object"
+          "model_paths": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Model Paths",
+            "type": "array"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "face": {
+            "default": "auto",
+            "title": "Face",
+            "type": "string"
+          },
+          "depth_mm": {
+            "default": 0.0,
+            "title": "Depth Mm",
+            "type": "number"
+          },
+          "mode": {
+            "default": "deboss",
+            "title": "Mode",
+            "type": "string"
+          },
+          "scale": {
+            "default": 0.7,
+            "title": "Scale",
+            "type": "number"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          },
+          "output_dir": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Output Dir"
           }
         },
         "required": [
-          "arguments"
+          "model_paths",
+          "content"
         ],
         "title": "batch_decorateArguments",
         "type": "object"
@@ -2553,6 +2661,15 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "image": "content",
+        "files": {
+          "model_paths": "many"
+        },
+        "outputs": {
+          "output_dir": "folder"
+        }
       }
     },
     {
@@ -2563,14 +2680,29 @@
       "category": "decoration",
       "parameters": {
         "properties": {
-          "arguments": {
+          "num_units": {
+            "title": "Num Units",
+            "type": "integer"
+          },
+          "decoration_cost": {
             "additionalProperties": true,
-            "title": "Arguments",
+            "title": "Decoration Cost",
             "type": "object"
+          },
+          "setup_time_minutes": {
+            "default": 5.0,
+            "title": "Setup Time Minutes",
+            "type": "number"
+          },
+          "labor_cost_per_hour": {
+            "default": 0.0,
+            "title": "Labor Cost Per Hour",
+            "type": "number"
           }
         },
         "required": [
-          "arguments"
+          "num_units",
+          "decoration_cost"
         ],
         "title": "estimate_batch_costArguments",
         "type": "object"
@@ -2588,14 +2720,48 @@
       "category": "decoration",
       "parameters": {
         "properties": {
-          "arguments": {
-            "additionalProperties": true,
-            "title": "Arguments",
-            "type": "object"
+          "base_model_path": {
+            "title": "Base Model Path",
+            "type": "string"
+          },
+          "decorated_model_path": {
+            "title": "Decorated Model Path",
+            "type": "string"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          },
+          "material_cost_per_kg": {
+            "default": 20.0,
+            "title": "Material Cost Per Kg",
+            "type": "number"
+          },
+          "electricity_cost_per_kwh": {
+            "default": 0.12,
+            "title": "Electricity Cost Per Kwh",
+            "type": "number"
+          },
+          "printer_power_watts": {
+            "default": 150.0,
+            "title": "Printer Power Watts",
+            "type": "number"
+          },
+          "labor_minutes": {
+            "default": 0.0,
+            "title": "Labor Minutes",
+            "type": "number"
+          },
+          "labor_cost_per_hour": {
+            "default": 0.0,
+            "title": "Labor Cost Per Hour",
+            "type": "number"
           }
         },
         "required": [
-          "arguments"
+          "base_model_path",
+          "decorated_model_path"
         ],
         "title": "estimate_decoration_costArguments",
         "type": "object"
@@ -2603,6 +2769,12 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
+      },
+      "inputs": {
+        "files": {
+          "base_model_path": "one",
+          "decorated_model_path": "one"
+        }
       }
     },
     {
@@ -2662,14 +2834,35 @@
       "category": "decoration",
       "parameters": {
         "properties": {
-          "arguments": {
-            "additionalProperties": true,
-            "title": "Arguments",
-            "type": "object"
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "output_dir": {
+            "title": "Output Dir",
+            "type": "string"
+          },
+          "target_size_mm": {
+            "default": 0.0,
+            "title": "Target Size Mm",
+            "type": "number"
+          },
+          "nozzle_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Nozzle Mm"
           }
         },
         "required": [
-          "arguments"
+          "content",
+          "output_dir"
         ],
         "title": "generate_qr_decorationArguments",
         "type": "object"
@@ -2686,6 +2879,12 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "image": "content",
+        "outputs": {
+          "output_dir": "folder"
+        }
       }
     },
     {
@@ -2905,14 +3104,68 @@
       "category": "decoration",
       "parameters": {
         "properties": {
-          "arguments": {
-            "additionalProperties": true,
-            "title": "Arguments",
-            "type": "object"
+          "model_path": {
+            "title": "Model Path",
+            "type": "string"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "face": {
+            "default": "auto",
+            "title": "Face",
+            "type": "string"
+          },
+          "depth_mm": {
+            "default": 0.0,
+            "title": "Depth Mm",
+            "type": "number"
+          },
+          "mode": {
+            "default": "deboss",
+            "title": "Mode",
+            "type": "string"
+          },
+          "scale": {
+            "default": 0.7,
+            "title": "Scale",
+            "type": "number"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          },
+          "content_type": {
+            "default": "auto",
+            "title": "Content Type",
+            "type": "string"
+          },
+          "offset_x_mm": {
+            "default": 0.0,
+            "title": "Offset X Mm",
+            "type": "number"
+          },
+          "offset_y_mm": {
+            "default": 0.0,
+            "title": "Offset Y Mm",
+            "type": "number"
+          },
+          "absolute_size_mm": {
+            "default": 0.0,
+            "title": "Absolute Size Mm",
+            "type": "number"
+          },
+          "image_style": {
+            "default": "auto",
+            "title": "Image Style",
+            "type": "string"
           }
         },
         "required": [
-          "arguments"
+          "model_path",
+          "content"
         ],
         "title": "smart_decorateArguments",
         "type": "object"
@@ -2920,6 +3173,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "mesh": "model_path",
+        "image": "content"
       }
     },
     {
@@ -19193,7 +19450,7 @@
     },
     {
       "name": "generate_ashtray",
-      "description": "Generate an ashtray with optional branding and a QR code (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 ashtrays/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate an ashtray with optional branding; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 ashtrays/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_metered",
       "category": "product_generators",
@@ -19376,7 +19633,7 @@
     },
     {
       "name": "generate_coaster",
-      "description": "Generate a coaster with optional branding and a QR code (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 coasters/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a coaster with optional branding; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 coasters/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_metered",
       "category": "product_generators",
@@ -19630,7 +19887,7 @@
     },
     {
       "name": "generate_jewelry_tray",
-      "description": "Generate a jewelry tray with optional decoration and a QR code (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 jewelry trays/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a jewelry tray with optional decoration; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 jewelry trays/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_metered",
       "category": "product_generators",
@@ -20140,7 +20397,7 @@
     },
     {
       "name": "generate_pen_cup",
-      "description": "Generate a desktop pen / brush cup with optional decoration and a QR code (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 pen cups/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a desktop pen / brush cup with optional decoration; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 pen cups/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_metered",
       "category": "product_generators",
