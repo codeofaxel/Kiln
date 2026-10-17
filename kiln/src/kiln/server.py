@@ -8107,6 +8107,26 @@ def _undriven_multi_material_decision(
     return out
 
 
+def _plate_too_big_refusal(compose_result: dict[str, Any], composed_path: str) -> dict[str, Any] | None:
+    """An error envelope for a composed plate bigger than its bed, else ``None``.
+
+    The verdict is the composer's own (``fits_bed``, from
+    :func:`kiln.printers.bed_fit.plate_fit` -- the judgment the slice and
+    start gates make), said before anything is sliced rather than by the
+    slicer after it.  The composed file rides along, for a bigger printer or
+    a slicer of the person's choosing.
+    """
+    if compose_result.get("fits_bed") is not False:
+        return None
+    fit = compose_result.get("bed_fit") or {}
+    return _error_dict(
+        str(fit.get("message") or "The composed plate is bigger than the bed."),
+        code="PLATE_EXCEEDS_BED",
+        retryable=False,
+        extra={"multi_material_3mf": composed_path, "bed_fit": fit},
+    )
+
+
 def _refuse_undriven_multi_material(
     tool: str,
     printer_name: str | None,
@@ -17406,10 +17426,13 @@ def compose_multicolor_3mf(
 ) -> dict:
     """Compose a multi-color / multi-material .3mf from multiple STL files.
 
-    Creates a **single print-ready .3mf** containing all parts with per-part
-    AMS/extruder slot assignments.  This is the correct way to send a
-    multi-color design to any FDM printer — the printer receives one file,
-    not multiple.
+    Creates a **single .3mf, ready to slice**, containing all parts with
+    per-part AMS/extruder slot assignments.  This is the correct way to hand
+    a multi-color design to a slicer — it receives one file, not multiple.
+    It is a model, not a sliced plate, so no printer starts it as it stands:
+    slice it first.  ``fits_bed`` says whether the plate fits the bed it was
+    composed for; when it does not, the message says by how much and what to
+    do, and does not offer it for printing.
 
     Compatible with:
     * **BambuStudio / Bambu A1, X1, P1 + AMS** — reads ``Metadata/model_settings.config``
@@ -17427,9 +17450,8 @@ def compose_multicolor_3mf(
             {"stl_path": "/tmp/qr_pads.stl", "extruder": 2,
              "name": "qr_code", "color": "#111111", "material": "PLA Black"},
         ])
-        # 4. Upload and print:
-        upload_file(result["output_path"])
-        start_print(result["output_path"])
+        # 4. Slice and print (or slice_model to look at the slice first):
+        slice_and_print(result["output_path"])
 
     Args:
         parts: List of part dicts.  Each dict requires:
@@ -17460,7 +17482,9 @@ def compose_multicolor_3mf(
 
     Returns:
         Dict with ``success``, ``output_path``, ``parts``, ``total_triangles``,
-        ``total_vertices``, ``extruder_map``, and ``message``.  It also says
+        ``total_vertices``, ``extruder_map``, ``fits_bed`` (``False`` when the
+        plate is bigger than its bed, ``None`` when it could not be measured),
+        ``bed_fit`` (the sizes behind that verdict), and ``message``.  It also says
         whether the part colours are on the printer, as
         ``colour_availability`` (absent when Kiln cannot see what is loaded).
         Relay its ``say`` as written and add nothing about filament: never
@@ -18428,7 +18452,8 @@ def multi_copy_print(
 
     Uses PrusaSlicer's ``--duplicate`` flag when available (handles placement,
     collision avoidance, and travel optimization). Falls back to STL mesh
-    duplication for OrcaSlicer or when fine control is needed.
+    duplication for OrcaSlicer or when fine control is needed.  Copies that do
+    not all fit the bed are refused, saying so, never sliced short.
 
     Requires a slicer (PrusaSlicer or OrcaSlicer) installed locally.
     The printer must be idle and connected.
@@ -21587,6 +21612,8 @@ def multi_material_print(
                 f"Failed to build multi-material 3MF: {compose_result.get('error')}",
                 code="INTERNAL_ERROR",
             )
+        if refusal := _plate_too_big_refusal(compose_result, output_3mf):
+            return refusal
 
         # Step 3: One set of settings for the plate.  Every slot shares one
         # nozzle and one bed, so the plate prints at the hottest material's
@@ -22102,6 +22129,8 @@ def multi_color_copies(
                 f"Failed to build multi-color 3MF: {compose_result.get('error')}",
                 code="INTERNAL_ERROR",
             )
+        if refusal := _plate_too_big_refusal(compose_result, output_3mf):
+            return refusal
 
         # The material's settings are the slice's own business: it is told
         # the material below, and writes them for every copy.  (This door

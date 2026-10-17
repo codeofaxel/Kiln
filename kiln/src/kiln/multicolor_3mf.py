@@ -949,9 +949,23 @@ def _resolve_plate(
     than failing: bed placement is a correction, never a reason to
     refuse a compose.
     """
+    width, depth, _height, _words = plate_bed(plate_width, plate_depth, printer_id)
+    return width, depth
+
+
+def plate_bed(
+    plate_width: float, plate_depth: float, printer_id: str | None,
+) -> tuple[float, float, float | None, str]:
+    """``(width, depth, height, words)`` of the bed a plate is laid out for.
+
+    The printer's build volume when *printer_id* resolves, its name in
+    *words* ("the Bambu Lab A1's bed"); otherwise the caller's plate size,
+    with no height, said as the plate it was laid out for.  What
+    :func:`kiln.printers.bed_fit.plate_fit` judges a layout against.
+    """
     if printer_id:
         try:
-            from kiln.printers.bed_fit import resolve_build_volume
+            from kiln.printers.bed_fit import get_printer_display_name, resolve_build_volume
 
             resolved = resolve_build_volume(printer_id)
         except Exception:  # noqa: BLE001 — placement is advisory, never fatal
@@ -959,9 +973,33 @@ def _resolve_plate(
             logger.debug("build volume lookup failed for %r", printer_id,
                          exc_info=True)
         if resolved is not None:
-            _model_id, build_volume = resolved
-            return build_volume[0], build_volume[1]
-    return plate_width, plate_depth
+            model_id, build_volume = resolved
+            name = get_printer_display_name(model_id) or model_id
+            return build_volume[0], build_volume[1], build_volume[2], f"the {name}'s bed"
+    return plate_width, plate_depth, None, "the plate it was laid out for"
+
+
+def placed_bbox(parts: list[ColorPart]) -> dict[str, float] | None:
+    """The bounding box of *parts* where they are placed: each mesh's own
+    bounds moved by its ``x/y/z``.  ``None`` when no mesh can be read."""
+    lo = [float("inf")] * 3
+    hi = [float("-inf")] * 3
+    for part in parts:
+        try:
+            box = _stl_bounding_box(part.stl_path)
+        except Exception:  # noqa: BLE001 — an unreadable mesh is not measured
+            continue
+        offset = (part.x, part.y, part.z)
+        for axis in range(3):
+            lo[axis] = min(lo[axis], box[axis] + offset[axis])
+            hi[axis] = max(hi[axis], box[axis + 3] + offset[axis])
+    if lo[0] == float("inf"):
+        return None
+    return {
+        "x_min": lo[0], "x_max": hi[0],
+        "y_min": lo[1], "y_max": hi[1],
+        "z_min": lo[2], "z_max": hi[2],
+    }
 
 
 def _plate_translation(
@@ -1174,8 +1212,8 @@ def compose_multicolor_3mf(
 ) -> dict[str, Any]:
     """Compose a multi-color / multi-material .3mf from multiple STL files.
 
-    Creates a single print-ready .3mf containing all parts with per-part
-    AMS/extruder assignments.  All parts must share the same coordinate
+    Creates a single .3mf, ready to slice, containing all parts with
+    per-part AMS/extruder assignments.  All parts must share the same coordinate
     origin — their relative layout is preserved exactly as positioned in
     the STL files (when the group as a whole sits off the plate, one
     common translation moves it onto the bed; see ``plate_width``).
@@ -1220,7 +1258,13 @@ def compose_multicolor_3mf(
         * ``degenerate_skipped`` (int) — only present when > 0: input
           triangles dropped because their vertices collapse under exact
           dedup (the 3MF spec forbids repeated indices)
-        * ``message`` (str) — human summary
+        * ``fits_bed`` (bool | None) — whether the placed plate fits its
+          bed, by :func:`kiln.printers.bed_fit.plate_fit` (the judgment the
+          slice and start gates make); ``None`` when it cannot be measured
+        * ``bed_fit`` (dict) — the sizes behind ``fits_bed``, and when it is
+          ``False`` the sentence that says so and what to do
+        * ``message`` (str) — human summary; offers the plate for slicing
+          only when it fits
         * ``slicer_note`` (str) — multi-extruder plates only: what to tell
           the user if they open the file in Bambu Studio themselves (it
           re-derives print settings and may need its prime tower moved
@@ -1235,7 +1279,8 @@ def compose_multicolor_3mf(
             ColorPart("/tmp/coaster_qr.stl",   extruder=2, name="qr_code",
                       color="#111111", material="PLA Black"),
         ])
-        # → result["output_path"] is a ready-to-upload .3mf
+        # → result["output_path"] is a .3mf ready to slice, and
+        #   result["fits_bed"] says whether it fits the plate
     """
     if not parts:
         return {"success": False, "error": "No parts provided — need at least one ColorPart."}
@@ -1372,17 +1417,33 @@ def compose_multicolor_3mf(
     # copies) is preserved exactly — see _plate_translation for why an
     # off-plate 3MF silently slices to nothing.
     # -----------------------------------------------------------------------
-    plate_w, plate_d = _resolve_plate(plate_width, plate_depth, printer_id)
+    plate_w, plate_d, plate_h, bed_words = plate_bed(plate_width, plate_depth, printer_id)
     g_min_x = g_min_y = g_min_z = float("inf")
-    g_max_x = g_max_y = float("-inf")
+    g_max_x = g_max_y = g_max_z = float("-inf")
     for part, vertices, _ in parsed:
         g_min_x = min(g_min_x, min(v[0] for v in vertices) + part.x)
         g_max_x = max(g_max_x, max(v[0] for v in vertices) + part.x)
         g_min_y = min(g_min_y, min(v[1] for v in vertices) + part.y)
         g_max_y = max(g_max_y, max(v[1] for v in vertices) + part.y)
         g_min_z = min(g_min_z, min(v[2] for v in vertices) + part.z)
+        g_max_z = max(g_max_z, max(v[2] for v in vertices) + part.z)
     bed_tx, bed_ty, bed_tz = _plate_translation(
         g_min_x, g_max_x, g_min_y, g_max_y, g_min_z, plate_w, plate_d,
+    )
+    # Whether the plate fits its bed, by the judgment the slice and start
+    # gates make (kiln.printers.bed_fit.plate_fit): the translation above
+    # moves a group onto the plate, and cannot make a plate bigger than its
+    # bed fit it.
+    from kiln.printers.bed_fit import plate_fit
+
+    plate_verdict = plate_fit(
+        {
+            "x_min": g_min_x + bed_tx, "x_max": g_max_x + bed_tx,
+            "y_min": g_min_y + bed_ty, "y_max": g_max_y + bed_ty,
+            "z_min": g_min_z + bed_tz, "z_max": g_max_z + bed_tz,
+        },
+        (plate_w, plate_d, plate_h),
+        bed=bed_words,
     )
     if (bed_tx, bed_ty, bed_tz) != (0.0, 0.0, 0.0):
         from dataclasses import replace as _dc_replace
@@ -1475,18 +1536,32 @@ def compose_multicolor_3mf(
         if flush_matrix_str:
             result["flush_matrix_embedded"] = True
 
+    result["fits_bed"] = plate_verdict["fits"]
+    result["bed_fit"] = plate_verdict
+
     # Compose human summary
     safety_note = ""
     if safety_result and safety_result["level"] in ("caution", "conditional"):
             safety_note = f" ⚠️  {safety_result['message']}"
 
+    if plate_verdict["fits"] is False:
+        # Never "next: print it" for a plate the slicer and the printer will
+        # refuse; the sizes and the way out instead.
+        next_step = f" {plate_verdict['message']} It is not ready to print as laid out."
+    else:
+        # The file is a model, not a sliced plate: no printer starts it as
+        # it stands, so the step after it is a slice.
+        next_step = (
+            f" Next step: slice_and_print('{output_path}') slices it for the printer and "
+            f"prints it, or slice_model('{output_path}') to look at the slice first."
+        )
     result["message"] = (
         f"Created {len(parsed)}-color 3MF with {total_t:,} triangles. "
         f"Extruder assignments: {extruder_summary}. "
         f"Compatible with BambuStudio (AMS), PrusaSlicer (MMU), and Cura."
         + (" Flush matrix embedded for purge tower sizing." if flush_matrix_str else "")
         + safety_note
-        + f" Next step: upload_file('{output_path}') then start_print()."
+        + next_step
     )
 
     return result
