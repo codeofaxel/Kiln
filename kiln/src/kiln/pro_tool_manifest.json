@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-17T23:06:41.325431+00:00",
+  "generated": "2026-10-17T23:39:49.915260+00:00",
   "tool_count": 415,
   "categories": {
     "product_generators": {
@@ -2386,8 +2386,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
-      },
-      "served": false
+      }
     },
     {
       "name": "cloud_remote_remove",
