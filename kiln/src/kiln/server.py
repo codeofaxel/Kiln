@@ -19182,6 +19182,9 @@ def _pro_api_call(
         )
 
 
+#: The version of a manifest entry's ``history`` block this build reads (the
+#: design-history tools, kiln.history_courier).
+_HISTORY_SCHEMA_VERSION = 1
 #: The version of a manifest entry's ``local_steps`` block this build reads
 #: (what a served tool needs read here first, and whether it may ask this
 #: computer to act on the printer).
@@ -19427,6 +19430,14 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
         # all, and whether it may ask this computer to ACT on the printer
         # (kiln.served_steps).  Read only from a block of the version this
         # build understands; anything else leaves the tool as it was.
+        # A design-history tool: send this computer's own history with the
+        # call and write back what changed, or run a cloud door here
+        # (kiln.history_courier).  Read only from a block of the version this
+        # build understands.
+        history_def = tool_def.get("history")
+        history_mode = ""
+        if isinstance(history_def, dict) and history_def.get("schema_version") == _HISTORY_SCHEMA_VERSION:
+            history_mode = str(history_def.get("mode") or "")
         local_steps_def = tool_def.get("local_steps")
         reads_first: list = []
         may_act = False
@@ -19439,9 +19450,18 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
 
         # Build the stub function.  Closures capture `name` by reference,
         # so we use a factory to freeze the value.
-        def _make_stub(_name: str, _inputs: dict | None, _reads: list, _may_act: bool):
+        def _make_stub(
+            _name: str, _inputs: dict | None, _reads: list, _may_act: bool, _history: str = "",
+        ):
             def _stub(**kwargs):
                 from kiln import served_makes, served_steps
+
+                if _history and _history != "served":
+                    # A cloud door this computer runs itself, from its own
+                    # history records, with the person's own sign-in.
+                    from kiln.history_courier import run_local
+
+                    return run_local(_name, _history, kwargs)
 
                 # Whether the user's agent has seen the actions this tool
                 # wants done on the printer and said to run them.  The
@@ -19487,6 +19507,13 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                 # Likewise a blade-status request carries this install's
                 # recent fault codes: the hosted side has no event log.
                 call = with_recent_faults(_name, with_local_reading(_name, kwargs))
+                if _history == "served":
+                    # The design history this call is about lives here; it
+                    # rides with the call and what changed comes back.
+                    from kiln.history_courier import records_for_call
+
+                    history_sent = records_for_call(call)
+                    call = {**call, "history_records": history_sent}
 
                 def ask(**more):
                     if pre_read:
@@ -19500,6 +19527,10 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                     return _pro_api_call(_name, **call)
 
                 answer = ask()
+                if _history == "served":
+                    from kiln.history_courier import take_delta
+
+                    answer = take_delta(answer, history_sent, tool=_name)
                 # The tool may need one thing only this computer can do
                 # (slice a part with this computer's slicer, start the
                 # resume file it built).  It is done here, from an
@@ -19553,7 +19584,7 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                 )
             return _stub
 
-        stub = _make_stub(name, served_inputs, reads_first, may_act)
+        stub = _make_stub(name, served_inputs, reads_first, may_act, history_mode)
 
         # Reconstruct a typed Python signature from the JSON Schema so
         # that FastMCP generates the correct tool schema for clients.

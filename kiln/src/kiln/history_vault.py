@@ -1,0 +1,692 @@
+"""This computer's design history: branches, versions and releases, as records.
+
+The branch, merge, cherry-pick and release operations run on Kiln's servers
+(they need a Kiln account on a plan that includes them).  The history they
+work on stays here, on this computer, until the person pushes it.  This
+module keeps that history as plain records, and nothing else: it has no
+merge, no comparison and no judgment of its own.
+
+**The record format is the contract.**  A design's history is the same shape
+Kiln's cloud push, pull and clone move:
+
+* ``branches``: ``branch_id``, ``design_id``, ``name``, ``parent_branch_id``,
+  ``base_version_id``, ``head_version_id``, ``created_at``, ``created_by``,
+  ``status``, ``annotation``, ``metadata``;
+* ``versions``: ``version_id``, ``parent_version_id``, ``created_at``;
+* ``memberships``: ``branch_id``, ``version_id``, ``position``, ``added_at``;
+* ``provenance_sidecars``: ``version_id`` and ``recipe_dict`` (the version's
+  recipe; ``mesh_bytes_b64`` carries its mesh on the wire);
+* ``releases``: a signed release as the server returned it.
+
+A call sends :meth:`HistoryVault.bundle` for the designs it names, and writes
+back the delta the server answers with (:meth:`HistoryVault.apply_delta`).
+Meshes are kept once each, by SHA-256, under ``~/.kiln/history_vault/meshes``.
+
+**The design library is the start of every history.**  A design saved with
+the version tools lives under ``~/.kiln/designs/<design_id>/`` as recipe
+files, one per version.  The first time a design is asked about, its versions
+are recorded here in order on a ``main`` branch.  A version saved later joins
+the end of the design's CHECKED-OUT branch: ``main`` until a branch is made
+(which checks it out) or another is checked out (:meth:`HistoryVault.check_out`),
+and the library's head recipe is that branch's head, so the next save
+continues it.  Each recorded library file gets its ``version_id`` written into
+it, so a file is never mistaken for another version saved under the same
+number.  A version the server makes is written back into the library too, so
+the version tools see it.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import logging
+import os
+import re
+import sqlite3
+import threading
+import time
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+SCHEMA_VERSION = 1
+
+_RECIPE_HEAD = ".kiln_recipe.json"
+_MESH_SUFFIXES = (".stl", ".3mf", ".obj", ".ply", ".glb")
+_MESH_KEY = "mesh_bytes_b64"
+_MAIN = "main"
+
+
+def _kiln_home() -> Path:
+    return Path(os.path.expanduser("~")) / ".kiln"
+
+
+def _designs_root() -> Path:
+    """Where the version tools keep the design library, read from them."""
+    from kiln.plugins.version_tools import _DESIGNS_ROOT
+
+    return Path(os.path.expanduser(_DESIGNS_ROOT))
+
+
+def _design_folder(design_id: Any) -> Path | None:
+    """The library folder of *design_id*, or ``None`` when it names anything else.
+
+    A design id arrives from the server in every answer, so it is judged the
+    way the version tools judge one (``kiln.plugins.version_tools._design_dir``):
+    by the folder it resolves to, which must sit directly in the library.
+    """
+    if not isinstance(design_id, str) or not design_id.strip():
+        return None
+    root = os.path.realpath(_designs_root())
+    target = os.path.realpath(os.path.join(root, design_id))
+    if os.path.dirname(target) != root or target == root:
+        return None
+    return Path(target)
+
+
+#: A mesh is filed under its SHA-256; anything else is not a mesh name.
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_NOT_ID_CHARS = re.compile(r"[^A-Za-z0-9_-]")
+
+
+def _sha(value: Any) -> str | None:
+    return value if isinstance(value, str) and _SHA256.match(value) else None
+
+
+def _file_tag(version_id: str) -> str:
+    """A version id made safe to put in a file name."""
+    tag = _NOT_ID_CHARS.sub("", version_id)[:12]
+    return tag or hashlib.sha256(version_id.encode("utf-8")).hexdigest()[:12]
+
+
+def _rows(items: Any, *keys: str) -> list[dict[str, Any]]:
+    """The well-formed rows of an answer's list: dicts carrying every *keys* as text."""
+    if not isinstance(items, list):
+        return []
+    return [
+        r for r in items
+        if isinstance(r, dict) and all(isinstance(r.get(k), str) and r.get(k) for k in keys)
+    ]
+
+
+def _canonical(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, default=str)
+
+
+#: Recipe keys holding a file path.  A path names a folder on this computer
+#: (often the person's home folder), so it leaves as its bare file name.
+_PATH_KEYS = frozenset({
+    "stl_path", "mesh_path", "output_path", "imported_mesh_path", "final_3mf",
+    "path", "file_path", "source_path", "3mf_path", "step_path",
+})
+
+
+def _without_local_paths(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            k: (os.path.basename(v) if k in _PATH_KEYS and isinstance(v, str) and os.path.isabs(v) else _without_local_paths(v))
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [_without_local_paths(v) for v in value]
+    return value
+
+
+def _main_branch_id(design_id: str) -> str:
+    return uuid.uuid5(uuid.NAMESPACE_URL, f"kiln-history-main:{design_id}").hex
+
+
+class HistoryVault:
+    """SQLite records of this computer's design history.  Thread-safe."""
+
+    def __init__(self, db_path: str | None = None, mesh_dir: str | None = None) -> None:
+        home = _kiln_home()
+        self._db_path = db_path or str(home / "history_vault.db")
+        self._mesh_dir = Path(mesh_dir or home / "history_vault" / "meshes")
+        os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
+        self._lock = threading.RLock()
+        self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA busy_timeout=5000")
+        self._conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS branches (
+                branch_id TEXT PRIMARY KEY,
+                design_id TEXT NOT NULL,
+                record TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_hv_branches_design ON branches(design_id);
+            CREATE TABLE IF NOT EXISTS versions (
+                version_id TEXT PRIMARY KEY,
+                design_id TEXT NOT NULL,
+                parent_version_id TEXT,
+                created_at REAL NOT NULL,
+                recipe TEXT NOT NULL,
+                mesh_sha256 TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_hv_versions_design ON versions(design_id);
+            CREATE TABLE IF NOT EXISTS memberships (
+                branch_id TEXT NOT NULL,
+                version_id TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                added_at REAL NOT NULL,
+                PRIMARY KEY (branch_id, version_id)
+            );
+            CREATE TABLE IF NOT EXISTS releases (
+                release_id TEXT PRIMARY KEY,
+                design_id TEXT NOT NULL,
+                record TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_hv_releases_design ON releases(design_id);
+            CREATE TABLE IF NOT EXISTS checkouts (
+                design_id TEXT PRIMARY KEY,
+                branch_id TEXT NOT NULL
+            );
+            """
+        )
+        self._conn.commit()
+
+    def close(self) -> None:
+        self._conn.close()
+
+    # -- lookups -----------------------------------------------------------
+
+    def has_design(self, design_id: str) -> bool:
+        row = self._conn.execute(
+            "SELECT 1 FROM branches WHERE design_id = ? LIMIT 1", (design_id,)
+        ).fetchone()
+        return row is not None
+
+    def design_of_branch(self, branch_id: str) -> str | None:
+        row = self._conn.execute(
+            "SELECT design_id FROM branches WHERE branch_id = ?", (branch_id,)
+        ).fetchone()
+        return row["design_id"] if row else None
+
+    def design_of_version(self, version_id: str) -> str | None:
+        row = self._conn.execute(
+            "SELECT design_id FROM versions WHERE version_id = ?", (version_id,)
+        ).fetchone()
+        return row["design_id"] if row else None
+
+    def design_of_release(self, release_id: str) -> str | None:
+        row = self._conn.execute(
+            "SELECT design_id FROM releases WHERE release_id = ?", (release_id,)
+        ).fetchone()
+        return row["design_id"] if row else None
+
+    def branches(self, design_id: str) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT record FROM branches WHERE design_id = ?", (design_id,)
+        ).fetchall()
+        out = [json.loads(r["record"]) for r in rows]
+        return sorted(out, key=lambda b: float(b.get("created_at") or 0.0))
+
+    def branch(self, branch_id: str) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT record FROM branches WHERE branch_id = ?", (branch_id,)
+        ).fetchone()
+        return json.loads(row["record"]) if row else None
+
+    def branch_named(self, design_id: str, name: str) -> dict[str, Any] | None:
+        for b in self.branches(design_id):
+            if b.get("name") == name and b.get("status") != "retired":
+                return b
+        return None
+
+    def memberships(self, branch_id: str) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT * FROM memberships WHERE branch_id = ? ORDER BY position, added_at",
+            (branch_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def checked_out(self, design_id: str) -> dict[str, Any] | None:
+        """The branch this computer's saves of *design_id* continue (``main`` by default)."""
+        row = self._conn.execute(
+            "SELECT branch_id FROM checkouts WHERE design_id = ?", (design_id,)
+        ).fetchone()
+        branch = self.branch(row["branch_id"]) if row else None
+        if branch is None or branch.get("status") == "retired" or branch.get("design_id") != design_id:
+            branch = self.branch(_main_branch_id(design_id)) or self.branch_named(design_id, _MAIN)
+        return branch
+
+    def check_out(self, design_id: str, branch_id: str) -> dict[str, Any] | None:
+        """Make *branch_id* the branch saves of *design_id* continue; ``None`` if it is not one.
+
+        The library's head recipe becomes that branch's head, numbered after
+        every version in the library, so the next save forks from it under a
+        number no other version holds.
+        """
+        branch = self.branch(branch_id)
+        if branch is None or branch.get("design_id") != design_id or branch.get("status") == "retired":
+            return None
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO checkouts (design_id, branch_id) VALUES (?, ?)",
+                (design_id, branch_id),
+            )
+            self._conn.commit()
+        self._point_head(design_id)
+        return branch
+
+    def version(self, version_id: str) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT * FROM versions WHERE version_id = ?", (version_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        out = dict(row)
+        out["recipe"] = json.loads(out["recipe"])
+        return out
+
+    def mesh_path(self, sha: str | None) -> Path | None:
+        if not _sha(sha):
+            return None
+        for suffix in _MESH_SUFFIXES:
+            path = self._mesh_dir / f"{sha}{suffix}"
+            if path.is_file():
+                return path
+        return None
+
+    # -- what a call sends ---------------------------------------------------
+
+    def bundle(
+        self,
+        design_id: str,
+        *,
+        meshes_for: set[str] | frozenset[str] = frozenset(),
+        mesh_budget: int = 16 * 1024 * 1024,
+    ) -> dict[str, Any]:
+        """One design's records, with the meshes of its heads and *meshes_for*.
+
+        Mesh bytes ride only for the versions a call is likely to need them
+        for (every branch head, and the versions it names), up to
+        *mesh_budget* bytes; ``meshes_left_out`` lists the rest.
+        """
+        branches = self.branches(design_id)
+        wanted = set(meshes_for) | {b["head_version_id"] for b in branches if b.get("head_version_id")}
+        rows = self._conn.execute(
+            "SELECT * FROM versions WHERE design_id = ? ORDER BY created_at", (design_id,)
+        ).fetchall()
+        versions, sidecars, left_out = [], [], []
+        spent = 0
+        for row in rows:
+            recipe = _without_local_paths(json.loads(row["recipe"]))
+            if row["version_id"] in wanted and row["mesh_sha256"]:
+                path = self.mesh_path(row["mesh_sha256"])
+                size = path.stat().st_size if path else 0
+                if path and spent + size <= mesh_budget:
+                    recipe[_MESH_KEY] = base64.b64encode(path.read_bytes()).decode("ascii")
+                    recipe["stl_path"] = path.name
+                    spent += size
+                elif path:
+                    left_out.append(row["version_id"])
+            versions.append({
+                "version_id": row["version_id"],
+                "parent_version_id": row["parent_version_id"],
+                "created_at": row["created_at"],
+            })
+            sidecars.append({"version_id": row["version_id"], "recipe_dict": recipe})
+        memberships = []
+        for b in branches:
+            memberships.extend(self.memberships(b["branch_id"]))
+        releases = [
+            json.loads(r["record"])
+            for r in self._conn.execute(
+                "SELECT record FROM releases WHERE design_id = ?", (design_id,)
+            ).fetchall()
+        ]
+        out = {
+            "design_id": design_id,
+            "branches": branches,
+            "versions": versions,
+            "memberships": memberships,
+            "provenance_sidecars": sidecars,
+            "releases": releases,
+        }
+        if left_out:
+            out["meshes_left_out"] = left_out
+        return out
+
+    # -- writing ---------------------------------------------------------------
+
+    def _put_mesh(self, data: bytes, suffix: str = ".stl") -> str:
+        sha = hashlib.sha256(data).hexdigest()
+        if self.mesh_path(sha) is None:
+            self._mesh_dir.mkdir(parents=True, exist_ok=True)
+            suffix = suffix if suffix in _MESH_SUFFIXES else ".stl"
+            target = self._mesh_dir / f"{sha}{suffix}"
+            tmp = target.with_suffix(target.suffix + ".part")
+            tmp.write_bytes(data)
+            os.replace(tmp, target)
+        return sha
+
+    def _put_version(
+        self, design_id: str, version: dict[str, Any], recipe: dict[str, Any]
+    ) -> str | None:
+        """Record one version; returns the mesh SHA it now points at."""
+        recipe = dict(recipe)
+        mesh_b64 = recipe.pop(_MESH_KEY, None)
+        sha = _sha(recipe.get("mesh_sha256"))
+        if mesh_b64:
+            try:
+                data = base64.b64decode(mesh_b64)
+            except (ValueError, TypeError):
+                data = b""
+            if data:
+                suffix = Path(str(recipe.get("stl_path") or "")).suffix.lower()
+                sha = self._put_mesh(data, suffix)
+        recipe.setdefault("version_id", version["version_id"])
+        self._conn.execute(
+            "INSERT OR REPLACE INTO versions "
+            "(version_id, design_id, parent_version_id, created_at, recipe, mesh_sha256) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                version["version_id"],
+                design_id,
+                version.get("parent_version_id"),
+                float(version.get("created_at") or time.time()),
+                _canonical(recipe),
+                sha,
+            ),
+        )
+        return sha
+
+    def _put_branch(self, branch: dict[str, Any]) -> None:
+        self._conn.execute(
+            "INSERT OR REPLACE INTO branches (branch_id, design_id, record) VALUES (?, ?, ?)",
+            (branch["branch_id"], branch["design_id"], _canonical(branch)),
+        )
+
+    def _put_membership(self, m: dict[str, Any]) -> None:
+        self._conn.execute(
+            "INSERT OR IGNORE INTO memberships (branch_id, version_id, position, added_at) "
+            "VALUES (?, ?, ?, ?)",
+            (m["branch_id"], m["version_id"], int(m.get("position") or 0), float(m.get("added_at") or time.time())),
+        )
+
+    def _put_release(self, release: dict[str, Any]) -> None:
+        record = {k: v for k, v in release.items() if k != "new"}
+        self._conn.execute(
+            "INSERT OR REPLACE INTO releases (release_id, design_id, record) VALUES (?, ?, ?)",
+            (record["release_id"], record.get("design_id") or "", _canonical(record)),
+        )
+
+    def apply_delta(self, delta: dict[str, Any]) -> dict[str, Any]:
+        """Write what a served call changed in one design.
+
+        A branch is moved only from the head it had when the call was sent
+        (``expected_heads``): one moved here in the meantime is left as it is
+        and named in ``branches_changed_here``.  Versions, memberships and
+        releases are added; a version's recipe amendment replaces its recipe.
+        """
+        design_id = str(delta.get("design_id") or "")
+        recipes = {
+            r["version_id"]: r.get("recipe_dict") if isinstance(r.get("recipe_dict"), dict) else {}
+            for r in _rows(delta.get("provenance_sidecars"), "version_id")
+        }
+        moved_here: list[str] = []
+        written: list[dict[str, Any]] = []
+        with self._lock:
+            for v in _rows(delta.get("versions"), "version_id"):
+                self._put_version(design_id, v, dict(recipes.get(v["version_id"]) or {}))
+                written.append(self.version(v["version_id"]) or {})
+            for update in _rows(delta.get("recipe_updates"), "version_id"):
+                if self.version(update["version_id"]) is None:
+                    continue
+                recipe = update.get("recipe_dict") if isinstance(update.get("recipe_dict"), dict) else {}
+                self._conn.execute(
+                    "UPDATE versions SET recipe = ? WHERE version_id = ?",
+                    (_canonical(dict(recipe)), update["version_id"]),
+                )
+            expected = delta.get("expected_heads") if isinstance(delta.get("expected_heads"), dict) else {}
+            for branch in _rows(delta.get("branches"), "branch_id"):
+                if branch.get("design_id") not in (None, design_id):
+                    continue
+                current = self.branch(branch["branch_id"])
+                if branch["branch_id"] in expected:
+                    now_head = None if current is None else current.get("head_version_id")
+                    if current is not None and now_head != expected[branch["branch_id"]]:
+                        moved_here.append(branch["branch_id"])
+                        continue
+                self._put_branch({**branch, "design_id": design_id})
+            for m in _rows(delta.get("memberships"), "branch_id", "version_id"):
+                if m["branch_id"] in moved_here or self.design_of_branch(m["branch_id"]) != design_id:
+                    continue
+                self._put_membership(m)
+            for release in _rows(delta.get("releases"), "release_id"):
+                self._put_release({**release, "design_id": design_id})
+            self._conn.commit()
+        library = self._write_library(design_id, [w for w in written if w])
+        return {
+            "design_id": design_id,
+            "versions_added": len(written),
+            "branches_changed_here": moved_here,
+            "library_files": library,
+        }
+
+    def apply_remote(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Record a pull or clone answer: the remote's branches as they are there."""
+        bundle_like = {
+            "design_id": payload.get("design_id") or (payload.get("branch") or {}).get("design_id"),
+            "branches": payload.get("branches") or ([payload["branch"]] if payload.get("branch") else []),
+            "versions": payload.get("versions") or [],
+            "memberships": payload.get("memberships") or [],
+            "provenance_sidecars": payload.get("provenance_sidecars") or [],
+            "releases": payload.get("releases") or [],
+        }
+        design_id = str(bundle_like["design_id"] or "")
+        recipes = {
+            r["version_id"]: r.get("recipe_dict") if isinstance(r.get("recipe_dict"), dict) else {}
+            for r in _rows(bundle_like["provenance_sidecars"], "version_id")
+        }
+        branches = [b for b in _rows(bundle_like["branches"], "branch_id") if b.get("design_id") in (None, design_id)]
+        bundle_like["branches"] = branches
+        written = []
+        with self._lock:
+            for v in _rows(bundle_like["versions"], "version_id"):
+                self._put_version(design_id, v, dict(recipes.get(v["version_id"]) or {}))
+                written.append(self.version(v["version_id"]) or {})
+            for b in branches:
+                self._put_branch({**b, "design_id": design_id})
+            for m in _rows(bundle_like["memberships"], "branch_id", "version_id"):
+                if self.design_of_branch(m["branch_id"]) != design_id:
+                    continue
+                self._put_membership({**m, "added_at": m.get("added_at") or time.time()})
+            for r in _rows(bundle_like["releases"], "release_id"):
+                self._put_release({**r, "design_id": design_id})
+            self._conn.commit()
+        self._write_library(design_id, [w for w in written if w])
+        return {
+            "design_id": design_id,
+            "branches": len(bundle_like["branches"]),
+            "versions": len(written),
+            "releases": len(bundle_like["releases"]),
+        }
+
+    # -- the design library -----------------------------------------------------
+
+    def sync_from_library(self, design_id: str) -> int:
+        """Record the library's versions of *design_id* that are not recorded yet.
+
+        New ones join ``main`` in version order.  Returns how many were added.
+        """
+        folder = _design_folder(design_id)
+        if folder is None or not folder.is_dir():
+            return 0
+        found: list[tuple[int, dict[str, Any], Path]] = []
+        for path in folder.glob(".kiln_recipe*.json"):
+            if path.name == _RECIPE_HEAD:
+                continue
+            try:
+                recipe = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            number = recipe.get("version")
+            if isinstance(number, int) and number > 0:
+                found.append((number, recipe, path))
+        if not found:
+            return 0
+        found.sort(key=lambda item: item[0])
+        added = 0
+        with self._lock:
+            target = self.checked_out(design_id)
+            if target is None:
+                target = {
+                    "branch_id": _main_branch_id(design_id),
+                    "design_id": design_id,
+                    "name": _MAIN,
+                    "parent_branch_id": None,
+                    "base_version_id": None,
+                    "head_version_id": None,
+                    "created_at": time.time(),
+                    "created_by": None,
+                    "status": "active",
+                    "annotation": "",
+                    "metadata": {},
+                }
+            head = target.get("head_version_id")
+            position = len(self.memberships(target["branch_id"]))
+            for _number, recipe, path in found:
+                vid = recipe.get("version_id") if isinstance(recipe.get("version_id"), str) else None
+                if vid and self.version(vid) is not None:
+                    continue
+                vid = vid or uuid.uuid4().hex
+                recipe = dict(recipe)
+                recipe["version_id"] = vid
+                stl = recipe.get("stl_path")
+                if isinstance(stl, str) and stl and os.path.isfile(stl):
+                    recipe[_MESH_KEY] = base64.b64encode(Path(stl).read_bytes()).decode("ascii")
+                self._put_version(
+                    design_id,
+                    {"version_id": vid, "parent_version_id": head, "created_at": _created_at(recipe, path)},
+                    recipe,
+                )
+                self._put_membership({
+                    "branch_id": target["branch_id"], "version_id": vid,
+                    "position": position, "added_at": time.time(),
+                })
+                _stamp(path, vid)
+                position += 1
+                head = vid
+                added += 1
+            if added:
+                self._put_branch({**target, "head_version_id": head})
+            self._conn.commit()
+        return added
+
+    def _write_library(self, design_id: str, versions: list[dict[str, Any]]) -> list[str]:
+        """Put each version the server made into the design library as a recipe file."""
+        folder = _design_folder(design_id)
+        if folder is None or not versions:
+            return []
+        folder.mkdir(parents=True, exist_ok=True)
+        taken = {p.name: p for p in folder.glob(".kiln_recipe*.json")}
+        written = []
+        for v in versions:
+            recipe = _library_recipe(v, design_id)
+            mesh = self.mesh_path(v.get("mesh_sha256"))
+            if mesh is not None:
+                local = folder / f"mesh-{v['mesh_sha256'][:16]}{mesh.suffix}"
+                if not local.is_file():
+                    local.write_bytes(mesh.read_bytes())
+                recipe["stl_path"] = str(local)
+            number = recipe.get("version") if isinstance(recipe.get("version"), int) else None
+            name = f".kiln_recipe.v{number}.json" if number else ""
+            if not name or (name in taken and _version_in(taken[name]) != v["version_id"]):
+                name = f".kiln_recipe.{_file_tag(v['version_id'])}.json"
+            path = folder / name
+            path.write_text(json.dumps(recipe, indent=2, sort_keys=True), encoding="utf-8")
+            taken[name] = path
+            written.append(str(path))
+        self._point_head(design_id)
+        return written
+
+    def _point_head(self, design_id: str) -> None:
+        """Make the library's head recipe the checked-out branch's head.
+
+        Numbered after every version in the library, because the version
+        tools number a save one past the head: a head numbered lower would
+        have the next save written over another version's file.
+        """
+        folder = _design_folder(design_id)
+        branch = self.checked_out(design_id)
+        head = self.version(branch["head_version_id"]) if branch and branch.get("head_version_id") else None
+        if folder is None or head is None:
+            return
+        numbers = [
+            n for n in (_read(p).get("version") for p in folder.glob(".kiln_recipe*.json") if p.name != _RECIPE_HEAD)
+            if isinstance(n, int)
+        ]
+        recipe = _library_recipe(head, design_id)
+        recipe["version"] = max([*numbers, int(recipe.get("version") or 0)] or [1])
+        mesh = self.mesh_path(head.get("mesh_sha256"))
+        if mesh is not None:
+            local = folder / f"mesh-{head['mesh_sha256'][:16]}{mesh.suffix}"
+            if not local.is_file():
+                local.write_bytes(mesh.read_bytes())
+            recipe["stl_path"] = str(local)
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / _RECIPE_HEAD).write_text(json.dumps(recipe, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _read(path: Path) -> dict[str, Any]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _library_recipe(version: dict[str, Any], design_id: str) -> dict[str, Any]:
+    """A recorded version as a library recipe file the version tools can load.
+
+    The fields every recipe file carries (``name``, ``created``) are filled
+    from the version's own record when its recipe does not state them.
+    """
+    recipe = dict(version.get("recipe") or {})
+    recipe["version_id"] = version["version_id"]
+    recipe.setdefault("name", recipe.get("design_id") or design_id)
+    if not isinstance(recipe.get("created"), str):
+        stamp = float(version.get("created_at") or time.time())
+        recipe["created"] = datetime.fromtimestamp(stamp, tz=timezone.utc).isoformat()
+    recipe.setdefault("design_id", design_id)
+    return recipe
+
+
+def _stamp(path: Path, version_id: str) -> None:
+    """Write *version_id* into a library recipe file, so it names one version."""
+    data = _read(path)
+    if not data or data.get("version_id") == version_id:
+        return
+    data["version_id"] = version_id
+    try:
+        path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+    except OSError as exc:
+        logger.debug("history: could not stamp %s: %s", path, exc)
+
+
+def _version_in(path: Path) -> str | None:
+    vid = _read(path).get("version_id")
+    return vid if isinstance(vid, str) else None
+
+
+def _created_at(recipe: dict[str, Any], path: Path) -> float:
+    created = recipe.get("created")
+    if isinstance(created, str):
+        try:
+            return datetime.fromisoformat(created.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            pass
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return time.time()
+
+
+__all__ = ["SCHEMA_VERSION", "HistoryVault"]

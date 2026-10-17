@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-17T11:08:22.251144+00:00",
+  "generated": "2026-10-17T20:20:55.089142+00:00",
   "tool_count": 415,
   "categories": {
     "product_generators": {
@@ -1656,6 +1656,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "clone"
       }
     },
     {
@@ -1826,6 +1830,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "remote_branches"
       }
     },
     {
@@ -1920,6 +1928,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "pull"
       }
     },
     {
@@ -2069,6 +2081,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "push"
       }
     },
     {
@@ -3974,6 +3990,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -4744,6 +4764,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -4792,6 +4816,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -5205,6 +5233,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -5582,6 +5614,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -6206,6 +6242,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -6413,6 +6453,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -6903,6 +6947,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -7295,6 +7343,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -7761,6 +7813,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -8057,6 +8113,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -8420,6 +8480,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -8463,6 +8527,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -9239,6 +9307,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {

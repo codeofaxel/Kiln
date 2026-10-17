@@ -13753,7 +13753,11 @@ try:
 
     register_pro_cli(cli)
 except ImportError:
-    pass  # kiln-pro not installed — pro CLI commands not available
+    # kiln-pro not installed: the design-history commands are couriers that
+    # send this computer's own history to Kiln's servers and keep the change.
+    from kiln.cli.history_commands import register_history_cli
+
+    register_history_cli(cli)
 
 
 # Auth commands — `kiln signin` / `kiln signout` / `kiln whoami` / `kiln pair`.
