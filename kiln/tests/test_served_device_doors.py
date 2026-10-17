@@ -14,7 +14,9 @@ real tools' shapes:
 * the pre-flight carries the clumping judgement, or a line saying why not;
 * a Pro answer's abrasive escalation reaches recommend_material as the
   NOZZLE ADVISORY, and a lower plan's refusal leaves the floor;
-* a flow anomaly is reported once per window, off the calling thread.
+* a flow anomaly is reported once per window, off the calling thread;
+* a print start's grams reach the nozzle's wear count, off the print's
+  thread, read from the sliced file; a file with no figure sends nothing.
 
 The real tools at each tier, through the hosted trace, are pinned on the
 kiln-pro side (``tests/test_device_doors_served.py``).
@@ -71,6 +73,9 @@ class _Servers:
                     "diameter_mm": 0.4, "provenance": "user_override", "grams_through": 120.0}
         if tool_name == "record_extrusion_event":
             return {"success": True, "status": "ok"}
+        if tool_name == "nozzle_odometer":
+            return {"status": "success", "success": True, "recorded": True, "grams": kw["grams"],
+                    "source": "explicit", "grams_through_after": 132.5, "reason": ""}
         raise AssertionError(f"unexpected wire {tool_name}")
 
 
@@ -205,3 +210,55 @@ class TestAFlowAnomaly:
             source = inspect.getsource(module)
             assert "report_flow_anomaly(" in source, module.__name__
             assert "record_extrusion_event_for_printer" not in source, module.__name__
+
+
+def _join(name: str) -> None:
+    for t in threading.enumerate():
+        if t.name == name:
+            t.join(5)
+
+
+class TestAPrintStartsWear:
+    """Adam, 2026-10-17: free on every plan for a signed-in account."""
+
+    def test_the_files_grams_reach_the_wear_count_off_the_print_thread(self, servers, monkeypatch, tmp_path):
+        sliced = tmp_path / "plate.gcode"
+        sliced.write_text("; generated\nG28\n; filament used [g] = 12.50\n")
+        seen_threads: list[str] = []
+        real = servers.__call__
+
+        def spy(tool_name, _timeout=None, _asked_by_user=True, **kw):
+            seen_threads.append(threading.current_thread().name)
+            return real(tool_name, _timeout, _asked_by_user, **kw)
+
+        monkeypatch.setattr(srv, "_pro_api_call", spy)
+        nozzle._state_memo["shop_a1"] = (0.0, {"grams_through": 120.0})
+        assert nozzle.record_print_odometer("shop_a1", str(sliced)) is None
+        _join("kiln-odometer-report")
+        (sent,) = _asked(servers, "nozzle_odometer")
+        assert sent["printer_id"] == "shop_a1" and sent["grams"] == pytest.approx(12.5)
+        assert sent["dedupe_key"].startswith(f"start:shop_a1:{sliced}:")
+        assert seen_threads == ["kiln-odometer-report"]
+        assert nozzle._state_memo == {}, "a check must not answer from the count before this print"
+
+    def test_a_file_with_no_figure_sends_nothing(self, servers, tmp_path):
+        bare = tmp_path / "bare.gcode"
+        bare.write_text("G28\nG1 X10\n")
+        nozzle.record_print_odometer("shop_a1", str(bare))
+        nozzle.record_print_odometer("shop_a1", "only-on-the-printer.3mf")
+        _join("kiln-odometer-report")
+        assert _asked(servers, "nozzle_odometer") == []
+
+    def test_a_service_left_alone_is_not_asked(self, servers, monkeypatch):
+        import time
+
+        monkeypatch.setattr(nozzle, "_service_down_until", time.monotonic() + 60)
+        nozzle.record_print_odometer("shop_a1", None, grams=10.0)
+        _join("kiln-odometer-report")
+        assert _asked(servers, "nozzle_odometer") == []
+
+    def test_signed_out_nothing_breaks_and_nothing_is_kept(self, servers):
+        servers.signed_out = True
+        nozzle.record_print_odometer("shop_a1", None, grams=10.0)
+        _join("kiln-odometer-report")
+        assert len(_asked(servers, "nozzle_odometer")) == 1

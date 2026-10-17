@@ -38,8 +38,8 @@ Used by:
 Where kiln-pro is not installed, every helper asks Kiln's servers
 instead, over the door every served tool uses: the capacity verdict,
 the nozzle on record, the abrasive escalation, the clumping judgement;
-a flow anomaly is reported fire-and-forget like the cutter counter, off
-the calling thread.  The servers decide the tier from the account
+a flow anomaly and a print start's grams are reported fire-and-forget
+like the cutter counter, off the calling thread.  The servers decide the tier from the account
 asking; a refusal or no answer reads as ``None`` and the public floor
 the caller already has stands.
 """
@@ -758,24 +758,38 @@ def _served_flow_report(printer_id: str, event_type: str, severity: str) -> None
         _service_down_until, _service_down_miss = time.monotonic() + SERVICE_BACKOFF_S, classify_answer(answer)
 
 
+#: The hosted door a print start's grams are reported to without kiln-pro.
+ODOMETER_TOOL = "nozzle_odometer"
+
+
 def record_print_odometer(
     printer_id: str,
     file_name: str | None,
     *,
     grams: float | None = None,
 ) -> dict[str, Any] | None:
-    """Advance the pro nozzle odometer for one started print.
+    """Advance the nozzle odometer for one started print.
 
     Called from ``PrinterAdapter.start_print`` — the chokepoint every
     print passes through, success OR failure — so nozzle wear counts
     for every print, not just the ones something watched to completion.
     A cancelled print over-counts its planned filament; that is the
     safe direction (a nozzle retired early beats a worn nozzle read as
-    fresh).  No-op without kiln-pro.
+    fresh).
+
+    With kiln-pro installed the count moves locally.  Otherwise the
+    print's grams are read here, from the sliced file, by the readers
+    every print-start count uses (:mod:`kiln._pro_cutter_bridge`), and
+    reported to Kiln's servers on a short-lived thread, free on every
+    plan for a signed-in account.  Signed out, or a file with no figure,
+    and the print is simply not counted; nothing waits and nothing raises.
     """
     try:
         from kiln_pro.nozzle_intelligence.odometer import record_print_filament
     except ImportError:
+        record_print_filament = None
+    if record_print_filament is None:
+        _report_print_grams(printer_id, file_name, grams)
         return None
     try:
         return record_print_filament(
@@ -786,6 +800,52 @@ def record_print_odometer(
         )
     except Exception:  # noqa: BLE001 — wear bookkeeping never blocks a print
         return None
+
+
+def _report_print_grams(printer_id: str, file_name: str | None, grams: float | None) -> None:
+    """Send one start's grams to the hosted odometer, off the calling thread."""
+    if not printer_id or not isinstance(printer_id, str):
+        return
+    if grams is None:
+        from kiln._pro_cutter_bridge import grams_in_file, local_sliced_path
+
+        try:
+            grams = grams_in_file(local_sliced_path(file_name))
+        except Exception:  # noqa: BLE001 -- an unreadable file is a print not counted
+            grams = None
+    if not grams or grams <= 0 or time.monotonic() < _service_down_until:
+        return
+    threading.Thread(
+        target=_served_odometer_report,
+        # One start, one charge; the same file printed again later is
+        # another print, so the key carries the moment.
+        args=(printer_id, float(grams), f"start:{printer_id}:{file_name}:{time.time():.0f}"),
+        name="kiln-odometer-report", daemon=True,
+    ).start()
+
+
+def _served_odometer_report(printer_id: str, grams: float, dedupe_key: str) -> None:
+    """POST one start's grams to the hosted door.  Runs off the calling thread."""
+    global _service_down_until, _service_down_miss
+    from kiln.served_answer import classify_answer, classify_transport_error
+
+    try:
+        from kiln.server import _pro_api_call
+
+        answer = _pro_api_call(
+            ODOMETER_TOOL, _timeout=_CONSULT_TIMEOUT_S, _asked_by_user=False,
+            printer_id=printer_id, grams=grams, dedupe_key=dedupe_key,
+        )
+    except Exception as exc:  # noqa: BLE001 -- the network is a degrade, never a print
+        logger.debug("print-start odometer not served", exc_info=True)
+        _service_down_until, _service_down_miss = time.monotonic() + SERVICE_BACKOFF_S, classify_transport_error(exc)
+        return
+    if isinstance(answer, dict) and answer.get("recorded") is True:
+        # The count just moved: a check must not answer from the one it
+        # remembered a moment ago.
+        forget_recorded_nozzle()
+    elif isinstance(answer, dict) and answer.get("code") == "SERVER_UNREACHABLE":
+        _service_down_until, _service_down_miss = time.monotonic() + SERVICE_BACKOFF_S, classify_answer(answer)
 
 
 __all__ = [
