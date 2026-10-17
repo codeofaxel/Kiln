@@ -47,7 +47,15 @@ import time
 import zipfile
 from typing import Any
 
-from kiln.served_answer import Miss, classify_answer, classify_transport_error, fields, sentence
+from kiln.served_answer import (
+    LOCAL_FAULT_CODE,
+    Miss,
+    classify_answer,
+    classify_transport_error,
+    fields,
+    local_fault,
+    sentence,
+)
 from kiln.untrusted_zip import UntrustedZipFile
 
 logger = logging.getLogger(__name__)
@@ -72,7 +80,7 @@ _GCODE_SUFFIXES = (".gcode", ".gco", ".g")
 #: The code a miss carries when nothing was asked of Kiln's servers at all:
 #: the file could not be sent, or the answer on this computer failed.  Its
 #: sentence is its own detail, never one of the served causes' fixes.
-_NOT_ASKED = "NOT_ASKED"
+_NOT_ASKED = LOCAL_FAULT_CODE
 _TOO_LARGE = "the file is too large to send"
 
 
@@ -140,8 +148,7 @@ def _local(
             printer_id=printer_id,
         )
     except Exception as exc:  # noqa: BLE001 -- an estimate never fails for want of it
-        logger.debug("cost intelligence on this computer failed", exc_info=True)
-        return None, Miss("unanswered", _NOT_ASKED, f"cost intelligence on this computer stopped: {exc}"[:400])
+        return None, local_fault(exc, where="cost intelligence on this computer")
     if isinstance(answer, dict):
         return answer, None
     return None, Miss("unanswered", _NOT_ASKED, "cost intelligence on this computer gave no answer")

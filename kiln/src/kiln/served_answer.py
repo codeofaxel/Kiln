@@ -54,11 +54,14 @@ from __future__ import annotations
 import errno
 import http.client
 import json
+import logging
 import re
 import socket
 import ssl
 from dataclasses import dataclass
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 CAUSES = ("offline", "signed_out", "unanswered", "refused")
 
@@ -221,6 +224,24 @@ def story_for_tool(name: str, kind: str | None = None, category: str | None = No
 # ---------------------------------------------------------------------------
 # deciding why
 # ---------------------------------------------------------------------------
+
+
+#: The code a bridge's own miss carries when nothing was asked of Kiln's
+#: servers: kiln-pro on this computer answered, or failed to.
+LOCAL_FAULT_CODE = "NOT_ASKED"
+
+
+def local_fault(exc: BaseException, *, where: str = "kiln-pro on this computer", code: str = LOCAL_FAULT_CODE) -> Miss:
+    """The :class:`Miss` for an exception kiln-pro's code raised in this process.
+
+    The exception is logged here, with its traceback, and the miss says only
+    that *where* stopped.  Its text never rides in the miss: on Kiln's servers
+    this process answers a remote caller, and an exception can name a path, a
+    query or an internal that nobody outside should read.  Every bridge's
+    local path words its fault through this one helper.
+    """
+    logger.warning("%s raised; the caller is told only that it stopped", where, exc_info=(type(exc), exc, exc.__traceback__))
+    return Miss("unanswered", code, f"{where} stopped")
 
 
 def classify_answer(answer: Any) -> Miss | None:
@@ -536,6 +557,7 @@ __all__ = [
     "CAUSES",
     "HOSTED_DOORS",
     "KINDS",
+    "LOCAL_FAULT_CODE",
     "Miss",
     "SESSION_EXPIRED_CODE",
     "SIGNED_OUT_CODES",
@@ -547,6 +569,7 @@ __all__ = [
     "envelope_for_transport",
     "fields",
     "kind_of_tool",
+    "local_fault",
     "sentence",
     "story_for_tool",
 ]

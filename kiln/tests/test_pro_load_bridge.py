@@ -271,9 +271,12 @@ class TestTheBridge:
         assert estimate is None and miss == Miss("refused", "TIER_REQUIRED", load_bridge._PRO_REQUIRED)
 
     def test_kiln_pro_failing_here_is_a_miss_not_a_crash(self, monkeypatch):
+        """The exception's text stays in this computer's log, never in the
+        miss (tests/test_bridge_faults_stay_local.py walks every bridge)."""
         self._local_module(monkeypatch, RuntimeError("boom"))
         estimate, miss = load_bridge.load_figure("petg", 24.0, 100.0)
-        assert estimate is None and miss.cause == "unanswered" and "boom" in miss.detail
+        assert estimate is None and miss.cause == "unanswered"
+        assert miss.detail == "kiln-pro on this computer stopped" and "boom" not in miss.detail
 
     def test_kiln_pro_with_no_load_module_asks_the_servers(self, monkeypatch, servers):
         monkeypatch.setitem(sys.modules, "kiln_pro.load_capacity", None)

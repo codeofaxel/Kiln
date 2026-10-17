@@ -48,7 +48,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from kiln.served_answer import Miss, classify_answer, classify_transport_error, clause
+from kiln.served_answer import LOCAL_FAULT_CODE, Miss, classify_answer, classify_transport_error, clause, local_fault
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +88,7 @@ _last_miss: dict[str, Miss] = {}
 _retry_after: dict[str, float] = {}
 MISS_RETRY_S: float = 15.0
 #: A miss with nothing asked of Kiln's servers: kiln-pro on this computer failed.
-_NOT_ASKED = "NOT_ASKED"
+_NOT_ASKED = LOCAL_FAULT_CODE
 
 
 def available() -> bool:
@@ -171,8 +171,7 @@ def _local(key: str) -> tuple[dict[str, Any] | None, Miss | None]:
 
         record = local_record(key)
     except Exception as exc:  # noqa: BLE001 -- a loader never fails for want of it
-        logger.debug("printer catalogue on this computer failed", exc_info=True)
-        return None, Miss("unanswered", _NOT_ASKED, f"kiln-pro on this computer stopped: {exc}"[:400])
+        return None, local_fault(exc)
     return (record if _is_record(record) else None), None
 
 

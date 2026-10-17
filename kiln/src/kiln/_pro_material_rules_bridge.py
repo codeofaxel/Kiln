@@ -45,10 +45,9 @@ def rule_checks(material: str, requirements: list[str]) -> dict[str, Any]:
     try:
         return check(material, requirements)
     except Exception as exc:  # noqa: BLE001 -- a local fault is a miss to word, never a traceback
-        logger.debug("local material rule check failed", exc_info=True)
-        from kiln.served_answer import Miss
+        from kiln.served_answer import local_fault
 
-        return _miss(Miss("unanswered", detail=str(exc)[:200]), requirements)
+        return _miss(local_fault(exc, where="the material rule check on this computer", code=""), requirements)
 
 
 def _served(material: str, requirements: list[str]) -> dict[str, Any]:

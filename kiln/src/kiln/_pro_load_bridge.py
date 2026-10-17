@@ -27,7 +27,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from kiln.served_answer import Miss, classify_answer, classify_transport_error
+from kiln.served_answer import LOCAL_FAULT_CODE, Miss, classify_answer, classify_transport_error, local_fault
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ WIRE_TOOL = "estimate_load_figure"
 #: Where the same answer is read from when kiln-pro IS installed here.
 LOCAL_MODULE = "kiln_pro.load_capacity"
 #: A miss with nothing asked of Kiln's servers: kiln-pro on this computer failed.
-_NOT_ASKED = "NOT_ASKED"
+_NOT_ASKED = LOCAL_FAULT_CODE
 #: The hosted boundary's own exception for a read below the record's tier
 #: (kiln-pro's ``HostedIntelligencePolicyError``), known by name and wording
 #: because public Kiln cannot import the type.
@@ -107,8 +107,7 @@ def _local(
             # On the hosted server the caller's plan is below the figure's:
             # a refusal, worded as one, never "kiln-pro stopped".
             return None, Miss("refused", "TIER_REQUIRED", _PRO_REQUIRED)
-        logger.debug("load figure on this computer failed", exc_info=True)
-        return None, Miss("unanswered", _NOT_ASKED, f"kiln-pro on this computer stopped: {exc}"[:400])
+        return None, local_fault(exc)
     return _read(out)
 
 
