@@ -6948,6 +6948,13 @@ def monitor_print(
     ``monitor_print_vision``. For persistent background monitoring, use
     ``watch_print``.
 
+    This is the text report from the computer the printer is attached
+    to.  When Kiln's hosted connector (api.kiln3d.com) is also connected,
+    ``monitor_printer`` there is the door for the inline live monitor and
+    camera; call that one to show the person a live panel.  The report's
+    closing ``Live monitor:`` line says whether a panel came with THIS
+    result or where the live monitor is instead — repeat it as written.
+
     :param printer_name: Target printer name.  Omit for the default printer.
     :param include_snapshot: Whether to capture and save a camera snapshot.
     :param brief_id: Optional saved-goal id from ``design_session``.  When

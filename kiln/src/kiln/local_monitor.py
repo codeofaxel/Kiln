@@ -43,12 +43,46 @@ as the stage's view fetches geometry through ``kiln_viewer_payload`` — a
 route measured working on the Claude desktop host on 2026-09-02, once the
 verb stood on the tool list from install (a host caches that list at
 initialize and ignores ``list_changed``, so a verb registered at the
-first resource read is one the host never learns).  The text report's
-``Camera:`` line still names the snapshot file it saved, so the agent's
-picture is never in question.  ``KILN_MONITOR_INLINE_CAMERA=1`` restores
+first resource read is one the host never learns).  The snapshot file the
+report saved is named in the result's ``live_monitor.snapshot_file``, for
+the agent; the report's own ``Camera:`` line says where the PERSON sees
+the camera (see WHAT THE RESULT SAYS ABOUT THE PANEL below), because a
+bare temp path is what an agent relays when that line is all it has.
+``KILN_MONITOR_INLINE_CAMERA=1`` restores
 the inline frame for a host that renders panels, cannot proxy tools back,
 and whose operator has decided the context is worth it — an opt-in to a
 measured cost, not a tuning knob.
+
+WHAT THE RESULT SAYS ABOUT THE PANEL
+------------------------------------
+Measured 2026-10-17: a claude.ai web chat linked to Claude Desktop drives
+the desktop's LOCAL servers remotely.  The MCP client is still Claude
+Desktop's, so this process saw the MCP Apps extension declared at
+initialize, attached the payload, and the model — reading a description
+that said the tool "opens" the panel — told the person the live monitor
+was open and quoted the saved frame's temp path.  No panel was drawn: the
+surface showing the conversation was a web page, not the client that made
+the declaration.  Nothing in the result had said whether a panel was
+really there, so the model said what the description promised.
+
+So every monitor result now carries a ``Live monitor:`` line in the text
+report and a ``live_monitor`` block in ``structuredContent``, graded by
+the evidence this process actually holds:
+
+* ``none`` — the host declared nothing and has read no panel document.
+  The payload is withheld, the line names the web monitor
+  (``app.kiln3d.com/monitor``), and no panel is claimed.
+* ``attached`` — the host DECLARED the extension, nothing more.  The
+  payload rides; the line says it is attached and where to look if no
+  panel is drawn.  This is the posture the measured defect ran under, and
+  the one place the server cannot tell a rendering client from a web chat
+  driving it, so it says both halves.
+* ``open`` — the host has READ the monitor document this session, or a
+  panel has polled ``kiln_monitor_snapshot``: the panel is proven to draw
+  here, and the line says it is open and refreshing itself.
+
+The description clause stamped on the tools tells the agent to repeat
+that line, never to assume a panel from the description.
 
 THE ONE PROCESS THAT OWNS THE PRINTER
 -------------------------------------
@@ -87,8 +121,10 @@ signed in or not — the floor never moves.
 from __future__ import annotations
 
 import base64
+import contextlib
 import logging
 import os
+import re
 import time
 from typing import Any
 
@@ -96,6 +132,7 @@ from kiln.mcp_compat import (
     result_is_error,
     result_structured_content,
     set_result_structured_content,
+    tool_result_blocks,
     wrap_call_tool_result,
 )
 from kiln.monitor_payload import (
@@ -140,17 +177,69 @@ PRINT_MONITOR_RESOURCE_NAME = "kiln_print_monitor"
 #: over the tool surface can find.  Derived from roster membership, never
 #: hand-typed per tool.
 MONITOR_DESCRIPTION_CLAUSE = (
-    "INLINE LIVE MONITOR: on success this tool also opens Kiln's inline "
-    "print monitor — a live panel with progress, temperatures, and the "
-    "camera while a print runs — in hosts that render MCP Apps panels. The "
-    "panel polls the printer itself once open, so do not call this tool "
-    "again to refresh it: later checks go through printer_status or "
+    "INLINE LIVE MONITOR: in apps that draw MCP Apps panels, this tool's "
+    "result also carries Kiln's inline print monitor — a live panel with "
+    "progress, temperatures, and the camera while a print runs. The "
+    "result's own 'Live monitor:' line says whether that panel is open "
+    "here, attached but unconfirmed, or not available in this app (then it "
+    "names the web monitor instead); repeat what that line says and never "
+    "tell the person a panel is open on the strength of this description. "
+    "The panel polls the printer itself once open, so do not call this "
+    "tool again to refresh it: later checks go through printer_status or "
     "first_layer_status, and a repeat while the panel is live returns the "
     "text report with a one-line card, not a second panel. Pass "
     "show_panel=True only when the person asks to see the panel again. "
     "Free with a Kiln sign-in; the text report below is always complete "
     "on its own."
 )
+
+#: Where the person sees the live monitor when the app they are in draws
+#: no panel.  Spelled as every other door spells it (``server.py``'s
+#: phone guidance), never as a tool argument.
+WEB_MONITOR_URL = "app.kiln3d.com/monitor"
+
+#: The ``Live monitor:`` line the text report ends with, and the
+#: ``live_monitor.note`` the structured block carries, keyed by the
+#: evidence grade (``none`` / ``attached`` / ``open``) — see the module
+#: docstring, WHAT THE RESULT SAYS ABOUT THE PANEL.  The ``repeat`` grade
+#: is ``open`` proven by the panel's own poll, said in the repeat's words.
+LIVE_MONITOR_LINES: dict[str, str] = {
+    "none": (
+        "Live monitor: this app does not show Kiln's live panel; the live "
+        f"monitor with the camera is at {WEB_MONITOR_URL} (sign-in required)."
+    ),
+    "attached": (
+        "Live monitor: Kiln's live panel is attached to this result because "
+        "this app said it draws MCP Apps panels. If no panel is drawn above, "
+        f"the live monitor with the camera is at {WEB_MONITOR_URL} (sign-in "
+        "required)."
+    ),
+    "open": "Live monitor: the live panel is open above and refreshes itself.",
+    "repeat": (
+        "Live monitor: the panel an earlier call opened is still live above "
+        "and refreshes itself."
+    ),
+}
+
+#: What the report's ``Camera:`` line says in the saved path's place — the
+#: path itself moves to ``live_monitor.snapshot_file`` for the agent.
+CAMERA_LINES: dict[str, str] = {
+    "none": (
+        "Camera: frame captured; the live camera is in the monitor at "
+        f"{WEB_MONITOR_URL}."
+    ),
+    "attached": (
+        "Camera: frame captured; the live camera is in the panel above when "
+        f"it is drawn, otherwise at {WEB_MONITOR_URL}."
+    ),
+    "open": "Camera: live in the panel above.",
+    "repeat": "Camera: live in the panel above.",
+}
+
+#: The report's ``Camera:`` line when it names the file it saved — one
+#: token, a path, ending in the JPEG the tool writes.  "No camera
+#: available" and "Snapshot capture failed" have spaces and are left alone.
+_CAMERA_PATH_LINE = re.compile(r"^Camera: (?P<path>\S+\.jpe?g)[ \t]*$", re.MULTILINE)
 
 #: Tools whose success result is a monitoring answer about a printer, so
 #: opening (or refreshing) the live panel on it is what the user wanted.
@@ -770,10 +859,6 @@ def _install_result_hook(mcp: Any) -> bool:
                 return
             if result_is_error(inner):
                 return
-            if not _host_renders_apps(mcp, ctx):
-                _log_signal_once(attaching=False)
-                return
-            _log_signal_once(attaching=True)
             printer_name = None
             show_panel = False
             if isinstance(args, dict):
@@ -781,6 +866,16 @@ def _install_result_hook(mcp: Any) -> bool:
                 if isinstance(pn, str) and pn:
                     printer_name = pn
                 show_panel = bool(args.get("show_panel"))
+            if not _host_renders_apps(mcp, ctx):
+                # No payload, no printer read — but the result still says
+                # so, in words, and names where the person DOES see it.
+                _log_signal_once(attaching=False)
+                sc = result_structured_content(inner)
+                sc = dict(sc) if isinstance(sc, dict) else {}
+                _say_live_monitor(inner, sc, "none")
+                set_result_structured_content(inner, sc)
+                return
+            _log_signal_once(attaching=True)
             payload = compose_local_payload(
                 printer_name=printer_name,
                 include_camera=inline_camera_enabled(),
@@ -803,11 +898,71 @@ def _install_result_hook(mcp: Any) -> bool:
             # ``show_panel`` is the person's ask to see it again.
             if not show_panel and _panel_is_live(printer_name):
                 sc["shown"] = {"repeat": "live_panel", "repeat_note": LIVE_PANEL_NOTE}
+                grade = "repeat"
+            elif _host_proven_to_render():
+                grade = "open"
+            else:
+                grade = "attached"
+            _say_live_monitor(inner, sc, grade)
             set_result_structured_content(inner, sc)
         except Exception:  # noqa: BLE001 — a panel must never break a tool
             logger.debug("local monitor payload not attached", exc_info=True)
 
     return wrap_call_tool_result(mcp, _attach)
+
+
+def _host_proven_to_render() -> bool:
+    """Whether this host has SHOWN it draws the panel, not merely said so.
+
+    The declaration at initialize is the client's claim about itself, and
+    the client is not always the surface the person is looking at (the
+    measured case in the module docstring).  Two things only a drawn panel
+    does: read the monitor document, and poll ``kiln_monitor_snapshot``.
+    """
+    if _host_read_the_monitor:
+        return True
+    now = time.monotonic()
+    return any(now - at <= PANEL_LIVE_WINDOW_SECONDS for at in _panel_polls.values())
+
+
+def _is_json_text(text: str) -> bool:
+    """A text block that is a JSON document (a dict-returning tool's result)
+    is left as it is: a line appended to it would corrupt what the agent
+    parses.  The structured block carries the verdict there."""
+    return text.lstrip()[:1] in ("{", "[")
+
+
+def _say_live_monitor(inner: Any, sc: dict, grade: str) -> None:
+    """Grade the panel claim in the result's own words, by *grade*.
+
+    Writes the ``live_monitor`` block into *sc* (the caller sets it on the
+    result) and, on a plain-text report, replaces a ``Camera:`` line that
+    names the saved frame's path with where the person sees the camera and
+    appends the ``Live monitor:`` line.  The saved path is kept, for the
+    agent, in ``live_monitor.snapshot_file`` — a temp path in prose is what
+    an agent relays to the person as if it were a link.
+    """
+    block: dict[str, Any] = {
+        "panel": "open" if grade == "repeat" else grade,
+        "note": LIVE_MONITOR_LINES[grade],
+        "web": WEB_MONITOR_URL,
+    }
+    blocks = tool_result_blocks(inner)
+    for item in blocks if isinstance(blocks, list) else []:
+        text = getattr(item, "text", None)
+        if getattr(item, "type", None) != "text" or not isinstance(text, str):
+            continue
+        if _is_json_text(text):
+            break
+        m = _CAMERA_PATH_LINE.search(text)
+        if m:
+            block["snapshot_file"] = m.group("path")
+            text = text[: m.start()] + CAMERA_LINES[grade] + text[m.end():]
+        # A frozen block still gets the structured verdict.
+        with contextlib.suppress(Exception):
+            item.text = f"{text.rstrip()}\n{LIVE_MONITOR_LINES[grade]}"
+        break
+    sc["live_monitor"] = block
 
 
 def _log_signal_once(attaching: bool) -> None:
