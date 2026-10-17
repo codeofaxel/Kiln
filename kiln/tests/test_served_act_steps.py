@@ -864,3 +864,74 @@ class TestThroughTheStub:
         monkeypatch.setattr(server, "_pro_api_call", lambda name, **kw: self._asks(handed_file))
         answer = tool(original_gcode_path=self._gcode(tmp_path))
         assert answer["code"] == "ACTIONS_PROPOSED" and door_calls == []
+
+
+class TestTheFleetReads:
+    """Every Klipper printer's configuration and every printer's own nozzle
+    setting, for a served fleet sweep (2026-10-17): asked at once, each with
+    the deadline, and never an address or a machine's identity."""
+
+    class _Klipper:
+        def __init__(self, config):
+            self._config = config
+
+        def get_printer_config(self):
+            if isinstance(self._config, Exception):
+                raise self._config
+            return self._config
+
+    @pytest.fixture
+    def fleet(self, monkeypatch):
+        import kiln.printer_nozzle_reading as reading
+        import kiln.server as server
+
+        monkeypatch.setattr(server, "_read_config_printers", lambda: {
+            "a1": {"type": "bambu", "printer_model": "bambu_a1", "host": "10.0.0.5"},
+            "voron": {"type": "moonraker", "printer_model": "voron_2", "host": "voron.local"},
+            "trident": {"type": "moonraker", "printer_model": "voron_trident", "host": "trident.local"},
+        })
+        monkeypatch.setattr(server, "_resolve_effective_printer_name", lambda name=None: "a1")
+        klippers = {"voron": self._Klipper({"probe": {"z_offset": "1.2"}}),
+                    "trident": self._Klipper(OSError("no route to trident.local"))}
+
+        class _Registry:
+            def get(self, name):
+                return klippers[name]
+
+        monkeypatch.setattr(server, "_get_registry", lambda: _Registry())
+        seen = {
+            "a1": {"machine": "a1", "fingerprint": "serial:01P00A000000001", "family": "bambu",
+                   "resolved_by": "name", "material": "hardened_steel", "nozzle_diameter_mm": 0.4,
+                   "read_from": "mqtt", "firmware_version": "01.04", "state_age_seconds": 2,
+                   "stale_after_seconds": 60, "read_at": "2026-10-17T10:00:00+00:00", "value_kind": "configured"},
+        }
+        monkeypatch.setattr(reading, "observe_printer_nozzle", lambda name: seen.get(name))
+        return klippers
+
+    def _read(self, want):
+        done, refused = served_steps.carry_out(
+            "t", [{"kind": "printer_facts", "id": "printer_facts", "printer_name": "", "want": want}], _send,
+        )
+        assert refused is None
+        return {p["name"]: p for p in done["printer_facts"]["data"]["printers"]}, done
+
+    def test_every_klipper_printers_configuration_is_read(self, fleet):
+        by_name, done = self._read(["every_klipper_config"])
+        assert by_name["voron"]["klipper_config"] == {"probe": {"z_offset": "1.2"}}
+        assert by_name["trident"]["klipper_config"] is None
+        assert by_name["trident"]["klipper_config_error"] == "the printer could not be asked"
+        assert "klipper_config" not in by_name["a1"], "only a Klipper printer has one"
+        assert "trident.local" not in json.dumps(done)
+
+    def test_every_printers_nozzle_is_read_without_its_identity(self, fleet):
+        by_name, done = self._read(["every_nozzle"])
+        assert by_name["a1"]["nozzle_reading"]["nozzle_diameter_mm"] == 0.4
+        assert by_name["a1"]["nozzle_reading"]["material"] == "hardened_steel"
+        assert by_name["voron"]["nozzle_reading"] is None
+        assert by_name["voron"]["nozzle_reading_error"] == "it did not say what nozzle it holds"
+        text = json.dumps(done)
+        assert "01P00A000000001" not in text and "fingerprint" not in text and "10.0.0.5" not in text
+
+    def test_neither_is_read_unless_asked(self, fleet):
+        by_name, _ = self._read([])
+        assert all("klipper_config" not in p and "nozzle_reading" not in p for p in by_name.values())

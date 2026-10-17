@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-17T21:06:40.514283+00:00",
+  "generated": "2026-10-17T22:38:43.650853+00:00",
   "tool_count": 414,
   "categories": {
     "product_generators": {
@@ -13695,7 +13695,19 @@
         "schema_version": 1,
         "kind": "verdict"
       },
-      "served": false
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "every_job",
+              "every_klipper_config"
+            ]
+          }
+        ],
+        "acts": false
+      }
     },
     {
       "name": "decorate_during_print_fleet",
@@ -14016,9 +14028,21 @@
       },
       "offline": {
         "schema_version": 1,
-        "kind": "action"
+        "kind": "read"
       },
-      "served": false
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "every_job",
+              "every_nozzle"
+            ]
+          }
+        ],
+        "acts": false
+      }
     },
     {
       "name": "fleet_pause",

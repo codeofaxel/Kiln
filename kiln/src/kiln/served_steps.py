@@ -18,9 +18,10 @@ makes the toolpath; the servers then judge the result.
 
 ``printer_facts``: say which printers this install has -- each one's name,
 connection kind and model, and when asked, a Klipper printer's own
-configuration, what a printer is doing, or the named printer's current
-reading (its state, temperatures and progress, as numbers and words) --
-with the time they were read.  Never an address, a serial number or a
+configuration (one printer's, or every Klipper printer's for a fleet
+triage), what a printer is doing, the named printer's current reading (its
+state, temperatures and progress, as numbers and words), or the nozzle each
+printer holds as its own setting -- with the time they were read.  Never an address, a serial number or a
 credential: a served tool needs to know WHAT the printer is and what it
 reads, and nothing here tells it where the printer is or how to reach it.
 
@@ -185,7 +186,19 @@ def _slice(tool: str, step: dict[str, Any]) -> tuple[str | None, dict[str, Any] 
 #: hands).  A job is its state and how far along it is -- never the file's
 #: name, for the same reason the print-history step sends none.  A reading
 #: is numbers and words (:func:`_telemetry_fact`).
-_FACTS_EXTRAS = frozenset({"klipper_config", "job", "every_job", "telemetry", "hardware"})
+#: For a fleet sweep, every Klipper printer's own configuration
+#: (``every_klipper_config``) and the nozzle every printer holds as its own
+#: setting (``every_nozzle``: size, material and when it was said, never a
+#: serial or fingerprint).
+_FACTS_EXTRAS = frozenset({
+    "klipper_config", "job", "every_job", "telemetry", "hardware",
+    "every_klipper_config", "every_nozzle",
+})
+#: What of a printer's own nozzle report a fleet sweep is sent.
+_NOZZLE_FACT_KEYS = (
+    "material", "nozzle_diameter_mm", "read_from", "firmware_version",
+    "state_age_seconds", "stale_after_seconds", "read_at", "value_kind",
+)
 #: How long a printer is given to answer for its configuration or its job.
 _FACTS_DEADLINE_S = 8.0
 #: How many printers are asked at once for a fleet-wide read.
@@ -363,10 +376,60 @@ def _printer_facts(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | No
             server, asked_of, jobs=jobs, hardware=hardware,
             telemetry_of=target if "telemetry" in want else None,
         )
+    if "every_klipper_config" in want or "every_nozzle" in want:
+        _read_fleet(
+            server, printers,
+            configs="every_klipper_config" in want, nozzles="every_nozzle" in want,
+        )
     return {
         "read_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "printers": printers,
     }, None
+
+
+def _nozzle_fact(name: str) -> dict[str, Any] | None:
+    """What *name* holds as its nozzle, cut to the facts a sweep needs."""
+    from kiln.printer_nozzle_reading import observe_printer_nozzle
+
+    seen = observe_printer_nozzle(name)
+    if not isinstance(seen, dict):
+        return None
+    return {key: seen.get(key) for key in _NOZZLE_FACT_KEYS}
+
+
+def _read_fleet(server: Any, facts: list[dict[str, Any]], *, configs: bool, nozzles: bool) -> None:
+    """Fill ``klipper_config`` on every Klipper printer (when *configs*) and
+    ``nozzle_reading`` on every printer (when *nozzles*): every printer asked
+    at once, each given the deadline.  A printer that does not answer, or
+    cannot say, is said to, never guessed."""
+    import concurrent.futures
+
+    def config_of(name: str) -> Any:
+        return server._get_registry().get(name).get_printer_config()
+
+    asks: dict[tuple[str, str], Any] = {}
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=_FACTS_WORKERS)
+    try:
+        for fact in facts:
+            if configs and fact["type"] == "moonraker":
+                asks[(fact["name"], "klipper_config")] = pool.submit(config_of, fact["name"])
+            if nozzles:
+                asks[(fact["name"], "nozzle_reading")] = pool.submit(_nozzle_fact, fact["name"])
+        concurrent.futures.wait(asks.values(), timeout=_FACTS_DEADLINE_S)
+        by_name = {f["name"]: f for f in facts}
+        for (name, key), future in asks.items():
+            fact = by_name[name]
+            try:
+                if not future.done():
+                    raise concurrent.futures.TimeoutError()
+                fact[key] = future.result()
+                if fact[key] is None and key == "nozzle_reading":
+                    fact["nozzle_reading_error"] = "it did not say what nozzle it holds"
+            except Exception as exc:  # noqa: BLE001 -- said, never guessed
+                fact[key] = None
+                fact[f"{key}_error"] = _did_not_answer(exc)
+    finally:
+        pool.shutdown(wait=False)
 
 
 def _read_jobs(
