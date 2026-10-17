@@ -21,8 +21,11 @@ connection kind and model, and when asked, a Klipper printer's own
 configuration (one printer's, or every Klipper printer's for a fleet
 triage; only the probe and bed settings a power-loss check reads, never its
 serial port, CAN id or macros), what a printer is doing, the named printer's current reading (its
-state, temperatures and progress, as numbers and words), or the nozzle each
-printer holds as its own setting -- with the time they were read.  Never an address, a serial number or a
+state, temperatures and progress, as numbers and words), the nozzle each
+printer holds as its own setting, or the spools each printer reports loaded
+and, for the colours the call asked about, whether each is loaded there, a
+spool the person recorded owning, or neither (only the matching spools, as
+recorded: brand, colour, material) -- with the time they were read.  Never an address, a serial number or a
 credential: a served tool needs to know WHAT the printer is and what it
 reads, and nothing here tells it where the printer is or how to reach it.
 
@@ -193,8 +196,13 @@ def _slice(tool: str, step: dict[str, Any]) -> tuple[str | None, dict[str, Any] 
 #: serial or fingerprint).
 _FACTS_EXTRAS = frozenset({
     "klipper_config", "job", "every_job", "telemetry", "hardware",
-    "every_klipper_config", "every_nozzle",
+    "every_klipper_config", "every_nozzle", "every_loaded_spools",
 })
+#: Text that can locate a printer: an address, a URL, a host name.
+_NAMES_A_PLACE = re.compile(r"://|\bhost\b|\d{1,3}(?:\.\d{1,3}){3}|[a-z0-9-]+\.(?:local|lan|home)\b", re.IGNORECASE)
+#: How many colours a spool read may be asked about, and how long one may be.
+_MAX_SPOOL_COLOURS = 16
+_COLOUR_TEXT_LIMIT = 40
 #: What of a Klipper printer's configuration ever leaves this computer: the
 #: sections and settings the served power-loss check reads (whether the
 #: probe can re-find Z on a bare spot, and the bed's size), and nothing
@@ -426,10 +434,11 @@ def _printer_facts(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | No
             server, asked_of, jobs=jobs, hardware=hardware,
             telemetry_of=target if "telemetry" in want else None,
         )
-    if "every_klipper_config" in want or "every_nozzle" in want:
+    if "every_klipper_config" in want or "every_nozzle" in want or "every_loaded_spools" in want:
         _read_fleet(
             server, printers,
             configs="every_klipper_config" in want, nozzles="every_nozzle" in want,
+            spools=_spool_question(step) if "every_loaded_spools" in want else None,
         )
     return {
         "read_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -447,11 +456,71 @@ def _nozzle_fact(name: str) -> dict[str, Any] | None:
     return {key: seen.get(key) for key in _NOZZLE_FACT_KEYS}
 
 
-def _read_fleet(server: Any, facts: list[dict[str, Any]], *, configs: bool, nozzles: bool) -> None:
-    """Fill ``klipper_config`` on every Klipper printer (when *configs*) and
-    ``nozzle_reading`` on every printer (when *nozzles*): every printer asked
-    at once, each given the deadline.  A printer that does not answer, or
-    cannot say, is said to, never guessed."""
+def _spool_question(step: dict[str, Any]) -> tuple[list[str], str | None]:
+    """The colours (and the print's material) a spool read is asked about,
+    as the call gave them, cut to what a colour can be; ``([], None)`` for
+    none, and the read then says only what is loaded."""
+    raw = step.get("colours")
+    if isinstance(raw, str):
+        raw = raw.replace(";", ",").split(",")
+    colours: list[str] = []
+    for value in raw if isinstance(raw, list) else []:
+        if isinstance(value, str) and value.strip() and len(value.strip()) <= _COLOUR_TEXT_LIMIT:
+            colours.append(value.strip())
+        if len(colours) >= _MAX_SPOOL_COLOURS:
+            break
+    material = step.get("material")
+    material = material.strip() if isinstance(material, str) and 0 < len(material.strip()) <= _COLOUR_TEXT_LIMIT else None
+    return colours, material
+
+
+def _spools_fact(server: Any, name: str, question: tuple[list[str], str | None]) -> dict[str, Any]:
+    """*name*'s loaded spools, read once, and -- for the colours asked --
+    whether each is loaded there, owned, or neither, on that same reading."""
+    from kiln.colour_availability import colour_availability
+    from kiln.multi_material import ReadOnce, multi_material_status
+
+    from kiln.printers.base import PrinterEngagementError
+
+    adapter = server._resolve_adapter(name)
+    try:
+        reading = multi_material_status(adapter)
+    except PrinterEngagementError as exc:
+        # The one-printer rule's own words: which machine Kiln is driving.
+        return {"loaded_spools": None, "loaded_spools_error": str(exc)[:_ACT_TEXT_LIMIT]}
+    except Exception:  # noqa: BLE001 -- said, never guessed
+        return {"loaded_spools": None, "loaded_spools_error": "the printer could not be asked"}
+    seen = reading.to_dict()
+    # A failed read's reason is an exception's text, which can name the
+    # printer's address; it is said as a failed read and nothing more.
+    seen["warnings"] = (
+        ["the printer could not be read"] if reading.kind == "unknown"
+        else [w for w in seen.get("warnings") or [] if not _NAMES_A_PLACE.search(str(w))]
+    )
+    seen.pop("summary", None)
+    out: dict[str, Any] = {"loaded_spools": seen}
+    colours, material = question
+    if colours:
+        out["colour_availability"] = colour_availability(
+            colours, printer_name=name, adapter=ReadOnce(adapter, reading), material=material,
+        )
+    return out
+
+
+def _read_fleet(
+    server: Any,
+    facts: list[dict[str, Any]],
+    *,
+    configs: bool,
+    nozzles: bool,
+    spools: tuple[list[str], str | None] | None = None,
+) -> None:
+    """Fill ``klipper_config`` on every Klipper printer (when *configs*),
+    ``nozzle_reading`` on every printer (when *nozzles*) and
+    ``loaded_spools`` (with ``colour_availability`` for the colours asked)
+    on every printer (when *spools*): every printer asked at once, each
+    given the deadline.  A printer that does not answer, or cannot say, is
+    said to, never guessed."""
     import concurrent.futures
 
     def config_of(name: str) -> Any:
@@ -465,6 +534,8 @@ def _read_fleet(server: Any, facts: list[dict[str, Any]], *, configs: bool, nozz
                 asks[(fact["name"], "klipper_config")] = pool.submit(config_of, fact["name"])
             if nozzles:
                 asks[(fact["name"], "nozzle_reading")] = pool.submit(_nozzle_fact, fact["name"])
+            if spools is not None and not fact.get("same_machine_as"):
+                asks[(fact["name"], "loaded_spools")] = pool.submit(_spools_fact, server, fact["name"], spools)
         concurrent.futures.wait(asks.values(), timeout=_FACTS_DEADLINE_S)
         by_name = {f["name"]: f for f in facts}
         for (name, key), future in asks.items():
@@ -472,6 +543,9 @@ def _read_fleet(server: Any, facts: list[dict[str, Any]], *, configs: bool, nozz
             try:
                 if not future.done():
                     raise concurrent.futures.TimeoutError()
+                if key == "loaded_spools":
+                    fact.update(future.result())
+                    continue
                 fact[key] = future.result()
                 if fact[key] is None and key == "nozzle_reading":
                     fact["nozzle_reading_error"] = "it did not say what nozzle it holds"
@@ -1058,6 +1132,11 @@ def read_first(
             "printer_name": printer_name,
             "want": _wanted_for(read, call),
         }
+        # The colours a spool read is about are the call's own arguments,
+        # named by the listing; checked again where they are read.
+        for field, named in (("colours", read.get("colours_from")), ("material", read.get("material_from"))):
+            if isinstance(named, str) and isinstance(call, dict) and call.get(named) is not None:
+                step[field] = call.get(named)
         facts, refusal = do(tool, step)
         if refusal is not None or facts is None:
             return {}, refusal

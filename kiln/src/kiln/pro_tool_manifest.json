@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-17T22:38:43.650853+00:00",
+  "generated": "2026-10-17T22:46:56.797819+00:00",
   "tool_count": 414,
   "categories": {
     "product_generators": {
@@ -13952,7 +13952,21 @@
         "schema_version": 1,
         "kind": "read"
       },
-      "served": false
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "every_job",
+              "every_loaded_spools"
+            ],
+            "colours_from": "colours",
+            "material_from": "material"
+          }
+        ],
+        "acts": false
+      }
     },
     {
       "name": "fleet_hardware_stops",

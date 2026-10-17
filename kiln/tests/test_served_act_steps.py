@@ -998,3 +998,99 @@ class TestAConfigLeavesCutToWhatIsRead:
         assert '"z_offset": "1.85"' in sent
         for secret in ("usb-Klipper", "61755fe321ac", "s3cr3t", "hooks.example.com", "private.cfg", "PF13", "^PG15"):
             assert secret not in sent, secret
+
+
+class TestTheSpoolRead:
+    """Every printer's loaded spools, read once, and -- for the colours a
+    fleet colour check asked about -- whether each is loaded there, a spool
+    the person recorded, or neither (2026-10-17, Adam: the matching spools
+    go with the one call and are not kept)."""
+
+    @pytest.fixture
+    def fleet(self, monkeypatch):
+        import kiln.colour_availability as availability
+        import kiln.server as server
+        from kiln.ams_routing import Tray
+        from kiln.multi_material import MultiMaterialStatus
+
+        monkeypatch.setattr(server, "_read_config_printers", lambda: {
+            "a1": {"type": "bambu", "printer_model": "bambu_a1", "host": "10.0.0.5"},
+            "voron": {"type": "moonraker", "printer_model": "voron_2", "host": "voron.local"},
+        })
+        monkeypatch.setattr(server, "_resolve_effective_printer_name", lambda name=None: "a1")
+        reading = MultiMaterialStatus(kind="ams", driven_by_kiln=True, source="bambu:mqtt", num_slots=4,
+                                      slots=(Tray(slot=0, material="PLA", hex6="C12E1F", unit=0, name="A1"),))
+
+        class _A1:
+            def get_multi_material_status(self):
+                return reading
+
+        class _Voron:
+            def get_multi_material_status(self):
+                raise OSError("HTTPConnectionPool(host='192.168.1.40', port=7125): timed out")
+
+        adapters = {"a1": _A1(), "voron": _Voron()}
+        monkeypatch.setattr(server, "_resolve_adapter", lambda name=None: adapters[name])
+        asked: list = []
+
+        def answer(colours, *, printer_name=None, adapter=None, material=None):
+            asked.append((list(colours), printer_name, adapter.get_multi_material_status(), material))
+            return {"printer": printer_name, "colours": [
+                {"colour": "#C12E1F", "state": "loaded", "slot": "slot A1"},
+                {"colour": "#00AE42", "state": "owned", "spool": "Polymaker green PLA"},
+            ], "say": "You have Polymaker green PLA but it isn't loaded on a1."}
+
+        monkeypatch.setattr(availability, "colour_availability", answer)
+        return asked, reading
+
+    def _read(self, **step):
+        done, refused = served_steps.carry_out(
+            "t", [{"kind": "printer_facts", "id": "printer_facts", "printer_name": "",
+                   "want": ["every_loaded_spools"], **step}], _send,
+        )
+        assert refused is None
+        return {p["name"]: p for p in done["printer_facts"]["data"]["printers"]}, done
+
+    def test_each_printers_spools_and_the_asked_colours_on_that_same_reading(self, fleet):
+        asked, reading = fleet
+        by_name, _ = self._read(colours=["#C12E1F", "#00AE42"], material="PLA")
+        assert by_name["a1"]["loaded_spools"]["loaded_slots"][0]["color"] == "C12E1F"
+        assert by_name["a1"]["colour_availability"]["colours"][1]["state"] == "owned"
+        (colours, name, seen, material) = next(a for a in asked if a[1] == "a1")
+        assert colours == ["#C12E1F", "#00AE42"] and material == "PLA"
+        assert seen is reading, "the colours are judged on the reading that was sent"
+
+    def test_a_printer_that_fails_is_said_without_its_address(self, fleet):
+        by_name, done = self._read(colours=["#C12E1F"])
+        voron = by_name["voron"]["loaded_spools"]
+        assert voron["kind"] == "unknown" and voron["warnings"] == ["the printer could not be read"]
+        assert "192.168.1.40" not in json.dumps(done) and "voron.local" not in json.dumps(done)
+
+    def test_no_colours_asked_reads_only_what_is_loaded(self, fleet):
+        asked, _ = fleet
+        by_name, _ = self._read()
+        assert "colour_availability" not in by_name["a1"] and asked == []
+
+    def test_the_colours_come_from_the_calls_own_arguments(self, fleet, monkeypatch):
+        asked, _ = fleet
+        done, refused = served_steps.read_first(
+            "fleet_colour_match",
+            [{"kind": "printer_facts", "want": ["every_loaded_spools"], "colours_from": "colours", "material_from": "material"}],
+            printer_name="", call={"colours": "#C12E1F;#00AE42", "material": "PLA"},
+        )
+        assert refused is None and asked[0][0] == ["#C12E1F", "#00AE42"] and asked[0][3] == "PLA"
+
+    @pytest.mark.parametrize("colours", [["x" * 41], [7], "", None])
+    def test_a_colour_that_is_not_one_asks_nothing(self, fleet, colours):
+        asked, _ = fleet
+        self._read(colours=colours)
+        assert asked == []
+
+    def test_a_reading_comes_back_the_same(self, fleet):
+        from kiln.multi_material import status_from_dict
+
+        _, reading = fleet
+        back = status_from_dict(reading.to_dict())
+        assert back.to_dict() == reading.to_dict()
+        assert status_from_dict({"kind": "ams", "loaded_slots": [{"slot": "zero"}]}) is None
+        assert status_from_dict("ams") is None
