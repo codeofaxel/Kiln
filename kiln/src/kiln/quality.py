@@ -3,8 +3,8 @@
 Provides a protocol-level quality scoring and attestation system that
 replaces subjective, agent-specific quality judgments with a standardized,
 tamper-evident format.  Quality attestations use HMAC-SHA256 signatures
-so that scores can be verified during dispute resolution in the 3DOS
-network.
+so that scores can be verified by either party during dispute
+resolution.
 
 Example::
 

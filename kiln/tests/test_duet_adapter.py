@@ -952,8 +952,10 @@ def test_set_tool_temp_sends_m104() -> None:
     fake = _rrf3()
     adapter = fake.install(_adapter())
 
-    assert adapter.set_tool_temp(245).ok
-    assert fake.gcodes() == ["M104 S245"]
+    # Under the generic floor (240 C): no model is bound here, and the wire
+    # is what this test is about.
+    assert adapter.set_tool_temp(235).ok
+    assert fake.gcodes() == ["M104 S235"]
 
 
 def test_set_bed_temp_sends_m140() -> None:
@@ -965,12 +967,27 @@ def test_set_bed_temp_sends_m140() -> None:
 
 
 def test_high_temp_machines_are_not_capped_at_desktop_limits() -> None:
-    """Duet drives 500 C hotends; a 300 C ceiling would break the class."""
+    """Duet drives 500 C hotends; a 300 C ceiling would break the class --
+    once Kiln has been told which machine this is.  The session fixture's
+    synthetic ``kilntest_hot`` (500 C / 200 C) stands in for the industrial
+    machines whose real rows are served."""
     fake = _rrf3()
     adapter = fake.install(_adapter())
+    adapter.set_safety_profile("kilntest_hot")
 
     assert adapter.set_tool_temp(450).ok
     assert fake.gcodes() == ["M104 S450"]
+
+
+def test_an_unnamed_machine_is_held_to_the_floor_until_it_is_named() -> None:
+    """With no model bound, the Duet's 500 C protocol ceiling says nothing
+    about the hotend on the bench; the refusal says what to set."""
+    fake = _rrf3()
+    adapter = fake.install(_adapter())
+
+    with pytest.raises(PrinterError, match="has not been told this printer's model"):
+        adapter.set_tool_temp(450)
+    assert fake.gcodes() == []
 
 
 def test_temperature_above_the_ceiling_is_refused() -> None:
@@ -1225,22 +1242,28 @@ def test_duet_examples_name_a_reprapfirmware_machine() -> None:
     )
     printers = data.get("printers", data)
 
+    # A roster row states its firmware through its cited motion family;
+    # ``firmware_label`` reads that (and a stored label where a full row
+    # carries one).
+    from kiln.motion_facts import firmware_label
+
     for model_id in _EXAMPLES_BY_TYPE["duet"]:
-        firmware = str(printers[model_id].get("firmware", "")).lower()
+        firmware = str(firmware_label(printers[model_id]) or "").lower()
         assert "reprap" in firmware, f"{model_id} is not a RepRapFirmware machine"
 
 
-def test_real_safety_profile_clamps_the_adapter_ceiling() -> None:
-    """End-to-end: a catalogued Duet machine's real limits must bind.
+def test_a_bound_safety_profile_clamps_the_adapter_ceiling() -> None:
+    """End-to-end: a catalogued Duet machine's limits must bind.
 
     The adapter's own ceiling is the widest the backend class allows; the
-    bound profile is what narrows it to this machine.
+    bound profile is what narrows it to this machine.  ``kilntest_hot`` is
+    the session fixture's synthetic 500 C / 200 C machine.
     """
     fake = _rrf3()
     adapter = fake.install(_adapter())
-    adapter.set_safety_profile("visionminer_22idex_v4")
+    adapter.set_safety_profile("kilntest_hot")
 
-    # Within the machine's real envelope (500 C hotend / 200 C bed).
+    # Within the machine's envelope (500 C hotend / 200 C bed).
     assert adapter.set_tool_temp(480).ok
     assert adapter.set_bed_temp(190).ok
 
@@ -1268,3 +1291,39 @@ def test_adapter_writes_no_local_state() -> None:
     source = inspect.getsource(duet_module)
     assert "~/.kiln" not in source
     assert "Path.home" not in source
+
+
+# ---------------------------------------------------------------------------
+# Machine identity
+# ---------------------------------------------------------------------------
+
+
+def test_main_board_unique_id_is_read_verbose() -> None:
+    fake = _rrf3(rr_model=_model_router({"state.status": "idle", "boards[0].uniqueId": "08DGM-9T6BU-F42SW-6J1FD"}))
+    adapter = fake.install(_adapter())
+
+    identity = adapter.read_machine_identity()
+
+    assert identity is not None
+    assert identity.value == "08DGM-9T6BU-F42SW-6J1FD"
+    assert identity.source == "rrf_object_model.boards[0].uniqueId"
+    assert identity.kind == "board_id"
+    query = next(c for c in fake.calls if c.path == "rr_model" and c.params.get("key") == "boards[0].uniqueId")
+    assert "v" in query.params["flags"]
+
+
+def test_a_board_without_a_unique_id_is_none() -> None:
+    fake = _rrf3(rr_model=_model_router({"state.status": "idle", "boards[0].uniqueId": None}))
+    adapter = fake.install(_adapter())
+    assert adapter.read_machine_identity() is None
+
+
+def test_rrf2_board_has_no_object_model_and_reports_none() -> None:
+    fake = _FakeDuet(
+        rr_connect=_CONNECT_OK,
+        rr_model=(404, "Not found"),
+        rr_status={"status": "I"},
+    )
+    adapter = fake.install(_adapter())
+    assert adapter.read_machine_identity() is None
+    assert all(c.params.get("key") != "boards[0].uniqueId" for c in fake.calls)

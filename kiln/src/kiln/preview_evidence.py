@@ -140,7 +140,7 @@ def _file_hash(path: str | os.PathLike[str] | None) -> str | None:
 
 def _read_ledger() -> dict[str, dict[str, Any]]:
     try:
-        entries = json.loads(_ledger_path().read_text())
+        entries = json.loads(_ledger_path().read_text(encoding="utf-8"))
         return entries if isinstance(entries, dict) else {}
     except Exception:  # noqa: BLE001 — a corrupt ledger is an empty ledger
         return {}

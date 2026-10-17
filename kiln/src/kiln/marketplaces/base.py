@@ -10,6 +10,7 @@ from __future__ import annotations
 import functools
 import hashlib
 import logging
+import os
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
@@ -364,6 +365,14 @@ def resumable_download(
     part_path = out_path.with_suffix(out_path.suffix + ".part")
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # A link at either name would carry the download wherever it points.
+    # The final name is refused; a link at the temp name is not one of
+    # ours, so it is removed (the link, never its target).
+    if out_path.is_symlink():
+        raise MarketplaceError(f"Kiln does not save a download over the link {out_path}")
+    if part_path.is_symlink() or (part_path.exists() and not part_path.is_file()):
+        part_path.unlink()
+
     # If final file already exists and has content, verify and return it
     if out_path.exists() and out_path.stat().st_size > 0:
         _verify_download(out_path, expected_sha256, expected_size)
@@ -411,7 +420,10 @@ def resumable_download(
                 resp.raise_for_status()
                 mode = "wb"
 
-            with open(part_path, mode) as fh:
+            # Opened without following a link, even one made since the check.
+            flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+            flags |= os.O_APPEND if mode == "ab" else os.O_TRUNC
+            with os.fdopen(os.open(part_path, flags, 0o644), "ab" if mode == "ab" else "wb") as fh:
                 for chunk in resp.iter_content(chunk_size=chunk_size):
                     fh.write(chunk)
 
@@ -433,7 +445,9 @@ def resumable_download(
                             continue
                     except (ValueError, TypeError):
                         pass  # Malformed Content-Length, skip check
-                part_path.rename(out_path)
+                if out_path.is_symlink():
+                    raise MarketplaceError(f"Kiln does not save a download over the link {out_path}")
+                os.replace(part_path, out_path)
                 _verify_download(out_path, expected_sha256, expected_size)
                 return str(out_path.resolve())
 

@@ -50,6 +50,20 @@ class DiscoveredPrinter:
     discovery_method: str = ""  # "mdns", "http_probe", "manual"
     trusted: bool = False
 
+    @property
+    def address(self) -> str:
+        """The host a saved config wants for this printer.
+
+        HTTP backends keep the port they answered on (OctoPrint on 80 or
+        5000, Moonraker on 7125, 4408 or 80, PrusaLink on 80 or 8080), or the
+        saved printer is looked for on port 80.  Bambu and Elegoo speak
+        MQTT / SDCP on fixed ports their adapters own, so they get the bare
+        address.
+        """
+        if self.printer_type in ("bambu", "elegoo"):
+            return self.host
+        return self.host if self.port in (0, 80) else f"{self.host}:{self.port}"
+
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
@@ -302,8 +316,14 @@ def _parse_ssdp_headers(text: str) -> dict[str, str]:
 def _try_ssdp(timeout: float) -> list[DiscoveredPrinter]:
     """Discover Bambu Lab printers via their SSDP broadcast (UDP 2021).
 
-    Bambu printers in LAN / Developer Mode broadcast an SSDP ``NOTIFY``
-    to ``239.255.255.250:2021`` carrying the device IP (``Location``),
+    Bambu printers announce themselves with an SSDP ``NOTIFY`` -- in cloud
+    mode as well as LAN Only Mode, per Bambu's own network-ports page --
+    either multicast to ``239.255.255.250`` on port 1990 or broadcast to
+    ``255.255.255.255`` on port 2021.  Kiln listens on 2021 (and joins the
+    group there), so it hears the broadcast; a printer that sent only the
+    1990 multicast would be missed.  None is known to, and listening on
+    1990 too could hold the port Bambu Studio uses on the same computer.
+    The NOTIFY carries the device IP (``Location``),
     serial (``USN``), model and name.  They answer neither the mDNS
     service types we browse nor a TCP/HTTP port scan (the MQTT port is
     filtered to raw connects), so SSDP is the only reliable LAN
@@ -328,8 +348,9 @@ def _try_ssdp(timeout: float) -> list[DiscoveredPrinter]:
         except OSError:
             logger.debug("SSDP multicast join failed; listening for broadcasts only")
 
-        # Bambu re-broadcasts its NOTIFY roughly every 10 s and ignores
-        # active M-SEARCH, so the window must exceed one broadcast interval.
+        # Observed on Kiln's own test printers (Bambu publishes neither):
+        # the NOTIFY repeats roughly every 10 s and an active M-SEARCH gets
+        # no answer, so the window must exceed one broadcast interval.
         deadline = time.monotonic() + min(timeout, 12.0)
         while time.monotonic() < deadline:
             sock.settimeout(max(0.2, deadline - time.monotonic()))
@@ -501,7 +522,7 @@ def _detect_wsl_host_subnet() -> str | None:
     used to derive the subnet for printer discovery.
     """
     try:
-        with open("/etc/resolv.conf") as f:
+        with open("/etc/resolv.conf", encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.strip()
                 if line.startswith("nameserver"):

@@ -83,6 +83,19 @@ def read_setting(adapter: Any) -> Any:
     return setting
 
 
+def read_refused(adapter: Any) -> dict[str, Any] | None:
+    """The one-printer rule's verdict on reading *adapter*'s nozzle setting,
+    or ``None`` when Kiln may read it.  Below the fleet tier Kiln reads one
+    machine at a time; a second machine's own screen shows its setting, and
+    a caller that falls back to another size says so with these words."""
+    try:
+        from kiln.printers.engagement import check_command
+
+        return check_command(adapter, "read_nozzle_setting")
+    except ImportError:
+        return None
+
+
 def observe_printer_nozzle(printer_id: str) -> dict[str, Any] | None:
     """What the machine *printer_id* names holds as its nozzle, or ``None``.
 
@@ -109,13 +122,8 @@ def observe_printer_nozzle(printer_id: str) -> dict[str, Any] | None:
         if resolved is None:
             return None
         adapter, registered_name, resolved_by = resolved
-        try:
-            from kiln.printers.engagement import check_command
-
-            if check_command(adapter, "get_state") is not None:
-                return None
-        except ImportError:
-            pass
+        if read_refused(adapter) is not None:
+            return None
         setting = read_setting(adapter)
         if setting is None:
             return None

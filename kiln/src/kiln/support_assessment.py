@@ -70,7 +70,7 @@ def _load_profiles() -> dict[str, Any]:
     if _PROFILES:
         return _PROFILES
     try:
-        with open(_DATA_FILE) as fh:
+        with open(_DATA_FILE, encoding="utf-8") as fh:
             raw = json.load(fh)
         # Skip _meta key
         _PROFILES = {k: v for k, v in raw.items() if not k.startswith("_")}

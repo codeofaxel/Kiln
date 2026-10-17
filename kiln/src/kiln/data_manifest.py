@@ -49,7 +49,6 @@ REFERENCE_DATA_FILES: dict[str, str] = {
     ),
     "component_catalog.json": "COTS component dimensions, keyed by component",
     "design_templates.json": "parametric template definitions, keyed by template",
-    "material_catalog.json": "material properties, keyed by material",
     "support_profiles.json": "support-generation presets, keyed by strategy",
     "tool_safety.json": "tool-call safety rules for the agent surface",
     "design_knowledge/design_templates.json": (
@@ -62,7 +61,8 @@ REFERENCE_DATA_FILES: dict[str, str] = {
         "requirement vocabulary, keyed by requirement"
     ),
     "design_knowledge/load_tables.json": (
-        "structural load tables, keyed by geometry and material"
+        "load-lookup roster: which limit governs each material; the figures "
+        "are Kiln's catalogue record, served one material at a time"
     ),
     "design_knowledge/material_troubleshooting.json": (
         "print-defect guidance, keyed by symptom and material"
@@ -92,13 +92,19 @@ PROSE_EXCLUDED_KEYS: frozenset[str] = frozenset(
     {"start_gcode", "end_gcode", "settings", "bed_shape", "_sources", "_meta"}
 )
 
-#: Every key a printer row in ``printer_intelligence.json`` carries.  This
+#: Every key a ROSTER row in ``printer_intelligence.json`` carries.  This
 #: is the POSITIVE half of the sentence below: that one names the fields
 #: reserved OUT of the public catalogue, and until now nothing named the
 #: ones that are in it, so "the schema is fixed" was a claim with no
-#: subject.  Each entry is a physical fact about the machine or a safety
-#: ceiling -- the band that is public at every tier -- and every row
-#: answers every key, ``null`` where nobody has settled the fact.
+#: subject.
+#:
+#: Since 2026-10-12 the bundled file is a roster: a printer's spec sheet,
+#: its rated ceilings, its per-material recipes and its nozzle-probe
+#: rectangle are served per printer from Kiln's catalogue when the printer
+#: is set up (:mod:`kiln._pro_catalogue_bridge`), so a named row carries
+#: only what every install needs with no record at all.  The generic
+#: ``default`` row is the one bundled row that carries the full field set,
+#: as the floor; the sweep that pins this constant exempts it by name.
 #:
 #: Read it, do not copy it.  The list had been retyped in the test suite
 #: here and again in kiln-pro's catalogue gate, and on 2026-09-15
@@ -108,37 +114,24 @@ PROSE_EXCLUDED_KEYS: frozenset[str] = frozenset(
 PUBLIC_PROFILE_FIELDS: frozenset[str] = frozenset(
     {
         "display_name",
-        "firmware",
-        "extruder_type",
-        "hotend_type",
-        "has_enclosure",
-        "has_chamber_sensor",
-        "has_abl",
-        "has_input_shaping",
-        "build_volume_mm",
-        "max_hotend_temp",
-        "max_bed_temp",
-        "materials",
-        # Where a machine taps the bed to feel for a blob on the nozzle, and
-        # the slicing modes that skip that tap -- both as its maker publishes
-        # them.  A rectangle on a bed is a physical fact like build_volume_mm,
-        # and the warning built on it ("your part is parked where the probe
-        # taps") has to work on a laptop with no internet, so it is public at
-        # every tier.  The research behind it -- the schedule, the sensing,
-        # the provenance, the fleet view -- stays in Kiln Pro.  ``null`` for a
-        # machine whose maker states none, which is "Kiln does not know",
-        # never "this machine has no probe".
-        "nozzle_clumping_probe",
         # The physical facts that decide whether Kiln may move the head on an
         # idle machine that may still hold a part: which part moves in Z, how
         # Z finds its datum and where, whether the firmware refuses an
         # unhomed move, the commanded Z ceiling, the vendor's park verb.  A
         # refusal built on them ("this printer finds Z by pressing the nozzle
-        # onto the plate") has to work offline, so the block is public at
-        # every tier; each field carries its provenance, and a fact that
-        # rests on a community post is stored as ``null`` with the hearsay in
-        # the note.  Schema and vocabulary: kiln.motion_facts.
+        # onto the plate") has to work offline, with no record and no
+        # connection, so the block is public at every tier and is never
+        # served; each field carries its provenance, and a fact that rests
+        # on a community post is stored as ``null`` with the hearsay in the
+        # note.  Schema and vocabulary: kiln.motion_facts.
         "motion",
+        # The marketed bed, [x, y, z] mm: the one number of a printer's
+        # record that stays public, because the print-start bed check, the
+        # G-code bounds check and the park planner hold a SIGNED-OUT install
+        # to it (2026-10-15: without it they switched off for every roster
+        # printer).  Written from kiln-pro's catalogue by one script and
+        # pinned equal to it there; the measured usable envelope is served.
+        "rated_build_volume_mm",
     }
 )
 

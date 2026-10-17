@@ -13,6 +13,7 @@ File: ``~/.kiln/daily_stats.json``
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import json
 import logging
@@ -309,6 +310,15 @@ def _empty_day() -> dict[str, Any]:
         # machine (a managed venv, a system Python).  Same fix bucket,
         # opposite fixes.
         "update_nudge": {},        # {"shown_tool_result": 1, "upgrade_ok": 1}
+        # Sign-in funnel: stage -> count today, over the CLOSED vocabulary
+        # _ACCOUNT_NUDGE_STAGES.  Where an account was offered (at connect,
+        # in get_started, on a reply a sign-in would fix, at a printer's
+        # setup when the install is holding it to generic limits for want
+        # of a sign-in), whether a sign-in was started and through which
+        # door, how it ended, and whether it followed a limits nudge.
+        # Every stage happens on this machine; the server sees a device
+        # code being made and claimed, never the offer that led to it.
+        "account_nudge": {},       # {"offered_connect": 1, "started_chat": 1}
         # Per-tool call counts: tool_name → times called today.  Counts
         # EVERY local tool dispatch (not just the six outcome events),
         # so the anonymous heartbeat can finally show what unsigned
@@ -357,8 +367,10 @@ def _empty_day() -> dict[str, Any]:
         "template_uses": {},       # {"shelf_bracket": 3, "stackable_bin": 1}
         # Whether live video from a printer's camera worked, as classes:
         # {"<model>|<channel>|<source>|<event>": count}.  Written by the
-        # relay (kiln.streaming) and the camera check (kiln.camera_check),
-        # the only two places that know; see record_video_outcome.
+        # relay (kiln.streaming), the camera check (kiln.camera_check), and
+        # -- for a still picture of the bed, or an owner saying their
+        # printer has a camera -- kiln.streaming.note_still /
+        # note_owner_said_camera; see record_video_outcome.
         "video_outcomes": {},
         "motion_refusals": {},
         # What a served motion plan did on a real machine, as classes:
@@ -396,7 +408,7 @@ _ROLLOVER_COUNTERS = (
 # these are a different shape answering a different question.
 _ROLLOVER_MAPS = (
     "tier_denials", "account_wall", "tool_calls", "tool_failures",
-    "update_nudge",
+    "update_nudge", "account_nudge",
     "texture_names", "decoration_types", "slicer_profiles",
     "marketplace_sources", "template_uses",
     "generation_providers", "marketplace_searches",
@@ -974,6 +986,142 @@ _UPDATE_NUDGE_STAGES = frozenset({
 })
 
 
+# The sign-in funnel's stages.  A CLOSED set for the same reason as the
+# upgrade funnel's: our own words, so an unknown one is a bug, never a row.
+_ACCOUNT_NUDGE_STAGES = frozenset({
+    # Offers.  The agent was told a free account exists ...
+    "offered_connect",       # ... in the MCP instructions at connect
+    "offered_get_started",   # ... in get_started's account block
+    "offered_hint",          # ... on a reply a sign-in would fix
+    "offered_resignin",      # the same reply, to a machine whose stored
+                             # session lapsed: a returning account, not a
+                             # new one, so it never inflates the first count
+    # A sign-in began: a device code was issued, by door.
+    "started_chat",          # kiln_signin, from inside an agent chat
+    "started_cli",           # `kiln signin` in a terminal
+    "start_failed",          # the start itself failed (offline, server)
+    # How it ended.
+    "completed_chat",
+    "completed_cli",
+    "completed_pair",        # `kiln pair <code>`, a code made on the web
+    "completed_other",       # a door this list does not name yet
+    "completed_returning",   # ALSO counted under its door: the machine
+                             # still held a session, so this was signing
+                             # back in, not a first account
+    # The setup-time limits nudge (safety_profiles.warm_profile): a printer
+    # was set up on a signed-out install, which is therefore holding it to
+    # the generic floor, and the person was told a free sign-in lifts it.
+    "offered_limits",        # ... Kiln has the printer's record, unfetched
+    "offered_limits_unknown",  # ... Kiln has no row for the printer at all
+    "completed_limits",      # ALSO counted under its door: a sign-in that
+                             # finished within a day of a limits nudge
+                             # (the marker in record_limits_nudge_offer)
+    "denied",                # cancelled in the browser
+    "expired",               # the code ran out before anyone finished
+    "timed_out",             # the terminal stopped waiting first
+})
+
+
+def record_account_nudge(stage: str) -> None:
+    """Count one stage of the sign-in funnel for today.  Never raises.
+
+    The account has been offered on three surfaces, and the server sees
+    only the far end: 197 sign-ins started in the 30 days to 2026-10-09,
+    157 of them expired unfinished, and nothing said where they came from
+    or whether anyone had been asked.  Each stage fails differently: an
+    offer with no start is an agent that never relayed it; a start with no
+    finish is a sign-in flow people give up on.
+    """
+    name = (stage or "").strip()
+    if name not in _ACCOUNT_NUDGE_STAGES:
+        return
+    _record_name_count("account_nudge", name)
+
+
+#: Where a setup-time limits nudge waits for the sign-in it asked for.  The
+#: nudge is minted in the MCP server process (``safety_profiles.warm_profile``)
+#: and the sign-in it leads to usually finishes in another one -- ``kiln
+#: signin`` in a terminal -- so "did a sign-in follow it" cannot be a fact one
+#: process holds.  One marker, overwritten by the latest nudge, read and
+#: removed by the sign-in that completes (``auth_commands._complete_signin``,
+#: where every sign-in door ends).
+_LIMITS_NUDGE_MARKER_PATH: Path = Path.home() / ".kiln" / "limits_nudge_pending.json"
+#: A sign-in later than this after the nudge is not the nudge's: it counts
+#: as nothing, and the marker is cleared all the same.
+_LIMITS_NUDGE_FRESH_S = 24 * 3600
+_LIMITS_OFFER_STAGES = frozenset({"offered_limits", "offered_limits_unknown"})
+
+
+def record_limits_nudge_offer(stage: str, printer_model: str, *, leads_to_signin: bool = True) -> None:
+    """Count a setup-time limits nudge and leave the marker its sign-in reads.
+
+    ``leads_to_signin=False`` counts the nudge and leaves no marker: the
+    sentence asked for no sign-in, so a sign-in after it is not its doing.
+
+    ``stage`` is ``offered_limits`` (a catalogued printer the install is
+    signed out for) or ``offered_limits_unknown`` (a printer Kiln has no row
+    for); any other word is dropped.  ``printer_model`` is the spelling the
+    printer was set up under -- a model name, never a serial or an address --
+    and it stays in the marker on this computer: the heartbeat carries the
+    count alone.
+
+    The marker is written only where the nudge is shown: an install without
+    kiln-pro, signed out.  The hosted server never shows it (kiln-pro's own
+    catalogue answers there, in-process) and never records anything
+    (:func:`_recording_suppressed`), so no marker is written on a machine
+    that serves more than one person.  Never raises: a marker that cannot
+    be written costs one uncounted conversion, never a printer's setup.
+    """
+    name = (stage or "").strip()
+    if name not in _LIMITS_OFFER_STAGES:
+        return
+    record_account_nudge(name)
+    if _recording_suppressed() or not leads_to_signin:
+        return
+    try:
+        _LIMITS_NUDGE_MARKER_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _LIMITS_NUDGE_MARKER_PATH.write_text(
+            json.dumps({
+                "shown_at": time.time(),
+                "stage": name,
+                "printer_model": str(printer_model or "")[:120],
+            }),
+            encoding="utf-8",
+        )
+    except Exception as exc:  # noqa: BLE001 -- one uncounted conversion, never a failed setup
+        _logger.debug("limits nudge marker not written: %s", exc)
+
+
+def record_limits_nudge_conversion() -> bool:
+    """A sign-in just completed: count ``completed_limits`` if a limits nudge
+    was shown within :data:`_LIMITS_NUDGE_FRESH_S`, and clear the marker.
+
+    Returns True when a conversion was counted.  The marker is removed
+    whatever its age -- the sign-in it waited for has happened, and an older
+    one belongs to nobody -- and no marker, the common case, counts nothing.
+    Under suppressed recording the file is not touched either: a test
+    runner must not consume a real marker.  Never raises.
+    """
+    if _recording_suppressed():
+        return False
+    path = _LIMITS_NUDGE_MARKER_PATH
+    shown_at = 0.0
+    try:
+        if not path.is_file():
+            return False
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            shown_at = float(raw.get("shown_at") or 0.0)
+    except Exception as exc:  # noqa: BLE001 -- an unreadable marker is no marker
+        _logger.debug("limits nudge marker unreadable: %s", exc)
+    with contextlib.suppress(OSError):
+        path.unlink()
+    if shown_at <= 0.0 or time.time() - shown_at > _LIMITS_NUDGE_FRESH_S:
+        return False
+    record_account_nudge("completed_limits")
+    return True
+
+
 def record_update_nudge(stage: str) -> None:
     """Count one stage of the upgrade-nudge funnel for today.
 
@@ -1190,9 +1338,11 @@ def record_video_outcome(model: object, channel: str, source: str, event: str) -
 
     ``channel``, ``source`` and ``event`` come from the closed vocabularies
     in :mod:`kiln.streaming`; the relay and the planning helper every door
-    calls are the only writers, once per session (see
-    ``kiln.streaming.MJPEGProxy``).  A key that is not four well-formed
-    tokens is dropped.  Silent by contract.
+    calls write once per session (see ``kiln.streaming.MJPEGProxy``), and
+    the two camera facts that are not live video -- a still picture came
+    back, an owner said the printer has a camera -- once a day
+    (``kiln.streaming.note_still`` / ``note_owner_said_camera``).  A key
+    that is not four well-formed tokens is dropped.  Silent by contract.
     """
     key = f"{video_model_token(model)}|{channel}|{source}|{event}"
     _record_name_count(
@@ -1456,6 +1606,7 @@ def get_daily_stats() -> dict[str, Any]:
         # P2S install fails at start_print" said nothing instead.
         "tool_failures": data.get("tool_failures", {}),
         "update_nudge": data.get("update_nudge", {}),
+        "account_nudge": data.get("account_nudge", {}),
         # Returned here from the start.  A map recorded but not returned
         # reads {} in every heartbeat forever — exactly how tool_failures
         # shipped nothing on 1,000 production rows.

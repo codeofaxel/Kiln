@@ -164,12 +164,28 @@ def format_error(
     *,
     json_mode: bool = False,
 ) -> str:
-    """Shortcut for a standard error response."""
-    return format_response(
-        "error",
-        error={"code": code, "message": message},
-        json_mode=json_mode,
-    )
+    """Shortcut for a standard error response.
+
+    Called while Kiln's one-printer refusal is the exception being handled,
+    it answers with the refusal's own words and code rather than the
+    command's "verify the printer is online" -- the same rule the MCP
+    tools' error envelope follows (see
+    :func:`kiln.printers.engagement.refusal_in_flight`).
+    """
+    error: dict[str, Any] = {"code": code, "message": message}
+    try:
+        from kiln.printers.engagement import refusal_in_flight, refusal_words
+
+        refusal = refusal_in_flight()
+    except Exception:  # noqa: BLE001 -- an error message never fails to print
+        refusal = None
+    if refusal is not None:
+        error = {
+            "code": str(refusal.get("code") or "TIER_SINGLE_PRINTER_LIMIT"),
+            "message": refusal_words(refusal),
+            "refusal": refusal,
+        }
+    return format_response("error", error=error, json_mode=json_mode)
 
 
 # ---------------------------------------------------------------------------
@@ -615,6 +631,25 @@ def format_discovered(
 # ---------------------------------------------------------------------------
 
 
+def _delivered_total(quote: dict[str, Any]) -> float:
+    """What the person pays for ``quote``, delivered: printing, the cheapest
+    shipping, and Kiln's fee.
+
+    The order service's price sheet states it when the quote carries one
+    (the same total the quote card shows); otherwise it is worked out from
+    the same parts.
+    """
+    sheet = quote.get("price_sheet")
+    if isinstance(sheet, dict) and isinstance(sheet.get("total"), (int, float)):
+        return float(sheet["total"])
+    shipping = [
+        s.get("price") for s in quote.get("shipping_options") or []
+        if isinstance(s, dict) and isinstance(s.get("price"), (int, float))
+    ]
+    before_shipping = quote.get("total_with_fee", quote.get("total_price", 0)) or 0
+    return float(before_shipping) + (min(shipping) if shipping else 0.0)
+
+
 def format_quote(
     quote: dict[str, Any],
     *,
@@ -637,6 +672,7 @@ def format_quote(
     total = quote.get("total_price", 0)
     currency = quote.get("currency", "USD")
     lead = quote.get("lead_time_days")
+    delivered = _delivered_total(quote)
 
     if RICH_AVAILABLE:
         table = Table(show_header=False, box=None, padding=(0, 2))
@@ -657,10 +693,7 @@ def format_quote(
                 )
             else:
                 table.add_row("Kiln fee", f"{currency} {fee_amt:.2f}")
-            total_with_fee = quote.get("total_with_fee", total)
-            table.add_row("Total", f"[bold green]{currency} {total_with_fee:.2f}[/bold green]")
-        else:
-            table.add_row("Total", f"[bold green]{currency} {total:.2f}[/bold green]")
+        table.add_row("Total, delivered", f"[bold green]{currency} {delivered:.2f}[/bold green]")
 
         if lead:
             table.add_row("Lead time", f"{lead} days")
@@ -689,9 +722,7 @@ def format_quote(
             lines.append(f"Kiln fee: {currency} 0.00 (waived)")
         else:
             lines.append(f"Kiln fee: {currency} {fee_amt:.2f}")
-        lines.append(f"Total:    {currency} {quote.get('total_with_fee', total):.2f}")
-    else:
-        lines.append(f"Total:    {currency} {total:.2f}")
+    lines.append(f"Total, delivered: {currency} {delivered:.2f}")
     if lead:
         lines.append(f"Lead:     {lead} days")
     return "\n".join(lines)
@@ -755,6 +786,8 @@ def format_order(
             table.add_row("Payment", payment_url)
         if order.get("estimated_delivery"):
             table.add_row("Delivery", order["estimated_delivery"])
+        for warning in order.get("warnings") or []:
+            table.add_row("Warning", Text(warning, style="yellow"))
 
         return _render(Panel(table, title="Order", border_style="blue"))
 
@@ -783,6 +816,8 @@ def format_order(
     payment_url = order.get("payment_url")
     if payment_url and payment_url != order.get("checkout_url"):
         lines.append(f"Payment:  {payment_url}")
+    for warning in order.get("warnings") or []:
+        lines.append(f"Warning:  {warning}")
     return "\n".join(lines)
 
 

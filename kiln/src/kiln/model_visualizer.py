@@ -33,6 +33,7 @@ from kiln import _fonts
 from kiln.emboss_generator import _openscad_version_year, get_openscad_version
 from kiln.openscad_runner import run_openscad
 from kiln.preview_render import downscale_png, effective_supersample
+from kiln.untrusted_zip import UntrustedZipFile
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +116,7 @@ def _is_bambu_wrapped_3mf(file_path: str) -> bool:
     PrusaSlicer input.
     """
     try:
-        with zipfile.ZipFile(file_path, "r") as zf:
+        with UntrustedZipFile(file_path, "r") as zf:
             members = set(zf.namelist())
             if "Metadata/plate_1.gcode" not in members:
                 return False
@@ -144,7 +145,7 @@ def _extract_bambu_thumbnails(
 
     out: list[dict] = []
     try:
-        with zipfile.ZipFile(file_path, "r") as zf:
+        with UntrustedZipFile(file_path, "r") as zf:
             members = set(zf.namelist())
             for member, angle_label, description in _BAMBU_THUMBNAIL_MAP:
                 if member not in members:

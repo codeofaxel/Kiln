@@ -66,6 +66,9 @@ class TestTheServedRequest:
             )
         assert answer == {"success": True, "answer": 1}
         assert seen["tool"] == bridge.WIRE_TOOL and seen["timeout"] == 30.0
+        # An enrichment of an estimate the person asked for, not an ask of its
+        # own: a signed-out install must not count it as an account wall.
+        assert seen["_asked_by_user"] is False
         assert gzip.decompress(base64.b64decode(seen["gcode_gz_b64"])).decode() == _orca_plate()
         assert (seen["file_name"], seen["total_cost_usd"], seen["estimated_time_seconds"], seen["printer_id"]) == (
             "plate.gcode", 1.5, 3600, "a1"

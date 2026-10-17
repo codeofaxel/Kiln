@@ -52,6 +52,7 @@ from typing import Any
 
 from kiln.nozzle_size_check import MISMATCH_CODE as NOZZLE_SIZE_MISMATCH
 from kiln.tiers_and_terms import upgrade_nudge_block
+from kiln.untrusted_zip import UntrustedZipFile
 
 _logger = logging.getLogger(__name__)
 
@@ -153,6 +154,18 @@ def _temp_verdict(
         # min that strictly exceeds the ceiling is physically impossible.
         # Explicit "is not None" (not truthiness) so a legitimate 0 isn't lost.
         if printer_max is not None and mat_min is not None and mat_min > printer_max:
+            if getattr(printer, "resolved_from", "") == "generic":
+                # A roster printer with no record in hand is held to the
+                # generic floor; say so, rather than calling the floor its
+                # rating.
+                return (
+                    True,
+                    "MATERIAL_EXCEEDS_HOTEND",
+                    f"{material_id} needs at least {mat_min}°C at the nozzle, and "
+                    f"Kiln is holding this printer to the generic {printer_max}°C "
+                    f"floor because this install has no record for it. Sign in "
+                    f"free and Kiln works to the printer's real limits.",
+                )
             return (
                 True,
                 "MATERIAL_EXCEEDS_HOTEND",
@@ -578,14 +591,34 @@ def _concurrent_fleet_verdict(adapter: Any) -> dict[str, Any] | None:
             return None
 
         others = ", ".join(sorted(busy)[:3])
+        reason = (
+            f"Kiln runs one printer at a time on this plan, and "
+            f"{others} is already printing."
+        )
+        free_path = "Wait for it to finish, or start it after this one."
+        headline = "Coordinate this job with the printer that is already running."
+        free_included = "The job has not started; wait and run it next."
+        # A busy machine that is paused at a planned hardware stop is not
+        # printing: it is waiting, hot, for the person's hands.  Words only --
+        # the refusal above is already decided and nothing below changes it.
+        waiting = _waiting_at_a_stop(registry, busy)
+        if waiting is not None:
+            label, note = waiting
+            from kiln.hardware_stops import waiting_elsewhere_words
+
+            waiting_line, way_on = waiting_elsewhere_words(label, note)
+            reason = (
+                f"{waiting_line} Kiln runs one printer at a time on this plan, so "
+                f"this print can start once {label}'s print is finished or cancelled."
+            )
+            free_path = way_on
+            headline = "Coordinate this job with the printer that is waiting for you."
+            free_included = f"The job has not started. {waiting_line} {way_on}"
         verdict = {
             "blocked": True,
-            "reason": (
-                f"Kiln runs one printer at a time on this plan, and "
-                f"{others} is already printing."
-            ),
+            "reason": reason,
             "override_hint": (
-                "Wait for it to finish, or start it after this one. "
+                f"{free_path} "
                 "Kiln Business runs your printers in parallel — "
                 "https://kiln3d.com/pricing"
             ),
@@ -602,17 +635,12 @@ def _concurrent_fleet_verdict(adapter: Any) -> dict[str, Any] | None:
                 variant="concurrent_queue",
                 tier="business",
                 feature="Coordinated multi-printer queue",
-                headline=(
-                    "Coordinate this job with the printer that is already "
-                    "running."
-                ),
+                headline=headline,
                 outcome_preview=(
                     "Kiln Business would route the queue across the available "
                     "machines and start eligible work in parallel."
                 ),
-                free_included=(
-                    "The job has not started; wait and run it next."
-                ),
+                free_included=free_included,
                 moment="resource_threshold",
             ),
         )
@@ -620,6 +648,24 @@ def _concurrent_fleet_verdict(adapter: Any) -> dict[str, Any] | None:
     except Exception:  # noqa: BLE001 — a licensing check never breaks a print
         _logger.debug("concurrent-fleet gate soft-passed", exc_info=True)
         return None
+
+
+def _waiting_at_a_stop(registry: Any, busy: list[str]) -> tuple[str, dict[str, Any]] | None:
+    """``(name, note)`` when the ONE busy machine is paused at a planned stop.
+
+    Only for a single busy machine: with two, tending to one would not free
+    this start, and words saying it would are wrong.  The reading belongs to
+    :mod:`kiln.hardware_stops`; anything it cannot tell answers ``None``.
+    """
+    if len(busy) != 1:
+        return None
+    try:
+        from kiln.hardware_stops import waiting_elsewhere
+
+        note = waiting_elsewhere(registry.get(busy[0]))
+    except Exception:  # noqa: BLE001 -- the words never break the gate
+        return None
+    return (busy[0], note) if note else None
 
 
 def _machine_id(adapter: Any) -> str:
@@ -861,12 +907,11 @@ def _gcode_head(path: str, max_lines: int) -> list[str] | None:
     low = path.lower()
     try:
         if low.endswith(".3mf"):
-            import zipfile
 
             from kiln.gcode import _MAX_SCAN_BYTES
             from kiln.gcode_metadata import read_member_text, sliced_gcode_member
 
-            with zipfile.ZipFile(path) as zf:
+            with UntrustedZipFile(path) as zf:
                 member = sliced_gcode_member(zf)
                 if member is None:
                     return None
@@ -1399,6 +1444,12 @@ def run_adapter_gate(
         except _ReadBackFailed as exc:
             return _read_back_refusal(file_name, printer_id, str(exc), override)
     inspected = job if job is not None else fetched
+    # The file about to start may carry a hardware plan (a pause for a nut or
+    # a magnet); read it from this copy, the one certain to be that file, before
+    # a fetched copy is deleted below.  Filed only if the start succeeds.
+    from kiln.hardware_stops import stage as _stage_hardware_plan
+
+    _stage_hardware_plan(adapter, file_name, inspected)
     material_id = _resolve_material(kwargs)
     if inspected and read_quiet_start_contract(inspected) is not None:
         quiet = evaluate_quiet_start(adapter, inspected, kwargs)

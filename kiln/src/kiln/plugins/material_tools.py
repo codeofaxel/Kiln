@@ -465,6 +465,12 @@ class _MaterialToolsPlugin:
                     }
 
             except PrinterError as exc:
+                from kiln.printers.engagement import refusal_in_flight
+
+                if refusal_in_flight(exc) is not None:
+                    # Kiln declined to read this printer: that is not a
+                    # health finding about it, and "critical" would say it is.
+                    return _srv._error_dict(str(exc))
                 checks["printer_connected"] = {
                     "status": "critical",
                     "detail": f"Failed to read printer state: {exc}",

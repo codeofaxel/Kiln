@@ -247,6 +247,29 @@ def test_the_running_tool_name_is_visible_during_dispatch(monkeypatch):
     assert tool_context.current_tool_name() is None  # reset after the call
 
 
+def test_the_running_tools_arguments_are_visible_during_dispatch(monkeypatch):
+    """What the caller asked rides with the name -- the make doors' goal join
+    records a generator's material from it -- as a copy that is gone once
+    the call ends."""
+    from kiln import server, tool_context
+
+    seen: list[dict] = []
+    mgr = server.mcp._tool_manager
+
+    async def _peek(name, arguments, context=None, convert_result=False):
+        seen.append(tool_context.current_tool_arguments())
+        return {"success": True}
+
+    monkeypatch.setattr(mgr, "_kiln_request_context_capture_installed", False)
+    monkeypatch.setattr(mgr, "call_tool", _peek)
+    server._install_mcp_request_context_capture()
+    monkeypatch.setattr(server, "_terms_gate_blocks", lambda _n: False)
+    asyncio.run(mgr.call_tool("compile_scad", {"scad_code": "cube(1);"}))
+    assert seen == [{"scad_code": "cube(1);"}]
+    seen[0]["scad_code"] = "sphere(1);"  # a copy: nothing the tool holds moves
+    assert tool_context.current_tool_arguments() == {}  # gone after the call
+
+
 # ---------------------------------------------------------------------------
 # The sibling-name mismatch
 # ---------------------------------------------------------------------------
@@ -313,10 +336,19 @@ def test_check_printer_material_support_flags_a_default_answer():
     assert "profile_is_default" not in out
 
 
-def test_safety_profile_accepts_the_vendor_spelling():
+def test_safety_profile_accepts_the_vendor_spelling(monkeypatch):
+    """The vendor spelling and the catalogue id resolve to one profile, and
+    a record is only ever asked for under the catalogue's id -- so the
+    answer is the same whether the record is bundled, on this computer, or
+    (as in public CI) not held at all."""
+    from kiln import _pro_catalogue_bridge as bridge
     from kiln import safety_profiles
 
+    asked: list[str] = []
+    real = bridge.printer_record
+    monkeypatch.setattr(bridge, "printer_record", lambda key: asked.append(key) or real(key))
     assert safety_profiles.get_profile("Creality K1C").id == safety_profiles.get_profile("k1c").id
+    assert set(asked) <= {"k1c"}, asked
 
 
 # ---------------------------------------------------------------------------

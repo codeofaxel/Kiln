@@ -586,3 +586,29 @@ def test_a_latch_under_either_name_refuses_the_resume(monkeypatch):
     assert out["success"] is False
     assert out["error"]["code"] == "E_STOP_LATCHED"
     assert printer.resumed == 0
+
+
+
+def test_a_cancel_the_printer_could_not_do_keeps_the_print_watched(monkeypatch):
+    """A firmware with no abort command answers "paused instead, not
+    cancelled".  That print is still on the bed: it stays watched, nothing
+    records it as cancelled, and the reply says it was not cancelled."""
+    _garage, workshop = _two_printers(monkeypatch)
+    workshop.cancel_print = lambda: PrintResult(
+        success=False,
+        message="This printer's firmware cannot abort a print over USB. Kiln paused it.",
+    )
+    stopped: list[str | None] = []
+    monkeypatch.setattr(server, "_stop_print_watchdog", lambda name=None: stopped.append(name))
+    ended: list[bool] = []
+    monkeypatch.setattr(server, "_is_heater_watchdog_machine", lambda adapter: ended.append(True) or True)
+    cleared: list[str] = []
+    monkeypatch.setattr(hook, "clear_cancel_intent", lambda name: cleared.append(name))
+
+    out = server.cancel_print(printer_name="workshop")
+
+    assert out["success"] is False and "cannot abort" in out["message"]
+    assert out["printer_name"] == "workshop"
+    assert stopped == [], "the print watchdog must keep watching a print that did not end"
+    assert ended == [], "the heater watchdog must not be told the print ended"
+    assert cleared == ["workshop"], "the cancel intent filed before the command is withdrawn"

@@ -1,17 +1,23 @@
-"""The H2-family Bambu machines are catalogued, and catalogued CONSERVATIVELY.
+"""The H2-family Bambu machines are catalogued, on every roster and by
+every identifier.
 
 The H2D, H2D Pro, H2C and X2D were missing from every roster file while
 kiln-pro's detection intelligence already modelled three of them, so a user
 could ask a detection question about an H2D and get an answer for a machine
 that had no printer profile at all.
 
-The sharp half of this file is the build volume.  Every one of these machines
-publishes SEVERAL envelopes -- a single-nozzle figure, a smaller dual-nozzle
-figure, and a "total volume for two nozzles" that is a tool-travel span rather
-than a printable box.  ``bed_fit`` calls itself the last line of defence
-before slicing and before send, so the catalogue figure is a crash guard: a
-part that fits the single-nozzle envelope but not the dual one MUST be
-refused.  These tests assert the refusal, not the presence of a number.
+The sharp half of this work is the build volume.  Every one of these
+machines publishes SEVERAL envelopes -- a single-nozzle figure, a smaller
+dual-nozzle figure, and a "total volume for two nozzles" that is a
+tool-travel span rather than a printable box -- and the catalogue figure is
+a crash guard: a part that fits the single-nozzle envelope but not the dual
+one MUST be refused.  Since 2026-10-12 that figure, the hotend ceilings and
+the per-material recipes are served per printer from Kiln's catalogue, so
+the conservative-envelope refusal, the X2D's lower ceiling and the recipe
+checks are pinned beside the records, in kiln-pro's
+``tests/test_printer_catalogue_numbers.py``.  What stays here is what the
+public tree still owns: the five rosters, the serial prefixes, the hint
+table and the BambuStudio model ids.
 """
 from __future__ import annotations
 
@@ -22,20 +28,10 @@ import pytest
 
 from kiln.cli.printer_model_prompt import suggest_bambu_model
 from kiln.printer_profile_ids import map_printer_hint_to_profile_id
-from kiln.printers.bed_fit import check_bed_fit, resolve_build_volume
 
 DATA = Path(__file__).resolve().parents[1] / "src" / "kiln" / "data"
 
 NEW_MODELS = ("bambu_h2d", "bambu_h2d_pro", "bambu_h2c", "bambu_x2d")
-
-# The envelope each machine must be catalogued at: the smallest SUPPORTED
-# printable mode, never the marketing figure.
-CONSERVATIVE_VOLUME = {
-    "bambu_h2d": (300.0, 320.0, 320.0),
-    "bambu_h2d_pro": (300.0, 320.0, 320.0),
-    "bambu_h2c": (300.0, 320.0, 320.0),
-    "bambu_x2d": (235.0, 256.0, 256.0),
-}
 
 ROSTER_FILES = {
     "printer_profiles": DATA / "design_knowledge" / "printer_profiles.json",
@@ -62,50 +58,6 @@ def test_every_roster_file_carries_the_new_machines(roster: str, model: str):
         f"{model} missing from {roster}; the five roster files are pinned to "
         "an identical key set"
     )
-
-
-@pytest.mark.parametrize("model", NEW_MODELS)
-def test_catalogued_at_the_conservative_envelope(model: str):
-    resolved = resolve_build_volume(model)
-    assert resolved is not None, f"{model} has no build volume for the bed-fit guard"
-    assert resolved[1] == CONSERVATIVE_VOLUME[model]
-
-
-@pytest.mark.parametrize(
-    "model,over_x,fits_single_nozzle_envelope",
-    [
-        # 310 clears the H2D/H2C single-nozzle X (325) but not the dual X (300).
-        ("bambu_h2d", 310.0, 325.0),
-        ("bambu_h2d_pro", 310.0, 325.0),
-        ("bambu_h2c", 310.0, 325.0),
-        # 250 clears the X2D main-nozzle X (256) but not the auxiliary X (235.5).
-        ("bambu_x2d", 250.0, 256.0),
-    ],
-)
-def test_a_part_only_the_wider_mode_could_print_is_refused(
-    model: str, over_x: float, fits_single_nozzle_envelope: float
-):
-    """The crash guard refuses what only the WIDER published mode could print.
-
-    This is the assertion that would have caught taking the marketing figure:
-    each ``over_x`` genuinely fits that machine's single-nozzle envelope, so a
-    catalogue built on that number would wave the part through and drive the
-    toolhead into the parked second nozzle.
-    """
-    assert over_x < fits_single_nozzle_envelope, "fixture must fit the wider mode"
-
-    volume = resolve_build_volume(model)[1]
-    bbox = {
-        "x_min": 0.0, "x_max": over_x,
-        "y_min": 0.0, "y_max": 100.0,
-        "z_min": 0.0, "z_max": 100.0,
-    }
-    verdict = check_bed_fit(bbox, volume)
-    assert verdict["ok"] is False, (
-        f"{model} accepted a {over_x} mm part; the catalogue is carrying a "
-        "wider envelope than the machine can print in every supported mode"
-    )
-    assert verdict["error_code"] == "EXCEEDS_BED"
 
 
 @pytest.mark.parametrize(
@@ -136,27 +88,6 @@ def test_serial_prefix_suggests_the_new_models(serial_prefix: str, expected: str
 def test_hint_resolution_tests_the_pro_before_the_base_model(hint: str, expected: str):
     """"h2d_pro" contains "h2d", so order decides whether the Pro exists at all."""
     assert map_printer_hint_to_profile_id(hint) == expected
-
-
-def test_x2d_keeps_the_lower_hotend_ceiling_of_its_own_class():
-    """The X2D is 300C, not the 350C the rest of the H2 family reaches.
-
-    Its material verdicts are therefore derived from the 300C X1C, and the
-    difference has to survive into the shipped data: PPS needs a hotend the
-    X2D does not have.
-    """
-    intel = json.loads(ROSTER_FILES["printer_intelligence"].read_text(encoding="utf-8"))
-    assert intel["bambu_x2d"]["max_hotend_temp"] == 300
-    for hot_family in ("bambu_h2d", "bambu_h2d_pro", "bambu_h2c"):
-        assert intel[hot_family]["max_hotend_temp"] == 350
-
-    compat = json.loads(
-        ROSTER_FILES["printer_material_compatibility"].read_text(encoding="utf-8")
-    )
-    compat = compat.get("printers", compat)
-    assert compat["bambu_x2d"]["pps"]["status"] == "not_compatible"
-    assert "high_temp_hotend" in compat["bambu_x2d"]["pps"]["upgrades_needed"]
-    assert compat["bambu_h2d"]["pps"]["status"] == "needs_upgrade"
 
 
 # --- BambuStudio model_id detection ---------------------------------------
@@ -229,60 +160,3 @@ def test_every_new_machine_is_reachable_by_all_three_identifier_kinds(model: str
         ),
     }
     assert all(kinds.values()), f"{model} missing identifier kinds: {kinds}"
-
-
-# --- per-material temperatures -------------------------------------------
-#
-# Per the maker's own machine-specific filament profiles.  Fan is
-# NOT taken from the vendor profile -- it is a per-material constant in Kiln,
-# identical across every Bambu machine in the catalogue, so it is read from
-# that existing convention rather than re-derived.
-
-
-@pytest.mark.parametrize("model", NEW_MODELS)
-def test_new_machines_carry_per_material_temperatures(model: str):
-    """A catalogued machine that answers no material question is half-added."""
-    intel = json.loads(ROSTER_FILES["printer_intelligence"].read_text(encoding="utf-8"))
-    mats = intel[model]["materials"]
-    assert len(mats) >= 10, f"{model} has only {len(mats)} materials"
-    for name, entry in mats.items():
-        assert set(entry) == {"hotend", "bed", "fan"}, f"{model}.{name} shape"
-        assert 150 <= entry["hotend"] <= intel[model]["max_hotend_temp"], (
-            f"{model}.{name} hotend {entry['hotend']} outside the machine's own ceiling"
-        )
-        assert 0 <= entry["bed"] <= intel[model]["max_bed_temp"]
-        assert 0 <= entry["fan"] <= 100
-
-
-def test_x2d_has_no_pps_because_it_cannot_reach_the_temperature():
-    """The X2D's 300C ceiling and its missing PPS profile must agree.
-
-    Bambu publishes no PPS filament profile for the X2D at all, which is the
-    vendor independently confirming the compatibility verdict derived from its
-    hotend ceiling.  If a future edit adds PPS here, one of the two is wrong.
-    """
-    intel = json.loads(ROSTER_FILES["printer_intelligence"].read_text(encoding="utf-8"))
-    assert "PPS" not in intel["bambu_x2d"]["materials"]
-    for hot_family in ("bambu_h2d", "bambu_h2d_pro", "bambu_h2c"):
-        assert "PPS" in intel[hot_family]["materials"]
-
-    profiles = json.loads(ROSTER_FILES["printer_profiles"].read_text(encoding="utf-8"))
-    assert "pps" not in profiles["bambu_x2d"]["supported_materials"]
-
-
-def test_fan_stays_a_per_material_constant_across_bambu_machines():
-    """Fan is a material property in this catalogue, not a machine one.
-
-    The new machines were populated on that basis, so if a future edit makes
-    fan machine-specific this assumption needs revisiting rather than silently
-    breaking.
-    """
-    intel = json.loads(ROSTER_FILES["printer_intelligence"].read_text(encoding="utf-8"))
-    seen: dict[str, set[int]] = {}
-    for pid, prof in intel.items():
-        if not pid.startswith("bambu_"):
-            continue
-        for mat, entry in (prof.get("materials") or {}).items():
-            seen.setdefault(mat, set()).add(entry["fan"])
-    disagreeing = {m: v for m, v in seen.items() if len(v) > 1}
-    assert not disagreeing, f"fan is no longer material-constant: {disagreeing}"

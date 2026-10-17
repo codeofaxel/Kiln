@@ -802,8 +802,8 @@ class TestTheHostedStore:
 
 
 class TestTheParserEverySurfaceShares:
-    """kiln-pro's hosted 'input required' shape and the desktop app's sheet
-    hand the person's filled form to ``answer_from_content`` as a dict.
+    """kiln-pro's hosted 'input required' shape hands the person's filled
+    form to ``answer_from_content`` as a dict.
     What it means there is what it means in the MCP dialog."""
 
     def test_the_field_names_are_the_contract(self):

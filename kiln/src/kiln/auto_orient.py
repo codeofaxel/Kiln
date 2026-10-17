@@ -24,6 +24,7 @@ from kiln.printability import (
     _normalize,
     _triangle_normal,
 )
+from kiln.untrusted_zip import UntrustedZipFile
 
 # ---------------------------------------------------------------------------
 # Dataclasses
@@ -659,10 +660,10 @@ def _resolve_plate_xy(
 
     resolved = resolve_build_volume(printer_id)
     if resolved is None:
+        from kiln.printers.bed_fit import no_bed_reason
+
         raise ValueError(
-            f"Unknown printer_id {printer_id!r}; omit printer_id and pass "
-            "bed_width_mm/bed_depth_mm explicitly, or use a supported "
-            "printer model id."
+            no_bed_reason(printer_id, instead="omit printer_id and pass bed_width_mm/bed_depth_mm explicitly")
         )
     _model_id, build_volume = resolved
     return build_volume[0], build_volume[1]
@@ -925,7 +926,7 @@ def rotate_3mf_file(
     ET.register_namespace("", _3MF_NS)
 
     # Read the model XML from the source archive.
-    with zipfile.ZipFile(input_path, "r") as zin:
+    with UntrustedZipFile(input_path, "r") as zin:
         if _3MF_MODEL_PATH not in zin.namelist():
             raise ValueError(
                 f"3MF archive missing {_3MF_MODEL_PATH}: not a valid 3MF file"
@@ -957,7 +958,7 @@ def rotate_3mf_file(
     # Build the output 3MF: copy every entry except the model XML from
     # the source archive, then write the updated model XML.
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-    with zipfile.ZipFile(input_path, "r") as zin, zipfile.ZipFile(
+    with UntrustedZipFile(input_path, "r") as zin, zipfile.ZipFile(
         output_path, "w", compression=zipfile.ZIP_DEFLATED
     ) as zout:
         for entry in zin.infolist():

@@ -202,7 +202,7 @@ def _write_body_gcode(tmp_path: Path) -> Path:
 
 
 class TestWrapGcodeFidelity:
-    def test_wrapped_gcode_round_trips_byte_identical(self, tmp_path: Path):
+    def test_wrapped_gcode_round_trips_byte_identical(self, tmp_path: Path, served_roster_records):
         """The gcode inside the emitted 3MF carries the caller's motion lines
         byte-for-byte, and the body's parsed footprint/Z equal the input's.
 

@@ -8,9 +8,10 @@ Bambu printers expose:
 * **MQTT** on port 8883 (TLS) for status, commands, and G-code.
 * **FTPS** on port 990 (implicit TLS) for file upload/download/delete.
 
-Authentication uses the printer's **LAN Access Code** (found on the
-printer's LCD under Network settings) as both the MQTT password and
-the FTPS password.  The username is always ``"bblp"``.
+Authentication uses the printer's **LAN Access Code** as both the MQTT
+password and the FTPS password; where each model shows it is the one list
+every setup door reads (:mod:`kiln.printer_backends`).  The username is
+always ``"bblp"``.
 
 The adapter mirrors the retry and error-handling patterns established by
 the OctoPrint and Moonraker adapters.
@@ -49,6 +50,7 @@ from kiln.bambu_trays import read_tray_id as _read_tray_id
 from kiln.bambu_trays import tray_id as _bambu_tray_id
 from kiln.bambu_trays import tray_name as _bambu_tray_name
 from kiln.bambu_trays import unit_name as _bambu_unit_name
+from kiln.printer_backends import need_where
 from kiln.printer_intelligence import chamber_sensor_for_model
 from kiln.printers.bambu_hms_text import (
     device_type_from_serial,
@@ -59,6 +61,7 @@ from kiln.printers.base import (
     DEFAULT_PURGE_LENGTH_MM,
     FILAMENT_FEED_RATE_MM_MIN,
     STALE_STATE_WARN_AGE,
+    CameraHandshake,
     CameraStreamError,
     FilamentHandlingUnsupported,
     FilamentOpPlan,
@@ -92,6 +95,7 @@ from kiln.printers.base import (
 )
 from kiln.printers.command_verdict import CommandVerdict
 from kiln.printers.progress_motion import forget_job_start, job_elapsed_seconds
+from kiln.untrusted_zip import UntrustedZipFile
 
 logger = logging.getLogger(__name__)
 
@@ -281,6 +285,10 @@ _SPEED_PROFILES: dict[str, int] = {
 }
 _SPEED_PROFILE_NAMES: dict[int, str] = {v: k for k, v in _SPEED_PROFILES.items()}
 
+#: Where a person finds the access code, read from the one list every setup
+#: door reads, so a recovery message sends them where setup did.
+_ACCESS_CODE_WHERE = need_where("bambu", "access_code")
+
 # Known Bambu firmware error codes with actionable messages.
 # Error codes appear in the ``print_error`` field of MQTT push_status.
 # Hex format: 0502-4007 → decimal 84033543.
@@ -288,8 +296,8 @@ _KNOWN_PRINT_ERRORS: dict[int, str] = {
     84033543: (
         "Printer rejected the command (error 0502-4007: authentication expired). "
         "This happens when the printer is restarted — the access code becomes stale. "
-        "FIX: On the printer touchscreen, go to Settings → Network → "
-        "turn LAN Only Mode OFF then ON, then toggle Developer Mode OFF and ON. "
+        f"FIX: Find the access code {_ACCESS_CODE_WHERE}, turn LAN Only Mode "
+        "OFF then ON, then toggle Developer Mode OFF and ON. "
         "Copy the NEW access code and update your Kiln config "
         "(kiln config set access_code <new_code>). "
         "The old access code will NOT work even if it looks the same — "
@@ -1365,6 +1373,9 @@ def _find_ffmpeg() -> str | None:
 #: The printer-side port for the TLS + JPEG camera feed (A1 / P1 series).
 _CAMERA_PORT = 6000
 
+#: The printer-side port for the RTSPS camera stream (X1 series).
+_RTSPS_PORT = 322
+
 #: Per-frame header: payload size, itrack, flags, reserved — all uint32 LE.
 _CAMERA_FRAME_HEADER = struct.Struct("<IIII")
 
@@ -1471,6 +1482,44 @@ def _read_port6000_frames(
             yield frame
 
 
+def _connect_camera_tls(
+    host: str, port: int, ctx: ssl.SSLContext, *, timeout: float, name_address: bool = True
+) -> ssl.SSLSocket:
+    """Open the camera port and complete its TLS handshake, nothing more.
+
+    The one connect for the relay's feed and for the setup handshake: the
+    feed goes on to send the auth packet, the handshake hangs up here.  A
+    port that does not answer, and a port that answers but will not complete
+    TLS, raise :class:`CameraStreamError` naming what the person can check.
+    The returned socket is open and the caller closes it.  A setup reply
+    carries no address, so the handshake asks for the messages without one
+    (``name_address=False``).
+    """
+    shown = f" ({host}:{port})" if name_address else ""
+    try:
+        sock = socket.create_connection((host, port), timeout=timeout)
+    except OSError as exc:
+        raise CameraStreamError(
+            f"Nothing answered on the camera port{shown}: "
+            "the printer may be off, a LAN-mode liveview switch may be off "
+            "on models that have one, or this model streams over RTSPS "
+            "instead. "
+            f"({exc.__class__.__name__})",
+            code="CAMERA_UNREACHABLE",
+        ) from exc
+    try:
+        return ctx.wrap_socket(sock, server_hostname=host)
+    except (ssl.SSLError, OSError) as exc:
+        sock.close()
+        raise CameraStreamError(
+            f"The camera port{shown} answered but did "
+            "not complete a TLS handshake: a LAN-mode liveview switch may "
+            "be off on models that have one, or this model streams over "
+            f"RTSPS instead. ({exc.__class__.__name__})",
+            code="CAMERA_UNREACHABLE",
+        ) from exc
+
+
 class BambuPort6000Source:
     """The relay's frame source for an A1 / P1 camera: ONE authenticated
     connection, every frame the printer pushes, until stopped.
@@ -1499,28 +1548,7 @@ class BambuPort6000Source:
         self.label = f"bambu-port6000://{host}:{port}"
 
     def frames(self, stop: threading.Event) -> Iterator[bytes]:
-        try:
-            sock = socket.create_connection((self._host, self._port), timeout=self._timeout)
-        except OSError as exc:
-            raise CameraStreamError(
-                f"Nothing answered on the camera port ({self._host}:{self._port}): "
-                "the printer may be off, a LAN-mode liveview switch may be off "
-                "on models that have one, or this model streams over RTSPS "
-                "instead. "
-                f"({exc.__class__.__name__})",
-                code="CAMERA_UNREACHABLE",
-            ) from exc
-        try:
-            ssock = self._ctx.wrap_socket(sock, server_hostname=self._host)
-        except (ssl.SSLError, OSError) as exc:
-            sock.close()
-            raise CameraStreamError(
-                f"The camera port ({self._host}:{self._port}) answered but did "
-                "not complete a TLS handshake: a LAN-mode liveview switch may "
-                "be off on models that have one, or this model streams over "
-                f"RTSPS instead. ({exc.__class__.__name__})",
-                code="CAMERA_UNREACHABLE",
-            ) from exc
+        ssock = _connect_camera_tls(self._host, self._port, self._ctx, timeout=self._timeout)
         try:
             ssock.sendall(self._auth)
             yield from _read_port6000_frames(ssock, stop, first_frame_timeout=self._timeout)
@@ -1710,8 +1738,9 @@ class BambuAdapter(PrinterAdapter):
     Args:
         host: IP address or hostname of the Bambu printer on the LAN.
         access_code: LAN Access Code from the printer's LCD.
-        serial: Printer serial number (used in MQTT topics).  Found on the
-            printer's LCD under Device Info.
+        serial: Printer serial number (used in MQTT topics).  Network
+            discovery reads it; where it is on the printer's screen is in
+            :mod:`kiln.printer_backends`.
         timeout: Timeout in seconds for MQTT operations and FTP connections.
         tls_mode: TLS verification mode: ``"pin"`` (default, TOFU pinning),
             ``"ca"`` (strict CA/hostname validation), or ``"insecure"``
@@ -1736,6 +1765,39 @@ class BambuAdapter(PrinterAdapter):
     # Elapsed comes from job_elapsed_seconds — a Kiln-side stopwatch nothing
     # stops on its own — so a late reading keeps counting and must be refused.
     _DURATION_SEMANTICS: ClassVar[str] = "stopwatch"
+
+    @property
+    def camera_fitted_at_factory(self) -> bool | None:
+        """Whether this machine left the factory with a camera of its own.
+
+        Every printer this adapter drives ships with one, so a camera that
+        does not answer is a camera that is not answering -- never a
+        printer without one.  The exception is the X1 (not the X1 Carbon):
+        its chamber camera is an optional upgrade, and Kiln keeps the X1
+        in the X1 Carbon's family (:data:`_BAMBU_MODEL_FAMILIES`).  The
+        serial number tells them apart: a prefix Kiln knows names a model
+        that ships with a camera, the X1 Carbon's own prefix included.  An
+        unknown prefix on a machine declared as X1-family, or declared as
+        nothing, could be the X1: ``None``, which reads as "not known" and
+        leaves it to what Kiln has seen and what its owner says.
+        """
+        prefix = str(getattr(self, "_serial", "") or "")[:3].upper()
+        if _BAMBU_MODEL_FAMILIES.get(prefix) is not None:
+            return True
+        declared = str(getattr(self, "_printer_model", "") or "").lower()
+        if not declared or ("x1" in declared and "x1e" not in declared):
+            return None
+        return True
+
+    def camera_catalogue_model(self) -> str:
+        """The declared model -- except for a machine that could be the X1
+        (see :attr:`camera_fitted_at_factory`).  The catalogue's row for the
+        X1 Carbon's family describes the X1 Carbon, whose camera is fitted;
+        asked about a machine that may be the X1, it would answer for the
+        wrong one.  ``""`` then: nothing is asked, and the owner says."""
+        if self.camera_fitted_at_factory is None:
+            return ""
+        return self.declared_printer_model()
 
     # Opt in to PrinterAdapter's idle connection release: a Bambu rations LAN
     # MQTT clients, so holding one while nobody is calling costs another
@@ -2381,8 +2443,10 @@ class BambuAdapter(PrinterAdapter):
                         "or another machine using the printer, then try "
                         "again.\n"
                         "  If that's not it: check the printer is powered "
-                        "on and on this network, and that LAN Mode is on "
-                        "(printer screen → Settings → Network).  A refused "
+                        "on and on this network, and that LAN Only Mode is "
+                        # Never the words "access code" here: they read as a
+                        # refused login (reads_as_credentials_refusal).
+                        f"on -- the switch is {_ACCESS_CODE_WHERE}.  A refused "
                         "login is reported separately, not as this."
                     )
 
@@ -2519,8 +2583,8 @@ class BambuAdapter(PrinterAdapter):
         if code in _CONNACK_CREDENTIAL_REFUSALS:
             return (
                 f"The printer at {self._host} answered and refused Kiln's "
-                f"access code ({reason}).  On the printer's screen open "
-                "Settings → Network, copy the current access code, and update "
+                f"access code ({reason}).  Copy the current access code "
+                f"({_ACCESS_CODE_WHERE}) and update "
                 "it in Kiln's config -- a restarted printer can issue a new one "
                 "that looks the same."
             )
@@ -3587,7 +3651,7 @@ class BambuAdapter(PrinterAdapter):
                 detail = (
                     f"FTPS authentication to {self._host}:{_FTPS_PORT} failed. "
                     "Access code may be wrong or stale.\n"
-                    "  1) Check printer -> Settings -> LAN for the current access code\n"
+                    f"  1) Find the current access code {_ACCESS_CODE_WHERE}\n"
                     "  2) Toggle LAN Only Mode off/on to regenerate the code\n"
                 )
             elif isinstance(exc, ConnectionRefusedError) or "connection refused" in exc_lower:
@@ -4658,10 +4722,9 @@ class BambuAdapter(PrinterAdapter):
         or ``None`` if the file cannot be read.
         """
         import json
-        import zipfile
 
         try:
-            with zipfile.ZipFile(file_path, "r") as zf:
+            with UntrustedZipFile(file_path, "r") as zf:
                 meta_name = f"Metadata/plate_{plate_number}.json"
                 if meta_name not in zf.namelist():
                     return None
@@ -4786,10 +4849,9 @@ class BambuAdapter(PrinterAdapter):
             plate_number: Which plate's metadata to inspect.
         """
         import xml.etree.ElementTree as ET
-        import zipfile
 
         try:
-            with zipfile.ZipFile(file_path, "r") as zf:
+            with UntrustedZipFile(file_path, "r") as zf:
                 # 1. Check plate JSON metadata.
                 meta_name = f"Metadata/plate_{plate_number}.json"
                 if meta_name in zf.namelist():
@@ -4918,11 +4980,10 @@ class BambuAdapter(PrinterAdapter):
             plate_number: Which plate to inspect.
         """
         import json
-        import zipfile
 
         issues: list[str] = []
         try:
-            with zipfile.ZipFile(file_path, "r") as zf:
+            with UntrustedZipFile(file_path, "r") as zf:
                 meta_name = f"Metadata/plate_{plate_number}.json"
                 if meta_name not in zf.namelist():
                     return issues
@@ -7629,6 +7690,54 @@ class BambuAdapter(PrinterAdapter):
         model = self._printer_model
         return model[len("bambu_") :] if model.startswith("bambu_") else model
 
+    def _own_camera_handshake(self) -> CameraHandshake:
+        """Open the camera port, complete TLS, hang up: no access code, no video.
+
+        Judged honestly per family.  The A1 / P1 feed (port 6000) answers a
+        connection with a TLS handshake before anything is sent to it, and
+        starts video only after the 80-byte auth packet — so a completed
+        handshake proves the camera service is up and listening, and
+        nothing more: whether the LAN access code is accepted is only known
+        when video first starts, and the detail says so.  The X1 families
+        stream RTSPS on port 322, and RTSP over TLS also completes its TLS
+        handshake before any RTSP request; Kiln has no RTSP client that
+        asks without opening the stream, so the handshake stops there.  That
+        path has not been exercised against an X1 in this repository.  A
+        model declared in neither family is tried on port 6000, as the feed
+        itself is.
+        """
+        from kiln.printers.base import CAMERA_HANDSHAKE_ADDRESS_TIMEOUT
+
+        if self._family() in _RTSPS_FAMILIES:
+            port, where, proven = (
+                _RTSPS_PORT,
+                "bambu_rtsps_322",
+                "The RTSPS camera port completed a TLS handshake. Kiln has no RTSP client "
+                "that asks without opening the stream, so nothing past the handshake was "
+                "checked.",
+            )
+        else:
+            port, where, proven = (
+                _CAMERA_PORT,
+                "bambu_port6000",
+                "The camera port completed a TLS handshake. Kiln sent no access code and "
+                "read no video, so whether the code is accepted is learned when video "
+                "first starts.",
+            )
+        try:
+            ssock = _connect_camera_tls(
+                self._host,
+                port,
+                self._camera_tls_context(),
+                timeout=CAMERA_HANDSHAKE_ADDRESS_TIMEOUT,
+                name_address=False,
+            )
+        except CameraStreamError as exc:
+            return CameraHandshake(False, where, str(exc))
+        with contextlib.suppress(OSError):
+            ssock.close()
+        return CameraHandshake(True, where, proven)
+
     def stream_capability(self) -> StreamCapability:
         """Whether Kiln's local relay can carry this printer's live video.
 
@@ -7684,7 +7793,7 @@ class BambuAdapter(PrinterAdapter):
 
     def _raw_stream_url(self) -> str:
         """Return the real RTSPS URL with embedded credentials (internal use only)."""
-        return f"rtsps://bblp:{self._access_code}@{self._host}:322/streaming/live/1"
+        return f"rtsps://bblp:{self._access_code}@{self._host}:{_RTSPS_PORT}/streaming/live/1"
 
     def get_stream_url(self) -> str | None:
         """Return the RTSPS stream URL for X1 series printers.
@@ -7697,7 +7806,7 @@ class BambuAdapter(PrinterAdapter):
         tool responses.  Internal methods that need the real credential
         call :meth:`_raw_stream_url` directly.
         """
-        return f"rtsps://bblp:****@{self._host}:322/streaming/live/1"
+        return f"rtsps://bblp:****@{self._host}:{_RTSPS_PORT}/streaming/live/1"
 
     # ------------------------------------------------------------------
     # Cleanup

@@ -25,6 +25,7 @@ import asyncio
 import importlib.util
 import json
 import os
+import re
 import struct
 import sys
 import tempfile
@@ -1020,7 +1021,7 @@ class TestGetAdapter:
         # read the developer's real ~/.kiln/config.yaml.
         monkeypatch.setattr(mod, "_runtime_config_resolved", True)
 
-        with pytest.raises(RuntimeError, match="KILN_PRINTER_HOST"):
+        with pytest.raises(RuntimeError, match=re.escape(mod.NO_PRINTER_CONFIGURED)):
             mod._get_adapter()
 
     def test_registry_default_answers_when_env_unset(self, monkeypatch):
@@ -1062,7 +1063,7 @@ class TestGetAdapter:
         assert mod._get_adapter() is adapter
 
     def test_empty_registry_still_raises_env_error(self, monkeypatch):
-        """No env host AND empty registry keeps the actionable env-var error."""
+        """No env host AND empty registry still raises the no-printer error."""
         import kiln.server as mod
 
         monkeypatch.setattr(mod, "_adapter", None)
@@ -1070,8 +1071,47 @@ class TestGetAdapter:
         monkeypatch.setattr(mod, "_registry", PrinterRegistry())
         monkeypatch.setattr(mod, "_runtime_config_resolved", True)  # see test_missing_host
 
-        with pytest.raises(RuntimeError, match="KILN_PRINTER_HOST"):
+        with pytest.raises(RuntimeError, match=re.escape(mod.NO_PRINTER_CONFIGURED)):
             mod._get_adapter()
+
+    def test_a_printer_door_with_no_printer_hands_setup_to_the_agent(self, monkeypatch):
+        """With nothing set up, every printer door gives the same refusal:
+        one plain sentence for the person (no tool names, none of the door's
+        own "Failed to ..." or a hint meant for another fault, no
+        environment variables), the setup conversation in ``agent_hint``,
+        and the code the print monitor panels read to show setup rather
+        than "printer offline"."""
+        import kiln.server as mod
+
+        monkeypatch.setattr(mod, "_adapter", None)
+        monkeypatch.setattr(mod, "_PRINTER_HOST", "")
+        monkeypatch.setattr(mod, "_registry", PrinterRegistry())
+        monkeypatch.setattr(mod, "_runtime_config_resolved", True)  # see test_missing_host
+
+        for door in (mod.printer_status, mod.pause_print, mod.preflight_check):
+            result = door()
+            assert result["success"] is False, result
+            assert result["error"]["code"] == "NO_PRINTER_CONFIGURED", result
+            assert result["error"]["message"] == mod.NO_PRINTER_MESSAGE, result
+            assert "register_printer" in result["agent_hint"], result
+            assert "make and model" in result["agent_hint"], result
+
+    def test_the_hosted_server_says_it_reaches_no_printer(self, monkeypatch):
+        """On Kiln's hosted server the same refusal points the agent at a
+        local install instead of a setup this server cannot do."""
+        import kiln.runtime_env
+        import kiln.server as mod
+
+        monkeypatch.setattr(mod, "_adapter", None)
+        monkeypatch.setattr(mod, "_PRINTER_HOST", "")
+        monkeypatch.setattr(mod, "_registry", PrinterRegistry())
+        monkeypatch.setattr(mod, "_runtime_config_resolved", True)  # see test_missing_host
+        monkeypatch.setattr(kiln.runtime_env, "is_hosted_multitenant", lambda: True)
+
+        result = mod.printer_status()
+        assert result["error"]["code"] == "NO_PRINTER_CONFIGURED", result
+        assert "kiln3d.com/install" in result["agent_hint"], result
+        assert "register_printer" not in result["agent_hint"], result
 
     def test_missing_api_key_for_octoprint(self, monkeypatch):
         """Missing KILN_PRINTER_API_KEY raises RuntimeError for octoprint."""
@@ -1575,17 +1615,16 @@ class TestSendGcodeWithValidation:
 # fleet_status()
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(
-    not importlib.util.find_spec("kiln.licensing"),
-    reason="kiln.licensing extracted to kiln-pro",
-)
 class TestFleetStatus:
     """Tests for the fleet_status MCP tool."""
 
     @pytest.fixture(autouse=True)
     def _bypass_license(self, monkeypatch):
-        """Bypass PRO tier check so fleet tests can exercise the tool logic."""
+        """Stand in a plan that covers fleet tools, so these exercise the
+        tool logic: kiln-pro's gate where it is installed, the signed-in
+        account's plan on a plain install."""
         monkeypatch.setattr("kiln.licensing.check_tier", lambda _tier: (True, None))
+        monkeypatch.setattr("kiln.account_plan._covers", lambda _required: True)
 
     def test_empty_registry_no_env(self, monkeypatch):
         """Empty registry with no env adapter returns empty list."""
@@ -1681,8 +1720,14 @@ class TestRegisterPrinter:
     @pytest.fixture(autouse=True)
     def _no_config_write(self, monkeypatch, tmp_path):
         import kiln.server as mod
+        from kiln.cli.config import PrinterSaveResult
 
-        monkeypatch.setattr(mod, "save_printer", lambda *a, **kw: tmp_path / "config.yaml")
+        monkeypatch.setattr("kiln.cli.config.get_config_path", lambda: tmp_path / "config.yaml")
+        monkeypatch.setattr(
+            mod,
+            "save_printer",
+            lambda name, *a, **kw: PrinterSaveResult(tmp_path / "config.yaml", name, "added"),
+        )
 
     def test_octoprint_success(self, monkeypatch):
         import kiln.server as mod
@@ -1779,8 +1824,8 @@ class TestRegisterPrinter:
         monkeypatch.setattr(mod, "CrealityAdapter", FakeCrealityAdapter)
         monkeypatch.setattr(
             mod,
-            "_validate_printer_url",
-            lambda host, printer_type: (f"http://{host}" if "://" not in host else host, []),
+            "_check_printer_url",
+            lambda host, printer_type: (f"http://{host}" if "://" not in host else host, [], None),
         )
 
         result = register_printer(
@@ -1950,6 +1995,367 @@ class TestRegisterPrinter:
         )
         assert result["success"] is False
         assert result["error"]["code"] == "INVALID_ARGS"
+
+
+class TestRegisterPrinterUnderASavedName:
+    """register_printer and a name already saved: a different machine is
+    refused before anything is built or registered; the same machine keeps
+    the model and camera saved for it, live and on disk."""
+
+    _SERIAL = "01P00A000000001"
+
+    @pytest.fixture
+    def saved(self, monkeypatch, tmp_path):
+        import kiln.bench
+        import kiln.server as mod
+        from kiln.cli.config import save_printer
+
+        cfg = tmp_path / "config.yaml"
+        monkeypatch.setattr("kiln.cli.config.get_config_path", lambda: cfg)
+        registry = PrinterRegistry()
+        monkeypatch.setattr(mod, "_registry", registry)
+        monkeypatch.setattr(mod, "_adapter", None)
+        monkeypatch.setattr(kiln.bench, "offer_after_registration", lambda *_a, **_k: None)
+        built: list = []
+
+        class FakeBambuAdapter:
+            name = "bambu"
+
+            def __init__(self, *, host, access_code, serial, tls_mode, printer_model=None):
+                self.printer_model = printer_model
+                self.camera = None
+                built.append(self)
+
+            def set_safety_profile(self, profile_id):
+                self.profile_id = profile_id
+
+            def set_external_camera(self, *, snapshot_url=None, stream_url=None):
+                self.camera = (snapshot_url, stream_url)
+
+        monkeypatch.setattr(mod, "BambuAdapter", FakeBambuAdapter)
+        save_printer(
+            "a1", "bambu", "192.168.1.6",
+            access_code="x", serial=self._SERIAL, printer_model="bambu_a1",
+            camera_stream_url="rtsps://192.168.1.50/live", config_path=cfg, probe=False,
+        )
+        return cfg, registry, built
+
+    def test_a_different_serial_is_refused_and_not_registered(self, saved):
+        cfg, registry, built = saved
+        before = cfg.read_text()
+        result = register_printer(
+            name="a1", printer_type="bambu", host="192.168.1.7",
+            api_key="y", serial="01P00A000000002", verify_connection=False,
+        )
+        assert result["success"] is False
+        assert result["error"]["code"] == "NAME_TAKEN"
+        assert "serial ending 0001" in result["error"]["message"]
+        assert result["suggested_name"] == "a1-2"
+        assert "a1" not in registry
+        assert built == []
+        assert cfg.read_text() == before
+
+    def test_the_same_serial_updates_and_keeps_model_and_camera(self, saved):
+        import yaml
+
+        cfg, registry, built = saved
+        result = register_printer(
+            name="a1", printer_type="bambu", host="192.168.1.7",
+            api_key="y", serial=self._SERIAL, verify_connection=False,
+        )
+        assert result["success"] is True
+        assert result["saved"] == "updated"
+        assert "Updated existing printer 'a1'" in result["message"]
+        assert "a1" in registry
+        assert built[0].printer_model == "bambu_a1"
+        assert built[0].camera == (None, "rtsps://192.168.1.50/live")
+        entry = yaml.safe_load(cfg.read_text())["printers"]["a1"]
+        assert entry["host"] == "192.168.1.7"
+        assert entry["printer_model"] == "bambu_a1"
+
+
+class TestRegisterPrinterReplacedName:
+    """A name saved for a printer Kiln cannot match to this one (no serial,
+    address changed) is replaced: nothing saved for the old address --
+    credential, camera -- reaches the live adapter or the new entry."""
+
+    @pytest.fixture
+    def door(self, monkeypatch, tmp_path):
+        import kiln.bench
+        import kiln.server as mod
+        from kiln.cli.config import save_printer
+
+        cfg = tmp_path / "config.yaml"
+        monkeypatch.setattr("kiln.cli.config.get_config_path", lambda: cfg)
+        registry = PrinterRegistry()
+        monkeypatch.setattr(mod, "_registry", registry)
+        monkeypatch.setattr(mod, "_adapter", None)
+        monkeypatch.setattr(mod, "_SESSION_PRINTERS", {}, raising=False)
+        monkeypatch.setattr(kiln.bench, "offer_after_registration", lambda *_a, **_k: None)
+        built: list = []
+
+        class FakeMoonrakerAdapter:
+            name = "moonraker"
+
+            def __init__(self, *, host, api_key=None, verify_ssl=True):
+                self.host = host
+                self.api_key = api_key
+                self.camera = None
+                built.append(self)
+
+            def set_external_camera(self, *, snapshot_url=None, stream_url=None):
+                self.camera = (snapshot_url, stream_url)
+
+            def disconnect(self):
+                pass
+
+        monkeypatch.setattr(mod, "MoonrakerAdapter", FakeMoonrakerAdapter)
+        save_printer(
+            "voron", "moonraker", "http://10.0.0.5", api_key="k", printer_model="voron_2",
+            camera_stream_url="rtsp://user:secret@10.0.0.50/live",
+            config_path=cfg, probe=False,
+        )
+        return cfg, registry, built
+
+    def test_the_saved_camera_and_key_do_not_follow_the_name_to_a_new_address(self, door):
+        import yaml
+
+        cfg, registry, built = door
+        result = register_printer(
+            name="voron", printer_type="moonraker", host="http://10.0.0.9", verify_connection=False,
+        )
+        assert result["success"] is True, result
+        assert result["saved"] == "replaced"
+        assert "api_key, printer_model, camera_stream_url" in result["notice"]
+        assert "secret" not in json.dumps(result)
+        assert built[0].camera is None
+        entry = yaml.safe_load(cfg.read_text())["printers"]["voron"]
+        assert entry == {"type": "moonraker", "host": "http://10.0.0.9"}
+        assert registry.get("voron") is built[0]
+
+
+class TestRegisterPrinterMatchedByMachineId:
+    """register_printer reads the id the machine reports for itself once
+    the address answers, and a name saved for a printer that moved is
+    judged by that id: the same id updates and keeps the credential and
+    camera, live and on disk; a different id is refused unregistered."""
+
+    _ID = "b898bdb4"
+
+    @pytest.fixture
+    def door(self, monkeypatch, tmp_path):
+        import kiln.bench
+        import kiln.server as mod
+        from kiln.cli.config import save_printer
+        from kiln.printers.base import MachineIdentity
+
+        cfg = tmp_path / "config.yaml"
+        monkeypatch.setattr("kiln.cli.config.get_config_path", lambda: cfg)
+        registry = PrinterRegistry()
+        monkeypatch.setattr(mod, "_registry", registry)
+        monkeypatch.setattr(mod, "_adapter", None)
+        monkeypatch.setattr(mod, "_SESSION_PRINTERS", {}, raising=False)
+        monkeypatch.setattr(kiln.bench, "offer_after_registration", lambda *_a, **_k: None)
+        # The address answers; what the machine then reports is the fake's.
+        monkeypatch.setattr(mod, "_check_printer_url", lambda host, *, printer_type: (host, [], True))
+        built: list = []
+        reports = {"value": self._ID}
+
+        class FakeMoonrakerAdapter:
+            name = "moonraker"
+
+            def __init__(self, *, host, api_key=None, verify_ssl=True):
+                self.host = host
+                self.api_key = api_key
+                self.camera = None
+                built.append(self)
+
+            def set_external_camera(self, *, snapshot_url=None, stream_url=None):
+                self.camera = (snapshot_url, stream_url)
+
+            def set_safety_profile(self, profile_id):
+                self.profile_id = profile_id
+
+            def read_machine_identity(self):
+                if reports["value"] is None:
+                    return None
+                return MachineIdentity(
+                    value=reports["value"],
+                    source="moonraker_system_info.cpu_info.serial_number",
+                    kind="host_board_serial",
+                )
+
+            def disconnect(self):
+                pass
+
+        monkeypatch.setattr(mod, "MoonrakerAdapter", FakeMoonrakerAdapter)
+        save_printer(
+            "voron", "moonraker", "http://10.0.0.5", api_key="k", printer_model="voron_2",
+            camera_stream_url="rtsp://user:secret@10.0.0.50/live",
+            machine_identity=FakeMoonrakerAdapter(host="x").read_machine_identity(),
+            config_path=cfg, probe=False,
+        )
+        built.clear()
+        return cfg, registry, built, reports
+
+    def test_the_same_id_at_a_new_address_updates_and_keeps_key_and_camera(self, door):
+        import yaml
+
+        cfg, registry, built, _reports = door
+        result = register_printer(
+            name="voron", printer_type="moonraker", host="http://10.0.0.9", verify_connection=False,
+        )
+        assert result["success"] is True, result
+        assert result["saved"] == "updated"
+        assert result["machine_identity"]["value"] == self._ID
+        assert result["machine_identity"]["kind"] == "host_board_serial"
+        assert "secret" not in json.dumps(result)
+        assert built[0].camera == (None, "rtsp://user:secret@10.0.0.50/live")
+        assert built[0].profile_id == "voron_2"
+        entry = yaml.safe_load(cfg.read_text())["printers"]["voron"]
+        assert entry["host"] == "http://10.0.0.9"
+        assert entry["api_key"] == "k"
+        assert entry["machine_id"] == self._ID
+        assert registry.get("voron") is built[0]
+
+    def test_a_different_id_is_refused_and_nothing_is_registered(self, door):
+        cfg, registry, built, reports = door
+        reports["value"] = "0badf00d"
+        before = cfg.read_text()
+        result = register_printer(
+            name="voron", printer_type="moonraker", host="http://10.0.0.9", verify_connection=False,
+        )
+        assert result["success"] is False, result
+        assert result["error"]["code"] == "NAME_TAKEN"
+        assert "machine id ending BDB4" in result["error"]["message"]
+        assert result["suggested_name"] == "voron-2"
+        assert "voron" not in registry
+        assert cfg.read_text() == before
+
+    def test_an_id_that_cannot_be_read_replaces_and_says_so(self, door):
+        import yaml
+
+        cfg, registry, built, reports = door
+        reports["value"] = None
+        result = register_printer(
+            name="voron", printer_type="moonraker", host="http://10.0.0.9", verify_connection=False,
+        )
+        assert result["success"] is True, result
+        assert result["saved"] == "replaced"
+        assert "machine_identity" not in result
+        assert any("could not read this printer's own id" in w for w in result.get("warnings", []))
+        assert built[0].camera is None
+        entry = yaml.safe_load(cfg.read_text())["printers"]["voron"]
+        assert "api_key" not in entry
+        assert "machine_id" not in entry
+
+    def test_a_session_only_registration_carries_the_read_id(self, door, monkeypatch):
+        import kiln.server as mod
+
+        _cfg, registry, built, reports = door
+        reports["value"] = "feedface"
+        first = register_printer(
+            name="k1", printer_type="moonraker", host="http://10.0.0.7", persist=False, verify_connection=False,
+        )
+        assert first["success"] is True, first
+        assert mod._SESSION_PRINTERS["k1"]["machine_id"] == "feedface"
+        reports["value"] = "0badf00d"
+        second = register_printer(
+            name="k1", printer_type="moonraker", host="http://10.0.0.8", persist=False, verify_connection=False,
+        )
+        assert second["success"] is False
+        assert second["error"]["code"] == "NAME_TAKEN"
+        assert registry.get("k1") is built[0]
+
+
+class TestRegisterPrinterSessionOnly:
+    """register_printer(persist=False) under a name in use: judged by the
+    same rule as a saved registration, against both the saved config and
+    printers registered earlier in the session without saving."""
+
+    @pytest.fixture
+    def door(self, monkeypatch, tmp_path):
+        import kiln.bench
+        import kiln.server as mod
+
+        cfg = tmp_path / "config.yaml"
+        monkeypatch.setattr("kiln.cli.config.get_config_path", lambda: cfg)
+        registry = PrinterRegistry()
+        monkeypatch.setattr(mod, "_registry", registry)
+        monkeypatch.setattr(mod, "_adapter", None)
+        monkeypatch.setattr(mod, "_SESSION_PRINTERS", {}, raising=False)
+        monkeypatch.setattr(kiln.bench, "offer_after_registration", lambda *_a, **_k: None)
+        built: list = []
+
+        class FakeBambuAdapter:
+            name = "bambu"
+
+            def __init__(self, *, host, access_code, serial, tls_mode, printer_model=None):
+                self.host = host
+                self.printer_model = printer_model
+                self.camera = None
+                built.append(self)
+
+            def set_safety_profile(self, profile_id):
+                self.profile_id = profile_id
+
+            def set_external_camera(self, *, snapshot_url=None, stream_url=None):
+                self.camera = (snapshot_url, stream_url)
+
+            def disconnect(self):
+                pass
+
+        monkeypatch.setattr(mod, "BambuAdapter", FakeBambuAdapter)
+
+        def register(serial, host="192.168.1.6", **kw):
+            return register_printer(
+                name="a1", printer_type="bambu", host=host, api_key="x",
+                serial=serial, persist=False, verify_connection=False, **kw,
+            )
+
+        return cfg, registry, built, register
+
+    def test_a_different_serial_is_refused_and_the_first_stays(self, door):
+        _cfg, registry, built, register = door
+        assert register("01P00A000000001")["success"] is True
+        result = register("01P00A000000002", host="192.168.1.7")
+        assert result["success"] is False
+        assert result["error"]["code"] == "NAME_TAKEN"
+        assert "serial ending 0001" in result["error"]["message"]
+        assert len(built) == 1
+        assert registry.get("a1") is built[0]
+
+    def test_the_same_serial_updates_and_keeps_the_model(self, door):
+        _cfg, registry, built, register = door
+        register("01P00A000000001", printer_model="bambu_a1")
+        result = register("01P00A000000001", host="192.168.1.7")
+        assert result["success"] is True
+        assert "Updated printer 'a1' for this session" in result["message"]
+        assert registry.get("a1") is built[1]
+        assert built[1].printer_model == "bambu_a1"
+
+    def test_a_saved_name_is_not_bypassed_by_skipping_the_save(self, door):
+        from kiln.cli.config import save_printer
+
+        cfg, registry, built, register = door
+        save_printer(
+            "a1", "bambu", "192.168.1.6", access_code="x",
+            serial="01P00A000000001", config_path=cfg, probe=False,
+        )
+        result = register("01P00A000000002", host="192.168.1.7")
+        assert result["success"] is False
+        assert result["error"]["code"] == "NAME_TAKEN"
+        assert built == []
+        assert "a1" not in registry
+
+    def test_a_name_no_longer_registered_is_free_again(self, door):
+        _cfg, registry, built, register = door
+        register("01P00A000000001")
+        registry.unregister("a1")
+        result = register("01P00A000000002", host="192.168.1.7")
+        assert result["success"] is True
+        assert "notice" not in result
+        assert registry.get("a1") is built[1]
 
 
 # ---------------------------------------------------------------------------
@@ -3352,7 +3758,9 @@ class TestResliceWithOverrides:
         assert "profile_validation" in result
         assert "profile_validation_warning" in result
         assert "unsafe" in result["profile_validation_warning"].lower()
-        mock_validate.assert_called_once_with("bambu_a1", "bambu_a1")
+        # The check reads the file about to be sliced, the override in it: a
+        # check of the bundled profile could never see the 350 it warns about.
+        mock_validate.assert_called_once_with("bambu_a1", "bambu_a1", settings={"temperature": "350"})
 
 
 # ---------------------------------------------------------------------------
@@ -4499,9 +4907,12 @@ class TestWrapGcodeSaysWhetherColoursAreLoaded:
             filament_colors=["#FFFFFF", "#F72323"],
         )
         assert result["success"] is True
-        assert result["ams_advisory"]["verdict"] == "mismatch"
-        assert result["ams_advisory"]["printer"] == "default"
-        assert [m["color"] for m in result["ams_advisory"]["missing"]] == ["#F72323"]
+        availability = result["colour_availability"]
+        assert availability["colours"] == [
+            {"colour": "#FFFFFF", "state": "loaded", "slot": "slot A1"},
+            {"colour": "#F72323", "state": "missing"},
+        ]
+        assert "ams_advisory" not in result
 
     @patch("kiln.server._get_adapter")
     def test_no_colours_given_means_nothing_to_say(self, mock_get_adapter):
@@ -4511,5 +4922,5 @@ class TestWrapGcodeSaysWhetherColoursAreLoaded:
 
         result = wrap_gcode_as_3mf(gcode_path="/tmp/test.gcode")
         assert result["success"] is True
-        assert "ams_advisory" not in result
+        assert "colour_availability" not in result
         adapter.get_ams_status.assert_not_called()

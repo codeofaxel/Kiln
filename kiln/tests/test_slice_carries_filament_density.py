@@ -348,7 +348,7 @@ def _loaded_ini(cmd: list[str]) -> dict[str, str]:
 
 
 class TestSliceFileCarriesTheIdentity:
-    def test_a_bundled_profile_gains_density_diameter_and_type(self, tmp_path):
+    def test_a_bundled_profile_gains_density_diameter_and_type(self, tmp_path, served_roster_records):
         stl = _cube(tmp_path / "cube.stl")
         seen: dict[str, Any] = {}
         result = _run_prusa(stl, seen, profile=resolve_slicer_profile("bambu_a1"), material="PETG")
@@ -460,7 +460,7 @@ class TestSliceFileCarriesTheIdentity:
         with pytest.raises(SlicerError, match="Profile file not found"):
             _run_prusa(stl, {}, profile=str(tmp_path / "gone.ini"), material="PETG")
 
-    def test_the_slice_is_still_counted_against_the_printer_profile(self, tmp_path):
+    def test_the_slice_is_still_counted_against_the_printer_profile(self, tmp_path, served_roster_records):
         """Telemetry keys on the profile's stem; the derived profile must not
         turn every slice into an ``overrides_…`` row."""
         stl = _cube(tmp_path / "cube.stl")
@@ -977,7 +977,7 @@ class TestPrusaSlicerWritesTheWeightItself:
         assert _footer_value(body, "filament used [g]") == pytest.approx(mm * _AREA_MM2 * 1.24 / 1000.0, abs=0.01)
         assert _footer_value(body, "filament_density") == 1.24
 
-    def test_the_after_the_fact_fill_is_no_longer_needed_on_a_kiln_slice(self, tmp_path):
+    def test_the_after_the_fact_fill_is_no_longer_needed_on_a_kiln_slice(self, tmp_path, served_roster_records):
         """The safety net stays; a Kiln-sliced file never reaches it.  The
         usage reader takes the slicer's grams as written, the Bambu wrap
         writes those same grams to the tile, and completion changes nothing."""

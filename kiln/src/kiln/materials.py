@@ -105,9 +105,37 @@ class Spool:
     cost_usd: float | None = None
     purchase_date: float | None = None
     notes: str = ""
+    #: Who last set ``remaining_grams``, in the one provenance vocabulary:
+    #: ``user_reported`` (a person or agent said so -- the default, and what
+    #: a row written before the field existed means), ``inferred`` (Kiln's
+    #: own count of what the prints it started used), or ``observed`` (the
+    #: printer's reading of a spool it can measure).  A count is arithmetic
+    #: and a reading is the machine's; a reader can say which it holds.
+    remaining_determined_by: str = DECLARED
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def _spool_from_row(row: dict[str, Any]) -> Spool:
+    """Build a :class:`Spool` from a stored row.
+
+    A row written before ``remaining_determined_by`` existed stores NULL,
+    and NULL means the figure is the one the person gave when they added
+    the spool: nothing else wrote it then.
+    """
+    values = {k: row[k] for k in Spool.__dataclass_fields__ if k in row}
+    if not values.get("remaining_determined_by"):
+        values["remaining_determined_by"] = DECLARED
+    return Spool(**values)
+
+
+#: Provenance of a remaining figure Kiln counted: what a spool held, less
+#: what the prints Kiln started were sliced to use.
+COUNTED = "inferred"
+
+#: Provenance of a remaining figure the printer reported for the spool.
+MEASURED = "observed"
 
 
 @dataclass
@@ -311,7 +339,14 @@ class MaterialTracker:
     ) -> float | None:
         """Subtract used grams from loaded material and linked spool.
 
-        Returns the new remaining grams, or ``None`` if no material tracked.
+        The loaded-material row's own figure moves when it has one; the
+        spool it links moves whether or not the row carries a figure, so a
+        spool linked with ``set_material(..., spool_id=...)`` counts down.
+        A negative *grams* gives filament back (a print cancelled part-way)
+        and announces nothing.
+
+        Returns the row's new remaining grams, else the linked spool's, or
+        ``None`` if nothing is tracked for that tool.
         Emits SPOOL_LOW when remaining drops below 10% of spool weight,
         and SPOOL_EMPTY when remaining reaches zero.
         """
@@ -325,39 +360,113 @@ class MaterialTracker:
             if row is None:
                 return None
 
+            new_remaining: float | None = None
             old_remaining = row.get("remaining_grams")
-            if old_remaining is None:
-                return None
-
-            new_remaining = max(0.0, old_remaining - grams)
-            self._db.update_material_remaining(
-                printer_name,
-                tool_index,
-                new_remaining,
-            )
+            if old_remaining is not None:
+                new_remaining = max(0.0, old_remaining - grams)
+                self._db.update_material_remaining(
+                    printer_name,
+                    tool_index,
+                    new_remaining,
+                )
 
             # Also deduct from linked spool
+            spool_remaining: float | None = None
             spool_id = row.get("spool_id")
-            if spool_id and self._db is not None:
-                spool_row = self._db.get_spool(spool_id)
-                if spool_row:
-                    spool_remaining = max(
-                        0.0,
-                        spool_row["remaining_grams"] - grams,
-                    )
-                    self._db.update_spool_remaining(spool_id, spool_remaining)
-                    _spool_warning_args = (
-                        spool_id,
-                        spool_remaining,
-                        spool_row["weight_grams"],
-                        printer_name,
-                    )
+            if spool_id:
+                moved = self._move_spool_locked(spool_id, grams)
+                if moved is not None:
+                    spool_remaining, spool_total = moved
+                    if grams > 0:
+                        _spool_warning_args = (
+                            spool_id,
+                            spool_remaining,
+                            spool_total,
+                            printer_name,
+                        )
 
         # Emit events outside the lock to prevent deadlocks
         if _spool_warning_args is not None:
             self._emit_spool_warnings(*_spool_warning_args)
 
-        return new_remaining
+        return new_remaining if new_remaining is not None else spool_remaining
+
+    def count_spool_usage(
+        self,
+        spool_id: str,
+        grams: float,
+        *,
+        printer_name: str = "",
+    ) -> float | None:
+        """Kiln's count against one spool: subtract *grams*, never below zero.
+
+        For a spool no loaded-material row links -- one matched to a tray by
+        its colour and material.  A negative *grams* gives filament back,
+        never past the spool's own weight, and announces nothing.  Returns
+        the new remaining grams, or ``None`` when there is no such spool.
+        Emits the same SPOOL_LOW / SPOOL_EMPTY events as
+        :meth:`deduct_usage` when a count going down crosses them.
+        """
+        with self._lock:
+            if self._db is None:
+                return None
+            moved = self._move_spool_locked(spool_id, grams)
+        if moved is None:
+            return None
+        remaining, total = moved
+        if grams > 0:
+            self._emit_spool_warnings(spool_id, remaining, total, printer_name)
+        return remaining
+
+    def _move_spool_locked(self, spool_id: str, grams: float) -> tuple[float, float] | None:
+        """Move a spool's remaining by *grams* used.  Caller holds ``_lock``.
+
+        ``(new remaining, spool weight)``, or ``None`` when no such spool.
+        Clamped to the spool: never below zero, and a give-back never past
+        the weight it was recorded with.  Stamped as Kiln's count.
+        """
+        spool_row = self._db.get_spool(spool_id)
+        if not spool_row:
+            return None
+        total = float(spool_row.get("weight_grams") or 0.0)
+        remaining = max(0.0, float(spool_row.get("remaining_grams") or 0.0) - grams)
+        if grams < 0 and total > 0:
+            remaining = min(remaining, total)
+        self._db.update_spool_remaining(spool_id, remaining, determined_by=COUNTED)
+        return remaining, total
+
+    def set_spool_remaining(
+        self,
+        spool_id: str,
+        remaining_grams: float,
+        *,
+        determined_by: str = DECLARED,
+    ) -> Spool | None:
+        """Set what is left on a spool to a stated figure.
+
+        The door for a figure that is not Kiln's arithmetic: the person
+        saying what they have (``user_reported``, the default) or the
+        printer's reading of the spool (``observed``).  Returns the updated
+        spool, or ``None`` when there is no such spool.
+
+        :raises ValueError: for a negative figure, or a ``determined_by``
+            outside the provenance vocabulary.
+        """
+        vocabulary = _provenance_vocabulary()
+        if determined_by not in vocabulary:
+            raise ValueError(
+                f"Invalid determined_by {determined_by!r}. "
+                f"Must be one of: {sorted(vocabulary)}"
+            )
+        if remaining_grams < 0:
+            raise ValueError("remaining_grams cannot be negative.")
+        with self._lock:
+            if self._db is None or not self._db.get_spool(spool_id):
+                return None
+            self._db.update_spool_remaining(
+                spool_id, float(remaining_grams), determined_by=determined_by
+            )
+        return self.get_spool(spool_id)
 
     def _emit_spool_warnings(
         self,
@@ -397,8 +506,15 @@ class MaterialTracker:
         weight_grams: float = 1000.0,
         cost_usd: float | None = None,
         notes: str = "",
+        remaining_grams: float | None = None,
     ) -> Spool:
-        """Add a new spool to inventory."""
+        """Add a new spool to inventory.
+
+        *remaining_grams* is what is left on a spool that is not new; left
+        out, the spool is full.
+        """
+        if remaining_grams is not None and remaining_grams < 0:
+            raise ValueError("remaining_grams cannot be negative.")
         spool_id = os.urandom(6).hex()
         spool = Spool(
             id=spool_id,
@@ -406,7 +522,7 @@ class MaterialTracker:
             color=color,
             brand=brand,
             weight_grams=weight_grams,
-            remaining_grams=weight_grams,
+            remaining_grams=weight_grams if remaining_grams is None else float(remaining_grams),
             cost_usd=cost_usd,
             purchase_date=time.time(),
             notes=notes,
@@ -426,7 +542,7 @@ class MaterialTracker:
         if self._db is None:
             return []
         rows = self._db.list_spools()
-        return [Spool(**{k: row[k] for k in Spool.__dataclass_fields__ if k in row}) for row in rows]
+        return [_spool_from_row(row) for row in rows]
 
     def get_spool(self, spool_id: str) -> Spool | None:
         """Get a spool by ID."""
@@ -435,7 +551,7 @@ class MaterialTracker:
         row = self._db.get_spool(spool_id)
         if row is None:
             return None
-        return Spool(**{k: row[k] for k in Spool.__dataclass_fields__ if k in row})
+        return _spool_from_row(row)
 
 
 # ---------------------------------------------------------------------------

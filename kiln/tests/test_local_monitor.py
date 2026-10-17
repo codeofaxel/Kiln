@@ -480,6 +480,14 @@ class TestTheRoomCameraRule:
 def _run_hook(host, tool_name, arguments=None):
     """Drive the real lowlevel hook over a monitor result and return the
     result's structuredContent — the stage harness, pointed at this door."""
+    from kiln.mcp_compat import result_structured_content
+
+    return result_structured_content(_run_hook_result(host, tool_name, arguments))
+
+
+def _run_hook_result(host, tool_name, arguments=None, text="PRINTING 41%"):
+    """The same drive, returning the whole result: the text block the agent
+    reads and the structured block beside it."""
     from kiln.mcp_compat import MCP_SDK_MAJOR, lowlevel_server
 
     _cache_the_monitor()
@@ -487,11 +495,9 @@ def _run_hook(host, tool_name, arguments=None):
 
     from mcp.types import CallToolResult, TextContent
 
-    from kiln.mcp_compat import result_structured_content
-
     # The installed SDK's own result type.  An SDK 1-shaped stand-in let a
     # write by the SDK 1 field name pass here while it raised on SDK 2.
-    result = CallToolResult(content=[TextContent(type="text", text="PRINTING 41%")])
+    result = CallToolResult(content=[TextContent(type="text", text=text)])
     server = lowlevel_server(mcp)
 
     params = None
@@ -510,7 +516,7 @@ def _run_hook(host, tool_name, arguments=None):
         local_monitor.install(mcp)
         handler = server.get_request_handler("tools/call").handler
         anyio.run(handler, host._mcp_server.request_context, params)
-        return result_structured_content(result)
+        return result
 
     from mcp.server.lowlevel.server import request_ctx
     from mcp.types import CallToolRequest
@@ -530,7 +536,7 @@ def _run_hook(host, tool_name, arguments=None):
         anyio.run(handlers[CallToolRequest], req)
     finally:
         request_ctx.reset(token)
-    return result_structured_content(result)
+    return result
 
 
 class TestThePayloadRidesTheResult:
@@ -913,3 +919,118 @@ class TestARepeatWhileThePanelIsLive:
         _MonitoringToolsPlugin().register(mcp)
         vision = mcp._tool_manager._tools["monitor_print_vision"]
         assert inspect.signature(vision.fn).parameters["show_panel"].default is False
+
+
+
+#: A report the way ``monitor_print`` writes one, with the saved frame's
+#: temp path on its ``Camera:`` line -- the line the model quoted to the
+#: person on 2026-10-17 in a chat that drew no panel.
+_REPORT = (
+    "Print Status: PRINTING\n"
+    "- Progress: 41%\n"
+    "Camera: /tmp/kiln_monitor_0a1b2c3d4e5f.jpg\n"
+    "Comments: Running normally."
+)
+
+
+def _report_text(result):
+    from kiln.mcp_compat import tool_result_blocks
+
+    return tool_result_blocks(result)[0].text
+
+
+def _sc(result):
+    from kiln.mcp_compat import result_structured_content
+
+    return result_structured_content(result) or {}
+
+
+class TestTheResultSaysWhetherAPanelIsReallyThere:
+    """Measured 2026-10-17: a claude.ai web chat driving Claude Desktop's
+    local servers.  The client declared the MCP Apps extension, the payload
+    rode, the description said the tool "opens" the panel, and the model
+    told the person the live monitor was open -- over a chat that drew
+    nothing -- and quoted the frame's temp path.  The result had never said
+    whether a panel was there.  Now it grades its own claim by the evidence
+    this process holds, and the Camera line never hands the person a path."""
+
+    def test_a_host_that_declared_nothing_is_told_where_the_monitor_is(self):
+        result = _run_hook_result(_Host(_Caps()), "monitor_print", text=_REPORT)
+        text = _report_text(result)
+        sc = _sc(result)
+        assert local_monitor.LIVE_MONITOR_LINES["none"] in text
+        assert local_monitor.WEB_MONITOR_URL in text
+        assert "/tmp/" not in text and ".jpg" not in text
+        assert "panel is open" not in text and "attached" not in text
+        assert sc["live_monitor"]["panel"] == "none"
+        # The path is kept for the agent, out of the prose.
+        assert sc["live_monitor"]["snapshot_file"] == "/tmp/kiln_monitor_0a1b2c3d4e5f.jpg"
+        # And no printer was read for it.
+        assert monitor_payload.MONITOR_STRUCTURED_CONTENT_KEY not in sc
+
+    def test_a_declaration_alone_earns_attached_never_open(self):
+        """The grade the measured defect ran under: the client said it draws
+        panels and nothing has proven it.  Both halves are said."""
+        result = _run_hook_result(_apps_host(), "monitor_print", text=_REPORT)
+        text = _report_text(result)
+        sc = _sc(result)
+        assert sc[monitor_payload.MONITOR_STRUCTURED_CONTENT_KEY]
+        assert sc["live_monitor"]["panel"] == "attached"
+        assert local_monitor.LIVE_MONITOR_LINES["attached"] in text
+        assert "If no panel is drawn above" in text
+        assert local_monitor.WEB_MONITOR_URL in text
+        assert "/tmp/" not in text
+        assert "panel is open" not in text
+
+    def test_a_host_that_read_the_monitor_document_earns_open(self):
+        """Only a host about to draw the panel reads its document (the
+        resource latch); that is positive evidence the declaration is not."""
+        _cache_the_monitor()
+        mcp = _fastmcp()
+        local_monitor.install(mcp)
+        anyio.run(mcp.read_resource, local_monitor.PRINT_MONITOR_RESOURCE_URI)
+        assert local_monitor._host_read_the_monitor
+        result = _run_hook_result(_apps_host(), "monitor_print", text=_REPORT)
+        text = _report_text(result)
+        assert _sc(result)["live_monitor"]["panel"] == "open"
+        assert local_monitor.LIVE_MONITOR_LINES["open"] in text
+        assert "Camera: live in the panel above." in text
+        assert "/tmp/" not in text
+
+    def test_a_panels_own_poll_earns_open_on_a_repeat(self):
+        mcp = _fastmcp()
+        assert local_monitor._register_snapshot_verb(mcp)
+        anyio.run(call_registered_tool, mcp, "kiln_monitor_snapshot", {})
+        result = _run_hook_result(_apps_host(), "monitor_print", text=_REPORT)
+        sc = _sc(result)
+        assert sc["shown"]["repeat"] == "live_panel"
+        assert sc["live_monitor"]["panel"] == "open"
+        assert local_monitor.LIVE_MONITOR_LINES["repeat"] in _report_text(result)
+
+    def test_a_json_text_block_is_left_whole(self):
+        """``monitor_print_vision`` returns a dict; its text block is JSON
+        the agent parses, so the verdict rides only in the structured block."""
+        result = _run_hook_result(
+            _Host(_Caps()), "monitor_print_vision", text='{"success": true}'
+        )
+        assert _report_text(result) == '{"success": true}'
+        assert _sc(result)["live_monitor"]["panel"] == "none"
+
+    def test_a_camera_line_without_a_path_is_left_alone(self):
+        text = _report_text(
+            _run_hook_result(_Host(_Caps()), "monitor_print", text="Camera: No camera available")
+        )
+        assert text.startswith("Camera: No camera available")
+        assert local_monitor.LIVE_MONITOR_LINES["none"] in text
+
+    def test_the_clause_sends_the_agent_to_the_line_not_the_promise(self):
+        clause = local_monitor.MONITOR_DESCRIPTION_CLAUSE
+        assert "'Live monitor:' line" in clause
+        assert "never tell the person a panel is open" in clause
+        assert "on success this tool also opens" not in clause
+
+    def test_the_text_report_steers_to_the_hosted_twin(self):
+        from kiln import server
+
+        doc = server.monitor_print.__doc__
+        assert "monitor_printer" in doc and "hosted connector" in doc

@@ -14,6 +14,10 @@ import contextlib
 import os
 import time
 
+# The header of the document at kiln3d.com/terms carries its own page
+# version (3.2 as of 2026-10-12), which moves on every published edit.  THIS
+# constant moves only for a change material enough to ask every user to
+# accept again (Terms §22.1): bumping it re-prompts every install and account.
 _CURRENT_TERMS_VERSION = "3.0"
 
 _SETTINGS_KEY_VERSION = "terms_accepted_version"

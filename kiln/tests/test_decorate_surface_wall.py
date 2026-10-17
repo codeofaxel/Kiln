@@ -155,7 +155,7 @@ def _install_engine(monkeypatch, engine):
     # The success tail composes previews / quota tiles; keep it inert here.
     import kiln.server as srv
 
-    monkeypatch.setattr(srv, "_finish_decoration_result", lambda d, *, content: d)
+    monkeypatch.setattr(srv, "_finish_decoration_result", lambda d, *, content, **_kw: d)
 
 
 def _ok(result) -> dict:

@@ -76,8 +76,10 @@ def _outer_wall_chord_depth(body, z: float) -> tuple[int, float]:
     """(facets, deepest facet in mm) of the outermost loop at height z.
 
     A facet's depth is how far its middle sits inside the circle through
-    its two corners -- what the slicer traces as a flat.
+    its two corners -- what the slicer traces as a flat.  trimesh cuts the
+    section with scipy, which Kiln does not depend on.
     """
+    pytest.importorskip("scipy", reason="trimesh needs scipy to cut a section; Kiln does not install it")
     section = body.section(plane_origin=[0, 0, z], plane_normal=[0, 0, 1])
     planar, to_3d = section.to_2D()
     centre = body.bounds.mean(axis=0)[:2]

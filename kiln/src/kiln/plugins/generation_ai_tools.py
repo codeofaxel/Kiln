@@ -22,6 +22,14 @@ from kiln.tool_annotations import creates
 _logger = logging.getLogger(__name__)
 
 
+
+def _keyless_make_line() -> str:
+    """The keyless make, in the one wording every map uses
+    (``kiln.front_door.KEYLESS_MAKE_LINE``)."""
+    from kiln.front_door import KEYLESS_MAKE_LINE
+
+    return KEYLESS_MAKE_LINE
+
 class _GenerationAIToolsPlugin:
     """AI generation pipeline tools.
 
@@ -289,9 +297,12 @@ class _GenerationAIToolsPlugin:
         ) -> dict:
             """Make a 3D model from a reference image.
 
-            DEFAULT (keyless): you (the agent) can SEE the image — study it
-            and write the OpenSCAD yourself, then compile_scad. You do NOT
-            need an image-to-3D provider, and with no key configured this
+            DEFAULT (keyless): you (the agent) can SEE the image — study it,
+            give it to ``design_session`` as ``reference_images`` (every later
+            make is checked against it), and write the OpenSCAD yourself for
+            ``design_session(verb="generate", scad_code=...)`` — or
+            ``compile_scad`` on an install without ``design_session``. You do
+            NOT need an image-to-3D provider, and with no key configured this
             tool hands the job back to your vision instead of erroring.
 
             OPT-IN cloud path: when the user has set their OWN
@@ -301,6 +312,10 @@ class _GenerationAIToolsPlugin:
 
             **EXPERIMENTAL:** AI-generated models are experimental.  Always
             validate the mesh before printing.
+
+            ``reference_picture`` says what becomes of the picture: compared
+            with the model when it arrives and with every make on the goal it
+            is given to, or, where this install cannot compare, that you must.
 
             **Image tips:**
             - Use a clear, well-lit photo of the object.
@@ -328,19 +343,24 @@ class _GenerationAIToolsPlugin:
             # back to your vision rather than nagging for a provider.
             import os
 
+            from kiln.reference_compare import PICTURE_PLAN_KEY, picture_plan
+
             if not os.environ.get("KILN_MESHY_API_KEY", "").strip():
                 return {
                     "success": True,
                     "needs_agent_vision": True,
                     "image_url": image_url,
+                    # What becomes of the picture: kept on the goal and
+                    # compared with every make, or said not to be.
+                    PICTURE_PLAN_KEY: picture_plan(image_url),
                     "message": (
                         "No image-to-3D provider is configured — and you don't "
-                        "need one. You can SEE this image: study it and write "
-                        "the OpenSCAD to match the object, then compile it with "
-                        "compile_scad (free, no key). Show the user a preview "
-                        "and iterate. Cloud image-to-3D (Meshy) is an OPT-IN "
-                        "that needs the user's own KILN_MESHY_API_KEY — never "
-                        "required."
+                        "need one. You can SEE this image: study it and give it "
+                        "to design_session as reference_images, so every make is "
+                        "checked against it. " + _keyless_make_line() + " Show "
+                        "the user a preview and iterate. Cloud image-to-3D (Meshy) is an "
+                        "OPT-IN that needs the user's own KILN_MESHY_API_KEY — "
+                        "never required."
                     ),
                 }
             if provider != "meshy":
@@ -369,6 +389,9 @@ class _GenerationAIToolsPlugin:
                         "the mesh and check dimensions before printing."
                     ),
                     "message": f"Image-to-3D job submitted to {gen.display_name}.",
+                    PICTURE_PLAN_KEY: picture_plan(
+                        image_url, arrives_through="download_generated_model"
+                    ),
                 }
                 # No autofire bundle here — generate_model_from_image
                 # submits an ASYNC job and the response carries only
@@ -379,8 +402,9 @@ class _GenerationAIToolsPlugin:
             except GenerationAuthError as exc:
                 return _srv._error_dict(
                     f"Image-to-3D provider auth failed: {exc}. You don't need a "
-                    "provider — study the image and write the OpenSCAD yourself, "
-                    "then compile_scad. Cloud Meshy is opt-in via KILN_MESHY_API_KEY.",
+                    "provider — study the image. "
+                    + _keyless_make_line()
+                    + " Cloud Meshy is opt-in via KILN_MESHY_API_KEY.",
                     code="AUTH_ERROR",
                 )
             except GenerationError as exc:
@@ -440,6 +464,7 @@ class _GenerationAIToolsPlugin:
             job_id: str,
             provider: str = "meshy",
             output_path: str | None = None,
+            brief_id: str = "",
         ) -> dict:
             """Download a completed generated model, check it, and open it on the stage.
 
@@ -450,6 +475,9 @@ class _GenerationAIToolsPlugin:
             from, so the stage and design history can say so later.
 
             Args:
+                brief_id: The saved goal's id from ``design_session``; pass it so
+                    this make joins the goal (recorded against it; Kiln Pro checks the
+                    result against it). Empty when there is no goal.
                 job_id: Job ID of a completed generation job.
                 provider: Provider that owns the job (``"meshy"`` or ``"openscad"``).
                 output_path: Directory to save the file.  Defaults to
@@ -459,7 +487,6 @@ class _GenerationAIToolsPlugin:
             from kiln.generation import (
                 GenerationAuthError,
                 GenerationError,
-                GenerationResult,
             )
             from kiln.preview_evidence import stage_file_for
 
@@ -477,28 +504,11 @@ class _GenerationAIToolsPlugin:
                 # stays on disk beside the STL (textures and materials live
                 # only there), and until 2026-08-28 nothing named it — the
                 # result path was overwritten and the source silently
-                # orphaned in a temp dir.
-                conversion = None
-                if result.format in ("obj", "glb"):
-                    source_format = result.format
-                    try:
-                        from kiln.format_conversion import convert_to_stl_recorded
+                # orphaned in a temp dir.  One helper for every door a
+                # generator's file arrives through, CLI included.
+                from kiln.format_conversion import convert_generated_result
 
-                        stl_path, conversion = convert_to_stl_recorded(
-                            result.local_path,
-                            tool="download_generated_model",
-                        )
-                        result = GenerationResult(
-                            job_id=result.job_id,
-                            provider=result.provider,
-                            local_path=stl_path,
-                            format="stl",
-                            file_size_bytes=os.path.getsize(stl_path),
-                            prompt=result.prompt,
-                        )
-                        _logger.info("Auto-converted %s to STL: %s", source_format.upper(), stl_path)
-                    except Exception as exc:
-                        _logger.warning("%s→STL conversion failed, keeping original: %s", source_format.upper(), exc)
+                result, conversion = convert_generated_result(result, tool="download_generated_model")
 
                 # Validate the mesh if it's a supported format.
                 validation = dimensions = size = None
@@ -537,6 +547,13 @@ class _GenerationAIToolsPlugin:
                 # completed result).  The mesh path is
                 # ``result.local_path`` — explicit source_path since
                 # the response nests the path under "result".
+                from kiln.front_door import join_goal
+                from kiln.reference_compare import compare_with_picture
+
+                # A model made FROM a picture is meant to look like it: compared
+                # with it here, before the goal's own pictures (join_goal).
+                compare_with_picture(response, result.source_image, result.local_path)
+                join_goal(brief_id, response, result.local_path)
                 try:
                     from kiln_pro.plugins.git_render_tools import (
                         attach_inspect_bundle,
@@ -673,6 +690,7 @@ class _GenerationAIToolsPlugin:
             timeout: int = 600,
             material: str | None = None,
             placement: str | list[float] | None = None,
+            brief_id: str = "",
         ) -> dict:
             """Full pipeline: generate a model, validate, slice, and upload (preview).
 
@@ -686,6 +704,9 @@ class _GenerationAIToolsPlugin:
             (Thingiverse, MyMiniFactory) instead of generating new ones.
 
             Args:
+                brief_id: The saved goal's id from ``design_session``; pass it so
+                    this make joins the goal (recorded against it; Kiln Pro checks the
+                    result against it). Empty when there is no goal.
                 prompt: Text description of the 3D model to generate.
                 provider: Generation provider (``"meshy"`` or ``"openscad"``).
                 style: Optional style hint for cloud providers.
@@ -695,9 +716,10 @@ class _GenerationAIToolsPlugin:
                     auto-selection (e.g. ``"prusa_mini"``).
                 timeout: Max seconds to wait for generation (default 600).
                 material: Filament material for the slice (``"PLA"``,
-                    ``"PETG"``, …); its density is what the slicer weighs
-                    the print with.  Omitted, the spool the printer reports
-                    loaded answers, then PLA — ``slice.filament`` says which.
+                    ``"PETG"``, …).  It sets the temperatures, melt rate and
+                    cooling, and its density weighs the print.  Omitted, the
+                    spool the printer reports loaded answers, then PLA —
+                    ``slice.filament`` says which.
                 placement: Where the part goes when the plate still holds
                     the last print: ``[x, y]`` in mm, a named region
                     (``"front-left"``, ``"centre"``, …), or ``"keep"``.
@@ -752,26 +774,9 @@ class _GenerationAIToolsPlugin:
                 # Step 3.5: Auto-convert OBJ/GLB -> STL, with the receipt —
                 # same record the download tool attaches, so the print
                 # pipeline's makes tell the same story.
-                conversion = None
-                if result.format in ("obj", "glb"):
-                    source_format = result.format
-                    try:
-                        from kiln.format_conversion import convert_to_stl_recorded
+                from kiln.format_conversion import convert_generated_result
 
-                        stl_path, conversion = convert_to_stl_recorded(
-                            result.local_path,
-                            tool="generate_and_print",
-                        )
-                        result = GenerationResult(
-                            job_id=result.job_id,
-                            provider=result.provider,
-                            local_path=stl_path,
-                            format="stl",
-                            file_size_bytes=os.path.getsize(stl_path),
-                            prompt=result.prompt,
-                        )
-                    except Exception as exc:
-                        _logger.warning("%s->STL conversion failed: %s", source_format.upper(), exc)
+                result, conversion = convert_generated_result(result, tool="generate_and_print")
 
                 # Step 4: Comprehensive validation pipeline.
                 #
@@ -814,11 +819,18 @@ class _GenerationAIToolsPlugin:
                             bed_size_model_id, _build_vol = resolved
                             bed_size_source = "printer_intelligence"
                         elif printer_id:
+                            from kiln.printers.bed_fit import catalogue_printer_id, no_bed_reason
+
                             return _srv._error_dict(
-                                f"Unknown printer_id {printer_id!r}; use a supported "
-                                "printer model id or omit printer_id and pass an "
-                                "adapter with build-volume metadata.",
-                                code="UNKNOWN_PRINTER_MODEL",
+                                no_bed_reason(
+                                    printer_id,
+                                    instead="omit printer_id and pass an adapter with build-volume metadata",
+                                ),
+                                code=(
+                                    "PRINTER_RECORD_UNAVAILABLE"
+                                    if catalogue_printer_id(printer_id)
+                                    else "UNKNOWN_PRINTER_MODEL"
+                                ),
                             )
 
                     gate = gate_for_print(
@@ -862,13 +874,15 @@ class _GenerationAIToolsPlugin:
                 except Exception:
                     _sg_adapter = None
                 if _sg_adapter is not None and effective_printer_id:
+                    from kiln.plugins.slicer_tools import _loaded_material_for as _loaded_for
                     from kiln.slicer_profiles import (
                         resolve_slicer_profile,
                         start_gcode_override_from_printer,
                     )
 
                     _sg_patch, _sg_reason = start_gcode_override_from_printer(
-                        _sg_adapter, effective_printer_id, None
+                        _sg_adapter, effective_printer_id, None,
+                        material=material or _loaded_for(printer_name, material),
                     )
                     if _sg_patch:
                         try:
@@ -1012,7 +1026,7 @@ class _GenerationAIToolsPlugin:
                     if upload_path.lower().endswith(".3mf") and os.path.isfile(upload_path):
                         start_kwargs["local_file_path"] = upload_path
                     print_result = adapter.start_print(file_name, **start_kwargs)
-                    _srv._note_print_started(adapter)
+                    _srv._note_print_started(adapter, print_result)
                     print_verdict = resolve_print_start(
                         adapter, print_result, sent_at=sent_at,
                         file_name=file_name, vendor_start_block=quiet_plan is None,
@@ -1090,6 +1104,9 @@ class _GenerationAIToolsPlugin:
                         f"to begin printing after review."
                     )
 
+                from kiln.front_door import join_goal
+
+                join_goal(brief_id, resp, result.local_path)
                 try:
                     from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
                     return attach_inspect_bundle(
@@ -1124,6 +1141,8 @@ class _GenerationAIToolsPlugin:
             parameters: dict | None = None,
             material: str = "PLA",
             auto_reinforce: bool = False,
+            printer_id: str | None = None,
+            brief_id: str = "",
         ) -> dict:
             """Generate from template + structural analysis + print settings (recommended for functional parts).
 
@@ -1139,10 +1158,16 @@ class _GenerationAIToolsPlugin:
             The agent can take the output and directly call ``reslice_with_overrides``
             or ``run_reslice_and_print`` with the recommended settings.
 
+            :param brief_id: The saved goal's id from ``design_session``; pass it so
+                this make joins the goal (recorded against it; Kiln Pro checks the
+                result against it). Empty when there is no goal.
             :param template_id: Template ID from ``list_design_templates``.
             :param parameters: Parameter overrides (e.g., ``{"phone_width": 80}``).
-            :param material: Filament type for settings inference (PLA, PETG, ABS, etc.).
+            :param material: Filament type for settings inference and for the
+                reinforcements (PLA, PETG, ABS, etc.).
             :param auto_reinforce: If True, auto-apply structural reinforcements.
+            :param printer_id: The printer the part is for, so the reinforcements
+                are sized for its nozzle and layer height.
             :returns: Dict with STL path, structural grade, reinforcements, and print settings.
             """
             if err := _srv._check_auth("generate"):
@@ -1168,7 +1193,7 @@ class _GenerationAIToolsPlugin:
                 if auto_reinforce and plan.reinforcements:
                     from kiln.design_reasoning import apply_reinforcements
 
-                    reinf = apply_reinforcements(stl_path)
+                    reinf = apply_reinforcements(stl_path, printer_id=printer_id, material=material)
                     stl_path = reinf.output_path
                     reinforcement_result = reinf.to_dict()
 
@@ -1212,6 +1237,9 @@ class _GenerationAIToolsPlugin:
                         "with these settings."
                     ),
                 }
+                from kiln.front_door import join_goal
+
+                join_goal(brief_id, response, stl_path)
                 try:
                     from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
                     return attach_inspect_bundle(response, level="quick")
@@ -1253,7 +1281,7 @@ class _GenerationAIToolsPlugin:
 
             try:
                 tpl_path = os.path.join(os.path.dirname(_srv.__file__), "data", "design_templates.json")
-                with open(tpl_path) as fh:
+                with open(tpl_path, encoding="utf-8") as fh:
                     templates = json.load(fh)
 
                 tpl = templates.get(template_id)

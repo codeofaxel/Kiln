@@ -19,6 +19,13 @@ from kiln.printer_setup import AGENT_REMEDY
 
 _logger = logging.getLogger(__name__)
 
+def _keyless_make_line() -> str:
+    """The keyless make, in the one wording every map uses
+    (``kiln.front_door.KEYLESS_MAKE_LINE``)."""
+    from kiln.front_door import KEYLESS_MAKE_LINE
+
+    return KEYLESS_MAKE_LINE
+
 def _template_part_count() -> int:
     """How many parametric parts this build can render, counted live.
 
@@ -705,11 +712,27 @@ class _UtilityToolsPlugin:
             else:
                 from kiln.tiers_and_terms import AGENT_ACCOUNT_NUDGE
 
+                try:
+                    from kiln.daily_stats import record_account_nudge
+
+                    record_account_nudge("offered_get_started")
+                except Exception:  # noqa: BLE001 — telemetry never breaks onboarding
+                    pass
                 _account = {
                     "signed_in": False,
                     "tool": "kiln_signin",
                     "message": AGENT_ACCOUNT_NUDGE,
                 }
+            # A printer set up from the config at boot had no door to speak
+            # to; its limits nudge, if one was minted, is said here, once.
+            try:
+                from kiln.safety_profiles import pending_limits_nudge
+
+                _limits_note = pending_limits_nudge()
+            except Exception:  # noqa: BLE001 -- onboarding must not break
+                _limits_note = None
+            if _limits_note:
+                _account["limits_note"] = _limits_note
 
             # Serve-process pile-up nudge — get_started is the mandated
             # first call, so it's where an agent learns the machine has
@@ -863,7 +886,7 @@ class _UtilityToolsPlugin:
                 },
                 "core_workflows": {
                     "print_a_file": (
-                        "show_on_stage(file) → issue_preview_token(file, door=...) → "
+                        "show_on_stage(file_path) → issue_preview_token(file_path, door=...) → "
                         "upload_file → preflight_check → start_print(preview_token=...)"
                     ),
                     "marketplace_to_print": (
@@ -897,7 +920,9 @@ class _UtilityToolsPlugin:
                     "flat_part_from_relationships": (
                         "solve_sketch(sketch=...) → compile_scad(scad_code=<the "
                         "returned OpenSCAD, unchanged — its first line is a "
-                        "header the sketch tools read back>) → visualize_model. "
+                        "header the sketch tools read back>, brief_id=<the "
+                        "goal_id, when the part belongs to a design_session "
+                        "goal>) → visualize_model. "
                         "Describe a flat part by how its points and edges "
                         "RELATE (lengths, angles, parallel, symmetric, a hole "
                         "so far from an edge) and the solver places every "
@@ -1018,7 +1043,7 @@ class _UtilityToolsPlugin:
                         "call find_design_templates(use_case) BEFORE writing "
                         "any OpenSCAD, and offer a match unprompted rather "
                         "than waiting to be asked whether one exists. Then "
-                        "generate_from_template(id, {...}) renders a "
+                        "generate_from_template(template_id, {...}) renders a "
                         "printable STL. It is FREE, runs locally through "
                         "OpenSCAD with no AI provider or API key, and every "
                         "part is print-verified at its default, minimum and "
@@ -1031,13 +1056,10 @@ class _UtilityToolsPlugin:
                     ),
                     "default_is_openscad": (
                         "For a custom object the template library does not "
-                        "cover, DEFAULT to "
-                        "writing the OpenSCAD yourself and compiling it locally "
-                        "with compile_scad — free, no API key, works for every "
-                        "user. This is the reach for any 'make me a ...' "
-                        "request no template fits. (compile_scad needs the "
-                        "OpenSCAD binary; see "
-                        "the 'openscad' field below if it isn't installed.)"
+                        "cover — any 'make me a ...' request no template fits — "
+                        "the DEFAULT is the keyless make. " + _keyless_make_line()
+                        + " (Both compile with the OpenSCAD binary; see the "
+                        "'openscad' field below if it isn't installed.)"
                     ),
                     "providers_are_opt_in": (
                         "Cloud AI text-to-3D / image-to-3D backends (Gemini, "

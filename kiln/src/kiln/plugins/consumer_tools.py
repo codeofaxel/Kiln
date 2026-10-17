@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from kiln.tiers_and_terms import signin_hint_fields, tier_required_message
+from kiln.tiers_and_terms import paywall_fields, signin_hint_fields, tier_required_message
 
 _logger = logging.getLogger(__name__)
 
@@ -126,6 +126,7 @@ class _ConsumerToolsPlugin:
                     "error": tier_required_message("Tax calculation", "pro"),
                     "code": "PRO_REQUIRED",
                     **signin_hint_fields(),
+                    **paywall_fields("pro"),
                 }
 
             # Canonical-preview mode: walk the fee through BillingLedger
@@ -202,6 +203,7 @@ class _ConsumerToolsPlugin:
                     "error": tier_required_message("Tax calculation", "pro"),
                     "code": "PRO_REQUIRED",
                     **signin_hint_fields(),
+                    **paywall_fields("pro"),
                 }
 
             try:
@@ -233,6 +235,7 @@ class _ConsumerToolsPlugin:
                     "error": tier_required_message("Tax calculation", "pro"),
                     "code": "PRO_REQUIRED",
                     **signin_hint_fields(),
+                    **paywall_fields("pro"),
                 }
 
             try:

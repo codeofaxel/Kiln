@@ -182,7 +182,7 @@ _KIND_RULES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
         ("read", r"^(list|get|find|search|show|inspect|read|visualize|visual_diff|fingerprint|tail|summarize|query|"
                  r"usage_summary|billing_|license_status|check_payment|preview_overage|cutter_wear_status|"
                  r"nozzle_wear_status|maintenance_due|abrasive_escalation|decoration_history|"
-                 r"design_version_health|github_|best_|cross_|resolve_handle)"),
+                 r"design_version_health|github_|best_|cross_)"),
         ("action", r"^(fleet_|pause|resume|cancel|revert|plan_|request_|auto_recover|recover_power|"
                    r"resume_interrupted|emit_test|add_feature_during|decorate_during|deboss_during|"
                    r"apply_mid_print|plan_mid_print|preview_mid_print|revert_mid_print|start_|stop_|trigger|"
@@ -485,6 +485,12 @@ HOSTED_DOORS: dict[str, tuple[str, str]] = {
     "kiln._pro_nozzle_bridge": ("served_answer", "the pre-print nozzle-life verdict for the pre-flight, a start and a slice; the nozzle on record, for the pre-flight's comparison and for the size a check or a slice runs with"),
     "kiln._pro_placement_bridge": ("served_answer", "the plate-clearance verdict for slicing beside a part left on the plate"),
     "kiln._pro_cost_bridge": ("served_answer", "cost intelligence for a print file's estimate; the estimate itself is the floor"),
+    "kiln._pro_melt_bridge": ("served_answer", "a printer's own melt rates for a slice; the material's cautious figure is the floor"),
+    "kiln._pro_material_rules_bridge": ("served_answer", "whether a material meets the rules a part must meet; a miss judges no requirement met"),
+    "kiln.plugins.fleet_tools": ("served_answer", "fleet routing on an install without the router; a miss routes nothing"),
+    "kiln._pro_camera_bridge": ("served_answer", "whether a printer model ships with a camera, for always allow; a miss asks the person instead"),
+    "kiln._pro_catalogue_bridge": ("served_answer", "one printer's catalogue record (limits, variants, spec sheet) at setup, kept on this computer; a miss is the record last kept, else the generic floor, said once at setup"),
+    "kiln._pro_material_bridge": ("served_answer", "one material's catalogue record (a family's brand figures, its load figures) the first time a door asks, kept on this computer; a miss is the record last kept, else the family's own range for a brand and no load figure, each door saying why"),
     "kiln.stage_link": ("served_answer", "browser stage links; the four served causes word through here, the local stage is the floor"),
     "kiln.stage_cache": ("infrastructure", "the stage document upload behind stage_link; its refusals surface through stage_link"),
     "kiln.monitor_twin": ("infrastructure", "print twins pushed best-effort; the local monitor is the floor"),
@@ -495,7 +501,6 @@ HOSTED_DOORS: dict[str, tuple[str, str]] = {
     "kiln.heartbeat": ("infrastructure", "the daily install heartbeat; never user-facing"),
     "kiln.auth_session": ("own_vocabulary", "token refresh; its states word the sign-in doors"),
     "kiln.cli.auth_commands": ("own_vocabulary", "kiln signin / pair / signout: the sign-in doors themselves"),
-    "kiln.cli.main": ("own_vocabulary", "kiln register: a sign-in door"),
     "kiln.cli.spend_caps_commands": ("own_vocabulary", "spend caps CLI: a terminal door with its own errors"),
     "kiln.plugins.tier_diagnostic_tools": ("infrastructure", "names the host in prose only; reads local state"),
     "kiln.runtime_env": ("infrastructure", "names the host in prose only"),

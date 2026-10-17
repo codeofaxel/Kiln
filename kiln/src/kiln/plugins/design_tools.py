@@ -555,9 +555,40 @@ class _DesignToolsPlugin:
                     direction; full table value). If unsure, leave True:
                     it is the conservative default.
             """
+            from kiln.account_plan import LicenseTier, check_tier
             from kiln.design_intelligence import estimate_load_capacity
 
             try:
+                from kiln.design_intelligence import load_table_materials, resolve_material_key
+
+                known = resolve_material_key(material, {m: None for m in load_table_materials()})
+                if known is None:
+                    return {
+                        "success": False,
+                        "error": f"Unknown load table material: {material}. "
+                        f"Available: {', '.join(load_table_materials())}.",
+                    }
+                # The figure is Kiln Pro's (tiering decision of 2026-10-16):
+                # free is told, in words, that the load was not checked --
+                # never a number it could read as a clearance.
+                tier_ok, _tier_msg = check_tier(LicenseTier.PRO)
+                if not tier_ok:
+                    from kiln.design_intelligence import _is_pla_family
+                    from kiln.load_bearing_detector import attach_load_bearing_nudge
+
+                    unchecked = {
+                        "success": True,
+                        "material": material,
+                        "load_checked": False,
+                        "message": (
+                            "Kiln doesn't check load on the free plan, so treat this part as "
+                            "unverified for the weight it will carry."
+                            + (" PLA sags over time under a load left on it." if _is_pla_family(material.lower()) else "")
+                            + " Knocks, weight left on for months, humidity and any hardware bolted on all count against it."
+                            + " Kiln Pro sizes it for the weight, how long it's held, and the way it's printed."
+                        ),
+                    }
+                    return attach_load_bearing_nudge(unchecked, force=True, material=material)
                 estimate = estimate_load_capacity(
                     material,
                     cross_section_mm2,
@@ -569,10 +600,7 @@ class _DesignToolsPlugin:
                     # different limit. It deflects out of the way long before
                     # it breaks, so answer the question that actually applies
                     # instead of returning nothing.
-                    from kiln.design_intelligence import (
-                        estimate_deflection_limited_load,
-                        load_table_materials,
-                    )
+                    from kiln.design_intelligence import estimate_deflection_limited_load
 
                     flex = estimate_deflection_limited_load(
                         material, cross_section_mm2, cantilever_length_mm
@@ -590,6 +618,13 @@ class _DesignToolsPlugin:
                             "not by expecting more of the polymer."
                         )
                         return flex
+                    from kiln.design_intelligence import load_figures_unanswered
+
+                    why = load_figures_unanswered(material)
+                    if why:
+                        # The roster knows the material; its figures could not
+                        # be had (offline, signed out, the servers silent).
+                        return {"success": False, "code": "LOAD_FIGURES_UNAVAILABLE", "error": f"Kiln can't size {material} right now: {why}."}
                     return {
                         "success": False,
                         "error": f"Unknown load table material: {material}. "
@@ -617,12 +652,26 @@ class _DesignToolsPlugin:
                 return {"success": False, "error": str(exc)}
 
         @mcp.tool()
-        def check_material_environment(material: str, environment: str) -> dict:
-            """Check whether a material is compatible with an environment.
+        def check_material_environment(
+            material: str,
+            environment: str,
+            requirements: list[str] | None = None,
+        ) -> dict:
+            """Check whether a material is compatible with an environment, and
+            optionally whether it meets the rules the part must meet.
 
             Args:
                 material: Material ID from the design knowledge base.
                 environment: Natural language environment description.
+                requirements: Optional rules to check the material against
+                    before printing: any of ``food_safe``, ``reach``,
+                    ``rohs``, ``flame_retardant``, ``uv``.  The answer comes
+                    back under ``rule_checks``: the material's warnings at
+                    every tier, and from Kiln Business a meets / does-not-meet
+                    verdict with the reason for each requirement
+                    (https://kiln3d.com/pricing).  When the check cannot be
+                    made, ``rule_checks.checked`` is false and no
+                    requirement is called met.
             """
             from kiln.design_intelligence import check_environment_compatibility
 
@@ -648,6 +697,10 @@ class _DesignToolsPlugin:
                     "curated verdicts are a kiln-pro feature — "
                     "https://kiln3d.com/pricing."
                 )
+                if requirements:
+                    from kiln._pro_material_rules_bridge import rule_checks
+
+                    result["rule_checks"] = rule_checks(material, list(requirements))
                 return result
             except Exception as exc:
                 _logger.error(
@@ -836,7 +889,7 @@ class _DesignToolsPlugin:
 
             * ``generatable: true`` — a PARAMETRIC PART.  The result
               carries its parameters, so you can fill in the user's
-              dimensions and call ``generate_from_template(id, {...})``
+              dimensions and call ``generate_from_template(template_id, {...})``
               to render a printable STL.
             * ``generatable: false`` — a DESIGN PATTERN (snap fit, living
               hinge, press fit).  Guidance for OpenSCAD you write
@@ -1063,6 +1116,9 @@ class _DesignToolsPlugin:
                 goal: Optional finishing goal or technique name.
             """
             from kiln.design_intelligence import (
+                find_post_processing_technique as _find_technique,
+            )
+            from kiln.design_intelligence import (
                 get_public_post_processing as _get_pp,
             )
 
@@ -1074,10 +1130,13 @@ class _DesignToolsPlugin:
                         "error": f"No post-processing data for '{material}'.",
                     }
 
+                # A technique is never named without how not to get hurt
+                # doing it, so the overview carries each safety note too.
                 technique_overview = [
                     {
                         "name": technique.get("name"),
                         "difficulty": technique.get("difficulty"),
+                        "safety_notes": technique.get("safety_notes"),
                     }
                     for technique in guide.techniques
                     if isinstance(technique, dict)
@@ -1126,16 +1185,7 @@ class _DesignToolsPlugin:
                     answer = {"strengthening": guide.strengthening}
                     resolved_goal = "strengthen"
                 else:
-                    match = next(
-                        (
-                            technique
-                            for technique in guide.techniques
-                            if isinstance(technique, dict)
-                            and str(technique.get("name", "")).strip().lower()
-                            == goal.strip().lower()
-                        ),
-                        None,
-                    )
+                    match = _find_technique(guide.techniques, goal)
                     if match is None:
                         names = [
                             str(item["name"])
@@ -1557,6 +1607,7 @@ class _DesignToolsPlugin:
             scad_path: str = "",
             timeout: int = 300,
             fastener: str = "",
+            brief_id: str = "",
         ) -> dict:
             """Compile OpenSCAD code into an STL file.
 
@@ -1581,6 +1632,9 @@ class _DesignToolsPlugin:
             its ``agent_instruction`` before repeating any of it.
 
             Args:
+                brief_id: The saved goal's id from ``design_session``; pass it so
+                    this make joins the goal (recorded against it; Kiln Pro checks the
+                    result against it). Empty when there is no goal.
                 scad_code: Valid OpenSCAD source code (provide this OR scad_path).
                 scad_path: Path to a .scad file (provide this OR scad_code).
                 timeout: Maximum compilation time in seconds (default 300).
@@ -1676,6 +1730,9 @@ class _DesignToolsPlugin:
                 from kiln.fusion_check import attach_fusion_report
 
                 response = attach_fusion_report(response, stl_path)
+                from kiln.front_door import join_goal
+
+                join_goal(brief_id, response, stl_path)
                 try:
                     from kiln_pro.plugins.git_render_tools import (
                         attach_inspect_bundle,
@@ -1696,6 +1753,7 @@ class _DesignToolsPlugin:
             parameter_name: str,
             new_value: float,
             material: str | None = None,
+            brief_id: str = "",
         ) -> dict:
             """Update a parameter in OpenSCAD code and recompile to STL.
 
@@ -1704,6 +1762,9 @@ class _DesignToolsPlugin:
             STL — all in one step. Perfect for "make it 5mm wider" requests.
 
             Args:
+                brief_id: The saved goal's id from ``design_session``; pass it so
+                    this make joins the goal (recorded against it; Kiln Pro checks the
+                    result against it). Empty when there is no goal.
                 scad_code: OpenSCAD source code.
                 parameter_name: Variable name to update (e.g. "wall_thickness").
                 new_value: New numeric value.
@@ -1728,6 +1789,9 @@ class _DesignToolsPlugin:
                         f"Updated {parameter_name}={new_value}, compiled to STL{suffix}."
                     ),
                 }
+                from kiln.front_door import join_goal
+
+                join_goal(brief_id, response, response.get("stl_path"))
                 # Same flush-attachment door as compile_scad: a tweak can
                 # slide a part to exact tangency; flag unfused contact.
                 from kiln.fusion_check import attach_fusion_report
@@ -2029,20 +2093,31 @@ class _DesignToolsPlugin:
         def get_brand_filament_profile(profile_id: str) -> dict:
             """Get printing parameters for a specific brand filament.
 
-            Returns brand-specific nozzle temp, bed temp, speed, density,
-            drying requirements, and hardware requirements (hardened nozzle,
-            enclosure, AMS compatibility).
+            The names and the printer-damage flags (hardened nozzle,
+            enclosure) are always answered. The brand's own tune -- nozzle
+            and bed temperatures, speed, density, drying, AMS -- is part of
+            Kiln Pro; below it, or offline, those figures are null and
+            ``figures_unanswered`` says why.
 
             Args:
                 profile_id: Brand filament ID (e.g. "bambu_pla_basic",
                     "prusament_petg", "polymaker_polyterra_pla")
             """
+            from kiln.design_intelligence import brand_figures_unanswered
             from kiln.design_intelligence import get_brand_filament_profile as _get
 
             profile = _get(profile_id)
             if profile is None:
                 return {"error": f"Brand filament profile '{profile_id}' not found", "status": "error"}
-            return {"status": "success", "data": profile.to_dict()}
+            out = {"status": "success", "data": profile.to_dict()}
+            if not profile.has_figures():
+                why = brand_figures_unanswered(profile.parent_material)
+                out["figures_unanswered"] = (
+                    f"{profile.brand} {profile.product_name}'s own tune is not in hand"
+                    + (f": {why}" if why else "")
+                    + "; the names and the printer-damage flags are answered."
+                )
+            return out
 
         def list_brand_filament_profiles(
             brand: str = "",
@@ -2050,24 +2125,37 @@ class _DesignToolsPlugin:
         ) -> dict:
             """List available brand-specific filament profiles.
 
-            Returns all known brand filament profiles, optionally filtered
-            by brand name or parent material type.
+            Returns every known brand filament profile -- names and the
+            printer-damage flags -- optionally filtered by brand name or
+            parent material. A brand's own tune is part of Kiln Pro and is
+            filled in one family at a time: filter by ``parent_material`` to
+            get that family's figures; an unfiltered list on an install
+            without kiln-pro is names only, and ``figures_unanswered`` names
+            each family whose figures are not in hand and why.
 
             Args:
                 brand: Filter by brand (e.g. "Bambu", "Prusament", "Polymaker")
                 parent_material: Filter by parent material (e.g. "pla", "petg", "abs")
             """
+            from kiln.design_intelligence import brand_figures_unanswered
             from kiln.design_intelligence import list_brand_filament_profiles as _list
 
             profiles = _list(
                 brand=brand or None,
                 parent_material=parent_material or None,
             )
-            return {
+            out = {
                 "status": "success",
                 "count": len(profiles),
                 "data": [p.to_dict() for p in profiles],
             }
+            missing = sorted({p.parent_material for p in profiles if not p.has_figures()})
+            if missing:
+                out["figures_unanswered"] = {
+                    family: (brand_figures_unanswered(family) or "the figures were not asked for in a list of every family; filter by parent_material")
+                    for family in missing
+                }
+            return out
 
         # ---------------------------------------------------------------
         # resolve_filament — unified filament resolver

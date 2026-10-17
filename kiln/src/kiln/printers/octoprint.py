@@ -22,6 +22,7 @@ import requests
 from requests.exceptions import ConnectionError as ReqConnectionError
 from requests.exceptions import RequestException, Timeout
 
+from kiln.printer_backends import REQUEST_OFFERS, backend_for
 from kiln.printers.base import (
     DEFAULT_LOAD_LENGTH_MM,
     DEFAULT_PURGE_LENGTH_MM,
@@ -56,6 +57,12 @@ except ImportError:  # pragma: no cover
     _WS_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+#: Where a person makes an OctoPrint key, and the offer to ask OctoPrint for
+#: one, as every setup door says them (kiln.printer_backends).
+_KEY_NEED = next(need for need in backend_for("octoprint").needs if need.key == "api_key")
+_KEY_WHERE = _KEY_NEED.where
+_KEY_OFFER = REQUEST_OFFERS.get(_KEY_NEED.request, "")
 
 # HTTP status codes eligible for automatic retry.
 _RETRYABLE_STATUS_CODES: frozenset[int] = frozenset({502, 503, 504})
@@ -664,10 +671,15 @@ class OctoPrintAdapter(PrinterAdapter):
                     if len(response.text) > 300:
                         body += " (truncated)"
                     sc = response.status_code
-                    if sc == 401:
-                        hint = " API key may be invalid. Check KILN_PRINTER_API_KEY or config. Retry with `get_state()`."
-                    elif sc == 403:
-                        hint = " Insufficient permissions. Check API key scope in OctoPrint settings. Retry with `get_state()`."
+                    if sc in (401, 403):
+                        # OctoPrint answers a missing or wrong key with 403
+                        # (older releases used 401), the same answer it gives a
+                        # user without the permission, so both are said.
+                        hint = (
+                            " OctoPrint refused the API key: it is missing, wrong, or its user lacks "
+                            f"permission for this. Make a new one {_KEY_WHERE}"
+                            + (f"; {_KEY_OFFER}." if _KEY_OFFER else ".")
+                        )
                     elif sc == 404:
                         hint = " Resource not found — the file or endpoint may not exist. Verify with `list_files()`."
                     elif sc == 409:
@@ -1582,6 +1594,29 @@ class OctoPrintAdapter(PrinterAdapter):
         ``/webcam/?action=stream``.
         """
         return f"{self._host}/webcam/?action=stream"
+
+    # Where this printer type's camera is known to answer, for the check
+    # and the setup handshake (kiln.camera_check).
+    camera_check_ids: ClassVar[tuple[str, ...]] = ("octoprint_webcam_stream",)
+
+    def camera_probes(self) -> list[Any]:
+        """The one address this adapter opens for OctoPrint's webcam.
+
+        Built from what the adapter already holds; nothing is contacted here.
+        """
+        from kiln.camera_check import CameraProbe
+
+        return [
+            CameraProbe(
+                "octoprint_webcam_stream",
+                f"{self._host}/webcam/?action=stream",
+                "OctoPrint's own configuration reference (config.yaml, webcam section) gives "
+                "the stream as the MJPG-Streamer path ?action=stream on the stream host; this "
+                "adapter has always opened it as /webcam/?action=stream on the printer's own "
+                "host, the same address its snapshots and live video use. Source: the maker's "
+                "documentation for the path, this adapter for the host.",
+            )
+        ]
 
     # -- filament sensor (optional) ----------------------------------------
 

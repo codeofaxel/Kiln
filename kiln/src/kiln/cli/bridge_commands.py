@@ -765,47 +765,19 @@ def _discovered_line(found: object) -> str:
     return f"{label} — {address} ({found.printer_type})"
 
 
-def _discovered_host(found: object) -> str:
-    """The host string ``save_printer`` wants for this discovery result.
+def _credential_prompts(printer_type: str, discovered_serial: str, host: str = "") -> dict:
+    """Ask only for what this backend actually needs, nothing else.
 
-    HTTP backends keep their discovered port (Moonraker answers on 7125,
-    4408, or 80 depending on the machine); Bambu and Elegoo speak
-    MQTT/SDCP on fixed ports their adapters own, so they get the bare
-    address — ``_normalize_host`` strips any scheme for them anyway.
+    The printer was found on the network, so its optional credentials are
+    not asked for; what each kind needs is the one list every setup door
+    reads (kiln.printer_backends).
     """
-    if found.printer_type in ("bambu", "elegoo"):
-        return found.host
-    port = getattr(found, "port", 0) or 0
-    return found.host if port in (0, 80) else f"{found.host}:{port}"
+    from kiln.cli.connection_prompt import ask_connection_needs
 
-
-def _credential_prompts(printer_type: str, discovered_serial: str) -> dict:
-    """Ask only for what this backend actually needs, nothing else."""
-    extras: dict = {}
-    if printer_type == "octoprint":
-        extras["api_key"] = click.prompt(
-            "  OctoPrint API key (OctoPrint → Settings → API)", default="", show_default=False
-        ).strip() or None
-    elif printer_type == "prusalink":
-        extras["api_key"] = click.prompt(
-            "  PrusaLink password (printer screen → Settings → Network)",
-            default="", show_default=False,
-        ).strip() or None
-    elif printer_type == "duet":
-        extras["api_key"] = click.prompt(
-            "  Machine password (Enter if you never set one)", default="", show_default=False
-        ).strip() or None
-    elif printer_type == "bambu":
-        extras["access_code"] = click.prompt(
-            "  LAN access code (printer screen → Settings → WLAN)", default="", show_default=False
-        ).strip() or None
-        serial = click.prompt(
-            "  Serial number", default=discovered_serial or "", show_default=bool(discovered_serial)
-        ).strip()
-        extras["serial"] = serial or None
-    elif printer_type == "elegoo" and discovered_serial:
-        extras["serial"] = discovered_serial
-    return extras
+    answers = ask_connection_needs(
+        printer_type, found={"serial": discovered_serial}, discovered=True, host=host
+    )
+    return {key: value for key, value in answers.items() if value}
 
 
 def _offer_first_printer() -> None:
@@ -861,7 +833,9 @@ def _offer_first_printer() -> None:
             return
         chosen = found[int(raw) - 1]
 
-    extras = _credential_prompts(chosen.printer_type, getattr(chosen, "serial", "") or "")
+    extras = _credential_prompts(
+        chosen.printer_type, getattr(chosen, "serial", "") or "", host=chosen.address
+    )
 
     # The model key turns on the safety stack (bed-fit, temperature limits);
     # skippable so a shy answer never strands the setup, and the prompt itself
@@ -872,13 +846,20 @@ def _offer_first_printer() -> None:
     model = prompt_for_printer_model(chosen.printer_type, serial_hint, allow_skip=True)
 
     from kiln.cli.config import save_printer
+    from kiln.cli.main import _machine_identity_for_save
 
     name = _suggest_printer_name(getattr(chosen, "name", ""), chosen.printer_type)
     try:
+        # The save asks the machine for the id it reports for itself once
+        # the address answers (bounded; a read that fails leaves the printer
+        # known by its address).
         save_printer(
             name,
             chosen.printer_type,
-            _discovered_host(chosen),
+            chosen.address,
+            read_machine_identity=lambda: _machine_identity_for_save(
+                chosen.printer_type, chosen.address, printer_model=model, **extras
+            ),
             printer_model=model,
             **extras,
         )
@@ -890,6 +871,18 @@ def _offer_first_printer() -> None:
         click.style("  Saved ✓", fg="green")
         + f" — '{name}' is your active printer."
     )
+    # Discovery just heard this printer; now, without a frame, does its
+    # camera answer?  One line, and never a reason for enable to fail.
+    try:
+        from kiln.camera_check import camera_setup_line
+        from kiln.cli.config import load_printer_config
+        from kiln.cli.main import _make_adapter
+
+        _handshake, camera_line = camera_setup_line(_make_adapter(load_printer_config(name)), door="cli")
+    except Exception:  # noqa: BLE001 — the printer is saved; a camera line must not undo it
+        camera_line = ""
+    if camera_line:
+        click.echo(f"  {camera_line}")
 
 
 def _slicer_note() -> None:

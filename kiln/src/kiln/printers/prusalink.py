@@ -25,12 +25,15 @@ import requests
 from requests.exceptions import ConnectionError as ReqConnectionError
 from requests.exceptions import RequestException, Timeout
 
+from kiln.printer_backends import PRUSALINK_PI_KEY_WHERE, need_where
 from kiln.printers.base import (
+    CameraHandshake,
     FilamentHandlingUnsupported,
     FilamentOpPlan,
     FilamentOpResult,
     JobProgress,
     JobResult,
+    MachineIdentity,
     NozzleSetting,
     PrinterAdapter,
     PrinterCapabilities,
@@ -49,6 +52,16 @@ logger = logging.getLogger(__name__)
 _RETRYABLE_STATUS_CODES: frozenset[int] = frozenset({502, 503, 504})
 _FILE_ROOTS: tuple[str, ...] = ("usb", "local")
 _FILE_ROOT_FALLBACK_HTTP_CODES: tuple[int, ...] = (403, 404)
+
+#: What PrusaLink on a Raspberry Pi puts in the body of the HTTP 403 it
+#: answers a wrong or empty ``X-Api-Key`` with.  It is an authentication failure wearing a 403, so it must never be
+#: read as a storage-root or permission problem.
+_BAD_API_KEY_MARKER = "Bad X-Api-Key"
+
+
+class PrusaLinkAuthError(PrinterError):
+    """The printer refused Kiln's API key."""
+
 
 # Printer type codes reported in the ``printer`` field of GET /api/version
 # by PrusaLink on Buddy firmware (MINI / MK3.5 / MK3.9 / MK4 / XL / iX /
@@ -117,8 +130,9 @@ _STATE_MAP: dict[str, PrinterStatus] = {
 # "STOPPED" is Prusa Link's word for a print the user ended early; the
 # firmware has no separate cancelled state.  "ERROR" and "ATTENTION" are
 # deliberately absent: those describe a condition the PRINTER is in
-# (a thermal fault, a filament-change prompt), not a verdict on a job,
-# and they already map to an ERROR status that says so.
+# (a thermal fault, a filament-change prompt), not a verdict on a job.
+# ERROR maps to an ERROR status; ATTENTION does too unless a job is on
+# the printer, where get_state reads it as PAUSED -- waiting for a person.
 _JOB_RESULT_MAP: dict[str, JobResult] = {
     "FINISHED": JobResult.COMPLETED,
     "STOPPED": JobResult.CANCELLED,
@@ -472,8 +486,18 @@ class PrusaLinkAdapter(PrinterAdapter):
                     if response.status_code == 401:
                         raise PrinterError(
                             f"Authentication failed (HTTP 401) for Prusa Link at {self._host}. "
-                            f"Your API key is invalid or missing. Find the correct key in "
-                            f"Settings > Network > PrusaLink on your printer's LCD, then update "
+                            f"Your API key is invalid or missing. The key is the PrusaLink "
+                            f"password, {need_where('prusalink', 'api_key')}. Then update "
+                            f"with: kiln auth --name <name> --host {self._host} "
+                            f"--type prusalink --api-key <YOUR_KEY>",
+                        )
+                    if response.status_code == 403 and _BAD_API_KEY_MARKER in (response.text or ""):
+                        raise PrusaLinkAuthError(
+                            f"Prusa Link at {self._host} refused the API key (HTTP 403, "
+                            f"'{_BAD_API_KEY_MARKER}'). That is how PrusaLink on a Raspberry Pi "
+                            f"(MK3S/MK2.5) answers a wrong or empty key. Its API key is not the "
+                            f"login the setup wizard made and is empty until you make one, "
+                            f"{PRUSALINK_PI_KEY_WHERE}, not on the printer's screen. Then update "
                             f"with: kiln auth --name <name> --host {self._host} "
                             f"--type prusalink --api-key <YOUR_KEY>",
                         )
@@ -489,8 +513,8 @@ class PrusaLinkAdapter(PrinterAdapter):
                             f"Access forbidden (HTTP 403) for Prusa Link at {self._host} "
                             f"on {method} {path}. Your API key may lack required permissions, "
                             f"or this firmware may reject the requested operation/path. "
-                            f"Check the key in Settings > Network > PrusaLink on your printer's "
-                            f"LCD.{endpoint_hint}",
+                            f"Check the key: it is the PrusaLink password, "
+                            f"{need_where('prusalink', 'api_key')}.{endpoint_hint}",
                         )
                     if response.status_code == 404:
                         raise PrinterError(
@@ -581,6 +605,9 @@ class PrusaLinkAdapter(PrinterAdapter):
 
     @classmethod
     def _is_storage_fallback_error(cls, exc: PrinterError) -> bool:
+        if isinstance(exc, PrusaLinkAuthError):
+            # A refused key is the same on every storage root.
+            return False
         return any(cls._is_http_error(exc, code) for code in _FILE_ROOT_FALLBACK_HTTP_CODES)
 
     def _iter_file_roots(self, preferred: str | None = None) -> list[str]:
@@ -643,6 +670,24 @@ class PrusaLinkAdapter(PrinterAdapter):
     # PrinterAdapter -- state queries
     # ------------------------------------------------------------------
 
+    def read_machine_identity(self) -> MachineIdentity | None:
+        """The printer's own serial number, from its info endpoint.
+
+        PrusaLink serves it as ``serial`` on ``GET /api/v1/info`` (the
+        printer's serial, the one on its label), beside the nozzle diameter
+        the setting read above uses.  ``None`` when the endpoint cannot be
+        read or carries no serial.
+        """
+        try:
+            info = self._get_json("/api/v1/info")
+        except PrinterError:
+            return None
+        raw = info.get("serial") if isinstance(info, dict) else None
+        value = str(raw or "").strip()
+        if not value:
+            return None
+        return MachineIdentity(value=value, source="prusalink_info.serial", kind="printer_serial")
+
     def read_nozzle_setting(self) -> NozzleSetting | None:
         """The nozzle diameter this printer holds in its own settings.
 
@@ -683,6 +728,11 @@ class PrusaLinkAdapter(PrinterAdapter):
         state_str = printer.get("state", "IDLE") if isinstance(printer, dict) else "IDLE"
         mapped_status = _STATE_MAP.get(state_str, PrinterStatus.UNKNOWN)
         job_result = _JOB_RESULT_MAP.get(state_str)
+        # ATTENTION during a job is a print stopped and waiting for a person
+        # (a filament-change prompt, a feed problem), not a failed one.
+        job = _safe_get(data, "job", default={})
+        if state_str == "ATTENTION" and isinstance(job, dict) and job.get("id") is not None:
+            mapped_status = PrinterStatus.PAUSED
 
         tool_actual = printer.get("temp_nozzle") if isinstance(printer, dict) else None
         tool_target = printer.get("target_nozzle") if isinstance(printer, dict) else None
@@ -1148,6 +1198,31 @@ class PrusaLinkAdapter(PrinterAdapter):
         except Exception:
             logger.debug("Webcam snapshot failed", exc_info=True)
         return None
+
+    #: The one camera endpoint Prusa Link offers (``GET /api/v1/cameras/snap``);
+    #: it needs the printer's API key, so it is asked through this adapter's
+    #: own session rather than listed as a probe for the bare check.
+    _CAMERA_SNAP_PATH: ClassVar[str] = "/api/v1/cameras/snap"
+
+    def _own_camera_handshake(self) -> CameraHandshake:
+        """Headers only, through the authenticated session: no picture is read.
+
+        The snap endpoint answers with the camera's current still; the
+        handshake hangs up at its headers, so the image is never read.
+        """
+        from kiln.camera_check import handshake_address
+        from kiln.printers.base import CAMERA_HANDSHAKE_ADDRESS_TIMEOUT
+
+        answered, what = handshake_address(
+            self._url(self._CAMERA_SNAP_PATH),
+            timeout=CAMERA_HANDSHAKE_ADDRESS_TIMEOUT,
+            session=self._session,
+        )
+        if answered:
+            return CameraHandshake(True, "prusalink_cameras_snap", f"The printer's camera answered with {what}.")
+        return CameraHandshake(
+            False, "prusalink_cameras_snap", f"The printer's camera endpoint gave {what}."
+        )
 
     # ------------------------------------------------------------------
     # Dunder helpers

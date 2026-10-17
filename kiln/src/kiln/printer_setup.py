@@ -480,6 +480,19 @@ def set_printer_model(
         _write(target, key, config_path=config_path)
         invalidate_cache()
     out["applied"] = True
+    # The model is set: fetch its record now, and say once what an install
+    # that could not get it is held to (the same engine every setup door
+    # reaches through PrinterAdapter.set_safety_profile).
+    try:
+        from kiln.safety_profiles import pending_limits_nudge, warm_profile
+
+        warm_profile(key)
+        limits_note = pending_limits_nudge()
+    except Exception:  # noqa: BLE001 -- a setup never fails over the record
+        limits_note = None
+    if limits_note:
+        out["limits_note"] = limits_note
+        notes = [*notes, limits_note]
     was = f" (was {previous})" if previous and previous != key else ""
     out["message"] = " ".join([f"{target} is now set up as {key}{was}.", said, *notes])
     return out

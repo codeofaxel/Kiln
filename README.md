@@ -7,7 +7,7 @@
   <a href="https://pypi.org/project/kiln3d/"><img src="https://img.shields.io/pypi/v/kiln3d" alt="PyPI"></a>
   <a href="https://pepy.tech/projects/kiln3d"><img src="https://img.shields.io/pepy/dt/kiln3d" alt="PyPI Downloads"></a>
   <a href="https://pypi.org/project/kiln3d/"><img src="https://img.shields.io/pypi/pyversions/kiln3d" alt="Python"></a>
-  <a href="https://github.com/codeofaxel/Kiln/blob/main/LICENSE"><img src="https://img.shields.io/github/license/codeofaxel/Kiln" alt="License"></a>
+  <a href="https://github.com/codeofaxel/Kiln/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="License"></a>
   <a href="https://github.com/codeofaxel/Kiln/blob/main/policies/SIGNING.md"><img src="https://img.shields.io/badge/verified%20by-sigstore%20%2B%20SLSA-0f6fdc?logo=sigstore&logoColor=white" alt="Verified by Sigstore + SLSA"></a>
   <a href="https://glama.ai/mcp/servers/codeofaxel/kiln"><img src="https://glama.ai/mcp/servers/codeofaxel/kiln/badge?v=2" alt="Kiln MCP server" width="120"></a>
 </p>
@@ -16,7 +16,7 @@
 
 **The open-source MCP server for 3D printing.**
 
-Kiln lets AI agents (Claude Desktop, Claude Code, Codex, or any custom MCP client) drive real 3D printers end to end — Bambu Lab, Creality, Prusa, Elegoo, Voron, Sovol, AnkerMake, Artillery, FlashForge, QIDI, RatRig, and SparkX, over OctoPrint, Moonraker/Klipper, PrusaLink, and Direct USB.
+Kiln lets AI agents (Claude Desktop, Claude Code, Codex, or any custom MCP client) drive real 3D printers end to end — Bambu Lab, Creality, Prusa, Elegoo, Voron, Sovol, AnkerMake, Artillery, FlashForge, QIDI, RatRig, and SparkX. It is compatible with OctoPrint, Moonraker/Klipper, PrusaLink, and Direct USB.
 
 In a single conversation, an agent can design a part, slice it, queue it on the right printer, monitor the camera, recover from failures, and ship the result. No human in the middle.
 
@@ -175,7 +175,7 @@ kiln agent --model openai/gpt-4o
 kiln agent --model meta-llama/llama-3.1-70b-instruct --tier essential
 ```
 
-Tool tiers auto-match model capability: **essential** (15 tools) for smaller models, **standard** (60 tools) for mid-range, **full** (135 tools) for stronger models. All <!-- KILN_MCP_TOOL_COUNT:OLD --> 932 tools are available over MCP via `kiln serve`.
+Tool tiers auto-match model capability: **essential** (15 tools) for smaller models, **standard** (60 tools) for mid-range, **full** (135 tools) for stronger models. All <!-- KILN_MCP_TOOL_COUNT:OLD --> 914 tools are available over MCP via `kiln serve`.
 </details>
 
 <details>
@@ -186,13 +186,13 @@ Tool tiers auto-match model capability: **essential** (15 tools) for smaller mod
 | Printer | `--type` | What you need |
 |---------|----------|---------------|
 | **Prusa MK4/XL/Mini+** | `prusalink` | IP + API key (Settings › Network › PrusaLink on the LCD) |
-| **OctoPrint** (any printer) | `octoprint` | OctoPrint URL + API key (Settings › API) |
+| **OctoPrint** (any printer) | `octoprint` | OctoPrint URL + API key (User Settings › Application Keys) |
 | **Klipper/Moonraker** | `moonraker` | Moonraker URL (usually `http://<ip>:7125`) |
 | **Creality K1/K2/Hi/Ender V4/V3 KE** | `creality` | IP + `printer_model` (e.g. `creality_k1_max`); probes local Moonraker ports |
-| **Bambu Lab** | `bambu` | IP + LAN access code + serial number (all on the LCD) |
+| **Bambu Lab** | `bambu` | IP + serial number + LAN access code, all on the printer's screen; LAN Only Mode and Developer Mode on to start and control prints |
 | **Elegoo** (SDCP) | `elegoo` | IP only — no auth. Neptune 4 / OrangeStorm Giga use `moonraker`. |
 | **Duet / RepRapFirmware** | `duet` | IP only, plus the machine password if one is set (`M551` in `config.g`). |
-| **Direct USB** (Marlin) | `serial` | USB cable only — no network. Ender 3, Prusa MK3, CR-10, any Marlin/RepRap printer. |
+| **Direct USB** (Marlin) | `usb` | USB cable only — no network. Ender 3, Prusa MK3, CR-10, any Marlin/RepRap printer. |
 
 Kiln only needs IP reachability on your LAN. Ethernet-only printers are fully supported.
 
@@ -249,15 +249,15 @@ Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&ut
 
 ## Why Kiln?
 
-- **One control plane, any printer** — OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, Serial. Manage a mixed fleet from one place.
+- **One control plane, any printer** — compatible with OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, Serial. Manage a mixed fleet from one place.
 - **No printer? No problem** — Outsource jobs to Craftcloud's 150+ manufacturing services through the hosted proxy, or use direct mode with your own provider credentials.
-- **AI-native** — <!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 939 MCP capabilities and <!-- KILN_CLI_COUNT:OLD --> 253 CLI commands built for AI agents. Not a web UI with an API bolted on.
+- **AI-native** — <!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 921 MCP capabilities and <!-- KILN_CLI_COUNT:OLD --> 245 CLI commands built for AI agents. Not a web UI with an API bolted on.
 - **Describe it, print it** — Natural-language to physical object pipeline: text or sketch → AI generation → validation → slice → print.
 - **Decorate anything** — QR codes, photos, logos, text, SVGs, and procedural textures (tiger stripe, marble, camo, wood grain, honeycomb) embossed or debossed onto any model with one command.
 - **Manuals included** — Multi-part prints can generate printable PDF assembly manuals with Bill of Materials, isometric step renders, mating arrows, and pause-and-check verification gates. (Business)
 - **Resume, don't restart** — Cancelled or failed print? Resume from the exact layer it stopped on any supported FDM printer. No filament wasted. (Pro)
 - **Modify mid-print** — Add decorations, append features, or swap materials on a live print with atomic revert if anything goes wrong. (Pro)
-- **Smart material routing** — 25 materials, 45 brand-specific filament profiles (Bambu, Prusament, Polymaker, and more) across 11 material families. Intent-based recommendations with printer capability awareness.
+- **Smart material routing** — 38 materials and brand filament profiles for 69 brands and lines (the per-brand tune is part of Kiln Pro). Intent-based recommendations with printer capability awareness.
 - **Prints don't fail silently** — Cross-printer learning, automatic failure recovery, closed-loop AI generation feedback (failed prints auto-improve future generations), preflight safety checks on every job.
 - **Doomed prints stopped early** — Too big for the build plate, or a material your hotend can't melt? Caught before filament is wasted, rotated to fit when possible, one-command override. Pro shows the fix: true usable area, cleanest split, or the material to switch to.
 - **Search → Slice → Print** — Search and download 3D models from MyMiniFactory and Cults3D (search only), auto-slice with PrusaSlicer, OrcaSlicer, or BambuStudio, print — all from one agent conversation.
@@ -267,7 +267,7 @@ Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&ut
 
 | Backend | Status | Printers |
 |---------|--------|----------|
-| **OctoPrint** | Stable | Any OctoPrint-connected printer (Prusa, Ender, custom) |
+| **OctoPrint** | Stable | Compatible with any OctoPrint-connected printer (Prusa, Ender, custom) |
 | **Moonraker** | Stable | Klipper-based printers (Voron, Ratrig, etc.) |
 | **Creality** | Stable when Moonraker is reachable | SPARKX i7, K1/K1 Max/K1C/K1 SE, K2/K2 Pro/K2 Plus/K2 SE, Creality Hi, Ender-3 V4/V3 KE, Ender-5 Max, CR-10 SE via local Moonraker. Older Marlin Creality printers use `serial` or `octoprint`. |
 | **Bambu** | Stable | Bambu Lab X1C, X1E, P1S, P1P, P2S, A1, A1 Mini, A2L, H2S, H2D, H2D Pro, H2C, X2D (via LAN MQTT) |
@@ -336,8 +336,8 @@ Designs aren't text, but they need version control. Kiln treats meshes, decorati
 Three things make this different from `git`:
 
 1. **Outcome-correlated branches.** Every branch is tagged with empirical print results — success rate, warp, adhesion, cost — so cross-branch A/B is automatic, not anecdotal.
-2. **3-way semantic mesh merge.** Z-level / pocket / bounding-box conflict zones rendered as visual diffs, not text patches. Manufacturing tolerance, not character offsets.
-3. **Signed releases with mesh re-fingerprinting.** Ed25519 signatures over a release manifest pinned to an exact mesh; verification re-computes the fingerprint to detect tamper after release.
+2. **3-way semantic mesh merge.** Conflicts are shown as visual diffs of the geometry, not text patches. Manufacturing tolerance, not character offsets.
+3. **Signed releases.** A release is cryptographically signed and pinned to its exact mesh, so anyone can verify the part they hold is the part that was released.
 
 Here's what `visualize_branch_tree("my-coaster")` actually emits — the same renderer the workshop, CLI, and your agent see (yellow = signed release, light blue = experiment, light red = branch with failed outcomes):
 
@@ -380,7 +380,7 @@ Patent pending across semantic mesh merge, outcome-correlated branching, and sig
 
 ## Tools
 
-The Kiln MCP server (`kiln serve`) exposes **<!-- KILN_MCP_TOOL_COUNT:OLD --> 932 tools** to agents, plus prompts and resources for **<!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 939 total MCP capabilities**. Rather than list them all here, agents browse the live catalog with `get_skill_manifest` and ToolSearch-style discovery. A representative slice, in the order a print actually happens:
+The Kiln MCP server (`kiln serve`) exposes **<!-- KILN_MCP_TOOL_COUNT:OLD --> 914 tools** to agents, plus prompts and resources for **<!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 921 total MCP capabilities**. Rather than list them all here, agents browse the live catalog with `get_skill_manifest` and ToolSearch-style discovery. A representative slice, in the order a print actually happens:
 
 - **design_session**
   - Talk to Kiln about what you're making and get back a design that matches what you asked for
@@ -425,18 +425,18 @@ The Kiln MCP server (`kiln serve`) exposes **<!-- KILN_MCP_TOOL_COUNT:OLD --> 93
   - Stop a running print immediately
 - **purge_filament**
   - Heat the nozzle and push a short length through — the clog test, with `load_filament` and `unload_filament` beside it for a spool change
-  - Reports what the printer could actually tell: on a Bambu it reads the AMS and translates the printer's own fault code, and where a machine reports no flow signal it says so rather than claiming success
-  - Always says where the purge went: parked over the machine's own purge chute first where the model's own start-sequence position is served one plan at a time through Kiln's hosted service for a printer paired to your Kiln sign-in, free, and kept on your machine so it keeps working offline, or in place with the reason — never a guessed coordinate
+  - Reports what the printer could actually tell: where a machine reports no flow signal it says so rather than claiming success
+  - Always says where the purge went: over the machine's own purge chute where Kiln knows it for your model (served through Kiln's hosted service for a printer paired to your Kiln sign-in, free, and kept on your machine so it keeps working offline), or in place with the reason — never a guessed coordinate
 - **wipe_nozzle**
-  - Clean the nozzle tip on the printer's own wipe pad, running the pass its start sequence runs (served one plan at a time through Kiln's hosted service for a printer paired to your Kiln sign-in, free, and kept on your machine so it keeps working offline); refuses, and says what to use instead, on any model without a served pad position
-  - Run it in steps where the pass is new to a machine: `plan_only` describes every motion and sends nothing; `step=N` sends one motion, says what it left armed, and holds the heater-off finish until the last step. A wipe whose plan presses the plate — its Z datum is taken on the plate, or the head crosses the plate to reach the pad — asks for `plate_clear` on every call: a person's word, never inferred. A pass derived from a model's start file that no one has yet run on a real machine says so and runs in steps only
+  - Clean the nozzle tip on the printer's own wipe pad (served through Kiln's hosted service for a printer paired to your Kiln sign-in, free, and kept on your machine so it keeps working offline); refuses, and says what to use instead, on any model whose pad Kiln does not know
+  - Run it in steps where the pass is new to a machine: `plan_only` describes every motion and sends nothing; `step=N` sends one motion, says what it left armed, and holds the cool-down until the last step. A wipe that presses or crosses the plate asks for `plate_clear` on every call: a person's word, never inferred. Where a model's wipe has not yet been run on a real machine, Kiln says so and runs it in steps only
 - **home_axes**
-  - The Home button, from Kiln: the model's own start-sequence homing where it is served one plan at a time through Kiln's hosted service for a printer paired to your Kiln sign-in, free, and kept on your machine so it keeps working offline, the firmware's own routine elsewhere, a refusal that names the screen's jog controls where neither is safe
+  - The Home button, from Kiln: your model's own homing routine where Kiln has it (served through Kiln's hosted service for a printer paired to your Kiln sign-in, free, and kept on your machine so it keeps working offline), the firmware's own routine elsewhere, a refusal that names the screen's jog controls where neither is safe
   - Run it in steps the first time: `plan_only` describes every motion before anything moves; `step=N` sends one motion and says what it left armed
 - **park_head**
-  - Move the head somewhere safe, away from the plate, and leave it there — raise, home X, off-plate spot; never a Z touch, never heat
+  - Move the head to the model's own spot off the plate and leave it there; never a Z touch, never heat
 - **plate_status**
-  - What Kiln knows is on the build plate: the print that left a part there, how tall it is and how long ago, or that it is clear — a person's word (`kiln plate clear`, or `plate_clear` on home and park) or a look through the printer's camera (`look_at_plate`); nothing marks it clear on its own
+  - What Kiln knows is on the build plate: the print that left a part there and how long ago, or that it is clear — a person's word (`kiln plate clear`, or `plate_clear` on home and park) or a look through the printer's camera (`look_at_plate`); nothing marks it clear on its own
   - Home, park, slicing and starting a print refuse to cross a recorded part, and the refusal shows the plate through the camera where the printer has one, so an old record is checked rather than trusted
 - **diagnose_print_failure_live**
   - Diagnose a failing print from live printer state plus the model's own geometry
@@ -492,7 +492,9 @@ All local printing is **free forever** — status, file management, slicing, fle
 | **Business** | $199/mo | Commercial use, 3 printers + 3 seats, fleet management, cross-printer learning, QR generation, assembly manuals, team pull requests, approval gates, webhooks. |
 | **Enterprise** | Contact us | Large fleets, SSO/SCIM, RBAC, audit trail, encrypted G-code at rest, white-label manuals, 99.9% SLA, on-prem/VPC. |
 
-Full comparison at **[kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&utm_medium=readme)**. Run `kiln upgrade` to activate a license key. For provider-routed orders, the provider remains merchant of record; Kiln acts as orchestration infrastructure.
+**Founding offer:** half off for life while founding spots last — Pro $24.50/mo or $234/yr, Business $99.50/mo or $954/yr. Students get half off for 12 months. Details and how to claim the student price: **[kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&utm_medium=readme)**.
+
+Full comparison at **[kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&utm_medium=readme)**. Already subscribed? Run `kiln signin` to put this machine on your plan. For provider-routed orders, the provider remains merchant of record; Kiln acts as orchestration infrastructure.
 
 ## Safety
 
@@ -589,7 +591,6 @@ Entry-point plugins are **default-deny** in production (`KILN_PLUGIN_POLICY=stri
 | `consumer.py` | Consumer workflow for non-printer users (address validation, material recommendations, timeline/price estimation, onboarding) |
 | `cost_estimator.py` | Print cost estimation from G-code analysis |
 | `materials.py` | Multi-material and spool tracking |
-| `material_catalog.py` | Material brand catalog, properties, and purchase-link metadata |
 | `material_inventory.py` | Fleet material inventory and assignment tracking |
 | `bed_leveling.py` | Automated bed leveling trigger system |
 | `streaming.py` | MJPEG webcam streaming proxy |
@@ -611,12 +612,11 @@ Entry-point plugins are **default-deny** in production (`KILN_PLUGIN_POLICY=stri
 | `agent_loop.py` | Generic agent loop for any OpenAI-compatible API (OpenRouter, direct, etc.) |
 | `openrouter.py` | OpenRouter integration with model catalog and auto-tier detection |
 | `data/` | Bundled JSON databases (safety profiles, slicer profiles, printer intelligence) |
-| `gateway/` | External-provider integration gateway *(as integrations launch)* |
 | `heater_watchdog.py` | Auto-cooldown watchdog for idle heaters |
 | `wallets.py` | Crypto wallet configuration (Solana/Ethereum for donations and fees) |
 | `pro_tool_manifest.json` | Public manifest for kiln-pro tool discovery and REST proxy stubs |
 | `decoration_quota.py` | Free-tier decoration quota tracking and tier resolution hooks |
-| `cli/` | Click CLI with <!-- KILN_CLI_COUNT:OLD --> 253 commands and JSON output |
+| `cli/` | Click CLI with <!-- KILN_CLI_COUNT:OLD --> 245 commands and JSON output |
 
 kiln-pro ([kiln3d.com](https://kiln3d.com/?utm_source=github&utm_medium=readme)) extends public Kiln with paid-tier REST serving, billing, licensing, SSO, RBAC, G-code encryption, uptime reporting, team administration, and project-cost workflows. Public Kiln exposes only the interface/proxy surface for those capabilities; the private implementation stays in kiln-pro.
 </details>
@@ -673,3 +673,7 @@ By contributing, you agree to the [Contributor License Agreement](policies/CONTR
 ---
 
 Also listed on [Smithery](https://smithery.ai/servers/codeofaxel/kiln).
+
+## Trademarks
+
+[OctoPrint is a registered trademark](https://octoprint.org). Other product and company names are trademarks of their respective owners; Kiln is not affiliated with or endorsed by them.

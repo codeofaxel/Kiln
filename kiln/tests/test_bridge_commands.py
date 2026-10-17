@@ -916,7 +916,6 @@ def test_which_platforms_have_a_supervising_login_service(monkeypatch):
 
 from kiln.cli.bridge_commands import (  # noqa: E402
     _credential_prompts,
-    _discovered_host,
     _discovered_line,
     _offer_first_printer,
     _slicer_note,
@@ -938,11 +937,11 @@ def test_suggest_printer_name_slugs_the_advertised_name():
 
 
 def test_discovered_host_keeps_real_ports_and_bares_bambu():
-    assert _discovered_host(_found()) == "192.168.1.23:7125"
-    assert _discovered_host(_found(port=80)) == "192.168.1.23"
+    assert _found().address == "192.168.1.23:7125"
+    assert _found(port=80).address == "192.168.1.23"
     # Bambu speaks MQTT on its own fixed port — whatever port discovery saw,
     # the saved host must stay bare or the adapter would dial the wrong thing.
-    assert _discovered_host(_found(printer_type="bambu", port=990)) == "192.168.1.23"
+    assert _found(printer_type="bambu", port=990).address == "192.168.1.23"
 
 
 def test_discovered_line_prefers_the_advertised_name():
@@ -983,6 +982,9 @@ def test_onboarding_saves_the_one_found_printer(monkeypatch, capsys):
     saved = {}
 
     def fake_save(name, ptype, host, **kw):
+        # The save is handed a way to read the machine's own id; what it
+        # reads is the config layer's business, so only its presence is pinned.
+        assert callable(kw.pop("read_machine_identity"))
         saved.update({"name": name, "type": ptype, "host": host, **kw})
         return "/tmp/config.yaml"
 

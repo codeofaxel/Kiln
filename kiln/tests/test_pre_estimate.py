@@ -101,15 +101,25 @@ class TestGetMaterialProfile:
 class TestGetPrinterSpeeds:
     """Tests for printer speed profile lookup."""
 
-    def test_known_printer_bambu_a1(self):
-        speeds = _get_printer_speeds("bambu_a1")
-        assert speeds["infill"] == pytest.approx(250.0)
-        assert speeds["perimeter"] == pytest.approx(200.0)
-        assert speeds["first_layer"] == pytest.approx(50.0)
+    # The session fixture's synthetic printers carry the profiles here; a
+    # real printer's figures are its served record, pinned in kiln-pro's
+    # ``tests/test_printer_catalogue_numbers.py``.
 
-    def test_known_printer_ender3(self):
+    def test_known_printer(self):
+        speeds = _get_printer_speeds("kilntest_open")
+        assert speeds["infill"] == pytest.approx(80.0)
+        assert speeds["perimeter"] == pytest.approx(60.0)
+        assert speeds["first_layer"] == pytest.approx(25.0)
+
+    def test_another_known_printer(self):
+        speeds = _get_printer_speeds("kilntest_ptfe")
+        assert speeds["infill"] == pytest.approx(60.0)
+
+    def test_a_roster_printer_with_no_record_gets_the_defaults(self, signed_out_install):
+        """Signed out, a roster name answers the generic figures, never a
+        sibling's."""
         speeds = _get_printer_speeds("ender3")
-        assert speeds["infill"] == pytest.approx(50.0)
+        assert speeds == _get_printer_speeds(None)
 
     def test_unknown_printer_returns_defaults(self):
         speeds = _get_printer_speeds("nonexistent_printer_xyz")
@@ -121,7 +131,7 @@ class TestGetPrinterSpeeds:
         assert speeds["perimeter"] > 0
 
     def test_all_speeds_positive(self):
-        speeds = _get_printer_speeds("bambu_a1")
+        speeds = _get_printer_speeds("kilntest_open")
         for key, val in speeds.items():
             assert val > 0, f"Speed '{key}' should be positive"
 
@@ -134,14 +144,14 @@ class TestGetPrinterSpeeds:
 class TestPrinterDefaults:
     """Tests for printer default layer height and infill."""
 
-    def test_bambu_a1_layer_height(self):
-        assert _get_printer_layer_height("bambu_a1") == pytest.approx(0.2)
+    def test_layer_height(self):
+        assert _get_printer_layer_height("kilntest_open") == pytest.approx(0.2)
 
-    def test_bambu_a1_infill(self):
-        assert _get_printer_infill("bambu_a1") == pytest.approx(15.0)
+    def test_infill(self):
+        assert _get_printer_infill("kilntest_enclosed") == pytest.approx(15.0)
 
-    def test_prusa_mk4_infill(self):
-        assert _get_printer_infill("prusa_mk4") == pytest.approx(20.0)
+    def test_another_infill(self):
+        assert _get_printer_infill("kilntest_open") == pytest.approx(20.0)
 
     def test_none_printer_defaults(self):
         assert _get_printer_layer_height(None) == pytest.approx(0.2)
@@ -156,39 +166,24 @@ class TestPrinterDefaults:
 class TestGetPrinterToolChange:
     """Tests for per-printer tool change data lookup."""
 
-    def test_bambu_a1_ams_lite(self):
-        tc = _get_printer_tool_change("bambu_a1")
+    def test_a_changer_kiln_drives(self):
+        tc = _get_printer_tool_change("kilntest_enclosed")
         assert tc["tool_changer"] == "ams_lite"
         assert tc["has_auto_tool_change"] is True
         assert tc["tool_change_seconds"] > 0
 
-    def test_bambu_x1c_ams(self):
-        tc = _get_printer_tool_change("bambu_x1c")
-        assert tc["tool_changer"] == "ams"
-        assert tc["has_auto_tool_change"] is True
-
-    def test_prusa_mk4_mmu3(self):
-        tc = _get_printer_tool_change("prusa_mk4")
-        assert tc["tool_changer"] == "mmu3"
-        assert tc["has_auto_tool_change"] is True
-
-    def test_prusa_mk3s_mmu2s(self):
-        tc = _get_printer_tool_change("prusa_mk3s")
-        assert tc["tool_changer"] == "mmu2s"
-        assert tc["has_auto_tool_change"] is True
-
-    def test_voron_2_ercf(self):
-        tc = _get_printer_tool_change("voron_2")
+    def test_a_changer_kiln_has_never_driven(self):
+        tc = _get_printer_tool_change("kilntest_variants_se")
         assert tc["tool_changer"] == "ercf"
         assert tc["has_auto_tool_change"] is True
 
-    def test_ender3_no_tool_changer(self):
-        tc = _get_printer_tool_change("ender3")
+    def test_no_tool_changer(self):
+        tc = _get_printer_tool_change("kilntest_open")
         assert tc["tool_changer"] == "none"
         assert tc["has_auto_tool_change"] is False
 
-    def test_elegoo_neptune4_no_tool_changer(self):
-        tc = _get_printer_tool_change("elegoo_neptune4")
+    def test_a_roster_printer_with_no_record_has_no_changer_on_record(self, signed_out_install):
+        tc = _get_printer_tool_change("ender3")
         assert tc["tool_changer"] == "none"
         assert tc["has_auto_tool_change"] is False
 
@@ -200,52 +195,22 @@ class TestGetPrinterToolChange:
         tc = _get_printer_tool_change(None)
         assert tc["has_auto_tool_change"] is False
 
-    def test_prusa_mini_no_mmu(self):
-        """Prusa Mini does NOT have MMU compatibility."""
-        tc = _get_printer_tool_change("prusa_mini")
+    def test_a_single_material_row_states_zero_seconds(self):
+        tc = _get_printer_tool_change("kilntest_small")
         assert tc["tool_changer"] == "none"
         assert tc["has_auto_tool_change"] is False
         assert tc["tool_change_seconds"] == 0
 
-    def test_prusa_xl_tool_changer(self):
-        """Prusa XL uses physical tool changer — fastest swap mechanism."""
-        tc = _get_printer_tool_change("prusa_xl")
-        assert tc["tool_changer"] == "tool_changer"
-        assert tc["has_auto_tool_change"] is True
-        # Tool changer should be much faster than AMS/MMU
-        assert tc["tool_change_seconds"] < 10
+    def test_every_held_profile_has_tool_change_data(self):
+        """Every profile this process holds (the generic row and the
+        session's synthetic printers) carries a tool_change record; that
+        every served record does is pinned in kiln-pro."""
+        from kiln.slicer_profiles import list_slicer_profiles, raw_profile
 
-    def test_prusa_xl_fastest_swap(self):
-        """Prusa XL should be faster per-swap than any other printer."""
-        tc_xl = _get_printer_tool_change("prusa_xl")
-        tc_bambu = _get_printer_tool_change("bambu_a1")
-        tc_mmu = _get_printer_tool_change("prusa_mk4")
-        assert tc_xl["tool_change_seconds"] < tc_bambu["tool_change_seconds"]
-        assert tc_xl["tool_change_seconds"] < tc_mmu["tool_change_seconds"]
-
-    def test_bambu_vs_prusa_timing(self):
-        """AMS Lite and MMU3 should have different timing."""
-        tc_bambu = _get_printer_tool_change("bambu_a1")
-        tc_prusa = _get_printer_tool_change("prusa_mk4")
-        # Both should have positive times but they should differ
-        assert tc_bambu["tool_change_seconds"] > 0
-        assert tc_prusa["tool_change_seconds"] > 0
-
-    def test_all_supported_printers_have_tool_change_data(self):
-        """Every printer in slicer_profiles.json should have tool_change data."""
-        import json as _json
-        import os
-
-        profiles_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
-            "src", "kiln", "data", "slicer_profiles.json",
-        )
-        with open(profiles_path) as fh:
-            profiles = _json.load(fh)
-
-        for pid, profile in profiles.items():
-            if pid.startswith("_"):
-                continue
+        held = {pid: raw_profile(pid) for pid in list_slicer_profiles()}
+        held = {pid: row for pid, row in held.items() if row is not None}
+        assert "default" in held and "kilntest_open" in held
+        for pid, profile in held.items():
             tc = profile.get("tool_change")
             assert tc is not None, f"Printer '{pid}' missing tool_change data"
             assert "tool_change_seconds" in tc, f"Printer '{pid}' missing tool_change_seconds"
@@ -343,9 +308,9 @@ class TestEstimateFromDimensionsSingleMaterial:
 
     def test_flat_tray_like_object(self):
         """A 120x120x15mm tray-like object."""
-        est = estimate_from_dimensions(120, 120, 15, printer_id="bambu_a1")
+        est = estimate_from_dimensions(120, 120, 15, printer_id="kilntest_enclosed")
         assert est.estimated_time_seconds > 0
-        assert est.printer_id == "bambu_a1"
+        assert est.printer_id == "kilntest_enclosed"
         assert est.infill_percent == pytest.approx(15.0)
         assert est.layer_height_mm == pytest.approx(0.2)
 
@@ -373,17 +338,17 @@ class TestEstimateFromDimensionsSingleMaterial:
         assert est_high.total_weight_grams > est_low.total_weight_grams
 
     def test_fast_printer_less_time(self):
-        """Bambu A1 (fast) should estimate less time than Ender 3 (slow)."""
+        """A fast synthetic printer estimates less time than a slow one."""
         est_fast = estimate_from_dimensions(
-            100, 100, 50, printer_id="bambu_a1"
+            100, 100, 50, printer_id="kilntest_enclosed"
         )
         est_slow = estimate_from_dimensions(
-            100, 100, 50, printer_id="ender3"
+            100, 100, 50, printer_id="kilntest_open"
         )
         assert est_fast.estimated_time_seconds < est_slow.estimated_time_seconds
 
     def test_confidence_with_printer(self):
-        est = estimate_from_dimensions(50, 50, 50, printer_id="bambu_a1")
+        est = estimate_from_dimensions(50, 50, 50, printer_id="kilntest_enclosed")
         assert est.confidence == "high"
 
     def test_confidence_without_printer(self):
@@ -414,13 +379,13 @@ class TestEstimateFromDimensionsMultiMaterial:
         est = estimate_from_dimensions(
             100, 100, 15,
             materials=["PLA", "PLA"],
-            printer_id="bambu_a1",
+            printer_id="kilntest_enclosed",
         )
         assert len(est.filaments) == 2
         assert est.filaments[0].role == "body"
         assert est.filaments[1].role == "accent_1"
         assert est.tool_changes > 0
-        assert est.tool_change_type == "ams_lite"  # A1 has AMS Lite
+        assert est.tool_change_type == "ams_lite"  # the synthetic row with a changer Kiln drives
 
     def test_two_color_fractions_sum_to_one(self):
         est = estimate_from_dimensions(
@@ -453,7 +418,7 @@ class TestEstimateFromDimensionsMultiMaterial:
         est = estimate_from_dimensions(
             100, 100, 15,
             materials=["PLA", "PLA", "PLA"],
-            printer_id="bambu_a1",
+            printer_id="kilntest_enclosed",
         )
         assert len(est.filaments) == 3
         assert est.tool_changes > 0
@@ -472,18 +437,18 @@ class TestEstimateFromDimensionsMultiMaterial:
         est = estimate_from_dimensions(
             100, 100, 15,
             materials=["PLA", "PLA"],
-            printer_id="bambu_a1",
+            printer_id="kilntest_enclosed",
         )
-        assert est.tool_change_type == "ams_lite"  # A1 has AMS Lite
+        assert est.tool_change_type == "ams_lite"  # the synthetic row with a changer Kiln drives
         assert est.tool_change_time_seconds > 0
 
     def test_tool_changes_prusa_mk4(self):
         est = estimate_from_dimensions(
             100, 100, 15,
             materials=["PLA", "PLA"],
-            printer_id="prusa_mk4",
+            printer_id="kilntest_variants_se",
         )
-        assert est.tool_change_type == "mmu3"  # MK4 has MMU3
+        assert est.tool_change_type == "ercf"  # the synthetic row with a changer Kiln has never driven
         assert est.tool_change_time_seconds > 0
 
     def test_tool_changes_ender3(self):
@@ -491,7 +456,7 @@ class TestEstimateFromDimensionsMultiMaterial:
         est = estimate_from_dimensions(
             100, 100, 15,
             materials=["PLA", "PLA"],
-            printer_id="ender3",
+            printer_id="kilntest_open",
         )
         assert est.tool_change_type == "manual"
         assert est.tool_change_time_seconds > 0
@@ -510,13 +475,13 @@ class TestEstimateFromDimensionsMultiMaterial:
             100, 100, 15,
             materials=["PLA", "PLA"],
             material_fractions=[0.95, 0.05],
-            printer_id="bambu_a1",
+            printer_id="kilntest_enclosed",
         )
         est_even = estimate_from_dimensions(
             100, 100, 15,
             materials=["PLA", "PLA"],
             material_fractions=[0.50, 0.50],
-            printer_id="bambu_a1",
+            printer_id="kilntest_enclosed",
         )
         assert est_surface.tool_changes < est_even.tool_changes
 
@@ -571,7 +536,7 @@ class TestEstimateFromTemplate:
     """Tests for template-based estimation."""
 
     def test_phone_stand(self):
-        est = estimate_from_template("phone_stand", printer_id="bambu_a1")
+        est = estimate_from_template("phone_stand", printer_id="kilntest_enclosed")
         assert est.estimated_time_seconds > 0
         assert est.total_cost_usd > 0
         assert est.width_mm > 0
@@ -604,7 +569,7 @@ class TestEstimateFromTemplate:
         est = estimate_from_template(
             "phone_stand",
             materials=["PLA", "PLA"],
-            printer_id="bambu_a1",
+            printer_id="kilntest_enclosed",
         )
         assert len(est.filaments) == 2
         assert est.tool_changes > 0
@@ -675,7 +640,7 @@ class TestConsistency:
         assert sum_lengths == pytest.approx(est.total_filament_meters, abs=0.1)
 
     def test_total_cost_equals_sum(self):
-        est = estimate_from_dimensions(100, 100, 50, printer_id="bambu_a1")
+        est = estimate_from_dimensions(100, 100, 50, printer_id="kilntest_enclosed")
         expected = est.filament_cost_usd + est.electricity_cost_usd
         assert est.total_cost_usd == pytest.approx(expected, abs=0.02)
 
@@ -684,7 +649,7 @@ class TestConsistency:
         est = estimate_from_dimensions(
             100, 100, 15,
             materials=["PLA", "PLA"],
-            printer_id="bambu_a1",
+            printer_id="kilntest_enclosed",
         )
         # tool_change_time should be positive and included in total
         assert est.tool_change_time_seconds > 0
@@ -717,14 +682,14 @@ class TestRealisticScenarios:
             materials=["PLA", "PLA"],
             material_fractions=[0.85, 0.15],
             material_roles=["body", "surface_texture"],
-            printer_id="bambu_a1",
+            printer_id="kilntest_enclosed",
         )
 
         # Time should be in a reasonable range (1-4 hours)
         assert 1800 < est.estimated_time_seconds < 14400
         # Should have tool changes
         assert est.tool_changes > 0
-        assert est.tool_change_type == "ams_lite"  # A1 has AMS Lite
+        assert est.tool_change_type == "ams_lite"  # the synthetic row with a changer Kiln drives
         # Cost should be under $5 for PLA
         assert est.total_cost_usd < 5.0
         # Weight should be reasonable (30-80g for a tray)
@@ -735,7 +700,7 @@ class TestRealisticScenarios:
         est = estimate_from_dimensions(
             90, 90, 8,
             materials=["PLA"],
-            printer_id="bambu_a1",
+            printer_id="kilntest_enclosed",
         )
         # Should be quick — under 1 hour
         assert est.estimated_time_seconds < 5400
@@ -746,7 +711,7 @@ class TestRealisticScenarios:
         est = estimate_from_dimensions(
             100, 100, 200,
             materials=["PLA"],
-            printer_id="ender3",
+            printer_id="kilntest_open",
         )
         # Ender 3 is slow — this should take many hours
         assert est.estimated_time_seconds > 7200  # at least 2 hours
@@ -756,7 +721,7 @@ class TestRealisticScenarios:
         est = estimate_from_dimensions(
             120, 35, 8,
             materials=["PLA"],
-            printer_id="bambu_a1",
+            printer_id="kilntest_enclosed",
         )
         assert est.estimated_time_seconds < 3600  # under 1 hour
 
@@ -810,7 +775,7 @@ class TestListAddons:
             assert "creality_cfs" in ids
 
     def test_filter_excludes_incompatible(self):
-        addons = list_addons(printer_id="ender3")
+        addons = list_addons(printer_id="kilntest_open")
         ids = {a["id"] for a in addons}
         # CFS-C is K1-series only, CANVAS is Centauri-only
         assert "creality_cfs" not in ids
@@ -825,7 +790,7 @@ class TestListAddons:
         assert "coprint_kcm" in ids  # Klipper-only, Voron is Klipper
 
     def test_klipper_addons_excluded_for_non_klipper(self):
-        addons = list_addons(printer_id="ender3")
+        addons = list_addons(printer_id="kilntest_open")
         ids = {a["id"] for a in addons}
         assert "coprint_kcm" not in ids  # Ender 3 is not Klipper
 
@@ -880,13 +845,13 @@ class TestGetPrinterToolChangeWithAddon:
 
     def test_unknown_addon_returns_builtin(self):
         """Unknown add-on ID falls back to the printer's built-in data."""
-        tc = _get_printer_tool_change("bambu_a1", tool_changer_addon="nonexistent_xyz")
+        tc = _get_printer_tool_change("kilntest_enclosed", tool_changer_addon="nonexistent_xyz")
         # Should fall back to AMS Lite since addon wasn't found
         assert tc["tool_changer"] == "ams_lite"
         assert tc["addon"] is None
 
     def test_no_addon_returns_builtin(self):
-        tc = _get_printer_tool_change("bambu_a1", tool_changer_addon=None)
+        tc = _get_printer_tool_change("kilntest_enclosed", tool_changer_addon=None)
         assert tc["tool_changer"] == "ams_lite"
         assert tc["addon"] is None
 
@@ -957,7 +922,7 @@ class TestEstimateWithAddon:
         est = estimate_from_dimensions(
             100, 100, 15,
             materials=["PLA", "PLA"],
-            printer_id="ender3",
+            printer_id="kilntest_open",
             tool_changer_addon="mosaic_palette3",
         )
         assert est.tool_change_type == "palette"
@@ -969,13 +934,13 @@ class TestEstimateWithAddon:
         est_palette = estimate_from_dimensions(
             100, 100, 15,
             materials=["PLA", "PLA"],
-            printer_id="ender3",
+            printer_id="kilntest_open",
             tool_changer_addon="mosaic_palette3",
         )
         est_chameleon = estimate_from_dimensions(
             100, 100, 15,
             materials=["PLA", "PLA"],
-            printer_id="ender3",
+            printer_id="kilntest_open",
             tool_changer_addon="chameleon_mk4",
         )
         assert est_palette.tool_change_time_seconds < est_chameleon.tool_change_time_seconds
@@ -997,7 +962,7 @@ class TestEstimateWithAddon:
             estimate_from_dimensions(
                 100, 100, 15,
                 materials=["PLA", "PLA"],
-                printer_id="ender3",
+                printer_id="kilntest_open",
                 tool_changer_addon="creality_cfs",
             )
 
@@ -1018,7 +983,7 @@ class TestEstimateWithAddon:
             100, 100, 15,
             materials=["PLA"] * 5,  # 5 colors
             material_fractions=[0.5, 0.15, 0.15, 0.1, 0.1],
-            printer_id="ender3",
+            printer_id="kilntest_open",
             tool_changer_addon="chameleon_mk4",  # max 4 colors
         )
         assert any("max 4 colors" in w for w in est.warnings)

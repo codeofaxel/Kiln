@@ -87,22 +87,27 @@ class _AuthToolsPlugin:
                     code="SIGNIN_UNAVAILABLE",
                 )
 
+            from kiln.cli.auth_commands import _record_signin_stage
+
             try:
                 resp = _http_post("/api/auth/device/start", {})
             except Exception as exc:
                 # _http_post raises click.ClickException on any HTTP / network
                 # failure; surface its message rather than let it bubble.
+                _record_signin_stage("start_failed")
                 return _srv._error_dict(
                     f"kiln_signin: could not start the sign-in flow: {exc}",
                     code="SIGNIN_START_FAILED",
                 )
 
             if not resp.get("success", True) and resp.get("error"):
+                _record_signin_stage("start_failed")
                 return _srv._error_dict(
                     resp.get("error") or "Could not start the sign-in flow.",
                     code="SIGNIN_START_FAILED",
                 )
 
+            _record_signin_stage("started_chat")
             return {
                 "success": True,
                 "verification_uri": resp.get("verification_uri") or "",
@@ -192,7 +197,7 @@ class _AuthToolsPlugin:
                         "tier": tier,
                         "has_entitlement": bool(resp.get("has_entitlement")),
                         "signed_in_at": int(time.time()),
-                    })
+                    }, door="chat")
                 except Exception as exc:
                     return _srv._error_dict(
                         f"kiln_signin_poll: sign-in succeeded but the "
@@ -209,6 +214,10 @@ class _AuthToolsPlugin:
 
             # denied / expired / anything else — echo the server's human
             # message if present, but never raise.
+            if status in ("denied", "expired"):
+                from kiln.cli.auth_commands import _record_signin_stage
+
+                _record_signin_stage(status)
             out: dict[str, Any] = {"success": True, "status": status}
             msg = resp.get("message")
             if msg:

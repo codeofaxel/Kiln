@@ -105,8 +105,19 @@ class TestTheRuleItself:
 
     def test_registration_and_discovery_are_never_gated(self):
         """Owning printers is free; running them in parallel is the product."""
-        for never in ("register_printer", "list_printers", "discover_printers", "upload_file"):
+        for never in ("register_printer", "list_printers", "discover_printers"):
             assert never not in engagement.GATED_ACTIONS
+        assert not engagement.is_gated("get_printer_info")
+
+    def test_what_a_second_machine_holds_is_read_on_its_own_screen(self, two_printers):
+        """Files, spools and settings on the other machine are gated (2026-10-11):
+        its own screen shows them, and reading them through Kiln is the fleet
+        experience the fleet tier sells."""
+        a, b = two_printers
+        _engage(a, "a1")
+        for read in ("upload_file", "list_files", "get_ams_status", "get_filament_status",
+                     "read_nozzle_setting", "get_bed_mesh", "get_firmware_status"):
+            assert engagement.check_command(b, read) is not None, read
 
     def test_a_fleet_tier_lifts_the_rule(self, two_printers, monkeypatch):
         a, b = two_printers
@@ -276,7 +287,7 @@ class TestItRefusesToGuess:
     def test_an_ungated_action_passes_through(self, two_printers):
         a, b = two_printers
         _engage(a, "a1")
-        assert engagement.check_command(b, "list_files") is None
+        assert engagement.check_command(b, "get_printer_info") is None
 
 
 class TestWhatAPersonReads:
@@ -325,27 +336,18 @@ class TestTheAdapterChokepoint:
         assert err.verdict is verdict
         assert "a1" in str(err)
 
-    def test_every_control_method_is_covered(self):
-        """The list is the contract: a command absent here is ungated."""
-        assert engagement.GATED_ACTIONS == frozenset(
-            {
-                "get_state",
-                "get_job",
-                "pause_print",
-                "resume_print",
-                "cancel_print",
-                "emergency_stop",
-                "set_tool_temp",
-                "set_bed_temp",
-                "send_gcode",
-                "load_filament",
-                "unload_filament",
-                "purge_filament",
-                "wipe_nozzle",
-                "home_axes",
-                "park_head",
-            }
-        )
+    def test_the_commands_first_pinned_here_stay_gated(self):
+        """These fifteen were the whole rule until 2026-10-11.  Completeness --
+        every adapter command gated or named with a reason -- is pinned against
+        the real adapter classes in test_one_printer_rule_covers_every_command.py."""
+        first = {
+            "get_state", "get_job", "pause_print", "resume_print", "cancel_print",
+            "emergency_stop", "set_tool_temp", "set_bed_temp", "send_gcode",
+            "load_filament", "unload_filament", "purge_filament", "wipe_nozzle",
+            "home_axes", "park_head",
+        }
+        assert first <= engagement.GATED_ACTIONS
+        assert all(engagement.is_gated(action) for action in first)
 
 
 def _real_adapter_class():

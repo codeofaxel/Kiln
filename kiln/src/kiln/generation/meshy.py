@@ -39,6 +39,17 @@ from kiln.generation.base import (
 
 logger = logging.getLogger(__name__)
 
+#: How an image-to-3D job's prompt names the picture it was made from.
+_IMAGE_PROMPT_PREFIX = "[image-to-3d] "
+
+
+def _source_image(is_image_job: bool, prompt: str) -> str:
+    """The picture an image-to-3D job was made from, read back off the
+    prompt it recorded; "" for any other job."""
+    if is_image_job and prompt.startswith(_IMAGE_PROMPT_PREFIX):
+        return prompt[len(_IMAGE_PROMPT_PREFIX):]
+    return ""
+
 _BASE_URL = "https://api.meshy.ai/openapi/v2"
 _BASE_URL_V1 = "https://api.meshy.ai/openapi/v1"
 
@@ -334,13 +345,13 @@ class MeshyProvider(GenerationProvider):
                 code="INVALID_RESPONSE",
             )
 
-        self._prompts[task_id] = f"[image-to-3d] {image_url}"
+        self._prompts[task_id] = f"{_IMAGE_PROMPT_PREFIX}{image_url}"
         self._image_jobs.add(task_id)
 
         return GenerationJob(
             id=task_id,
             provider=self.name,
-            prompt=f"[image-to-3d] {image_url}",
+            prompt=f"{_IMAGE_PROMPT_PREFIX}{image_url}",
             status=GenerationStatus.PENDING,
             progress=0,
             created_at=time.time(),
@@ -489,6 +500,7 @@ class MeshyProvider(GenerationProvider):
             format=ext,
             file_size_bytes=file_size,
             prompt=prompt,
+            source_image=_source_image(job_id in self._image_jobs, prompt),
         )
 
     def list_styles(self) -> list[str]:

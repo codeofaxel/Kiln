@@ -17,7 +17,8 @@ do with the answer:
   never reaches the orchestrator -- and leaves the preview sign-off standing
   for the retry;
 * the survey's tier gate is relayed as it is, one gate;
-* a server without kiln-pro's survey refuses honestly, never routes blind;
+* a server without kiln-pro's survey asks Kiln's servers, never routes blind
+  (the served route itself is pinned in ``test_route_print_job_plain_install.py``);
 * ``suggest_printer_for_job`` says ``has_room`` per suggestion and, when the
   survey is not available, why not;
 * the job envelope: a mesh carries its size, a sliced file carries its path.
@@ -199,10 +200,18 @@ class TestRoutePrintJob:
         assert result == gate
         assert d.router.seen == [], "nothing is routed past a gate"
 
-    def test_without_the_survey_routing_refuses_rather_than_routing_blind(self, doors, tmp_path):
+    def test_without_the_survey_the_question_goes_to_kilns_servers_never_to_a_blind_route(self, doors, tmp_path, monkeypatch):
+        """A plain install has neither the survey nor the router; the door
+        asks the served route (``plan_fleet_route``) with what it read of
+        its own printers, and the local router is never consulted."""
+        import kiln.server as srv
+
+        asked: list[dict] = []
+        monkeypatch.setattr(srv, "_pro_api_call", lambda tool, **kw: asked.append({"tool": tool, **kw}) or {"success": True, "routing": {"recommended_printer": {"printer_id": "a"}}})
         d = doors(["a"], survey_missing=True)
         result = d.tools["route_print_job"](_cube(tmp_path / "cube.stl"), material="PLA")
-        assert result["success"] is False and result["error"]["code"] == "ROUTING_UNAVAILABLE"
+        assert result["success"] is True and result["routing"]["recommended_printer"]["printer_id"] == "a"
+        assert asked[0]["tool"] == "plan_fleet_route" and set(asked[0]["plates"]) == {"a"}
         assert d.router.seen == []
 
 

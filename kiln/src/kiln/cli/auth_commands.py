@@ -74,13 +74,26 @@ def _write_tokens(data: dict[str, Any]) -> None:
     path = _tokens_path()
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2, sort_keys=True))
+    tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
     with contextlib.suppress(OSError):
         os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)  # 0600
     tmp.replace(path)
 
 
-def _complete_signin(data: dict[str, Any]) -> None:
+def _record_signin_stage(stage: str) -> None:
+    """Count a sign-in funnel stage (``daily_stats.record_account_nudge``).
+
+    Never raises: a sign-in must not fail over its own counter.
+    """
+    try:
+        from kiln.daily_stats import record_account_nudge
+
+        record_account_nudge(stage)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _complete_signin(data: dict[str, Any], *, door: str = "other") -> None:
     """Store a new sign-in, then hand the account this install's agreement to
     the Terms.
 
@@ -90,8 +103,46 @@ def _complete_signin(data: dict[str, Any]) -> None:
     the moment one exists, not on the first hosted call that gets refused
     without it.  The hand-off is best-effort: a sign-in never fails over it,
     and a refused hosted call still makes it (``server._pro_api_call``).
+
+    ``door`` names which way in it was (``chat`` / ``cli`` / ``pair``), counted
+    here because this is the one function every door ends in: a fourth door
+    still counts, as ``completed_other``, instead of going unseen.  A machine
+    that still held a session is also counted ``completed_returning``, so a
+    lapsed owner signing back in is never read as a new account; one that
+    was shown a limits nudge at a printer's setup within the day is also
+    counted ``completed_limits``.
     """
+    try:
+        held = _read_tokens()
+        returning = bool(held.get("access_token") or held.get("refresh_token"))
+    except Exception:  # noqa: BLE001
+        returning = False
     _write_tokens(data)
+    _record_signin_stage(
+        f"completed_{door}" if door in ("chat", "cli", "pair") else "completed_other"
+    )
+    if returning:
+        _record_signin_stage("completed_returning")
+    # A limits nudge shown at a printer's setup (``safety_profiles.warm_profile``)
+    # waits for this moment in a marker on disk, because it was minted in the
+    # MCP server process and this sign-in may be finishing in another: counted
+    # ``completed_limits`` when the nudge was within a day, nothing otherwise.
+    try:
+        from kiln.daily_stats import record_limits_nudge_conversion
+
+        record_limits_nudge_conversion()
+    except Exception:  # noqa: BLE001 -- a sign-in never fails over its counter
+        pass
+    # And in THIS process the catalogue bridge forgets the signed-out misses,
+    # so the next ask for a printer's record goes to the servers at once
+    # rather than after its retry wait -- the in-chat door (kiln_signin_poll)
+    # ends here in the same process that will now answer for the printers.
+    try:
+        from kiln._pro_catalogue_bridge import forget
+
+        forget()
+    except Exception:  # noqa: BLE001
+        pass
     try:
         from kiln import terms
 
@@ -105,7 +156,7 @@ def _read_tokens() -> dict[str, Any]:
     if not path.exists():
         return {}
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return {}
 
@@ -282,11 +333,17 @@ def auth_login(no_browser: bool, timeout: int, provider: str | None) -> None:
         sys.exit(2)
 
     # 1) Start the device flow.
-    start = _http_post("/api/auth/device/start", {})
+    try:
+        start = _http_post("/api/auth/device/start", {})
+    except Exception:
+        _record_signin_stage("start_failed")
+        raise
     if not start.get("success"):
+        _record_signin_stage("start_failed")
         raise click.ClickException(
             start.get("error") or "Could not start the sign-in flow."
         )
+    _record_signin_stage("started_cli")
 
     device_code = start["device_code"]
     user_code = start["user_code"]
@@ -361,6 +418,7 @@ def auth_login(no_browser: bool, timeout: int, provider: str | None) -> None:
     else:
         if is_tty:
             click.echo("\r" + " " * 60 + "\r", nl=False, err=True)
+        _record_signin_stage("timed_out")
         raise click.ClickException(
             "Sign-in timed out before the browser flow completed. "
             "Run `kiln signin` again."
@@ -382,7 +440,7 @@ def auth_login(no_browser: bool, timeout: int, provider: str | None) -> None:
             "tier": tier,
             "has_entitlement": bool(result.get("has_entitlement")),
             "signed_in_at": int(time.time()),
-        })
+        }, door="cli")
         # Final confirmation on stdout (not stderr) so ``kiln login
         # | tail -1`` captures it.  Ember-coloured checkmark +
         # lowercase "you're in" matches the workshop's signin copy
@@ -392,10 +450,12 @@ def auth_login(no_browser: bool, timeout: int, provider: str | None) -> None:
     if status == "denied":
         # User cancelled in the browser (e.g. picked a provider, got
         # to the consent screen, hit back).  Quiet exit, no scolding.
+        _record_signin_stage("denied")
         raise click.ClickException(
             result.get("message") or "Sign-in was cancelled in the browser."
         )
     if status == "expired":
+        _record_signin_stage("expired")
         raise click.ClickException(
             result.get("message") or "Sign-in code expired. Run `kiln signin` again."
         )
@@ -861,7 +921,7 @@ def auth_pair(code: str, client: str | None) -> None:
         "tier": tier,
         "has_entitlement": bool(resp.get("has_entitlement")),
         "signed_in_at": int(time.time()),
-    })
+    }, door="pair")
 
     # Post-write smoke test — confirm the token the server just gave us
     # is accepted by /api/auth/whoami.  The token IS written regardless

@@ -120,7 +120,7 @@ def _cache_path(device_type: str) -> Path:
 
 def _load_cache(device_type: str) -> dict[str, Any] | None:
     try:
-        with _cache_path(device_type).open() as f:
+        with _cache_path(device_type).open(encoding="utf-8") as f:
             data = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return None
@@ -137,7 +137,7 @@ def _write_cache(device_type: str, table: dict[str, Any]) -> None:
         path = _cache_path(device_type)
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".json.tmp")
-        with tmp.open("w") as f:
+        with tmp.open("w", encoding="utf-8") as f:
             json.dump(table, f)
         os.replace(tmp, path)
     except OSError as exc:

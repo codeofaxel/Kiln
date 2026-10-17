@@ -34,6 +34,7 @@ from typing import Any
 from kiln import step_import
 from kiln.gcode import _MAX_SCAN_BYTES, GCODE_NUMBER, axis_value
 from kiln.gcode_metadata import read_member_text, sliced_gcode_member
+from kiln.untrusted_zip import UntrustedZipFile
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ def _load_printer_intelligence() -> dict[str, Any]:
     """Load printer_intelligence.json (cached)."""
     global _printer_intelligence_cache  # noqa: PLW0603
     if _printer_intelligence_cache is None:
-        with open(_PRINTER_INTELLIGENCE_PATH) as f:
+        with open(_PRINTER_INTELLIGENCE_PATH, encoding="utf-8") as f:
             _printer_intelligence_cache = json.load(f)
     return _printer_intelligence_cache
 
@@ -120,6 +121,15 @@ def _printer_id_candidates(printer_id: str | None) -> list[str]:
         if candidate in aliases:
             candidates.append(aliases[candidate])
 
+    # Then the spellings every other door resolves a printer by: the
+    # catalogue's own names for its rows ("Bambu Lab X1 Carbon", "Prusa
+    # MK4S") and the vendor forms.  Last, so nothing above resolves
+    # differently; a name only this rule knows is no longer a miss here
+    # while it is a hit at the safety and compatibility doors.
+    from kiln.catalog_keys import printer_key_candidates
+
+    candidates.extend(printer_key_candidates(printer_id))
+
     seen: set[str] = set()
     ordered: list[str] = []
     for candidate in candidates:
@@ -136,16 +146,97 @@ def _lookup_build_volume_exact(
         return None
     if candidate in _BUILD_VOLUME_OVERRIDES:
         return _BUILD_VOLUME_OVERRIDES[candidate]
-    entry = _load_printer_intelligence().get(candidate)
-    if not entry:
+    roster = _load_printer_intelligence()
+    if candidate not in roster:
         return None
-    vol = entry.get("build_volume_mm")
-    if not vol or len(vol) < 3:
+    # A roster printer: its bed is in its catalogue record, fetched once
+    # per printer (kiln.printer_intelligence reads it through the bridge).
+    from kiln.printer_intelligence import build_volume_for
+
+    resolved = build_volume_for(candidate)
+    if resolved is not None:
+        return resolved[1]
+    # With no record in hand -- a signed-out install, a first setup offline
+    # -- the roster's RATED bed (the marketed size, on the box) stands in,
+    # so the print-start gate, the bounds check and the park planner still
+    # hold the machine to its real edges (2026-10-15: with no bed at all they
+    # switched themselves off for every roster printer, and the make
+    # pipeline sized parts against a guessed 200 mm cube).  Never a guess:
+    # a roster row with no rated bed is unknown.  Every bed reader comes
+    # through here, so that is one helper's answer, not a branch per door.
+    return _rated_build_volume(roster.get(candidate))
+
+
+def _rated_build_volume(row: Any) -> tuple[float, float, float] | None:
+    """The roster row's ``rated_build_volume_mm`` as a tuple, or ``None``."""
+    volume = row.get("rated_build_volume_mm") if isinstance(row, dict) else None
+    if not isinstance(volume, (list, tuple)) or len(volume) != 3:
         return None
     try:
-        return (float(vol[0]), float(vol[1]), float(vol[2]))
+        x, y, z = (float(v) for v in volume)
     except (TypeError, ValueError):
         return None
+    return (x, y, z) if min(x, y, z) > 0 else None
+
+
+def build_volume_exact(printer_id: str | None) -> tuple[float, float, float] | None:
+    """The bed for EXACTLY the roster id *printer_id* spells (normalised,
+    never a prefix match and never ``default``): the record's, else the
+    roster's rated bed.  For a caller whose number becomes a travel move
+    (:func:`kiln.printers.bambu_3mf._bed_center`), where answering a
+    neighbouring key would be a move to the wrong place."""
+    key = _normalise_printer_id(printer_id or "") if printer_id else ""
+    return _lookup_build_volume_exact(key) if key else None
+
+
+def catalogue_printer_id(printer_id: str | None) -> str | None:
+    """The roster id *printer_id* spells, or ``None`` -- never ``default``.
+
+    Whether a printer IS a catalogue printer, asked of the roster alone, so
+    the answer is the same signed out, offline, or with the record in hand.
+    :func:`resolve_build_volume` answers a different question -- what its
+    bed is -- and has nothing to say until the record has been fetched.
+    """
+    roster = _load_printer_intelligence()
+    for candidate in _printer_id_candidates(printer_id):
+        if candidate != "default" and not candidate.startswith("_") and candidate in roster:
+            return candidate
+        if candidate in _BUILD_VOLUME_OVERRIDES:
+            return candidate
+    return None
+
+
+def no_bed_reason(
+    printer_id: str | None, *, instead: str | None, needed_for: str = "lay the part out on",
+) -> str:
+    """Why *printer_id* has no bed to lay a part out on, as a sentence that
+    names the fix.
+
+    Two different answers, told apart on purpose (2026-10-12): a printer
+    the roster does not list is UNKNOWN, and *instead* says what the caller
+    can do (pass the bed by hand, name a supported model); a roster printer
+    whose record this install does not hold is KNOWN -- the install is
+    signed out, or could not reach Kiln's servers at setup -- and is told
+    that sign-in is the fix.  Calling the second "unknown" sent a person
+    looking for a model id they already had right.  Never a guessed bed.
+    """
+    label = str(printer_id or "").strip()
+    listed = catalogue_printer_id(label) if label else None
+    if listed is None:
+        tail = f"; {instead}, or use a supported printer model id" if instead else ""
+        return f"Unknown printer_id {label!r}{tail}."
+    try:
+        from kiln._pro_catalogue_bridge import unanswered
+
+        why = unanswered(listed)
+    except Exception:  # noqa: BLE001
+        why = None
+    why = why or "sign in free and Kiln fetches it the next time this printer is set up"
+    tail = f"; {instead} to go on without it" if instead else ""
+    return (
+        f"Kiln knows the {listed} but this install holds no record for it, so it has no "
+        f"bed to {needed_for}: {why.rstrip('.')}. Nothing is guessed{tail}."
+    )
 
 
 def get_build_volume(printer_id: str | None) -> tuple[float, float, float] | None:
@@ -198,7 +289,7 @@ def owner_stated_build_volume(printer_id: str | None) -> tuple[float, float, flo
     on it says whose it is (the validation pipeline's resolver does), and
     a caller that only lays a part out on it need not.
     """
-    if resolve_build_volume(printer_id) is not None:
+    if catalogue_printer_id(printer_id) is not None:
         return None
     from kiln.safety_profiles import local_printer_build_volume
 
@@ -441,7 +532,7 @@ def _plate_gcode_file(threemf_path: str) -> Any:
     gcode_bytes: bytes | None = None
     if Path(threemf_path).is_file():
         try:
-            with zipfile.ZipFile(threemf_path) as zf:
+            with UntrustedZipFile(threemf_path) as zf:
                 member = sliced_gcode_member(zf)
                 if member is not None:
                     gcode_bytes = read_member_text(zf, member, _MAX_SCAN_BYTES).encode("utf-8")
@@ -481,16 +572,17 @@ def compute_3mf_geometry_bbox(threemf_path: str) -> dict[str, float] | None:
     never as a failure.
     """
     from kiln.threemf_parser import (
-        _CORE_NS,
-        _apply_3mf_transform,
         _ModelArchive,
-        _parse_vertices,
+        _placed_vertex_bounds,
+        open_untrusted_zip,
     )
 
-    points: list[tuple[float, float, float]] = []
     errors: list[str] = []
     try:
-        with zipfile.ZipFile(threemf_path) as zf:
+        with open_untrusted_zip(threemf_path) as zf:
+            # Structure only: the vertices are folded into running bounds as
+            # they stream (see _placed_vertex_bounds), so this check costs
+            # the same memory for a 1 MB part and a 1 GB one.
             archive = _ModelArchive(zf, errors)
             to_mm = archive.root_transform_mm()
             if to_mm is None:
@@ -499,14 +591,7 @@ def compute_3mf_geometry_bbox(threemf_path: str) -> dict[str, float] | None:
                     threemf_path, "; ".join(errors),
                 )
                 return None
-            for placed in archive.placements(root_transform=to_mm):
-                mesh_el = placed.element.find(f"{{{_CORE_NS}}}mesh")
-                if mesh_el is None:
-                    continue
-                points.extend(
-                    _apply_3mf_transform(placed.transform, v)
-                    for v in _parse_vertices(mesh_el)
-                )
+            bounds = _placed_vertex_bounds(archive, to_mm)
     except (zipfile.BadZipFile, ValueError, KeyError, OSError) as exc:
         logger.warning("compute_3mf_geometry_bbox failed for %s: %s",
                        threemf_path, exc)
@@ -517,12 +602,13 @@ def compute_3mf_geometry_bbox(threemf_path: str) -> dict[str, float] | None:
             threemf_path, "; ".join(errors),
         )
 
-    if not points:
+    if bounds is None:
         return None
+    (x_min, y_min, z_min), (x_max, y_max, z_max) = bounds
     return {
-        "x_min": min(p[0] for p in points), "x_max": max(p[0] for p in points),
-        "y_min": min(p[1] for p in points), "y_max": max(p[1] for p in points),
-        "z_min": min(p[2] for p in points), "z_max": max(p[2] for p in points),
+        "x_min": x_min, "x_max": x_max,
+        "y_min": y_min, "y_max": y_max,
+        "z_min": z_min, "z_max": z_max,
     }
 
 
@@ -829,7 +915,7 @@ def _fits_on_another_face(bbox: dict[str, float], build_volume: tuple[float, flo
     """
     extents = sorted(bbox[f"{a}_max"] - bbox[f"{a}_min"] for a in "xyz")
     sides = sorted(float(v) for v in build_volume)
-    return all(e <= s + _FIT_EPSILON_MM for e, s in zip(extents, sides))
+    return all(e <= s + _FIT_EPSILON_MM for e, s in zip(extents, sides, strict=True))
 
 
 def validate_gcode_for_printer(
@@ -946,7 +1032,7 @@ def check_gcode_has_homing(
     gcode_text: str | None = None
     if p.suffix.lower() == ".3mf" or str(p).lower().endswith(".gcode.3mf"):
         try:
-            with zipfile.ZipFile(p) as zf:
+            with UntrustedZipFile(p) as zf:
                 member = sliced_gcode_member(zf)
                 if member is not None:
                     gcode_text = read_member_text(zf, member, _MAX_SCAN_BYTES)

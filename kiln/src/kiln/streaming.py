@@ -96,9 +96,11 @@ LOCAL_ONLY_MESSAGE = (
 # are the only words each token may take.  This module is their one home:
 # the camera check and the dashboard read them from here.
 
-#: The feed the relay read, or tried to.
+#: The feed the relay read, or tried to.  ``still`` is not a feed: it is
+#: one picture fetched to look at the bed (:func:`note_still`), recorded
+#: here because it is the same evidence about the same cameras.
 VIDEO_CHANNELS: tuple[str, ...] = (
-    "bambu_port6000", "http_mjpeg", "rtsp", "webrtc", "none", "other",
+    "bambu_port6000", "http_mjpeg", "rtsp", "webrtc", "none", "other", "still",
 )
 
 #: Whose camera: the printer's own, a camera the user registered that is
@@ -111,6 +113,10 @@ VIDEO_EVENTS: tuple[str, ...] = (
     "fps_lt1", "fps_1to5", "fps_5to15", "fps_15up",
     "refused_access", "refused_unreachable", "refused_no_stream",
     "refused_rtsp", "refused_webrtc", "refused_other",
+    # Not the relay's: a still picture came back (``still`` channel), and
+    # a printer's owner said it has a camera Kiln could not reach (``none``
+    # channel).  Neither says anything about live video.
+    "still_ok", "owner_said",
 )
 
 #: The shape of a stream path on the printer's own address, recorded with
@@ -237,6 +243,62 @@ def _video_source(adapter: Any) -> tuple[str, str | None]:
     if camera_host and camera_host == _adapter_host(adapter):
         return "user_same_host", _address_event(stream)
     return "user_other", None
+
+
+def still_source(adapter: Any) -> str:
+    """Whose camera a still picture of the bed comes from: the printer's
+    own (``printer``), one the user registered that is served from the
+    printer's own address (``user_same_host``), or one elsewhere
+    (``user_other``).  A still is fetched from the registered camera's
+    snapshot address, else its stream address, so that is the address
+    compared -- not the stream address the relay would read."""
+    camera = getattr(adapter, "external_camera", None)
+    if camera is None:
+        return "printer"
+    address = getattr(camera, "snapshot_url", None) or getattr(camera, "stream_url", None)
+    camera_host = _hostname(address)
+    if camera_host and camera_host == _adapter_host(adapter):
+        return "user_same_host"
+    return "user_other"
+
+
+#: Camera facts already recorded today, so a bed looked at before every
+#: print reads as one printer with a camera, not a count of looks.
+_CAMERA_FACTS_RECORDED: set[tuple[str, ...]] = set()
+
+
+def _record_camera_fact(model: str, channel: str, source: str, event: str) -> None:
+    """Record one camera fact for a model, once per process-day."""
+    today = date.today().isoformat()
+    key = (today, model, channel, source, event)
+    with _PLAN_RECORDED_LOCK:
+        if key in _CAMERA_FACTS_RECORDED:
+            return
+        stale = {k for k in _CAMERA_FACTS_RECORDED if k[0] != today}
+        _CAMERA_FACTS_RECORDED.difference_update(stale)
+        _CAMERA_FACTS_RECORDED.add(key)
+    _record_outcome(model, channel, source, event)
+
+
+def note_still(adapter: Any) -> None:
+    """A real picture of the bed came back from this printer: say so, by
+    model and by whose camera it was, once a day.  Silent by contract."""
+    try:
+        from kiln.daily_stats import video_model_token
+
+        model = video_model_token(adapter.declared_printer_model())
+        _record_camera_fact(model, "still", still_source(adapter), "still_ok")
+    except Exception:  # noqa: BLE001 — telemetry never breaks a look
+        logger.debug("still outcome not recorded", exc_info=True)
+
+
+def note_owner_said_camera(printer_name: str | None) -> None:
+    """The owner said this printer has a camera of its own that Kiln could
+    not reach: say so, by model, once a day.  Silent by contract."""
+    try:
+        _record_camera_fact(video_model_for(printer_name), "none", "printer", "owner_said")
+    except Exception:  # noqa: BLE001
+        logger.debug("owner-said camera not recorded", exc_info=True)
 
 
 def _record_outcome(model: str, channel: str, source: str, event: str) -> None:

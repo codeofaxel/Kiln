@@ -41,6 +41,7 @@ from typing import Any
 
 from kiln.openscad_runner import present_signals
 from kiln.slicer_filament import LOADED_OBSERVED, SliceFilament, ensure_profile_filament
+from kiln.slicer_material import MaterialRefused
 from kiln.slicer_orca import (
     PRIME_TOWER_WIDTH_MM,
     ini_to_settings,
@@ -127,6 +128,21 @@ class SlicerError(Exception):
 
 class SlicerNotFoundError(SlicerError):
     """Raised when no slicer binary is found on the system."""
+
+
+class MaterialNotPrintableError(SlicerError):
+    """The target printer cannot melt the material the slice was declared for.
+
+    The print gate's own verdict, raised before the slicer runs: a file
+    sliced for a temperature the hotend never reaches is a file that cannot
+    print.  ``code`` is the gate's (``MATERIAL_EXCEEDS_HOTEND``), so a door
+    refuses in the words and with the code a print would.
+    """
+
+    def __init__(self, message: str, *, code: str, verdict: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.verdict = verdict or {}
 
 
 # ---------------------------------------------------------------------------
@@ -1072,12 +1088,15 @@ def slice_file(
     # whatever door it entered by.  The derived file keeps the printer
     # profile's name, so telemetry still counts the slice against the
     # printer and Orca's presets are still named for it.
-    slicer_profile, filament = ensure_profile_filament(
-        profile,
-        material=material,
-        loaded_type=loaded_material,
-        loaded_determined_by=loaded_determined_by,
-    )
+    try:
+        slicer_profile, filament = ensure_profile_filament(
+            profile,
+            material=material,
+            loaded_type=loaded_material,
+            loaded_determined_by=loaded_determined_by,
+        )
+    except MaterialRefused as exc:
+        raise MaterialNotPrintableError(str(exc), code=exc.code, verdict=exc.verdict) from exc
     # Which nozzle the profile was written for, read from the profile itself
     # so every door's reply says it whichever door resolved the profile.
     from kiln.slicer_profiles import nozzle_fit_of
@@ -1347,7 +1366,7 @@ def _parse_gcode_estimates(gcode_path: str) -> dict[str, Any]:
     estimates: dict[str, Any] = {"gcode_path": gcode_path}
 
     try:
-        with open(gcode_path, errors="replace") as fh:
+        with open(gcode_path, errors="replace", encoding="utf-8") as fh:
             search_lines = [line for line in fh if line.startswith(";")]
     except OSError:
         return estimates
@@ -1470,10 +1489,10 @@ def slice_multicolor_copies(
 
         resolved = resolve_build_volume(printer_id)
         if resolved is None:
+            from kiln.printers.bed_fit import no_bed_reason
+
             raise ValueError(
-                f"Unknown printer_id {printer_id!r}; omit printer_id and "
-                "pass bed_width_mm/bed_depth_mm explicitly, or use a "
-                "supported printer model id."
+                no_bed_reason(printer_id, instead="omit printer_id and pass bed_width_mm/bed_depth_mm explicitly")
             )
         _model_id, build_volume = resolved
         bed_width_mm, bed_depth_mm = build_volume[0], build_volume[1]
@@ -1570,7 +1589,7 @@ def slice_multicolor_copies(
             filament = result.filament
 
             # Read the gcode body
-            with open(result.output_path, errors="replace") as fh:
+            with open(result.output_path, errors="replace", encoding="utf-8") as fh:
                 gcode_bodies.append(fh.read())
 
             placed += 1
@@ -1583,7 +1602,7 @@ def slice_multicolor_copies(
     os.makedirs(out_dir, mode=0o700, exist_ok=True)
     stem = Path(input_path).stem
     merged_path = os.path.join(out_dir, f"{stem}_multicolor.gcode")
-    with open(merged_path, "w") as fh:
+    with open(merged_path, "w", encoding="utf-8") as fh:
         fh.write(_KILN_GCODE_HEADER + merged)
 
     return SliceResult(
@@ -1696,7 +1715,7 @@ def merge_multipart_gcode(
         if not os.path.isfile(gcode_path):
             raise ValueError(f"Gcode file not found: {gcode_path}")
 
-        with open(gcode_path) as f:
+        with open(gcode_path, encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
 
         header_lines: list[str] = []
@@ -1862,7 +1881,7 @@ def merge_multipart_gcode(
             "merged_multicolor.gcode",
         )
 
-    with open(output_path, "w") as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         f.write(_KILN_GCODE_HEADER + "".join(f"{line}\n" for line in merged_totals) + merged_body)
 
     return {

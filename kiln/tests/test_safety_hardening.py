@@ -70,8 +70,8 @@ class TestGetTempLimits:
     """Tests for _get_temp_limits() with KILN_PRINTER_MODEL."""
 
     def test_default_limits_without_model(self, monkeypatch) -> None:
-        """Without ANY resolvable printer model, fall back to the
-        documented conservative generic limits (300°C tool / 130°C bed).
+        """Without ANY resolvable printer model, fall back to the generic
+        floor: the PTFE-safe 240 C hotend and the 80 C bed.
 
         Both ``_PRINTER_MODEL`` AND ``_resolve_printer_model_live`` must
         be neutralised — the live resolver will otherwise auto-detect a
@@ -84,23 +84,25 @@ class TestGetTempLimits:
         )
         from kiln.server import _get_temp_limits
         max_tool, max_bed = _get_temp_limits()
-        assert max_tool == 250.0
-        assert max_bed == 100.0
+        assert max_tool == 240.0
+        assert max_bed == 80.0
 
-    def test_ender3_limits(self, monkeypatch) -> None:
-        """Ender 3 has PTFE hotend — max hotend should be clamped to 240
-        (the PTFE-safe ceiling), not 300.  Bed honors the Ender 3 profile."""
-        monkeypatch.setattr("kiln.server._PRINTER_MODEL", "ender3")
+    def test_a_ptfe_lined_printers_limits(self, monkeypatch) -> None:
+        """A PTFE-lined hotend is clamped to 240 (the PTFE-safe ceiling)
+        below its profile's own 260; the bed honours the profile.  The
+        session fixture's synthetic ``kilntest_ptfe`` (260 C / 100 C,
+        ``hotend_type: ptfe_lined``) stands in for the lined desktop
+        machines whose real rows are served."""
+        monkeypatch.setattr("kiln.server._PRINTER_MODEL", "kilntest_ptfe")
         monkeypatch.setattr(
             "kiln.server._resolve_printer_model_live",
-            lambda *_a, **_kw: "ender3",
+            lambda *_a, **_kw: "kilntest_ptfe",
         )
         from kiln.server import _get_temp_limits
         max_tool, max_bed = _get_temp_limits()
-        # PTFE-clamp ceiling kicks in for the Ender 3's PTFE-lined hotend.
+        # PTFE-clamp ceiling kicks in for the lined hotend.
         assert max_tool == 240.0
-        # Ender 3 stock bed: 110°C max
-        assert max_bed == 110.0
+        assert max_bed == 100.0
 
     def test_unknown_model_falls_back(self, monkeypatch) -> None:
         """Unknown model falls back to the generic limits — same as the
@@ -108,8 +110,9 @@ class TestGetTempLimits:
 
         Those limits were 300C/130C until 2026-07-20, described as
         "conservative" while actually being the LOOSEST ceiling in the fleet.
-        An unidentified printer is now treated as the least capable machine
-        the registry describes (250C/100C)."""
+        An unidentified printer is held to the floor (240C/80C): since
+        2026-10-12 a PTFE-safe hotend ceiling, because whether a hotend is
+        lined is part of the record Kiln serves per printer."""
         monkeypatch.setattr(
             "kiln.server._PRINTER_MODEL", "nonexistent_printer_xyz",
         )
@@ -119,8 +122,8 @@ class TestGetTempLimits:
         )
         from kiln.server import _get_temp_limits
         max_tool, max_bed = _get_temp_limits()
-        assert max_tool == 250.0
-        assert max_bed == 100.0
+        assert max_tool == 240.0
+        assert max_bed == 80.0
 
 
 # ===================================================================
@@ -189,16 +192,23 @@ class TestAdapterSafetyProfile:
 
         adapter = _TestAdapter()
 
-        # Without profile: 300 should be OK
-        adapter._validate_temp(300, 300.0, "Hotend")  # should not raise
+        # Without a profile the adapter is held to the generic floor, not to
+        # the 300 the caller passes.  This line used to assert the opposite
+        # ("without profile: 300 should be OK"); it was inverted on purpose,
+        # because an adapter literal is the loosest hotend its protocol can
+        # drive and says nothing about the one on the bench.
+        with pytest.raises(PrinterError, match="has not been told this printer's model"):
+            adapter._validate_temp(300, 300.0, "Hotend")
+        adapter._validate_temp(240, 300.0, "Hotend")  # at the floor: fine
 
-        # With ender3 profile: 300 should fail (max 250)
-        adapter.set_safety_profile("ender3")
-        with pytest.raises(PrinterError, match="250"):
+        # With a lined printer's profile (the synthetic kilntest_ptfe, 260 C
+        # ceiling): 300 should fail against the profile's own number.
+        adapter.set_safety_profile("kilntest_ptfe")
+        with pytest.raises(PrinterError, match="260"):
             adapter._validate_temp(300, 300.0, "Hotend")
 
-        # 250 should still be OK for ender3
-        adapter._validate_temp(250, 300.0, "Hotend")  # should not raise
+        # 260 is the profile's ceiling and still passes.
+        adapter._validate_temp(260, 300.0, "Hotend")  # should not raise
 
 
 # ===================================================================

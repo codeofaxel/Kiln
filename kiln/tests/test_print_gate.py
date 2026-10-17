@@ -27,7 +27,7 @@ def _box(size_mm: float, path: str) -> str:
 
 @pytest.fixture
 def big(tmp_path) -> str:
-    return _box(400.0, str(tmp_path / "big.stl"))  # 400mm > 256mm bed
+    return _box(400.0, str(tmp_path / "big.stl"))  # 400mm > the synthetic 220mm bed
 
 
 @pytest.fixture
@@ -45,16 +45,16 @@ def _clear_overrides():
 
 class TestFitVerdict:
     def test_oversize_is_blocked(self, big):
-        r = G(big, "bambu_a1")
+        r = G(big, "kilntest_open")
         assert r["blocked"] is True
         assert r["code"] == "EXCEEDS_BED"
         assert r["suggestions"]
 
     def test_normal_passes(self, small):
-        assert G(small, "bambu_a1")["blocked"] is False
+        assert G(small, "kilntest_open")["blocked"] is False
 
     def test_override_converts_block_to_allowed(self, big):
-        r = G(big, "bambu_a1", allow_oversize=True)
+        r = G(big, "kilntest_open", allow_oversize=True)
         assert r["blocked"] is False
         assert r.get("overridden") is True
 
@@ -65,7 +65,7 @@ class TestNeverFalseBlocks:
         assert G(big, "totally_unknown_printer_zzz")["blocked"] is False
 
     def test_missing_file_soft_passes(self):
-        assert G("/no/such/file.stl", "bambu_a1")["blocked"] is False
+        assert G("/no/such/file.stl", "kilntest_open")["blocked"] is False
 
     def test_no_printer_soft_passes(self, big):
         assert G(big, None)["blocked"] is False
@@ -73,30 +73,30 @@ class TestNeverFalseBlocks:
 
 class TestTempCeiling:
     def test_too_hot_material_blocked(self, small):
-        # polycarbonate needs >=270C; ender3 hotend maxes at 260C
-        r = G(small, "ender3", material_id="polycarbonate")
+        # polycarbonate needs >=270C; the synthetic lined row's hotend maxes at 260C
+        r = G(small, "kilntest_ptfe", material_id="polycarbonate")
         assert r["blocked"] is True
         assert r["code"] == "MATERIAL_EXCEEDS_HOTEND"
 
     @pytest.mark.parametrize("material", ["pla", "nylon"])
     def test_reachable_material_passes(self, small, material):
-        assert G(small, "ender3", material_id=material)["blocked"] is False
+        assert G(small, "kilntest_ptfe", material_id=material)["blocked"] is False
 
     def test_unknown_material_soft_passes(self, small):
-        assert G(small, "ender3", material_id="unobtanium_x")["blocked"] is False
+        assert G(small, "kilntest_ptfe", material_id="unobtanium_x")["blocked"] is False
 
     def test_temp_override(self, small):
-        r = G(small, "ender3", material_id="polycarbonate", allow_oversize=True)
+        r = G(small, "kilntest_ptfe", material_id="polycarbonate", allow_oversize=True)
         assert r["blocked"] is False and r.get("overridden") is True
 
 
 class TestOverrideGrant:
     def test_grant_is_per_printer_and_expiring(self):
-        pg.grant_oversize_override("bambu_a1", ttl_seconds=300)
-        assert pg._override_active("bambu_a1") is True
+        pg.grant_oversize_override("kilntest_open", ttl_seconds=300)
+        assert pg._override_active("kilntest_open") is True
         assert pg._override_active("prusa_mk4") is False
         # case-insensitive key
-        assert pg._override_active("BAMBU_A1") is True
+        assert pg._override_active("KILNTEST_OPEN") is True
 
     def test_grant_expires(self):
         pg.grant_oversize_override("expiretest", ttl_seconds=-1)  # already expired
@@ -106,7 +106,7 @@ class TestOverrideGrant:
 class _FakeAdapter(PrinterAdapter):
     """Minimal adapter to exercise the Template Method without hardware."""
 
-    printer_id = "bambu_a1"
+    printer_id = "kilntest_open"
 
     def __init__(self) -> None:
         self.impl_calls: list[str] = []
@@ -121,9 +121,9 @@ _FakeAdapter.__abstractmethods__ = frozenset()
 
 
 class _EnderAdapter(_FakeAdapter):
-    """Fake adapter reporting as an ender3 (260C hotend ceiling) for temp tests."""
+    """Fake adapter reporting as the synthetic lined row (260C hotend ceiling) for temp tests."""
 
-    printer_id = "ender3"
+    printer_id = "kilntest_ptfe"
 
 
 _EnderAdapter.__abstractmethods__ = frozenset()
@@ -144,7 +144,7 @@ class TestTemplateMethodBackstop:
 
     def test_override_lets_oversize_through(self, big):
         a = _FakeAdapter()
-        pg.grant_oversize_override("bambu_a1", ttl_seconds=300)
+        pg.grant_oversize_override("kilntest_open", ttl_seconds=300)
         r = a.start_print(big)
         assert r.success is True and a.impl_calls == [big]
 
@@ -172,7 +172,7 @@ class TestSwarmFixes:
 
     def test_override_is_single_use(self, big):
         a = _FakeAdapter()
-        pg.grant_oversize_override("bambu_a1", ttl_seconds=300)
+        pg.grant_oversize_override("kilntest_open", ttl_seconds=300)
         assert a.start_print(big).success is True   # 1st: override rescues, grant consumed
         assert a.start_print(big).success is False  # 2nd: grant gone -> blocked again
 
@@ -199,34 +199,34 @@ class TestSwarmFixes:
         # min == max -> reachable -> NOT blocked (strict ">")
         monkeypatch.setattr(di, "get_printer_design_profile", lambda pid: _Printer(260))
         monkeypatch.setattr(di, "get_material_profile", lambda mid: _Mat(260, 310))
-        assert pg._temp_verdict("ender3", "x")[0] is False  # 260 > 260 is False
+        assert pg._temp_verdict("kilntest_ptfe", "x")[0] is False  # 260 > 260 is False
 
         # strictly above -> blocked
         monkeypatch.setattr(di, "get_material_profile", lambda mid: _Mat(270, 310))
-        assert pg._temp_verdict("ender3", "x")[0] is True
+        assert pg._temp_verdict("kilntest_ptfe", "x")[0] is True
 
         # zero min survives extraction (and 0 < 260 -> not blocked)
         monkeypatch.setattr(di, "get_material_profile", lambda mid: _Mat(0, 300))
-        assert pg._temp_verdict("ender3", "x")[0] is False
+        assert pg._temp_verdict("kilntest_ptfe", "x")[0] is False
 
 
 class TestSliceLayerTemp:
     """check_material_temp — the public slice-layer temperature gate."""
 
     def test_blocks_unreachable_material(self):
-        v = pg.check_material_temp("ender3", "polycarbonate")
+        v = pg.check_material_temp("kilntest_ptfe", "polycarbonate")
         assert v is not None and v["code"] == "MATERIAL_EXCEEDS_HOTEND"
         assert "force_print_oversize" in v["override_hint"]
 
     def test_allows_reachable_material(self):
-        assert pg.check_material_temp("ender3", "pla") is None
+        assert pg.check_material_temp("kilntest_ptfe", "pla") is None
 
     def test_normalizes_material_string(self):
-        assert pg.check_material_temp("ender3", " POLYCARBONATE ") is not None
+        assert pg.check_material_temp("kilntest_ptfe", " POLYCARBONATE ") is not None
 
     def test_soft_passes_without_printer_or_material(self):
         assert pg.check_material_temp(None, "polycarbonate") is None
-        assert pg.check_material_temp("ender3", None) is None
+        assert pg.check_material_temp("kilntest_ptfe", None) is None
 
 
 # ---------------------------------------------------------------------------
@@ -374,7 +374,7 @@ class TestFileOnPrinterIsRead:
 
         _Broken.__abstractmethods__ = frozenset()
         a = _Broken(None)
-        pg.grant_oversize_override("bambu_a1", ttl_seconds=300)
+        pg.grant_oversize_override("kilntest_open", ttl_seconds=300)
         assert a.start_print("x.gcode.3mf").success is True and a.impl_calls == ["x.gcode.3mf"]
         # consumed: the next start is refused again
         assert a.start_print("x.gcode.3mf").success is False

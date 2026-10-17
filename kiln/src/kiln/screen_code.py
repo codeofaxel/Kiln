@@ -74,6 +74,10 @@ RESHOW_EVERY_S = 30.0
 _WORD_TO_CHOICE = {"2h": "next_two_hours", "today": "rest_of_today"}
 _EVERY_PRINTER_WORDS = {"all", "every", "everywhere", "fleet"}
 
+#: The one non-print door that shows a code: limits a person must confirm
+#: for a printer Kiln has no number for.  The banner names it as such.
+LIMITS_TOOL = "add_safety_profile"
+
 #: Outcomes of :func:`issue`.
 SHOWN = "shown"
 COOLDOWN = "cooldown"
@@ -184,6 +188,12 @@ def banner_text(issued: Issued) -> tuple[str, str, str]:
     from kiln.print_consent import display_name
 
     printer = issued.printer_label or issued.printer_name or "your printer"
+    if issued.tool == LIMITS_TOOL:
+        return (
+            f"Kiln code {issued.code}",
+            f"Temperature limits for {printer}",
+            "Type the code in your chat to let Kiln hold this printer to the limits proposed.",
+        )
     return (
         f"Kiln print code {issued.code}",
         f"{display_name(issued.file_name)} on {printer}",
@@ -579,12 +589,24 @@ def answer(words: str, *, host: str = "") -> dict[str, Any]:
     return {"outcome": ANSWERED, "record": record, "host": host}
 
 
-def take_answer(file_name: str, printer_name: str | None) -> Answered | None:
-    """The unspent answer for this print on this printer, spent now."""
+def take_answer(file_name: str, printer_name: str | None, *, tool: str | None = None) -> Answered | None:
+    """The unspent answer for this print on this printer, spent now.
+
+    A code is answered for the door that showed it: with *tool* unset
+    only a print's answer is handed over, and with ``tool=LIMITS_TOOL``
+    only a limits answer -- an answer for the other door is left where it
+    is, never spent, so a code typed for one thing cannot approve another.
+    """
     now = time.time()
     with _lock:
         _prune(now)
-        return _answered.pop(_key(file_name, printer_name), None)
+        key = _key(file_name, printer_name)
+        record = _answered.get(key)
+        if record is None:
+            return None
+        if (record.issued.tool == LIMITS_TOOL) != (tool == LIMITS_TOOL):
+            return None
+        return _answered.pop(key)
 
 
 def status() -> dict[str, Any]:
@@ -642,7 +664,7 @@ def host_dialog_hook(client_name: str | None, *, server_name: str = "kiln", cwd:
     for raw in _HOOK_SETTINGS:
         path = Path(raw).expanduser() if raw.startswith("~") else base / raw
         try:
-            data = json.loads(path.read_text())
+            data = json.loads(path.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001 — absent or unreadable is no hook
             continue
         hooks = (data.get("hooks") or {}) if isinstance(data, dict) else {}

@@ -22,6 +22,7 @@ from kiln.gcode import (
     slicer_filament_types,
     slicer_print_time,
 )
+from kiln.untrusted_zip import UntrustedZipFile
 
 #: How far Kiln's own count may sit from the slicer's ``filament used``
 #: total before the estimate says so.  The count matched OrcaSlicer to
@@ -310,7 +311,7 @@ def _sliced_3mf_gcode_lines(file_path: str) -> list[str]:
 
     name = os.path.basename(file_path)
     try:
-        with zipfile.ZipFile(file_path) as zf:
+        with UntrustedZipFile(file_path) as zf:
             member = sliced_gcode_member(zf)
             if member is None:
                 raise ValueError(
@@ -574,7 +575,7 @@ class CostEstimator:
             lines = _sliced_3mf_gcode_lines(file_path)
         else:
             _refuse_oversized(file_path)
-            with open(file_path, errors="replace") as f:
+            with open(file_path, errors="replace", encoding="utf-8") as f:
                 lines = f.readlines()
 
         return self.estimate_from_gcode(
@@ -931,7 +932,7 @@ class CostEstimator:
                 body = "".join(_sliced_3mf_gcode_lines(file_path))
             else:
                 _refuse_oversized(file_path)
-                with open(file_path, errors="replace") as fh:
+                with open(file_path, errors="replace", encoding="utf-8") as fh:
                     body = fh.read()
         except (OSError, ValueError):
             return None
@@ -1034,7 +1035,7 @@ class CostEstimator:
         import zipfile
 
         try:
-            with zipfile.ZipFile(file_path, "r") as zf:
+            with UntrustedZipFile(file_path, "r") as zf:
                 if "Metadata/slice_info.config" not in zf.namelist():
                     return None
                 xml_data = zf.read("Metadata/slice_info.config").decode("utf-8")

@@ -2,8 +2,46 @@
 # docstrings (a third-party repository, a source file:line pin, a vendor
 # or community page, an account or client name, a fetch date), keyed
 # `path :: matched text`.  Read by scripts/audit_moat_comment_leak.py: a
-# pin not listed here fails the gate.  These pre-date the rule and are
-# to be scrubbed or moved to the private evidence; this list may only
-# shrink.  Regenerate with
+# pin not listed here fails the gate.  These pre-date the rule (the
+# source-file and site entries pre-date its 2026-10-09 widening) and
+# are to be scrubbed or moved to the private evidence, or kept as an
+# integration target's own reference by a reviewed decision; this list
+# may only shrink.  Regenerate with
 #     python3 scripts/audit_moat_comment_leak.py --freeze-source-pins
 # and commit the diff.
+kiln/src/kiln/multicolor_3mf.py :: Model.cpp
+kiln/src/kiln/multicolor_3mf.py :: bbs_3mf.cpp
+kiln/src/kiln/multicolor_3mf.py :: src/libslic3r/Format/3mf.cpp
+kiln/src/kiln/multicolor_3mf.py :: src/libslic3r/Model.cpp
+kiln/src/kiln/multicolor_3mf.py :: src/libslic3r/TriangleSelector.cpp
+kiln/src/kiln/printers/bambu.py :: DeviceErrorDialog.cpp
+kiln/src/kiln/printers/bambu.py :: DeviceManager.cpp
+kiln/src/kiln/printers/bambu.py :: wiki.bambulab.com
+kiln/src/kiln/printers/bambu_hms_text.py :: HMS.cpp
+kiln/src/kiln/printers/duet.py :: GCodes2.cpp
+kiln/src/kiln/printers/duet.py :: RepRap.cpp
+kiln/src/kiln/printers/duet.py :: src/Config/Configuration.h
+kiln/src/kiln/printers/duet.py :: src/GCodes/GCodeBuffer/StringParser.cpp
+kiln/src/kiln/printers/duet.py :: src/GCodes/GCodes2.cpp
+kiln/src/kiln/printers/duet.py :: src/Heating/Heat.cpp
+kiln/src/kiln/printers/duet.py :: src/Networking/HttpResponder.cpp
+kiln/src/kiln/printers/duet.py :: src/Platform/Platform.cpp
+kiln/src/kiln/printers/duet.py :: src/Platform/RepRap.cpp
+kiln/src/kiln/printers/duet.py :: src/PrintMonitor/PrintMonitor.cpp
+kiln/src/kiln/printers/duet.py :: src/RepRap.cpp
+kiln/src/kiln/printers/prusalink.py :: include/common/printer_model_data.hpp
+kiln/src/kiln/printers/prusalink.py :: lib/WUI/link_content/basic_gets.cpp
+kiln/src/kiln/printers/qoi.py :: qoi.h
+kiln/src/kiln/printers/serial_adapter.py :: Version.h
+kiln/src/kiln/threemf_parser.py :: src/libslic3r/Model.cpp
+kiln/src/kiln/threemf_parser.py :: src/libslic3r/TriangleSelector.cpp
+kiln/tests/test_duet_adapter.py :: Configuration.h
+kiln/tests/test_duet_adapter.py :: GCodes2.cpp
+kiln/tests/test_duet_adapter.py :: Platform.cpp
+kiln/tests/test_duet_adapter.py :: RepRap.cpp
+kiln/tests/test_fault_in_the_screens_own_words.py :: DeviceErrorDialog.cpp
+kiln/tests/test_fault_in_the_screens_own_words.py :: DeviceManager.cpp
+kiln/tests/test_fault_in_the_screens_own_words.py :: HMS.cpp
+kiln/tests/test_multicolor_3mf.py :: Model.cpp
+kiln/tests/test_multicolor_3mf.py :: TriangleSelector.cpp
+kiln/tests/test_qoi_encoder.py :: qoi.h

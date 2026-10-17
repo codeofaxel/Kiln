@@ -17,6 +17,187 @@ from typing import Any
 _logger = logging.getLogger(__name__)
 
 
+def _limits_proposal_key(printer_model: str, profile: dict) -> tuple[str, str]:
+    """``(what the code is for, its fingerprint)``: the proposal's numbers,
+    so a code answered for one set of limits cannot be spent on another."""
+    import hashlib
+    import json
+
+    limits = {k: profile.get(k) for k in sorted(profile) if k != "notes"}
+    digest = hashlib.sha256(json.dumps(limits, sort_keys=True, default=str).encode()).hexdigest()
+    return f"limits for {printer_model}", digest
+
+
+def _needs_a_sign_in(printer_model: str) -> dict | None:
+    """The refusal a signed-out install gets for a limit above the floor on
+    a printer Kiln has no number for, or ``None`` when it is signed in.
+
+    The floor still prints; what a sign-in buys is Kiln standing behind a
+    ceiling it will enforce.  Counted on the account wall like every other
+    door a sign-in opens, so the dashboard sees it.
+    """
+    try:
+        from kiln.auth_session import resolve_api_bearer
+
+        if resolve_api_bearer().token:
+            return None
+    except Exception:  # noqa: BLE001 -- an unreadable session is not a sign-in
+        pass
+    try:
+        from kiln.daily_stats import record_account_wall
+
+        record_account_wall("add_safety_profile")
+    except Exception:  # noqa: BLE001
+        pass
+    from kiln.tiers_and_terms import signin_hint_fields
+
+    return {
+        "success": False,
+        "status": "error",
+        "code": "KILN_ACCOUNT_NOT_PAIRED",
+        "error": (
+            f"Kiln has no verified limits for {printer_model!r}, so these numbers would be the only ceiling "
+            "it enforces, and that takes a signed-in install. Sign in free (kiln_signin), then call this again: "
+            "a person confirms the limits with a code on this screen, as a print start is."
+        ),
+        **signin_hint_fields(),
+    }
+
+
+def _limits_confirmed_by_a_person(printer_model: str, profile: dict) -> Any:
+    """``True`` when a person has typed the code shown for exactly these
+    limits; otherwise the refusal that says what to do, after showing the
+    code where a screen can show one.
+
+    The hosted server has no screen and no single owner, so it never
+    writes a limit a person did not confirm on their own machine.
+    """
+    import kiln.server as _srv
+    from kiln import screen_code
+    from kiln.runtime_env import is_hosted_multitenant
+
+    if is_hosted_multitenant():
+        return _srv._error_dict(
+            f"Kiln has no verified limits for {printer_model!r}; a limit above its generic floor "
+            "is confirmed by the person on the machine the printer is set up on, and the hosted "
+            "server is not that machine.",
+            code="NOT_HERE",
+        )
+    key, digest = _limits_proposal_key(printer_model, profile)
+    answered = screen_code.take_answer(key, printer_model, tool=screen_code.LIMITS_TOOL)
+    if answered is not None and answered.issued.file_sha256 == digest:
+        _srv._audit(
+            "add_safety_profile", "limits_confirmed",
+            details={"printer_model": printer_model, "proposal": digest, "words": answered.words},
+        )
+        return True
+    shown = screen_code.issue(
+        tool=screen_code.LIMITS_TOOL, file_name=key, file_sha256=digest,
+        printer_name=printer_model, host=_srv._host_label(None),
+        printer_label=str(profile.get("display_name") or printer_model),
+    )
+    outcome = shown.get("outcome")
+    lead = (
+        f"Kiln has no verified limits for {printer_model!r}, so these numbers would be the only "
+        "ceiling it has. "
+    )
+    if outcome == screen_code.SHOWN:
+        how = (
+            "A code was just shown on the person's screen. Ask them to type it, pass their words "
+            "to give_print_code, then call add_safety_profile again with the same numbers."
+        )
+    elif outcome == screen_code.COOLDOWN:
+        how = f"Too many codes were shown recently; try again in {shown.get('seconds_left', 60)} seconds."
+    else:
+        how = (
+            "This machine cannot show the person a code, so Kiln cannot take these limits here. "
+            "Set printer_model to a printer Kiln knows, or state limits at or below the generic floor."
+        )
+    return _srv._error_dict(lead + how, code="CONFIRMATION_REQUIRED", extra={"code_shown": outcome})
+
+
+def _limits_read_off_the_printer(printer_model: str, printer_name: str) -> dict:
+    """The limits the connected printer states for itself, as a proposal
+    (``{"profile", "read", "missing"}``), or the refusal that says why
+    nothing could be read and what to pass instead.
+
+    A Klipper machine through Moonraker states its heater ceilings, travel
+    and velocity in its own configuration; nothing else does.  Read on the
+    machine the printer is set up on, never the hosted server.  A setup
+    read: Kiln driving another printer does not refuse it.
+    """
+    import kiln.server as _srv
+    from kiln.printers.base import PrinterError
+    from kiln.runtime_env import is_hosted_multitenant
+
+    say_profile = "State the limits yourself in `profile` (from the maker's own spec page, never a guess)."
+    or_say_profile = "or state them yourself in `profile` (from the maker's own spec page, never a guess)."
+    if is_hosted_multitenant():
+        return _srv._error_dict(
+            f"Limits for {printer_model!r} can be read off the printer only on the machine it is set up on, "
+            "and the hosted server is not that machine. " + say_profile,
+            code="NOT_HERE",
+        )
+    try:
+        adapter = _srv._resolve_adapter(printer_name or None)
+    except Exception as exc:  # noqa: BLE001 -- no printer, a misnamed one, a bad config: one refusal
+        return _srv._error_dict(
+            f"No printer to read limits from ({exc}). Name a registered printer in `printer_name`, or "
+            + say_profile,
+            code="PRINTER_NOT_FOUND",
+        )
+    try:
+        proposal = adapter.read_machine_limits()
+    except PrinterError as exc:
+        return _srv._error_dict(
+            f"{adapter.name} could not be asked for its configuration ({exc}). Try again when it is "
+            "reachable, " + or_say_profile,
+            code="PRINTER_UNREACHABLE", retryable=True,
+        )
+    if proposal is None:
+        return _srv._error_dict(
+            f"{adapter.name} does not state its own limits: only a Klipper machine reached through "
+            "Moonraker does, and this one is not one or exposes no configuration. " + say_profile,
+            code="MACHINE_STATES_NO_LIMITS",
+        )
+    if proposal["missing"]:
+        return _srv._error_dict(
+            f"{adapter.name}'s configuration states {', '.join(proposal['read'])} but not "
+            f"{', '.join(proposal['missing'])}. Pass the full `profile`, keeping the numbers it did state "
+            "(in `proposal`) and adding the rest from the maker's own spec page.",
+            code="MACHINE_STATES_PARTIAL_LIMITS",
+            extra={"proposal": proposal["profile"], "read_from_printer": proposal["read"], "missing": proposal["missing"]},
+        )
+    caution = _hotend_caution(proposal["profile"].get("max_hotend_temp"))
+    if caution:
+        proposal["caution"] = caution
+        proposal["profile"]["notes"] = f"{proposal['profile'].get('notes', '')} {caution}".strip()
+    return proposal
+
+
+def _hotend_caution(hotend: object) -> str | None:
+    """What the person must hear before confirming a hotend limit read off
+    the printer that is above the generic floor -- the PTFE-safe ceiling
+    Kiln holds a hotend it knows nothing about to -- or None.
+
+    The number is the board's shutdown point, and no config says whether
+    the hotend is lined, so the caution is a floor at every tier.
+    """
+    from kiln.safety_profiles import get_profile
+
+    try:
+        value, floor = float(hotend), float(get_profile("default").max_hotend_temp)
+    except (TypeError, ValueError, KeyError):
+        return None
+    if value <= floor:
+        return None
+    return (
+        f"{value:g} C is where this printer's board shuts the hotend down, not a rating, so a print "
+        f"set that hot can trip it. If the hotend has a PTFE liner, keep it at or below {floor:g} C: "
+        "above that the liner breaks down and gives off fumes."
+    )
+
+
 class _SafetyToolsPlugin:
     """Safety audit, dashboard, settings, and profile management tools.
 
@@ -296,44 +477,45 @@ class _SafetyToolsPlugin:
 
         @mcp.tool()
         def list_safety_profiles() -> dict:
-            """List all available printer safety profiles.
+            """List the printers Kiln has a safety profile for, by id and name.
 
-            Returns a list of profile IDs and display names from the bundled
-            safety database.  Use with ``get_safety_profile`` to inspect limits
-            for a specific printer, or ``validate_gcode_safe`` to validate
-            commands against a printer's limits.
+            The list names printers; it carries no limits.  Kiln reads a
+            printer's limits one printer at a time: call
+            ``get_safety_profile`` with one of these ids for its temperature,
+            feedrate and flow limits, its build volume, and where those
+            numbers came from.  ``validate_gcode_safe`` checks commands
+            against one printer's limits.  A printer set up on this machine
+            with limits its owner entered is listed too, marked
+            ``set_up_on_this_machine``.
             """
             if err := _srv._check_auth("safety"):
                 return err
             try:
                 from kiln.safety_profiles import (
-                    get_profile,
-                    limits_provenance_note,
+                    list_local_printer_overrides,
                     list_profiles,
+                    roster_display_name,
                 )
 
-                ids = list_profiles()
+                # Names only, from the roster this install carries: asking for
+                # every printer's limits here would be one catalogue fetch per
+                # printer, and a bulk door to every ceiling Kiln holds.
+                set_up_here = set(list_local_printer_overrides())
                 profiles = []
-                for pid in ids:
-                    try:
-                        p = get_profile(pid)
-                        profiles.append(
-                            {
-                                "id": p.id,
-                                "display_name": p.display_name,
-                                "max_hotend_temp": p.max_hotend_temp,
-                                "max_bed_temp": p.max_bed_temp,
-                                # A roster row quotes two limits, so it owes
-                                # the same one-line answer to "whose numbers
-                                # are these?" the full profile carries — an
-                                # owner-typed profile must not read like a
-                                # curated one here either.
-                                "limits_provenance": limits_provenance_note(p),
-                            }
-                        )
-                    except KeyError:
-                        continue
-                return {"success": True, "count": len(profiles), "profiles": profiles}
+                for pid in list_profiles():
+                    entry: dict[str, Any] = {"id": pid, "display_name": roster_display_name(pid) or pid}
+                    if pid in set_up_here:
+                        entry["set_up_on_this_machine"] = True
+                    profiles.append(entry)
+                return {
+                    "success": True,
+                    "count": len(profiles),
+                    "profiles": profiles,
+                    "note": (
+                        "Names only. For one printer's limits and where they came from, "
+                        "call get_safety_profile(printer_id=<id>)."
+                    ),
+                }
             except Exception as exc:
                 _logger.exception("Unexpected error in list_safety_profiles")
                 return _srv._error_dict(
@@ -389,9 +571,8 @@ class _SafetyToolsPlugin:
         # ------------------------------------------------------------------
 
         @mcp.tool()
-        @_srv.requires_tier(_srv.LicenseTier.BUSINESS)
-        def add_safety_profile(printer_model: str, profile: dict) -> dict:
-            """Add a local safety-profile override for a printer model.
+        def add_safety_profile(printer_model: str, profile: dict | None = None, printer_name: str = "") -> dict:
+            """Add a local safety-profile override for a printer model.  Free at every tier.
 
             Validates the profile and saves it to this machine's override file
             (``~/.kiln/local_printer_overrides.json``; the older name
@@ -410,6 +591,32 @@ class _SafetyToolsPlugin:
             Values saved here are labelled owner-supplied in every profile
             readout — Kiln never presents them as its own verified numbers.
 
+            For a printer Kiln has no number for, a limit above its generic
+            floor needs two things.  A signed-in install (a free account:
+            ``kiln_signin``), because Kiln vouches for ceilings it enforces
+            and a ceiling nobody set is held to the floor.  And a PERSON's
+            confirmation: Kiln shows a code on the screen of the machine it
+            runs on, the person types it in the chat, you pass it to
+            ``give_print_code``, then call this again with the same numbers.  Find the numbers on the maker's own spec
+            page (maximum hotend and bed temperature, bed size) and say where
+            they came from in ``notes``; never guess them, and never ask the
+            person to type numbers they do not know.  The code is the
+            confirmation; nothing you can call stands in for it.
+
+            A Klipper printer that is set up here can state them itself.
+            Leave ``profile`` out and Kiln reads the heater ceilings, travel
+            and velocity limit off the printer's own configuration (through
+            Moonraker), puts them in front of the person as ``proposal`` with
+            the configuration lines they came from, and takes the same code.
+            The saved limits are labelled as read from that printer.  The
+            hotend and bed numbers are the board's shutdown points, and a
+            hotend proposal above Kiln's generic floor carries a
+            ``caution`` about PTFE-lined hotends: say it to the person
+            before they confirm.  A printer that cannot state them (any
+            other backend) says so and asks for ``profile``; a
+            configuration that states only some of them hands those back
+            in ``proposal`` for you to complete.
+
             Args:
                 printer_model: Short identifier for the printer (e.g.
                     ``"my_custom_corexy"``).
@@ -417,27 +624,55 @@ class _SafetyToolsPlugin:
                     ``max_bed_temp``, ``max_feedrate``, and ``build_volume``
                     (a list of 3 positive numbers ``[X, Y, Z]``).  Optional
                     fields: ``display_name``, ``max_chamber_temp``, ``min_safe_z``,
-                    ``max_volumetric_flow``, ``notes``.
+                    ``max_volumetric_flow``, ``notes``.  Omit it to read the
+                    limits off the printer.
+                printer_name: Which registered printer to read the limits
+                    off when ``profile`` is omitted; the default printer
+                    when empty.  Ignored when ``profile`` is given.
             """
             if err := _srv._check_auth("safety"):
                 return err
             try:
                 from kiln.safety_profiles import (
-                    add_community_profile,
+                    limits_above_floor,
+                    set_local_printer_override,
                     validate_safety_profile,
                 )
 
+                shown: dict = {}
+                if not profile:
+                    proposal = _limits_read_off_the_printer(printer_model, printer_name)
+                    if "profile" not in proposal:
+                        return proposal
+                    profile = proposal["profile"]
+                    # What the person is confirming rides on every reply when
+                    # the numbers were read off the printer: they never typed
+                    # them, and the caution is said before they confirm.
+                    shown = {"proposal": profile, "read_from_printer": proposal["read"]}
+                    if proposal.get("caution"):
+                        shown["caution"] = proposal["caution"]
                 errors = validate_safety_profile(profile)
                 if errors:
                     return _srv._error_dict(
                         f"Validation failed: {'; '.join(errors)}",
-                        code="VALIDATION_ERROR",
+                        code="VALIDATION_ERROR", extra=shown or None,
                     )
-                add_community_profile(printer_model, profile)
+                confirmed = False
+                if limits_above_floor(printer_model, profile):
+                    if (wall := _needs_a_sign_in(printer_model)) is not None:
+                        return {**wall, **shown}
+                    answered = _limits_confirmed_by_a_person(printer_model, profile)
+                    if answered is not True:
+                        return {**answered, **shown}
+                    confirmed = True
+                set_local_printer_override(printer_model, profile, confirmed=confirmed)
                 return {
                     "success": True,
                     "printer_model": printer_model.lower().replace("-", "_").strip(),
-                    "message": "Local printer override saved successfully.",
+                    "message": "Local printer override saved successfully."
+                    + (" The person confirmed these limits." if confirmed else "")
+                    + (" They were read off the printer's own configuration." if shown else ""),
+                    **shown,
                 }
             except ValueError as exc:
                 return _srv._error_dict(
@@ -577,9 +812,14 @@ class _SafetyToolsPlugin:
                         "file": issued.file_name, "printer": issued.printer_name or "default",
                         "choice": rec.choice, "typed_duration": rec.typed_duration,
                     },
-                    "next": f"Call the tool that starts the print again ({issued.tool}); this yes covers it.",
+                    "next": (
+                        "Call add_safety_profile again with the same limits; this yes covers them."
+                        if issued.tool == screen_code.LIMITS_TOOL
+                        else f"Call the tool that starts the print again ({issued.tool}); this yes covers it."
+                    ),
                 }
-                if rec.answer.opens_window:
+                for_a_print = issued.tool != screen_code.LIMITS_TOOL
+                if for_a_print and rec.answer.opens_window:
                     # The window opens where the dialog's does: when the print
                     # starts, in the wrapper — never from a tool.
                     reply["standing_window"] = {
@@ -587,8 +827,9 @@ class _SafetyToolsPlugin:
                         "for": rec.answer.describe_window_ask(),
                     }
                 # Someone who typed a code is someone the phone would help:
-                # one line for after the print starts, once.
-                offer = _srv._phone_offer()
+                # one line for after the print starts, once.  A limits code
+                # starts nothing, so it earns no print offer.
+                offer = _srv._phone_offer() if for_a_print else None
                 if offer:
                     reply["phone_next_time"] = offer
                 _srv._audit(

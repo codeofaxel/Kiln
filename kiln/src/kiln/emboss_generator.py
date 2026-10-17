@@ -476,7 +476,7 @@ def _invert_dat_heightmap(content_info: dict, output_dir: Path) -> dict:
         return content_info
 
     inv_path = output_dir / (Path(dat_path).stem + "_inv.dat")
-    with open(dat_path) as f_in, open(inv_path, "w") as f_out:
+    with open(dat_path, encoding="utf-8") as f_in, open(inv_path, "w", encoding="utf-8") as f_out:
         for line in f_in:
             vals = line.strip().split()
             inv_vals = [f"{1.0 - float(v):.4f}" for v in vals]
@@ -695,7 +695,7 @@ def measure_text_block_mm(
         escaped_font = _escape_scad_string(font)
         with tempfile.TemporaryDirectory(prefix="kiln_text_probe_") as d:
             scad = os.path.join(d, "probe.scad")
-            with open(scad, "w") as f:
+            with open(scad, "w", encoding="utf-8") as f:
                 f.write(
                     f'linear_extrude(height=0.5) text("{escaped_text}", '
                     f'size={probe_size}, font="{escaped_font}");\n'

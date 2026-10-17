@@ -348,8 +348,24 @@ class TestMaterialCheck:
         )
         assert result.sufficient is False
         assert len(result.alternative_printers) == 0
-        # Should suggest purchase
-        assert any("amazon" in s.lower() or "purchase" in s.lower() for s in result.suggestions)
+        # Nothing the person has will do: one offer of help, as a question,
+        # with no store, no link and no list.
+        offers = [s for s in result.suggestions if "help finding" in s]
+        assert offers == ["Want help finding a PLA filament that suits this print?"]
+        text = " ".join(result.suggestions).lower()
+        assert "http" not in text and "amazon" not in text and "purchase" not in text
+
+    def test_a_spool_on_the_shelf_means_no_offer_to_find_filament(self, db):
+        _add_material(db, "ender3", "PLA", remaining_grams=50.0)
+        _add_spool(db, "sp-shelf", "PLA", remaining_grams=800.0, brand="Hatchbox", color="white")
+
+        result = check_material_sufficiency(
+            db, printer_name="ender3", required_grams=200.0, material_type="PLA",
+        )
+        text = " ".join(result.suggestions).lower()
+        assert "unused spool" in text
+        assert "help finding" not in text
+        assert "http" not in text and "purchase" not in text
 
     def test_no_material_loaded(self, db):
         result = check_material_sufficiency(

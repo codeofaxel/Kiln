@@ -32,12 +32,29 @@ flattened") is the planned enrichment, not this record.
 
 from __future__ import annotations
 
+import contextlib
+import dataclasses
+import filecmp
+import logging
+import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
 #: Versioned discriminator, following ``kiln.step_facts.v1``'s pattern.
 FORMAT_CONVERSION_KIND = "kiln.format_conversion.v1"
+
+#: Formats a door hands on as an STL when a file arrives in them.  Kiln's
+#: 3D stage, its browser link and the slicer all refuse a GLB, so a GLB
+#: that arrives as it is can be neither seen, measured nor printed.
+ARRIVAL_CONVERSIONS = frozenset({"glb"})
+
+#: A generator's OBJ becomes an STL too, as its doors always have.  A
+#: marketplace's OBJ is left as it is: every door reads OBJ.
+GENERATED_CONVERSIONS = frozenset({"glb", "obj"})
 
 #: What each source format can carry that binary STL cannot.  STL is pure
 #: triangles — no color, no materials, no textures, no named objects — so
@@ -122,11 +139,24 @@ def convert_to_stl_recorded(
     Call sites adopt this instead of the bare converter so a conversion
     without a record becomes impossible to write by accident — the pair
     is the only thing this function returns.
+
+    The STL never replaces a different file: a listing that ships
+    ``part.stl`` beside ``part.glb`` keeps its own STL, and the copy is
+    named ``part.glb.stl`` instead (see :func:`_place_beside`).
     """
     from kiln.arrival import carry
     from kiln.generation.validation import convert_to_stl
 
-    stl_path = convert_to_stl(input_path)
+    source = Path(input_path)
+    fd, written = tempfile.mkstemp(prefix=".kiln-convert-", suffix=".stl", dir=source.parent)
+    os.close(fd)
+    try:
+        convert_to_stl(input_path, written)
+        stl_path = _place_beside(source, written)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(written)
+        raise
     # The STL is the same model, so it came from the same place.
     carry(input_path, stl_path)
     return stl_path, format_conversion_record(
@@ -134,4 +164,76 @@ def convert_to_stl_recorded(
         to_path=stl_path,
         tool=tool,
         reason=reason,
+    )
+
+
+def _place_beside(source: Path, written: str) -> str:
+    """Move the STL *written* for *source* to its name beside the source.
+
+    ``part.stl`` for ``part.glb``, unless a DIFFERENT file already has that
+    name: a listing can ship its designer's own STL next to the GLB, and a
+    conversion that overwrote it would destroy a file the person downloaded.
+    The copy is then ``part.glb.stl``, a name only a conversion writes, so
+    an older conversion of a changed GLB is the one thing it can replace.
+    The same bytes under the preferred name are the same conversion done
+    again, and are kept rather than written twice.
+    """
+    preferred = source.with_suffix(".stl")
+    if not preferred.exists():
+        os.replace(written, preferred)
+        return str(preferred)
+    if filecmp.cmp(written, preferred, shallow=False):
+        os.unlink(written)
+        return str(preferred)
+    beside = source.with_name(source.name + ".stl")
+    os.replace(written, beside)
+    return str(beside)
+
+
+def convert_on_arrival(
+    file_path: str,
+    *,
+    tool: str,
+    formats: frozenset[str] = ARRIVAL_CONVERSIONS,
+) -> tuple[str, dict[str, Any] | None]:
+    """The file a door hands on for *file_path*, and the record when it converted.
+
+    Every door that receives a file from outside Kiln (a marketplace
+    download, a generator's result) calls this, so a GLB never reaches the
+    stage, the slicer or a printer as a GLB: it is handed on as an STL
+    beside it, with the original still on disk and named in the record.
+    A file in any other format comes back unchanged with no record.
+
+    Raises :class:`ValueError` (or :class:`OSError`) when a file that needed
+    converting could not be read; the door decides what to tell the person.
+    """
+    if Path(file_path).suffix.lower().lstrip(".") not in formats:
+        return file_path, None
+    return convert_to_stl_recorded(file_path, tool=tool)
+
+
+def convert_generated_result(result: Any, *, tool: str) -> tuple[Any, dict[str, Any] | None]:
+    """:func:`convert_on_arrival` for a generator's ``GenerationResult``.
+
+    Returns the result to hand on (pointing at the STL when one was made)
+    and the record.  A conversion that fails keeps the original, as the
+    generation doors always have, and says so in the log.
+    """
+    try:
+        stl_path, conversion = convert_on_arrival(
+            result.local_path, tool=tool, formats=GENERATED_CONVERSIONS
+        )
+    except Exception as exc:  # noqa: BLE001 — the download stands without its STL
+        logger.warning("%s to STL conversion failed, keeping the original: %s", result.format.upper(), exc)
+        return result, None
+    if conversion is None:
+        return result, None
+    return (
+        dataclasses.replace(
+            result,
+            local_path=stl_path,
+            format="stl",
+            file_size_bytes=os.path.getsize(stl_path),
+        ),
+        conversion,
     )

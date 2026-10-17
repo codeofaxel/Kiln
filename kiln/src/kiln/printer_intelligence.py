@@ -40,7 +40,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from kiln.motion_facts import MotionFacts, load_motion_facts
+from kiln.motion_facts import MotionFacts, firmware_label, load_motion_facts
 
 logger = logging.getLogger(__name__)
 
@@ -170,19 +170,41 @@ class PrinterIntel:
 # process serves many: every later reader inherited the first reader's
 # entitlement, in whichever direction it happened to fall.
 
-#: Profiles built from the public JSON alone — the floor every caller gets.
+#: Profiles built from the full rows alone — the floor every caller gets.
 _public_cache: dict[str, PrinterIntel] = {}
 _public_loaded: bool = False
+_public_built_at: int = -1
 
 #: The parsed public JSON, kept so the merge below never re-reads the file.
+#: Since 2026-10-12 it is a ROSTER: each row carries ``display_name`` and the
+#: ``motion`` block, and the generic ``default`` row carries everything.  A
+#: printer's spec sheet, limits and material recipes are kiln-pro's, one
+#: record per printer, fetched through :mod:`kiln._pro_catalogue_bridge` the
+#: first time a door asks and merged into the roster row here.
 _public_raw: dict[str, Any] | None = None
+
+#: Catalogue rows this process has resolved: ``{id: the roster row merged
+#: with the record's intel block}``.  Grows per printer; never the roster.
+_catalogue_rows: dict[str, dict[str, Any]] = {}
+#: The whole record behind each row above, by catalogue id: the four blocks
+#: the bridge parsed.  This module reads ``intel``; :mod:`kiln.slicer_profiles`
+#: and :mod:`kiln.design_intelligence` read their blocks through
+#: :func:`catalogue_block`, so the record is fetched ONCE per printer and
+#: resolved ONCE (:func:`_row_for`), never three times by three loaders.
+_catalogue_records: dict[str, dict[str, Any]] = {}
+#: Bumped when a row lands, so every decoded view rebuilds on its next read
+#: instead of answering from before the row existed.
+_rows_version: int = 0
+#: ``(rows_version, the full rows)`` -- the rows a profile can be built
+#: from: the generic row, a fixture's full rows, and every fetched record.
+_full_rows_cache: tuple[int, dict[str, dict[str, Any]]] | None = None
 
 #: ``(the overlay payload that was merged, the profiles merged from it)``.
 #: Holding the payload object instead of a boolean keeps the merge reusable
 #: exactly as long as it is still the same data, and re-merges by itself if
 #: kiln-pro ever serves this kind per-caller — a field-level tier projection
 #: hands back a different object, which this comparison notices.
-_merged_cache: tuple[dict[str, Any], dict[str, PrinterIntel]] | None = None
+_merged_cache: tuple[dict[str, Any], int, dict[str, PrinterIntel]] | None = None
 
 
 def _deep_merge_dicts(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
@@ -215,6 +237,156 @@ def _read_public_json() -> dict[str, Any]:
             logger.error("Failed to load printer intelligence: %s", exc)
             _public_raw = {}
     return _public_raw
+
+
+def _is_full_row(row: Any) -> bool:
+    """A row a profile may be built from: one that states its ceiling.  A
+    roster row never is -- built, it would claim an all-metal hotend and a
+    Marlin board for a machine nobody has described."""
+    return isinstance(row, dict) and "max_hotend_temp" in row
+
+
+def _full_rows() -> dict[str, dict[str, Any]]:
+    """Every row a profile can be built from, keyed by id, in the public
+    file's order with fetched records after it."""
+    global _full_rows_cache
+    cached = _full_rows_cache
+    if cached is not None and cached[0] == _rows_version:
+        return cached[1]
+    rows = {k: v for k, v in _read_public_json().items() if not k.startswith("_") and _is_full_row(v)}
+    for key, row in _catalogue_rows.items():
+        rows.setdefault(key, row)
+    _full_rows_cache = (_rows_version, rows)
+    return rows
+
+
+def _normalise(printer_id: str) -> str:
+    return printer_id.lower().replace("-", "_").strip()
+
+
+def _candidates(printer_id: str) -> list[str]:
+    normalised = _normalise(printer_id)
+    candidates = [normalised]
+    if normalised.startswith("creality_"):
+        candidates.append(normalised.removeprefix("creality_"))
+    return candidates
+
+
+def _fetch_row(spelling: str) -> tuple[str, dict[str, Any]] | None:
+    """The catalogue's row for *spelling*, merged into this process, or ``None``."""
+    global _rows_version
+    if not spelling or spelling == "default":
+        return None
+    try:
+        from kiln._pro_catalogue_bridge import printer_record
+
+        record = printer_record(spelling)
+    except Exception:  # noqa: BLE001 -- the bridge never raises; a lookup never fails for it
+        logger.debug("printer record not fetched", exc_info=True)
+        return None
+    if record is None:
+        return None
+    key = str(record["printer_id"])
+    held = _catalogue_rows.get(key)
+    if held is not None:
+        return key, held
+    public = _read_public_json().get(key)
+    row = dict(public) if isinstance(public, dict) else {}
+    row.update(record.get("intel") or {})
+    row.setdefault("display_name", record.get("display_name") or key)
+    _catalogue_rows[key] = row
+    _catalogue_records[key] = record
+    _rows_version += 1
+    return key, row
+
+
+def catalogue_block(
+    printer_id: str, block: str, *, exact: bool = False,
+) -> tuple[str, dict[str, Any]] | None:
+    """``(id, the record's *block*)`` for *printer_id*, or ``None``.
+
+    The one door the other loaders read their block of a record through
+    (``design`` for :mod:`kiln.design_intelligence`, ``slicer`` for
+    :mod:`kiln.slicer_profiles`): resolved by :func:`_row_for` -- exact among
+    the rows held, else the catalogue's answer (fetched, and held with its
+    whole record), else the prefix rule -- so a spelling cannot get one
+    printer's spec sheet and another's slicer profile.  ``exact`` demands the
+    resolved id BE the spelling, for a fact that belongs to one model.
+
+    ``None`` when nothing resolved, or when what resolved is a bundled row
+    with no record behind it (the generic row, a fixture's full row): the
+    caller then reads its own bundled copy.  Never raises.
+    """
+    normalised = _normalise(printer_id or "")
+    if not normalised or normalised == "default":
+        return None
+    resolved = _row_for(normalised)
+    if resolved is None or (exact and resolved[0] != normalised):
+        return None
+    record = _catalogue_records.get(resolved[0])
+    found = record.get(block) if isinstance(record, dict) else None
+    if not isinstance(found, dict):
+        return None
+    return resolved[0], dict(found)
+
+
+def held_catalogue_blocks(block: str) -> dict[str, dict[str, Any]]:
+    """Every record this process has fetched so far, as ``{id: block}``.
+    Never fetches: a listing on an install whose records are served must
+    not ask the servers for every printer on the roster."""
+    return {
+        key: dict(record[block])
+        for key, record in _catalogue_records.items()
+        if isinstance(record.get(block), dict)
+    }
+
+
+def catalogue_here() -> bool:
+    """True when kiln-pro's catalogue is on this computer: every record is a
+    dict read away, so a listing may resolve the whole roster."""
+    try:
+        from kiln._pro_catalogue_bridge import available
+
+        return available()
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _row_for(printer_id: str) -> tuple[str, dict[str, Any]] | None:
+    """``(id, row)`` for *printer_id*: exact among the rows held, else the
+    catalogue's answer (fetched and held), else the prefix rule over the
+    rows held -- the order every public door has always resolved in, with
+    the catalogue in the middle so one resolver answers family and prefix
+    for the spec sheet and the ceilings alike."""
+    if not printer_id:
+        return None
+    candidates = _candidates(printer_id)
+    rows = _full_rows()
+    for candidate in candidates:
+        row = rows.get(candidate)
+        if row is not None:
+            return candidate, row
+    roster = _read_public_json()
+    listed = next((c for c in candidates if c in roster and not c.startswith("_")), None)
+    fetched = _fetch_row(listed or candidates[0])
+    if fetched is not None:
+        return fetched
+    try:
+        from kiln._pro_catalogue_bridge import available
+    except Exception:  # noqa: BLE001
+        available = lambda: False  # noqa: E731
+    if available():
+        # kiln-pro here is the resolver; its "no row" is final (see
+        # safety_profiles._curated_match for why a prefix hit over held
+        # rows would be wrong on a shared server).
+        return None
+    for key, row in rows.items():
+        if key == "default":
+            continue
+        for candidate in candidates:
+            if candidate.startswith(key) or key.startswith(candidate):
+                return key, row
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -440,7 +612,7 @@ def _build_profiles(raw: dict[str, Any]) -> dict[str, PrinterIntel]:
             profiles[key] = PrinterIntel(
                 id=key,
                 display_name=data.get("display_name", key),
-                firmware=data.get("firmware", "marlin"),
+                firmware=firmware_label(data) or "marlin",
                 extruder_type=data.get("extruder_type", "direct_drive"),
                 hotend_type=data.get("hotend_type", "all_metal"),
                 has_enclosure=bool(data.get("has_enclosure", False)),
@@ -467,10 +639,12 @@ def _public_profiles() -> dict[str, PrinterIntel]:
     is the same floor a kiln-pro-less install has always had.  Losing the
     overlay costs depth; it never costs a printer limit.
     """
-    global _public_loaded
-    if not _public_loaded:
-        _public_cache.update(_build_profiles(_read_public_json()))
+    global _public_loaded, _public_built_at
+    if not _public_loaded or _public_built_at != _rows_version:
+        _public_cache.clear()
+        _public_cache.update(_build_profiles(_full_rows()))
         _public_loaded = True
+        _public_built_at = _rows_version
         logger.debug(
             "Loaded %d printer intel profiles from %s",
             len(_public_cache),
@@ -530,10 +704,10 @@ def _profiles_for_caller() -> dict[str, PrinterIntel]:
     if overlay is None:
         return _public_profiles()
     cached = _merged_cache
-    if cached is not None and cached[0] is overlay:
-        return cached[1]
-    merged = _build_profiles(_deep_merge_dicts(_read_public_json(), overlay))
-    _merged_cache = (overlay, merged)
+    if cached is not None and cached[0] is overlay and cached[1] == _rows_version:
+        return cached[2]
+    merged = _build_profiles(_deep_merge_dicts(_full_rows(), overlay))
+    _merged_cache = (overlay, _rows_version, merged)
     return merged
 
 
@@ -549,20 +723,12 @@ def get_printer_intel(printer_id: str) -> PrinterIntel:
     depth (quirks, calibration recipes, failure modes) is included only for a
     caller entitled to it; everyone else gets the public floor.
     """
+    resolved = _row_for(printer_id)
     profiles = _profiles_for_caller()
-    normalised = printer_id.lower().replace("-", "_").strip()
-    candidates = [normalised]
-    if normalised.startswith("creality_"):
-        candidates.append(normalised.removeprefix("creality_"))
-    for candidate in candidates:
-        profile = profiles.get(candidate)
+    if resolved is not None:
+        profile = profiles.get(resolved[0])
         if profile is not None:
             return profile
-
-    for key in profiles:
-        for candidate in candidates:
-            if candidate.startswith(key) or key.startswith(candidate):
-                return profiles[key]
 
     default = profiles.get("default")
     if default is not None:
@@ -571,8 +737,8 @@ def get_printer_intel(printer_id: str) -> PrinterIntel:
 
 
 def list_intel_profiles() -> list[str]:
-    """Return all available printer intel profile IDs."""
-    return sorted(_profiles_for_caller())
+    """Every printer the roster lists (plus the generic row), by id."""
+    return sorted(k for k in _read_public_json() if not k.startswith("_"))
 
 
 def get_material_settings(
@@ -759,18 +925,15 @@ _raw_loaded: bool = False
 
 
 def _load_raw() -> None:
-    """Load the raw JSON dict so we can read extended fields like speed data.
+    """Fill ``_raw_cache`` with the full rows this process holds.
 
-    Public data only, at every tier: build volumes, temp ceilings and speed
-    limits are the safety floor, never overlay depth.
+    Kept for callers that walk it (the intel-derived design profiles); a
+    row a door has not resolved yet is not in it, and a reader that wants
+    ONE printer asks :func:`_get_raw`, which fetches.
     """
     global _raw_loaded
-    if _raw_loaded:
-        return
-    for key, data in _read_public_json().items():
-        if key == "_meta":
-            continue
-        _raw_cache[key] = data
+    _raw_cache.clear()
+    _raw_cache.update(_full_rows())
     _raw_loaded = True
 
 
@@ -804,36 +967,95 @@ def chamber_sensor_for_model(printer_id: str | None) -> bool | None:
     """
     if not printer_id:
         return None
-    _load_raw()
-    entry = _raw_cache.get(printer_id.lower().replace("-", "_").strip())
-    if entry is None:
+    normalised = _normalise(printer_id)
+    if normalised == "default":
         return None
-    return _stated_bool(entry.get("has_chamber_sensor"))
+    resolved = _row_for(normalised)
+    if resolved is None or resolved[0] != normalised:
+        return None
+    return _stated_bool(resolved[1].get("has_chamber_sensor"))
 
 
 def _get_raw(printer_id: str) -> dict[str, Any] | None:
-    """Return the raw JSON entry for *printer_id*, or ``None``."""
-    _load_raw()
-    normalised = printer_id.lower().replace("-", "_").strip()
-    entry = _raw_cache.get(normalised)
-    if entry is not None:
-        return entry
-    # Fuzzy prefix match (same logic as get_printer_intel).
-    for key in _raw_cache:
-        if normalised.startswith(key) or key.startswith(normalised):
-            return _raw_cache[key]
+    """Return the raw row for *printer_id* (the catalogue's answer, by the
+    same resolution as :func:`get_printer_intel`), or ``None``."""
+    resolved = _row_for(printer_id)
+    return resolved[1] if resolved is not None else None
+
+
+def roster_firmware(printer_id: str) -> str | None:
+    """The coarse firmware label the public ROSTER states for *printer_id*
+    (its cited ``motion.firmware_family``), or ``None``.
+
+    Public at every tier and in hand before any record is fetched, so a door
+    that only needs to know the firmware family -- which free line to say --
+    reads it here rather than off a record a signed-out install does not
+    hold.  Exact roster id only, a vendor prefix tolerated.
+    """
+    from kiln.motion_facts import firmware_label
+
+    roster = _read_public_json()
+    for candidate in _candidates(printer_id or ""):
+        row = roster.get(candidate)
+        if isinstance(row, dict) and candidate != "default":
+            return firmware_label(row)
     return None
+
+
+def row_for_exact(printer_id: str) -> dict[str, Any] | None:
+    """The catalogue row for the EXACT roster id *printer_id*, or ``None``.
+
+    Fetched through the bridge like every other read, but never a prefix
+    hit: a fact read here (a probe rectangle, a sensor) belongs to one
+    model, and a sibling's would be a wrong fact stated confidently.
+    Never the generic row.
+    """
+    normalised = _normalise(printer_id or "")
+    if not normalised or normalised == "default":
+        return None
+    resolved = _row_for(normalised)
+    if resolved is None or resolved[0] != normalised:
+        return None
+    return resolved[1]
+
+
+def build_volume_for(printer_id: str) -> tuple[str, tuple[float, float, float]] | None:
+    """``(id, (x, y, z))`` for the EXACT roster id *printer_id*, or ``None``.
+
+    The one build-volume read :mod:`kiln.printers.bed_fit` makes per
+    candidate.  Exact: the caller walks its own spellings, and a fuzzy hit
+    here would answer a candidate it never meant.  Never the generic row.
+    """
+    normalised = _normalise(printer_id or "")
+    if not normalised or normalised == "default":
+        return None
+    resolved = _row_for(normalised)
+    if resolved is None or resolved[0] != normalised:
+        return None
+    volume = resolved[1].get("build_volume_mm")
+    if isinstance(volume, dict):
+        volume = [volume.get("x"), volume.get("y"), volume.get("z")]
+    if not volume or len(volume) < 3:
+        return None
+    try:
+        return normalised, (float(volume[0]), float(volume[1]), float(volume[2]))
+    except (TypeError, ValueError):
+        return None
 
 
 def _reset_caches() -> None:
     """Drop every decoded profile and the parsed JSON behind them.  For tests."""
-    global _public_loaded, _public_raw, _merged_cache, _raw_loaded
+    global _public_loaded, _public_raw, _merged_cache, _raw_loaded, _rows_version, _full_rows_cache
     _public_cache.clear()
     _public_loaded = False
     _public_raw = None
     _merged_cache = None
     _raw_cache.clear()
     _raw_loaded = False
+    _catalogue_rows.clear()
+    _catalogue_records.clear()
+    _rows_version += 1
+    _full_rows_cache = None
 
 
 # ---------------------------------------------------------------------------
@@ -1156,7 +1378,7 @@ def _resolve_caps(printer_id: str) -> dict[str, Any] | None:
         # legacy entry that predates the field.
         has_is = raw.get("has_input_shaping")
         if has_is is None:
-            has_is = raw.get("firmware") in ("bambu", "klipper")
+            has_is = firmware_label(raw) in ("bambu", "klipper")
         return {
             "max_speed": int(raw["max_speed_mm_s"]),
             "max_accel": int(raw.get("max_acceleration_mm_s2", 5000)),

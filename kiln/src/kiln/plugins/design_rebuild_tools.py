@@ -87,6 +87,9 @@ class _DesignRebuildPlugin:
 
             apply_brief_to_recipe(recipe_path, brief_id)
             result = rebuild_design_from_recipe(recipe_path)
+            from kiln.front_door import join_goal
+
+            join_goal(brief_id, result, result.get("compiled_stl") or result.get("stl_path"))
             try:
                 from kiln_pro.plugins.git_render_tools import (
                     _DEFAULT_STL_KEYS,

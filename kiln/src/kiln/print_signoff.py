@@ -306,9 +306,13 @@ def record_refusal(record: dict[str, Any] | None, printer_name: str | None) -> s
             # fresh frame, or the job does not go.  (A machine with no
             # camera has nothing to look through; a plate on record as
             # occupied is refused by the start itself.)
-            from kiln.consent_windows import look_at_bed
+            from kiln.consent_windows import look_at_bed, settle_copy_bed_check
             from kiln.plate_state import LOOK_BLIND, LOOK_NEEDED
 
+            if window.account_grant and not window.bed_check:
+                # A copy of the account's always allow that has not started
+                # a print yet: what it says about the bed is decided now.
+                settle_copy_bed_check(window.id, printer_name)
             look = look_at_bed(printer_name)
             if look.verdict in (LOOK_NEEDED, LOOK_BLIND):
                 return (

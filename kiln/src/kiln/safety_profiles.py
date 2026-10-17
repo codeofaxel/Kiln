@@ -163,6 +163,21 @@ _local_override_cache: dict[str, SafetyProfile] = {}
 _loaded: bool = False
 _local_overrides_loaded: bool = False
 
+#: ``{profile_id: display_name}`` for every printer the bundled file LISTS.
+#: The bundled file is a roster: which printers exist and what they are
+#: called.  A printer's limits are kiln-pro's, one record per printer,
+#: fetched through :mod:`kiln._pro_catalogue_bridge` the first time a door
+#: asks and parsed into ``_cache`` under the catalogue's own id.  A roster
+#: row never becomes a profile on its own -- a profile with no limits in it
+#: would be a ceiling nobody set.  Only the generic ``default`` row (and a
+#: test fixture's rows) carry limits in the bundled file.
+_roster: dict[str, str] = {}
+
+#: Printers this process has already minted a limits nudge for, and the
+#: nudges not yet spoken.  See :func:`warm_profile`.
+_nudged: set[str] = set()
+_pending_nudges: list[str] = []
+
 #: ``{profile_id: {variant_id: {field: value, ...}}}`` — curated only.
 #: The sole source of a number that is HIGHER than a base curated limit.
 _variant_data: dict[str, dict[str, dict[str, Any]]] = {}
@@ -235,8 +250,14 @@ def _parse_profiles(
     *,
     variants_into: dict[str, dict[str, dict[str, Any]]] | None = None,
     stamp_owner: bool = False,
+    roster_into: dict[str, str] | None = None,
 ) -> None:
     """Parse raw JSON profile entries into *target* dict.
+
+    *roster_into*, when given, collects the rows that carry a name and no
+    limits -- the BUNDLED file's rows since 2026-10-12, whose limits live in
+    kiln-pro's catalogue.  Only the bundled load passes it: an override row
+    with no ``max_hotend_temp`` is malformed, as it always was.
 
     Keys beginning with ``_`` are metadata, not printers, and are skipped —
     the same convention the other bundled data files use.
@@ -252,6 +273,11 @@ def _parse_profiles(
     """
     for key, data in raw.items():
         if key.startswith("_"):
+            continue
+        if roster_into is not None and isinstance(data, dict) and "max_hotend_temp" not in data:
+            # A roster row: the printer exists and has a name; its limits
+            # are fetched per printer.  Never a profile.
+            roster_into[key] = str(data.get("display_name") or key)
             continue
         try:
             target[key] = SafetyProfile(
@@ -299,12 +325,13 @@ def _load() -> None:
         _loaded = True
         return
 
-    _parse_profiles(raw, _cache, variants_into=_variant_data)
+    _parse_profiles(raw, _cache, variants_into=_variant_data, roster_into=_roster)
     _loaded = True
     logger.debug(
-        "Loaded %d safety profiles (%d with curated variants) from %s",
+        "Loaded %d safety profiles (%d with curated variants) and a roster of %d from %s",
         len(_cache),
         len(_variant_data),
+        len(_roster),
         _DATA_FILE,
     )
 
@@ -612,6 +639,39 @@ def _clamp_to_curated(
     return _dc_replace(community, **replaced, **carry)
 
 
+def _clamp_override(
+    override: SafetyProfile, curated: SafetyProfile | None, candidates: list[str]
+) -> SafetyProfile:
+    """Clamp *override* against the curated record, or against what stands in
+    for one that is not held.
+
+    The curated record when it is held.  Otherwise, for an override whose
+    OWN key -- or the spelling that reached it -- names a CATALOGUE printer
+    (a signed-out install, a kept record gone), the generic floor, never
+    nothing: an override saved under a catalogue name was exempted from a
+    person's confirmation on the strength of the record it would be clamped
+    against (:func:`limits_above_floor`), so the day the record cannot be
+    had, that number has nothing of Kiln's underneath it, and standing it
+    unclamped would hand a typed 500 C to the G-code validator through a
+    door the save-time check could not see.  Judged by the override's own
+    key as well as the request's, because a request can reach an override
+    by prefix under a spelling the roster does not list.  A name the roster
+    does not list keeps today's rule: a person confirmed it, and it stands.
+    Clamped to the floor, the profile reads as not on a curated base,
+    whatever its name.
+    """
+    if curated is not None:
+        return _clamp_to_curated(override, curated)
+    if _catalogue_lists([override.id, *candidates]) is None:
+        return _clamp_to_curated(override, None)
+    logger.info(
+        "local printer override %r names a catalogue printer whose record is not held "
+        "right now; held to the generic floor until it is",
+        override.id,
+    )
+    return _dc_replace(_clamp_to_curated(override, _cache.get("default")), curated_base=False)
+
+
 def _curated_match(candidates: list[str]) -> SafetyProfile | None:
     """The curated profile these candidates resolve to, exact then fuzzy.
 
@@ -628,11 +688,67 @@ def _curated_match(candidates: list[str]) -> SafetyProfile | None:
         profile = _cache.get(candidate)
         if profile is not None:
             return profile
+    # Not held here: ask the catalogue for the row -- by the roster id when
+    # a spelling names one outright (one ask, never one per spelling), else
+    # by the spelling itself.  One resolver -- kiln-pro's -- answers exact,
+    # family and prefix for every door, so the ceilings and the spec sheet
+    # can never come from two different rows.  The answer lands in
+    # ``_cache`` under the catalogue's own id, and the next ask is a dict hit.
+    listed = next((c for c in candidates if c in _roster), None)
+    fetched = _fetch_curated(listed or (candidates[0] if candidates else ""))
+    if fetched is not None:
+        return fetched
+    if _catalogue_here():
+        # kiln-pro on this computer IS the resolver (the hosted server is
+        # one): its "no row" is final.  A prefix hit over the rows this
+        # process happens to hold would answer a spelling the resolver
+        # rejected -- and on a shared server, uncounted by the guard that
+        # fences how many models one seat may ask about.
+        return None
+    # No answer (offline, signed out, the service silent): the prefix rule
+    # over whatever this process already holds, as before.
     for key, profile in _cache.items():
+        if key == "default":
+            continue
         for candidate in candidates:
             if candidate.startswith(key) or key.startswith(candidate):
                 return profile
     return None
+
+
+def _catalogue_here() -> bool:
+    """True when kiln-pro's catalogue reader is installed on this computer."""
+    try:
+        from kiln._pro_catalogue_bridge import available
+
+        return available()
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _fetch_curated(spelling: str) -> SafetyProfile | None:
+    """The catalogue's profile for *spelling*, parsed into ``_cache``, or
+    ``None`` when the catalogue has no row or nothing answered."""
+    if not spelling:
+        return None
+    try:
+        from kiln._pro_catalogue_bridge import printer_record
+
+        record = printer_record(spelling)
+    except Exception:  # noqa: BLE001 -- the bridge never raises, and a lookup never fails for it
+        logger.debug("printer record not fetched", exc_info=True)
+        return None
+    if record is None:
+        return None
+    key = str(record["printer_id"])
+    held = _cache.get(key)
+    if held is not None:
+        return held
+    row = dict(record.get("safety") or {})
+    row.setdefault("display_name", record.get("display_name") or key)
+    _parse_profiles({key: row}, _cache, variants_into=_variant_data)
+    _roster.setdefault(key, str(row["display_name"]))
+    return _cache.get(key)
 
 
 def _curated_resolved(
@@ -723,11 +839,12 @@ def get_profile(printer_id: str, *, variant: str | None = None) -> SafetyProfile
 
     # Local overrides take precedence over bundled — but only in the SAFE
     # direction, and BOTH override doors go through the same clamp against
-    # the same curated answer.  See _clamp_to_curated and _curated_resolved.
+    # the same curated answer.  See _clamp_to_curated, _curated_resolved and
+    # _clamp_override (which decides what stands in for a record not held).
     for candidate in candidates:
         override = _local_override_cache.get(candidate)
         if override is not None:
-            return _clamp_to_curated(override, curated)
+            return _clamp_override(override, curated, candidates)
 
     # An EXACT curated match still beats a fuzzy override match, as it always
     # has.  `curated` is already this profile with the variant applied —
@@ -741,7 +858,7 @@ def get_profile(printer_id: str, *, variant: str | None = None) -> SafetyProfile
     for key in _local_override_cache:
         for candidate in candidates:
             if candidate.startswith(key) or key.startswith(candidate):
-                return _clamp_to_curated(_local_override_cache[key], curated)
+                return _clamp_override(_local_override_cache[key], curated, candidates)
 
     if curated is not None:
         return curated
@@ -760,13 +877,23 @@ def list_profiles() -> list[str]:
     """
     _load()
     _load_local_overrides()
-    return sorted(set(_cache.keys()) | set(_local_override_cache.keys()))
+    return sorted(set(_roster) | set(_cache) | set(_local_override_cache))
 
 
 def get_all_profiles() -> dict[str, SafetyProfile]:
-    """Return all loaded profiles as a dict keyed by profile ID."""
+    """The profiles this process HOLDS, keyed by id: the generic row and
+    every catalogued printer a door has resolved so far.  Not the roster
+    (:func:`list_profiles`): a printer's limits are fetched per printer."""
     _load()
     return dict(_cache)
+
+
+def roster_display_name(profile_id: str) -> str | None:
+    """The bundled roster's name for a CANONICAL id, or ``None``."""
+    _load()
+    key = _normalise(profile_id or "")
+    held = _cache.get(key)
+    return held.display_name if held is not None else _roster.get(key)
 
 
 def match_display_name(name: str) -> str | None:
@@ -779,17 +906,18 @@ def match_display_name(name: str) -> str | None:
     """
     _load()
     normalised = name.lower().replace("-", "_").replace(" ", "_").strip("_")
+    names = {**_roster, **{key: profile.display_name for key, profile in _cache.items()}}
 
     # Check display_name fields
-    for key, profile in _cache.items():
+    for key, display_name in names.items():
         if key == "default":
             continue
-        dn = profile.display_name.lower().replace("-", "_").replace(" ", "_").strip("_")
+        dn = display_name.lower().replace("-", "_").replace(" ", "_").strip("_")
         if normalised == dn or normalised in dn or dn in normalised:
             return key
 
     # Fallback: try key matching
-    for key in _cache:
+    for key in names:
         if key == "default":
             continue
         if normalised.startswith(key) or key.startswith(normalised):
@@ -799,15 +927,20 @@ def match_display_name(name: str) -> str | None:
 
 
 # Last-resort limits for when even the `default` profile cannot be loaded.
-# These are the values of the LEAST capable machine the registry describes, so
-# an unidentified printer is treated as the weakest one rather than the
-# strongest.  The previous literals here were 300/130 — described in the
-# docstring as "conservative generic limits" while actually being the LOOSEST
-# ceiling in the file, which would have let an unknown (possibly PTFE-lined)
-# hotend be driven to 300C.  Named, and named honestly, so the next reader does
+# The generic floor is BELOW every catalogued printer's ceiling, so a printer
+# Kiln has not been told the model of -- or has not been able to fetch the
+# record for -- is treated as the weakest machine rather than the strongest.
+# The previous literals here were 300/130 — described in the docstring as
+# "conservative generic limits" while actually being the LOOSEST ceiling in
+# the file, which would have let an unknown (possibly PTFE-lined) hotend be
+# driven to 300C.  The hotend floor is the PTFE-safe 240 C (the same margin
+# ``server._PTFE_SAFE_MAX`` applies to a lined hotend): whether a machine's
+# hotend is lined is part of its catalogue record, so an install that could
+# not fetch the record cannot know, and the floor assumes it is.  PLA and
+# PETG print under it.  Named, and named honestly, so the next reader does
 # not have to guess whether the number means anything.
-_UNKNOWN_PRINTER_MAX_HOTEND_C = 250.0
-_UNKNOWN_PRINTER_MAX_BED_C = 100.0
+_UNKNOWN_PRINTER_MAX_HOTEND_C = 240.0
+_UNKNOWN_PRINTER_MAX_BED_C = 80.0
 
 
 def resolve_limits(printer_id: str | None = None) -> tuple:
@@ -832,6 +965,134 @@ def resolve_limits(printer_id: str | None = None) -> tuple:
         return default.max_hotend_temp, default.max_bed_temp
     except KeyError:
         return _UNKNOWN_PRINTER_MAX_HOTEND_C, _UNKNOWN_PRINTER_MAX_BED_C
+
+
+# ---------------------------------------------------------------------------
+# Setup: fetch the record once, and say what an install without it is told
+# ---------------------------------------------------------------------------
+
+
+def _catalogue_lists(candidates: list[str]) -> str | None:
+    """The roster's name for the printer *candidates* spell, or ``None``.
+
+    For WORDING only: whether the nudge says "Kiln knows this printer" or
+    "Kiln doesn't know this printer yet".  The enforcement answer is the
+    catalogue's (:func:`_curated_match`), never this.
+    """
+    _load()
+    names = {**_roster, **{key: profile.display_name for key, profile in _cache.items() if key != "default"}}
+    for candidate in candidates:
+        if candidate in names:
+            return names[candidate]
+    try:
+        from kiln.printer_profile_ids import map_printer_hint_to_profile_id
+
+        mapped = map_printer_hint_to_profile_id(candidates[0]) if candidates else None
+    except Exception:  # noqa: BLE001
+        mapped = None
+    return names.get(mapped) if mapped else None
+
+
+def _count_limits_offer(stage: str, spelling: str, *, leads_to_signin: bool = True) -> None:
+    """Count a limits nudge in the sign-in funnel and, for one that asks for
+    a sign-in, leave the marker the sign-in it leads to reads
+    (``daily_stats``).  The one writer: the nudge is minted here and nowhere
+    else.  Never raises."""
+    try:
+        from kiln.daily_stats import record_limits_nudge_offer
+
+        record_limits_nudge_offer(stage, spelling, leads_to_signin=leads_to_signin)
+    except Exception:  # noqa: BLE001 -- a counter never costs a setup
+        logger.debug("limits nudge not counted", exc_info=True)
+
+
+def warm_profile(printer_id: str) -> str | None:
+    """Fetch *printer_id*'s record now, at setup, and mint the one sentence an
+    install that could not get it is owed.  Returns that sentence, or ``None``.
+
+    The chokepoint every setup door reaches (``PrinterAdapter.set_safety_profile``):
+    the record is fetched here so a print-time door never waits on the
+    network, and so the miss is said ONCE, at setup, never on every command.
+    Two sentences, for two different people:
+
+    * a catalogued printer the install is SIGNED OUT for: Kiln knows the
+      machine and is holding it to the generic floor only for want of a
+      sign-in -- sign in free and it works to the real limits;
+    * a printer the catalogue has no row for: Kiln holds it to the generic
+      floor until a person states its limits (an agent may find them from
+      the maker's own page), on a signed-in install (free), confirmed with
+      a code on this screen, as a print start is.
+
+    Offline or unanswered is neither: the record is fetched on the next
+    command that needs it, and the floor stands meanwhile with nothing to
+    say to the person.  A process mints each printer's sentence once; the
+    door that speaks it takes it with :func:`pending_limits_nudge`.
+
+    The two signed-out sentences are the sign-in funnel's ``offered_limits``
+    and ``offered_limits_unknown`` (``daily_stats.record_limits_nudge_offer``),
+    counted here, where they are minted, so no door that speaks one has to
+    remember to.  The third sentence asks for no sign-in and counts nothing.
+    """
+    spelling = str(printer_id or "").strip()
+    if not spelling:
+        return None
+    normalised = _normalise(spelling)
+    if normalised in _nudged:
+        return None
+    try:
+        profile = get_profile(spelling)
+    except KeyError:
+        return None
+    if profile.id != "default" or normalised == "default":
+        return None
+    from kiln._pro_catalogue_bridge import why_unanswered
+
+    cause = why_unanswered(normalised)
+    candidates = [normalised] + [c for c in printer_key_candidates(spelling) if c != normalised]
+    listed = _catalogue_lists(candidates)
+    hotend, bed = profile.max_hotend_temp, profile.max_bed_temp
+    if listed is not None:
+        if cause != "signed_out":
+            return None
+        sentence = (
+            f"Kiln knows the {listed} well, and is holding it to generic limits "
+            f"({hotend:g} C hotend, {bed:g} C bed) only because this install is signed out. "
+            "Sign in free and Kiln works to that printer's real limits (hotend and bed temperatures) "
+            "and slices with its tuned profile and material settings."
+        )
+        _count_limits_offer("offered_limits", spelling)
+    elif cause == "signed_out":
+        # A printer the catalogue has no row for, on a signed-out install:
+        # limits above the floor take a signed-in install (free) and a
+        # person's code, so this sentence asks for the sign-in and leaves
+        # the conversion marker.
+        sentence = (
+            f"Kiln doesn't know the {spelling!r} yet, so it holds it to generic limits "
+            f"({hotend:g} C hotend, {bed:g} C bed). Sign in free, and your agent can read its real "
+            "limits off the printer itself (a Klipper machine), find them on the maker's own spec "
+            "page, or you can enter them (add_safety_profile); you confirm them with a code on this "
+            "screen, as a print start is."
+        )
+        _count_limits_offer("offered_limits_unknown", spelling)
+    else:
+        # The same printer on a signed-in install: nothing to sign in for,
+        # so no offer is counted.
+        sentence = (
+            f"Kiln doesn't know the {spelling!r} yet, so it holds it to generic limits "
+            f"({hotend:g} C hotend, {bed:g} C bed). Your agent can read its real limits off the "
+            "printer itself (a Klipper machine), find them on the maker's own spec page, or you can "
+            "enter them (add_safety_profile); you confirm them with a code on this screen, as a "
+            "print start is."
+        )
+    _nudged.add(normalised)
+    _pending_nudges.append(sentence)
+    return sentence
+
+
+def pending_limits_nudge() -> str | None:
+    """The oldest unspoken limits nudge, or ``None``.  Taking it is saying
+    it: a sentence leaves this list once."""
+    return _pending_nudges.pop(0) if _pending_nudges else None
 
 
 #: Human names for the sentence in :func:`limits_provenance_note`.  The
@@ -1214,13 +1475,110 @@ def _save_local_overrides() -> None:
     _LOCAL_OVERRIDE_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
+class LimitsNeedAPerson(ValueError):
+    """An override would raise a limit above Kiln's floor for a printer
+    Kiln has no number of its own for, and no person has confirmed it.
+
+    ``above_floor`` names the fields asking for more than the generic
+    profile allows.  A door that can put the question to a person (the
+    code on the screen) does so and calls again with ``confirmed=True``.
+    """
+
+    def __init__(self, printer_model: str, above_floor: tuple[str, ...]) -> None:
+        self.printer_model = printer_model
+        self.above_floor = above_floor
+        super().__init__(
+            f"Kiln has no verified limits for {printer_model!r}, so these numbers would be the only "
+            f"ceiling it has, and they go above the generic floor on {', '.join(above_floor)}. "
+            "A person has to confirm them."
+        )
+
+
+#: Fields where a typed number can loosen what Kiln would otherwise hold,
+#: each with the direction that loosens it: a ceiling above the floor's, or
+#: a floor (min_safe_z) below it.  A ceiling the generic profile leaves
+#: unset (``max_volumetric_flow``) is unbounded there, so any number stated
+#: for it stands with nothing of Kiln's underneath and needs a person too.
+_FLOOR_BOUND_FIELDS = (
+    ("max_hotend_temp", "above"),
+    ("max_bed_temp", "above"),
+    ("max_chamber_temp", "above"),
+    ("max_feedrate", "above"),
+    ("max_volumetric_flow", "above"),
+    ("min_safe_z", "below"),
+)
+
+
+def limits_above_floor(printer_model: str, profile: dict[str, Any]) -> tuple[str, ...]:
+    """The limit fields in *profile* that would LOOSEN Kiln's floor with
+    nothing of Kiln's underneath them: a ceiling above the generic one, a
+    minimum below it, or a ceiling the generic profile leaves unbounded.
+
+    Empty when a curated profile answers for this printer BY NAME (an
+    override can only tighten it, so the number typed can never win), and
+    empty when every stated limit is at or below the generic profile's.  A
+    field named here is a ceiling a person typed that Kiln would then
+    enforce as its own -- which is why that takes a person, never only an
+    agent.
+
+    The exemption is the override's OWN key being a curated key, nothing
+    looser.  :func:`get_profile` reaches an override by prefix, and a
+    request can match the override's key without matching any curated key
+    (``"enderx"`` reaches an override saved as ``"ender"``, which no
+    curated row answers), so a ceiling exempted on a fuzzy curated hit --
+    or on a spelling that resolves to a curated key but is saved under
+    another -- could stand unclamped under some request.  The key that is
+    saved is the key that is judged.
+
+    And a curated key is one whose record this process HOLDS (fetched from
+    the catalogue, or kiln-pro here), not merely one the roster lists.  A
+    catalogued printer whose record could not be had -- a signed-out
+    install -- has nothing of Kiln's to clamp against, so it is judged like
+    a printer Kiln has no number for: the floor, and a person for anything
+    above it.  Exempting on the roster alone would let a typed 500 C stand
+    unclamped under a catalogue name.
+    """
+    _load()
+    normalised = _normalise(printer_model)
+    curated = _curated_match([normalised])
+    if curated is not None and curated.id == normalised:
+        return ()
+    floor = _cache.get("default")
+    if floor is None:
+        return tuple(f for f, _ in _FLOOR_BOUND_FIELDS if profile.get(f) is not None)
+    loosened: list[str] = []
+    for field, direction in _FLOOR_BOUND_FIELDS:
+        value = profile.get(field)
+        if value is None:
+            continue
+        limit = getattr(floor, field, None)
+        try:
+            past = limit is None or (
+                float(value) > float(limit) if direction == "above" else float(value) < float(limit)
+            )
+        except (TypeError, ValueError):
+            past = True
+        if past:
+            loosened.append(field)
+    return tuple(loosened)
+
+
 def set_local_printer_override(
     printer_model: str,
     profile: dict[str, Any],
     *,
     source: str = "local",
+    confirmed: bool = False,
 ) -> None:
     """Validate and save an override for a printer on THIS machine.
+
+    A limit above the generic floor for a printer Kiln has no curated
+    number for is refused with :class:`LimitsNeedAPerson` unless
+    *confirmed* says a person has confirmed these numbers.  Only a door
+    that put the question to a person may pass it; an agent's say-so is
+    not a confirmation.  A curated printer is never asked (the override
+    can only tighten it), and neither is an override at or below the
+    floor, which is what Kiln would hold anyway.
 
     Persisted to ``~/.kiln/local_printer_overrides.json`` so it survives
     restarts.  It takes precedence over the bundled profile only in the
@@ -1252,6 +1610,10 @@ def set_local_printer_override(
     errors = validate_safety_profile(profile)
     if errors:
         raise ValueError(f"Invalid safety profile: {'; '.join(errors)}")
+    if not confirmed:
+        above = limits_above_floor(printer_model, profile)
+        if above:
+            raise LimitsNeedAPerson(printer_model, above)
 
     notes = profile.get("notes", "")
     if source and source not in ("local", "community"):

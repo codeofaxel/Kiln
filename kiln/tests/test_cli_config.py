@@ -199,8 +199,302 @@ class TestSaveAndLoad:
 
 
 # ---------------------------------------------------------------------------
+# save_printer under a name already saved
+# ---------------------------------------------------------------------------
+
+_A1_SERIAL = "01P00A000000001"
+
+
+def _saved_a1(tmp_path: Path) -> Path:
+    cfg = tmp_path / "config.yaml"
+    save_printer(
+        "a1", "bambu", "192.168.1.6",
+        access_code="x", serial=_A1_SERIAL, printer_model="bambu_a1",
+        camera_stream_url="rtsps://192.168.1.50/live",
+        config_path=cfg, probe=False,
+    )
+    return cfg
+
+
+def _entry(cfg: Path, name: str) -> dict:
+    return yaml.safe_load(cfg.read_text())["printers"][name]
+
+
+class TestSaveUnderASavedName:
+    """Same machine (serial, or an unchanged address) updates and keeps
+    what was stated before; a different machine is refused unwritten;
+    an address-only printer that moved is replaced with a notice."""
+
+    def test_a_new_name_is_added_without_a_notice(self, tmp_path):
+        result = save_printer("p", "bambu", "10.0.0.2", access_code="x", serial="S1",
+                              config_path=tmp_path / "config.yaml", probe=False)
+        assert result.outcome == "added"
+        assert result.notice is None
+        assert result.path == tmp_path / "config.yaml"
+
+    def test_a_different_serial_is_refused_and_nothing_is_written(self, tmp_path):
+        cfg = _saved_a1(tmp_path)
+        before = cfg.read_text()
+        with pytest.raises(ValueError, match="serial ending 0001, at 192.168.1.6"):
+            save_printer("a1", "bambu", "192.168.1.7", access_code="y", serial="01P00A000000002",
+                         config_path=cfg, probe=False)
+        assert cfg.read_text() == before
+
+    def test_the_refusal_names_a_free_name(self, tmp_path):
+        cfg = _saved_a1(tmp_path)
+        save_printer("a1-2", "bambu", "192.168.1.8", access_code="z", serial="S3", config_path=cfg, probe=False)
+        with pytest.raises(ValueError) as info:
+            save_printer("a1", "bambu", "192.168.1.7", access_code="y", serial="S2", config_path=cfg, probe=False)
+        assert info.value.suggested_name == "a1-3"
+        assert "'a1-3'" in str(info.value)
+
+    def test_the_same_serial_updates_and_keeps_model_and_camera(self, tmp_path):
+        cfg = _saved_a1(tmp_path)
+        result = save_printer("a1", "bambu", "192.168.1.7", access_code="y", serial=_A1_SERIAL.lower(),
+                              config_path=cfg, probe=False)
+        entry = _entry(cfg, "a1")
+        assert entry["host"] == "192.168.1.7"
+        assert entry["access_code"] == "y"
+        assert entry["printer_model"] == "bambu_a1"
+        assert entry["camera_stream_url"] == "rtsps://192.168.1.50/live"
+        assert result.outcome == "updated"
+        assert "from 192.168.1.6 to 192.168.1.7" in result.notice
+        assert "printer_model, camera_stream_url" in result.notice
+
+    def test_a_different_printer_type_is_refused(self, tmp_path):
+        cfg = _saved_a1(tmp_path)
+        before = cfg.read_text()
+        with pytest.raises(ValueError, match="different kind of printer"):
+            save_printer("a1", "moonraker", "http://192.168.1.6", config_path=cfg, probe=False)
+        assert cfg.read_text() == before
+
+    def test_a_different_elegoo_mainboard_is_refused(self, tmp_path):
+        cfg = tmp_path / "config.yaml"
+        save_printer("sat", "elegoo", "10.0.0.3", serial="MAINBOARD-AAAA", config_path=cfg, probe=False)
+        with pytest.raises(ValueError, match="serial ending AAAA"):
+            save_printer("sat", "elegoo", "10.0.0.3", serial="MAINBOARD-BBBB", config_path=cfg, probe=False)
+        assert _entry(cfg, "sat")["mainboard_id"] == "MAINBOARD-AAAA"
+
+    def test_an_address_only_printer_that_moved_is_replaced_with_a_notice(self, tmp_path):
+        cfg = tmp_path / "config.yaml"
+        save_printer("ender", "octoprint", "http://10.0.0.5", api_key="k", printer_model="ender3",
+                     config_path=cfg, probe=False)
+        result = save_printer("ender", "octoprint", "http://10.0.0.9", api_key="k2", config_path=cfg, probe=False)
+        entry = _entry(cfg, "ender")
+        assert entry["host"] == "http://10.0.0.9"
+        assert entry["api_key"] == "k2"
+        assert "printer_model" not in entry
+        assert result.outcome == "replaced"
+        assert "(was at http://10.0.0.5)" in result.notice
+        assert "api_key, printer_model" in result.notice
+
+    def test_an_address_only_printer_at_the_same_address_is_updated(self, tmp_path):
+        cfg = tmp_path / "config.yaml"
+        save_printer("ender", "octoprint", "http://10.0.0.5", api_key="k", printer_model="ender3",
+                     config_path=cfg, probe=False)
+        result = save_printer("ender", "octoprint", "http://10.0.0.5", api_key="k2", config_path=cfg, probe=False)
+        assert result.outcome == "updated"
+        assert result.notice.startswith("Updated existing printer 'ender'.")
+        assert _entry(cfg, "ender")["printer_model"] == "ender3"
+
+    def test_a_replaced_entry_drops_the_old_credentials_and_camera(self, tmp_path):
+        # Everything saved under the name describes the machine at the old
+        # address: its key, its model's limits, its camera (whose URL may
+        # embed a password).  When the address changed and nothing proves
+        # this is that machine, none of it applies to the new address; the
+        # notice says what has to be stated again.
+        cfg = tmp_path / "config.yaml"
+        save_printer("ender", "octoprint", "http://10.0.0.5", api_key="k", printer_model="ender3",
+                     camera_stream_url="rtsp://user:secret@10.0.0.50/live",
+                     config_path=cfg, probe=False)
+        result = save_printer("ender", "octoprint", "http://10.0.0.9", config_path=cfg, probe=False)
+        entry = _entry(cfg, "ender")
+        assert entry == {"type": "octoprint", "host": "http://10.0.0.9"}
+        assert result.outcome == "replaced"
+        assert result.dropped == ("api_key", "printer_model", "camera_stream_url")
+        assert "api_key, printer_model, camera_stream_url" in result.notice
+        assert "secret" not in result.notice
+
+    def test_a_serial_printer_saved_without_its_serial_at_a_new_address_is_refused(self, tmp_path):
+        # The saved entry names one machine by serial; a save that names
+        # none, at another address, cannot be shown to be that machine, so
+        # neither the serial nor the access code is carried to the new host.
+        cfg = _saved_a1(tmp_path)
+        before = cfg.read_text()
+        with pytest.raises(ValueError, match="serial ending 0001") as info:
+            save_printer("a1", "bambu", "192.168.1.7", access_code="y", config_path=cfg, probe=False)
+        assert info.value.suggested_name == "a1-2"
+        assert cfg.read_text() == before
+
+    def test_a_serial_printer_saved_without_its_serial_at_the_same_address_is_updated(self, tmp_path):
+        cfg = _saved_a1(tmp_path)
+        result = save_printer("a1", "bambu", "192.168.1.6", access_code="y", config_path=cfg, probe=False)
+        entry = _entry(cfg, "a1")
+        assert result.outcome == "updated"
+        assert entry["serial"] == _A1_SERIAL
+        assert entry["access_code"] == "y"
+
+    def test_a_new_camera_replaces_both_saved_camera_urls(self, tmp_path):
+        cfg = _saved_a1(tmp_path)
+        save_printer("a1", "bambu", "192.168.1.6", access_code="x", serial=_A1_SERIAL,
+                     camera_snapshot_url="http://192.168.1.60/snap.jpg", config_path=cfg, probe=False)
+        entry = _entry(cfg, "a1")
+        assert entry["camera_snapshot_url"] == "http://192.168.1.60/snap.jpg"
+        assert "camera_stream_url" not in entry
+        assert entry["printer_model"] == "bambu_a1"
+
+
+# ---------------------------------------------------------------------------
 # set_active_printer
 # ---------------------------------------------------------------------------
+
+
+class TestSaveWithAReadMachineId:
+    """A machine id Kiln read off the printer is stored for the types that
+    state none, and judges a save under the name the way a stated serial
+    does: the same id at a new address updates and keeps the credential,
+    a different id is refused, and an id that could not be read this time
+    is replaced as an id-less printer is -- never refused, since the
+    person never typed it."""
+
+    @staticmethod
+    def _identity(value="CZPX4720X004XC34242", source="prusalink_info.serial"):
+        from kiln.printers.base import MachineIdentity
+
+        return MachineIdentity(value=value, source=source, kind="printer_serial")
+
+    def _saved_mk4(self, tmp_path, **extra):
+        cfg = tmp_path / "config.yaml"
+        save_printer("mk4", "prusalink", "http://10.0.0.5", api_key="k", printer_model="prusa_mk4",
+                     camera_stream_url="rtsp://user:secret@10.0.0.50/live",
+                     machine_identity=self._identity(), config_path=cfg, probe=False, **extra)
+        return cfg
+
+    def test_the_read_id_is_stored_with_its_source(self, tmp_path):
+        cfg = self._saved_mk4(tmp_path)
+        entry = _entry(cfg, "mk4")
+        assert entry["machine_id"] == "CZPX4720X004XC34242"
+        assert entry["machine_id_source"] == "prusalink_info.serial"
+
+    def test_a_bambu_save_never_stores_a_read_id(self, tmp_path):
+        cfg = tmp_path / "config.yaml"
+        save_printer("a1", "bambu", "10.0.0.2", access_code="x", serial="S1",
+                     machine_identity=self._identity(), config_path=cfg, probe=False)
+        assert "machine_id" not in _entry(cfg, "a1")
+
+    def test_a_printer_that_moved_is_updated_when_it_reports_the_saved_id(self, tmp_path):
+        cfg = self._saved_mk4(tmp_path)
+        result = save_printer("mk4", "prusalink", "http://10.0.0.9",
+                              machine_identity=self._identity(), config_path=cfg, probe=False)
+        entry = _entry(cfg, "mk4")
+        assert result.outcome == "updated"
+        assert "from http://10.0.0.5 to http://10.0.0.9" in result.notice
+        assert entry["host"] == "http://10.0.0.9"
+        assert entry["api_key"] == "k"
+        assert entry["camera_stream_url"] == "rtsp://user:secret@10.0.0.50/live"
+        assert entry["machine_id"] == "CZPX4720X004XC34242"
+        assert "machine_id" not in result.notice
+
+    def test_the_id_is_compared_without_regard_to_case(self, tmp_path):
+        cfg = self._saved_mk4(tmp_path)
+        result = save_printer("mk4", "prusalink", "http://10.0.0.9",
+                              machine_identity=self._identity("czpx4720x004xc34242"),
+                              config_path=cfg, probe=False)
+        assert result.outcome == "updated"
+
+    def test_a_different_id_at_a_new_address_is_refused_unwritten(self, tmp_path):
+        cfg = self._saved_mk4(tmp_path)
+        before = cfg.read_text()
+        with pytest.raises(ValueError, match="machine id ending 4242") as info:
+            save_printer("mk4", "prusalink", "http://10.0.0.9", api_key="k2",
+                         machine_identity=self._identity("CZPX4720X004XC99999"),
+                         config_path=cfg, probe=False)
+        assert info.value.suggested_name == "mk4-2"
+        assert cfg.read_text() == before
+
+    def test_a_different_id_at_the_same_address_is_refused_too(self, tmp_path):
+        cfg = self._saved_mk4(tmp_path)
+        with pytest.raises(ValueError, match="A different machine answers as 'mk4'"):
+            save_printer("mk4", "prusalink", "http://10.0.0.5",
+                         machine_identity=self._identity("CZPX4720X004XC99999"),
+                         config_path=cfg, probe=False)
+        assert _entry(cfg, "mk4")["machine_id"] == "CZPX4720X004XC34242"
+
+    def test_a_moved_printer_whose_id_could_not_be_read_is_replaced_not_refused(self, tmp_path):
+        cfg = self._saved_mk4(tmp_path)
+        result = save_printer("mk4", "prusalink", "http://10.0.0.9", config_path=cfg, probe=False)
+        entry = _entry(cfg, "mk4")
+        assert result.outcome == "replaced"
+        assert "api_key" not in entry
+        assert "machine_id" not in entry
+        assert "machine_id_source" not in entry
+        assert "printer_model" not in entry
+        assert result.dropped == ("api_key", "printer_model", "camera_stream_url")
+        assert "machine_id" not in result.notice
+
+    def test_an_id_from_another_source_says_nothing_either_way(self, tmp_path):
+        # A backend that starts reading a different field must not call
+        # every printer saved before it a different machine.
+        cfg = self._saved_mk4(tmp_path)
+        result = save_printer("mk4", "prusalink", "http://10.0.0.9",
+                              machine_identity=self._identity("OTHER", source="prusalink_info.hostname"),
+                              config_path=cfg, probe=False)
+        assert result.outcome == "replaced"
+        assert _entry(cfg, "mk4")["machine_id"] == "OTHER"
+
+    def test_a_save_at_the_same_address_keeps_the_saved_id_when_none_was_read(self, tmp_path):
+        cfg = self._saved_mk4(tmp_path)
+        result = save_printer("mk4", "prusalink", "http://10.0.0.5", api_key="k2",
+                              config_path=cfg, probe=False)
+        assert result.outcome == "updated"
+        assert _entry(cfg, "mk4")["machine_id"] == "CZPX4720X004XC34242"
+        assert "machine_id" not in result.notice
+
+    def test_the_result_carries_the_id_the_entry_holds(self, tmp_path):
+        cfg = tmp_path / "config.yaml"
+        result = save_printer("mk4", "prusalink", "http://10.0.0.5", api_key="k",
+                              machine_identity=self._identity(), config_path=cfg, probe=False)
+        assert result.machine_identity == self._identity()
+        plain = save_printer("ender", "octoprint", "http://10.0.0.6", api_key="k",
+                             config_path=cfg, probe=False)
+        assert plain.machine_identity is None
+
+    def test_a_reader_is_asked_only_when_the_address_answers(self, tmp_path, monkeypatch):
+        import kiln.cli.config as mod
+
+        cfg = tmp_path / "config.yaml"
+        asked: list[str] = []
+
+        def reader():
+            asked.append("read")
+            return self._identity()
+
+        monkeypatch.setattr(mod, "_check_printer_url", lambda url, *, printer_type, probe: (url, [], False))
+        save_printer("mk4", "prusalink", "http://10.0.0.5", api_key="k",
+                     read_machine_identity=reader, config_path=cfg, probe=True)
+        assert asked == []
+        assert "machine_id" not in _entry(cfg, "mk4")
+
+        monkeypatch.setattr(mod, "_check_printer_url", lambda url, *, printer_type, probe: (url, [], True))
+        result = save_printer("mk4", "prusalink", "http://10.0.0.5", api_key="k",
+                              read_machine_identity=reader, config_path=cfg, probe=True)
+        assert asked == ["read"]
+        assert _entry(cfg, "mk4")["machine_id"] == "CZPX4720X004XC34242"
+        assert result.machine_identity == self._identity()
+
+    def test_a_reader_that_fails_leaves_the_save_without_an_id(self, tmp_path, monkeypatch):
+        import kiln.cli.config as mod
+
+        cfg = tmp_path / "config.yaml"
+        monkeypatch.setattr(mod, "_check_printer_url", lambda url, *, printer_type, probe: (url, [], True))
+
+        def reader():
+            raise RuntimeError("printer hung up")
+
+        result = save_printer("mk4", "prusalink", "http://10.0.0.5", api_key="k",
+                              read_machine_identity=reader, config_path=cfg, probe=True)
+        assert result.outcome == "added"
+        assert "machine_id" not in _entry(cfg, "mk4")
 
 
 class TestSetActive:

@@ -15,27 +15,30 @@
           "400-grit sandpaper",
           "600-grit sandpaper",
           "water for wet sanding"
-        ]
+        ],
+        "safety_notes": "Wear a dust mask. PLA dust is not toxic but irritates lungs."
       },
       {
         "name": "Filler Primer + Spray Paint",
         "difficulty": "easy",
         "tools_needed": [
-          "filler primer (Rust-Oleum, Tamiya)",
+          "sandable filler primer spray",
           "spray paint",
           "fine sandpaper (400-600 grit)",
           "clear coat (optional)"
-        ]
+        ],
+        "safety_notes": "Spray in well-ventilated area or outdoors. Wear a respirator when spraying."
       },
       {
-        "name": "Epoxy Coating (XTC-3D)",
+        "name": "Epoxy Coating",
         "difficulty": "moderate",
         "tools_needed": [
-          "XTC-3D epoxy (or generic brush-on epoxy)",
+          "brush-on two-part epoxy coating that self-levels",
           "mixing cups",
           "disposable brush",
           "nitrile gloves"
-        ]
+        ],
+        "safety_notes": "Work in ventilated area. Wear nitrile gloves — uncured epoxy is a skin sensitizer."
       }
     ],
     "paintability": {
@@ -64,7 +67,8 @@
           "400-grit sandpaper",
           "600-grit sandpaper",
           "water for wet sanding"
-        ]
+        ],
+        "safety_notes": "Wear a dust mask."
       },
       {
         "name": "Filler Primer + Spray Paint",
@@ -74,17 +78,19 @@
           "spray paint",
           "fine sandpaper (400-600 grit)",
           "clear coat (optional)"
-        ]
+        ],
+        "safety_notes": "Spray in well-ventilated area."
       },
       {
-        "name": "Epoxy Coating (XTC-3D)",
+        "name": "Epoxy Coating",
         "difficulty": "moderate",
         "tools_needed": [
-          "XTC-3D epoxy",
+          "brush-on two-part epoxy coating that self-levels",
           "mixing cups",
           "disposable brush",
           "nitrile gloves"
-        ]
+        ],
+        "safety_notes": "Ventilated area. Nitrile gloves required."
       }
     ],
     "paintability": {
@@ -111,14 +117,16 @@
         "tools_needed": [
           "clear spray lacquer or polyurethane",
           "lint-free cloth"
-        ]
+        ],
+        "safety_notes": "Spray in ventilated area."
       },
       {
         "name": "Light Dusting (Minimal Sanding)",
         "difficulty": "easy",
         "tools_needed": [
           "800-grit or finer sandpaper"
-        ]
+        ],
+        "safety_notes": "Wear a dust mask."
       }
     ],
     "paintability": {
@@ -144,7 +152,8 @@
           "wood stain (oil-based or water-based)",
           "clean rags",
           "polyurethane sealant"
-        ]
+        ],
+        "safety_notes": "Oil-based stains require ventilation. Wear nitrile gloves."
       },
       {
         "name": "Sanding Only",
@@ -153,7 +162,8 @@
           "120-grit sandpaper",
           "220-grit sandpaper",
           "320-grit sandpaper"
-        ]
+        ],
+        "safety_notes": "Wear a dust mask. Wood fiber dust is mildly irritating."
       },
       {
         "name": "Sealant Coating",
@@ -161,7 +171,8 @@
         "tools_needed": [
           "polyurethane spray or brush-on",
           "fine sandpaper (320 grit)"
-        ]
+        ],
+        "safety_notes": "Ventilated area for polyurethane application."
       }
     ],
     "paintability": {
@@ -191,7 +202,8 @@
           "paper towels",
           "wire rack or stand",
           "aluminum foil"
-        ]
+        ],
+        "safety_notes": "CRITICAL: Acetone is extremely flammable and toxic to inhale. Work in a well-ventilated area away from heat sources. Wear nitrile gloves and safety glasses. Never heat acetone directly."
       },
       {
         "name": "Sanding",
@@ -201,7 +213,8 @@
           "400-grit sandpaper",
           "600-grit sandpaper",
           "water for wet sanding"
-        ]
+        ],
+        "safety_notes": "Wear a dust mask. ABS dust contains styrene — avoid prolonged inhalation."
       },
       {
         "name": "ABS Slurry Welding",
@@ -211,7 +224,8 @@
           "ABS scraps or failed prints",
           "small glass jar",
           "brush or syringe"
-        ]
+        ],
+        "safety_notes": "Ventilated area. Nitrile gloves. Acetone dissolves many plastics — protect work surfaces."
       },
       {
         "name": "Painting",
@@ -220,7 +234,8 @@
           "filler primer",
           "spray paint or acrylic",
           "fine sandpaper"
-        ]
+        ],
+        "safety_notes": "Standard spray painting precautions."
       }
     ],
     "paintability": {
@@ -249,7 +264,8 @@
           "220-grit sandpaper",
           "400-grit sandpaper",
           "600-grit sandpaper"
-        ]
+        ],
+        "safety_notes": "Wear a dust mask. ASA dust contains styrene."
       },
       {
         "name": "Acetone Vapor Smoothing (Limited)",
@@ -259,7 +275,8 @@
           "sealed glass container",
           "paper towels",
           "wire rack"
-        ]
+        ],
+        "safety_notes": "Same acetone safety precautions as ABS. Extended exposure time increases fume risk — ensure strong ventilation."
       },
       {
         "name": "Painting",
@@ -268,7 +285,8 @@
           "filler primer",
           "UV-resistant spray paint",
           "fine sandpaper"
-        ]
+        ],
+        "safety_notes": "Standard painting precautions."
       }
     ],
     "paintability": {
@@ -298,26 +316,29 @@
           "400-grit sandpaper",
           "600-grit sandpaper",
           "water for wet sanding"
-        ]
+        ],
+        "safety_notes": "Wear a dust mask. Wet sanding reduces dust significantly."
       },
       {
         "name": "Painting",
         "difficulty": "easy",
         "tools_needed": [
-          "plastic-specific primer (Krylon Fusion)",
+          "spray primer formulated to bond to plastic",
           "spray paint or acrylic",
           "fine sandpaper"
-        ]
+        ],
+        "safety_notes": "Standard painting precautions."
       },
       {
         "name": "Epoxy Coating",
         "difficulty": "moderate",
         "tools_needed": [
-          "brush-on epoxy or XTC-3D",
+          "brush-on two-part epoxy coating that self-levels",
           "mixing cups",
           "disposable brush",
           "nitrile gloves"
-        ]
+        ],
+        "safety_notes": "Ventilated area. Nitrile gloves required."
       }
     ],
     "paintability": {
@@ -347,7 +368,8 @@
           "water for wet sanding",
           "nitrile gloves",
           "N95 respirator"
-        ]
+        ],
+        "safety_notes": "MANDATORY: Wet sand only. Carbon fiber dust is a respiratory and skin irritant. Wear N95 respirator and nitrile gloves. Clean up wet — never sweep or blow dry CF dust."
       },
       {
         "name": "Epoxy Sealing",
@@ -357,7 +379,8 @@
           "mixing cups",
           "disposable brush",
           "nitrile gloves"
-        ]
+        ],
+        "safety_notes": "Ventilated area. Nitrile gloves."
       },
       {
         "name": "Painting",
@@ -366,7 +389,8 @@
           "filler primer",
           "spray paint",
           "fine sandpaper"
-        ]
+        ],
+        "safety_notes": "Wet sand preparation to contain fiber dust."
       }
     ],
     "paintability": {
@@ -396,7 +420,8 @@
           "water",
           "nitrile gloves",
           "N95 respirator"
-        ]
+        ],
+        "safety_notes": "MANDATORY: Wet sand only. Carbon fiber dust is a respiratory and skin irritant. N95 respirator and nitrile gloves required."
       },
       {
         "name": "Epoxy Sealing",
@@ -406,7 +431,8 @@
           "mixing cups",
           "disposable brush",
           "nitrile gloves"
-        ]
+        ],
+        "safety_notes": "Ventilated area. Nitrile gloves."
       },
       {
         "name": "Painting",
@@ -415,7 +441,8 @@
           "plastic-specific primer",
           "spray paint",
           "fine sandpaper"
-        ]
+        ],
+        "safety_notes": "Wet sand preparation. Standard painting ventilation."
       }
     ],
     "paintability": {
@@ -445,7 +472,8 @@
           "water",
           "nitrile gloves",
           "N95 respirator"
-        ]
+        ],
+        "safety_notes": "MANDATORY: Wet sand only. N95 respirator and nitrile gloves required for carbon fiber dust."
       },
       {
         "name": "Epoxy Sealing",
@@ -455,7 +483,8 @@
           "mixing cups",
           "disposable brush",
           "nitrile gloves"
-        ]
+        ],
+        "safety_notes": "Ventilated area. Nitrile gloves."
       },
       {
         "name": "Painting",
@@ -463,7 +492,8 @@
         "tools_needed": [
           "plastic-specific primer",
           "spray paint"
-        ]
+        ],
+        "safety_notes": "Wet sand to contain fiber dust."
       }
     ],
     "paintability": {
@@ -493,7 +523,8 @@
           "water",
           "nitrile gloves",
           "N95 respirator"
-        ]
+        ],
+        "safety_notes": "MANDATORY: Wet sand only. Carbon fiber dust is harmful. N95 respirator and nitrile gloves required."
       },
       {
         "name": "Epoxy Sealing",
@@ -503,7 +534,8 @@
           "mixing cups",
           "disposable brush",
           "nitrile gloves"
-        ]
+        ],
+        "safety_notes": "Ventilated area. Nitrile gloves."
       },
       {
         "name": "Painting",
@@ -511,7 +543,8 @@
         "tools_needed": [
           "plastic-specific primer",
           "spray paint"
-        ]
+        ],
+        "safety_notes": "Wet sand to contain fiber dust."
       }
     ],
     "paintability": {
@@ -533,29 +566,30 @@
   "tpu": {
     "techniques": [
       {
-        "name": "Flexible Paint (PlastiDip / Flex Seal)",
+        "name": "Flexible Rubber Paint",
         "difficulty": "moderate",
         "tools_needed": [
-          "PlastiDip spray or Flex Seal",
+          "flexible rubber coating spray or liquid rubber sealant",
           "masking tape (if multi-color)"
-        ]
+        ],
+        "safety_notes": "Spray in well-ventilated area. Rubber coating spray fumes are moderately toxic."
       },
       {
         "name": "Dyeing",
         "difficulty": "moderate",
         "tools_needed": [
-          "Rit DyeMore (synthetic fabric dye)",
+          "synthetic-fiber fabric dye (the kind made for polyester and nylon)",
           "pot of water",
           "stove or hot plate",
           "tongs"
-        ]
+        ],
+        "safety_notes": "Use dedicated dye pot (not food prep). Ventilated area. Wear gloves — dye stains skin."
       }
     ],
     "paintability": {
       "primer_needed": false,
       "paint_types": [
-        "plastidip",
-        "flex_seal",
+        "rubber_coating",
         "fabric_paint"
       ]
     },
@@ -570,15 +604,16 @@
   "nylon": {
     "techniques": [
       {
-        "name": "Dyeing with Rit DyeMore",
+        "name": "Dyeing",
         "difficulty": "moderate",
         "tools_needed": [
-          "Rit DyeMore (synthetic fabric dye)",
+          "synthetic-fiber fabric dye (the kind made for polyester and nylon)",
           "large pot",
           "stove or hot plate",
           "tongs",
           "thermometer"
-        ]
+        ],
+        "safety_notes": "Dedicated dye pot — not for food. Ventilated area. Wear gloves."
       },
       {
         "name": "Sanding",
@@ -587,7 +622,8 @@
           "120-grit sandpaper",
           "220-grit sandpaper",
           "400-grit sandpaper"
-        ]
+        ],
+        "safety_notes": "Wear a dust mask. Nylon dust is a mild irritant."
       },
       {
         "name": "Epoxy Coating",
@@ -597,7 +633,8 @@
           "mixing cups",
           "disposable brush",
           "nitrile gloves"
-        ]
+        ],
+        "safety_notes": "Ventilated area. Nitrile gloves."
       }
     ],
     "paintability": {
@@ -627,7 +664,8 @@
           "nitrile gloves",
           "N95 respirator",
           "safety glasses"
-        ]
+        ],
+        "safety_notes": "CRITICAL: Carbon fiber dust causes lung damage and severe skin irritation. N95 respirator, nitrile gloves, and safety glasses are mandatory. Wet sand only. Clean up with damp cloth — never blow or sweep dry."
       },
       {
         "name": "Epoxy Sealing",
@@ -637,7 +675,8 @@
           "mixing cups",
           "disposable brush",
           "nitrile gloves"
-        ]
+        ],
+        "safety_notes": "Ventilated area. Nitrile gloves."
       },
       {
         "name": "Painting",
@@ -646,7 +685,8 @@
           "nylon adhesion promoter",
           "filler primer",
           "spray paint"
-        ]
+        ],
+        "safety_notes": "Wet sand to contain fiber dust. Standard painting ventilation."
       }
     ],
     "paintability": {
@@ -677,7 +717,8 @@
           "nitrile gloves",
           "N95 respirator",
           "safety glasses"
-        ]
+        ],
+        "safety_notes": "CRITICAL: Glass fiber dust is more dangerous than carbon fiber dust — microscopic glass shards cause permanent lung damage and severe skin irritation. N95 respirator, nitrile gloves, safety glasses, and long sleeves mandatory. Wet sand only. Shower after extended sanding sessions."
       },
       {
         "name": "Epoxy Sealing",
@@ -687,7 +728,8 @@
           "mixing cups",
           "disposable brush",
           "nitrile gloves"
-        ]
+        ],
+        "safety_notes": "Ventilated area. Nitrile gloves."
       },
       {
         "name": "Painting",
@@ -696,7 +738,8 @@
           "nylon adhesion promoter",
           "filler primer",
           "spray paint"
-        ]
+        ],
+        "safety_notes": "Wet sand to contain glass fiber dust."
       }
     ],
     "paintability": {
@@ -726,7 +769,8 @@
           "600-grit sandpaper",
           "800-grit sandpaper",
           "water for wet sanding"
-        ]
+        ],
+        "safety_notes": "Wear a dust mask. PC dust is a mild irritant."
       },
       {
         "name": "Solvent Welding (Dichloromethane)",
@@ -737,7 +781,8 @@
           "clamps",
           "full-face respirator",
           "chemical-resistant gloves"
-        ]
+        ],
+        "safety_notes": "ADVANCED USERS ONLY: Dichloromethane is acutely toxic — causes chemical burns, is a suspected carcinogen, and can be fatal in poorly ventilated spaces. Full-face respirator with organic vapor cartridge, chemical-resistant gloves, and outdoor or fume-hood ventilation are mandatory."
       },
       {
         "name": "Painting",
@@ -746,7 +791,8 @@
           "plastic-specific primer",
           "spray paint",
           "fine sandpaper"
-        ]
+        ],
+        "safety_notes": "Standard painting precautions."
       },
       {
         "name": "Epoxy Coating",
@@ -756,7 +802,8 @@
           "mixing cups",
           "disposable brush",
           "nitrile gloves"
-        ]
+        ],
+        "safety_notes": "Ventilated area. Nitrile gloves."
       }
     ],
     "paintability": {
@@ -785,7 +832,8 @@
           "220-grit sandpaper",
           "400-grit sandpaper",
           "600-grit sandpaper"
-        ]
+        ],
+        "safety_notes": "Wear a dust mask."
       },
       {
         "name": "Acetone Smoothing (Limited)",
@@ -795,7 +843,8 @@
           "sealed glass container",
           "paper towels",
           "wire rack"
-        ]
+        ],
+        "safety_notes": "Acetone safety — flammable, toxic fumes. Strong ventilation required."
       },
       {
         "name": "Painting",
@@ -804,7 +853,8 @@
           "filler primer",
           "spray paint",
           "fine sandpaper"
-        ]
+        ],
+        "safety_notes": "Standard painting precautions."
       }
     ],
     "paintability": {
@@ -832,7 +882,8 @@
           "warm water (40-50C)",
           "container large enough for the part",
           "optional: ultrasonic cleaner"
-        ]
+        ],
+        "safety_notes": "PVA solution is non-toxic and biodegradable. Dispose down the drain. Ensure water temperature doesn't exceed 60C or it may soften PLA model material."
       },
       {
         "name": "Partial Dissolution (Break-Away Assist)",
@@ -840,7 +891,8 @@
         "tools_needed": [
           "warm water",
           "pliers or flush cutters"
-        ]
+        ],
+        "safety_notes": "Wear safety glasses when snapping off supports — PVA can shatter into small pieces."
       }
     ],
     "paintability": {
@@ -861,10 +913,11 @@
         "name": "Filler Primer + Spray Paint",
         "difficulty": "easy",
         "tools_needed": [
-          "filler primer (Rust-Oleum 2-in-1, Tamiya)",
+          "sandable filler primer spray",
           "spray paint",
           "clear coat (optional)"
-        ]
+        ],
+        "safety_notes": "Spray in well-ventilated area or outdoors. Wear a respirator when spraying."
       },
       {
         "name": "Sanding (only if painting)",
@@ -874,17 +927,19 @@
           "400-grit sandpaper",
           "600-grit sandpaper",
           "water for wet sanding"
-        ]
+        ],
+        "safety_notes": "Wear a dust mask. PLA dust is not toxic but irritates lungs."
       },
       {
-        "name": "Epoxy Coating (XTC-3D)",
+        "name": "Epoxy Coating",
         "difficulty": "moderate",
         "tools_needed": [
-          "XTC-3D epoxy (or generic brush-on epoxy)",
+          "brush-on two-part epoxy coating that self-levels",
           "mixing cups",
           "disposable brush",
           "nitrile gloves"
-        ]
+        ],
+        "safety_notes": "Work in ventilated area. Wear nitrile gloves — uncured epoxy is a skin sensitizer."
       }
     ],
     "paintability": {
@@ -913,26 +968,29 @@
           "400-grit sandpaper",
           "600-grit sandpaper",
           "water for wet sanding"
-        ]
+        ],
+        "safety_notes": "Wear a dust mask. Wet sanding reduces dust significantly."
       },
       {
         "name": "Painting",
         "difficulty": "easy",
         "tools_needed": [
-          "plastic-specific primer (Krylon Fusion)",
+          "spray primer formulated to bond to plastic",
           "spray paint or acrylic",
           "fine sandpaper (400-600 grit)"
-        ]
+        ],
+        "safety_notes": "Standard painting precautions. Spray in ventilated area."
       },
       {
         "name": "Epoxy Coating",
         "difficulty": "moderate",
         "tools_needed": [
-          "brush-on epoxy or XTC-3D",
+          "brush-on two-part epoxy coating that self-levels",
           "mixing cups",
           "disposable brush",
           "nitrile gloves"
-        ]
+        ],
+        "safety_notes": "Ventilated area. Nitrile gloves required."
       }
     ],
     "paintability": {
@@ -966,27 +1024,30 @@
           "400-grit sandpaper",
           "600-grit sandpaper",
           "water for wet sanding"
-        ]
+        ],
+        "safety_notes": "Wear a dust mask. PLA Tough dust is not toxic but irritates lungs."
       },
       {
         "name": "Filler Primer + Spray Paint",
         "difficulty": "easy",
         "tools_needed": [
-          "filler primer (Rust-Oleum 2-in-1, Tamiya)",
+          "sandable filler primer spray",
           "spray paint",
           "fine sandpaper (400-600 grit)",
           "clear coat (optional)"
-        ]
+        ],
+        "safety_notes": "Spray in well-ventilated area or outdoors. Wear a respirator when spraying."
       },
       {
-        "name": "Epoxy Coating (XTC-3D)",
+        "name": "Epoxy Coating",
         "difficulty": "moderate",
         "tools_needed": [
-          "XTC-3D epoxy (or generic brush-on epoxy)",
+          "brush-on two-part epoxy coating that self-levels",
           "mixing cups",
           "disposable brush",
           "nitrile gloves"
-        ]
+        ],
+        "safety_notes": "Work in ventilated area. Wear nitrile gloves — uncured epoxy is a skin sensitizer."
       }
     ],
     "paintability": {
@@ -1008,38 +1069,40 @@
   "tpu_95a": {
     "techniques": [
       {
-        "name": "Flexible Paint (PlastiDip / Flex Seal)",
+        "name": "Flexible Rubber Paint",
         "difficulty": "moderate",
         "tools_needed": [
-          "PlastiDip spray or Flex Seal",
+          "flexible rubber coating spray or liquid rubber sealant",
           "isopropyl alcohol",
           "masking tape (if multi-color)"
-        ]
+        ],
+        "safety_notes": "Spray in well-ventilated area. Rubber coating spray fumes are moderately toxic."
       },
       {
         "name": "Dyeing",
         "difficulty": "moderate",
         "tools_needed": [
-          "Rit DyeMore (synthetic fabric dye)",
+          "synthetic-fiber fabric dye (the kind made for polyester and nylon)",
           "pot of water",
           "stove or hot plate",
           "tongs"
-        ]
+        ],
+        "safety_notes": "Use dedicated dye pot (not food prep). Ventilated area. Wear gloves — dye stains skin."
       },
       {
         "name": "Fabric Paint",
         "difficulty": "easy",
         "tools_needed": [
-          "fabric paint (Tulip, Jacquard)",
+          "flexible acrylic fabric paint",
           "fine brush"
-        ]
+        ],
+        "safety_notes": "Minimal safety concerns. Water-based fabric paints are non-toxic."
       }
     ],
     "paintability": {
       "primer_needed": false,
       "paint_types": [
-        "plastidip",
-        "flex_seal",
+        "rubber_coating",
         "fabric_paint"
       ]
     },
@@ -1054,28 +1117,29 @@
   "tpu_85a": {
     "techniques": [
       {
-        "name": "Flexible Coating (PlastiDip / Rubber Coating)",
+        "name": "Flexible Rubber Coating",
         "difficulty": "moderate",
         "tools_needed": [
-          "PlastiDip spray or liquid rubber coating",
+          "flexible rubber coating spray or brush-on liquid rubber",
           "isopropyl alcohol"
-        ]
+        ],
+        "safety_notes": "Spray in well-ventilated area. Rubber coating spray fumes are moderately toxic."
       },
       {
         "name": "Dyeing",
         "difficulty": "moderate",
         "tools_needed": [
-          "Rit DyeMore (synthetic fabric dye)",
+          "synthetic-fiber fabric dye (the kind made for polyester and nylon)",
           "pot of water",
           "stove or hot plate",
           "tongs"
-        ]
+        ],
+        "safety_notes": "Use dedicated dye pot (not food prep). Ventilated area. Wear gloves. Handle warm parts carefully — they are extremely soft and pliable."
       }
     ],
     "paintability": {
       "primer_needed": false,
       "paint_types": [
-        "plastidip",
         "rubber_coating"
       ]
     },
@@ -1098,7 +1162,8 @@
           "wire rack or hook to suspend part",
           "nitrile gloves",
           "respirator"
-        ]
+        ],
+        "safety_notes": "IPA vapor is flammable — no open flames or sparks. Work in a well-ventilated area or fume hood. Wear nitrile gloves and a respirator. Do not heat the IPA to accelerate the process — fire risk."
       },
       {
         "name": "Manual IPA Brushing",
@@ -1107,7 +1172,8 @@
           "isopropyl alcohol (IPA, 90%+ concentration)",
           "soft brush (natural bristle or foam)",
           "nitrile gloves"
-        ]
+        ],
+        "safety_notes": "Wear nitrile gloves. Work in a ventilated area. IPA evaporates quickly but is flammable."
       },
       {
         "name": "Sanding",
@@ -1117,7 +1183,8 @@
           "600-grit sandpaper",
           "800-grit sandpaper",
           "water for wet sanding"
-        ]
+        ],
+        "safety_notes": "Wear a dust mask. PVB dust is not toxic but irritates lungs."
       }
     ],
     "paintability": {
@@ -1145,7 +1212,8 @@
           "butane torch or heat gun",
           "heat-resistant gloves",
           "fire extinguisher nearby"
-        ]
+        ],
+        "safety_notes": "Work in ventilated area. PP melts quickly — do not hold flame in one spot. Keep heat gun moving. PP combustion produces irritating fumes."
       },
       {
         "name": "Mechanical Sanding",
@@ -1154,17 +1222,19 @@
           "120-grit sandpaper",
           "220-grit sandpaper",
           "400-grit sandpaper"
-        ]
+        ],
+        "safety_notes": "Standard dust precautions. Replace sandpaper frequently as PP residue loads the grit quickly."
       },
       {
         "name": "PP-Compatible Adhesive Bonding",
         "difficulty": "advanced",
         "tools_needed": [
-          "PP-bonding primer (e.g., Loctite 770)",
+          "polyolefin primer for cyanoacrylate glue (made for PP and PE)",
           "cyanoacrylate or structural adhesive",
           "nitrile gloves",
           "isopropyl alcohol for surface prep"
-        ]
+        ],
+        "safety_notes": "Primer contains adhesion promoter chemicals — ventilated area, nitrile gloves."
       }
     ],
     "paintability": {
@@ -1198,7 +1268,8 @@
           "600-grit sandpaper",
           "dust mask",
           "water for wet sanding"
-        ]
+        ],
+        "safety_notes": "Wet sand and wear a mask. Dust from high-performance polymers should not be inhaled, and dry sanding generates a lot of it."
       },
       {
         "name": "Annealing",
@@ -1207,17 +1278,19 @@
           "temperature-controlled oven",
           "flat support fixture",
           "heat-rated gloves"
-        ]
+        ],
+        "safety_notes": "Use an oven rated for the temperature and never a domestic food oven. Ventilate; ramping and cooling slowly matters more than hitting an exact soak temperature."
       },
       {
-        "name": "Machining and drilling",
+        "name": "Drilling and tapping",
         "difficulty": "advanced",
         "tools_needed": [
-          "sharp carbide tooling",
-          "slow feed and speed",
-          "coolant or air blast",
+          "sharp drill bits",
+          "low drill speed",
+          "pause to clear chips",
           "eye protection"
-        ]
+        ],
+        "safety_notes": "Eye protection. Do not let the drill heat the part above its service temperature; smearing indicates too much heat."
       },
       {
         "name": "Bonding and inserts",
@@ -1227,7 +1300,8 @@
           "isopropyl alcohol",
           "two-part structural epoxy",
           "heat-set inserts and installation tip"
-        ]
+        ],
+        "safety_notes": "Ventilate while mixing epoxy. Insert installation temperatures for this family are much higher than for commodity plastics; use a tip that can reach them."
       }
     ],
     "paintability": "Difficult. Requires abrasion and a primer suited to low-surface-energy plastics.",
@@ -1248,17 +1322,19 @@
           "600-grit sandpaper",
           "dust mask",
           "water for wet sanding"
-        ]
+        ],
+        "safety_notes": "Wet sand and wear a mask. Dust from high-performance polymers should not be inhaled, and dry sanding generates a lot of it."
       },
       {
-        "name": "Machining and drilling",
+        "name": "Drilling and tapping",
         "difficulty": "advanced",
         "tools_needed": [
-          "sharp carbide tooling",
-          "slow feed and speed",
-          "coolant or air blast",
+          "sharp drill bits",
+          "low drill speed",
+          "pause to clear chips",
           "eye protection"
-        ]
+        ],
+        "safety_notes": "Eye protection. Do not let the drill heat the part above its service temperature; smearing indicates too much heat."
       },
       {
         "name": "Bonding and inserts",
@@ -1268,7 +1344,8 @@
           "isopropyl alcohol",
           "two-part structural epoxy",
           "heat-set inserts and installation tip"
-        ]
+        ],
+        "safety_notes": "Ventilate while mixing epoxy. Insert installation temperatures for this family are much higher than for commodity plastics; use a tip that can reach them."
       }
     ],
     "paintability": "Moderate. Abrade and prime before painting.",
@@ -1289,17 +1366,19 @@
           "600-grit sandpaper",
           "dust mask",
           "water for wet sanding"
-        ]
+        ],
+        "safety_notes": "Wet sand and wear a mask. Dust from high-performance polymers should not be inhaled, and dry sanding generates a lot of it."
       },
       {
-        "name": "Machining and drilling",
+        "name": "Drilling and tapping",
         "difficulty": "advanced",
         "tools_needed": [
-          "sharp carbide tooling",
-          "slow feed and speed",
-          "coolant or air blast",
+          "sharp drill bits",
+          "low drill speed",
+          "pause to clear chips",
           "eye protection"
-        ]
+        ],
+        "safety_notes": "Eye protection. Do not let the drill heat the part above its service temperature; smearing indicates too much heat."
       },
       {
         "name": "Bonding and inserts",
@@ -1309,7 +1388,8 @@
           "isopropyl alcohol",
           "two-part structural epoxy",
           "heat-set inserts and installation tip"
-        ]
+        ],
+        "safety_notes": "Ventilate while mixing epoxy. Insert installation temperatures for this family are much higher than for commodity plastics; use a tip that can reach them."
       }
     ],
     "paintability": "Moderate. Abrade and prime before painting.",
@@ -1330,7 +1410,8 @@
           "600-grit sandpaper",
           "dust mask",
           "water for wet sanding"
-        ]
+        ],
+        "safety_notes": "Wet sand and wear a mask. Dust from high-performance polymers should not be inhaled, and dry sanding generates a lot of it."
       },
       {
         "name": "Annealing",
@@ -1339,17 +1420,19 @@
           "temperature-controlled oven",
           "flat support fixture",
           "heat-rated gloves"
-        ]
+        ],
+        "safety_notes": "Use an oven rated for the temperature and never a domestic food oven. Ventilate; ramping and cooling slowly matters more than hitting an exact soak temperature."
       },
       {
-        "name": "Machining and drilling",
+        "name": "Drilling and tapping",
         "difficulty": "advanced",
         "tools_needed": [
-          "sharp carbide tooling",
-          "slow feed and speed",
-          "coolant or air blast",
+          "sharp drill bits",
+          "low drill speed",
+          "pause to clear chips",
           "eye protection"
-        ]
+        ],
+        "safety_notes": "Eye protection. Do not let the drill heat the part above its service temperature; smearing indicates too much heat."
       },
       {
         "name": "Bonding and inserts",
@@ -1359,7 +1442,8 @@
           "isopropyl alcohol",
           "two-part structural epoxy",
           "heat-set inserts and installation tip"
-        ]
+        ],
+        "safety_notes": "Ventilate while mixing epoxy. Insert installation temperatures for this family are much higher than for commodity plastics; use a tip that can reach them."
       }
     ],
     "paintability": "Difficult. Requires abrasion and a primer suited to low-surface-energy plastics.",
@@ -1380,17 +1464,19 @@
           "600-grit sandpaper",
           "dust mask",
           "water for wet sanding"
-        ]
+        ],
+        "safety_notes": "Wet sand and wear a mask. Dust from high-performance polymers should not be inhaled, and dry sanding generates a lot of it."
       },
       {
-        "name": "Machining and drilling",
+        "name": "Drilling and tapping",
         "difficulty": "advanced",
         "tools_needed": [
-          "sharp carbide tooling",
-          "slow feed and speed",
-          "coolant or air blast",
+          "sharp drill bits",
+          "low drill speed",
+          "pause to clear chips",
           "eye protection"
-        ]
+        ],
+        "safety_notes": "Eye protection. Do not let the drill heat the part above its service temperature; smearing indicates too much heat."
       },
       {
         "name": "Bonding and inserts",
@@ -1400,7 +1486,8 @@
           "isopropyl alcohol",
           "two-part structural epoxy",
           "heat-set inserts and installation tip"
-        ]
+        ],
+        "safety_notes": "Ventilate while mixing epoxy. Insert installation temperatures for this family are much higher than for commodity plastics; use a tip that can reach them."
       }
     ],
     "paintability": "Moderate. Abrade and prime before painting.",
@@ -1421,7 +1508,8 @@
           "600-grit sandpaper",
           "dust mask",
           "water for wet sanding"
-        ]
+        ],
+        "safety_notes": "Wet sand and wear a mask. Dust from high-performance polymers should not be inhaled, and dry sanding generates a lot of it."
       },
       {
         "name": "Annealing",
@@ -1430,17 +1518,19 @@
           "temperature-controlled oven",
           "flat support fixture",
           "heat-rated gloves"
-        ]
+        ],
+        "safety_notes": "Use an oven rated for the temperature and never a domestic food oven. Ventilate; ramping and cooling slowly matters more than hitting an exact soak temperature."
       },
       {
-        "name": "Machining and drilling",
+        "name": "Drilling and tapping",
         "difficulty": "advanced",
         "tools_needed": [
-          "sharp carbide tooling",
-          "slow feed and speed",
-          "coolant or air blast",
+          "sharp drill bits",
+          "low drill speed",
+          "pause to clear chips",
           "eye protection"
-        ]
+        ],
+        "safety_notes": "Eye protection. Do not let the drill heat the part above its service temperature; smearing indicates too much heat."
       },
       {
         "name": "Bonding and inserts",
@@ -1450,7 +1540,8 @@
           "isopropyl alcohol",
           "two-part structural epoxy",
           "heat-set inserts and installation tip"
-        ]
+        ],
+        "safety_notes": "Ventilate while mixing epoxy. Insert installation temperatures for this family are much higher than for commodity plastics; use a tip that can reach them."
       }
     ],
     "paintability": "Difficult. Requires abrasion and a primer suited to low-surface-energy plastics.",
@@ -1471,7 +1562,8 @@
           "water",
           "nitrile gloves",
           "N95 respirator"
-        ]
+        ],
+        "safety_notes": "MANDATORY wet sanding: the dust is a carbon-filled respiratory irritant. N95 and nitrile gloves."
       },
       {
         "name": "Painting",
@@ -1481,7 +1573,8 @@
           "spray paint",
           "masking film",
           "fine sandpaper"
-        ]
+        ],
+        "safety_notes": "Ventilate. Confirm after painting that the ground path still measures."
       },
       {
         "name": "Heat-set inserts",
@@ -1490,7 +1583,8 @@
           "heat-set inserts",
           "temperature-controlled installation tip",
           "press or vice"
-        ]
+        ],
+        "safety_notes": "Do not overheat; PETG's window between softening and degrading is narrow."
       }
     ],
     "paintability": {
@@ -1520,7 +1614,8 @@
           "suspension rig",
           "nitrile gloves",
           "respirator"
-        ]
+        ],
+        "safety_notes": "Acetone is flammable and the vapour is harmful. Ventilate, no ignition sources, respirator."
       },
       {
         "name": "Solvent welding",
@@ -1530,7 +1625,8 @@
           "brush or syringe",
           "clamps",
           "nitrile gloves"
-        ]
+        ],
+        "safety_notes": "Ventilate; nitrile gloves."
       },
       {
         "name": "Wet Sanding",
@@ -1541,7 +1637,8 @@
           "water",
           "nitrile gloves",
           "N95 respirator"
-        ]
+        ],
+        "safety_notes": "MANDATORY wet sanding: carbon-filled dust plus styrene. N95 and nitrile gloves."
       },
       {
         "name": "Painting",
@@ -1550,7 +1647,8 @@
           "plastic-specific primer",
           "spray paint",
           "masking film"
-        ]
+        ],
+        "safety_notes": "Ventilate. Re-measure the ground path after finishing."
       }
     ],
     "paintability": {
@@ -1582,17 +1680,19 @@
           "water",
           "nitrile gloves",
           "N95 respirator"
-        ]
+        ],
+        "safety_notes": "MANDATORY wet sanding. Chopped carbon fibre dust is a respiratory and skin irritant, and more of it here than in the nanotube-only grades."
       },
       {
-        "name": "Machining and drilling",
+        "name": "Drilling and tapping",
         "difficulty": "advanced",
         "tools_needed": [
-          "sharp carbide tooling",
-          "slow feed and speed",
-          "air blast",
+          "sharp drill bits",
+          "low drill speed",
+          "pause to clear chips",
           "eye protection"
-        ]
+        ],
+        "safety_notes": "Eye protection and extraction. Do not let the drill heat the part."
       },
       {
         "name": "Annealing",
@@ -1600,7 +1700,8 @@
         "tools_needed": [
           "oven with accurate control",
           "fixture or support for the part"
-        ]
+        ],
+        "safety_notes": "Support the part; annealing runs far above this material's glass transition and unsupported thin sections can sag."
       },
       {
         "name": "Heat-set inserts and bonding",
@@ -1611,7 +1712,8 @@
           "abrasive pad",
           "polyamide primer",
           "two-part epoxy"
-        ]
+        ],
+        "safety_notes": "Ventilate while mixing epoxy. Dry the part before bonding."
       }
     ],
     "paintability": {
@@ -1640,17 +1742,19 @@
           "water",
           "nitrile gloves",
           "N95 respirator"
-        ]
+        ],
+        "safety_notes": "MANDATORY wet sanding: the dust is a carbon-filled respiratory irritant. N95 and nitrile gloves."
       },
       {
-        "name": "Machining and drilling",
+        "name": "Drilling and tapping",
         "difficulty": "advanced",
         "tools_needed": [
-          "sharp carbide tooling",
-          "slow feed and speed",
-          "air blast",
+          "sharp drill bits",
+          "low drill speed",
+          "pause to clear chips",
           "eye protection"
-        ]
+        ],
+        "safety_notes": "Eye protection and extraction. Polycarbonate crazes when a solvent meets a stressed part. Keep solvent away from anything that will carry load, and never use a solvent cement on this material."
       },
       {
         "name": "Heat-set inserts",
@@ -1659,7 +1763,8 @@
           "heat-set inserts",
           "temperature-controlled installation tip",
           "press or vice"
-        ]
+        ],
+        "safety_notes": "Polycarbonate's window between softening and degrading is wide, but do not dwell."
       },
       {
         "name": "Painting",
@@ -1668,7 +1773,8 @@
           "plastic-specific primer",
           "spray paint",
           "masking film"
-        ]
+        ],
+        "safety_notes": "Ventilate. Re-measure the ground path after finishing."
       }
     ],
     "paintability": {
@@ -1699,17 +1805,19 @@
           "water",
           "nitrile gloves",
           "N95 respirator"
-        ]
+        ],
+        "safety_notes": "Wet sand and wear a mask. Dust from high-performance polymers plus carbon filler should not be inhaled."
       },
       {
-        "name": "Machining and drilling",
+        "name": "Drilling and tapping",
         "difficulty": "advanced",
         "tools_needed": [
-          "sharp carbide tooling",
-          "slow feed and speed",
-          "coolant or air blast",
+          "sharp drill bits",
+          "low drill speed",
+          "pause to clear chips",
           "eye protection"
-        ]
+        ],
+        "safety_notes": "Eye protection. Do not let the drill heat the part above its service temperature."
       },
       {
         "name": "Bonding and inserts",
@@ -1719,7 +1827,8 @@
           "temperature-controlled installation tip",
           "abrasive pad",
           "two-part epoxy"
-        ]
+        ],
+        "safety_notes": "Ventilate while mixing epoxy. Insert temperatures for this family are far above commodity plastics; use a tip that reaches them."
       }
     ],
     "paintability": {
@@ -1747,17 +1856,19 @@
           "water",
           "nitrile gloves",
           "N95 respirator"
-        ]
+        ],
+        "safety_notes": "Wet sand and wear a mask. Dust from high-performance polymers plus carbon filler should not be inhaled."
       },
       {
-        "name": "Machining and drilling",
+        "name": "Drilling and tapping",
         "difficulty": "advanced",
         "tools_needed": [
-          "sharp carbide tooling",
-          "slow feed and speed",
-          "coolant or air blast",
+          "sharp drill bits",
+          "low drill speed",
+          "pause to clear chips",
           "eye protection"
-        ]
+        ],
+        "safety_notes": "Eye protection. Do not let the drill heat the part above its service temperature."
       },
       {
         "name": "Bonding and inserts",
@@ -1767,7 +1878,8 @@
           "temperature-controlled installation tip",
           "abrasive pad",
           "two-part epoxy"
-        ]
+        ],
+        "safety_notes": "Ventilate while mixing epoxy. Insert temperatures for this family are far above commodity plastics; use a tip that reaches them."
       }
     ],
     "paintability": {
@@ -1794,7 +1906,8 @@
           "water",
           "nitrile gloves",
           "N95 respirator"
-        ]
+        ],
+        "safety_notes": "MANDATORY wet sanding: carbon-filled dust is a respiratory irritant."
       },
       {
         "name": "Painting",
@@ -1803,7 +1916,8 @@
           "plastic primer",
           "spray paint",
           "masking film"
-        ]
+        ],
+        "safety_notes": "Ventilate. Re-measure the ground path after finishing."
       },
       {
         "name": "Heat-set inserts",
@@ -1811,7 +1925,8 @@
         "tools_needed": [
           "heat-set inserts",
           "temperature-controlled tip"
-        ]
+        ],
+        "safety_notes": "Work cool and quickly; the margin between softening and slumping is small."
       }
     ],
     "paintability": {

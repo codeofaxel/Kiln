@@ -12,6 +12,7 @@ no manual imports needed.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from kiln.fulfillment_profiles import (
@@ -35,9 +36,22 @@ from kiln.fulfillment_profiles import (
 from kiln.fulfillment_profiles import (
     validate_shipping_confirmation_token as _validate_shipping_confirmation_token,
 )
+from kiln.fulfillment_service import (
+    NOT_INCLUDED,
+    NOT_INCLUDED_CODE,
+    WORDED_CANCEL_REFUSALS,
+    order_service,
+)
 from kiln.preview_gate import get_preview_gate
 
 _logger = logging.getLogger(__name__)
+
+
+def _not_included() -> dict[str, Any]:
+    """Every order tool's answer on an install without the order service."""
+    import kiln.server as _srv
+
+    return _srv._error_dict(NOT_INCLUDED, code=NOT_INCLUDED_CODE)
 
 
 def _resolve_shipping_address(
@@ -60,6 +74,76 @@ def _normalize_save_profile_decision(raw: str) -> str:
     if value in {"no", "n", "do_not_save", "dont_save", "false"}:
         return "do_not_save"
     return ""
+
+
+def _like_for_like_prices(
+    quoted_price: float,
+    result: Any,
+    *,
+    quote_id: str,
+    shipping_option_id: str,
+) -> tuple[float, float] | None:
+    """The quoted and placed prices to compare for a price change, or ``None``.
+
+    A quote's price is the print price alone; a placed order states what
+    the print service's checkout charges, which adds shipping and any tax.
+    They compare like with like only when the order states its total before
+    tax and the quote recorded the shipping option that was chosen: then
+    it is the print price plus that shipping against the checkout's total
+    before tax (tax is added at the checkout and is never a change of
+    price).  Otherwise there is nothing fair to compare, and ``None`` says
+    so rather than reading shipping and tax as a price change.
+    """
+    before_tax = getattr(result, "checkout_net", None)
+    if not isinstance(before_tax, (int, float)):
+        return None
+    try:
+        from kiln.quote_cache import get_cached_quote_by_id
+
+        cached = get_cached_quote_by_id(quote_id)
+    except Exception:
+        cached = None
+    options = ((getattr(cached, "metadata", None) or {}).get("shipping_options")) or []
+    shipping = next(
+        (
+            option.get("price")
+            for option in options
+            if isinstance(option, dict) and option.get("id") == shipping_option_id
+        ),
+        None,
+    )
+    if not isinstance(shipping, (int, float)):
+        return None
+    return quoted_price + float(shipping), float(before_tax)
+
+
+#: What a person who did not pay is told about Kiln's fee, when nothing was
+#: refunded on the spot: an unpaid order expires, and Kiln gives its fee back
+#: then (Terms §5.6).
+_FEE_IF_UNPAID = "If you don't pay, any fee Kiln charged for it comes back automatically once the order expires."
+
+
+def _price_change_line(quoted: float, placed: float, currency: str, fee_line: str) -> str:
+    """The order is placed and its price changed: say it plainly, keep the choice theirs."""
+    return (
+        f"Your order was placed, but the checkout total before tax is {placed:.2f} {currency}, "
+        f"not the quoted {quoted:.2f} {currency}. Pay only if that's fine; if not, just don't "
+        f"pay: an unpaid order is never made and expires on its own. {fee_line}"
+    ).strip()
+
+
+def _known_prices_line(quoted_price: float, result: Any, currency: str) -> str:
+    """What is known when the two prices cannot be compared like with like."""
+    if getattr(result, "checkout_total", None) is None and isinstance(result.total_price, (int, float)):
+        return (
+            f"The print service's total for this order is {result.total_price:.2f} {currency}; "
+            f"the quoted {quoted_price:.2f} {currency} was the print price alone, before "
+            "shipping and tax. Check the total on its checkout before you pay."
+        )
+    return (
+        f"The quoted {quoted_price:.2f} {currency} was the print price alone, before shipping "
+        "and tax. Check the total on the print service's checkout before you pay."
+    )
 
 
 def _validate_preview_confirmation(
@@ -142,13 +226,11 @@ class _FulfillmentToolsPlugin:
             import re
 
             import kiln.server as _srv
-            try:
-                from kiln.fulfillment import FulfillmentError
-            except ImportError:
-                return _srv._error_dict(
-                    "Fulfillment module is not available (kiln-pro required).",
-                    code="NOT_AVAILABLE",
-                )
+
+            service = order_service()
+            if service is None:
+                return _not_included()
+            FulfillmentError = service.FulfillmentError
 
             try:
                 provider = _srv._get_fulfillment()
@@ -212,17 +294,23 @@ class _FulfillmentToolsPlugin:
             when the order is placed via ``fulfillment_order``, or released
             if the user doesn't proceed.
 
+            The reply opens with ``tell_the_person``: the price and what it
+            is made of, timing, what more copies would cost, and the print
+            service's order terms with a link to them, already worded for
+            the person. Pass every line on to them word for word, in order,
+            before they decide; do not summarise, shorten or drop any.
+            ``quote.price_sheet`` holds the same numbers as data.
+
             Use the returned ``quote_id`` with ``fulfillment_order`` to place the
             order.
             """
             import kiln.server as _srv
-            try:
-                from kiln.fulfillment import FulfillmentError, QuoteRequest
-            except ImportError:
-                return _srv._error_dict(
-                    "Fulfillment module is not available (kiln-pro required).",
-                    code="NOT_AVAILABLE",
-                )
+
+            service = order_service()
+            if service is None:
+                return _not_included()
+            FulfillmentError = service.FulfillmentError
+            QuoteRequest = service.QuoteRequest
             try:
                 from kiln_pro.payments.base import PaymentError
             except ImportError:
@@ -234,6 +322,7 @@ class _FulfillmentToolsPlugin:
                     QuoteRequest(
                         file_path=file_path,
                         material_id=material_id,
+                        file_name=Path(file_path).name,
                         quantity=quantity,
                         shipping_country=shipping_country,
                     )
@@ -248,7 +337,28 @@ class _FulfillmentToolsPlugin:
                     )
                     quote_data["kiln_fee"] = fee_calc.to_dict()
                     quote_data["total_with_fee"] = float(fee_calc.total_cost)
-                quote_data.update(_srv._provider_routing_metadata(provider.name))
+                # The one price sheet every door serves, built by the order
+                # service so this tool never folds its own total.
+                routing = _srv._provider_routing_metadata(
+                    provider.name, shipping_country=shipping_country,
+                )
+                sheet = getattr(service, "price_sheet", None)
+                message = getattr(service, "quote_message", None)
+                tell: list[str] = []
+                if sheet is not None:
+                    kiln_fee = 0.0
+                    if fee_calc is not None:
+                        kiln_fee = float(
+                            getattr(fee_calc, "fee_amount", 0) + getattr(fee_calc, "tax_amount", 0)
+                        )
+                    # How the price is shown never costs the person the quote.
+                    try:
+                        quote_data["price_sheet"] = sheet(quote, kiln_fee=kiln_fee)
+                        if message is not None:
+                            tell = message(quote, quote_data["price_sheet"], routing)
+                    except Exception:
+                        _logger.warning("Could not word the price for quote %s", quote.quote_id, exc_info=True)
+                quote_data.update(routing)
                 quote_data["provider_quote_id"] = quote.quote_id
                 try:
                     from kiln.quote_cache import cache_quote
@@ -280,7 +390,9 @@ class _FulfillmentToolsPlugin:
                 # Try to authorize (hold) the fee at quote time.
                 try:
                     mgr = _srv._get_payment_mgr()
-                    if fee_calc is not None and mgr.available_rails:
+                    from kiln.fulfillment_service import server_takes_fee
+
+                    if fee_calc is not None and mgr.available_rails and not server_takes_fee(provider):
                         auth_result = mgr.authorize_fee(
                             quote.quote_id,
                             fee_calc,
@@ -294,10 +406,12 @@ class _FulfillmentToolsPlugin:
                     # Hold failed — fee will be collected at order time.
                     pass
 
-                return {
-                    "success": True,
-                    "quote": quote_data,
-                }
+                # The message first, already worded for the person.
+                reply: dict = {"success": True}
+                if tell:
+                    reply["tell_the_person"] = tell
+                reply["quote"] = quote_data
+                return reply
             except FileNotFoundError as exc:
                 return _srv._error_dict(
                     f"Failed to get fulfillment quote: {exc}", code="FILE_NOT_FOUND"
@@ -580,16 +694,26 @@ class _FulfillmentToolsPlugin:
                     charge — the tax line shows $0.00.
 
             Use ``fulfillment_order_status`` to track progress after placing.
+
+            Nothing is made until the person pays on the print service's
+            checkout, so the reply opens with ``tell_the_person``: the link to
+            pay first, then the checkout total with any tax, the print
+            service's order terms and a link to them. Pass every line on to
+            the person word for word.
+
+            If the person asks whether they can pay with a particular method,
+            answer from ``provider_pay_methods`` in the reply: yes for one it
+            lists; for any other, say Kiln doesn't know and that the checkout
+            page shows every option for their country. Never claim a method
+            that isn't listed.
             """
             import kiln.server as _srv
-            try:
-                from kiln.fulfillment import FulfillmentError, OrderRequest
-                from kiln.fulfillment.intelligence import QuoteValidation
-            except ImportError:
-                return _srv._error_dict(
-                    "Fulfillment module is not available (kiln-pro required).",
-                    code="NOT_AVAILABLE",
-                )
+
+            service = order_service()
+            if service is None:
+                return _not_included()
+            FulfillmentError = service.FulfillmentError
+            OrderRequest = service.OrderRequest
             try:
                 from kiln.licensing import LicenseTier
             except ImportError:
@@ -654,15 +778,18 @@ class _FulfillmentToolsPlugin:
                 if getattr(provider, "name", "") != "proxy":
                     tier_ok, tier_msg = check_tier(LicenseTier.BUSINESS)
                     if not tier_ok:
+                        from kiln.tiers_and_terms import paywall_fields
+
                         return {
                             "success": False,
                             "error": tier_msg,
                             "code": "LICENSE_REQUIRED",
                             "required_tier": "business",
+                            **paywall_fields("business"),
                         }
 
                 # 0. Validate quote is still valid
-                quote_validation: QuoteValidation | None = None
+                quote_validation: Any = None
                 try:
                     quote_validation = _srv._validate_quote_for_order(
                         quote_id,
@@ -700,8 +827,13 @@ class _FulfillmentToolsPlugin:
                         code="SHIPPING_NOT_CONFIRMED",
                     )
 
-                # 2. Determine price and calculate fee BEFORE placing.
-                estimated_price = quoted_price
+                # 2. Determine price and calculate fee BEFORE placing.  When
+                #    Kiln's hosted server places the order it charges the fee
+                #    itself, so nothing here records, holds or charges it.
+                from kiln.fulfillment_service import fee_taken_by_server, server_takes_fee
+
+                server_fee = server_takes_fee(provider)
+                estimated_price = 0.0 if server_fee else quoted_price
                 currency = quoted_currency
                 pay_result = None
                 fee_calc = None
@@ -731,7 +863,7 @@ class _FulfillmentToolsPlugin:
                             )
 
                 # 3. Charge / capture payment BEFORE placing the order.
-                if payment_hold_id or estimated_price > 0:
+                if not server_fee and (payment_hold_id or estimated_price > 0):
                     billing = _srv._get_billing()
                     if billing is None:
                         return _srv._error_dict(
@@ -807,15 +939,30 @@ class _FulfillmentToolsPlugin:
 
                 # 5. Build response.
                 order_data = result.to_dict()
-                order_data.update(
-                    _srv._provider_routing_metadata(
-                        provider.name,
-                        provider_order_id=result.order_id or "",
-                    )
+                routing = _srv._provider_routing_metadata(
+                    provider.name,
+                    provider_order_id=result.order_id or "",
+                    shipping_country=str((normalized_shipping_address or {}).get("country") or ""),
                 )
+                order_data.update(routing)
+                message = getattr(service, "order_message", None)
+                tell = []
+                if message is not None:
+                    try:
+                        tell = message(result, routing)
+                    except Exception:
+                        _logger.warning("Could not word order %s", result.order_id, exc_info=True)
                 if fee_calc:
                     order_data["kiln_fee"] = fee_calc.to_dict()
                     order_data["total_with_fee"] = float(fee_calc.total_cost)
+                upstream_fee = fee_taken_by_server(result)
+                if upstream_fee is not None:
+                    order_data["kiln_fee"] = upstream_fee
+                elif server_fee:
+                    order_data.setdefault("warnings", []).append(
+                        "Kiln's hosted service placed this order but didn't say what fee it charged; "
+                        "Kiln charged nothing for it on this machine."
+                    )
                 if pay_result:
                     order_data["payment"] = pay_result.to_dict()
 
@@ -837,7 +984,11 @@ class _FulfillmentToolsPlugin:
                                 result.order_id,
                             )
 
-                # 6. Price-drift check
+                # 6. The price, checked after placement: the order exists
+                #    whatever this finds, so it is never reported as
+                #    blocked.  A real change is said plainly with the pay
+                #    step kept; prices that cannot be compared like with
+                #    like are stated, never judged.
                 response_warnings: list[str] = []
                 if quote_validation and quote_validation.warnings:
                     response_warnings.extend(quote_validation.warnings)
@@ -845,41 +996,46 @@ class _FulfillmentToolsPlugin:
                 if result.total_price is not None and quote_validation:
                     from kiln.fulfillment.intelligence import _check_price_drift
 
-                    drift_warning, should_block = _check_price_drift(
+                    currency = getattr(result, "currency", None) or quoted_currency
+                    prices = _like_for_like_prices(
                         quote_validation.quoted_price,
-                        result.total_price,
+                        result,
+                        quote_id=quote_id,
+                        shipping_option_id=shipping_option_id,
                     )
-                    if should_block:
-                        _logger.error(
-                            "Price drift BLOCKED order for quote %s: %s",
-                            quote_id,
-                            drift_warning,
-                        )
-                        refund_warning = _srv._refund_after_order_failure(
-                            pay_result,
-                            payment_hold_id,
-                        )
-                        msg = drift_warning or "Price drift exceeded safety limit."
-                        if refund_warning:
-                            msg += f" {refund_warning}"
-                        else:
-                            msg += " Your payment has been refunded automatically."
-                        return _srv._error_dict(msg, code="PRICE_DRIFT_BLOCKED")
-                    if drift_warning:
-                        _logger.warning(
-                            "Price drift detected for quote %s: %s",
-                            quote_id,
-                            drift_warning,
-                        )
-                        response_warnings.append(drift_warning)
+                    if prices is None:
+                        known = _known_prices_line(quote_validation.quoted_price, result, currency)
+                        tell = [*tell[:1], known, *tell[1:]]
+                    else:
+                        quoted, placed = prices
+                        drift_warning, _beyond_limit = _check_price_drift(quoted, placed)
+                        if drift_warning:
+                            # The order stays payable, so Kiln's fee follows
+                            # the order as it does everywhere: it comes back
+                            # when the order is cancelled or expires unpaid,
+                            # never on the spot.  A refund here would let the
+                            # order be paid and made with the fee returned.
+                            _logger.warning(
+                                "Price changed for quote %s: quoted %.2f, checkout before tax %.2f",
+                                quote_id, quoted, placed,
+                            )
+                            change = _price_change_line(quoted, placed, currency, _FEE_IF_UNPAID)
+                            tell = [change, *tell]
+                            response_warnings.append(change)
+                            order_data["price_change"] = {
+                                "quoted": round(quoted, 2),
+                                "checkout_before_tax": round(placed, 2),
+                                "currency": currency,
+                            }
 
                 if response_warnings:
-                    order_data["warnings"] = response_warnings
+                    order_data["warnings"] = [*order_data.get("warnings", []), *response_warnings]
 
-                return {
-                    "success": True,
-                    "order": order_data,
-                }
+                reply = {"success": True}
+                if tell:
+                    reply["tell_the_person"] = tell
+                reply["order"] = order_data
+                return reply
             except Exception as exc:
                 _logger.exception("Unexpected error in fulfillment_order")
                 return _srv._error_dict(
@@ -894,15 +1050,29 @@ class _FulfillmentToolsPlugin:
                 order_id: Order ID from ``fulfillment_order``.
 
             Returns current order state, tracking info, and estimated delivery.
+
+            The reply opens with ``tell_the_person``: where the order is and,
+            while it is unpaid, the link to pay for it. Pass every line on to
+            the person word for word.
+
+            Nothing is made until an order is paid on the print service's
+            checkout, and Kiln cannot pay it for them. When the person wants to
+            pay, asks how to pay, or asks about an order that is not paid yet,
+            call this right away for that order and give them the link to pay
+            first, before anything else, without waiting to be asked for it.
+
+            If the person asks whether they can pay with a particular method,
+            answer from ``provider_pay_methods`` in the reply: yes for one it
+            lists; for any other, say Kiln doesn't know and that the checkout
+            page shows every option for their country. Never claim a method
+            that isn't listed.
             """
             import kiln.server as _srv
-            try:
-                from kiln.fulfillment import FulfillmentError
-            except ImportError:
-                return _srv._error_dict(
-                    "Fulfillment module is not available (kiln-pro required).",
-                    code="NOT_AVAILABLE",
-                )
+
+            service = order_service()
+            if service is None:
+                return _not_included()
+            FulfillmentError = service.FulfillmentError
 
             try:
                 provider = _srv._get_fulfillment()
@@ -914,10 +1084,20 @@ class _FulfillmentToolsPlugin:
                         provider_order_id=order_id,
                     )
                 )
-                return {
-                    "success": True,
-                    "order": order_data,
-                }
+                # The message first, worded by the order service.  How a
+                # status is worded never costs the person the status.
+                reply: dict = {"success": True}
+                message = getattr(service, "status_message", None)
+                if message is not None:
+                    try:
+                        tell = message(result)
+                    except Exception:
+                        _logger.warning("Could not word the status of %s", order_id, exc_info=True)
+                        tell = []
+                    if tell:
+                        reply["tell_the_person"] = tell
+                reply["order"] = order_data
+                return reply
             except (FulfillmentError, RuntimeError) as exc:
                 return _srv._error_dict(
                     f"Failed to check order status: {exc}. Verify the order_id is correct."
@@ -935,16 +1115,17 @@ class _FulfillmentToolsPlugin:
             Args:
                 order_id: Order ID to cancel.
 
-            Only orders that have not yet shipped can be cancelled.
+            Only orders that have not yet shipped can be cancelled. When the
+            print service has nothing to cancel (an unpaid order is never
+            made) or cancels only on a written request, the error message
+            says which and how; pass it on to the person as it is.
             """
             import kiln.server as _srv
-            try:
-                from kiln.fulfillment import FulfillmentError
-            except ImportError:
-                return _srv._error_dict(
-                    "Fulfillment module is not available (kiln-pro required).",
-                    code="NOT_AVAILABLE",
-                )
+
+            service = order_service()
+            if service is None:
+                return _not_included()
+            FulfillmentError = service.FulfillmentError
             try:
                 from kiln.licensing import LicenseTier, check_tier
             except ImportError:
@@ -967,7 +1148,7 @@ class _FulfillmentToolsPlugin:
                 return err
             tier_ok, tier_msg = check_tier(LicenseTier.BUSINESS)
             if not tier_ok:
-                from kiln.tiers_and_terms import signin_hint_fields
+                from kiln.tiers_and_terms import paywall_fields, signin_hint_fields
 
                 return {
                     "success": False,
@@ -975,6 +1156,7 @@ class _FulfillmentToolsPlugin:
                     "code": "LICENSE_REQUIRED",
                     "required_tier": "business",
                     **signin_hint_fields(),
+                    **paywall_fields("business"),
                 }
             try:
                 provider = _srv._get_fulfillment()
@@ -984,6 +1166,10 @@ class _FulfillmentToolsPlugin:
                     "order": result.to_dict(),
                 }
             except (FulfillmentError, RuntimeError) as exc:
+                code = getattr(exc, "code", None)
+                if code in WORDED_CANCEL_REFUSALS:
+                    # Already worded for the person, with what to do next.
+                    return _srv._error_dict(str(exc), code=code)
                 return _srv._error_dict(
                     f"Failed to cancel order: {exc}. The order may have already shipped."
                 )
@@ -1003,13 +1189,12 @@ class _FulfillmentToolsPlugin:
             """
             import kiln.server as _srv
 
+            if order_service() is None:
+                return _not_included()
             try:
                 monitor = _srv._get_fulfillment_monitor()
                 if monitor is None:
-                    return _srv._error_dict(
-                        "Fulfillment monitor is not available (kiln-pro required).",
-                        code="NOT_AVAILABLE",
-                    )
+                    return _not_included()
                 alerts = monitor.get_alerts()
                 return {"success": True, "alerts": alerts, "count": len(alerts)}
             except Exception as exc:

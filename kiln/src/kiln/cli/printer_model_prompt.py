@@ -95,15 +95,16 @@ def suggest_bambu_model(serial: str | None) -> str | None:
 
 def _validate_model_key(value: str) -> bool:
     """Check that *value* matches a key in printer_intelligence.json.
-    Uses ``get_build_volume`` because it's strict — ``get_printer_intel``
-    falls back to the 'default' profile and would silently accept typos.
+    Uses ``catalogue_printer_id`` because it's strict (the roster, exact
+    spellings only) — ``get_printer_intel`` falls back to the 'default'
+    profile and would silently accept typos.
     """
     raw = value.strip() if value else ""
     if not raw or raw != raw.lower():
         return False
     try:
-        from kiln.printers.bed_fit import get_build_volume
-        return get_build_volume(raw) is not None
+        from kiln.printers.bed_fit import catalogue_printer_id
+        return catalogue_printer_id(raw) is not None
     except Exception:
         # If we can't validate (missing data file), accept any non-empty
         # string — better to record the user's intent than to block.

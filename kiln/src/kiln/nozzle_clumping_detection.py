@@ -29,6 +29,7 @@ import logging
 from typing import Any
 
 from kiln.printers.base import NozzleClumpingDetection
+from kiln.untrusted_zip import UntrustedZipFile
 
 logger = logging.getLogger(__name__)
 
@@ -243,13 +244,12 @@ def file_facts(file_path: str) -> dict[str, Any] | None:
     import json
     import os
     import tempfile
-    import zipfile
 
     try:
         if not os.path.isfile(file_path):
             return None
         if file_path.casefold().endswith(".3mf"):
-            with zipfile.ZipFile(file_path) as zf:
+            with UntrustedZipFile(file_path) as zf:
                 names = zf.namelist()
                 gcode_members = sorted(n for n in names if n.casefold().endswith(".gcode"))
                 if not gcode_members:
@@ -294,20 +294,22 @@ _MODE_WORDS: dict[str, str] = {"spiral_vase": "spiral vase", "by_object": "by ob
 def probe_facts_for(printer_model: str | None) -> dict[str, Any] | None:
     """Where this model taps the bed, and the modes that skip the probe.
 
-    Read from the public printer catalogue, where the maker's published
+    Read from the printer's catalogue record, where the maker's published
     rectangle sits beside the machine's build volume: both are physical facts
-    about the machine, and a warning built on them has to work on a laptop
-    with no internet.  ``None`` for a model whose maker states none, which is
-    "Kiln does not know", never "this machine has no probe".
+    about the machine, fetched once at setup and kept on this computer so a
+    warning built on them works on a laptop with no internet.  ``None`` for a
+    model whose maker states none -- or whose record this install has not
+    been able to get -- which is "Kiln does not know", never "this machine
+    has no probe".
     """
     if not printer_model:
         return None
     try:
-        from kiln.printers.bed_fit import _load_printer_intelligence, _printer_id_candidates
+        from kiln.printer_intelligence import row_for_exact
+        from kiln.printers.bed_fit import _printer_id_candidates
 
-        data = _load_printer_intelligence() or {}
         for candidate in _printer_id_candidates(printer_model):
-            record = data.get(candidate)
+            record = row_for_exact(candidate)
             if isinstance(record, dict) and isinstance(record.get("nozzle_clumping_probe"), dict):
                 probe = dict(record["nozzle_clumping_probe"])
                 box = probe.get("detection_area_mm")

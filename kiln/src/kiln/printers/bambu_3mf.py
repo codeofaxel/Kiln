@@ -124,6 +124,7 @@ from kiln.gcode import (
     slicer_nozzle_diameters,
     slicer_print_time,
 )
+from kiln.untrusted_zip import UntrustedZipFile
 
 logger = logging.getLogger(__name__)
 
@@ -1231,43 +1232,51 @@ _TPL_VAR_RE = re.compile(r"\[(?P<name>[a-z_][a-z0-9_]*)\]")
 _KILN_SPIRAL_MODE = False
 _KILN_PRINT_SEQUENCE = "by layer"
 
-_PRINTER_INTEL_PATH = _DATA_DIR / "printer_intelligence.json"
-_printer_intel_raw: dict[str, Any] | None = None
-
-
 def _bed_center(printer_model: str) -> tuple[float, float] | None:
     """Bed centre ``(x, y)`` in mm for a DECLARED model, or ``None`` if unknown.
 
-    Read from ``printer_intelligence.json`` — the same spec sheet the rest of
-    Kiln reads — rather than copied into a table here, because a second copy
-    of a machine's bed size drifts silently and keeps answering confidently.
+    Read through the one bed helper every door uses
+    (:func:`kiln.printers.bed_fit.build_volume_exact`: the catalogue record,
+    else the roster's rated plate) rather than copied into a table here,
+    because a second copy of a machine's bed size drifts silently and keeps
+    answering confidently.  A signed-out install therefore still builds the
+    file around the plate's real centre (2026-10-15; before that it refused,
+    which left a signed-out Bambu owner unable to print through Kiln at
+    all).  A model the roster does not list has no centre, and the build is
+    refused with that said (:func:`_no_bed_on_record`): nothing is guessed
+    for a number that becomes a travel move.
 
     Exact key only: no fuzzy prefix match and no ``"default"`` profile.  This
     number becomes a travel move, so an unrecognised model gets ``None`` and
     the caller refuses instead of parking the head somewhere plausible.
     """
-    global _printer_intel_raw  # noqa: PLW0603
-    if _printer_intel_raw is None:
-        try:
-            _printer_intel_raw = json.loads(
-                _PRINTER_INTEL_PATH.read_text(encoding="utf-8")
-            )
-        except (OSError, ValueError):
-            _printer_intel_raw = {}
-    entry = _printer_intel_raw.get(_normalize_model(printer_model))
-    if not isinstance(entry, dict):
+    from kiln.printers.bed_fit import build_volume_exact
+
+    volume = build_volume_exact(_normalize_model(printer_model))
+    if volume is None:
         return None
-    volume = entry.get("build_volume_mm")
-    if isinstance(volume, dict):
-        width, depth = volume.get("x"), volume.get("y")
-    elif isinstance(volume, (list, tuple)) and len(volume) >= 2:
-        width, depth = volume[0], volume[1]
-    else:
-        return None
-    try:
-        return float(width) / 2.0, float(depth) / 2.0
-    except (TypeError, ValueError):
-        return None
+    return volume[0] / 2.0, volume[1] / 2.0
+
+
+def _no_bed_on_record(printer_model: str | None) -> str:
+    """Why this model has no bed centre, as a sentence that names the fix.
+
+    A roster printer whose record is not in hand -- this install is signed
+    out, or could not reach Kiln's servers when it was set up -- is told
+    the sign-in is the fix; a model the roster does not list is told it is
+    not catalogued.  Never a guessed number: the sentence ends the build.
+    """
+    model = _normalize_model(printer_model) if printer_model else ""
+    from kiln.printers.bed_fit import catalogue_printer_id, no_bed_reason
+
+    listed = catalogue_printer_id(model) if model else None
+    if listed is None:
+        return (
+            f"Kiln's catalogue has no row for {model or 'this printer'!r}, so it has no bed "
+            "centre to build the file's end sequence around and will not guess one."
+        )
+    # The same sentence every bed door says, with what this door needs it for.
+    return no_bed_reason(listed, instead=None, needed_for="take the centre of, for the file's end sequence")
 
 
 def _format_template_number(value: float) -> str:
@@ -1499,7 +1508,7 @@ def _machine_top_mm(printer_model: str | None) -> float | None:
             if travel is not None and float(travel) > 0:
                 return float(travel)
         volume = get_build_volume(candidate)
-        return float(volume[2]) if volume else None
+        return float(volume[2]) if volume and volume[2] > 0 else None
     return None
 
 
@@ -1555,7 +1564,15 @@ def _resolve_end_gcode(
         template this is): the first lift is ``max_z + 5`` but never past it.
         ``None`` leaves the lift uncapped.
     """
-    expanded = _expand_end_template(template, _end_template_variables(max_z, printer_model))
+    variables = _end_template_variables(max_z, printer_model)
+    try:
+        expanded = _expand_end_template(template, variables)
+    except ValueError as exc:
+        if "first_layer_center_no_wipe_tower" in str(exc) and "first_layer_center_no_wipe_tower" not in variables:
+            # The template needs the bed centre and this install has none
+            # for the model: say why and what fixes it, never a guess.
+            raise ValueError(_no_bed_on_record(printer_model)) from exc
+        raise
 
     safe_z = max_z + 5.0
     if z_top_mm is not None:
@@ -2358,7 +2375,7 @@ def carries_placeholder_model(path: str | os.PathLike[str]) -> bool:
     so a plain model 3MF is never mistaken for one.  Never raises.
     """
     try:
-        with zipfile.ZipFile(path) as zf:
+        with UntrustedZipFile(path) as zf:
             names = zf.namelist()
             if not any(n.startswith("Metadata/plate_") and n.endswith(".gcode") for n in names):
                 return False
@@ -2615,7 +2632,7 @@ def bambu_archive_problems(path: str | os.PathLike[str], *, name: str | None = N
     if Path(name or p.name).suffix.lower() != ".3mf":
         return []
     try:
-        zf = zipfile.ZipFile(str(p))
+        zf = UntrustedZipFile(str(p))
     except (OSError, zipfile.BadZipFile) as exc:
         return [f"{p.name} is not a readable 3MF archive ({exc})"]
     with zf:
@@ -2722,7 +2739,7 @@ def complete_bambu_archive(
     src = Path(path)
     dst = Path(output_path) if output_path else src
     slice_info: str | None = None
-    with zipfile.ZipFile(str(src)) as zf:
+    with UntrustedZipFile(str(src)) as zf:
         if "Metadata/plate_1.gcode" not in zf.namelist():
             raise ValueError(f"{src.name} is not a sliced plate (no Metadata/plate_1.gcode)")
         colors = _declared_plate_colors(zf)
@@ -2758,7 +2775,7 @@ def complete_bambu_archive(
     )
     replaced = set(rendered) | {KILN_PREVIEW_MARKER}
     tmp = dst.with_name(dst.name + ".completing")
-    with zipfile.ZipFile(str(src)) as src_zf, zipfile.ZipFile(str(tmp), "w", zipfile.ZIP_DEFLATED) as dst_zf:
+    with UntrustedZipFile(str(src)) as src_zf, zipfile.ZipFile(str(tmp), "w", zipfile.ZIP_DEFLATED) as dst_zf:
         for item in src_zf.infolist():
             if item.filename in replaced:
                 continue
@@ -3294,7 +3311,7 @@ def build_bambu_3mf(
     model_data: str = _MINIMAL_3D_MODEL
     if source_3mf_path and os.path.isfile(source_3mf_path):
         try:
-            with zipfile.ZipFile(source_3mf_path) as zf:
+            with UntrustedZipFile(source_3mf_path) as zf:
                 for name in zf.namelist():
                     if name.endswith(".png") and (
                         name.startswith("Metadata/")
@@ -3461,7 +3478,7 @@ def repackage_gcode_as_bambu_3mf(
     slice_info: str | None = None
     if source_3mf_path and os.path.isfile(source_3mf_path):
         try:
-            with zipfile.ZipFile(source_3mf_path) as zf:
+            with UntrustedZipFile(source_3mf_path) as zf:
                 for name in zf.namelist():
                     if name.endswith(".png") and (
                         name.startswith("Metadata/")

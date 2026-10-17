@@ -35,20 +35,20 @@ def _real_cube(path):
 
 class TestResolution:
     def test_a_known_printer_gives_its_own_bed(self):
-        plate = stage_plate.resolve_stage_plate("prusa_mk4")
-        assert (plate["x_mm"], plate["y_mm"]) == (250.0, 210.0)
-        assert plate["z_mm"] == 220.0
+        plate = stage_plate.resolve_stage_plate("kilntest_wide")
+        assert (plate["x_mm"], plate["y_mm"]) == (240.0, 200.0)
+        assert plate["z_mm"] == 230.0
         assert plate["source"] == "printer"
-        assert plate["printer_id"] == "prusa_mk4"
-        assert plate["label"] == "Prusa MK4 / MK4S"
+        assert plate["printer_id"] == "kilntest_wide"
+        assert plate["label"] == "Kilntest Wide 240"
 
     def test_a_non_square_bed_survives_as_a_rectangle(self):
         """The reason this module exists: one number cannot describe a bed."""
-        plate = stage_plate.resolve_stage_plate("prusa_mk4")
+        plate = stage_plate.resolve_stage_plate("kilntest_wide")
         assert plate["x_mm"] != plate["y_mm"]
 
     def test_a_human_label_resolves_the_same_as_the_id(self):
-        assert stage_plate.resolve_stage_plate("Bambu Lab A1")["printer_id"] == "bambu_a1"
+        assert stage_plate.resolve_stage_plate("Kilntest Open 220")["printer_id"] == "kilntest_open"
 
     def test_an_unknown_printer_is_a_reference_plate_not_a_guess(self):
         plate = stage_plate.resolve_stage_plate("totally_made_up_xyz")
@@ -80,20 +80,20 @@ class TestResolution:
         """The hosted skip is about the SHARED file, not about refusing to
         answer for a printer the caller named."""
         monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
-        assert stage_plate.resolve_stage_plate("prusa_mk4")["source"] == "printer"
+        assert stage_plate.resolve_stage_plate("kilntest_wide")["source"] == "printer"
 
     def test_a_broken_catalogue_still_yields_a_bed(self, monkeypatch):
         monkeypatch.setattr(
             "kiln.printers.bed_fit.resolve_build_volume",
             lambda _pid: (_ for _ in ()).throw(RuntimeError("catalogue on fire")),
         )
-        assert stage_plate.resolve_stage_plate("prusa_mk4")["source"] == "default"
+        assert stage_plate.resolve_stage_plate("kilntest_wide")["source"] == "default"
 
 
 class TestAttach:
     def test_stamps_the_plate_onto_a_payload(self):
-        payload = stage_plate.attach_stage_plate({"kind": "kiln.mesh.v1"}, "prusa_mk4")
-        assert payload["plate"]["x_mm"] == 250.0
+        payload = stage_plate.attach_stage_plate({"kind": "kiln.mesh.v1"}, "kilntest_wide")
+        assert payload["plate"]["x_mm"] == 240.0
 
     def test_no_payload_passes_through(self):
         assert stage_plate.attach_stage_plate(None) is None
@@ -105,22 +105,22 @@ class TestEveryDoorAttachesIt:
 
     def test_the_result_hook_payload_carries_a_plate(self, tmp_path, monkeypatch):
         monkeypatch.setattr(
-            "kiln.printer_model_resolver.resolve_printer_model", lambda: "prusa_mk4"
+            "kiln.printer_model_resolver.resolve_printer_model", lambda: "kilntest_wide"
         )
         mesh = _real_cube(tmp_path / "cube.stl")
         token = local_stage._mint(mesh)
         payload = local_stage._inline_payload(token)
-        assert payload["plate"]["printer_id"] == "prusa_mk4"
+        assert payload["plate"]["printer_id"] == "kilntest_wide"
 
     def test_the_panels_own_fetch_verb_carries_a_plate(self, tmp_path, monkeypatch):
         """The lazy-fetch door: a host that renders the panel but hands the
         geometry back through a tool call gets the same bed as the inline one."""
         monkeypatch.setattr(
-            "kiln.printer_model_resolver.resolve_printer_model", lambda: "prusa_mk4"
+            "kiln.printer_model_resolver.resolve_printer_model", lambda: "kilntest_wide"
         )
         mesh = _real_cube(tmp_path / "cube.stl")
         payload = local_stage._payload_for_mesh(mesh)
-        assert payload["plate"]["printer_id"] == "prusa_mk4"
+        assert payload["plate"]["printer_id"] == "kilntest_wide"
 
     def test_an_unreadable_mesh_still_raises_for_the_door_that_answers_a_person(
         self, tmp_path
@@ -412,7 +412,7 @@ class TestASliceShowsThePlateAsItWillPrint:
         monkeypatch.setattr(monitor_twin, "_ACTIVE_FILE", d / "active.json")
         monkeypatch.setenv("KILN_HOME", str(tmp_path / "home"))
         monkeypatch.setattr(
-            "kiln.printer_model_resolver.resolve_printer_model", lambda: "bambu_a1"
+            "kiln.printer_model_resolver.resolve_printer_model", lambda: "kilntest_open"
         )
         local_stage._reset_for_tests()
 
@@ -442,6 +442,6 @@ class TestASliceShowsThePlateAsItWillPrint:
         assert token and local_stage.resolve(token) == cube
 
         payload = local_stage._payload_for_mesh(cube)
-        assert payload["plate"]["printer_id"] == "bambu_a1"
+        assert payload["plate"]["printer_id"] == "kilntest_open"
         classes = {f["class"] for f in payload["slicer"]["features"]}
         assert {"skirt", "prime_tower"} <= classes, classes

@@ -20,15 +20,6 @@ from kiln import data_manifest
 #: waived so the gap stays visible and cannot grow -- the fix is to author
 #: the reason from the machine's published chamber and hotend limits, not
 #: to extend this set.
-RECORDED_REFUSALS_WITHOUT_A_REASON = frozenset(
-    {
-        "visionminer_22idex_v4.peek",
-        "visionminer_22idex_v4.pei_1010",
-        "visionminer_22idex_v4.pei_9085",
-        "visionminer_22idex_v4.pekk",
-        "visionminer_22idex_v4.ppsu",
-    }
-)
 
 
 class TestBundledDataManifest:
@@ -95,23 +86,32 @@ class TestPublicProfileFields:
         )
         assert not both, f"field is both carried and reserved: {sorted(both)}"
 
-    def test_every_printer_row_carries_exactly_these_fields(self) -> None:
-        """The declaration is what the catalogue actually holds.
+    def test_every_roster_row_carries_exactly_these_fields(self) -> None:
+        """The declaration is what the roster actually holds.
 
         ``test_printer_intelligence.py`` asserts the same thing through
         the loader; this asserts it of the constant itself, so a field
         added to the list without being added to the rows fails here
-        rather than shipping as a promise the data does not keep.
+        rather than shipping as a promise the data does not keep.  The
+        generic ``default`` row is exempt by name: it is the one bundled
+        row that carries the full spec sheet, as the floor.
         """
         catalogue = data_manifest.load("printer_intelligence.json")
         rows = {
             key: value
             for key, value in catalogue.items()
-            if not key.startswith("_")
+            if not key.startswith("_") and key != "default"
         }
-        assert rows, "the printer catalogue has no rows to check"
+        assert rows, "the printer roster has no rows to check"
         for key, row in rows.items():
             assert set(row) == data_manifest.PUBLIC_PROFILE_FIELDS, key
+        default = catalogue["default"]
+        # The generic row carries the spec sheet whole, and every roster
+        # field but the rated bed: its envelope is the floor's own
+        # build_volume_mm, never a printer's marketed bed.
+        assert set(default) > data_manifest.PUBLIC_PROFILE_FIELDS - {"rated_build_volume_mm"}
+        assert "rated_build_volume_mm" not in default
+        assert "max_hotend_temp" in default
 
 
 class TestReservedMarkersAreAbsent:
@@ -180,13 +180,21 @@ class TestProseExtraction:
         assert "bed_shape" not in keys
 
     def test_published_figures_exclude_prose(self) -> None:
-        """A number that appears only in a note is not 'published as data'."""
+        """A number that appears only in a note is not 'published as data'.
+
+        The generic row is the one bundled safety row with a figure in it;
+        a roster row publishes none, and the sweep still lists it."""
         published = data_manifest.printer_published_figures()
-        profile = data_manifest.load("safety_profiles.json")["bambu_x1c"]
+        profile = data_manifest.load("safety_profiles.json")["default"]
         assert (
             data_manifest.canonical_figure(profile["max_hotend_temp"])
-            in published["bambu_x1c"]
+            in published["default"]
         )
+        roster = [
+            key for key in data_manifest.load("safety_profiles.json")
+            if not key.startswith("_") and key != "default"
+        ]
+        assert roster and all(key in published for key in roster)
 
     def test_a_marked_hazard_passage_is_recognised(self) -> None:
         assert data_manifest.is_safety_marked(
@@ -223,13 +231,12 @@ class TestSafetyNotesAreRequired:
         missing = known - set(safety)
         assert not missing, f"no safety profile for {sorted(missing)}"
 
-    def test_every_safety_profile_carries_notes(self) -> None:
-        blank = sorted(
-            key
-            for key, profile in data_manifest.load("safety_profiles.json").items()
-            if not key.startswith("_") and not profile.get("notes", "").strip()
-        )
-        assert not blank, f"safety profile with no notes: {blank}"
+    def test_the_generic_safety_profile_carries_notes(self) -> None:
+        """The one bundled row with limits says what its numbers are.  That
+        every served record's notes are populated is pinned beside the
+        records, in kiln-pro's ``tests/test_printer_catalogue_numbers.py``."""
+        profile = data_manifest.load("safety_profiles.json")["default"]
+        assert profile.get("notes", "").strip(), "the generic safety profile has no notes"
 
     def test_every_printer_has_material_refusals(self) -> None:
         known = {
@@ -244,27 +251,45 @@ class TestSafetyNotesAreRequired:
         assert not missing, f"no material compatibility for {sorted(missing)}"
 
     def test_a_refused_material_explains_itself(self) -> None:
-        """The refusal note is the 'do not try this' door -- it needs a why."""
+        """The refusal note is the 'do not try this' door -- it needs a why.
+
+        Since 2026-10-12 the per-printer notes are the Pro overlay's, and
+        that every verdict has one is kiln-pro's material-note coverage
+        gate; the one bundled row whose notes are still public is the
+        generic ``default`` row, judged here."""
         compatibility = data_manifest.load(
             "design_knowledge/printer_material_compatibility.json"
         )
         unexplained = {
+            f"default.{material}"
+            for material, record in compatibility["default"].items()
+            if record.get("status") == "not_compatible"
+            and not record.get("notes", "").strip()
+        }
+        assert not unexplained, (
+            f"{len(unexplained)} generic-row refusal(s) ship with no reason: "
+            f"{sorted(unexplained)[:5]}. Every other refused material explains "
+            "what the machine lacks; write the same sentence."
+        )
+        noted_elsewhere = {
+            f"{printer_id}.{material}"
+            for printer_id, materials in compatibility.items()
+            if not printer_id.startswith("_") and printer_id != "default"
+            for material, record in materials.items()
+            if record.get("notes") and record.get("upgrades_needed")
+        }
+        assert not noted_elsewhere, (
+            "a per-printer compatibility note is the Pro overlay's since "
+            f"2026-10-12, never the public matrix's: {sorted(noted_elsewhere)[:5]}"
+        )
+        # The one exception: a refusal with no upgrade path keeps a public
+        # reason, or the user is told "no" and nothing else (the ceiling it
+        # names stays unquoted; test_registry_mirror pins that).
+        bare = {
             f"{printer_id}.{material}"
             for printer_id, materials in compatibility.items()
             if not printer_id.startswith("_")
             for material, record in materials.items()
-            if record.get("status") == "not_compatible"
-            and not record.get("notes", "").strip()
+            if record.get("status") == "not_compatible" and not record.get("upgrades_needed") and not record.get("notes")
         }
-        new_gaps = unexplained - RECORDED_REFUSALS_WITHOUT_A_REASON
-        assert not new_gaps, (
-            f"{len(new_gaps)} material refusal(s) ship with no reason: "
-            f"{sorted(new_gaps)[:5]}. Every other refused material explains "
-            "what the machine lacks; write the same sentence rather than "
-            "adding to the recorded gap."
-        )
-        closed = RECORDED_REFUSALS_WITHOUT_A_REASON - unexplained
-        assert not closed, (
-            "These refusals now carry a reason -- drop them from "
-            f"RECORDED_REFUSALS_WITHOUT_A_REASON: {sorted(closed)}"
-        )
+        assert not bare, f"refusals with no upgrade path and no reason: {sorted(bare)[:5]}"

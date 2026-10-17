@@ -68,31 +68,59 @@ def _write_cube_stl(
 # ---------------------------------------------------------------------------
 # Printer intelligence lookup
 # ---------------------------------------------------------------------------
+#
+# The rows here are the session fixture's synthetic printers
+# (tests/fixtures/printer_catalogue_test.json): a real printer's bed is
+# served from its catalogue record, and the real beds are pinned beside the
+# records in kiln-pro (tests/test_printer_catalogue_numbers.py).  What is
+# tested here is the resolution -- id, vendor-prefixed id, the printer's own
+# name -- and the guard built on the number.
 
 class TestBuildVolumeLookup:
-    def test_bambu_a1(self):
-        vol = get_build_volume("bambu_a1")
+    def test_by_id(self):
+        vol = get_build_volume("kilntest_enclosed")
         assert vol == (256.0, 256.0, 256.0)
 
-    def test_creality_k1_max_alias(self):
-        assert get_build_volume("creality_k1_max") == (300.0, 300.0, 300.0)
+    def test_creality_prefixed_alias(self):
+        # ``creality_`` is tolerated in front of any id and stripped.
+        assert get_build_volume("creality_kilntest_big") == (350.0, 350.0, 400.0)
 
     def test_human_model_labels(self):
-        assert get_build_volume("Creality K1 Max") == (300.0, 300.0, 300.0)
-        assert get_build_volume("Bambu Lab A1") == (256.0, 256.0, 256.0)
-        assert get_build_volume("Elegoo Neptune 4") == (225.0, 225.0, 265.0)
+        assert get_build_volume("Kilntest Big 350") == (350.0, 350.0, 400.0)
+        assert get_build_volume("Kilntest Enclosed 256") == (256.0, 256.0, 256.0)
+        assert get_build_volume("Kilntest Small 120") == (120.0, 120.0, 120.0)
 
     def test_explicit_size_variants(self):
         assert get_build_volume("voron_2.4_350") == (350.0, 350.0, 350.0)
 
-    def test_ender3_v3_ke(self):
-        assert get_build_volume("ender3_v3_ke") == (220.0, 220.0, 240.0)
+    def test_a_small_bed(self):
+        assert get_build_volume("kilntest_small") == (120.0, 120.0, 120.0)
 
-    def test_sparkx_i7(self):
-        assert get_build_volume("sparkx_i7") == (260.0, 260.0, 255.0)
+    def test_a_bed_that_is_not_a_cube(self):
+        assert get_build_volume("kilntest_open") == (220.0, 220.0, 250.0)
 
-    def test_ender3_v4(self):
-        assert get_build_volume("ender3_v4") == (220.0, 220.0, 235.0)
+    def test_a_roster_printer_whose_record_is_not_held_has_its_rated_bed(self, signed_out_install):
+        """Inverted 2026-10-15.  This asserted ``None`` signed out, and that
+        None switched the print-start bed check off for every roster
+        printer (check_bed_fit reads an unknown bed as "allow").  Now the
+        roster's rated bed stands in -- the fixture row's safety volume,
+        the way kiln-pro writes the real rows -- and never the generic
+        200 mm cube."""
+        from kiln.printers.bed_fit import catalogue_printer_id
+
+        assert catalogue_printer_id("kilntest_served") == "kilntest_served"
+        assert get_build_volume("kilntest_served") == (200.0, 200.0, 210.0)
+
+    def test_a_roster_row_with_no_rated_bed_is_unknown(self, signed_out_install, monkeypatch):
+        """Never a guess: a roster row that states no rated bed has none."""
+        import json
+
+        from kiln.printers import bed_fit
+
+        roster = json.loads(json.dumps(bed_fit._load_printer_intelligence()))
+        roster["kilntest_served"].pop("rated_build_volume_mm", None)
+        monkeypatch.setattr(bed_fit, "_printer_intelligence_cache", roster)
+        assert get_build_volume("kilntest_served") is None
 
     def test_unknown_returns_none(self):
         assert get_build_volume("this_printer_does_not_exist") is None
@@ -339,7 +367,7 @@ class TestValidateGcodeForPrinter:
             "G1 X-12.5 Y-10.0 Z0.2 F3000 E0.3\n"
             "G1 X12.5 Y12.5 E0.5\n"
         )
-        result = validate_gcode_for_printer(str(gcode), "bambu_a1")
+        result = validate_gcode_for_printer(str(gcode), "kilntest_enclosed")
         assert result["ok"] is False
         assert result["error_code"] == "OFF_BED_GEOMETRY"
 
@@ -351,7 +379,7 @@ class TestValidateGcodeForPrinter:
             "G1 X128 Y128 Z0.2 F3000 E0.3\n"
             "G1 X140 Y140 E0.5\n"
         )
-        result = validate_gcode_for_printer(str(gcode), "bambu_a1")
+        result = validate_gcode_for_printer(str(gcode), "kilntest_enclosed")
         assert result["ok"] is True
 
 
@@ -361,10 +389,11 @@ class TestValidateGcodeForPrinter:
 
 class TestValidateMeshForPrinter:
     def test_incident_reproduction_from_stl(self, tmp_path):
-        """STL with the exact bbox that caused incident #0."""
+        """STL with the exact bbox that caused incident #0, on a 256 mm bed
+        like the incident's (the synthetic ``kilntest_enclosed``)."""
         stl = tmp_path / "disc.stl"
         _write_cube_stl(stl, (-12.5, 12.5), (-12.5, 12.5), (0, 5))
-        result = validate_mesh_for_printer(str(stl), "bambu_a1")
+        result = validate_mesh_for_printer(str(stl), "kilntest_enclosed")
         assert result["ok"] is False
         assert result["error_code"] == "OFF_BED_GEOMETRY"
         # Translation should bring it on-bed
@@ -375,7 +404,7 @@ class TestValidateMeshForPrinter:
     def test_valid_stl_passes(self, tmp_path):
         stl = tmp_path / "placed.stl"
         _write_cube_stl(stl, (120, 140), (120, 140), (0, 5))
-        result = validate_mesh_for_printer(str(stl), "bambu_a1")
+        result = validate_mesh_for_printer(str(stl), "kilntest_enclosed")
         assert result["ok"] is True
 
 
@@ -470,14 +499,14 @@ class TestApplyTranslationToStl:
         stl = tmp_path / "before.stl"
         _write_cube_stl(stl, (-12.5, 12.5), (-12.5, 12.5), (0, 5))
         # Validate → get translation
-        result = validate_mesh_for_printer(str(stl), "bambu_a1")
+        result = validate_mesh_for_printer(str(stl), "kilntest_enclosed")
         assert result["ok"] is False
         translation = result["suggested_translate"]
         # Apply
         out = tmp_path / "after.stl"
         apply_translation_to_stl(str(stl), translation, str(out))
         # Re-validate — should now pass
-        result2 = validate_mesh_for_printer(str(out), "bambu_a1")
+        result2 = validate_mesh_for_printer(str(out), "kilntest_enclosed")
         assert result2["ok"] is True
 
 

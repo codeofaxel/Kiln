@@ -262,7 +262,14 @@ def map_printer_hint_to_profile_id(raw: str | None) -> str | None:
     if "p1p" in hint or ("bambu" in hint and "p1" in hint):
         return "bambu_p1p"
 
-    return None
+    # Nothing above matched: the catalogue's own spelling rules, so a model
+    # every other door finds by its name (an industrial machine written the
+    # way its row names it) is not left to the slicer's generic defaults.
+    from kiln.catalog_keys import printer_key_candidates
+    from kiln.motion_facts import catalogue_keys
+
+    rows = set(catalogue_keys())
+    return next((c for c in printer_key_candidates(raw) if c in rows), None)
 
 
 def resolve_declared_model(raw: str | None) -> tuple[str | None, list[str]]:

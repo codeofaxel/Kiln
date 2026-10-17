@@ -48,6 +48,7 @@ import zipfile
 from typing import Any
 
 from kiln.served_answer import Miss, classify_answer, classify_transport_error, fields, sentence
+from kiln.untrusted_zip import UntrustedZipFile
 
 logger = logging.getLogger(__name__)
 
@@ -165,9 +166,12 @@ def _served(
     except Exception:  # noqa: BLE001
         return None, Miss("unanswered", _NOT_ASKED, "this install could not open its connection to Kiln's servers")
     try:
+        # The person asked for an estimate; this enrichment rides along with
+        # it, so a signed-out install does not count it as reaching for it.
         answer = _pro_api_call(
             WIRE_TOOL,
             _timeout=_CONSULT_TIMEOUT_S,
+            _asked_by_user=False,
             gcode_gz_b64=base64.b64encode(gzip.compress(body, compresslevel=6)).decode("ascii"),
             file_name=os.path.basename(file_path),
             filaments=filaments,
@@ -204,7 +208,7 @@ def _gcode_bytes(file_path: str) -> tuple[bytes | None, str]:
             from kiln.gcode import _MAX_SCAN_BYTES
             from kiln.gcode_metadata import read_member_text, sliced_gcode_member
 
-            with zipfile.ZipFile(file_path) as zf:
+            with UntrustedZipFile(file_path) as zf:
                 member = sliced_gcode_member(zf)
                 if member is None:
                     return None, "the file holds a model, not sliced G-code"

@@ -1110,26 +1110,15 @@ def generate_original_design(
                 output_dir=effective_output_dir,
             )
 
-            conversion = None
-            if result.format == "obj":
-                from kiln.format_conversion import convert_to_stl_recorded
+            # A GLB or OBJ is audited as the STL beside it, through the one
+            # helper every door a generated file arrives through uses.
+            from kiln.format_conversion import convert_generated_result
 
-                stl_path, conversion = convert_to_stl_recorded(
-                    result.local_path,
-                    tool="audit_original_design",
-                )
-                result = type(result)(
-                    job_id=result.job_id,
-                    provider=result.provider,
-                    local_path=stl_path,
-                    format="stl",
-                    file_size_bytes=os.path.getsize(stl_path),
-                    prompt=result.prompt,
-                )
+            result, conversion = convert_generated_result(result, tool="audit_original_design")
 
             if result.format not in {"stl", "obj"}:
                 raise GenerationValidationError(
-                    f"Provider returned unsupported audit format: {result.format}.",
+                    f"Provider returned a {result.format} file that Kiln could not turn into an STL to audit.",
                     code="UNSUPPORTED_FORMAT",
                 )
 

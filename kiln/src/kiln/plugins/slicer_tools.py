@@ -10,11 +10,14 @@ no manual imports needed.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import math
 import os
 import re
+import shutil
+import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -1097,6 +1100,455 @@ def _attach_placement(response: dict, info: dict | None) -> None:
         response["start"] = {"allowed": False, "why": own or state.start_refusal_sentence()}
 
 
+# ---------------------------------------------------------------------------
+# Hardware that goes into the part while it prints
+# ---------------------------------------------------------------------------
+
+#: The served tool that plans bought hardware (nuts, magnets, bearings,
+#: inserts) into a print.  It is reached through the tool registry, whatever
+#: that holds under this name: Kiln's discovery stub, which sends the part and
+#: the sliced file to Kiln's servers and brings the written file back to this
+#: computer, or the tool itself where kiln-pro is installed.
+_HARDWARE_PLANNER = "plan_hardware_insertion"
+
+#: What of the planner's answer the person is told.
+_HARDWARE_BLOCK_KEYS = ("placements", "sealed_pockets", "safety_floor", "stops", "after_print", "written_note")
+
+#: The last sentence of every refusal below.
+_NOTHING_SENT = "Nothing was sent to the printer."
+
+
+#: Saying one of these as the whole hardware list means "nothing goes in;
+#: print every pocket empty" -- the person's word, so Kiln neither plans nor
+#: asks.  Said on purpose, never inferred from a blank.
+_NO_HARDWARE_WORDS = frozenset({"none", "nothing", "no hardware", "empty", "no"})
+
+
+def _hardware_phrases(hardware: Any) -> list[str]:
+    """The hardware the person named, as trimmed phrases; none when blank or
+    when the whole list says nothing goes in (:func:`_declared_no_hardware`)."""
+    if isinstance(hardware, str):
+        hardware = [hardware]
+    if not isinstance(hardware, (list, tuple)):
+        return []
+    phrases = _raw_phrases(hardware)
+    return [] if _declared_no_hardware(phrases) else phrases
+
+
+def _raw_phrases(hardware: Any) -> list[str]:
+    """The trimmed phrases as given, "none" included."""
+    if isinstance(hardware, str):
+        hardware = [hardware]
+    if not isinstance(hardware, (list, tuple)):
+        return []
+    return [item.strip() for item in hardware if isinstance(item, str) and item.strip()]
+
+
+def _declared_no_hardware(phrases: list[str]) -> bool:
+    """True when the person said, in so many words, that nothing goes in."""
+    return bool(phrases) and all(item.lower().rstrip(".") in _NO_HARDWARE_WORDS for item in phrases)
+
+
+def _sentences(*parts: Any) -> str:
+    """*parts* as running prose: each one a full sentence, the empty ones gone."""
+    out = []
+    for part in parts:
+        words = " ".join(str(part or "").split())
+        if words:
+            out.append(words if words[-1] in ".!?" else words + ".")
+    return " ".join(out)
+
+
+def _because(head: str, why: Any) -> str:
+    """*head* with the reason after a colon, when there is one."""
+    reason = " ".join(str(why or "").split()).rstrip(".")
+    return f"{head}: {reason}" if reason else head
+
+
+def _hardware_block(answer: dict[str, Any]) -> dict[str, Any]:
+    """What the planner said about the hardware, for the person: what goes in,
+    where, when, and the safety lines that go with it."""
+    return {key: answer[key] for key in _HARDWARE_BLOCK_KEYS if answer.get(key)}
+
+
+def _hardware_refusal(
+    reason: str,
+    *,
+    code: str,
+    answer: Any = None,
+    retryable: bool = False,
+    miss: Any = None,
+) -> dict[str, Any]:
+    """The refusal for a print that must not go on without its hardware plan.
+
+    What the planner did answer rides with it: where each part goes and when
+    is worth telling the person even when the print does not start, and an
+    upgrade block is the planner's own words, handed on unchanged.
+    """
+    import kiln.server as _srv
+
+    extra: dict[str, Any] = {}
+    if isinstance(answer, dict):
+        if block := _hardware_block(answer):
+            extra["hardware"] = block
+        if answer.get("upgrade"):
+            extra["upgrade"] = answer["upgrade"]
+    if miss is not None:
+        from kiln import served_answer
+
+        extra.update(served_answer.fields(miss))
+        if miss.cause == "signed_out":
+            from kiln.tiers_and_terms import signin_hint_fields
+
+            extra.update(signin_hint_fields())
+    return _srv._error_dict(
+        _sentences(reason, _NOTHING_SENT), code=code, retryable=retryable, extra=extra,
+    )
+
+
+def _target_model_name(printer_name: str | None) -> str:
+    """The model of the machine a call is aimed at, as Kiln knows it, or
+    ``""``.  The planner is told a printer by name only when Kiln has one:
+    a name it can only guess is never written."""
+    import kiln.server as _srv
+
+    try:
+        return str(_srv._resolve_target_printer_model(printer_name) or "")
+    except Exception:  # noqa: BLE001 -- an unknown printer is a blank, not a failure
+        return ""
+
+
+def _ask_hardware_planner(**kwargs: Any) -> Any:
+    """Ask the planner through the tool registry.
+
+    Raises ``LookupError`` on an install whose registry does not hold it.
+    """
+    import kiln.server as _srv
+
+    tool = _srv.mcp._tool_manager._tools.get(_HARDWARE_PLANNER)
+    if tool is None:
+        raise LookupError(_HARDWARE_PLANNER)
+    return tool.fn(**kwargs)
+
+
+def _swap_in_written_file(written: str, upload_path: str) -> None:
+    """Put the bytes of *written* at *upload_path*, in one step.
+
+    The name stays: the print ledgers, the monitor and the stop alerts all find
+    a print by the name of the file the printer was sent.  The new bytes are
+    staged beside the old file and moved over it, so a failure at any point
+    leaves the old file whole and nothing behind.  Once it is in place the
+    written copy goes: it was only ever on its way here, and a sliced file can
+    run to tens of megabytes, every print.  Raises ``OSError``.
+    """
+    if os.path.exists(upload_path) and os.path.samefile(written, upload_path):
+        return
+    staged_fd, staged = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(upload_path)), prefix=".kiln-hardware-")
+    os.close(staged_fd)
+    try:
+        shutil.copyfile(written, staged)
+        with contextlib.suppress(OSError):
+            shutil.copymode(upload_path, staged)
+        os.replace(staged, upload_path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(staged)
+        raise
+    with contextlib.suppress(OSError):
+        os.unlink(written)
+
+
+def _plan_hardware_into_print(
+    phrases: list[str],
+    *,
+    model_path: str,
+    upload_path: str,
+    printer: str,
+    material: str,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Plan *phrases* into the file that is about to be uploaded.
+
+    ``(block, None)`` says go on and print *upload_path*: its bytes are the
+    planner's written file when it wrote one, else the file as it was sliced
+    (every part goes in after the print), and *block* is what the person is
+    told.  ``(None, refusal)`` says print nothing.
+
+    A part that needs a pause is never printed from a file without one: the
+    cavity would be covered over with nothing in it.  So everything short of a
+    plan that covers the whole part is a refusal: no answer, a file the
+    planner could not read or that is not this part's, a seat it could not
+    place a pause for, hardware it found no seat for, and a pause it did not
+    write or that never reached this computer.
+    """
+    from kiln import served_answer
+
+    try:
+        answer = _ask_hardware_planner(
+            model_path=model_path, hardware=phrases, gcode_path=upload_path,
+            printer=printer, material=material, write_pauses=True,
+        )
+    except LookupError:
+        return None, _hardware_refusal(
+            "Kiln's hardware planner is not on this install, so Kiln cannot tell whether this part needs a "
+            "pause. Update Kiln and try again.",
+            code="HARDWARE_PLAN_UNAVAILABLE",
+        )
+    except Exception:  # noqa: BLE001 -- any failure to plan is a refusal, never a print without the plan
+        _logger.exception("The hardware planner failed")
+        return None, _hardware_refusal(
+            "Kiln could not plan the hardware for this print, so it did not start it.",
+            code="HARDWARE_PLAN_UNAVAILABLE",
+        )
+
+    miss = served_answer.classify_answer(answer)
+    if miss is not None:
+        reason = served_answer.sentence(
+            miss,
+            feature="hardware planner",
+            on_the_line="Putting hardware into this print needs a plan for where the pause goes",
+            cannot="plan the hardware",
+            wont="did not start the print",
+        )
+        return None, _hardware_refusal(
+            reason, code="HARDWARE_PLAN_UNAVAILABLE", answer=answer, miss=miss,
+            retryable=miss.cause in ("offline", "unanswered"),
+        )
+
+    def refuse(reason: str, code: str = "HARDWARE_NOT_PLANNED", **more: Any) -> tuple[None, dict[str, Any]]:
+        return None, _hardware_refusal(reason, code=code, answer=answer, **more)
+
+    facts = answer.get("file") if isinstance(answer.get("file"), dict) else {}
+    if facts.get("readable") is False:
+        return refuse(_sentences(_because("Kiln could not read the sliced file to place the pause for the hardware", facts.get("why"))))
+    if facts.get("matches_model") is False:
+        return refuse(_sentences(_because("The sliced file is not the part the hardware was planned for", facts.get("why"))))
+    if facts.get("warning"):
+        return refuse(_sentences("The pause for the hardware cannot go in this file", facts["warning"]))
+    if problems := answer.get("problems"):
+        return refuse(_sentences(
+            "Kiln could not place a pause for every piece of hardware, so a cavity would print over with nothing in it",
+            *problems,
+        ))
+    if unplaced := answer.get("unplaced"):
+        return refuse(_sentences("Kiln could not find a place in this part for all of the hardware", *unplaced))
+    placements = [p for p in (answer.get("placements") or []) if isinstance(p, dict)]
+    # A free answer carries no placements: it says which pockets the print
+    # will seal and hands over its own upgrade block.  A sealed pocket with
+    # no written pause is refused below like any other; a part with none
+    # prints, with the planner's own sentence for what the paid half adds.
+    sealed = [s for s in (answer.get("sealed_pockets") or []) if isinstance(s, dict)]
+    rope = answer.get("upgrade") if isinstance(answer.get("upgrade"), dict) else None
+    if not placements and not sealed and rope is None:
+        return refuse(_sentences(
+            "Kiln found nothing in this part to plan the hardware into", answer.get("note"), answer.get("next"),
+        ))
+
+    block = _hardware_block(answer)
+    if rope and not placements and not sealed:
+        block["note"] = _sentences(
+            "Nothing in this part needs a pause", rope.get("message") or rope.get("headline"),
+        )
+    written = answer.get("written_file")
+    if written:
+        if not (isinstance(written, str) and os.path.isfile(written)):
+            return refuse(
+                "Kiln wrote the file with the pause in it, but it did not reach this computer. Try again.",
+                "HARDWARE_PAUSE_NOT_WRITTEN", retryable=True,
+            )
+        if written.lower().endswith(".3mf") != upload_path.lower().endswith(".3mf"):
+            return refuse(
+                "The file Kiln wrote is not the kind of file this printer takes.", "HARDWARE_PAUSE_NOT_WRITTEN",
+            )
+        try:
+            _swap_in_written_file(written, upload_path)
+        except OSError:
+            _logger.warning("Could not put the written hardware file in place", exc_info=True)
+            return refuse(
+                "Kiln could not put the file with the pause in it in place.", "HARDWARE_PAUSE_NOT_WRITTEN",
+            )
+        return block, None
+
+    stops = [s for s in (answer.get("stops") or []) if isinstance(s, dict)]
+    if stops and all(s.get("already_in_file") for s in stops):
+        # The sliced file already pauses before every layer a part needs: the
+        # planner checked each one against this printer and wrote nothing, so
+        # the file prints as it is.
+        return block, None
+
+    if sealed or any(p.get("when") == "pause" for p in placements):
+        if any(isinstance(f, dict) and f.get("on_this_computer") is False for f in answer.get("files") or []):
+            return refuse(
+                "Kiln wrote the file with the pause in it, but it did not reach this computer. Try again.",
+                "HARDWARE_PAUSE_NOT_WRITTEN", retryable=True,
+            )
+        printer_note = answer.get("printer")
+        return refuse(
+            _sentences(
+                "This part needs a pause so its hardware can go in before the print covers it, and Kiln could "
+                "not write one",
+                answer.get("written_note"),
+                printer_note.get("why") if isinstance(printer_note, dict) else None,
+            ),
+            "HARDWARE_PAUSE_NOT_WRITTEN",
+        )
+    return block, None
+
+
+def _part_has_pockets(model_path: str) -> bool | None:
+    """Whether the part has a hole or cavity bought hardware could sit in,
+    read on this computer, so the planner is asked only for a part that
+    could need it.  ``None`` when the model could not be read."""
+    try:
+        from kiln.generation.validation import detect_holes
+
+        return bool(detect_holes(model_path))
+    except Exception:  # noqa: BLE001 -- an unreadable model is "could not look", never "no pockets"
+        _logger.debug("hardware: could not look for pockets in %s", model_path, exc_info=True)
+        return None
+
+
+def _needs_pause(proposal: dict[str, Any], seats: dict[str, dict[str, Any]]) -> bool:
+    """Whether a proposed part would be sealed inside the print: the planner
+    says so (``needs_pause``); an older planner is read from its seats -- a
+    cavity closed on both sides, or one whose way out is narrower than it."""
+    if "needs_pause" in proposal:
+        return bool(proposal["needs_pause"])
+    if proposal.get("kind") == "heat_set_insert":
+        return False
+    for seat_id in proposal.get("seats") or ():
+        seat = seats.get(seat_id) or {}
+        opening = seat.get("narrowest_opening_mm")
+        if seat.get("enclosed") or (isinstance(opening, (int, float)) and opening < float(seat.get("size_mm") or 0)):
+            return True
+    return False
+
+
+def _propose_unnamed_hardware(
+    *,
+    model_path: str,
+    printer: str,
+    material: str,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """A part with pockets and no hardware named: ask the planner what each
+    pocket looks cut for, before anything is sent to the printer.
+
+    ``(block, None)`` says print; *block* (or ``None``) is what the person is
+    told.  ``(None, refusal)`` says print nothing: a pocket that would be
+    sealed inside the print looks cut for something, and nobody has said
+    whether it goes in.  The refusal carries the planner's own questions and
+    the list to hand back once answered; saying ``hardware=["none"]`` prints
+    every pocket empty on the person's word.
+
+    This is a question, not a verdict, so every way the planner cannot answer
+    -- not on this install, signed out, offline, the servers said no -- lets
+    the print go on and says so in the block.  The planner reads the model
+    only; the sliced file is not sent for a question about pockets.
+    """
+    from kiln import served_answer
+
+    has_pockets = _part_has_pockets(model_path)
+    if has_pockets is False:
+        return None, None
+    try:
+        answer = _ask_hardware_planner(model_path=model_path, printer=printer, material=material)
+    except LookupError:
+        return {"unchecked": "Kiln's hardware planner is not on this install, so this part's pockets were not read."}, None
+    except Exception:  # noqa: BLE001 -- a question that cannot be asked never stops a print
+        _logger.debug("The hardware planner failed on the unnamed-hardware check", exc_info=True)
+        return {"unchecked": "Kiln could not read this part's pockets, so nothing was proposed for them."}, None
+
+    miss = served_answer.classify_answer(answer)
+    if miss is not None:
+        return {"unchecked": served_answer.sentence(
+            miss, feature="hardware planner",
+            on_the_line="Reading this part's pockets for hardware nobody named",
+            cannot="read the pockets", wont="printed the part as sliced",
+        )}, None
+    proposals = [p for p in (answer.get("proposed_hardware") or []) if isinstance(p, dict)]
+    if not proposals:
+        return None, None
+    seats = {s.get("id"): s for s in (answer.get("seats") or []) if isinstance(s, dict)}
+    sealed = [p for p in proposals if _needs_pause(p, seats)]
+    asks = [str(p.get("ask") or p.get("item")) for p in proposals]
+    block: dict[str, Any] = {"proposed": asks, "to_confirm": list(answer.get("hardware_to_confirm") or [])}
+    if not sealed:
+        block["note"] = ("These pockets open on a face, so whatever goes in them goes in after the print; "
+                         "name them to have Kiln plan it.")
+        return block, None
+    import kiln.server as _srv
+
+    extra: dict[str, Any] = {"hardware": block}
+    if answer.get("upgrade"):
+        extra["upgrade"] = answer["upgrade"]
+    sealed_asks = [str(p.get("ask") or p.get("item")) for p in sealed]
+    return None, _srv._error_dict(
+        _sentences(
+            "This part has a pocket that will be sealed inside the print, and nothing was named for it",
+            *sealed_asks,
+            'Ask the person, then call slice_and_print again with hardware set to what they said (the planner\'s '
+            'hardware_to_confirm, edited), or hardware=["none"] to print every pocket empty',
+            _NOTHING_SENT,
+        ),
+        code="HARDWARE_UNNAMED",
+        extra=extra,
+    )
+
+
+def _check_declared_none(
+    *,
+    model_path: str,
+    upload_path: str,
+    printer: str,
+    material: str,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """The person said nothing goes in.  Their word is taken -- unless their
+    own file says otherwise: a pause already in it, over a pocket the print
+    will seal, is a pause for something, and printing that blind is how a
+    cavity closes over a nut nobody planned.  Then the start is refused with
+    the contradiction, never with a guess at what the pause is for.
+
+    A planner that cannot answer takes the person at their word and says so.
+    """
+    from kiln import served_answer
+
+    block: dict[str, Any] = {"declared": "none", "note": "Printed with every pocket empty, as you said."}
+    if _part_has_pockets(model_path) is False:
+        return block, None
+    try:
+        answer = _ask_hardware_planner(model_path=model_path, gcode_path=upload_path, printer=printer, material=material)
+    except LookupError:
+        return block, None
+    except Exception:  # noqa: BLE001 -- their word stands when Kiln cannot read the file
+        _logger.debug("The hardware planner failed on the declared-none check", exc_info=True)
+        return block, None
+    if served_answer.classify_answer(answer) is not None:
+        return block, None
+    sealed = [s for s in (answer.get("sealed_pockets") or []) if isinstance(s, dict)]
+    # A filament change (a colour change, in the planner's words) is a pause
+    # with its own purpose; it contradicts nothing about hardware.
+    pauses = [s for s in (answer.get("stops_in_file") or [])
+              if isinstance(s, dict) and s.get("purpose") != "filament_change"]
+    if not sealed or not pauses:
+        return block, None
+    import kiln.server as _srv
+
+    layers = ", ".join(
+        f"before layer {p['before_layer']}" if p.get("before_layer") is not None else f"with {p.get('word', 'a pause')}"
+        for p in pauses
+    )
+    pockets = "; ".join(str(s.get("where") or s.get("seat")) for s in sealed)
+    return block, _srv._error_dict(
+        _sentences(
+            f"You said nothing goes in, but the sliced file already pauses {layers}, and this part has a pocket "
+            f"that will be sealed inside the print ({pockets})",
+            "Name what goes in and Kiln plans the pause for it, or remove the pause from the file and say none again",
+            _NOTHING_SENT,
+        ),
+        code="HARDWARE_NONE_BUT_PAUSED",
+        extra={"hardware": {"declared": "none", "pauses_in_file": pauses, "sealed_pockets": sealed}},
+    )
+
+
 def _placed_slice(
     input_path: str,
     *,
@@ -1154,6 +1606,11 @@ def _placed_slice(
         return None, err, info
     effective_input = placed
     if auto_center is not None:
+        # The material the slice is for is the one the hotend must melt,
+        # whichever door named it: the caller's word, else the printer's
+        # spool.  Only slice_and_print used to pass it, so the other doors
+        # sliced a material their printer cannot melt and said nothing.
+        material_id = material_id or slice_kwargs.get("material") or slice_kwargs.get("loaded_material")
         effective_input, gate_err, bed_fit = _apply_bed_fit_gate(
             placed, effective_printer_id, auto_center and place_info.get("plate") != "occupied",
             material_id=material_id,
@@ -1744,14 +2201,14 @@ def _maybe_overlay_calibration(
     input_path: str | None = None,
     slicer_name: str | None = None,
 ) -> tuple[dict[str, str], dict[str, Any] | None]:
-    """Inject a Pro+ user's calibrated slicer values into ``parsed_overrides``.
+    """Fill unset slicer settings from the person's own slicer calibration.
 
-    Lazy-imports ``kiln_pro.engineering.calibration_coach`` so this is
-    a no-op for free-tier installs that don't have kiln-pro present.
-    When kiln-pro is installed AND the user has a HIGH/MEDIUM-tier
-    calibrated slicer profile for ``printer_id`` (with material
-    matched when supplied; fallback to most-recent across all
-    materials when ``material`` is ``None``), the helper:
+    The values are the ones the person tuned in their own slicer app for
+    this printer, and they apply the same at every plan.  Reading them is
+    done by kiln-pro (https://kiln3d.com), imported lazily, so on an
+    install without it the overrides come back unchanged.  When a
+    calibrated profile is found for ``printer_id`` (matched to
+    ``material`` when supplied), the helper:
 
     - Fills in keys the caller did NOT already set in ``parsed_overrides``
       with the user's calibrated values (extrusion_multiplier,
@@ -1895,7 +2352,7 @@ def _count_gcode_tools(gcode_path: str | None) -> tuple[int, int] | None:
         tools: set[int] = set()
         changes = 0
         active: int | None = None
-        with open(gcode_path, errors="replace") as fh:
+        with open(gcode_path, errors="replace", encoding="utf-8") as fh:
             for line in fh:
                 m = _GCODE_TOOL_RE.match(line)
                 if not m:
@@ -2058,10 +2515,14 @@ class _SlicerToolsPlugin:
                 slicer_path: Explicit path to the slicer binary.  Auto-detected
                     if omitted.
                 material: Filament material for this slice (``"PLA"``,
-                    ``"PETG"``, ``"ABS"``, …).  Its density is what the
-                    slicer weighs the print with.  Omitted, the spool the
-                    printer reports loaded answers, then PLA; the response's
-                    ``filament`` block says which.
+                    ``"PETG"``, ``"TPU"``, …, or a product such as
+                    ``"bambu_tpu_95a"``).  It sets the slice's temperatures,
+                    melt rate and cooling -- Kiln's settings for it on this
+                    printer, see ``build_material_overrides`` -- and its
+                    density weighs the print.  Omitted, the spool the printer
+                    reports loaded answers, then PLA; the response's
+                    ``filament`` block says which, and ``filament.settings``
+                    what the slice was set to and why.
                 auto_center: When True (default), off-bed STLs are translated
                     to a bed-centered copy before slicing.  This prevents the
                     class of crash where origin-centered meshes (common from
@@ -2256,7 +2717,7 @@ class _SlicerToolsPlugin:
                     code="SLICER_NOT_FOUND",
                 )
             except SlicerError as exc:
-                return _srv._error_dict(f"Failed to slice model: {exc}", code="SLICER_ERROR")
+                return _srv._error_dict(f"Failed to slice model: {exc}", code=getattr(exc, "code", "SLICER_ERROR"))
             except FileNotFoundError as exc:
                 return _srv._error_dict(f"Failed to slice model: {exc}", code="FILE_NOT_FOUND")
             except Exception as exc:
@@ -2319,9 +2780,12 @@ class _SlicerToolsPlugin:
                     resolves its profile, its bed and its temperature
                     ceilings instead of the default printer's.
                 material: Filament material for this slice (``"PLA"``,
-                    ``"PETG"``, …); its density is what the slicer weighs
-                    the print with.  Omitted, the loaded spool answers,
-                    then PLA — the response's ``filament`` block says which.
+                    ``"PETG"``, …).  It sets the temperatures, melt rate and
+                    cooling (``build_material_overrides`` shows them) and its
+                    density weighs the print; any of them you also pass in
+                    ``overrides`` stays yours.  Omitted, the loaded spool
+                    answers, then PLA — the response's ``filament`` block
+                    says which.
                 placement: Where the part goes when the plate still holds the
                     last print: ``[x, y]`` in mm (the part's footprint
                     origin), a named region (``"front-left"``, ``"centre"``,
@@ -2374,13 +2838,12 @@ class _SlicerToolsPlugin:
                     printer_id, printer_name,
                 )
 
-                # -- Calibration overlay: when kiln-pro is installed and the
-                # user has a calibrated slicer profile for (printer, material),
-                # inject those values into parsed_overrides BEFORE resolve so
-                # the slicer's print-time / cost estimates use values the
-                # user has personally verified.  No-op for free users.
-                # User-supplied overrides ALWAYS win — the helper only fills
-                # gaps.
+                # -- Calibration overlay: the settings the person tuned in
+                # their own slicer app for this printer go into
+                # parsed_overrides BEFORE resolve, so the slice prints with
+                # them.  The same at every plan; without kiln-pro installed
+                # nothing is read and nothing changes.  User-supplied
+                # overrides ALWAYS win — the helper only fills gaps.
                 cal_used: dict[str, Any] | None = None
                 if effective_printer_id:
                     # Passing input_path here triggers Pro+ slice-history
@@ -2434,9 +2897,16 @@ class _SlicerToolsPlugin:
                 # Temperature ceilings belong to the TARGET machine — an
                 # override checked against the default printer's hotend is
                 # the wrong ceiling for the machine that will heat it.
+                # Judged on the file about to be sliced, overrides included:
+                # the bundled profile is the one thing these keys replaced.
                 _target_model = _srv._resolve_target_printer_model(printer_name)
                 if has_temp_overrides and effective_printer_id and _target_model:
-                    validation_result = validate_profile_for_printer(effective_printer_id, _target_model)
+                    from kiln.slicer_orca import ini_to_settings
+
+                    validation_result = validate_profile_for_printer(
+                        effective_printer_id, _target_model,
+                        settings=ini_to_settings(effective_profile) if effective_profile else None,
+                    )
 
                 # -- Plate gate, bed-fit gate, slice, second verdict: the
                 # one shared step (see _placed_slice) --
@@ -2547,7 +3017,7 @@ class _SlicerToolsPlugin:
             except SlicerError as exc:
                 return _srv._error_dict(
                     f"Failed to reslice model: {exc}",
-                    code="SLICER_ERROR",
+                    code=getattr(exc, "code", "SLICER_ERROR"),
                 )
             except FileNotFoundError as exc:
                 return _srv._error_dict(
@@ -2605,6 +3075,7 @@ class _SlicerToolsPlugin:
             skip_validation: bool = False,
             preview_token: str | None = None,
             placement: str | list[float] | None = None,
+            hardware: list[str] | None = None,
         ) -> dict:
             """Slice a 3D model (STL/3MF) + upload + print in one step (basic pipeline).
 
@@ -2632,11 +3103,13 @@ class _SlicerToolsPlugin:
                 profile: Path to a slicer profile/config file.
                 printer_id: Optional printer model ID for bundled profile
                     auto-selection (e.g. ``"prusa_mini"``).
-                material: Filament material (e.g. ``"PLA"``, ``"ABS"``).  Its
-                    density is what the slicer weighs the print with, and it
-                    steers the automatic brim/raft decision.  Omitted, the
-                    spool the printer reports loaded answers, then PLA — the
-                    response's ``slice.filament`` says which.
+                material: Filament material (e.g. ``"PLA"``, ``"ABS"``).  It
+                    sets the slice's temperatures, melt rate and cooling
+                    (``build_material_overrides`` shows them), its density
+                    weighs the print, and it steers the automatic brim/raft
+                    decision.  Omitted, the spool the printer reports loaded
+                    answers, then PLA — the response's ``slice.filament``
+                    says which.
                 metadata: Optional dict of pass-through fields.  When
                     kiln-pro (https://kiln3d.com) is installed it
                     consumes keys here to generate a printable
@@ -2668,6 +3141,23 @@ class _SlicerToolsPlugin:
                     before upload.  The clearance verdict is free; placing
                     and starting a second print on an occupied plate is a
                     kiln-pro feature (https://kiln3d.com/pricing).
+                hardware: Bought parts that go into the part while it
+                    prints, as short phrases such as ``["4x 6x3 magnet",
+                    "2x M3 nut"]``.  The file that prints carries the pause
+                    Kiln's servers wrote into it, and the response's
+                    ``hardware`` block says what goes in and when; a part
+                    that needs a pause that cannot be written is refused
+                    before anything is sent to the printer.  Left out, a
+                    part with a pocket that would be sealed inside the
+                    print is refused with ``HARDWARE_UNNAMED`` and the
+                    planner's question for each pocket ("this hex pocket
+                    takes an M3 nut -- right?"): ask the person, then call
+                    again with what they said, or ``["none"]`` to print
+                    every pocket empty on their word.  ``["none"]`` with a
+                    pause already in the sliced file over a sealed pocket
+                    is refused as a contradiction (``HARDWARE_NONE_BUT_PAUSED``).
+                    Writing the pause is a kiln-pro feature
+                    (https://kiln3d.com/pricing).
 
             Combines ``slice_model``, ``upload_file``, and ``start_print`` into
             a single action.
@@ -2709,14 +3199,15 @@ class _SlicerToolsPlugin:
                 # repaired copy that no longer carries the color story.
                 _multicolor_source = input_path
 
-                # --- Pro+ calibration overlay ---
-                # Mirror slice_model: when kiln-pro is installed AND the user
-                # has a HIGH/MEDIUM-tier calibrated profile for this printer,
-                # overlay calibrated values (extrusion_multiplier,
-                # filament_max_volumetric_speed, pressure_advance,
-                # xy_size_compensation, filament_retraction_length) onto the
-                # slicer args.  Free tier no-op.  Re-resolves the profile so
-                # the slicer call actually uses the calibrated values.
+                # --- Calibration overlay ---
+                # Same overlay as reslice_with_overrides: the settings the
+                # person tuned in their own slicer app for this printer
+                # (extrusion_multiplier, filament_max_volumetric_speed,
+                # pressure_advance, xy_size_compensation,
+                # filament_retraction_length) fill the slicer args.  The same
+                # at every plan; without kiln-pro installed nothing is read.
+                # Re-resolves the profile so the slicer call actually uses
+                # the calibrated values.
                 parsed_overrides: dict[str, str] = {}
                 cal_used = None
                 if effective_printer_id:
@@ -2880,6 +3371,7 @@ class _SlicerToolsPlugin:
                         _sg_adapter,
                         effective_printer_id,
                         {**parsed_overrides, **adhesion_overrides},
+                        material=material,
                     )
                     if _sg_patch:
                         adhesion_overrides.update(_sg_patch)
@@ -2975,6 +3467,44 @@ class _SlicerToolsPlugin:
                     quiet_start=quiet_plan,
                     lift_floor_mm=sinfo.get("lift_floor_mm"),
                 )
+
+                # Hardware that goes in while the part prints.  Planned against
+                # the file as the printer will get it, wrapped or not, so the
+                # plan travels in the file the printer reads; the file with the
+                # pause written into it then takes this one's place, under the
+                # same name.  A part that needs a pause is never printed
+                # without one, so a plan that does not cover it ends here.
+                # Nothing named: a pocket that would be sealed inside the
+                # print is asked about, never printed over on a blank; the
+                # person's "none" prints it empty on their word.
+                hardware_block: dict[str, Any] | None = None
+                hardware_refusal: dict[str, Any] | None = None
+                if hardware_phrases := _hardware_phrases(hardware):
+                    hardware_block, hardware_refusal = _plan_hardware_into_print(
+                        hardware_phrases,
+                        model_path=effective_input,
+                        upload_path=upload_path,
+                        printer=effective_printer_id or _target_model_name(printer_name),
+                        material=material or "",
+                    )
+                elif _declared_no_hardware(_raw_phrases(hardware)):
+                    hardware_block, hardware_refusal = _check_declared_none(
+                        model_path=effective_input,
+                        upload_path=upload_path,
+                        printer=effective_printer_id or _target_model_name(printer_name),
+                        material=material or "",
+                    )
+                else:
+                    hardware_block, hardware_refusal = _propose_unnamed_hardware(
+                        model_path=effective_input,
+                        printer=effective_printer_id or _target_model_name(printer_name),
+                        material=material or "",
+                    )
+                if hardware_refusal is not None:
+                    hardware_refusal["slice"] = result.to_dict()
+                    _attach_placement(hardware_refusal, place_info)
+                    return hardware_refusal
+
                 if quiet_plan is not None and (
                     block := _plate_state.start_refusal(adapter, file_name=os.path.basename(upload_path), local_path=upload_path)
                 ):
@@ -3127,7 +3657,7 @@ class _SlicerToolsPlugin:
                     return block
                 sent_at = time.monotonic()
                 print_result = adapter.start_print(file_name, **print_kwargs)
-                _srv._note_print_started(adapter)
+                _srv._note_print_started(adapter, print_result)
 
                 base_name = os.path.basename(input_path)
                 verdict = resolve_print_start(
@@ -3185,6 +3715,8 @@ class _SlicerToolsPlugin:
                 # turned it, turned Kiln's mesh of a STEP), as slice_model says it.
                 _attach_bed_fit(resp, sinfo.get("bed_fit"))
                 _attach_placement(resp, place_info)
+                if hardware_block:
+                    resp["hardware"] = hardware_block
 
                 # Multicolor-flatten advisory — same wire as slice_model.
                 # The print already started (warn, never block); the user
@@ -3248,7 +3780,7 @@ class _SlicerToolsPlugin:
                     code="SLICER_NOT_FOUND",
                 )
             except SlicerError as exc:
-                return _srv._error_dict(f"Failed to slice and print: {exc}", code="SLICER_ERROR")
+                return _srv._error_dict(f"Failed to slice and print: {exc}", code=getattr(exc, "code", "SLICER_ERROR"))
             except PrinterNotFoundError:
                 return _srv._error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
             except (PrinterError, RuntimeError, FileNotFoundError) as exc:
@@ -3277,23 +3809,14 @@ class _SlicerToolsPlugin:
             if err := _srv._check_auth("slicer"):
                 return err
             try:
-                from kiln.slicer_profiles import get_slicer_profile, list_slicer_profiles
+                from kiln.slicer_profiles import roster_entries
 
-                ids = list_slicer_profiles()
-                profiles = []
-                for pid in ids:
-                    try:
-                        p = get_slicer_profile(pid)
-                        profiles.append(
-                            {
-                                "id": p.id,
-                                "display_name": p.display_name,
-                                "slicer": p.slicer,
-                                "tier": p.tier,
-                            }
-                        )
-                    except KeyError:
-                        continue
+                # The roster, never a fetch per printer: a profile's settings
+                # are served one printer at a time when that printer is
+                # asked for (get_slicer_profile), and a listing must not
+                # walk the catalogue.  ``slicer`` is null for a printer
+                # whose profile this install has not fetched.
+                profiles = roster_entries()
                 return {"success": True, "count": len(profiles), "profiles": profiles}
             except Exception as exc:
                 _logger.exception("Unexpected error in list_slicer_profiles_tool")
@@ -3305,12 +3828,15 @@ class _SlicerToolsPlugin:
 
         @mcp.tool(name="get_slicer_profile")
         def get_slicer_profile_tool(printer_id: str) -> dict:
-            """Get the full bundled slicer profile for a printer model.
+            """Get the full tuned slicer profile for a printer model.
 
             Returns all INI settings (layer height, speeds, temps, retraction, etc.)
-            and the recommended slicer.  Free-tier profiles (default, ender3,
-            prusa_mk3s, klipper_generic) are available to all users.  Premium
-            profiles require a Kiln Pro license.
+            and the recommended slicer.  A catalogued printer's profile is
+            served one printer per call and kept on this computer; a printer
+            whose record this install does not hold answers with the generic
+            ``default`` profile (``profile.id == "default"``).  Free-tier
+            profiles (default, ender3, prusa_mk3s, klipper_generic) are
+            available to all users.  Premium profiles require a Kiln Pro license.
 
             Args:
                 printer_id: Printer model identifier (e.g. ``"ender3"``,
@@ -3328,6 +3854,7 @@ class _SlicerToolsPlugin:
                     ok, message = _srv.check_tier(_srv.LicenseTier.PRO)
                     if not ok:
                         from kiln.tiers_and_terms import (
+                            paywall_fields,
                             signin_hint_fields,
                             tier_required_message,
                         )
@@ -3344,6 +3871,7 @@ class _SlicerToolsPlugin:
                             "required_tier": "pro",
                             "upgrade_url": "https://kiln3d.com/pricing",
                             **signin_hint_fields(),
+                            **paywall_fields("pro"),
                         }
 
                 return {"success": True, "profile": slicer_profile_to_dict(profile)}

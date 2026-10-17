@@ -706,7 +706,7 @@ class TestHeaderLineSurvivesEveryDoor:
         written: dict[str, str] = {}
 
         def fake_run(cmd, *_args, **_kwargs):
-            out_path, scad_path = cmd[2], cmd[-1]
+            out_path, scad_path = cmd[cmd.index("-o") + 1], cmd[-1]
             with open(scad_path, encoding="utf-8") as fh:
                 written["first_line"] = fh.readline().rstrip("\n")
             with open(out_path, "wb") as fh:

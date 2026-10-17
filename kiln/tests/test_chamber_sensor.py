@@ -10,46 +10,102 @@ ambient check -- quoted a 5 C chamber that does not exist.
 
 The rule lives in ONE place, :class:`PrinterState`, so every door that reads
 a state gets it: a state whose adapter says the machine has no chamber
-sensor carries no chamber numbers, and says why.  The per-model fact lives
-in the public catalogue (``has_chamber_sensor``), read from Bambu's own
-per-printer configuration: Bambu Studio shows a chamber temperature only
-where ``support_chamber_temp_display`` (or, absent that, ``support_chamber``)
-is true, which is every X1, X2D, P2S and H2 machine and none of the A1, A1
-mini, A2L, P1P or P1S.  The P1S is the case that makes "enclosed" the wrong
-anchor: it has an enclosure and no chamber sensor, and its own vendor's
-software declines to show one.
+sensor carries no chamber numbers, and says why.  The per-model fact
+(``has_chamber_sensor``) is part of each printer's catalogue record, served
+per printer; that every Bambu row states it the way Bambu's own per-printer
+configuration does (a chamber temperature is shown only where
+``support_chamber_temp_display``, or failing that ``support_chamber``, is
+true -- every X1, X2D, P2S and H2 machine and none of the A1, A1 mini, A2L,
+P1P or P1S; the P1S has an enclosure and no sensor, which is what makes
+"enclosed" the wrong anchor) is pinned beside the records, in kiln-pro's
+``tests/test_printer_catalogue_numbers.py``.
+
+Here the machines are the session fixture's synthetic printers
+(``tests/fixtures/printer_catalogue_test.json``): ``kilntest_open`` states no
+sensor, ``kilntest_enclosed`` states one, ``kilntest_big`` leaves the fact
+unstated.  A Bambu serial names a REAL model, so the serial-only path is
+exercised against the served door: sealed (the signed-out install public CI
+is) it answers unknown, and with the record served it answers the record.
 """
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
+from kiln import _pro_catalogue_bridge as bridge
+from kiln import printer_intelligence as pi
+from kiln import safety_profiles as sp
 from kiln.printer_intelligence import _get_raw, chamber_sensor_for_model
+from kiln.printers import bed_fit
 from kiln.printers.bambu import BambuAdapter
 from kiln.printers.base import PrinterState, PrinterStatus
 
 # The reading the incident produced, verbatim.
 INCIDENT_CHAMBER_PLACEHOLDER = 5
 
-# Every Bambu machine the catalogue knows, and what its own vendor's software
-# says about showing a chamber temperature for it.
-BAMBU_CHAMBER_SENSOR: dict[str, bool] = {
-    "bambu_a1": False,
-    "bambu_a1_mini": False,
-    "bambu_a2l": False,
-    "bambu_p1p": False,
-    "bambu_p1s": False,
-    "bambu_x1c": True,
-    "bambu_x1e": True,
-    "bambu_x2d": True,
-    "bambu_p2s": True,
-    "bambu_h2c": True,
-    "bambu_h2d": True,
-    "bambu_h2d_pro": True,
-    "bambu_h2s": True,
+#: The synthetic rows and what each states about a chamber sensor.
+SENSORLESS = "kilntest_open"
+SENSORED = "kilntest_enclosed"
+UNSTATED = "kilntest_big"
+FIXTURE_CHAMBER_SENSOR: dict[str, bool | None] = {
+    SENSORLESS: False,
+    SENSORED: True,
+    UNSTATED: None,
+    "kilntest_hot": True,
+    "kilntest_ptfe": False,
 }
+
+#: The model Bambu's documented serial scheme names for an A1 serial, and a
+#: SYNTHETIC record for it: every number here is made up; only the id and
+#: the one fact under test (no chamber sensor) are the A1's.
+SERIAL_NAMED_MODEL = "bambu_a1"
+SERIAL_NAMED_RECORD = {
+    "printer_id": SERIAL_NAMED_MODEL,
+    "matched_by": "exact",
+    "display_name": "Serial-named test record",
+    "safety": {
+        "max_hotend_temp": 290.0, "max_bed_temp": 95.0, "max_chamber_temp": None,
+        "max_feedrate": 9000.0, "min_safe_z": 0.0, "max_volumetric_flow": 14.0,
+        "build_volume": [210, 210, 210], "notes": "Synthetic served record.",
+    },
+    "intel": {
+        "firmware": "bambu", "extruder_type": "direct_drive", "hotend_type": "all_metal",
+        "has_enclosure": False, "has_chamber_sensor": False, "has_abl": True,
+        "has_input_shaping": True, "build_volume_mm": [210, 210, 210],
+        "max_hotend_temp": 290, "max_bed_temp": 95,
+        "materials": {"PLA": {"hotend": 207, "bed": 58, "fan": 100}},
+        "nozzle_clumping_probe": None,
+    },
+}
+
+
+def _forget_served_records() -> None:
+    """Drop any record a test had served, so the next test starts sealed."""
+    sp._cache.clear()
+    sp._roster.clear()
+    sp._variant_data.clear()
+    sp._loaded = False
+    pi._reset_caches()
+    bed_fit._printer_intelligence_cache = None
+    bridge.forget()
+
+
+@pytest.fixture
+def served_a1_record(monkeypatch, tmp_path):
+    """The servers answer the serial-named model with ``SERIAL_NAMED_RECORD``,
+    and the record is kept under a throwaway home, never this computer's."""
+    monkeypatch.setattr(bridge, "available", lambda: False)
+    monkeypatch.setattr(bridge, "KEEP_DIR", tmp_path / "printer_catalogue")
+    monkeypatch.setattr(
+        bridge, "_served",
+        lambda key: (json.loads(json.dumps(SERIAL_NAMED_RECORD)), None) if key == SERIAL_NAMED_MODEL else (None, None),
+    )
+    _forget_served_records()
+    yield
+    _forget_served_records()
 
 
 def _bambu(serial: str, printer_model: str | None = None) -> BambuAdapter:
@@ -83,58 +139,41 @@ def _idle_report(chamber: float | int = INCIDENT_CHAMBER_PLACEHOLDER) -> dict:
 
 
 class TestCatalogue:
-    @pytest.mark.parametrize("model,expected", sorted(BAMBU_CHAMBER_SENSOR.items()))
-    def test_every_bambu_row_states_its_chamber_sensor(self, model: str, expected: bool) -> None:
+    @pytest.mark.parametrize("model,expected", sorted(FIXTURE_CHAMBER_SENSOR.items()))
+    def test_every_held_row_states_its_chamber_sensor(self, model: str, expected: bool | None) -> None:
         raw = _get_raw(model)
         assert raw is not None, f"{model} is not in the catalogue"
         assert raw.get("has_chamber_sensor") is expected
 
     def test_accessor_answers_the_catalogue(self) -> None:
-        assert chamber_sensor_for_model("bambu_a1") is False
-        assert chamber_sensor_for_model("bambu_p1s") is False
-        assert chamber_sensor_for_model("bambu_x1c") is True
-        # The one non-Bambu FDM machine the catalogue has settled: Elegoo's
-        # own wiki documents replacing its chamber thermistor.  Its adapter
-        # reads TempOfBox from a real sensor, so the flag changes nothing
-        # there; it is recorded so the row answers rather than shrugs.
-        assert chamber_sensor_for_model("elegoo_centauri_carbon") is True
-        # The Carbon 2 (own row since 2026-09-18): Elegoo's per-model table
-        # lists a chamber thermistor on the Carbon 2 and Carbon 2 Combo, and
-        # the vendor configuration carries the box temperature sensor.
-        assert chamber_sensor_for_model("elegoo_centauri_carbon_2") is True
+        assert chamber_sensor_for_model(SENSORLESS) is False
+        assert chamber_sensor_for_model(SENSORED) is True
 
     def test_accessor_is_unknown_where_nothing_is_stated(self) -> None:
-        # A model the catalogue has never judged for this fact, and no model
-        # at all.  Neither is "no sensor": unknown must not blank a real
-        # reading and must not invent one.
-        assert chamber_sensor_for_model("ender3") is None
+        # A row that has never been judged for this fact, and no model at
+        # all.  Neither is "no sensor": unknown must not blank a real reading
+        # and must not invent one.
+        assert chamber_sensor_for_model(UNSTATED) is None
         assert chamber_sensor_for_model(None) is None
         assert chamber_sensor_for_model("") is None
         assert chamber_sensor_for_model("not_a_printer") is None
 
-    def test_a_heated_chamber_has_a_sensor(self) -> None:
-        # The design-knowledge table records a different fact -- whether the
-        # chamber is HEATED to a setpoint -- and the two must not contradict:
-        # a control loop needs a sensor, so every heated Bambu chamber is a
-        # measured one.  The converse is exactly what makes this its own
-        # field: the X1C is unheated and measured, the P1S enclosed and not.
-        import json
-        from pathlib import Path
+    def test_a_roster_printer_whose_record_is_not_held_is_unknown(self) -> None:
+        # A catalogue name with no record here (the session fixture seals the
+        # served door as signed out): the fact is on the record, so the
+        # answer is unknown -- not "no sensor".
+        assert chamber_sensor_for_model("kilntest_served") is None
 
-        profiles = json.loads(
-            (Path(__file__).parent.parent / "src" / "kiln" / "data" / "design_knowledge"
-             / "printer_profiles.json").read_text(encoding="utf-8")
-        )
-        for model in BAMBU_CHAMBER_SENSOR:
-            if profiles.get(model, {}).get("chamber_heated") is True:
-                assert chamber_sensor_for_model(model) is True, model
+    def test_the_served_record_answers(self, served_a1_record) -> None:
+        assert chamber_sensor_for_model(SERIAL_NAMED_MODEL) is False
 
     def test_accessor_is_exact_not_fuzzy(self) -> None:
-        # ``_get_raw`` prefix-matches, which is fine for quirks and wrong for
-        # a fact that decides whether a number is a measurement: "bambu_x1"
-        # must not borrow the X1C's answer.
-        assert chamber_sensor_for_model("bambu_x1") is None
-        assert chamber_sensor_for_model("bambu") is None
+        # ``_get_raw`` prefix-matches, which is fine for quirks and
+        # calibration prose and wrong for a fact that decides whether a
+        # number is a measurement: a prefix of the enclosed row's id must not
+        # borrow its answer.
+        assert chamber_sensor_for_model("kilntest_enclose") is None
+        assert chamber_sensor_for_model("kilntest") is None
 
 
 # ---------------------------------------------------------------------------
@@ -234,8 +273,8 @@ class TestPrinterStateRule:
 
 
 class TestBambuAdapter:
-    def test_incident_a1_reports_no_chamber(self) -> None:
-        adapter = _bambu("039001234567890", printer_model="bambu_a1")
+    def test_incident_sensorless_machine_reports_no_chamber(self) -> None:
+        adapter = _bambu("039001234567890", printer_model=SENSORLESS)
         adapter._last_status = _idle_report()
         state = adapter.get_state()
         assert state.chamber_temp_actual is None
@@ -245,37 +284,52 @@ class TestBambuAdapter:
         assert state.bed_temp_actual == 22.5
         assert state.tool_temp_actual == 24.06
 
-    def test_a1_by_serial_alone(self) -> None:
-        # No ``printer_model`` in config: the serial prefix names the A1.
+    def test_by_serial_alone_with_the_record_served(self, served_a1_record) -> None:
+        # No ``printer_model`` in config: the serial prefix names the model,
+        # and the model's served record says it has no sensor.
         adapter = _bambu("039001234567890")
         adapter._last_status = _idle_report()
         state = adapter.get_state()
         assert state.chamber_temp_actual is None
         assert state.chamber_sensor is False
 
-    def test_p1s_enclosed_but_sensorless(self) -> None:
-        adapter = _bambu("01P001234567890", printer_model="bambu_p1s")
+    def test_by_serial_alone_with_no_record_is_unknown(self) -> None:
+        # The same serial on an install that could not get the record (the
+        # session fixture seals the served door as signed out): the number
+        # is still not quoted, and no claim is made either way.
+        adapter = _bambu("039001234567890")
+        adapter._last_status = _idle_report()
+        state = adapter.get_state()
+        assert state.chamber_temp_actual is None
+        assert state.chamber_sensor is None
+
+    def test_enclosed_but_sensorless_is_sensorless(self) -> None:
+        # The P1S shape: an enclosure is not a sensor, the flag decides.
+        # (The P1S row itself -- enclosed, sensorless -- is pinned in
+        # kiln-pro.)
+        adapter = _bambu("01P001234567890", printer_model="kilntest_ptfe")
         adapter._last_status = _idle_report(chamber=27)
         state = adapter.get_state()
         assert state.chamber_temp_actual is None
         assert state.chamber_sensor is False
 
-    def test_x1c_keeps_its_measurement(self) -> None:
-        adapter = _bambu("00M001234567890", printer_model="bambu_x1c")
+    def test_a_sensored_machine_keeps_its_measurement(self) -> None:
+        adapter = _bambu("00M001234567890", printer_model=SENSORED)
         adapter._last_status = _idle_report(chamber=38.0)
         state = adapter.get_state()
         assert state.chamber_temp_actual == 38.0
         assert state.chamber_sensor is True
         assert state.chamber_note is None
 
-    def test_configured_model_outranks_serial(self) -> None:
+    def test_configured_model_outranks_serial(self, served_a1_record) -> None:
         # The config-declared model owns every behaviour decision, this one
-        # included -- the same boundary ``get_printer_info`` documents.
-        adapter = _bambu("00M001234567890", printer_model="bambu_a1")
+        # included -- the same boundary ``get_printer_info`` documents.  The
+        # serial names a sensored family; the declared model has no sensor.
+        adapter = _bambu("00M001234567890", printer_model=SENSORLESS)
         adapter._last_status = _idle_report(chamber=38.0)
         assert adapter.get_state().chamber_temp_actual is None
 
-    def test_state_builder_takes_no_lock(self) -> None:
+    def test_state_builder_takes_no_lock(self, served_a1_record) -> None:
         # ``get_state``'s backoff-cooldown branch builds the state while
         # HOLDING ``_state_lock`` (non-reentrant).  The first cut of this
         # feature resolved the model through ``get_printer_info``, whose
@@ -328,7 +382,7 @@ class TestBambuAdapter:
 
 class TestDoors:
     def _a1_adapter(self) -> MagicMock:
-        real = _bambu("039001234567890", printer_model="bambu_a1")
+        real = _bambu("039001234567890", printer_model=SENSORLESS)
         real._last_status = _idle_report()
         state = real.get_state()
         adapter = MagicMock()

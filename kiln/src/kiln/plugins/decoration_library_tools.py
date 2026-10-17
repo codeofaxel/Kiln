@@ -115,7 +115,7 @@ class _DecorationLibraryPlugin:
             recipe_path = os.path.join(model_dir, ".kiln_recipe.json")
             if os.path.isfile(recipe_path):
                 try:
-                    with open(recipe_path) as f:
+                    with open(recipe_path, encoding="utf-8") as f:
                         recipe_data = json.load(f)
                     _logger.debug("Loaded recipe sidecar: %s", recipe_path)
                 except (json.JSONDecodeError, OSError) as exc:
@@ -401,7 +401,7 @@ class _DecorationLibraryPlugin:
             try:
                 from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
 
-                return attach_inspect_bundle(result, level="quick")
+                return attach_inspect_bundle(result, level="quick", self_check_before=model_path)
             except ImportError:
                 return result
 

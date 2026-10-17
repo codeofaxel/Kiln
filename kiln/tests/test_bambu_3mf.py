@@ -51,6 +51,48 @@ from kiln.printers.bambu_3mf import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# The Bambu records, served
+# ---------------------------------------------------------------------------
+#
+# Since 2026-10-12 a printer's spec sheet -- its build volume included -- is
+# served per printer from Kiln's catalogue; the bundled file is a roster.
+# The 3MF builder reads the bed centre and the machine's top through that
+# record (``_bed_center``, ``_machine_top_mm``), so a file for a Bambu is
+# built here with the record SERVED, the way an install that set the printer
+# up has it (``conftest.synthetic_roster_record``: every number is made up
+# except the machine's height, read from the public motion block's
+# ``z_travel_limit_mm`` where the firmware states one, with the bed a square
+# of it -- true of the two machines whose hardware captures the tests below
+# reproduce).  Since 2026-10-12 the real geometry is the served record's,
+# pinned in kiln-pro beside it.  Public CI runs without kiln-pro and without
+# a sign-in; the session fixture seals the served door, and this one opens it.
+
+def _forget_served_records() -> None:
+    from kiln import _pro_catalogue_bridge as bridge
+    from kiln import printer_intelligence as pi
+    from kiln import safety_profiles as sp
+    from kiln.printers import bed_fit
+
+    sp._cache.clear()
+    sp._roster.clear()
+    sp._variant_data.clear()
+    sp._loaded = False
+    pi._reset_caches()
+    bed_fit._printer_intelligence_cache = None
+    bridge.forget()
+
+
+@pytest.fixture(autouse=True)
+def _bambu_records_served(monkeypatch, tmp_path):
+    from .conftest import serve_synthetic_roster_records
+
+    serve_synthetic_roster_records(monkeypatch)
+    _forget_served_records()
+    yield
+    _forget_served_records()
+
+
 @pytest.fixture(autouse=True)
 def _clear_singleton_cache():
     """Reset lazy-loaded template singletons between tests."""
@@ -2263,14 +2305,12 @@ class TestEndTemplateExpansion:
         short one was frozen, not filled in.  The frozen A1 capture is run
         through the same check and must fail it."""
         from kiln.printers.bambu_3mf import (
-            _DATA_DIR,
             _MODEL_END_GCODE_FILES,
             _load_a1_end_gcode,
             _resolve_end_gcode,
             _select_end_gcode,
         )
-
-        catalogue = json.loads((_DATA_DIR / "printer_intelligence.json").read_text())
+        from kiln.printers.bed_fit import get_build_volume
 
         def late_lifts(model: str, height: float, text: str) -> list[float]:
             out = _resolve_end_gcode(text, max_z=height, printer_model=model)
@@ -2285,7 +2325,9 @@ class TestEndTemplateExpansion:
             return zs[1:]
 
         def frozen_below_a_tall_part(model: str, text: str) -> bool:
-            tall = float(catalogue[model]["build_volume_mm"][2]) - 20.0
+            volume = get_build_volume(model)
+            assert volume is not None, f"{model}: no served build volume"
+            tall = float(volume[2]) - 20.0
             short_lifts, tall_lifts = late_lifts(model, 10.0, text), late_lifts(model, tall, text)
             return short_lifts == tall_lifts and any(z < tall for z in tall_lifts)
 
@@ -2424,11 +2466,42 @@ class TestEndTemplateExpansion:
 class TestBedCentreIsRead:
     """The bed centre is read from the spec sheet, never copied into a table."""
 
-    def test_known_models_resolve_from_printer_intelligence(self):
+    def test_known_models_resolve_from_the_served_record(self):
+        """Half the served bed, in both axes -- the record this module serves
+        carries the slicer profile's geometry (see the module fixture), so a
+        different bed per model yields a different centre."""
         from kiln.printers.bambu_3mf import _bed_center
+        from kiln.printers.bed_fit import get_build_volume
 
-        assert _bed_center("bambu_a1") == (128.0, 128.0)
-        assert _bed_center("bambu_a1_mini") == (90.0, 90.0)
+        for model in ("bambu_a1", "bambu_a1_mini"):
+            volume = get_build_volume(model)
+            assert volume is not None, model
+            assert _bed_center(model) == (volume[0] / 2.0, volume[1] / 2.0)
+        assert _bed_center("bambu_a1") != _bed_center("bambu_a1_mini")
+
+    def test_a_roster_model_with_no_record_centres_on_its_rated_plate(self, monkeypatch):
+        """Inverted 2026-10-15.  From 2026-10-12 this asserted that with no
+        record in hand (a signed-out install) there was no centre and the
+        build refused -- which left a signed-out Bambu owner unable to print
+        through Kiln at all.  The roster now carries each printer's RATED
+        plate (the marketed size, on the box), read through the one bed
+        helper, so the centre is the real plate's; a model the roster does
+        not list still has none, and the refusal still says so."""
+        from kiln import _pro_catalogue_bridge as bridge
+        from kiln.printers.bambu_3mf import _bed_center, _no_bed_on_record
+        from kiln.served_answer import Miss
+
+        monkeypatch.setattr(bridge, "_served", lambda key: (None, Miss("signed_out", "KILN_ACCOUNT_NOT_PAIRED")))
+        _forget_served_records()
+        import json
+
+        from kiln.printers import bed_fit
+
+        rated = bed_fit._load_printer_intelligence()["bambu_a1"]["rated_build_volume_mm"]
+        assert _bed_center("bambu_a1") == (rated[0] / 2.0, rated[1] / 2.0)
+        assert _bed_center("a printer nobody makes") is None
+        unknown = _no_bed_on_record("a printer nobody makes")
+        assert "no row" in unknown and "guess" in unknown.lower()
 
     def test_unknown_model_gets_none_not_a_default_bed(self):
         """A wrong bed centre is a travel move to the wrong place."""

@@ -192,7 +192,7 @@
       }
     },
     "agent_guidance": "Use standard metric pitches (M3=0.5, M4=0.7, M5=0.8, M6=1.0, M8=1.25). Pair with threaded_nut.",
-    "printability_notes": "Print vertically. Pitch under 1.0mm requires fine nozzle or resin. Add 0.2mm tolerance for mating.",
+    "printability_notes": "Print vertically. Pitch under 1.0mm requires a fine nozzle. Add 0.2mm tolerance for mating.",
     "category": "fasteners",
     "user_intents": [
       "threaded rod",
@@ -468,7 +468,7 @@
         "description": "shaft length in mm"
       }
     },
-    "agent_guidance": "Most common is NEMA 17 for 3D printers and CNC. Use nema_mount_mask() to create screw mounting holes.",
+    "agent_guidance": "Most common is NEMA 17 for 3D printers. Use nema_mount_mask() to create screw mounting holes.",
     "printability_notes": "Reference model for designing mounts \u2014 use nema_mount_mask() in difference().",
     "category": "electronics",
     "user_intents": [

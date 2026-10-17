@@ -47,6 +47,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import tempfile
 import time
 from dataclasses import dataclass
@@ -71,12 +72,100 @@ _RETURNS_PER_JOB = 1
 # network round trip to a DIFFERENT printer.
 _PEER_VERIFY_TTL_S = 30.0
 
-# Commands this module gates.  Registration, listing and discovery are NOT
-# here: owning printers is free at every tier, and always has been.
+# The rule covers every command an adapter has, by default.  Until
+# 2026-10-11 it covered a hand-kept list of fifteen names, and every command
+# nobody thought to list -- fans, the light, speed modes, skipping objects,
+# clearing an error, calibration, firmware updates, the camera -- drove a
+# second machine below the fleet tier.  Each of those existed before the rule
+# was written; nothing ever compared the list with the adapters.  Now a
+# public method is GATED unless it is named below with the reason it is not,
+# so a command added tomorrow answers to the rule without anyone remembering,
+# and ``tests/test_one_printer_rule_covers_every_command.py`` fails on any
+# adapter method that is in neither list.
+#
+# What is gated: everything Kiln asks a machine for -- what it is doing, what
+# it holds, what it is set to, the files kept on it -- and everything Kiln
+# tells it to do.  What is not: the identity read to register it (owning
+# printers is free at every tier, and always has been), facts from the
+# catalogue that touch no machine, Kiln's own connection and local settings,
+# and a method that only calls gated ones.  The second machine's own screen
+# shows its spools, its files and its settings; reading them through Kiln is
+# the fleet experience, which is what the fleet tier is.
+UNGATED_METHODS: dict[str, str] = {
+    # Identity: read to register the printer.
+    "get_printer_info": "identity, read to register the printer",
+    "get_identity_channels": "identity, read to register the printer",
+    "read_machine_identity": "identity, read to register the printer",
+    # Setup: the limits an unknown model's own config states, put in front of
+    # a person to confirm.  A ceiling is a fact about the model, not a look
+    # at what the machine is doing.
+    "read_machine_limits": "setup: the limits a printer states for itself, for a person to confirm",
+    # Setup: asked once by every door that saves a printer.  It learns only
+    # whether a camera answers, from headers, and never reads a frame; the
+    # camera check a person asks for later is gated (camera_probes).
+    "camera_handshake": "setup: whether the camera answers, no frame read",
+    # Facts about the model, from the catalogue.  No machine is asked.
+    "declared_printer_model": "the model the person told Kiln, not a reading",
+    "motion_facts": "catalogue facts about the model",
+    "camera_catalogue_model": "catalogue facts about the model",
+    "stream_capability": "what the camera can carry, from the model",
+    "homed_axes_field": "a field name, not a reading",
+    "purge_station": "where the model purges, from the catalogue",
+    # Kiln's own plumbing: connections, credentials, local settings and files.
+    "connect": "Kiln's own connection",
+    "disconnect": "Kiln's own connection",
+    "update_credentials": "a local setting",
+    "set_safety_profile": "a local setting",
+    "set_external_camera": "a local setting",
+    "enable_push_monitoring": "Kiln's own connection",
+    "disable_push_monitoring": "Kiln's own connection",
+    "wrap_gcode_as_3mf": "a file on this computer; the colour it asks the machine for is gated",
+    # Only through gated methods.
+    "async_start_print": "calls start_print",
+    "get_status": "calls get_state and get_job",
+    "async_get_state": "calls get_state",
+    "async_get_job_status": "calls get_job",
+    "async_get_temperatures": "calls get_state",
+    "async_cancel_print": "calls cancel_print",
+}
+
+# The gated commands Kiln knows of today, for the tests and the wording
+# below.  NOT what the gate reads: the gate covers every public method not in
+# UNGATED_METHODS, listed here or not.
 GATED_ACTIONS = frozenset(
     {
+        # Watches what the machine is doing right now.
         "get_state",
         "get_job",
+        "get_snapshot",
+        "get_stream_url",
+        "frame_source",
+        "camera_frame_source",
+        "camera_probes",
+        "get_tool_position",
+        "get_speed_profile",
+        # Reads what the machine holds and how it is set.
+        "list_files",
+        "read_print_file",
+        "get_filament_status",
+        "get_ams_status",
+        "get_cfs_status",
+        "get_multi_material_status",
+        "active_filament_color",
+        "read_active_slot",
+        "read_nozzle_setting",
+        "read_nozzle_clumping_detection",
+        "get_printer_config",
+        "get_bed_mesh",
+        "homed_axes_now",
+        "reported_firmware_version",
+        "get_firmware_status",
+        # Acts on the machine.  A start is refused here, whole, before the
+        # machine is read to prepare it; print_gate's concurrency check (one
+        # PRINT at a time, by what the peers are doing) is the other half.
+        "start_print",
+        "upload_file",
+        "delete_file",
         "pause_print",
         "resume_print",
         "cancel_print",
@@ -84,14 +173,32 @@ GATED_ACTIONS = frozenset(
         "set_tool_temp",
         "set_bed_temp",
         "send_gcode",
+        "publish_print_command",
         "load_filament",
         "unload_filament",
         "purge_filament",
         "wipe_nozzle",
         "home_axes",
         "park_head",
+        "set_fan",
+        "set_light",
+        "set_speed_profile",
+        "skip_objects",
+        "clear_error",
+        "run_calibration",
+        "firmware_resume_print",
+        "update_firmware",
+        "rollback_firmware",
+        "set_laser_power",
+        "set_spindle_speed",
     }
 )
+
+
+def is_gated(action: str) -> bool:
+    """Whether the one-printer rule covers *action*: every public adapter
+    method except the ones :data:`UNGATED_METHODS` names, with their reasons."""
+    return bool(action) and not action.startswith("_") and action not in UNGATED_METHODS
 
 _verify_cache: dict[str, tuple[float, bool]] = {}
 
@@ -116,7 +223,7 @@ def _read_store() -> dict[str, Any]:
     locked out of their own printer.
     """
     try:
-        raw = _store_path().read_text()
+        raw = _store_path().read_text(encoding="utf-8")
     except (OSError, ValueError):
         return {}
     try:
@@ -648,7 +755,7 @@ def check_command(adapter: Any, action: str) -> dict[str, Any] | None:
     now without paying anything, and the tier that lifts the rule, once.
     """
     try:
-        if action not in GATED_ACTIONS or _in_internal_read():
+        if not is_gated(action) or _in_internal_read():
             return None
         if _multi_machine_tier():
             return None
@@ -692,8 +799,41 @@ def check_command(adapter: Any, action: str) -> dict[str, Any] | None:
 # of the strings below mention a tier by name.
 # ---------------------------------------------------------------------------
 
-_CONTROL_ACTIONS = frozenset(
-    {"pause_print", "resume_print", "cancel_print", "set_tool_temp", "set_bed_temp", "send_gcode"}
+# The gated commands that only LOOK at the machine: what it is doing now
+# (``_WATCH_ACTIONS``) and what it holds or is set to (``_READ_ACTIONS``).
+# Every other gated command acts on it, and its refusal says the other
+# machine's own controls still work.
+_READ_ACTIONS = frozenset(
+    {
+        "list_files",
+        "read_print_file",
+        "get_filament_status",
+        "get_ams_status",
+        "get_cfs_status",
+        "get_multi_material_status",
+        "active_filament_color",
+        "read_active_slot",
+        "read_nozzle_setting",
+        "read_nozzle_clumping_detection",
+        "get_printer_config",
+        "get_bed_mesh",
+        "homed_axes_now",
+        "reported_firmware_version",
+        "get_firmware_status",
+    }
+)
+
+_WATCH_ACTIONS = frozenset(
+    {
+        "get_state",
+        "get_job",
+        "get_snapshot",
+        "get_stream_url",
+        "frame_source",
+        "camera_frame_source",
+        "get_tool_position",
+        "get_speed_profile",
+    }
 )
 
 
@@ -732,6 +872,23 @@ def _starts_sentence(name: str) -> str:
     return name[:1].upper() + name[1:] if name else name
 
 
+def _waiting_at_a_stop(engagement: Engagement) -> dict[str, Any] | None:
+    """The ``now`` note when the engaged machine is paused at a planned stop.
+
+    Read by :mod:`kiln.hardware_stops`, within the same bound as every other
+    look this module takes at a different printer; anything unknown is ``None``.
+    """
+    try:
+        peer = _peer_for(engagement.machine)
+        if peer is None:
+            return None
+        from kiln.hardware_stops import waiting_elsewhere
+
+        return waiting_elsewhere(peer, timeout_s=_PEER_VERIFY_TIMEOUT_S)
+    except Exception:  # noqa: BLE001 -- the words never break the gate
+        return None
+
+
 def _refusal(
     engagement: Engagement, action: str, machine: str, adapter: Any = None,
 ) -> dict[str, Any]:
@@ -768,6 +925,16 @@ def _refusal(
 
     not_watching = f"Kiln is not watching {this_one}. Nothing here is keeping an eye on it."
 
+    # The machine Kiln is working with may be paused at a planned hardware
+    # stop, waiting hot for the person's hands.  Say so first, and how to tend
+    # to it.  Words only: the refusal is already decided.
+    waiting_line = way_on = ""
+    note = _waiting_at_a_stop(engagement)
+    if note is not None:
+        from kiln.hardware_stops import waiting_elsewhere_words
+
+        waiting_line, way_on = waiting_elsewhere_words(other, note)
+
     if action == "emergency_stop":
         # The one moment where self-help comes first: a person who wants a
         # machine stopped needs the fastest real answer in the first sentence,
@@ -779,13 +946,18 @@ def _refusal(
         free_included = (
             f"{first} Kiln keeps full emergency stop on {other}, the machine it is running."
         )
-    elif action in _CONTROL_ACTIONS:
+    elif action in _READ_ACTIONS:
+        free_included = (
+            f"{_starts_sentence(this_one)}'s own screen still shows its spools, files and "
+            f"settings. To point Kiln at it instead, hand {other} back with hand_back_printer."
+        )
+    elif action not in _WATCH_ACTIONS:
         free_included = (
             f"{_starts_sentence(this_one)}'s own controls work as always, and you keep "
             f"full control of {other}. "
             f"To move Kiln over, hand {other} back with hand_back_printer."
         )
-    else:  # status reads
+    else:  # status and camera reads
         free_included = (
             f"{_starts_sentence(this_one)} still shows its own status on the printer. "
             f"To point Kiln at it instead, hand {other} back with hand_back_printer."
@@ -794,12 +966,12 @@ def _refusal(
     verdict: dict[str, Any] = {
         "blocked": True,
         "code": "TIER_SINGLE_PRINTER_LIMIT",
-        "reason": f"{headline} {not_watching}",
+        "reason": " ".join(part for part in (waiting_line, headline, not_watching) if part),
         "engaged_with": other,
         "engaged_since": engagement.since,
         "action": action,
         "returns_left": 0 if spent else max(0, _RETURNS_PER_JOB - _returns_used(store, machine)),
-        "suggestions": [free_included],
+        "suggestions": [free_included, *([way_on] if way_on else [])],
     }
     verdict["upgrade_nudge"] = upgrade_nudge_block(
         variant="single_printer_engagement",
@@ -810,8 +982,50 @@ def _refusal(
             "Kiln Business drives every printer at the same time, so status, "
             "pause and stop reach all of them without handing anything back."
         ),
-        free_included=free_included,
+        free_included=" ".join(part for part in (free_included, way_on) if part),
         moment="resource_threshold",
         context={"action": action, "plan": _plan_phrase()},
     )
     return verdict
+
+
+def refusal_words(verdict: dict[str, Any]) -> str:
+    """The whole refusal as one message, for a surface that prints text.
+
+    What happened, what the person can do now without paying anything, and
+    the tier that lifts the rule last and once -- the same order the
+    structured verdict carries for a surface that renders.
+    """
+    nudge = verdict.get("upgrade_nudge") or {}
+    parts = [str(verdict.get("reason") or "").strip()]
+    parts.extend(str(s).strip() for s in verdict.get("suggestions") or ())
+    parts.append(str(nudge.get("display_text") or "").strip())
+    return " ".join(part for part in parts if part)
+
+
+def refusal_in_flight(exc: BaseException | None = None) -> dict[str, Any] | None:
+    """The one-printer refusal behind a failure, or ``None``.
+
+    *exc* defaults to the exception being handled right now, which is what
+    lets an error envelope built inside an ``except`` block answer with the
+    refusal's own words without the door that caught it passing anything.
+    Every printer door wraps its failures as "Failed to ...: <error>. Check
+    that the printer is online"; for this one failure that advice is wrong,
+    and the envelope is the one place every door already goes through.
+
+    Follows the causes a failure names (``raise ... from``, a
+    ``PrinterError``'s ``cause``), so an adapter that re-wraps the refusal
+    still answers with it.  Not the implicit context: a different fault
+    raised while a refusal was being handled is that fault.
+    """
+    from kiln.printers.base import PrinterEngagementError
+
+    if exc is None:
+        exc = sys.exc_info()[1]
+    seen: set[int] = set()
+    while isinstance(exc, BaseException) and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, PrinterEngagementError) and isinstance(exc.verdict, dict):
+            return exc.verdict
+        exc = exc.__cause__ or getattr(exc, "cause", None)
+    return None

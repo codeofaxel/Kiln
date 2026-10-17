@@ -7,6 +7,9 @@ level, stream, sync/*, plugins/*, order/*, billing/*.
 from __future__ import annotations
 
 import json
+import re
+import sys
+import types
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -31,12 +34,6 @@ try:
 except ImportError:
     _has_payments = False
 
-try:
-    import kiln.fulfillment  # noqa: F401
-    _has_fulfillment = True
-except ImportError:
-    _has_fulfillment = False
-
 from kiln.printers.base import (
     JobProgress,
     PrinterFile,
@@ -45,6 +42,7 @@ from kiln.printers.base import (
     PrintResult,
     UploadResult,
 )
+from tests import _order_service as order_service
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -409,7 +407,10 @@ class TestSlice:
         kwargs = mock_slice.call_args.kwargs
         assert kwargs["profile"] == "/tmp/prusa_mini.ini"
 
-    def test_slice_defaults_to_pla_temperatures_when_no_profile(self, runner, tmp_path):
+    def test_slice_with_no_profile_leaves_the_temperatures_to_the_slice(self, runner, tmp_path):
+        """The slice sets the material's temperatures itself (kiln.slicer_material);
+        this command used to pass its own seven-material table as slicer
+        arguments, which outrank the profile the slice writes."""
         stl = tmp_path / "temps.stl"
         stl.write_text("solid\nendsolid\n")
         mock_result = MagicMock()
@@ -422,11 +423,10 @@ class TestSlice:
             result = runner.invoke(cli, ["slice", str(stl), "--json"])
 
         assert result.exit_code == 0
-        args = mock_slice.call_args.kwargs["extra_args"]
-        assert "--bed-temperature" in args
-        assert "60" in args
+        assert "--bed-temperature" not in (mock_slice.call_args.kwargs.get("extra_args") or [])
+        assert mock_slice.call_args.kwargs.get("material") is None  # PLA by default, said by the slice
 
-    def test_slice_uses_loaded_material_defaults(self, runner, tmp_path):
+    def test_slice_hands_the_loaded_material_to_the_slice(self, runner, tmp_path):
         stl = tmp_path / "petg.stl"
         stl.write_text("solid\nendsolid\n")
         mock_result = MagicMock()
@@ -444,9 +444,8 @@ class TestSlice:
             result = runner.invoke(cli, ["slice", str(stl), "--json"])
 
         assert result.exit_code == 0
-        args = mock_slice.call_args.kwargs["extra_args"]
-        assert "--bed-temperature" in args
-        assert "80" in args
+        assert "--bed-temperature" not in (mock_slice.call_args.kwargs.get("extra_args") or [])
+        assert mock_slice.call_args.kwargs["loaded_material"] == "PETG"
 
     def test_slice_auto_supports_enable_minimal_args(self, runner, tmp_path):
         stl = tmp_path / "supports.stl"
@@ -690,7 +689,196 @@ class TestPlugins:
 # ---------------------------------------------------------------------------
 
 
+#: Where every ordering door points an install without the order service.
+_CONNECTOR_DOCS = "https://kiln3d.com/docs/connector"
+
+#: Every terminal door to the order service.  ``{model}`` is a model file
+#: the test writes.
+_ORDER_SERVICE_DOORS = [
+    ["order", "materials"],
+    ["order", "quote", "{model}", "-m", "pla-white"],
+    ["order", "place", "quote-1"],
+    ["order", "status", "ord-1"],
+    ["order", "cancel", "ord-1"],
+    ["order", "history"],
+    ["order", "insurance", "50"],
+    ["fulfillment-materials"],
+]
+
+
+def _flat(text: str) -> str:
+    """Terminal output as one line of words: panel borders and wrapping gone."""
+    return " ".join(re.sub(r"[│╭╮╰╯─]", " ", text).split())
+
+
+def _door_argv(args: list[str], tmp_path: Path) -> list[str]:
+    model = tmp_path / "model.stl"
+    model.write_text("solid m\nendsolid m\n")
+    return [str(model) if arg == "{model}" else arg for arg in args]
+
+
+class _StandInPaymentError(Exception):
+    """The stand-in payment rail's refusal."""
+
+
+def _stand_in_fee_tools(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    missing: str = "",
+    record_charge_error: Exception | None = None,
+) -> tuple[MagicMock, MagicMock]:
+    """A stand-in fee ledger and payment manager for ``kiln order place``.
+
+    ``missing`` names the piece this install lacks (``"billing"`` or
+    ``"payments"``); ``record_charge_error`` makes the ledger fail to write
+    a charge.  Returns the ledger and the payment manager the command gets.
+    """
+    fee = MagicMock(fee_amount=4.0, tax_amount=0.0)
+    fee.to_dict.return_value = {"fee_amount": 4.0, "waived": False}
+    fee.total_cost = 44.0
+    ledger = MagicMock()
+    ledger.calculate_fee.return_value = fee
+    if record_charge_error is not None:
+        ledger.record_charge.side_effect = record_charge_error
+    manager = MagicMock(available_rails=[])
+    billing = types.ModuleType("kiln.billing")
+    billing.BillingLedger = MagicMock(return_value=ledger)
+    payments_base = types.ModuleType("kiln_pro.payments.base")
+    payments_base.PaymentError = _StandInPaymentError
+    payments_manager = types.ModuleType("kiln_pro.payments.manager")
+    payments_manager.PaymentManager = MagicMock(return_value=manager)
+    monkeypatch.setitem(sys.modules, "kiln.billing", None if missing == "billing" else billing)
+    for name, module in (
+        ("kiln_pro.payments.base", payments_base),
+        ("kiln_pro.payments.manager", payments_manager),
+    ):
+        monkeypatch.setitem(sys.modules, name, None if missing == "payments" else module)
+    return ledger, manager
+
+
+def _placing_provider(
+    total_price: float | None = 40.0, production_price: float | None = 30.0,
+) -> MagicMock:
+    """A print-service provider that accepts every order as ``ord-777``.
+
+    ``total_price`` is the checkout total (printing, shipping and tax);
+    ``production_price`` the printing alone, as the print service states it.
+    """
+    placed = MagicMock(
+        order_id="ord-777", total_price=total_price, production_price=production_price, currency="USD",
+        kiln_fee_charged=None,
+    )
+    placed.to_dict.return_value = {
+        "order_id": "ord-777",
+        "status": "submitted",
+        "provider": "craftcloud",
+        "total_price": total_price,
+        "currency": "USD",
+    }
+    provider = MagicMock()
+    provider.place_order.return_value = placed
+    return provider
+
+
+def _place_argv(tmp_path: Path) -> list[str]:
+    preview_file = tmp_path / "model.stl"
+    preview_file.write_bytes(b"solid test\nendsolid test\n")
+    return [
+        "order", "place", "quote-1",
+        "--shipping", "ship-1",
+        "--first-name", "Ada",
+        "--last-name", "Lovelace",
+        "--email", "ada@example.com",
+        "--phone", "555-0100",
+        "--street", "123 Main St",
+        "--city", "Austin",
+        "--state", "TX",
+        "--postal-code", "78701",
+        "--country", "US",
+        "--preview-file", str(preview_file),
+        "--confirm-preview",
+        "--confirm-shipping",
+        "--do-not-save-shipping-profile",
+    ]
+
+
+class TestOrderingWithoutTheOrderService:
+    """A plain install has no order service: every terminal door says so,
+    in one sentence, and stops before anything is sent."""
+
+    @pytest.fixture(autouse=True)
+    def _plain_install(self, monkeypatch):
+        order_service.remove(monkeypatch)
+
+    @pytest.mark.parametrize("args", _ORDER_SERVICE_DOORS, ids="-".join)
+    def test_says_where_ordering_lives_and_exits_without_a_traceback(self, runner, tmp_path, args):
+        result = runner.invoke(cli, _door_argv(args, tmp_path))
+        assert result.exit_code == 1, result.output
+        assert isinstance(result.exception, SystemExit), repr(result.exception)
+        flat = _flat(result.output)
+        assert _CONNECTOR_DOCS in flat
+        assert "nothing was sent" in flat
+
+    @pytest.mark.parametrize("args", _ORDER_SERVICE_DOORS, ids="-".join)
+    def test_json_mode_says_it_in_the_error_envelope(self, runner, tmp_path, args):
+        result = runner.invoke(cli, [*_door_argv(args, tmp_path), "--json"])
+        assert result.exit_code == 1, result.output
+        error = json.loads(result.output)["error"]
+        assert error["code"] == "NOT_AVAILABLE"
+        assert _CONNECTOR_DOCS in error["message"]
+
+    def test_every_door_says_the_identical_sentence(self, runner, tmp_path):
+        messages = set()
+        for args in _ORDER_SERVICE_DOORS:
+            result = runner.invoke(cli, [*_door_argv(args, tmp_path), "--json"])
+            messages.add(json.loads(result.output)["error"]["message"])
+        assert len(messages) == 1, messages
+
+    def test_compare_cost_keeps_its_local_half_and_says_the_same_for_the_outsourced_half(
+        self, runner, tmp_path,
+    ):
+        gcode = tmp_path / "model.gcode"
+        gcode.write_text("G28\n")
+        estimate = MagicMock()
+        estimate.to_dict.return_value = {"material": "PLA", "total_cost_usd": 1.50}
+        estimator = MagicMock()
+        estimator.estimate_from_file.return_value = estimate
+        with patch("kiln.cost_estimator.CostEstimator", return_value=estimator), \
+             patch("kiln._pro_cost_bridge.attach_cost_intelligence"):
+            result = runner.invoke(cli, [
+                "compare-cost", str(gcode), "--fulfillment-material", "pla-white", "--json",
+            ])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)["data"]
+        assert data["local"]["available"] is True
+        assert data["fulfillment"]["available"] is False
+        assert _CONNECTOR_DOCS in data["fulfillment"]["error"]
+
+    @pytest.mark.parametrize("args", [
+        ["order", "countries", "--json"],
+        ["order", "recommend", "functional", "--json"],
+        ["order", "estimate", "FDM", "--volume", "10", "--json"],
+        ["order", "timeline", "FDM", "--json"],
+        ["order", "validate-address", "--street", "1 Main St", "--city", "Austin",
+         "--state", "TX", "--postal-code", "78701", "--country", "US", "--json"],
+    ], ids=lambda args: args[1])
+    def test_the_order_commands_that_need_no_order_service_still_answer(self, runner, args):
+        result = runner.invoke(cli, args)
+        assert result.exit_code == 0, result.output
+
+
 class TestOrder:
+    """The ordering commands where the order service is present: the real
+    one on a kiln-pro install, a stand-in elsewhere, so they run everywhere."""
+
+    @pytest.fixture(autouse=True)
+    def _order_service_present(self, monkeypatch):
+        order_service.provide(monkeypatch)
+
+    @pytest.fixture
+    def fee_tools(self, monkeypatch):
+        return _stand_in_fee_tools(monkeypatch)
+
     def test_order_materials_json(self, runner):
         provider = MagicMock()
         mock_mat = MagicMock()
@@ -706,30 +894,32 @@ class TestOrder:
             result = runner.invoke(cli, ["order", "materials", "--json"])
         assert result.exit_code != 0
 
-    @pytest.mark.skipif(not _has_billing, reason="kiln-pro billing module not available")
-    def test_order_quote_json(self, runner, tmp_path):
+    def test_order_quote_json(self, runner, tmp_path, monkeypatch):
         gcode = tmp_path / "model.gcode"
         gcode.write_text("G28\n")
         provider = MagicMock()
-        mock_quote = MagicMock()
-        mock_quote.total_price = 25.00
-        mock_quote.currency = "USD"
-        mock_quote.to_dict.return_value = {
+        quote_dict = {
             "total_price": 25.00, "unit_price": 25.00,
             "material": "PLA", "lead_time_days": 5,
         }
+        mock_quote = SimpleNamespace(
+            quote_id="q-1", total_price=25.00, currency="USD", to_dict=lambda: dict(quote_dict),
+        )
         provider.get_quote.return_value = mock_quote
         mock_ledger = MagicMock()
         mock_fee = MagicMock()
         mock_fee.to_dict.return_value = {"fee_usd": 2.50, "rate": 0.10}
         mock_fee.total_cost = 27.50  # Must be a real number for JSON serialization
         mock_ledger.calculate_fee.return_value = mock_fee
-        with patch("kiln.cli.main._get_fulfillment_provider", return_value=provider), \
-             patch("kiln.billing.BillingLedger", return_value=mock_ledger):
+        billing = types.ModuleType("kiln.billing")
+        billing.BillingLedger = MagicMock(return_value=mock_ledger)
+        monkeypatch.setitem(sys.modules, "kiln.billing", billing)
+        with patch("kiln.cli.main._get_fulfillment_provider", return_value=provider):
             result = runner.invoke(cli, [
                 "order", "quote", str(gcode), "-m", "pla-white", "--json",
             ])
         assert result.exit_code == 0
+        assert provider.get_quote.call_args.args[0].file_name == "model.gcode"
 
     def test_order_status_json(self, runner):
         provider = MagicMock()
@@ -740,8 +930,7 @@ class TestOrder:
             result = runner.invoke(cli, ["order", "status", "ord-1", "--json"])
         assert result.exit_code == 0
 
-    @pytest.mark.skipif(not _has_fulfillment, reason="kiln-pro fulfillment module not available")
-    def test_order_place_passes_shipping_address_and_returns_checkout(self, runner, tmp_path):
+    def test_order_place_passes_shipping_address_and_returns_checkout(self, runner, tmp_path, fee_tools):
         preview_file = tmp_path / "model.stl"
         preview_file.write_bytes(b"solid test\nendsolid test\n")
         provider = MagicMock()
@@ -783,7 +972,6 @@ class TestOrder:
         data = json.loads(result.output)
         assert data["data"]["order"]["checkout_url"] == "https://craftcloud3d.com/checkout/ord-1"
 
-    @pytest.mark.skipif(not _has_fulfillment, reason="kiln-pro fulfillment module not available")
     def test_order_place_json_requires_shipping_profile_save_decision(self, runner, tmp_path):
         preview_file = tmp_path / "model.stl"
         preview_file.write_bytes(b"solid test\nendsolid test\n")
@@ -811,8 +999,7 @@ class TestOrder:
         provider.place_order.assert_not_called()
         assert "ask the user whether Kiln should save" in result.output
 
-    @pytest.mark.skipif(not _has_fulfillment, reason="kiln-pro fulfillment module not available")
-    def test_order_place_interactive_asks_to_save_shipping_profile(self, runner, tmp_path, monkeypatch):
+    def test_order_place_interactive_asks_to_save_shipping_profile(self, runner, tmp_path, monkeypatch, fee_tools):
         monkeypatch.setenv("KILN_SHIPPING_PROFILES_PATH", str(tmp_path / "profiles.json"))
         preview_file = tmp_path / "model.stl"
         preview_file.write_bytes(b"solid test\nendsolid test\n")
@@ -848,7 +1035,6 @@ class TestOrder:
         assert "Save this shipping contact/address" in result.output
         assert not (tmp_path / "profiles.json").exists()
 
-    @pytest.mark.skipif(not _has_fulfillment, reason="kiln-pro fulfillment module not available")
     def test_order_place_rejects_partial_shipping_address(self, runner):
         provider = MagicMock()
         with patch("kiln.cli.main._get_fulfillment_provider", return_value=provider):
@@ -861,7 +1047,6 @@ class TestOrder:
         provider.place_order.assert_not_called()
         assert "Shipping address is incomplete" in result.output
 
-    @pytest.mark.skipif(not _has_fulfillment, reason="kiln-pro fulfillment module not available")
     def test_order_place_rejects_missing_preview_confirmation(self, runner):
         provider = MagicMock()
         with patch("kiln.cli.main._get_fulfillment_provider", return_value=provider):
@@ -892,6 +1077,223 @@ class TestOrder:
         with patch("kiln.cli.main._get_fulfillment_provider", return_value=provider):
             result = runner.invoke(cli, ["order", "cancel", "ord-1", "--json"])
         assert result.exit_code == 0
+
+    # The pay step reaches the terminal too: the words every ordering door
+    # says, worded by the order service, ahead of the details.
+
+    def test_order_place_opens_with_where_to_pay(self, runner, tmp_path, fee_tools, monkeypatch):
+        service = order_service.provide(monkeypatch)
+        pay = "To start order 1528, pay for it on the print service's checkout: https://pay.example"
+        monkeypatch.setattr(service, "order_message", lambda result, routing: [pay], raising=False)
+        with patch("kiln.cli.main._get_fulfillment_provider", return_value=_placing_provider()):
+            result = runner.invoke(cli, _place_argv(tmp_path))
+        assert result.exit_code == 0, result.output
+        assert result.output.splitlines()[0] == pay
+
+    def test_order_status_says_where_the_order_is_first(self, runner, monkeypatch):
+        service = order_service.provide(monkeypatch)
+        words = ["Order 1528 is waiting for payment. To start it, pay on the print service's checkout: https://pay.example"]
+        monkeypatch.setattr(service, "status_message", lambda result: list(words), raising=False)
+        provider = MagicMock()
+        provider.get_order_status.return_value.to_dict.return_value = {"order_id": "ord-1", "status": "submitted"}
+        with patch("kiln.cli.main._get_fulfillment_provider", return_value=provider):
+            result = runner.invoke(cli, ["order", "status", "ord-1"])
+            as_json = runner.invoke(cli, ["order", "status", "ord-1", "--json"])
+        assert result.exit_code == 0, result.output
+        assert result.output.splitlines()[0] == words[0]
+        assert json.loads(as_json.output)["data"]["order"]["tell_the_person"] == words
+
+    def test_order_cancel_says_a_worded_refusal_as_it_is(self, runner, monkeypatch):
+        service = order_service.provide(monkeypatch)
+        sentence = "Nothing to cancel: order 1528 is waiting for payment."
+        refusal = service.FulfillmentError(sentence)
+        refusal.code = "NOTHING_TO_CANCEL"
+        provider = MagicMock()
+        provider.cancel_order.side_effect = refusal
+        with patch("kiln.cli.main.FulfillmentError", service.FulfillmentError), \
+             patch("kiln.cli.main._get_fulfillment_provider", return_value=provider):
+            result = runner.invoke(cli, ["order", "cancel", "ord-1", "--json"])
+        error = json.loads(result.output)["error"]
+        assert error["message"] == sentence and error["code"] == "NOTHING_TO_CANCEL"
+
+    def test_order_quote_says_sales_tax_is_added_at_checkout(self, runner, tmp_path, monkeypatch):
+        model = tmp_path / "model.stl"
+        model.write_bytes(b"solid test\nendsolid test\n")
+        provider = MagicMock()
+        provider.name = "craftcloud"
+        provider.get_quote.return_value.total_price = 16.58
+        provider.get_quote.return_value.currency = "USD"
+        provider.get_quote.return_value.to_dict.return_value = {"total_price": 16.58, "quote_id": "q-1"}
+        billing = types.ModuleType("kiln.billing")
+        monkeypatch.setitem(sys.modules, "kiln.billing", billing)
+        with patch("kiln.cli.main._get_fulfillment_provider", return_value=provider):
+            result = runner.invoke(cli, ["order", "quote", str(model), "-m", "pla-white"])
+        assert result.exit_code == 0, result.output
+        assert "Sales tax, where it applies, is added at Craftcloud's checkout." in result.output
+
+    def test_a_fee_step_that_fails_after_the_order_exists_reports_it_as_placed(
+        self, runner, tmp_path, monkeypatch,
+    ):
+        _stand_in_fee_tools(monkeypatch, record_charge_error=RuntimeError("database is locked"))
+        provider = _placing_provider()
+        with patch("kiln.cli.main._get_fulfillment_provider", return_value=provider):
+            result = runner.invoke(cli, [*_place_argv(tmp_path), "--json"])
+        assert result.exit_code == 0, result.output
+        assert "Failed to place order" not in result.output
+        provider.place_order.assert_called_once()
+        order = json.loads(result.output)["data"]["order"]
+        assert order["order_id"] == "ord-777"
+        assert order["payment"] == {"status": "not_recorded"}
+        assert "ord-777" in order["warnings"][0]
+        assert "fee" in order["warnings"][0]
+
+    def test_a_fee_step_that_fails_shows_the_order_and_why_in_the_terminal(
+        self, runner, tmp_path, monkeypatch,
+    ):
+        _stand_in_fee_tools(monkeypatch, record_charge_error=RuntimeError("database is locked"))
+        with patch("kiln.cli.main._get_fulfillment_provider", return_value=_placing_provider()):
+            result = runner.invoke(cli, _place_argv(tmp_path))
+        flat = _flat(result.output)
+        assert result.exit_code == 0, result.output
+        assert "Failed to place order" not in flat
+        assert "ord-777" in flat
+        assert "was placed" in flat
+        assert "fee" in flat
+
+    @pytest.mark.parametrize("missing", ["billing", "payments"])
+    def test_an_install_that_cannot_record_the_fee_is_refused_before_the_order_is_sent(
+        self, runner, tmp_path, monkeypatch, missing,
+    ):
+        _stand_in_fee_tools(monkeypatch, missing=missing)
+        provider = _placing_provider()
+        with patch("kiln.cli.main._get_fulfillment_provider", return_value=provider):
+            result = runner.invoke(cli, [*_place_argv(tmp_path), "--json"])
+        assert result.exit_code != 0
+        provider.place_order.assert_not_called()
+        assert "Failed to place order" not in result.output
+        assert "not placed" in _flat(result.output)
+
+    @pytest.mark.parametrize("outcome, payment", [
+        ("charged", {"status": "succeeded"}),
+        ("no_rail", {"status": "no_payment_method"}),
+        ("declined", {"status": "failed"}),
+    ])
+    def test_a_fee_step_that_finishes_settles_the_fee_as_before(
+        self, runner, tmp_path, monkeypatch, outcome, payment,
+    ):
+        ledger, manager = _stand_in_fee_tools(monkeypatch)
+        if outcome != "no_rail":
+            manager.available_rails = ["stripe"]
+        if outcome == "charged":
+            manager.charge_fee.return_value = MagicMock(to_dict=lambda: {"status": "succeeded"})
+        if outcome == "declined":
+            manager.charge_fee.side_effect = _StandInPaymentError("card declined")
+        with patch("kiln.cli.main._get_fulfillment_provider", return_value=_placing_provider()):
+            result = runner.invoke(cli, [*_place_argv(tmp_path), "--json"])
+        assert result.exit_code == 0, result.output
+        order = json.loads(result.output)["data"]["order"]
+        assert order["payment"] == payment
+        assert order["kiln_fee"] == {"fee_amount": 4.0, "waived": False}
+        assert order["total_with_fee"] == 44.0  # checkout total 40 + fee 4
+        assert "warnings" not in order
+        if outcome == "no_rail":
+            ledger.record_charge.assert_called_once_with("ord-777", ledger.calculate_fee.return_value)
+        if outcome == "declined":
+            ledger.record_charge.assert_called_once_with(
+                "ord-777", ledger.calculate_fee.return_value, payment_status="failed",
+            )
+
+    def test_the_fee_on_a_placed_order_is_charged_on_the_printing_never_shipping_or_tax(
+        self, runner, tmp_path, monkeypatch,
+    ):
+        # The test order placed 2026-10-12: printing 20.68, shipping 4.75,
+        # sales tax 2.12, checkout total 27.55.
+        ledger, _manager = _stand_in_fee_tools(monkeypatch)
+        provider = _placing_provider(total_price=27.55, production_price=20.68)
+        with patch("kiln.cli.main._get_fulfillment_provider", return_value=provider):
+            result = runner.invoke(cli, [*_place_argv(tmp_path), "--json"])
+        assert result.exit_code == 0, result.output
+        assert ledger.calculate_fee.call_args.args[0] == 20.68
+        order = json.loads(result.output)["data"]["order"]
+        assert order["total_with_fee"] == 31.55  # 27.55 at the checkout + Kiln's 4.00
+
+    def test_an_order_the_hosted_server_charged_is_not_charged_again_here(
+        self, runner, tmp_path, monkeypatch,
+    ):
+        # Through Kiln's hosted connector the server charges the fee and the
+        # order says so: nothing is recorded or charged here, and the fee is
+        # shown once.  Ordered directly, the fee is recorded here once.
+        server_fee = {"fee_amount": 1.03, "tax_amount": 0.0, "waived": False}
+        ledger, manager = _stand_in_fee_tools(monkeypatch)
+        manager.available_rails = ["stripe"]
+        hosted = _placing_provider(total_price=27.55, production_price=20.68)
+        hosted.place_order.return_value.kiln_fee_charged = server_fee
+        with patch("kiln.cli.main._get_fulfillment_provider", return_value=hosted):
+            result = runner.invoke(cli, _place_argv(tmp_path))
+        assert result.exit_code == 0, result.output
+        ledger.calculate_fee.assert_not_called()
+        ledger.record_charge.assert_not_called()
+        manager.charge_fee.assert_not_called()
+        flat = _flat(result.output)
+        assert flat.count("Kiln fee") == 1 and "USD 1.03" in flat
+        assert "Total USD 28.58" in flat  # 27.55 at the checkout + the 1.03 the server charged
+
+        ledger, manager = _stand_in_fee_tools(monkeypatch)
+        with patch("kiln.cli.main._get_fulfillment_provider", return_value=_placing_provider(27.55, 20.68)):
+            result = runner.invoke(cli, [*_place_argv(tmp_path), "--json"])
+        assert result.exit_code == 0, result.output
+        ledger.record_charge.assert_called_once_with("ord-777", ledger.calculate_fee.return_value)
+
+    def test_an_order_that_states_no_printing_price_is_charged_no_fee(
+        self, runner, tmp_path, monkeypatch,
+    ):
+        ledger, manager = _stand_in_fee_tools(monkeypatch)
+        manager.available_rails = ["stripe"]
+        provider = _placing_provider(total_price=27.55, production_price=None)
+        with patch("kiln.cli.main._get_fulfillment_provider", return_value=provider):
+            result = runner.invoke(cli, [*_place_argv(tmp_path), "--json"])
+        assert result.exit_code == 0, result.output
+        ledger.calculate_fee.assert_not_called()
+        manager.charge_fee.assert_not_called()
+        order = json.loads(result.output)["data"]["order"]
+        assert order["order_id"] == "ord-777"
+        assert "never on shipping or tax" in order["warnings"][0]
+
+    def test_the_quote_total_is_the_delivered_total_shipping_included(
+        self, runner, tmp_path, monkeypatch,
+    ):
+        model = tmp_path / "model.stl"
+        model.write_text("solid m\nendsolid m\n")
+        options = [
+            {"id": "s-2", "name": "Express", "price": 19.0},
+            {"id": "s-1", "name": "Standard", "price": 4.75},
+        ]
+        service = sys.modules["kiln.fulfillment"]
+        fields = {
+            "quote_id": "q-1", "provider": "craftcloud", "material": "pla", "quantity": 1,
+            "unit_price": 20.68, "total_price": 20.68, "currency": "USD", "lead_time_days": 5,
+        }
+        if hasattr(service, "Quote"):
+            # The real quote and the order service's own price sheet.
+            quote = service.Quote(
+                **fields, shipping_options=[service.ShippingOption(**o) for o in options],
+            )
+        else:
+            quote = SimpleNamespace(**fields)
+            quote.to_dict = lambda: {**fields, "shipping_options": options}
+        provider = MagicMock()
+        provider.name = "craftcloud"
+        provider.get_quote.return_value = quote
+        fee = MagicMock(fee_amount=2.07, tax_amount=0.0, total_cost=22.75)
+        fee.to_dict.return_value = {"fee_amount": 2.07, "waived": False}
+        billing = types.ModuleType("kiln.billing")
+        billing.BillingLedger = MagicMock(return_value=MagicMock(calculate_fee=MagicMock(return_value=fee)))
+        monkeypatch.setitem(sys.modules, "kiln.billing", billing)
+        with patch("kiln.cli.main._get_fulfillment_provider", return_value=provider):
+            result = runner.invoke(cli, ["order", "quote", str(model), "-m", "pla"])
+        assert result.exit_code == 0, result.output
+        # 20.68 printing + 4.75 cheapest shipping + 2.07 Kiln's fee.
+        assert "Total, delivered USD 27.50" in _flat(result.output)
 
 
 # ---------------------------------------------------------------------------
@@ -962,24 +1364,24 @@ class TestCommandHelp:
         ["plugins", "--help"],
         ["plugins", "list", "--help"],
         ["plugins", "info", "--help"],
-    ])
-    def test_help(self, runner, cmd):
-        result = runner.invoke(cli, cmd)
-        assert result.exit_code == 0, f"{' '.join(cmd)} failed: {result.output}"
-
-    # Pro-only CLI commands (sync, billing, order, fleet) require kiln-pro.
-    # Skip when kiln-pro is not installed.
-    @pytest.mark.parametrize("cmd", [
-        ["sync", "--help"],
-        ["sync", "status", "--help"],
-        ["sync", "now", "--help"],
-        ["sync", "configure", "--help"],
         ["order", "--help"],
         ["order", "materials", "--help"],
         ["order", "quote", "--help"],
         ["order", "place", "--help"],
         ["order", "status", "--help"],
         ["order", "cancel", "--help"],
+    ])
+    def test_help(self, runner, cmd):
+        result = runner.invoke(cli, cmd)
+        assert result.exit_code == 0, f"{' '.join(cmd)} failed: {result.output}"
+
+    # sync and billing are registered by kiln-pro, so they exist only
+    # where it is installed.
+    @pytest.mark.parametrize("cmd", [
+        ["sync", "--help"],
+        ["sync", "status", "--help"],
+        ["sync", "now", "--help"],
+        ["sync", "configure", "--help"],
         ["billing", "--help"],
         ["billing", "setup", "--help"],
         ["billing", "status", "--help"],

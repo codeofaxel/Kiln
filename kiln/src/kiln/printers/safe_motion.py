@@ -53,6 +53,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from kiln.gcode import GCODE_NUMBER, axis_value
+from kiln.untrusted_zip import UntrustedZipFile
 
 logger = logging.getLogger(__name__)
 
@@ -217,7 +218,7 @@ def _job_gcode_lines(job_path: str):
             from kiln.gcode import _MAX_SCAN_BYTES
             from kiln.gcode_metadata import read_member_text, sliced_gcode_member
 
-            with zipfile.ZipFile(path) as zf:
+            with UntrustedZipFile(path) as zf:
                 member = sliced_gcode_member(zf)
                 if member is None:
                     return None
@@ -1153,34 +1154,9 @@ def build_quiet_start_preamble(
 ) -> list[str]:
     """The quiet start: the print beside a part still on the plate.
 
-    Never the vendor's start (a Z home on the plate, a bed probe, a purge
-    line drawn across it).  In this order, and the order is the safety:
-
-    1. heaters set, no wait -- nothing moves yet;
-    2. absolute mode, then ONE absolute Z move to *clear_z_mm*: above
-       everything on the plate plus the margin.  Absolute, not relative,
-       because after a finished print the head rests at the end block's
-       park height, and a relative lift from there would over-travel;
-       from any resting height this move ends above every part -- if the
-       head is higher it descends straight down where it is, never onto a
-       top, because the clear height is above every top;
-    3. the firmware's X/Y home at that height -- the bed may roll its
-       whole length; every part passes under a head that clears it;
-    4. with a chute on record (*purge_at_mm*, the printer's own waste
-       chute off the plate; ``None`` for an axis it keeps), a travel to
-       it, still at the clear height, and the waits for the bed and the
-       hotend and the prime THERE -- the ooze of heating and the prime
-       fall into the chute, nothing lands on the plate;
-    5. a travel to the new part's own footprint centre, still at the
-       clear height (without a chute the waits and the prime happen here,
-       over the new footprint, so what falls lands under the part's own
-       first layer and nowhere else);
-    6. a descent over the new footprint only, to *approach_mm* above the
-       first layer -- the body's first move takes it the rest of the way;
-    7. the prime, so the E counter is defined before the first extrusion.
-
-    Pure: the numbers come from the placement verdict's plan, the words
-    on each line say why it is there.
+    Kiln's own prologue in place of the vendor's start, written from the
+    placement verdict's plan.  The order of the lines is the safety and
+    ``test_quiet_start.py`` pins it; every line says what it does.
     """
     cx, cy = float(travel_to_mm[0]), float(travel_to_mm[1])
     waits = [

@@ -242,11 +242,56 @@ class TestEstimatePrintCostFromMesh:
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture
+def pro_plan(monkeypatch):
+    """The caller holds Kiln Pro.  ``check_tier`` -> ``_covers`` reads the
+    plan through the module-level ``get_tier`` (``kiln.account_plan``), so
+    that one name is what a Pro caller looks like to every gate."""
+    from kiln.account_plan import LicenseTier
+
+    monkeypatch.setattr("kiln.account_plan.get_tier", lambda: LicenseTier.PRO)
+
+
 class TestEstimateStructuralLoad:
-    """Tests for estimate_structural_load MCP tool."""
+    """Tests for estimate_structural_load MCP tool.
+
+    The figure is Kiln Pro's (2026-10-16): the free plan is told, in words,
+    that the load was not checked, and the engine is only reached at Pro.
+    """
 
     @patch("kiln.design_intelligence.estimate_load_capacity")
     def test_happy_path(self, mock_fn, registered_tools):
+        """Free (the test session's plan): no figure, the message, the nudge,
+        and the engine is never called."""
+        result = registered_tools["estimate_structural_load"](
+            "petg", 50.0, 100.0, load_across_layers=True,
+        )
+
+        assert result["success"] is True
+        assert result["load_checked"] is False
+        assert result["material"] == "petg"
+        assert "doesn't check load on the free plan" in result["message"]
+        assert "unverified" in result["message"]
+        assert "Kiln Pro sizes it" in result["message"]
+        assert (
+            "Knocks, weight left on for months, humidity and any hardware "
+            "bolted on all count against it." in result["message"]
+        )
+        assert "sags" not in result["message"]
+        assert "upgrade_recommendation" in result
+        assert "safe_load_kg" not in result and "max_load_n" not in result
+        mock_fn.assert_not_called()
+
+    @patch("kiln.design_intelligence.estimate_load_capacity")
+    def test_free_pla_is_told_it_sags(self, mock_fn, registered_tools):
+        result = registered_tools["estimate_structural_load"]("PLA", 50.0, 100.0)
+
+        assert result["success"] is True and result["load_checked"] is False
+        assert "PLA sags over time under a load left on it." in result["message"]
+        mock_fn.assert_not_called()
+
+    @patch("kiln.design_intelligence.estimate_load_capacity")
+    def test_pro_gets_the_figure(self, mock_fn, registered_tools, pro_plan):
         mock_fn.return_value = SimpleNamespace(
             to_dict=lambda: {"safe_load_kg": 5.2, "safety_factor": 3.0},
         )
@@ -257,19 +302,33 @@ class TestEstimateStructuralLoad:
 
         assert result["success"] is True
         assert result["safe_load_kg"] == 5.2
+        assert "load_checked" not in result
         mock_fn.assert_called_once_with("petg", 50.0, 100.0, load_across_layers=True)
 
     @patch("kiln.design_intelligence.estimate_load_capacity")
     def test_unknown_material(self, mock_fn, registered_tools):
+        """An unknown material is refused before the plan is read: free and
+        Pro get the same error."""
         mock_fn.return_value = None
 
         result = registered_tools["estimate_structural_load"]("unobtanium", 10.0, 50.0)
 
         assert result["success"] is False
         assert "unobtanium" in result["error"]
+        mock_fn.assert_not_called()
+
+    @patch("kiln.design_intelligence.estimate_load_capacity")
+    def test_unknown_material_at_pro(self, mock_fn, registered_tools, pro_plan):
+        mock_fn.return_value = None
+
+        result = registered_tools["estimate_structural_load"]("unobtanium", 10.0, 50.0)
+
+        assert result["success"] is False
+        assert "unobtanium" in result["error"]
+        mock_fn.assert_not_called()
 
     @patch("kiln.design_intelligence.estimate_load_capacity", side_effect=RuntimeError("boom"))
-    def test_exception(self, mock_fn, registered_tools):
+    def test_exception(self, mock_fn, registered_tools, pro_plan):
         result = registered_tools["estimate_structural_load"]("pla", 10.0, 50.0)
 
         assert result["success"] is False
@@ -659,7 +718,7 @@ class TestGetPostProcessingGuide:
             "strengthen",
         ]
         assert result["techniques"] == [
-            {"name": "Sanding", "difficulty": "easy"},
+            {"name": "Sanding", "difficulty": "easy", "safety_notes": None},
         ]
         mock_fn.assert_called_once_with("pla")
 

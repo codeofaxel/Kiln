@@ -2,9 +2,9 @@
 
 Wires the full [Kiln](https://kiln3d.com) MCP server into Claude Code in one
 command. Kiln lets an AI agent design a part, slice it, print it on a real
-printer on your own network, monitor the camera, and recover from failures —
-across Bambu Lab, Creality, Prusa, Elegoo, OctoPrint, Moonraker/Klipper, and
-Direct USB.
+printer on your own network, monitor the camera, and recover from failures. It is
+compatible with Bambu Lab, Creality, Prusa, Elegoo, OctoPrint, Moonraker/Klipper,
+and Direct USB.
 
 ## Install
 
@@ -53,3 +53,7 @@ print fulfillment) reach Kiln's own services under the
 
 The marketplace catalog that lists this plugin lives at the repo root:
 `.claude-plugin/marketplace.json`.
+
+## Trademarks
+
+[OctoPrint is a registered trademark](https://octoprint.org). Other product and company names are trademarks of their respective owners; Kiln is not affiliated with or endorsed by them.

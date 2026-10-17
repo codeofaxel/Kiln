@@ -311,27 +311,30 @@ def test_the_cache_returns_the_same_measurement(plate):
 # ---------------------------------------------------------------------------
 
 
-def test_two_backends_grade_one_file_differently(tmp_path, monkeypatch):
+def test_two_backends_mesh_one_file_differently(tmp_path, monkeypatch):
     """The measurement the design rests on, taken with two REAL converters.
 
     A 150 mm sphere, written once, converted by each installed backend.  The
-    two disagree on density by more than an order of magnitude and land on
-    different scores — one object, one file, two verdicts.  The exact read is
-    unmoved by any of it, which is the whole point.
+    two disagree on density by more than an order of magnitude -- one object,
+    one file, two meshes.  The exact read is unmoved by any of it, which is
+    the whole point.
 
     This asserted different LETTERS until 2026-09-30, when the scorecard's
-    printability factor became analyze_printability's own score: that judges
-    overhangs by what a slicer can print rather than by the steepest facet,
-    so it stopped swinging with the tessellation and this sphere now lands on
-    one letter either way.  Re-measured rather than retuned: the quality
-    factor still grades Kiln's copy, so the score still moves with the
-    converter, and a grade that moves with the converter is still not a
-    grade of the user's design.
+    printability factor became analyze_printability's own score, and
+    different SCORES until 2026-10-04.  That second difference turned out to
+    be a defect, not a property of converters: the kernel's mesher leaves a
+    facet with no area at each pole of a sphere, so its copy of this sphere
+    read as an open surface (62 against FreeCAD's 64).  Those facets are now
+    dropped at the conversion's door (kiln.cad_kernel.drop_collapsed_facets),
+    both copies are closed, and this sphere scores the same either way.  What
+    is left is what was always true: the two converters cut one solid into
+    very different meshes, so any number read off the mesh is a number about
+    Kiln's copy (test_the_score_moves_when_only_the_tessellation_does holds
+    that the score still moves with density).
 
     Asserted as a relationship rather than as fixed numbers: the specific
-    figures depend on the backends a machine has and on the scorecard's
-    current weights, and a test that pinned them would break on a tuning
-    change without telling anyone anything true.
+    figures depend on the backends a machine has, and a test that pinned them
+    would break on a tuning change without telling anyone anything true.
 
     Skips without FreeCAD rather than failing — one backend cannot measure a
     two-backend claim, and a test that quietly passes on one would be
@@ -411,13 +414,17 @@ def test_two_backends_grade_one_file_differently(tmp_path, monkeypatch):
         "the two backends should disagree on density; if they no longer do, "
         "re-measure before trusting the rest of this"
     )
-    assert occt["overall_score"] != freecad["overall_score"], (
-        f"one file scored {occt['overall_score']} by occt and "
-        f"{freecad['overall_score']} by freecad is the reason a CAD file gets "
-        "no letter"
-    )
+    # Two meshes of one closed solid: neither converter may hand back an
+    # open surface, and each encloses the sphere to within its own faceting.
+    from kiln.mesh_frame import load_mesh
+
+    sphere = 4 / 3 * math.pi * 75.0**3
+    for name, mesh_path in (("occt", occt_mesh), ("freecad", str(freecad_mesh))):
+        copy = load_mesh(mesh_path, force="mesh")
+        assert copy.is_watertight, f"the {name} copy of a sphere is not a closed surface"
+        assert float(copy.volume) == pytest.approx(sphere, rel=0.01)
     # And the number that does not move, whichever converter ran.
-    assert exact.volume_mm3 == pytest.approx(4 / 3 * math.pi * 75.0**3, rel=1e-9)
+    assert exact.volume_mm3 == pytest.approx(sphere, rel=1e-9)
 
 
 def test_the_score_moves_when_only_the_tessellation_does(tmp_path, monkeypatch):

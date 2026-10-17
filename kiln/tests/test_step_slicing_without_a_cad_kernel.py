@@ -31,6 +31,19 @@ _TALL = (200.0, 245.0, 215.0)
 _FAR = (500.0, -500.0, 40.0)
 
 
+#: The bed every scenario here was measured on: a part 245 long fits a
+#: 250 x 210 plate only turned.  The MK4's real record is kiln-pro's; the
+#: served synthetic one is given this bed so the turn means what it meant.
+_MK4_BED = (250.0, 210.0, 220.0)
+
+
+@pytest.fixture(autouse=True)
+def _the_measured_bed(monkeypatch):
+    from .conftest import serve_synthetic_roster_records
+
+    serve_synthetic_roster_records(monkeypatch, volumes={"prusa_mk4": _MK4_BED})
+
+
 def _step_named(tmp_path: Path, name: str = "part.step") -> str:
     """A file with a STEP name and no kernel behind it."""
     path = tmp_path / name

@@ -1,8 +1,16 @@
 """Tests for printer intelligence database — firmware quirks, material
 compatibility, calibration guidance, and known failure modes.
 
+Since 2026-10-12 the bundled file is a roster and a real printer's spec
+sheet is served per printer, so the curated printers here are the session
+fixture's SYNTHETIC rows (``tests/fixtures/printer_catalogue_test.json``);
+the real printers' real spec sheets and recipes are pinned beside the real
+rows, in kiln-pro's ``tests/test_printer_catalogue_numbers.py``.  The tests
+that need kiln-pro's curated overlay keep their real ids: the overlay is
+keyed by them, and an install with the overlay has the catalogue too.
+
 Covers:
-    - get_printer_intel() for known printers (ender3, bambu_x1c)
+    - get_printer_intel() for curated printers
     - get_printer_intel() fallback to default for unknown printers
     - get_printer_intel() case normalization
     - list_intel_profiles() returns sorted list
@@ -62,50 +70,52 @@ def _reset_intel_cache():
 class TestGetPrinterIntel:
     """Tests for get_printer_intel() lookup and fallback logic."""
 
-    def test_ender3_intel_exists(self) -> None:
-        intel = get_printer_intel("ender3")
-        assert intel.id == "ender3"
-        assert intel.display_name == "Creality Ender 3 / Ender 3 Pro"
+    def test_lined_printer_intel_exists(self) -> None:
+        intel = get_printer_intel("kilntest_ptfe")
+        assert intel.id == "kilntest_ptfe"
+        assert intel.display_name == "Kilntest Lined 235"
 
-    def test_ender3_firmware(self) -> None:
-        intel = get_printer_intel("ender3")
+    def test_lined_printer_firmware(self) -> None:
+        intel = get_printer_intel("kilntest_ptfe")
         assert intel.firmware == "marlin"
 
-    def test_ender3_extruder_type(self) -> None:
-        intel = get_printer_intel("ender3")
+    def test_lined_printer_extruder_type(self) -> None:
+        intel = get_printer_intel("kilntest_ptfe")
         assert intel.extruder_type == "bowden"
 
-    def test_ender3_hotend_type(self) -> None:
-        intel = get_printer_intel("ender3")
+    def test_lined_printer_hotend_type(self) -> None:
+        intel = get_printer_intel("kilntest_ptfe")
         assert intel.hotend_type == "ptfe_lined"
 
-    def test_bambu_x1c_intel(self) -> None:
-        intel = get_printer_intel("bambu_x1c")
-        assert intel.id == "bambu_x1c"
-        assert intel.firmware == "bambu"
+    def test_enclosed_printer_intel(self) -> None:
+        intel = get_printer_intel("kilntest_enclosed")
+        assert intel.id == "kilntest_enclosed"
+        assert intel.firmware == "klipper"
         assert intel.hotend_type == "all_metal"
         assert intel.has_enclosure is True
         assert intel.has_abl is True
-
-    def test_bambu_x1c_extruder(self) -> None:
-        intel = get_printer_intel("bambu_x1c")
-        assert intel.extruder_type == "direct_drive"
-
-    def test_creality_k1_max_intel(self) -> None:
-        intel = get_printer_intel("k1_max")
-        assert intel.id == "k1_max"
-        assert intel.firmware == "klipper"
-        assert intel.has_enclosure is True
         assert intel.materials["PLA"].bed == 55
 
-    def test_creality_brand_prefixed_alias(self) -> None:
-        intel = get_printer_intel("creality_k1_max")
-        assert intel.id == "k1_max"
+    def test_enclosed_printer_extruder(self) -> None:
+        intel = get_printer_intel("kilntest_enclosed")
+        assert intel.extruder_type == "direct_drive"
 
-    def test_ender3_v3_ke_volume_and_firmware(self) -> None:
-        intel = get_printer_intel("ender3_v3_ke")
+    def test_creality_brand_prefixed_alias(self) -> None:
+        intel = get_printer_intel("creality_kilntest_enclosed")
+        assert intel.id == "kilntest_enclosed"
+
+    def test_open_klipper_printer_firmware_and_enclosure(self) -> None:
+        intel = get_printer_intel("kilntest_big")
         assert intel.firmware == "klipper"
         assert intel.has_enclosure is False
+
+    def test_a_roster_printer_whose_record_is_not_held_is_generic(self, signed_out_install) -> None:
+        """A catalogue name with no record here (a signed-out install, on
+        purpose) answers as the generic row; the served path is proved in
+        test_pro_catalogue_bridge."""
+        intel = get_printer_intel("kilntest_served")
+        assert intel.id == "default"
+        assert "kilntest_served" in list_intel_profiles()
 
     def test_nonexistent_falls_back_to_default(self) -> None:
         intel = get_printer_intel("nonexistent_printer_xyz")
@@ -113,31 +123,30 @@ class TestGetPrinterIntel:
         assert intel.display_name == "Generic FDM Printer"
 
     def test_case_normalization(self) -> None:
-        intel = get_printer_intel("Ender3")
-        assert intel.id == "ender3"
+        intel = get_printer_intel("Kilntest_Ptfe")
+        assert intel.id == "kilntest_ptfe"
 
     def test_hyphen_normalization(self) -> None:
-        """'Ender-3' normalizes hyphens to underscores ('ender_3').
-
-        Since 'ender_3' doesn't exactly match 'ender3' and the prefix
-        fuzzy match also fails, this falls back to default.
-        """
-        intel = get_printer_intel("Ender-3")
-        assert intel.id == "default"
+        """'Kilntest-Ptfe' normalizes hyphens to underscores and finds its
+        row; a spelling whose normalised form is no key and no prefix of
+        one falls back to default."""
+        intel = get_printer_intel("Kilntest-Ptfe")
+        assert intel.id == "kilntest_ptfe"
+        assert get_printer_intel("Kiln-Test-Ptfe").id == "default"
 
     def test_whitespace_stripping(self) -> None:
-        intel = get_printer_intel("  bambu_x1c  ")
-        assert intel.id == "bambu_x1c"
+        intel = get_printer_intel("  kilntest_enclosed  ")
+        assert intel.id == "kilntest_enclosed"
 
     @requires_printer_intelligence_overlay
     def test_cached_lookup_still_touches_canonical_overlay_loader(self) -> None:
         """A process cache must not bypass hosted private-read tracing."""
-        get_printer_intel("bambu_x1c")
+        get_printer_intel("kilntest_enclosed")
         with mock.patch(
             "kiln_pro.data_overlays.load_overlay",
             return_value={},
         ) as load_overlay:
-            get_printer_intel("bambu_x1c")
+            get_printer_intel("kilntest_enclosed")
         load_overlay.assert_called_once_with("printer_intelligence")
 
 
@@ -166,7 +175,7 @@ class _FakeOverlayLoader:
 
 
 PAID_DEPTH = {
-    "ender3": {
+    "kilntest_ptfe": {
         "quirks": ["PTFE tube degrades above 240C."],
         "calibration": {"esteps": "Extrude 100mm, measure, rescale."},
         "failure_modes": [
@@ -196,7 +205,7 @@ def overlay_loader(monkeypatch):
     return loader
 
 
-def _depth(printer_id: str = "ender3") -> tuple[int, int, int]:
+def _depth(printer_id: str = "kilntest_ptfe") -> tuple[int, int, int]:
     intel = get_printer_intel(printer_id)
     return len(intel.quirks), len(intel.calibration), len(intel.failure_modes)
 
@@ -256,22 +265,22 @@ class TestPerCallerEntitlement:
         self, overlay_loader
     ) -> None:
         overlay_loader.tier = "free"
-        intel = get_printer_intel("ender3")
-        assert intel.display_name == "Creality Ender 3 / Ender 3 Pro"
+        intel = get_printer_intel("kilntest_ptfe")
+        assert intel.display_name == "Kilntest Lined 235"
         assert intel.firmware == "marlin"
         assert intel.hotend_type == "ptfe_lined"
-        # The temperatures a caller could hurt a printer with are public.
+        # The temperatures a caller could hurt a printer with are the floor.
         assert intel.materials["PLA"].hotend == 200
         assert intel.materials["PLA"].bed == 60
         # Losing the overlay costs depth, never the catalogue.
-        assert "ender3" in list_intel_profiles()
+        assert "kilntest_ptfe" in list_intel_profiles()
 
     def test_entitlement_is_re_asked_but_the_merge_is_not_repeated(
         self, overlay_loader
     ) -> None:
         overlay_loader.tier = "pro"
-        first = get_printer_intel("ender3")
-        second = get_printer_intel("ender3")
+        first = get_printer_intel("kilntest_ptfe")
+        second = get_printer_intel("kilntest_ptfe")
         # Asked every read — the entitlement answer is never cached...
         assert overlay_loader.calls == ["printer_intelligence"] * 2
         # ...but the decoded profile is, so no re-merge on the hot path.
@@ -284,7 +293,7 @@ class TestPerCallerEntitlement:
         monkeypatch.setitem(sys.modules, "kiln_pro", None)
         monkeypatch.setitem(sys.modules, "kiln_pro.data_overlays", None)
         assert _depth() == (0, 0, 0)
-        assert get_printer_intel("ender3").materials["PLA"].hotend == 200
+        assert get_printer_intel("kilntest_ptfe").materials["PLA"].hotend == 200
 
 
 # ===================================================================
@@ -301,9 +310,11 @@ class TestListIntelProfiles:
     def test_contains_expected_profiles(self) -> None:
         profiles = list_intel_profiles()
         assert "default" in profiles
+        # The roster lists a real printer by name whether or not its record
+        # is held here, and the synthetic rows ride along in the session copy.
         assert "ender3" in profiles
         assert "bambu_x1c" in profiles
-        assert "qidi_x_plus3" in profiles
+        assert "kilntest_ptfe" in profiles
 
     def test_returns_list_of_strings(self) -> None:
         profiles = list_intel_profiles()
@@ -327,41 +338,39 @@ class TestListIntelProfiles:
 class TestGetMaterialSettings:
     """Tests for get_material_settings() lookup."""
 
-    def test_ender3_pla(self) -> None:
-        mat = get_material_settings("ender3", "PLA")
+    def test_lined_printer_pla(self) -> None:
+        mat = get_material_settings("kilntest_ptfe", "PLA")
         assert mat is not None
         assert isinstance(mat, MaterialProfile)
         assert mat.hotend == 200
         assert mat.bed == 60
         assert mat.fan == 100
 
-    def test_ender3_pla_case_insensitive(self) -> None:
+    def test_pla_case_insensitive(self) -> None:
         """Material lookup normalizes to upper case."""
-        mat = get_material_settings("ender3", "pla")
+        mat = get_material_settings("kilntest_ptfe", "pla")
         assert mat is not None
         assert mat.hotend == 200
 
-    def test_ender3_unknown_material(self) -> None:
-        mat = get_material_settings("ender3", "UNKNOWN_MATERIAL")
+    def test_unknown_material(self) -> None:
+        mat = get_material_settings("kilntest_ptfe", "UNKNOWN_MATERIAL")
         assert mat is None
 
-    def test_bambu_x1c_pa_cf(self) -> None:
-        """Bambu X1C supports high-temp materials like PA-CF."""
-        mat = get_material_settings("bambu_x1c", "PA-CF")
+    def test_enclosed_printer_pa_cf(self) -> None:
+        """An enclosed machine carries high-temp recipes like PA-CF."""
+        mat = get_material_settings("kilntest_enclosed", "PA-CF")
         assert mat is not None
-        assert mat.hotend == 280
+        assert mat.hotend == 290
         assert mat.bed == 100
 
-    def test_bambu_x1c_pc(self) -> None:
-        mat = get_material_settings("bambu_x1c", "PC")
+    def test_enclosed_printer_asa(self) -> None:
+        mat = get_material_settings("kilntest_enclosed", "ASA")
         assert mat is not None
-        assert mat.hotend == 270
+        assert mat.hotend == 260
 
-    def test_qidi_x_plus3_pc(self) -> None:
-        mat = get_material_settings("qidi_x_plus3", "PC")
-        assert mat is not None
-        assert mat.hotend == 280
-        assert mat.bed == 110
+    def test_a_recipe_the_row_does_not_carry_is_none(self) -> None:
+        mat = get_material_settings("kilntest_ptfe", "PA-CF")
+        assert mat is None
 
     def test_default_pla(self) -> None:
         mat = get_material_settings("default", "PLA")
@@ -389,8 +398,8 @@ class TestDiagnoseIssue:
         matches = diagnose_issue("ender3", "stringing")
         assert len(matches) >= 1
 
-    def test_ender3_nonexistent_symptom(self) -> None:
-        matches = diagnose_issue("ender3", "nonexistent symptom xyz123")
+    def test_nonexistent_symptom(self) -> None:
+        matches = diagnose_issue("kilntest_ptfe", "nonexistent symptom xyz123")
         assert matches == []
 
     def test_match_contains_required_keys(self) -> None:
@@ -425,7 +434,7 @@ class TestIntelToDict:
     """Tests for intel_to_dict() serialization."""
 
     def test_contains_all_fields(self) -> None:
-        intel = get_printer_intel("ender3")
+        intel = get_printer_intel("kilntest_ptfe")
         d = intel_to_dict(intel)
         expected_keys = [
             "id", "display_name", "firmware", "extruder_type",
@@ -436,7 +445,7 @@ class TestIntelToDict:
             assert key in d, f"Missing key '{key}' in serialized dict"
 
     def test_materials_are_dicts(self) -> None:
-        intel = get_printer_intel("ender3")
+        intel = get_printer_intel("kilntest_ptfe")
         d = intel_to_dict(intel)
         assert isinstance(d["materials"], dict)
         for _mat_name, mat_data in d["materials"].items():
@@ -446,7 +455,7 @@ class TestIntelToDict:
             assert "notes" in mat_data
 
     def test_failure_modes_are_dicts(self) -> None:
-        intel = get_printer_intel("ender3")
+        intel = get_printer_intel("kilntest_ptfe")
         d = intel_to_dict(intel)
         assert isinstance(d["failure_modes"], list)
         for fm in d["failure_modes"]:
@@ -455,13 +464,13 @@ class TestIntelToDict:
             assert "fix" in fm
 
     def test_is_json_serializable(self) -> None:
-        intel = get_printer_intel("bambu_x1c")
+        intel = get_printer_intel("kilntest_enclosed")
         d = intel_to_dict(intel)
         serialized = json.dumps(d)
         assert isinstance(serialized, str)
 
     def test_roundtrip_id_matches(self) -> None:
-        intel = get_printer_intel("ender3")
+        intel = get_printer_intel("kilntest_ptfe")
         d = intel_to_dict(intel)
         assert d["id"] == intel.id
         assert d["firmware"] == intel.firmware
@@ -471,9 +480,18 @@ class TestIntelToDict:
 # JSON data file validity
 # ===================================================================
 
-class TestPrinterIntelligenceJSON:
-    """Tests for the bundled printer_intelligence.json data file."""
+def _full_rows(raw: dict) -> dict[str, dict]:
+    """The rows the loader builds a profile from: the generic row and, in
+    the session copy this suite reads, the synthetic fixture rows."""
+    return {k: v for k, v in raw.items() if not k.startswith("_") and "max_hotend_temp" in v}
 
+
+class TestPrinterIntelligenceJSON:
+    """Tests for the bundled printer_intelligence.json data file (the
+    session's copy, with the synthetic rows flattened in)."""
+
+    #: What a row with a spec sheet carries.  A roster row carries only
+    #: ``PUBLIC_PROFILE_FIELDS``; its spec sheet is served.
     REQUIRED_PROFILE_FIELDS = [
         "display_name", "firmware", "extruder_type", "hotend_type",
     ]
@@ -483,22 +501,34 @@ class TestPrinterIntelligenceJSON:
         raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
         assert isinstance(raw, dict)
 
-    def test_all_profiles_have_required_fields(self) -> None:
+    def test_rows_with_a_spec_sheet_have_required_fields(self) -> None:
         raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
-        for key, data in raw.items():
-            if key == "_meta":
-                continue
+        assert "default" in _full_rows(raw)
+        for key, data in _full_rows(raw).items():
             for req_field in self.REQUIRED_PROFILE_FIELDS:
                 assert req_field in data, (
                     f"Profile '{key}' missing required field '{req_field}'"
                 )
 
-    def test_all_profiles_have_the_exact_public_floor(self) -> None:
+    def test_every_roster_row_has_the_exact_public_floor(self) -> None:
+        """A roster row is a name and the motion block, nothing served."""
         raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
-        for key, data in raw.items():
-            if key == "_meta":
-                continue
+        roster = {k: v for k, v in raw.items() if not k.startswith("_") and k not in _full_rows(raw)}
+        assert roster, "expected roster rows"
+        for key, data in roster.items():
             assert set(data) == PUBLIC_PROFILE_FIELDS, key
+
+    def test_the_generic_row_carries_the_floor_whole(self) -> None:
+        """The one bundled row every install holds with a spec sheet in it."""
+        raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
+        default = raw["default"]
+        # Every roster field but the rated bed: the generic row's envelope is
+        # its own floor (build_volume_mm), never a printer's marketed bed,
+        # and bed_fit answers no bed for "default" by name.
+        assert set(default) >= PUBLIC_PROFILE_FIELDS - {"rated_build_volume_mm"}
+        assert "rated_build_volume_mm" not in default
+        for field in ("max_hotend_temp", "max_bed_temp", "build_volume_mm", "materials", "hotend_type"):
+            assert field in default, field
 
     def test_private_hardware_shape_and_schema_ids_are_absent(self) -> None:
         raw_text = _DATA_FILE.read_text(encoding="utf-8")
@@ -524,19 +554,15 @@ class TestPrinterIntelligenceJSON:
             and ("hardware" in key.lower() or "capability" in key.lower())
         }
 
-    def test_all_profiles_have_materials_dict(self) -> None:
+    def test_rows_with_a_spec_sheet_have_materials_dict(self) -> None:
         raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
-        for key, data in raw.items():
-            if key == "_meta":
-                continue
+        for key, data in _full_rows(raw).items():
             assert "materials" in data, f"Profile '{key}' missing 'materials'"
             assert isinstance(data["materials"], dict)
 
     def test_all_material_entries_have_required_keys(self) -> None:
         raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
-        for key, data in raw.items():
-            if key == "_meta":
-                continue
+        for key, data in _full_rows(raw).items():
             for mat_name, mat_data in data.get("materials", {}).items():
                 assert "hotend" in mat_data, (
                     f"Profile '{key}' material '{mat_name}' missing 'hotend'"
@@ -606,7 +632,7 @@ class TestPrinterIntelStructure:
         assert len(intel.quirks) > 0
 
     def test_quirks_are_strings(self) -> None:
-        intel = get_printer_intel("ender3")
+        intel = get_printer_intel("kilntest_ptfe")
         for q in intel.quirks:
             assert isinstance(q, str)
 
@@ -617,19 +643,19 @@ class TestPrinterIntelStructure:
         assert len(intel.calibration) > 0
 
     def test_calibration_values_are_strings(self) -> None:
-        intel = get_printer_intel("ender3")
+        intel = get_printer_intel("kilntest_ptfe")
         for key, val in intel.calibration.items():
             assert isinstance(key, str)
             assert isinstance(val, str)
 
     def test_failure_modes_is_list_of_failure_mode(self) -> None:
-        intel = get_printer_intel("ender3")
+        intel = get_printer_intel("kilntest_ptfe")
         assert isinstance(intel.failure_modes, list)
         for fm in intel.failure_modes:
             assert isinstance(fm, FailureMode)
 
     def test_materials_is_dict_of_material_profile(self) -> None:
-        intel = get_printer_intel("ender3")
+        intel = get_printer_intel("kilntest_ptfe")
         assert isinstance(intel.materials, dict)
         for mat_name, mat in intel.materials.items():
             assert isinstance(mat_name, str)
@@ -640,6 +666,6 @@ class TestPrinterIntelStructure:
         assert intel.quirks == []
 
     def test_frozen(self) -> None:
-        intel = get_printer_intel("ender3")
+        intel = get_printer_intel("kilntest_ptfe")
         with pytest.raises(FrozenInstanceError):
             intel.firmware = "klipper"  # type: ignore[misc]

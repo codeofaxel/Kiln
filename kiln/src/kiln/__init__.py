@@ -90,13 +90,28 @@ def parse_float_env(name: str, default: float) -> float:
 # kiln-pro registers shimmed submodules (e.g. kiln.licensing) in
 # sys.modules but doesn't set them as attributes on this package.
 # __getattr__ bridges that gap so attribute-based traversal works.
+#
+# A submodule another thread is still importing is in sys.modules too, half
+# built.  ``from kiln import x`` asks this hook first, so handing that module
+# out skipped the wait an import statement makes: on a cold start, slices run
+# in parallel read the melt-rate bridge before its functions existed, and each
+# one quietly lost its material settings.  Such a module goes back through the
+# import system, which waits for the other thread and accepts a half-built
+# module only where waiting would deadlock, as an import statement does.
 # ---------------------------------------------------------------------------
 
 
 def __getattr__(name: str):
     fqn = f"{__name__}.{name}"
     mod = _sys.modules.get(fqn)
-    if mod is not None:
-        setattr(_sys.modules[__name__], name, mod)
-        return mod
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    if mod is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    if getattr(getattr(mod, "__spec__", None), "_initializing", False):
+        __import__(fqn)
+        if fqn not in _sys.modules:
+            # The other thread's import failed: run it here, so its error
+            # is the one raised.
+            __import__(fqn)
+        mod = _sys.modules[fqn]
+    setattr(_sys.modules[__name__], name, mod)
+    return mod

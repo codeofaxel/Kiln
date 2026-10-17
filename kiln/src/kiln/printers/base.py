@@ -23,6 +23,7 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, ClassVar
 
+from kiln.printer_backends import need_where
 from kiln.printers.command_verdict import CommandVerdict
 
 logger = logging.getLogger(__name__)
@@ -108,6 +109,40 @@ class PrinterError(Exception):
     def __init__(self, message: str, *, cause: Exception | None = None) -> None:
         super().__init__(message)
         self.cause = cause
+
+
+class UnsupportedCommand(PrinterError):
+    """The firmware answered a command with "I do not know that one".
+
+    Marlin does not refuse an unknown command with an error: it prints an
+    ``echo:Unknown command`` line and then a plain ``ok``, so a reader that
+    waits for ``ok`` takes the refusal for success.  An adapter that sees that
+    line raises this instead, carrying the command, so the caller can choose
+    what to do about a printer that cannot do the thing.  A subclass of
+    :class:`PrinterError` so every existing caller still renders it as a
+    message.
+    """
+
+    def __init__(self, command: str, *, cause: Exception | None = None) -> None:
+        super().__init__(f"The printer's firmware does not know the command {command!r}.", cause=cause)
+        self.command = command
+
+
+class WaitingForUser(PrinterError):
+    """The printer is parked waiting for a person, and reads no commands.
+
+    A pause the G-code file asked for stops the firmware's command queue
+    until someone clicks on the printer; the only sign on the wire is the
+    keepalive line it prints meanwhile.  Raised by an adapter that sees that
+    line, instead of letting the silence read as a printer that is gone.
+    """
+
+    def __init__(self, command: str = "", *, cause: Exception | None = None) -> None:
+        super().__init__(
+            "The printer is waiting for a click on the printer itself and is not reading commands.",
+            cause=cause,
+        )
+        self.command = command
 
 
 class PrinterEngagementError(PrinterError):
@@ -895,6 +930,80 @@ class NozzleSetting:
 
 
 @dataclass(frozen=True)
+class MachineIdentity:
+    """An id the machine reports for ITSELF, read off the printer at setup.
+
+    Kiln saves printers under a name the person chooses and reaches them by
+    an address the router hands out, so an address alone cannot say whether
+    the printer answering today is the one saved yesterday.  This record can:
+    a saved id that the machine at the new address reports again is the same
+    machine, and one it does not is a different one.  Kiln stores it beside
+    the saved printer and compares it on every save under a name in use.
+
+    :param value: The id exactly as the machine reports it (compared
+        case-insensitively).  Opaque: never parsed for a model or a date.
+    :param source: The endpoint and field it was read from, e.g.
+        ``"prusalink_info.serial"``.  Two ids are comparable only when their
+        sources agree, so a backend that starts reading a different field
+        changes nothing about printers saved before.
+    :param kind: What the id names.  ``"printer_serial"``: the printer's own
+        serial.  ``"board_id"``: the controller board's unique id -- it
+        travels with the board, not the frame.  ``"host_board_serial"``: the
+        serial of the computer running the printer's software (a Raspberry
+        Pi running Klipper); it identifies that computer, which a person can
+        move from one printer to another, so a match says "the same host",
+        not "the same frame".
+    """
+
+    value: str
+    source: str
+    kind: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {"value": self.value, "source": self.source, "kind": self.kind}
+
+
+#: How long a setup door waits for :meth:`PrinterAdapter.read_machine_identity`.
+#: The printer has just answered a state request on the same channel, so a
+#: healthy read returns well inside this; a slow one is given up on rather
+#: than holding setup, and the save goes ahead without an id.
+MACHINE_IDENTITY_READ_SECONDS: float = 5.0
+
+
+def read_machine_identity_bounded(
+    read: Callable[[], MachineIdentity | None],
+    *,
+    timeout_seconds: float = MACHINE_IDENTITY_READ_SECONDS,
+) -> MachineIdentity | None:
+    """Run *read* with a time limit; ``None`` when it fails or runs over.
+
+    *read* is normally an adapter's :meth:`PrinterAdapter.read_machine_identity`.
+    It runs on its own thread so an adapter whose request helper retries at
+    its own pace cannot hold a setup door past *timeout_seconds*; a read that
+    outlives the wait is abandoned, and nothing it returns later is used.
+    Never raises: a setup that could not learn the id is still a setup.
+    """
+    box: list[MachineIdentity | None] = [None]
+
+    def _run() -> None:
+        try:
+            found = read()
+        except Exception:
+            logger.debug("machine identity read failed", exc_info=True)
+            return
+        if isinstance(found, MachineIdentity) and found.value.strip():
+            box[0] = found
+
+    worker = threading.Thread(target=_run, name="kiln-machine-identity", daemon=True)
+    worker.start()
+    worker.join(timeout_seconds)
+    if worker.is_alive():
+        logger.debug("machine identity read gave up after %.1fs", timeout_seconds)
+        return None
+    return box[0]
+
+
+@dataclass(frozen=True)
 class NozzleClumpingDetection:
     """Whether a printer's own "nozzle clumping detection" switch is on, read
     off the machine.
@@ -1479,6 +1588,21 @@ class JobProgress:
         return data
 
 
+def hardware_stop_waiting(adapter: Any) -> dict[str, Any] | None:
+    """The stop *adapter*'s printer is paused at, waiting for hardware, or ``None``.
+
+    A function rather than a method, so a stand-in that borrows the resume
+    template keeps working.  Fails OPEN like every resume check: an error here
+    never stands between a person and their own print.
+    """
+    try:
+        from kiln.hardware_stops import stop_awaiting_hands
+
+        return stop_awaiting_hands(adapter)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def read_status(adapter: Any) -> tuple[PrinterState, JobProgress]:
     """Read both halves of a printer's status and make them agree.
 
@@ -1588,6 +1712,10 @@ CAUSE_POWERED_OFF = "powered_off_or_off_network"
 CAUSE_WRONG_ACCESS_CODE = "wrong_access_code"
 CAUSE_CONNECTION_LIMIT = "connection_limit"
 CAUSE_SILENT = "reachable_but_silent"
+# Not a read failure: the printer is reachable and paused, waiting for a
+# person to click on it.  Rides the same cause/remedy pair so a poller that
+# already shows those two fields shows this without a new one.
+CAUSE_WAITING_FOR_USER = "waiting_for_user"
 
 
 def probe_tcp(host: str, port: int, timeout: float = 2.0) -> bool | None:
@@ -1686,8 +1814,8 @@ def diagnose_read_failure(
             state=PrinterStatus.UNAUTHORIZED,
             cause=CAUSE_WRONG_ACCESS_CODE,
             remedy=(
-                "The printer answered and refused Kiln's access code. On the "
-                "printer's screen go to Settings → Network, turn LAN Only "
+                "The printer answered and refused Kiln's access code. Find "
+                f"it {need_where('bambu', 'access_code')}, turn LAN Only "
                 "Mode off and on, then Developer Mode off and on, and copy "
                 "the NEW code — a restarted printer issues a fresh one even "
                 "though it looks the same. Then run "
@@ -1824,10 +1952,47 @@ class PrintResult:
     success: bool
     message: str
     job_id: str | None = None
+    #: True when Kiln turned the operation away itself and sent the printer
+    #: nothing: the start template's safety gate or its sign-off backstop
+    #: refused.  Distinct from a command that WAS sent and then judged to
+    #: have failed, because the two need opposite handling downstream: a
+    #: sent command's failure is doubted until the printer confirms it (the
+    #: printer may be running the job), while a refusal before sending is
+    #: certain -- there is no job, on any reading of the printer.
+    refused_before_send: bool = False
 
     def to_dict(self) -> dict[str, Any]:
-        """Return a JSON-serialisable dictionary."""
-        return asdict(self)
+        """Return a JSON-serialisable dictionary.  ``refused_before_send``
+        is present only when it is true, so every other result keeps the
+        three keys it has always had."""
+        out = asdict(self)
+        if not self.refused_before_send:
+            out.pop("refused_before_send", None)
+        return out
+
+
+@dataclass
+class HardwareStopRefusal(PrintResult):
+    """A resume refused because the printer is waiting at a hardware stop.
+
+    Carries the stop itself (what goes in, how), so every door that resumes
+    can show the person what they are being asked to confirm.
+    """
+
+    code: str = "HARDWARE_NOT_CONFIRMED"
+    hardware: dict[str, Any] | None = None
+
+
+@dataclass
+class CodedPrintResult(PrintResult):
+    """A print-control result carrying a stable code an agent can branch on.
+
+    For the outcomes the person must hear about in words AND the caller must
+    be able to recognise without parsing them: a cancel the firmware could
+    not carry out, a resume only the printer's own controls can perform.
+    """
+
+    code: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -2262,6 +2427,20 @@ class PrinterInfo:
 def _make_engagement_gated(action: str, original):
     """Wrap *original* so it consults the single-printer engagement first."""
     import functools
+    import inspect
+
+    if inspect.iscoroutinefunction(original):
+        @functools.wraps(original)
+        async def _gated_async(self, *args, **kwargs):
+            from kiln.printers.engagement import check_command
+
+            verdict = check_command(self, action)
+            if verdict is not None:
+                raise PrinterEngagementError(verdict)
+            return await original(self, *args, **kwargs)
+
+        _gated_async._kiln_engagement_wrapped = True  # type: ignore[attr-defined]
+        return _gated_async
 
     @functools.wraps(original)
     def _gated(self, *args, **kwargs):
@@ -2297,9 +2476,19 @@ def _install_engagement_gate(cls: type, *, own_methods_only: bool) -> None:
     overriding one is how the base safety gate gets bypassed.  Gating must not
     cost the suite its ability to see that.
     """
-    from kiln.printers.engagement import GATED_ACTIONS
+    import inspect
 
-    for action in sorted(GATED_ACTIONS):
+    from kiln.printers.engagement import is_gated
+
+    names = cls.__dict__ if own_methods_only else dir(cls)
+    for action in sorted(names):
+        if not is_gated(action):
+            continue
+        # Only plain methods.  A property, staticmethod or classmethod is not
+        # a command sent to one machine, and wrapping one would break it.
+        raw = inspect.getattr_static(cls, action, None)
+        if not inspect.isfunction(raw):
+            continue
         original = cls.__dict__.get(action) if own_methods_only else getattr(cls, action, None)
         if original is None or not callable(original):
             continue
@@ -2311,6 +2500,95 @@ def _install_engagement_gate(cls: type, *, own_methods_only: bool) -> None:
             # implement it.  The subclass that implements it gets gated instead.
             continue
         setattr(cls, action, _make_engagement_gated(action, original))
+
+
+def _wrap_cancel_gives_back(cls: type) -> None:
+    """Wrap *cls*'s own ``cancel_print`` so a cancelled print gives filament back.
+
+    Called from ``PrinterAdapter.__init_subclass__``.  Before the stop: when
+    spools were charged for the print on this printer, one job read for how
+    far it has got, because afterwards the printer no longer says.  A
+    printer nothing was charged for is asked nothing; that is decided from
+    the local database.  After a stop that succeeded: the unprinted share
+    goes back (:func:`kiln.spool_usage.after_cancel`).  Neither half can
+    change or fail the stop.
+
+    An emergency stop does not come through here and keeps its whole
+    charge, except on a backend whose only stop IS its cancel.
+    """
+    original = cls.__dict__.get("cancel_print")
+    if (
+        original is None
+        or not callable(original)
+        or getattr(original, "_kiln_spool_wrapped", False)
+        or getattr(original, "__isabstractmethod__", False)
+    ):
+        return
+    import functools
+
+    @functools.wraps(original)
+    def _cancel_and_give_back(self, *args, **kwargs):
+        reading = None
+        try:
+            from kiln.spool_usage import before_cancel
+
+            reading = before_cancel(self)
+        except Exception:  # noqa: BLE001 — bookkeeping never touches a stop
+            import logging as _logging
+
+            _logging.getLogger(__name__).debug(
+                "spool charge not read before a cancel", exc_info=True
+            )
+        result = original(self, *args, **kwargs)
+        if reading is not None and getattr(result, "success", False):
+            try:
+                from kiln.spool_usage import after_cancel
+
+                after_cancel(reading)
+            except Exception:  # noqa: BLE001 — bookkeeping never changes a result
+                import logging as _logging
+
+                _logging.getLogger(__name__).debug(
+                    "spool give-back failed", exc_info=True
+                )
+        return result
+
+    _cancel_and_give_back._kiln_spool_wrapped = True  # type: ignore[attr-defined]
+    cls.cancel_print = _cancel_and_give_back
+
+
+def _wrap_emergency_reads_nothing(cls: type) -> None:
+    """Wrap *cls*'s own ``emergency_stop`` so no spool bookkeeping sits in front of it.
+
+    On a backend whose emergency stop is its cancel, the cancel wrap above
+    would read the print's progress first.  Inside this wrap it reads
+    nothing (:class:`kiln.spool_usage.urgent_stop`): the stop goes out as it
+    always did and the spools keep their whole charge.
+    """
+    original = cls.__dict__.get("emergency_stop")
+    if (
+        original is None
+        or not callable(original)
+        or getattr(original, "_kiln_spool_urgent", False)
+        or getattr(original, "__isabstractmethod__", False)
+    ):
+        return
+    import functools
+
+    @functools.wraps(original)
+    def _emergency_stop(self, *args, **kwargs):
+        try:
+            from kiln.spool_usage import urgent_stop
+
+            guard = urgent_stop()
+        except Exception:  # noqa: BLE001 — bookkeeping never touches a stop
+            return original(self, *args, **kwargs)
+        with guard:
+            return original(self, *args, **kwargs)
+
+    _emergency_stop._kiln_spool_urgent = True  # type: ignore[attr-defined]
+    cls.emergency_stop = _emergency_stop
+
 
 # ---------------------------------------------------------------------------
 # A camera the user supplies — frame plumbing only
@@ -2407,6 +2685,34 @@ class ExternalCamera:
             "stream_url": redact_url_credentials(self.stream_url),
             "note": EXTERNAL_CAMERA_NOTE,
         }
+
+
+#: The most one address is waited on during a camera handshake, and the
+#: most the whole handshake may take: setup runs it after the printer has
+#: answered, and a camera must never make setup feel slow.
+CAMERA_HANDSHAKE_ADDRESS_TIMEOUT = 2.0
+CAMERA_HANDSHAKE_BUDGET = 5.0
+
+
+@dataclass(frozen=True)
+class CameraHandshake:
+    """Whether a printer's camera answers, learned at setup without a frame.
+
+    ``answered`` is ``True`` when something answered as a camera at
+    ``where``, ``False`` when it was asked and did not, and ``None`` when
+    Kiln has no way to ask this printer's camera without starting it (or
+    knows no address to ask).  ``where`` is a probe id — several joined by
+    commas when each was asked — or ``"external"`` for the camera the user
+    supplied; never an address.  ``detail`` says it in a sentence a person
+    can act on.  No frame, and nothing that spells an address, lives here.
+    """
+
+    answered: bool | None
+    where: str
+    detail: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 def find_ffmpeg() -> str | None:
@@ -2784,6 +3090,17 @@ class PrinterAdapter(ABC):
             cls.get_state = _observed_get_state
 
         # ------------------------------------------------------------------
+        # Spool give-back: a print Kiln cancels returns the filament it had
+        # not printed to the spools that were charged for it at the start
+        # (kiln.spool_usage).  The same engine-not-instance shape: every
+        # backend defines its own cancel_print and every door that cancels
+        # calls it.  Installed BEFORE the engagement gate below, so that
+        # gate wraps it and a refused cancel never reaches it.
+        # ------------------------------------------------------------------
+        _wrap_cancel_gives_back(cls)
+        _wrap_emergency_reads_nothing(cls)
+
+        # ------------------------------------------------------------------
         # Single-printer engagement: every printer-directed command asks
         # whether Kiln is already working with a DIFFERENT machine.  Same
         # engine-not-instance shape as the two wraps above, and the same
@@ -2810,10 +3127,23 @@ class PrinterAdapter(ABC):
         When set, :meth:`_validate_temp` will use the profile's limits
         instead of the caller-supplied default.
 
+        Every setup door ends here -- the boot-time printer, a config
+        entry, ``register_printer`` -- so this is where the printer's
+        catalogue record is fetched once (``safety_profiles.warm_profile``),
+        and where an install that could not get it is handed its one
+        sentence, which the door that spoke to the person takes with
+        ``safety_profiles.pending_limits_nudge``.  Never raises for it.
+
         Args:
             profile_id: Profile identifier (e.g. ``"ender3"``, ``"bambu_x1c"``).
         """
         self._safety_profile_id = profile_id
+        try:
+            from kiln.safety_profiles import warm_profile
+
+            warm_profile(profile_id)
+        except Exception:  # noqa: BLE001 -- a setup never fails over the record
+            logger.debug("printer record not warmed at setup", exc_info=True)
 
     # -- print-duration semantics ----------------------------------------
     #
@@ -3167,6 +3497,7 @@ class PrinterAdapter(ABC):
             return PrintResult(
                 success=False,
                 message=reason + (" " + hint if hint else ""),
+                refused_before_send=True,
             )
         # The consent backstop.  An adapter a door handed out (a printer
         # registry, the CLI) starts nothing no clearance covers: the gate
@@ -3184,7 +3515,7 @@ class PrinterAdapter(ABC):
             )
             unsigned = None
         if unsigned is not None:
-            return PrintResult(success=False, message=unsigned["reason"])
+            return PrintResult(success=False, message=unsigned["reason"], refused_before_send=True)
         result = self._start_print_impl(file_name, **kwargs)
         if getattr(result, "success", False) and not is_resume_mode_3mf(file_name):
             # A resume 3MF continues the print that's already running (a
@@ -3249,6 +3580,21 @@ class PrinterAdapter(ABC):
                 _logging.getLogger(__name__).debug(
                     "monitor-twin print-start note failed", exc_info=True
                 )
+            # A job carrying a hardware plan (a nut or a magnet that goes in
+            # during a pause) is filed against this machine here, so status,
+            # watch and resume can say when each stop comes and what goes in.
+            # A start without one clears the last print's.  See
+            # kiln.hardware_stops.
+            try:
+                from kiln.hardware_stops import note_print_started as _note_hardware_plan
+
+                _note_hardware_plan(self, file_name, kwargs)
+            except Exception:  # noqa: BLE001 — the plan never affects a print
+                import logging as _logging
+
+                _logging.getLogger(__name__).debug(
+                    "hardware plan print-start note failed", exc_info=True
+                )
             # The plate now holds a part.  Recorded here, at the one door
             # every print passes through, with the file's height when Kiln
             # can read it, so home_axes and park_head can refuse a travel
@@ -3298,6 +3644,22 @@ class PrinterAdapter(ABC):
 
                 _logging.getLogger(__name__).debug(
                     "cutter count recording failed", exc_info=True
+                )
+            # The spools on record count down at START too: the sliced file
+            # says how many grams each filament uses, and this is the one
+            # event Kiln cannot miss.  The kwargs go along because they
+            # carry the slot each filament prints from.  Costs the start one
+            # look at the local spool list; the file and the printer are
+            # read on a thread of their own.  Never blocks a print.
+            try:
+                from kiln.spool_usage import charge_print
+
+                charge_print(self, file_name, kwargs)
+            except Exception:  # noqa: BLE001 — spool bookkeeping never blocks a print
+                import logging as _logging
+
+                _logging.getLogger(__name__).debug(
+                    "spool count not started", exc_info=True
                 )
             # Open the outcome row NOW, while we can still see the print.
             # The start is the one event Kiln is guaranteed to witness (it
@@ -3353,6 +3715,19 @@ class PrinterAdapter(ABC):
             # hook does -- a watchdog waiting for the one a previous print
             # left behind to stop -- delays the stamps and the pending row.
             _fire_print_started_hooks(self, file_name)
+        elif getattr(result, "success", False):
+            # A resume file finishes the print a cancel interrupted, so what
+            # that cancel gave back to the spools is being used after all.
+            try:
+                from kiln.spool_usage import resume_print as _spools_resume
+
+                _spools_resume(self)
+            except Exception:  # noqa: BLE001 — spool bookkeeping never blocks a print
+                import logging as _logging
+
+                _logging.getLogger(__name__).debug(
+                    "spool charge not restored on resume", exc_info=True
+                )
         return result
 
     @abstractmethod
@@ -3388,7 +3763,7 @@ class PrinterAdapter(ABC):
             PrinterError: If the printer cannot pause.
         """
 
-    def resume_print(self, *, force: bool = False) -> PrintResult:
+    def resume_print(self, *, force: bool = False, hardware_confirmed: bool = False) -> PrintResult:
         """Resume a previously paused print job, and CHECK that it took.
 
         TEMPLATE METHOD — adapters must NOT override this; they implement
@@ -3432,14 +3807,32 @@ class PrinterAdapter(ABC):
         detector is for, which is why the success message declines to claim
         the print is progressing and says how to find out.
 
+        **The hardware stop.**  A print paused at a stop its plan wrote for a
+        nut, a magnet or a bearing (:mod:`kiln.hardware_stops`) is waiting for
+        a person's hands, not for a command.  It resumes only with
+        *hardware_confirmed* -- the person's word that every piece is in and
+        sits level with or below the top of the print -- and *force* does not
+        stand in for that word: it answers a different question.  Anything
+        uncertain about the stop lets the resume go on.
+
         Raises:
             PrinterError: If the printer cannot resume.
         """
+        waiting = hardware_stop_waiting(self)
+        if waiting is not None and not hardware_confirmed:
+            from kiln.hardware_stops import refusal_message
+
+            return HardwareStopRefusal(success=False, message=refusal_message(waiting), hardware=waiting)
         if not force:
             refusal = self._not_paused_refusal()
             if refusal is not None:
                 return refusal
-        return self._verify_resume_took(self._resume_print_impl())
+        result = self._verify_resume_took(self._resume_print_impl())
+        if waiting is not None and result.success:
+            from kiln.hardware_stops import note_resumed
+
+            note_resumed(self, waiting)
+        return result
 
     def _not_paused_refusal(self) -> PrintResult | None:
         """The refusal to return before resuming, or ``None`` to go ahead.
@@ -3708,23 +4101,33 @@ class PrinterAdapter(ABC):
         Raises:
             PrinterError: If the temperature is out of safe range.
         """
-        # Use per-printer profile limits when available (defense-in-depth).
-        if self._safety_profile_id:
-            try:
-                from kiln.safety_profiles import get_profile  # noqa: E402
+        # The printer's own ceiling tightens the adapter's.  With no model
+        # bound, that ceiling is the generic profile's -- the least capable
+        # machine Kiln describes -- never the adapter's literal, which is
+        # the loosest hotend its protocol can drive and says nothing about
+        # the one on the bench.
+        try:
+            from kiln.safety_profiles import resolve_limits  # noqa: E402
 
-                profile = get_profile(self._safety_profile_id)
-                lower_heater = heater.lower()
-                if lower_heater in ("hotend", "tool"):
-                    max_temp = min(max_temp, profile.max_hotend_temp)
-                elif lower_heater == "bed":
-                    max_temp = min(max_temp, profile.max_bed_temp)
-            except (KeyError, ImportError):
-                pass  # fall back to caller-supplied max_temp
+            max_hotend, max_bed = resolve_limits(self._safety_profile_id or None)
+            lower_heater = heater.lower()
+            if lower_heater in ("hotend", "tool"):
+                max_temp = min(max_temp, max_hotend)
+            elif lower_heater == "bed":
+                max_temp = min(max_temp, max_bed)
+        except ImportError:
+            pass  # fall back to caller-supplied max_temp
 
         if target < 0:
             raise PrinterError(f"{heater} temperature {target}°C is negative -- must be >= 0.")
         if target > max_temp:
+            if not self._safety_profile_id:
+                raise PrinterError(
+                    f"{heater} temperature {target}°C exceeds safety limit ({max_temp:g}°C) -- the generic "
+                    "floor, because Kiln has not been told this printer's model. Set printer_model to a "
+                    "printer Kiln knows, or have the maker's limits confirmed by the person "
+                    "(add_safety_profile)."
+                )
             raise PrinterError(f"{heater} temperature {target}°C exceeds safety limit ({max_temp}°C).")
 
     # -- filament handling (load / unload / purge) -----------------------
@@ -4623,6 +5026,39 @@ class PrinterAdapter(ABC):
             return None
         config = reader()
         return None if config is None else ("klipper_config", config)
+
+    def read_machine_limits(self) -> dict[str, Any] | None:
+        """The limits this machine states about itself, as a proposal, or ``None``.
+
+        The shape :func:`kiln.machine_limits.limits_from_klipper_config`
+        returns -- the profile ``add_safety_profile`` takes, the config
+        line each number came from, and what the config left unstated.
+        Read fresh on every call, never from the motion cache: a person is
+        about to confirm these numbers, so they are the file as it is now.
+        Only a backend that exposes Moonraker's ``configfile`` object can
+        answer; every other backend answers ``None``, and so does a Klipper
+        machine that could not be asked.  Nothing is written anywhere.
+
+        A setup read, so the one-printer rule does not cover it
+        (``engagement.UNGATED_METHODS``): a ceiling is a fact about the
+        model for a person to confirm, not a look at what the machine is
+        doing.  The config it asks for (``get_printer_config``) stays gated
+        on its own, so it is read here as Kiln's own read.
+        """
+        reader = getattr(self, "get_printer_config", None)
+        if reader is None:
+            return None
+        from kiln.printers.engagement import internal_read
+
+        try:
+            with internal_read():
+                config = reader()
+        except Exception as exc:  # noqa: BLE001 -- a limit Kiln cannot read is one it does not propose
+            logger.debug("limits: %s could not read its config: %s", self.name, exc)
+            return None
+        from kiln.machine_limits import limits_from_klipper_config
+
+        return limits_from_klipper_config(config)
 
     def _count_motion_refusal(self, code: str, reason: str) -> None:
         """One tally per refusal, keyed by model, code and why -- the only trace it leaves.
@@ -5714,12 +6150,71 @@ class PrinterAdapter(ABC):
 
         Each is a :class:`kiln.camera_check.CameraProbe` on the printer's own
         host, carrying the basis for trying it, with an id from
-        :attr:`camera_check_ids`.  Called only for a check the user asked
-        for, and it may contact the printer.  A camera the user registered
-        does not change the answer: the check is about the printer's own
-        camera.  The default is no addresses.
+        :attr:`camera_check_ids`.  Called for a check the user asked for,
+        and by the setup handshake (:meth:`camera_handshake`); it may
+        contact the printer, but an adapter whose probes switch anything on
+        the printer ON overrides :meth:`_own_camera_handshake` to refuse the
+        handshake instead.  A camera the user registered does not change
+        the answer: the check is about the printer's own camera.  The
+        default is no addresses.
         """
         return []
+
+    # -- camera handshake (setup) ----------------------------------------
+
+    def camera_handshake(self) -> CameraHandshake:
+        """Whether this printer's camera answers, learned without a frame.
+
+        Run once at setup, after the printer itself has answered.  A camera
+        the user supplied is asked in place of the printer's own: it is the
+        one they stated, and it is what Kiln would read.  Otherwise the
+        printer's own camera is asked through :meth:`_own_camera_handshake`.
+        Bounded to :data:`CAMERA_HANDSHAKE_BUDGET` seconds in all; never
+        raises for anything the camera does.
+
+        Setting a printer up is free at every tier, so the one-printer rule
+        does not cover this (``engagement.UNGATED_METHODS``), and the
+        addresses it asks the printer for are read as part of the setup:
+        :meth:`camera_probes` stays gated for the camera check a person asks
+        for later, which is a look at the machine, not a setup.
+        """
+        from kiln.camera_check import handshake_external_camera
+        from kiln.printers.engagement import internal_read
+
+        camera = self._external_camera
+        if camera is not None:
+            return handshake_external_camera(
+                camera, timeout=min(CAMERA_HANDSHAKE_ADDRESS_TIMEOUT, CAMERA_HANDSHAKE_BUDGET)
+            )
+        with internal_read():
+            return self._own_camera_handshake()
+
+    def _own_camera_handshake(self) -> CameraHandshake:
+        """The handshake for the printer's own camera.
+
+        The default asks each :meth:`camera_probes` address in turn, headers
+        only, until one answers as a camera.  A type that declares no probe
+        ids answers ``None`` at once, with no socket opened.  An adapter whose
+        camera speaks its own protocol, or whose probes would switch video on,
+        overrides this: it must not start anything, and it returns
+        ``answered=None`` with the reason when it cannot ask without starting.
+        """
+        from kiln.camera_check import NO_CAMERA_HANDSHAKE_DETAIL, handshake_probes
+
+        if not self.camera_check_ids:
+            return CameraHandshake(None, "", NO_CAMERA_HANDSHAKE_DETAIL)
+        probes = self.camera_probes()
+        if not probes:
+            return CameraHandshake(
+                False,
+                ",".join(self.camera_check_ids),
+                "The printer named no camera address to ask.",
+            )
+        return handshake_probes(
+            probes,
+            budget=CAMERA_HANDSHAKE_BUDGET,
+            address_timeout=CAMERA_HANDSHAKE_ADDRESS_TIMEOUT,
+        )
 
     # -- a camera the user supplied ------------------------------------
     #
@@ -5768,6 +6263,22 @@ class PrinterAdapter(ABC):
         return self._external_camera is not None or bool(
             getattr(self.capabilities, "can_snapshot", False)
         )
+
+    #: Whether every machine this backend drives leaves the factory with a
+    #: camera of its own.  ``True`` only where that is so; ``None`` where
+    #: the backend cannot say, because the camera -- if there is one -- is
+    #: whatever its owner plugged into the print server.  ``can_snapshot``
+    #: says a picture can be ASKED for; this says a camera is THERE.
+    camera_fitted_at_factory: bool | None = None
+
+    def camera_catalogue_model(self) -> str:
+        """The model Kiln's catalogue may be asked about for THIS machine's
+        camera: the declared model.  A backend overrides it where one
+        declared model can stand for machines that differ in their cameras,
+        and returns ``""`` for a machine it cannot place -- so the answer
+        about one machine is never given to the other.
+        """
+        return self.declared_printer_model()
 
     @property
     def snapshot_source(self) -> str | None:
@@ -5996,6 +6507,21 @@ class PrinterAdapter(ABC):
         is a different fact from "the machine agrees with anything" and must
         never be read as one.  Sends no command and changes nothing on the
         printer.
+        """
+        return None
+
+    def read_machine_identity(self) -> MachineIdentity | None:
+        """The id this machine reports for itself, or ``None``.
+
+        Optional.  A backend whose protocol exposes a stable id for the
+        machine returns it as a :class:`MachineIdentity`; the default knows
+        none and says so.  ``None`` means "this backend cannot say" -- the
+        printer is then known by its address alone, and a later save under
+        its name at a new address is treated as a machine nothing can match.
+        Sends no command and changes nothing on the printer.  Called by the
+        setup doors after the connection check, through
+        :func:`read_machine_identity_bounded`, so a slow or failing read is
+        said and never fatal.
         """
         return None
 

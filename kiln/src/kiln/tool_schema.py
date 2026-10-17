@@ -459,7 +459,7 @@ def _load_tool_safety() -> dict:
         import os
 
         fallback = os.path.join(os.path.dirname(__file__), "data", "tool_safety.json")
-        with open(fallback) as fh:
+        with open(fallback, encoding="utf-8") as fh:
             raw = fh.read()
 
     data = json.loads(raw)

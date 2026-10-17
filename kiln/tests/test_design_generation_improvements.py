@@ -3506,244 +3506,6 @@ class TestEstimatePrintTimeEdgeCases:
 
 
 # ---------------------------------------------------------------------------
-# Geometry-level mesh repair: thicken, fillet, chamfer
-# ---------------------------------------------------------------------------
-
-
-class TestThickenWalls:
-    """Tests for thicken_walls() — geometry-level thin-wall fix."""
-
-    def test_basic_thickening(self, tmp_path):
-        from kiln.generation.validation import thicken_walls
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-        out = str(tmp_path / "thickened.stl")
-
-        result = thicken_walls(stl, amount_mm=0.5, output_path=out)
-
-        assert result["path"] == out
-        assert result["amount_mm"] == 0.5
-        assert result["triangle_count"] == 12
-        assert os.path.isfile(out)
-
-    def test_thickened_file_is_valid_stl(self, tmp_path):
-        from kiln.generation.validation import thicken_walls, validate_mesh
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-        out = str(tmp_path / "thickened.stl")
-
-        thicken_walls(stl, amount_mm=0.5, output_path=out)
-        val = validate_mesh(out)
-        assert val.valid
-        assert val.triangle_count == 12
-
-    def test_default_output_path(self, tmp_path):
-        from kiln.generation.validation import thicken_walls
-
-        stl = str(tmp_path / "part.stl")
-        _write_cube_stl(stl, 10.0)
-
-        result = thicken_walls(stl, amount_mm=0.3)
-        assert result["path"].endswith("_thickened.stl")
-        assert os.path.isfile(result["path"])
-
-    def test_thin_wall_detection(self, tmp_path):
-        from kiln.generation.validation import thicken_walls
-
-        stl = str(tmp_path / "thin.stl")
-        # A very thin slab (1mm thick) — should detect thin walls
-        _write_thin_wall_stl(stl, width=20.0, height=20.0, thickness=1.0)
-
-        result = thicken_walls(stl, amount_mm=0.5)
-        # Should have modified some vertices
-        assert result["vertices_modified"] > 0
-
-    def test_zero_amount_raises(self, tmp_path):
-        from kiln.generation.validation import thicken_walls
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-
-        with pytest.raises(ValueError, match="positive"):
-            thicken_walls(stl, amount_mm=0)
-
-    def test_negative_amount_raises(self, tmp_path):
-        from kiln.generation.validation import thicken_walls
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-
-        with pytest.raises(ValueError, match="positive"):
-            thicken_walls(stl, amount_mm=-1.0)
-
-    def test_empty_stl_raises(self, tmp_path):
-        from kiln.generation.validation import thicken_walls
-
-        stl = str(tmp_path / "empty.stl")
-        with open(stl, "wb") as fh:
-            fh.write(b"\x00" * 80)
-            fh.write(struct.pack("<I", 0))
-
-        with pytest.raises(ValueError, match="no geometry"):
-            thicken_walls(stl, amount_mm=0.5)
-
-
-class TestAddFillet:
-    """Tests for add_fillet() — round sharp edges."""
-
-    def test_basic_fillet(self, tmp_path):
-        from kiln.generation.validation import add_fillet
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-        out = str(tmp_path / "filleted.stl")
-
-        result = add_fillet(stl, radius_mm=1.0, output_path=out)
-
-        assert result["path"] == out
-        assert result["radius_mm"] == 1.0
-        assert result["angle_threshold_deg"] == 60.0
-        assert os.path.isfile(out)
-
-    def test_cube_has_sharp_edges(self, tmp_path):
-        from kiln.generation.validation import add_fillet
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-
-        result = add_fillet(stl, radius_mm=0.5)
-        # A cube has 12 edges, all at 90 degrees — should find sharp edges
-        assert result["sharp_edges_found"] > 0
-        assert result["fillet_triangles_added"] > 0
-        assert result["triangle_count"] > 12  # Original + fillet tris
-
-    def test_filleted_file_is_valid_stl(self, tmp_path):
-        from kiln.generation.validation import add_fillet, validate_mesh
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-        out = str(tmp_path / "filleted.stl")
-
-        add_fillet(stl, radius_mm=0.5, output_path=out)
-        val = validate_mesh(out)
-        assert val.valid
-        assert val.triangle_count > 12
-
-    def test_default_output_path(self, tmp_path):
-        from kiln.generation.validation import add_fillet
-
-        stl = str(tmp_path / "bracket.stl")
-        _write_cube_stl(stl, 10.0)
-
-        result = add_fillet(stl, radius_mm=1.0)
-        assert result["path"].endswith("_filleted.stl")
-
-    def test_zero_radius_raises(self, tmp_path):
-        from kiln.generation.validation import add_fillet
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-
-        with pytest.raises(ValueError, match="positive"):
-            add_fillet(stl, radius_mm=0)
-
-    def test_invalid_angle_raises(self, tmp_path):
-        from kiln.generation.validation import add_fillet
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-
-        with pytest.raises(ValueError, match="between 0 and 180"):
-            add_fillet(stl, angle_threshold_deg=0)
-
-        with pytest.raises(ValueError, match="between 0 and 180"):
-            add_fillet(stl, angle_threshold_deg=180)
-
-    def test_high_threshold_finds_no_edges(self, tmp_path):
-        from kiln.generation.validation import add_fillet
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-
-        # 170 degrees — almost flat, should find no sharp edges on a cube
-        result = add_fillet(stl, angle_threshold_deg=170.0)
-        # Cube edges are at 90 degrees (cos=0), only edges sharper than
-        # 170 degrees (cos(170)≈-0.985) would be detected — cube doesn't have those
-        assert result["triangle_count"] == 12  # No fillets added
-
-
-class TestAddChamfer:
-    """Tests for add_chamfer() — flat bevel at sharp edges."""
-
-    def test_basic_chamfer(self, tmp_path):
-        from kiln.generation.validation import add_chamfer
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-        out = str(tmp_path / "chamfered.stl")
-
-        result = add_chamfer(stl, distance_mm=0.5, output_path=out)
-
-        assert result["path"] == out
-        assert result["distance_mm"] == 0.5
-        assert result["angle_threshold_deg"] == 60.0
-        assert os.path.isfile(out)
-
-    def test_cube_has_sharp_edges(self, tmp_path):
-        from kiln.generation.validation import add_chamfer
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-
-        result = add_chamfer(stl, distance_mm=0.3)
-        assert result["sharp_edges_found"] > 0
-        assert result["chamfer_triangles_added"] > 0
-        assert result["triangle_count"] > 12
-
-    def test_chamfered_file_is_valid_stl(self, tmp_path):
-        from kiln.generation.validation import add_chamfer, validate_mesh
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-        out = str(tmp_path / "chamfered.stl")
-
-        add_chamfer(stl, distance_mm=0.5, output_path=out)
-        val = validate_mesh(out)
-        assert val.valid
-        assert val.triangle_count > 12
-
-    def test_default_output_path(self, tmp_path):
-        from kiln.generation.validation import add_chamfer
-
-        stl = str(tmp_path / "part.stl")
-        _write_cube_stl(stl, 10.0)
-
-        result = add_chamfer(stl, distance_mm=0.5)
-        assert result["path"].endswith("_chamfered.stl")
-
-    def test_zero_distance_raises(self, tmp_path):
-        from kiln.generation.validation import add_chamfer
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-
-        with pytest.raises(ValueError, match="positive"):
-            add_chamfer(stl, distance_mm=0)
-
-    def test_chamfer_adds_two_tris_per_edge(self, tmp_path):
-        from kiln.generation.validation import add_chamfer
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 10.0)
-
-        result = add_chamfer(stl, distance_mm=0.3)
-        # Each sharp edge gets 2 chamfer triangles
-        assert result["chamfer_triangles_added"] == result["sharp_edges_found"] * 2
-
-
-# ---------------------------------------------------------------------------
 # Boolean mesh operations (via OpenSCAD)
 # ---------------------------------------------------------------------------
 
@@ -4525,6 +4287,44 @@ class TestApplyReinforcements:
         assert 0 <= result.before_score <= 100
         assert 0 <= result.after_score <= 100
 
+    def test_sharp_corners_are_rounded_once_at_the_plans_threshold(self, tmp_path):
+        """The default threshold reaches the fillet as a number -- it arrived
+        as None, failed, and was reported as "No sharp edges found at
+        threshold" -- and a fillet acts on the whole part, so it runs once
+        however many corners asked for it (it ran once per corner)."""
+        manifold3d = pytest.importorskip("manifold3d")
+        trimesh = pytest.importorskip("trimesh")
+        import numpy as np
+
+        import kiln.design_reasoning as dr
+
+        cube = manifold3d.Manifold.cube
+        box = cube([40.0, 30.0, 15.0]) - cube([38.0, 28.0, 15.0]).translate([1.0, 1.0, 1.0])
+        flat = box.to_mesh()
+        stl = tmp_path / "box.stl"
+        trimesh.Trimesh(np.asarray(flat.vert_properties)[:, :3], np.asarray(flat.tri_verts), process=False).export(
+            str(stl)
+        )
+        calls = []
+        real = dr._apply_edge_finish
+
+        def counted(*args):
+            calls.append(args)
+            return real(*args)
+
+        asked = [r for r in dr.generate_improvement_plan(str(stl)).reinforcements if r.reinforcement_type == "fillet"]
+        assert len(asked) > 1  # several corners ask for the one edit
+        with patch.object(dr, "_apply_edge_finish", counted):
+            result = dr.apply_reinforcements(str(stl), output_path=str(tmp_path / "out.stl"))
+
+        fillets = [e for e in result.applied + result.skipped if e["type"] == "fillet"]
+        assert len(fillets) == 1
+        assert len(calls) == 1
+        _part, _work_dir, kind, _size, angle_deg, _printer, _choose = calls[0]
+        assert (kind, angle_deg) == ("fillet", dr._SHARP_ANGLE_THRESHOLD_DEG_PUBLIC)
+        assert "could not run" not in fillets[0].get("reason", "")
+        assert {fillets[0]["addresses"], *fillets[0].get("also_addresses", [])} == {r.addresses_risk for r in asked}
+
     def test_skipped_reorient_has_guidance(self, tmp_path):
         """Reorient recommendations should be skipped with guidance."""
 
@@ -4846,6 +4646,43 @@ class TestSmartGenerateFromTemplate:
             result = smart_generate_from_template("shelf_bracket", {"arm_length": 200})
 
         assert "fastener_advice" not in result
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_the_reinforcements_are_made_for_the_printer_and_material_named(
+        self, mock_auth, tmp_path,
+    ):
+        """The reinforcement step is sized for a printer and a material; this
+        door hands it the ones the caller named instead of leaving it to guess."""
+        smart_generate_from_template = _get_plugin_tool(
+            "generation_ai_tools", "smart_generate_from_template",
+        )
+        stl_path = str(tmp_path / "part.stl")
+        _write_cube_stl(stl_path, 20.0)
+        reinforced = MagicMock()
+        reinforced.output_path = stl_path
+        reinforced.to_dict.return_value = {"applied": []}
+
+        with patch(
+            "kiln.server.generate_from_template",
+            return_value={
+                "success": True,
+                "parameters_used": {},
+                "result": {"local_path": stl_path},
+                "dimensions": None,
+            },
+        ), patch(
+            "kiln.design_reasoning.generate_improvement_plan",
+            return_value=MagicMock(reinforcements=[object()], to_dict=MagicMock(return_value={})),
+        ), patch(
+            "kiln.design_reasoning.apply_reinforcements", return_value=reinforced,
+        ) as apply:
+            smart_generate_from_template(
+                "shelf_bracket", material="PETG", auto_reinforce=True, printer_id="bambu_a1",
+            )
+
+        apply.assert_called_once()
+        assert apply.call_args.kwargs["material"] == "PETG"
+        assert apply.call_args.kwargs["printer_id"] == "bambu_a1"
 
     @patch("kiln.server._check_auth", return_value=None)
     def test_invalid_template_returns_error(self, mock_auth):
@@ -5604,13 +5441,16 @@ class TestArrangePartsOnPlateTool:
             summary="Arranged 1/1 parts.",
         )
 
-        result = arrange_parts_on_plate('["/tmp/a.stl"]', printer_id="Creality K1 Max")
+        # Named by its display name; a synthetic printer the session holds
+        # (a 350 x 350 bed).  A real printer's bed is its catalogue record,
+        # which public CI does not hold.
+        result = arrange_parts_on_plate('["/tmp/a.stl"]', printer_id="Kilntest Big 350")
 
         assert result["success"] is True
-        assert result["bed_size_model_id"] == "k1_max"
-        assert result["bed_dims_mm"] == [300.0, 300.0]
-        assert mock_arrange.call_args.kwargs["plate_width_mm"] == 300.0
-        assert mock_arrange.call_args.kwargs["plate_depth_mm"] == 300.0
+        assert result["bed_size_model_id"] == "kilntest_big"
+        assert result["bed_dims_mm"] == [350.0, 350.0]
+        assert mock_arrange.call_args.kwargs["plate_width_mm"] == 350.0
+        assert mock_arrange.call_args.kwargs["plate_depth_mm"] == 350.0
 
 
 # ---- Loop 14: Template search by description ----
@@ -5897,7 +5737,7 @@ class TestDesignToGcode:
             "kiln.parametric.compile_scad_code", side_effect=_fake_compile
         ), patch("kiln.slicer.slice_file", side_effect=_fake_slice):
             result = design_to_gcode(
-                "hook", output_dir=str(tmp_path), printer_model="ender3"
+                "hook", output_dir=str(tmp_path), printer_model="kilntest_open"
             )
 
         assert "slicing" in result.steps_completed, result.errors
@@ -5909,7 +5749,7 @@ class TestDesignToGcode:
         assert result.gcode_file and result.gcode_file.endswith("out.gcode")
         assert captured["profile"] and captured["profile"].endswith(".ini")
         ini = pathlib.Path(captured["profile"]).read_text(encoding="utf-8")
-        assert "Creality Ender 3" in ini or "ender3" in captured["profile"]
+        assert "Kilntest Open 220" in ini or "kilntest_open" in captured["profile"]
 
 
 class TestDesignToGcodePipelineTool:

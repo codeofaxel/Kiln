@@ -276,6 +276,37 @@ def test_catches_each_provenance_class() -> None:
     assert found
 
 
+def test_catches_a_third_party_source_file_without_a_line() -> None:
+    """A path into someone else's source names where a fact was read as
+    surely as a line number does.  Kiln has no C or C++ of its own, so a C
+    or C++ file named in a comment is always someone else's.  (2026-10-08:
+    a comment citing the Buddy firmware's request parser by path, with no
+    line, got past the line-pin rule.)"""
+    found = _pins_in(
+        "kiln/src/kiln/x.py",
+        "# The password is the key (Prusa-Firmware-Buddy, lib/WUI/nhttp/req_parser.cpp).\nx = 1\n",
+    )
+    assert any("lib/WUI/nhttp/req_parser.cpp" in f for f in found), found
+    found = _pins_in("kiln/src/kiln/x.py", "# The fault text is the one HMS.cpp carries.\nx = 1\n")
+    assert any("HMS.cpp" in f for f in found), found
+
+
+def test_catches_a_vendor_wiki_named_without_a_page() -> None:
+    """Naming the wiki a fact came from, page titles after a colon, is the
+    same trail as its URL."""
+    found = _pins_in(
+        "kiln/src/kiln/x.py",
+        "# Menu paths are the maker's own (wiki.bambulab.com: enable-lan-mode, find-sn).\nx = 1\n",
+    )
+    assert any("wiki.bambulab.com" in f for f in found), found
+
+
+def test_a_pinned_line_is_reported_once() -> None:
+    """The file rule and the line rule see the same citation; one finding."""
+    found = _pins_in("kiln/src/kiln/x.py", "# per gcode/host/M115.cpp:63-75\nx = 1\n")
+    assert len(found) == 1, found
+
+
 def test_catches_how_a_vendor_sequence_was_captured() -> None:
     """The bundled end sequences named the slicer build and the file inside
     its profile bundle they came from, and a docstring gave the capture
@@ -400,7 +431,7 @@ def test_the_whole_tracked_tree_is_watched() -> None:
     ]
     assert unwatched == [], unwatched
     for must in ("tests/test_paywall_visibility.py", "plugins/kiln", "octoprint-cli/src", "policies/TERMS_OF_USE.md",
-                 ".github/workflows/ci.yml", "kiln/scripts/generate_load_tables.py"):
+                 ".github/workflows/ci.yml", "kiln/scripts/"):
         assert any(p.startswith(must) for p in _GATE._tree_paths()), must
         assert all(_GATE._in_scope(p) for p in _GATE._tree_paths() if p.startswith(must)), must
 

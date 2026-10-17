@@ -11,6 +11,10 @@ The merge is now directional, applied where the profile is READ rather
 than where it is written, so the guarantee holds whatever path a value
 arrived by: this tool, a hand-edited file, or any future federation that
 learns to write here.
+
+The curated printer here is ``kilntest_ptfe``, a synthetic PTFE-lined
+machine at 260 C (tests/fixtures/printer_catalogue_test.json): a real
+printer's limits are kiln-pro's catalogue, not public CI's.
 """
 
 from __future__ import annotations
@@ -22,6 +26,9 @@ from pathlib import Path
 import pytest
 
 import kiln.safety_profiles as sp
+
+#: The curated printer every test clamps against, and its spellings.
+_CURATED = "kilntest_ptfe"
 
 _BASE = {
     "display_name": "E",
@@ -42,7 +49,7 @@ def community(monkeypatch):
     monkeypatch.delenv("KILN_HOSTED_MULTITENANT", raising=False)
 
     def write(payload: dict) -> None:
-        path.write_text(json.dumps({"ender3": payload}), encoding="utf-8")
+        path.write_text(json.dumps({_CURATED: payload}), encoding="utf-8")
         sp._local_overrides_loaded = False
         sp._local_override_cache.clear()
 
@@ -53,19 +60,19 @@ def community(monkeypatch):
 
 class TestACommunityProfileCannotLoosenACuratedLimit:
     def test_raising_the_hotend_ceiling_is_ignored(self, community):
-        curated = sp.get_profile("ender3").max_hotend_temp
+        curated = sp.get_profile(_CURATED).max_hotend_temp
         community({**_BASE, "max_hotend_temp": 500.0})
-        assert sp.get_profile("ender3").max_hotend_temp == curated
+        assert sp.get_profile(_CURATED).max_hotend_temp == curated
 
     def test_raising_the_bed_ceiling_is_ignored(self, community):
-        curated = sp.get_profile("ender3").max_bed_temp
+        curated = sp.get_profile(_CURATED).max_bed_temp
         community({**_BASE, "max_hotend_temp": 250.0, "max_bed_temp": 150.0})
-        assert sp.get_profile("ender3").max_bed_temp == curated
+        assert sp.get_profile(_CURATED).max_bed_temp == curated
 
     def test_every_ceiling_field_is_clamped(self, community):
         """Named field by field, so adding one to the dataclass without
         adding it here is visible rather than silent."""
-        curated = sp.get_profile("ender3")
+        curated = sp.get_profile(_CURATED)
         community({
             **_BASE,
             "max_hotend_temp": 499.0,
@@ -74,7 +81,7 @@ class TestACommunityProfileCannotLoosenACuratedLimit:
             "max_feedrate": 49000.0,
             "max_volumetric_flow": 99.0,
         })
-        got = sp.get_profile("ender3")
+        got = sp.get_profile(_CURATED)
         for field in sp._CEILING_FIELDS:
             mine, theirs = getattr(got, field), getattr(curated, field)
             if isinstance(theirs, (int, float)):
@@ -82,9 +89,9 @@ class TestACommunityProfileCannotLoosenACuratedLimit:
 
     def test_a_floor_cannot_be_lowered(self, community):
         """min_safe_z is the other direction — lower is looser."""
-        curated = sp.get_profile("ender3")
+        curated = sp.get_profile(_CURATED)
         community({**_BASE, "max_hotend_temp": 250.0, "min_safe_z": -5.0})
-        assert sp.get_profile("ender3").min_safe_z >= curated.min_safe_z
+        assert sp.get_profile(_CURATED).min_safe_z >= curated.min_safe_z
 
 
 class TestTighteningStillWorks:
@@ -93,11 +100,11 @@ class TestTighteningStillWorks:
 
     def test_lowering_the_hotend_ceiling_is_honoured(self, community):
         community({**_BASE, "max_hotend_temp": 200.0})
-        assert sp.get_profile("ender3").max_hotend_temp == 200.0
+        assert sp.get_profile(_CURATED).max_hotend_temp == 200.0
 
     def test_a_fully_conservative_profile_passes_through_untouched(self, community):
         community({**_BASE, "max_hotend_temp": 200.0, "max_feedrate": 100.0})
-        got = sp.get_profile("ender3")
+        got = sp.get_profile(_CURATED)
         assert got.max_hotend_temp == 200.0
         assert got.max_feedrate == 100.0
 
@@ -118,12 +125,12 @@ class TestTheHostedOverlayIsStillSkipped:
     """The cross-tenant half, kept alongside so neither regresses."""
 
     def test_hosted_uses_the_curated_limit(self, community, monkeypatch):
-        curated = sp.get_profile("ender3").max_hotend_temp
+        curated = sp.get_profile(_CURATED).max_hotend_temp
         community({**_BASE, "max_hotend_temp": 200.0})
         monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
         sp._local_overrides_loaded = False
         sp._local_override_cache.clear()
-        assert sp.get_profile("ender3").max_hotend_temp == curated
+        assert sp.get_profile(_CURATED).max_hotend_temp == curated
 
 
 class TestTheFuzzyDoorClampsToo:
@@ -133,20 +140,23 @@ class TestTheFuzzyDoorClampsToo:
     community entry raw — so any printer id that prefix-matched a community key
     without being curated itself walked straight past the clamp.  Reproduced
     2026-08-07: ``get_profile('ender3_custom_build')`` answered 500 C while
-    ``get_profile('ender3')`` answered 260.  Same bug, second door.
+    ``get_profile('ender3')`` answered 260.  Same bug, second door.  Pinned
+    here on the synthetic lined printer and three spellings that only
+    prefix-match it.
     """
 
     @pytest.mark.parametrize(
-        "printer_id", ["ender3_custom_build", "ender3zzz", "ender3-with-a-mod"]
+        "printer_id",
+        ["kilntest_ptfe_custom_build", "kilntest_ptfezzz", "kilntest-ptfe-with-a-mod"],
     )
     def test_a_fuzzy_match_cannot_raise_the_ceiling(self, community, printer_id):
-        curated = sp.get_profile("ender3").max_hotend_temp
+        curated = sp.get_profile(_CURATED).max_hotend_temp
         community({**_BASE, "max_hotend_temp": 500.0})
         assert sp.get_profile(printer_id).max_hotend_temp == curated
 
     def test_a_fuzzy_match_still_honours_a_tightening(self, community):
         community({**_BASE, "max_hotend_temp": 200.0})
-        assert sp.get_profile("ender3_custom_build").max_hotend_temp == 200.0
+        assert sp.get_profile("kilntest_ptfe_custom_build").max_hotend_temp == 200.0
 
     def test_a_community_key_with_no_curated_twin_clamps_to_the_real_match(
         self, community
@@ -158,30 +168,32 @@ class TestTheFuzzyDoorClampsToo:
         against nothing.  It would then satisfy a request for
         ``"ender3_pro_custom"`` at 500 C while curated ``"ender3"``, the
         profile that request actually resolves to, sat right there saying 260.
-        Both the lookup and the clamp now ask _curated_match.
+        Both the lookup and the clamp now ask _curated_match.  Here the
+        community key is ``"kilntest_pt"`` and the request resolves to the
+        curated ``"kilntest_ptfe"``.
         """
         path = sp._LOCAL_OVERRIDE_FILE
         path.write_text(
-            json.dumps({"ender": {**_BASE, "max_hotend_temp": 500.0}}),
+            json.dumps({"kilntest_pt": {**_BASE, "max_hotend_temp": 500.0}}),
             encoding="utf-8",
         )
         sp._local_overrides_loaded = False
         sp._local_override_cache.clear()
-        assert "ender" not in sp._cache, "the premise: no curated twin"
-        got = sp.get_profile("ender3_pro_custom")
-        assert got.max_hotend_temp == sp._cache["ender3"].max_hotend_temp
+        assert "kilntest_pt" not in sp._cache, "the premise: no curated twin"
+        got = sp.get_profile("kilntest_ptfe_pro_custom")
+        assert got.max_hotend_temp == sp._cache[_CURATED].max_hotend_temp
 
     def test_a_short_community_key_cannot_become_a_wildcard(self, community):
         """A one-letter key prefix-matches almost everything.  It must still be
         measured against whatever the request really resolves to."""
         path = sp._LOCAL_OVERRIDE_FILE
         path.write_text(
-            json.dumps({"e": {**_BASE, "max_hotend_temp": 500.0}}),
+            json.dumps({"k": {**_BASE, "max_hotend_temp": 500.0}}),
             encoding="utf-8",
         )
         sp._local_overrides_loaded = False
         sp._local_override_cache.clear()
-        assert sp.get_profile("ender3").max_hotend_temp <= 260.0
+        assert sp.get_profile(_CURATED).max_hotend_temp <= sp._cache[_CURATED].max_hotend_temp
 
 
 class TestClampSettingsToProfile:
@@ -190,26 +202,26 @@ class TestClampSettingsToProfile:
     be handed to a slicer or a printer above that limit."""
 
     def test_an_over_ceiling_temperature_is_lowered(self):
-        curated = sp.get_profile("ender3")
-        held = sp.clamp_settings_to_profile({"temp_tool": 300.0}, "ender3")
+        curated = sp.get_profile(_CURATED)
+        held = sp.clamp_settings_to_profile({"temp_tool": 300.0}, _CURATED)
         assert held.settings["temp_tool"] == curated.max_hotend_temp
         assert held.clamped, "a clamp must be stated, not applied silently"
 
     def test_a_conservative_setting_passes_through_untouched(self):
-        held = sp.clamp_settings_to_profile({"temp_tool": 200.0, "temp_bed": 50.0}, "ender3")
+        held = sp.clamp_settings_to_profile({"temp_tool": 200.0, "temp_bed": 50.0}, _CURATED)
         assert held.settings == {"temp_tool": 200.0, "temp_bed": 50.0}
         assert not held.clamped
 
     def test_the_input_is_never_mutated(self):
         original = {"temp_tool": 300.0}
-        sp.clamp_settings_to_profile(original, "ender3")
+        sp.clamp_settings_to_profile(original, _CURATED)
         assert original == {"temp_tool": 300.0}
 
     def test_an_unrecognised_key_is_left_alone(self):
         """A clamp that guesses is worse than no clamp — `speed` is mm/s in the
         learning stores and mm/min in max_feedrate, so it is deliberately not
         in the table."""
-        held = sp.clamp_settings_to_profile({"speed": 99999, "notes": "x"}, "ender3")
+        held = sp.clamp_settings_to_profile({"speed": 99999, "notes": "x"}, _CURATED)
         assert held.settings == {"speed": 99999, "notes": "x"}
 
     def test_no_printer_means_nothing_to_clamp_against(self):
@@ -221,17 +233,17 @@ class TestClampSettingsToProfile:
     def test_a_string_valued_override_stays_a_string(self):
         """The slicer-override surface is string-typed."""
         held = sp.clamp_settings_to_profile(
-            {"first_layer_bed_temperature": "195"}, "ender3"
+            {"first_layer_bed_temperature": "195"}, _CURATED
         )
         value = held.settings["first_layer_bed_temperature"]
-        assert isinstance(value, str) and value == "110"
+        assert isinstance(value, str) and value == f"{sp._cache[_CURATED].max_bed_temp:g}"
 
     def test_a_missing_chamber_ceiling_is_not_invented(self):
         """A printer with no published chamber limit has nothing to clamp to."""
-        profile = sp.get_profile("ender3")
+        profile = sp.get_profile(_CURATED)
         if profile.max_chamber_temp is not None:
-            pytest.skip("ender3 publishes a chamber ceiling")
-        held = sp.clamp_settings_to_profile({"chamber_temp": 500.0}, "ender3")
+            pytest.skip(f"{_CURATED} publishes a chamber ceiling")
+        held = sp.clamp_settings_to_profile({"chamber_temp": 500.0}, _CURATED)
         assert held.settings["chamber_temp"] == 500.0
 
     def test_a_hardware_modified_declaration_is_no_longer_a_way_through(
@@ -247,8 +259,8 @@ class TestClampSettingsToProfile:
         curated value like every other one.
         """
         community({**_BASE, "max_hotend_temp": 300.0, "hardware_modified": True})
-        held = sp.clamp_settings_to_profile({"temp_tool": 290.0}, "ender3")
-        assert held.settings["temp_tool"] == sp._cache["ender3"].max_hotend_temp
+        held = sp.clamp_settings_to_profile({"temp_tool": 290.0}, _CURATED)
+        assert held.settings["temp_tool"] == sp._cache[_CURATED].max_hotend_temp
         assert held.clamped
 
     def test_a_local_override_does_not_travel_to_the_shared_server(
@@ -261,6 +273,6 @@ class TestClampSettingsToProfile:
         monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
         sp._local_overrides_loaded = False
         sp._local_override_cache.clear()
-        held = sp.clamp_settings_to_profile({"temp_tool": 290.0}, "ender3")
-        assert held.settings["temp_tool"] == sp._cache["ender3"].max_hotend_temp
+        held = sp.clamp_settings_to_profile({"temp_tool": 290.0}, _CURATED)
+        assert held.settings["temp_tool"] == sp._cache[_CURATED].max_hotend_temp
         assert held.clamped

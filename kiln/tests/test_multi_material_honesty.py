@@ -598,29 +598,31 @@ class TestPreflight:
 
 
 class TestPreEstimateDerived:
+    """The derivation, on the session's synthetic rows (a real printer's
+    changer is its served record since 2026-10-12, pinned in kiln-pro's
+    ``tests/test_printer_catalogue_numbers.py``)."""
+
     @pytest.mark.parametrize("printer_id,changer", [
-        ("voron_2", "ercf"), ("voron_0", "ercf"), ("prusa_mk3s", "mmu2s"),
-        ("prusa_mk4", "mmu3"), ("prusa_xl", "tool_changer"),
-        ("visionminer_22idex_v4", "idex"),
+        ("kilntest_variants_se", "ercf"), ("kilntest_big", "cfs"),
     ])
     def test_undriven_changers_are_hardware_unverified(self, printer_id, changer):
-        """Pre-fix: False for every one of these — only the seven CFS rows said True."""
+        """Pre-fix: False for every undriven changer — only the CFS rows said True."""
         from kiln.pre_estimate import _get_printer_tool_change
 
         tc = _get_printer_tool_change(printer_id)
         assert tc["tool_changer"] == changer
         assert tc["hardware_unverified"] is True
 
-    @pytest.mark.parametrize("printer_id", ["bambu_a1", "bambu_x1c", "bambu_p1s"])
-    def test_bambu_ams_stays_verified(self, printer_id):
+    def test_a_changer_kiln_drives_stays_verified(self):
         from kiln.pre_estimate import _get_printer_tool_change
 
-        assert _get_printer_tool_change(printer_id)["hardware_unverified"] is False
+        assert _get_printer_tool_change("kilntest_enclosed")["tool_changer"] == "ams_lite"
+        assert _get_printer_tool_change("kilntest_enclosed")["hardware_unverified"] is False
 
     def test_no_changer_is_not_unverified(self):
         from kiln.pre_estimate import _get_printer_tool_change
 
-        assert _get_printer_tool_change("ender3")["hardware_unverified"] is False
+        assert _get_printer_tool_change("kilntest_open")["hardware_unverified"] is False
 
     def test_addons_kiln_does_not_drive_are_unverified(self):
         from kiln.pre_estimate import _get_printer_tool_change, list_addons
@@ -630,32 +632,26 @@ class TestPreEstimateDerived:
         assert all(a["hardware_unverified"] is True for a in listed.values())
 
     def test_the_caution_names_the_users_changer_not_cfs(self):
-        """Pre-fix: silence for the Voron; and the only text that existed said 'CFS'."""
+        """Pre-fix: silence for an ERCF row; and the only text that existed said 'CFS'."""
         from kiln.pre_estimate import estimate_from_dimensions
 
-        est = estimate_from_dimensions(100, 100, 15, materials=["PLA", "PLA"], printer_id="voron_2")
+        est = estimate_from_dimensions(100, 100, 15, materials=["PLA", "PLA"], printer_id="kilntest_variants_se")
         cautions = [w for w in est.warnings if "unverified" in w]
         assert len(cautions) == 1
         assert "ERCF" in cautions[0]
         assert "CFS" not in cautions[0]
 
-    def test_prusa_mmu_gets_its_own_name(self):
-        from kiln.pre_estimate import estimate_from_dimensions
-
-        est = estimate_from_dimensions(100, 100, 15, materials=["PLA", "PLA"], printer_id="prusa_mk4")
-        assert any("Prusa MMU3" in w and "unverified" in w for w in est.warnings)
-
-    def test_cfs_says_it_once(self):
+    def test_a_row_with_its_own_wording_says_it_once(self):
         """Pre-fix: the row warning AND the generic CFS line — twice, two wordings."""
         from kiln.pre_estimate import estimate_from_dimensions
 
-        est = estimate_from_dimensions(100, 100, 15, materials=["PLA", "PLA"], printer_id="k2")
+        est = estimate_from_dimensions(100, 100, 15, materials=["PLA", "PLA"], printer_id="kilntest_big")
         assert sum("unverified" in w.lower() for w in est.warnings) == 1
 
-    def test_bambu_gets_no_caution(self):
+    def test_a_changer_kiln_drives_gets_no_caution(self):
         from kiln.pre_estimate import estimate_from_dimensions
 
-        est = estimate_from_dimensions(100, 100, 15, materials=["PLA", "PLA"], printer_id="bambu_a1")
+        est = estimate_from_dimensions(100, 100, 15, materials=["PLA", "PLA"], printer_id="kilntest_enclosed")
         assert not any("unverified" in w for w in est.warnings)
 
 

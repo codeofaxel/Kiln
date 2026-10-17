@@ -222,7 +222,6 @@ VIEWER_TOOLS: frozenset[str] = frozenset(
         "compose_part_from_primitives",
         "decorate_during_print",
         "decorate_surface",
-        "design_session",
         "design_to_gcode_pipeline",
         "download_generated_model",
         "download_model",
@@ -472,7 +471,7 @@ def _ledger_write(token: str, mesh_path: str) -> None:
         path = _token_ledger_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            entries = json.loads(path.read_text())
+            entries = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(entries, dict):
                 entries = {}
         except (OSError, ValueError):
@@ -497,7 +496,7 @@ def _ledger_write(token: str, mesh_path: str) -> None:
 def _ledger_read(token: str) -> str | None:
     """The ledger's answer for a token minted by any process, or ``None``."""
     try:
-        entries = json.loads(_token_ledger_path().read_text())
+        entries = json.loads(_token_ledger_path().read_text(encoding="utf-8"))
         value = entries.get(token) if isinstance(entries, dict) else None
         return value if isinstance(value, str) and value else None
     except Exception:  # noqa: BLE001
@@ -843,6 +842,10 @@ def token_for_call_result(result: Any) -> str | None:
             return None
         hosted_token: str | None = None
         existing = result_structured_content(result)
+        if not isinstance(existing, dict):
+            # A served tool's answer arrives as text alone; its artifact
+            # block is in there.
+            existing = _result_as_dict(result)
         if isinstance(existing, dict):
             art = existing.get("artifact")
             if isinstance(art, dict) and art.get("artifact_token"):
@@ -864,6 +867,15 @@ def token_for_call_result(result: Any) -> str | None:
             if hosted_token:
                 return _adopt(hosted_token, mesh)
             return _mint(mesh)
+        if hosted_token:
+            # A make built on Kiln's servers names no file on this
+            # computer.  Its look was fetched when it arrived
+            # (kiln.served_makes), and the stage shows that.
+            from kiln.served_makes import arrival_path
+
+            look = arrival_path(hosted_token)
+            if look:
+                return _adopt(hosted_token, look)
     except Exception as exc:  # noqa: BLE001 — a stage must never break a tool
         logger.debug("local stage token not minted: %s", exc)
     return None

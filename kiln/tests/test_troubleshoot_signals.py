@@ -35,11 +35,17 @@ from kiln.printer_intelligence import (
     read_load_step,
 )
 
+#: The printer the curated depth below is served for: a synthetic row the
+#: session holds (tests/fixtures/printer_catalogue_test.json).  An overlay
+#: entry merges over a row this process holds, and a real printer's row is
+#: kiln-pro's catalogue, which public CI does not hold.
+_PRINTER = "kilntest_open"
+
 # A profile shaped like the real A1 overlay: generic modes that share the word
 # "filament" with everything, plus two that claim exact signals.  The generic
 # ones are the noise the old matcher returned.
 SIGNAL_DEPTH = {
-    "bambu_a1": {
+    _PRINTER: {
         "failure_modes": [
             {
                 "symptom": "AMS Lite extrusion failures / filament not loading",
@@ -159,7 +165,7 @@ def test_two_different_steps_are_no_signal_at_all():
 
 
 def test_a_named_code_returns_only_the_mode_that_claims_it(signal_overlay):
-    matches = diagnose_issue("bambu_a1", "load failed with 1200-8007 on screen")
+    matches = diagnose_issue(_PRINTER, "load failed with 1200-8007 on screen")
     assert [m["symptom"] for m in matches] == [
         "Filament load fails at the purge step (step 6)"
     ]
@@ -170,7 +176,7 @@ def test_a_named_step_returns_only_the_modes_that_claim_it(signal_overlay):
     # The exact shape of the reported failure: the sentence contains
     # "filament", which used to drag in the AMS entry and bury the answer.
     matches = diagnose_issue(
-        "bambu_a1", "Load Filament wizard fails at step 5 pushing into the extruder"
+        _PRINTER, "Load Filament wizard fails at step 5 pushing into the extruder"
     )
     assert [m["symptom"] for m in matches] == [
         "Filament load fails at the push step (step 5)"
@@ -181,16 +187,16 @@ def test_a_named_step_returns_only_the_modes_that_claim_it(signal_overlay):
 def test_a_structured_signal_drops_the_text_noise(signal_overlay):
     generic = "AMS Lite extrusion failures / filament not loading"
     assert generic in [
-        m["symptom"] for m in diagnose_issue("bambu_a1", "filament not loading")
+        m["symptom"] for m in diagnose_issue(_PRINTER, "filament not loading")
     ]
     assert generic not in [
         m["symptom"]
-        for m in diagnose_issue("bambu_a1", "filament not loading at step 5")
+        for m in diagnose_issue(_PRINTER, "filament not loading at step 5")
     ]
 
 
 def test_text_only_symptoms_are_unchanged(signal_overlay):
-    matches = diagnose_issue("bambu_a1", "stringing")
+    matches = diagnose_issue(_PRINTER, "stringing")
     assert [m["symptom"] for m in matches] == ["Stringing with PETG"]
     assert matches[0]["matched_on"] == "text"
 
@@ -212,16 +218,16 @@ def test_the_narrower_claim_leads(signal_overlay):
         "fix": "Work down the path.",
         "load_steps": [2, 3, 5],
     }
-    profile = dict(SIGNAL_DEPTH["bambu_a1"])
-    profile["failure_modes"] = [broad, *SIGNAL_DEPTH["bambu_a1"]["failure_modes"]]
+    profile = dict(SIGNAL_DEPTH[_PRINTER])
+    profile["failure_modes"] = [broad, *SIGNAL_DEPTH[_PRINTER]["failure_modes"]]
     pi._merged_cache = None
     import sys
 
     sys.modules["kiln_pro.data_overlays"].load_overlay = lambda kind: {
-        "bambu_a1": profile
+        _PRINTER: profile
     }
     try:
-        matches = diagnose_issue("bambu_a1", "load fails at step 5")
+        matches = diagnose_issue(_PRINTER, "load fails at step 5")
         assert matches[0]["symptom"] == "Filament load fails at the push step (step 5)"
         assert broad["symptom"] in [m["symptom"] for m in matches]
     finally:
@@ -231,7 +237,7 @@ def test_the_narrower_claim_leads(signal_overlay):
 def test_a_code_outranks_a_step_when_both_are_named(signal_overlay):
     # "step 5" and a step-6 code: the code is the printer's own word for what
     # happened, so it leads.
-    matches = diagnose_issue("bambu_a1", "step 5, then 1200-8007")
+    matches = diagnose_issue(_PRINTER, "step 5, then 1200-8007")
     assert matches[0]["matched_on"] == "code"
     assert matches[0]["symptom"] == "Filament load fails at the purge step (step 6)"
 
@@ -242,32 +248,32 @@ def test_a_code_outranks_a_step_when_both_are_named(signal_overlay):
 
 
 def test_a_feed_step_rules_the_nozzle_out(signal_overlay):
-    reading = read_load_step("bambu_a1", 5)
+    reading = read_load_step(_PRINTER, 5)
     assert reading is not None
     assert reading["zone"] == "feed"
     assert "clog cannot be the cause" in reading["ruled_out"]
 
 
 def test_a_melt_step_rules_the_nozzle_in(signal_overlay):
-    reading = read_load_step("bambu_a1", 6)
+    reading = read_load_step(_PRINTER, 6)
     assert reading is not None
     assert reading["zone"] == "melt"
     assert "feed path above it is working" in reading["ruled_out"]
 
 
 def test_an_unknown_step_reads_as_nothing_rather_than_a_guess(signal_overlay):
-    assert read_load_step("bambu_a1", 99) is None
+    assert read_load_step(_PRINTER, 99) is None
 
 
 def test_a_printer_with_no_sequence_reads_as_nothing(signal_overlay):
-    assert read_load_step("ender3", 5) is None
+    assert read_load_step("kilntest_enclosed", 5) is None
 
 
 def test_load_sequence_is_absent_without_the_overlay():
     # Public floor: no curated load sequence ships in this repo.  Measured as
     # a free install, so an installed kiln-pro cannot answer in its place.
     with _free_install():
-        assert get_printer_intel("bambu_a1").load_sequence == []
+        assert get_printer_intel(_PRINTER).load_sequence == []
 
 
 def test_failure_mode_signals_default_to_empty():
@@ -519,6 +525,44 @@ def _free_troubleshoot(**kwargs):
         return getattr(tool, "fn", tool)(**kwargs)
 
 
+@contextlib.contextmanager
+def _a_bambu_on_record(printer_id: str = "bambu_a1"):
+    """The specific nudge is gated on the printer's firmware family, which is
+    part of its catalogue record -- and a free install with no sign-in, the
+    posture public CI is in, holds no record.  Stand in one for *printer_id*
+    that says Bambu and carries nothing else of Kiln's (no quirks, no
+    playbook), which is what a free caller's own A1 resolves to."""
+    import dataclasses
+    from unittest import mock
+
+    import kiln.server as srv
+
+    real = srv.get_printer_intel
+
+    def get_printer_intel(asked):
+        intel = real(asked)
+        if asked != printer_id:
+            return intel
+        return dataclasses.replace(intel, firmware="bambu", quirks=[], calibration={}, failure_modes=[])
+
+    with mock.patch.object(srv, "get_printer_intel", get_printer_intel):
+        yield
+
+
+def test_the_nudge_is_specific_for_a_catalogued_bambu_with_no_record(signed_out_install):
+    """A signed-out install holds no record, so the printer resolves to the
+    generic row -- but which firmware family a roster printer runs is on the
+    public motion block, so the Bambu-specific line is still said.  A/B:
+    with the firmware read off the record alone this hint was the generic
+    one (no stand-in record here, unlike the tests below)."""
+    from kiln.printer_intelligence import get_printer_intel, roster_firmware
+
+    assert get_printer_intel("bambu_a1").id == "default"
+    assert roster_firmware("bambu_a1") == "bambu"
+    hint = _free_troubleshoot(printer_id="bambu_a1", symptom="load fails at step 5, 1200-8007")["upgrade_hint"]
+    assert "fault code" in hint and "wizard step" in hint
+
+
 def test_the_nudge_is_specific_when_the_user_named_an_exact_signal():
     """The sharpest honest moment to mention Pro.
 
@@ -527,9 +571,10 @@ def test_the_nudge_is_specific_when_the_user_named_an_exact_signal():
     reads neither. Saying so is not a sales line — it is the one place the
     difference between the tiers is concrete.
     """
-    hint = _free_troubleshoot(
-        printer_id="bambu_a1", symptom="load fails at step 5, 1200-8007"
-    )["upgrade_hint"]
+    with _a_bambu_on_record():
+        hint = _free_troubleshoot(
+            printer_id="bambu_a1", symptom="load fails at step 5, 1200-8007"
+        )["upgrade_hint"]
     assert "fault code" in hint and "wizard step" in hint
     # The free floor is named too — a nudge that says only what you lack
     # reads as a wall; one that says what you keep reads as a door.
@@ -540,9 +585,11 @@ def test_the_nudge_is_specific_when_the_user_named_an_exact_signal():
 def test_the_nudge_never_leaks_the_paid_answer():
     # Naming the shape of the answer sells it; naming the answer gives it
     # away. "Step 5 is upstream of the melt zone" is the product.
-    hint = _free_troubleshoot(
-        printer_id="bambu_a1", symptom="load fails at step 5, 1200-8007"
-    )["upgrade_hint"].lower()
+    with _a_bambu_on_record():
+        hint = _free_troubleshoot(
+            printer_id="bambu_a1", symptom="load fails at step 5, 1200-8007"
+        )["upgrade_hint"].lower()
+    assert "fault code" in hint, "the premise: the specific nudge is the one read"
     for leak in ("upstream", "step 5 is", "cannot be the cause", "clog cannot",
                  "melt zone"):
         assert leak not in hint, f"the nudge gives away {leak!r}"
@@ -551,9 +598,14 @@ def test_the_nudge_never_leaks_the_paid_answer():
 def test_the_nudge_does_not_promise_what_pro_cannot_deliver():
     # A Prusa owner who types "step 3" gets the generic line, because the
     # codes and load sequences only exist for Bambu in the paid data. A
-    # promise the product cannot keep costs more than the sale.
+    # promise the product cannot keep costs more than the sale.  (A
+    # synthetic Marlin printer the session holds: a real printer's firmware
+    # family is its catalogue record.)
+    from kiln.printer_intelligence import get_printer_intel
+
+    assert get_printer_intel("kilntest_open").firmware not in ("bambu", "")
     hint = _free_troubleshoot(
-        printer_id="prusa_mk4", symptom="load fails at step 3"
+        printer_id="kilntest_open", symptom="load fails at step 3"
     )["upgrade_hint"]
     assert "fault code" not in hint
     assert "kiln3d.com" in hint
@@ -581,12 +633,13 @@ def test_the_nudge_is_said_once_per_session():
 
     reset_spoken_keys()
     try:
-        first = _free_troubleshoot(
-            printer_id="bambu_a1", symptom="load fails at step 5, 1200-8007"
-        )["upgrade_hint"]
-        second = _free_troubleshoot(
-            printer_id="bambu_a1", symptom="load fails at step 5, 1200-8007"
-        )["upgrade_hint"]
+        with _a_bambu_on_record():
+            first = _free_troubleshoot(
+                printer_id="bambu_a1", symptom="load fails at step 5, 1200-8007"
+            )["upgrade_hint"]
+            second = _free_troubleshoot(
+                printer_id="bambu_a1", symptom="load fails at step 5, 1200-8007"
+            )["upgrade_hint"]
         assert first, "the nudge never fired at all"
         assert second == "", "the nudge repeated within one session"
     finally:
@@ -604,7 +657,7 @@ def test_a_paid_caller_never_spends_the_session_claim(signal_overlay):
 
     reset_spoken_keys()
     try:
-        getattr(tool, "fn", tool)(printer_id="bambu_a1", symptom="stringing")
+        getattr(tool, "fn", tool)(printer_id=_PRINTER, symptom="stringing")
         assert claim_once("troubleshoot_printer.upgrade_hint") is True
     finally:
         reset_spoken_keys()

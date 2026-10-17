@@ -2265,7 +2265,7 @@
   },
   "pulley_gt2": {
     "display_name": "GT2 Timing Pulley",
-    "description": "Drives a 2 mm-pitch GT2 belt on a printer or CNC axis. Flanged barrel with simplified tooth grooves — set the tooth count and shaft bore. Prints without supports.",
+    "description": "Drives a 2 mm-pitch GT2 belt on a printer axis or other belt drive. Flanged barrel with simplified tooth grooves — set the tooth count and shaft bore. Prints without supports.",
     "category": "hardware",
     "parameters": {
       "teeth": {

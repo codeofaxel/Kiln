@@ -37,6 +37,7 @@ from kiln.printers.base import (
     FirmwareUpdateResult,
     JobProgress,
     JobResult,
+    MachineIdentity,
     NozzleSetting,
     PrinterAdapter,
     PrinterCapabilities,
@@ -1746,6 +1747,33 @@ class MoonrakerAdapter(PrinterAdapter):
             firmware_version=self._software_version(),
         )
 
+    def read_machine_identity(self) -> MachineIdentity | None:
+        """The serial of the computer running Klipper, from Moonraker's host info.
+
+        Read from ``GET /machine/system_info`` as
+        ``system_info.cpu_info.serial_number`` -- the CPU serial Moonraker
+        reads from ``/proc/cpuinfo`` on the host, and an empty string on a
+        host that has none (most x86 machines), which is reported as
+        ``None`` here.  This names the HOST (a Raspberry Pi, or the mainboard
+        computer of a printer that runs Klipper itself), not the printer
+        frame: a Pi carried to another printer carries its id along, so a
+        match means "the same host answered", and that is what the record
+        claims.  Nothing is sent to the printer.
+        """
+        try:
+            payload = self._get_json("/machine/system_info")
+        except PrinterError:
+            return None
+        raw = _safe_get(payload, "result", "system_info", "cpu_info", "serial_number", default="")
+        value = str(raw or "").strip()
+        if not value:
+            return None
+        return MachineIdentity(
+            value=value,
+            source="moonraker_system_info.cpu_info.serial_number",
+            kind="host_board_serial",
+        )
+
     def _software_version(self) -> str | None:
         """Klipper's ``software_version`` from ``/printer/info``, or ``None``."""
         try:
@@ -2030,6 +2058,37 @@ class MoonrakerAdapter(PrinterAdapter):
         except Exception:
             logger.debug("Webcam stream URL discovery failed", exc_info=True)
             return None
+
+    # Where this printer type's camera is known to answer, for the check
+    # and the setup handshake (kiln.camera_check): the one address the
+    # printer's own webcam list names.
+    camera_check_ids: ClassVar[tuple[str, ...]] = ("moonraker_webcam_list",)
+
+    def camera_probes(self) -> list[Any]:
+        """The stream address Moonraker's own webcam list names, to check.
+
+        Asks the printer through this adapter's own :meth:`get_stream_url`,
+        past the wrap that answers with a camera the user registered: the
+        check is about the printer's camera.  Reading the list switches
+        nothing on.  ``[]`` when the list names no webcam.
+        """
+        from kiln.camera_check import CameraProbe
+
+        ask = type(self).get_stream_url
+        while getattr(ask, "_kiln_camera_wrapped", False) and hasattr(ask, "__wrapped__"):
+            ask = ask.__wrapped__
+        url = ask(self)
+        if not url:
+            return []
+        return [
+            CameraProbe(
+                "moonraker_webcam_list",
+                url,
+                "The stream address the printer's own Moonraker webcam list reports "
+                "(GET /server/webcams/list, stream_url), as configured on the printer. "
+                "Source: the printer's own API.",
+            )
+        ]
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- filament sensor

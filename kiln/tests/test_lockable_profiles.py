@@ -64,14 +64,14 @@ class TestLockedProfileBlocksModification:
     def test_locked_profile_rejects_add(self):
         lock_safety_profile("my_printer")
         with pytest.raises(ValueError, match="admin-locked"):
-            add_community_profile("my_printer", _valid_profile())
+            add_community_profile("my_printer", _valid_profile(), confirmed=True)
 
     def test_unlocked_allows_add(self):
         lock_safety_profile("my_printer")
         unlock_safety_profile("my_printer")
         # Should not raise (though it may fail for other reasons in test env)
         try:
-            add_community_profile("my_printer", _valid_profile())
+            add_community_profile("my_printer", _valid_profile(), confirmed=True)
         except ValueError as e:
             if "admin-locked" in str(e):
                 pytest.fail("Should not be locked after unlock")

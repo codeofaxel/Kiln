@@ -35,7 +35,9 @@ from kiln.printer_backends import (
     NETWORK_PRINTER_TYPES,
     PRINTER_TYPE_LABELS,
     PRINTER_TYPES,
+    backend_for,
     format_printer_types,
+    need_where,
 )
 from kiln.printer_setup import CLI_REMEDY
 from kiln.printers.base import PrinterError
@@ -48,11 +50,6 @@ except ImportError:
     FulfillmentError = Exception  # type: ignore[misc,assignment]
 
 try:
-    from kiln.gateway.threedos import ThreeDOSError
-except ImportError:
-    ThreeDOSError = Exception  # type: ignore[misc,assignment]
-
-try:
     from kiln.generation.base import GenerationError
 except ImportError:
     GenerationError = Exception  # type: ignore[misc,assignment]
@@ -60,6 +57,8 @@ except ImportError:
 from kiln.cli.auth_commands import register_auth_cli
 from kiln.cli.bridge_commands import register_bridge_cli
 from kiln.cli.config import (
+    PrinterNameTaken,
+    _normalize_host,
     _normalize_printer_type,
     load_printer_config,
     remove_printer,
@@ -90,7 +89,7 @@ from kiln.cli.output import (
     format_status,
 )
 from kiln.cli.spend_caps_commands import register_spend_caps_cli
-from kiln.materials import MATERIAL_TEMPS, normalise_material_type
+from kiln.materials import normalise_material_type
 from kiln.routing_candidates import (
     adapter_supports_extension,
     collect_routing_candidates,
@@ -99,43 +98,17 @@ from kiln.routing_candidates import (
 logger = logging.getLogger(__name__)
 
 _MATERIAL_CHOICES: tuple[str, ...] = ("PLA", "PETG", "ABS", "TPU", "ASA", "Nylon", "PC")
-# Material temps and name normalisation moved to kiln.materials, and
-# candidate building to kiln.routing_candidates, so the route_print_job
-# tool can reach the same code without importing the CLI.  Aliased back
-# under their original private names: this module's call sites and the
-# tests that patch them are unchanged.
-_MATERIAL_TEMPS = MATERIAL_TEMPS
+# Name normalisation moved to kiln.materials, and candidate building to
+# kiln.routing_candidates, so the route_print_job tool can reach the same
+# code without importing the CLI.  Aliased back under their original
+# private names: this module's call sites and the tests that patch them are
+# unchanged.  A material's slicer temperatures are the slice's own
+# (kiln.slicer_material), never this module's.
 _normalise_material_type = normalise_material_type
 _adapter_supports_extension = adapter_supports_extension
 _collect_routing_candidates = collect_routing_candidates
 _SUPPORT_MODE_CHOICES: tuple[str, ...] = ("off", "auto", "minimal", "aggressive")
 _INGEST_EXTENSIONS: tuple[str, ...] = (".gcode", ".gco", ".g", ".3mf")
-
-
-def _material_profile_overrides(material: str) -> dict[str, str]:
-    """Build slicer profile overrides for a material."""
-    nozzle, first_nozzle, bed, first_bed = _MATERIAL_TEMPS[material]
-    return {
-        "temperature": str(nozzle),
-        "first_layer_temperature": str(first_nozzle),
-        "bed_temperature": str(bed),
-        "first_layer_bed_temperature": str(first_bed),
-    }
-
-
-def _material_extra_args(material: str) -> list[str]:
-    """Build CLI temperature args for slicers when no bundled profile is used."""
-    nozzle, first_nozzle, bed, first_bed = _MATERIAL_TEMPS[material]
-    return [
-        "--temperature",
-        str(nozzle),
-        "--first-layer-temperature",
-        str(first_nozzle),
-        "--bed-temperature",
-        str(bed),
-        "--first-layer-bed-temperature",
-        str(first_bed),
-    ]
 
 
 #: Where the CLI's material came from: ``--material``, the spool Kiln
@@ -258,6 +231,16 @@ def _resolve_support_style(support_mode: str, input_file: str) -> tuple[str | No
     return None, None
 
 
+def _echo_conversion(conversion: dict[str, Any] | None) -> None:
+    """Say that a generator's file was handed on as an STL, and where the
+    original still is (the record from ``kiln.format_conversion``)."""
+    if conversion:
+        click.echo(
+            f"  Converted from {conversion['from_format'].upper()} to STL; "
+            f"the original is kept at {conversion.get('original_path', 'its download folder')}"
+        )
+
+
 def _resolve_generation_provider(provider: str) -> GenerationProvider:  # noqa: F821
     """Resolve a generation provider by name.
 
@@ -323,25 +306,22 @@ def _resolve_slice_plan(
     ) = _resolve_material_for_slice_with_source(ctx, material)
     support_style, support_reason = _resolve_support_style(support_mode, input_file)
 
-    use_material_defaults = material_is_explicit or profile is None
-
+    # The material's temperatures, melt rate and cooling are not set here:
+    # the slice writes them from the material it is told (below), the same
+    # resolver every slicing door uses (kiln.slicer_material).  This command
+    # used to write its own seven-material temperature table into the
+    # profile, so the same --material sliced at different temperatures here
+    # and through the tools -- and set no melt rate at all.
     if effective_profile is None and effective_printer_id:
         try:
-            overrides: dict[str, str] = {}
-            if use_material_defaults:
-                overrides.update(_material_profile_overrides(material_key))
-            if support_style:
-                overrides.update(_support_profile_overrides(support_style))
             effective_profile = resolve_slicer_profile(
                 effective_printer_id,
-                overrides=overrides or None,
+                overrides=_support_profile_overrides(support_style) if support_style else None,
             )
         except Exception as exc:
             logger.debug("Profile resolution failed for %s: %s", effective_printer_id, exc)
 
     # Fallback to direct CLI overrides when no bundled profile is active.
-    if use_material_defaults and effective_profile is None:
-        extra_args.extend(_material_extra_args(material_key))
     if support_style and effective_profile is None:
         extra_args.extend(_support_extra_args(support_style))
 
@@ -591,6 +571,51 @@ def _make_adapter(cfg: dict[str, Any]):
     return adapter
 
 
+def _machine_identity_for_save(
+    printer_type: str,
+    host: str,
+    *,
+    api_key: str | None = None,
+    access_code: str | None = None,
+    serial: str | None = None,
+    printer_model: str | None = None,
+    adapter: Any | None = None,
+):
+    """The id the printer at *host* reports for itself, or ``None``.
+
+    What every CLI door that saves a printer calls so a save under a name
+    in use is judged by the machine's own id
+    (:meth:`kiln.printers.base.PrinterAdapter.read_machine_identity`), not
+    by its address.  *adapter* is one the door already built and tested;
+    without one, an adapter is built from the arguments the save will
+    carry.  Bounded (:data:`kiln.printers.base.MACHINE_IDENTITY_READ_SECONDS`)
+    and never raises: a printer whose id cannot be read is saved without
+    one, known by its address, and the door says so.  Bambu and Elegoo
+    state their id and are not asked; a USB port names no machine.
+    """
+    from kiln.printers.base import read_machine_identity_bounded
+
+    if _normalize_printer_type(printer_type) in ("bambu", "elegoo", "usb"):
+        return None
+
+    def _read():
+        live = adapter
+        if live is None:
+            cfg: dict[str, Any] = {"type": printer_type, "host": host}
+            if api_key:
+                cfg["api_key"] = api_key
+            if access_code:
+                cfg["access_code"] = access_code
+            if serial:
+                cfg["serial"] = serial
+            if printer_model:
+                cfg["printer_model"] = printer_model
+            live = _make_adapter(cfg)
+        return live.read_machine_identity()
+
+    return read_machine_identity_bounded(_read)
+
+
 def _make_bare_adapter(cfg: dict[str, Any]):
     """The backend half of :func:`_make_adapter`: the adapter, no camera."""
     from kiln.printers import (
@@ -638,7 +663,9 @@ def _make_bare_adapter(cfg: dict[str, Any]):
                 "Elegoo support requires websocket-client. "
                 "Install it with: uv pip install 'kiln3d[elegoo]' or pip install websocket-client"
             )
-        return ElegooAdapter(host=host, mainboard_id=cfg.get("serial") or "")
+        # save_printer writes the ID as ``mainboard_id`` (the key the MCP
+        # server reads too); ``serial`` is what older configs carried.
+        return ElegooAdapter(host=host, mainboard_id=cfg.get("mainboard_id") or cfg.get("serial") or "")
     elif ptype == "prusalink":
         return PrusaLinkAdapter(
             host=host,
@@ -1947,6 +1974,16 @@ def auth(
             "--baudrate applies to --type usb only; "
             f"{printer_type} printers are reached over the network."
         )
+    # Saving replaces the printer's whole entry, so it has to carry what this
+    # kind of printer needs -- one list every setup door reads.
+    from kiln.printer_backends import missing_needs, needs_sentence
+
+    gaps = missing_needs(
+        printer_type, {"api_key": api_key, "access_code": access_code, "serial": serial}
+    )
+    if gaps:
+        flags = ", ".join("--" + need.key.replace("_", "-") for need in gaps)
+        raise click.UsageError(f"{needs_sentence(printer_type, gaps)} Pass it with {flags}.")
     from kiln.printers.base import validate_external_camera_url
 
     for _label, _url in (
@@ -1959,18 +1996,26 @@ def auth(
             except ValueError as exc:
                 raise click.UsageError(str(exc)) from exc
     try:
-        path = save_printer(
+        # The save reads the id the printer reports for itself once the
+        # address answers, so a printer that moved is matched to its saved
+        # entry by that id rather than replaced.
+        saved = save_printer(
             name,
             printer_type,
             host,
             api_key=api_key,
             access_code=access_code,
             serial=serial,
+            read_machine_identity=lambda: _machine_identity_for_save(
+                printer_type, host,
+                api_key=api_key, access_code=access_code, serial=serial, printer_model=printer_model,
+            ),
             baudrate=baudrate,
             printer_model=printer_model,
             camera_snapshot_url=camera_snapshot_url,
             camera_stream_url=camera_stream_url,
         )
+        machine_identity = saved.machine_identity
         prusa_diagnostics: dict[str, Any] | None = None
         creality_diagnostics: dict[str, Any] | None = None
         saved_host = host
@@ -2011,18 +2056,58 @@ def auth(
             except Exception as exc:
                 logger.debug("Creality diagnostics after auth failed: %s", exc)
 
+        # Does the camera answer?  Asked once, without a frame, only when the
+        # address answered the save's own probe and the backend's diagnostics
+        # (where it has them) did not just fail: a printer that is not
+        # answering is not asked about its camera.
+        camera_line = ""
+        camera_handshake = None
+        diagnostics_failed = any(
+            d is not None and not d.get("ok", False) for d in (prusa_diagnostics, creality_diagnostics)
+        )
+        if saved.answered is not False and not diagnostics_failed:
+            try:
+                from kiln.camera_check import camera_setup_line, describe_handshake, handshake_external_camera
+
+                if printer_type == "usb":
+                    # Building a USB adapter opens the port, and opening the
+                    # port resets many boards; a serial port has no camera of
+                    # its own, so only a camera the person supplied is asked,
+                    # and it is asked directly.
+                    if camera_snapshot_url or camera_stream_url:
+                        from kiln.printers.base import CAMERA_HANDSHAKE_ADDRESS_TIMEOUT, ExternalCamera
+
+                        camera_handshake = handshake_external_camera(
+                            ExternalCamera(snapshot_url=camera_snapshot_url, stream_url=camera_stream_url),
+                            timeout=CAMERA_HANDSHAKE_ADDRESS_TIMEOUT,
+                        )
+                        camera_line = describe_handshake(camera_handshake, door="cli")
+                else:
+                    camera_handshake, camera_line = camera_setup_line(
+                        _make_adapter(load_printer_config(name)), door="cli"
+                    )
+            except Exception as exc:  # noqa: BLE001 — the save succeeded; a camera line must not undo it
+                logger.debug("camera handshake after auth skipped: %s", exc)
+
         data = {
             "name": name,
             "type": printer_type,
             "host": saved_host,
-            "config_path": str(path),
+            "config_path": str(saved.path),
+            "saved": saved.outcome,
         }
+        if saved.notice:
+            data["notice"] = saved.notice
+        if machine_identity is not None:
+            data["machine_identity"] = machine_identity.to_dict()
         if printer_model:
             data["printer_model"] = printer_model
         if prusa_diagnostics is not None:
             data["diagnostics"] = prusa_diagnostics
         if creality_diagnostics is not None:
             data["diagnostics"] = creality_diagnostics
+        if camera_handshake is not None:
+            data["camera_check"] = {**camera_handshake.to_dict(), "line": camera_line}
 
         if printer_type == "prusalink" and prusa_diagnostics is not None and not prusa_diagnostics.get("ok", False):
             checks = prusa_diagnostics.get("checks", [])
@@ -2075,6 +2160,8 @@ def auth(
             sys.exit(1)
 
         click.echo(format_response("success", data=data, json_mode=json_mode))
+        if not json_mode and camera_line:
+            click.echo(camera_line)
         if not json_mode and prusa_diagnostics is not None:
             profile_id = prusa_diagnostics.get("profile_id")
             file_count = prusa_diagnostics.get("file_count")
@@ -2106,6 +2193,8 @@ def auth(
                     f"CFS discovery: {detected}; active slot control is hardware-unverified in Kiln."
                 )
             click.echo("Creality connectivity check passed. Run: kiln doctor-creality for full diagnostics.")
+    except PrinterNameTaken as exc:
+        raise click.UsageError(str(exc)) from exc
     except OSError as exc:
         click.echo(
             format_error(
@@ -2162,9 +2251,17 @@ def status(ctx: click.Context, json_mode: bool) -> None:
             except Exception as exc:
                 logger.debug("Failed to enrich printer info: %s", exc)  # Best-effort enrichment
 
+        # A print carrying a hardware plan: the next stop, or what goes in now.
+        from kiln.hardware_stops import observe as _observe_hardware
+
+        hardware = _observe_hardware(adapter, state, job)
+        if hardware:
+            extra["hardware"] = hardware
         click.echo(format_status(state.to_dict(), job.to_dict(), json_mode=json_mode, extra=extra))
         if cooldown and not json_mode:
             click.echo(f"  {cooldown['note']}")
+        if hardware and not json_mode:
+            click.echo("\n".join(_hardware_lines(hardware)))
 
         # Migration nag: warn if the active printer has no printer_model.
         # Incident #0 (2026-04-15) exposed that the field silently
@@ -3284,6 +3381,16 @@ def pause(ctx: click.Context, json_mode: bool) -> None:
         sys.exit(1)
 
 
+def _hardware_lines(note: dict) -> list[str]:
+    """A hardware-stop note (kiln.hardware_stops) as lines for the terminal."""
+    lines = [f"  Hardware: {note['say']}"]
+    lines += [f"    {n}. {step}" for n, step in enumerate(note.get("steps") or (), 1)]
+    if note.get("stage") == "now":
+        lines.append("    When every piece is in and sits level with or below the top of the print: "
+                     "kiln resume --hardware-in")
+    return lines
+
+
 @cli.command()
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.option(
@@ -3294,8 +3401,17 @@ def pause(ctx: click.Context, json_mode: bool) -> None:
         "Use when the printer's screen disagrees with what Kiln reports."
     ),
 )
+@click.option(
+    "--hardware-in",
+    "hardware_confirmed",
+    is_flag=True,
+    help=(
+        "At a hardware stop: every nut, magnet or bearing for this stop is in "
+        "and sits level with or below the top of the print."
+    ),
+)
 @click.pass_context
-def resume(ctx: click.Context, json_mode: bool, force: bool) -> None:
+def resume(ctx: click.Context, json_mode: bool, force: bool, hardware_confirmed: bool) -> None:
     """Resume a paused print job."""
     try:
         safety_printer = _resolve_emergency_printer_name(ctx)
@@ -3310,8 +3426,14 @@ def resume(ctx: click.Context, json_mode: bool, force: bool) -> None:
             )
             sys.exit(1)
         adapter = _get_adapter_from_ctx(ctx)
-        result = adapter.resume_print(force=force)
+        confirmed = {"hardware_confirmed": True} if hardware_confirmed else {}
+        result = adapter.resume_print(force=force, **confirmed)
         click.echo(format_action("resume", result.to_dict(), json_mode=json_mode))
+        if getattr(result, "code", None) == "HARDWARE_NOT_CONFIRMED":
+            # Waiting for a person's hands: the steps, and the way through.
+            if not json_mode and result.hardware:
+                click.echo("\n".join(_hardware_lines(result.hardware)[1:]))
+            sys.exit(3)
     except click.ClickException:
         raise
     except PrinterError as exc:
@@ -4264,7 +4386,10 @@ def remove(name: str) -> None:
     "-m",
     default=None,
     type=click.Choice(_MATERIAL_CHOICES),
-    help="Material type — sets the temperatures and what the print is weighed as (defaults to the loaded material, then PLA).",
+    help=(
+        "Material type — sets the slice's temperatures, melt rate and cooling, and what the "
+        "print is weighed as (defaults to the loaded material, then PLA)."
+    ),
 )
 @click.option(
     "--support-mode",
@@ -4647,7 +4772,7 @@ def slice(
         click.echo(format_error(str(exc), code="SLICER_NOT_FOUND", json_mode=json_mode))
         sys.exit(1)
     except SlicerError as exc:
-        click.echo(format_error(str(exc), code="SLICER_ERROR", json_mode=json_mode))
+        click.echo(format_error(str(exc), code=getattr(exc, "code", "SLICER_ERROR"), json_mode=json_mode))
         sys.exit(1)
     except click.ClickException:
         raise
@@ -4814,10 +4939,13 @@ def wait(ctx: click.Context, interval: float, max_timeout: float, json_mode: boo
     """Block until the current print finishes.
 
     Polls printer status at the given interval.  Exits with code 0 on
-    successful completion, 1 on failure/cancellation/error.
+    successful completion, 1 on failure/cancellation/error, and 3 when the
+    print has stopped at a planned hardware stop and waits for a person.
+    A print carrying a hardware plan also says when a stop is close.
     """
     import time as _time
 
+    from kiln.hardware_stops import observe as _observe_hardware
     from kiln.printers.base import PrinterStatus
 
     try:
@@ -4828,6 +4956,22 @@ def wait(ctx: click.Context, interval: float, max_timeout: float, json_mode: boo
             state = adapter.get_state()
             job = adapter.get_job()
 
+            hardware = _observe_hardware(adapter, state, job, announce="chat")
+            if hardware and hardware["stage"] == "now":
+                if json_mode:
+                    click.echo(format_response("success", data={"final_state": "paused", "hardware": hardware},
+                                               json_mode=True))
+                else:
+                    click.echo("\n" + "\n".join(_hardware_lines(hardware)))
+                sys.exit(3)
+            if (
+                hardware
+                and hardware["new"]
+                and hardware["stage"] in ("coming_up", "missed", "passed_unseen")
+                and not json_mode
+            ):
+                click.echo("\n" + "\n".join(_hardware_lines(hardware)))
+
             # Terminal states
             if state.confirmed_state == PrinterStatus.IDLE:
                 # If we never saw a print, it's already idle
@@ -4836,7 +4980,11 @@ def wait(ctx: click.Context, interval: float, max_timeout: float, json_mode: boo
                     "file_name": job.file_name,
                     "elapsed_seconds": round(_time.time() - start, 1),
                 }
+                if hardware and hardware["stage"] == "after_print":
+                    data["hardware"] = hardware
                 click.echo(format_response("success", data=data, json_mode=json_mode))
+                if hardware and hardware["stage"] == "after_print" and not json_mode:
+                    click.echo("\n".join(_hardware_lines(hardware)))
                 return
 
             # ``effective_state``: a fault takes the headline while the machine goes
@@ -5136,7 +5284,7 @@ def monitor(ctx: click.Context, interval: float,
         # Resolve adapter early for friendly error messages, but the
         # health monitor itself looks the printer up via the registry
         # singleton when each tick runs.
-        _get_adapter_from_ctx(ctx)
+        adapter = _get_adapter_from_ctx(ctx)
         printer_name = ctx.obj.get("printer") or "default"
 
         # Build the policy directly from the CLI flags.  Wall-clock
@@ -5233,6 +5381,17 @@ def monitor(ctx: click.Context, interval: float,
                             click.echo(f"    [CRITICAL] {m.detail}")
                         elif m.severity == HealthSeverity.WARNING and m.detail:
                             click.echo(f"    [WARNING]  {m.detail}")
+
+                    # A print carrying a hardware plan: each moment once, as it comes.
+                    try:
+                        from kiln.hardware_stops import observe as _observe_hardware
+
+                        _hw = _observe_hardware(adapter, adapter.get_state(), adapter.get_job(), announce="chat")
+                    except Exception as _hw_exc:  # noqa: BLE001 -- never break a monitor tick
+                        logger.debug("hardware plan read skipped: %s", _hw_exc)
+                        _hw = None
+                    if _hw and _hw["new"]:
+                        click.echo("\n".join(_hardware_lines(_hw)))
 
                     # Smart-monitoring panel — surfaces the same Tier-1
                     # fields the MCP monitor_print one-shot reports.
@@ -5345,16 +5504,30 @@ def order() -> None:
     """
 
 
-def _get_fulfillment_provider():
+def _require_order_service(json_mode: bool) -> Any:
+    """The order service for an ordering command.
+
+    On an install without one (:mod:`kiln.fulfillment_service`), says so in
+    the sentence every ordering door shares and exits before anything is
+    sent.
+    """
+    from kiln.fulfillment_service import NOT_INCLUDED, NOT_INCLUDED_CODE, order_service
+
+    service = order_service()
+    if service is None:
+        click.echo(format_error(NOT_INCLUDED, code=NOT_INCLUDED_CODE, json_mode=json_mode))
+        sys.exit(1)
+    return service
+
+
+def _get_fulfillment_provider(service: Any) -> Any:
     """Create a fulfillment provider from env config.
 
-    Uses the provider registry to select the right provider based on
-    ``KILN_FULFILLMENT_PROVIDER`` or auto-detect from API key env vars.
+    Uses the order service's provider registry to select the right provider
+    based on ``KILN_FULFILLMENT_PROVIDER`` or auto-detect from API key env vars.
     """
-    from kiln.fulfillment import get_provider
-
     try:
-        return get_provider()
+        return service.get_provider()
     except (KeyError, RuntimeError, ValueError) as exc:
         raise click.ClickException(
             f"Fulfillment provider not configured: {exc}. "
@@ -5362,12 +5535,53 @@ def _get_fulfillment_provider():
         ) from exc
 
 
+def _order_routing(
+    provider_name: Any, provider_order_id: Any = "", shipping_country: Any = "",
+) -> dict[str, Any]:
+    """The print service's terms and ownership, as every order reply carries them.
+
+    A provider without a plain-text name has no recorded terms: its reply
+    carries none rather than a name that cannot be written out.
+    """
+    from kiln.server import _provider_routing_metadata
+
+    return _provider_routing_metadata(
+        provider_name if isinstance(provider_name, str) else "",
+        provider_order_id=provider_order_id if isinstance(provider_order_id, str) else "",
+        shipping_country=shipping_country if isinstance(shipping_country, str) else "",
+    )
+
+
+def _order_words(service: Any, message: str, *args: Any) -> list[str]:
+    """The lines the order service words for the person, or none.
+
+    The same words every other ordering door says; how an answer is worded
+    never costs the person the answer itself.
+    """
+    word = getattr(service, message, None)
+    if word is None:
+        return []
+    try:
+        return [str(line) for line in word(*args)]
+    except Exception:
+        logger.warning("Could not word the order service's %s", message, exc_info=True)
+        return []
+
+
+def _echo_words(lines: list[str]) -> None:
+    """Print worded lines ahead of the details they summarise."""
+    if lines:
+        click.echo("\n".join(lines))
+        click.echo()
+
+
 @order.command("materials")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def order_materials(json_mode: bool) -> None:
     """List available materials from fulfillment services."""
+    service = _require_order_service(json_mode)
     try:
-        provider = _get_fulfillment_provider()
+        provider = _get_fulfillment_provider(service)
         materials = provider.list_materials()
         click.echo(format_materials([m.to_dict() for m in materials], json_mode=json_mode))
     except click.ClickException:
@@ -5402,29 +5616,57 @@ def order_quote(file_path: str, material: str, quantity: int, country: str, json
     Upload a model file (STL, 3MF, OBJ) and receive pricing, lead time,
     and shipping options from Craftcloud's network of 150+ print services.
     """
+    service = _require_order_service(json_mode)
     try:
         from kiln.billing import BillingLedger
     except ImportError:
         BillingLedger = None
-    from kiln.fulfillment import QuoteRequest
 
     try:
-        provider = _get_fulfillment_provider()
+        provider = _get_fulfillment_provider(service)
         quote = provider.get_quote(
-            QuoteRequest(
+            service.QuoteRequest(
                 file_path=file_path,
                 material_id=material,
+                file_name=Path(file_path).name,
                 quantity=quantity,
                 shipping_country=country,
             )
         )
         quote_data = quote.to_dict()
+        kiln_fee = 0.0
         if BillingLedger is not None:
             ledger = BillingLedger()
             fee_calc = ledger.calculate_fee(quote.total_price, currency=quote.currency)
             quote_data["kiln_fee"] = fee_calc.to_dict()
             quote_data["total_with_fee"] = float(fee_calc.total_cost)
+            kiln_fee = float(getattr(fee_calc, "fee_amount", 0) + getattr(fee_calc, "tax_amount", 0))
+        # The one price sheet every door serves, built by the order service,
+        # so the total shown is the delivered total, shipping included.
+        sheet = getattr(service, "price_sheet", None)
+        if sheet is not None:
+            try:
+                quote_data["price_sheet"] = sheet(quote, kiln_fee=kiln_fee)
+            except Exception:
+                logger.warning("Could not build the price sheet for quote %s", quote.quote_id, exc_info=True)
+        # The print service's terms ride every quote, as at every other door;
+        # a quote is never lost to how its terms are read.
+        try:
+            routing = _order_routing(provider.name, shipping_country=country)
+        except Exception:
+            logger.warning("Could not read the print service's terms", exc_info=True)
+            routing = {}
+        quote_data.update(routing)
         click.echo(format_quote(quote_data, json_mode=json_mode))
+        if not json_mode:
+            tax = routing.get("provider_tax_note")
+            terms = [tax] if tax else []
+            terms.extend(routing.get("provider_order_terms") or [])
+            if routing.get("provider_terms_url"):
+                terms.append(f"The print service's full terms: {routing['provider_terms_url']}")
+            if terms:
+                click.echo()
+                click.echo("\n".join(terms))
     except click.ClickException:
         raise
     except FileNotFoundError as exc:
@@ -5575,6 +5817,109 @@ def _resolve_shipping_profile_save_step(
     _save_shipping_profile_from_cli(shipping_address, profile_name)
 
 
+def _order_fee_tools() -> tuple[Any, Any, type[Exception]]:
+    """The fee ledger, payment manager and payment error that settle Kiln's
+    fee on an order, resolved before the order is placed.
+
+    The fee is settled after the print service accepts the order, so a piece
+    missing here refuses the order while nothing has been sent, instead of
+    failing once an order exists.
+    """
+    try:
+        from kiln_pro.payments.base import PaymentError
+        from kiln_pro.payments.manager import PaymentManager
+
+        from kiln.billing import BillingLedger
+    except ImportError as exc:
+        raise click.ClickException(
+            "Kiln can't record its fee for an order on this install, so the order "
+            "was not placed and nothing was sent to the print service."
+        ) from exc
+    from kiln.persistence import get_db
+
+    try:
+        ledger = BillingLedger(db=get_db())
+    except Exception as exc:
+        raise click.ClickException(
+            f"Kiln couldn't open its fee ledger ({exc}), so the order was not "
+            "placed and nothing was sent to the print service."
+        ) from exc
+    return ledger, PaymentManager, PaymentError
+
+
+def _settle_order_fee(
+    order_data: dict[str, Any],
+    result: Any,
+    ledger: Any,
+    payment_manager_cls: Any,
+    payment_error_cls: type[Exception],
+) -> None:
+    """Settle Kiln's fee on an order the print service has accepted.
+
+    The fee is charged on the printing only (:func:`kiln.fulfillment_service.fee_basis`),
+    never on the checkout total, which adds shipping and tax.
+
+    The order exists by now, so nothing here may report it as failed: a fee
+    step that cannot finish leaves the order reported as placed, with a
+    warning that says the fee was not recorded.
+    """
+    from kiln.fulfillment_service import fee_basis, fee_taken_by_server
+
+    # Kiln's hosted server placed the order and charged the fee itself:
+    # show that fee, and record and charge nothing here.
+    upstream = fee_taken_by_server(result)
+    if upstream is not None:
+        order_data["kiln_fee"] = upstream
+        order_data["payment"] = {"status": "charged_by_kiln_server"}
+        fee_now = float(upstream.get("fee_amount") or 0) + float(upstream.get("tax_amount") or 0)
+        if isinstance(result.total_price, (int, float)):
+            order_data["total_with_fee"] = round(float(result.total_price) + fee_now, 2)
+        return
+    basis = fee_basis(result)
+    if basis is None:
+        logger.warning("Order %s states no printing price; Kiln's fee was not worked out", result.order_id)
+        order_data.setdefault("payment", {"status": "not_recorded"})
+        order_data.setdefault("warnings", []).append(
+            f"Order {result.order_id} was placed, but the print service didn't say what the printing "
+            "costs, so Kiln didn't work out its fee (it is charged on the printing only, never on "
+            f"shipping or tax). Don't place it again; check it with: kiln order status {result.order_id}"
+        )
+        return
+    try:
+        fee_calc = ledger.calculate_fee(
+            basis,
+            currency=result.currency,
+        )
+        try:
+            mgr = payment_manager_cls()
+            if mgr.available_rails:
+                pay_result = mgr.charge_fee(result.order_id, fee_calc)
+                order_data["payment"] = pay_result.to_dict()
+            else:
+                ledger.record_charge(result.order_id, fee_calc)
+                order_data["payment"] = {"status": "no_payment_method"}
+        except payment_error_cls:
+            ledger.record_charge(
+                result.order_id,
+                fee_calc,
+                payment_status="failed",
+            )
+            order_data["payment"] = {"status": "failed"}
+        order_data["kiln_fee"] = fee_calc.to_dict()
+        # What the person pays in all: the print service's checkout total
+        # (printing, shipping, tax) plus Kiln's fee and any tax on it.
+        order_data["total_with_fee"] = round(
+            float(result.total_price) + float(fee_calc.fee_amount) + float(fee_calc.tax_amount), 2,
+        )
+    except Exception as exc:
+        logger.warning("Order %s was placed but its fee was not recorded: %s", result.order_id, exc)
+        order_data.setdefault("payment", {"status": "not_recorded"})
+        order_data.setdefault("warnings", []).append(
+            f"Order {result.order_id} was placed, but Kiln couldn't finish recording its fee ({exc}). "
+            f"Don't place it again; check it with: kiln order status {result.order_id}"
+        )
+
+
 @order.command("place")
 @click.argument("quote_id")
 @click.option("--shipping", "-s", "shipping_id", default="", help="Shipping option ID (from quote).")
@@ -5624,20 +5969,7 @@ def order_place(
 
     Requires a quote ID from 'kiln order quote'.
     """
-    try:
-        from kiln.billing import BillingLedger
-    except ImportError:
-        BillingLedger = None
-    from kiln.fulfillment import OrderRequest
-    try:
-        from kiln_pro.payments.base import PaymentError
-    except ImportError:
-        PaymentError = None
-    try:
-        from kiln_pro.payments.manager import PaymentManager
-    except ImportError:
-        PaymentManager = None
-    from kiln.persistence import get_db
+    service = _require_order_service(json_mode)
 
     try:
         manual_shipping_fields = any(
@@ -5708,9 +6040,10 @@ def order_place(
             do_not_save=do_not_save_shipping_profile,
             json_mode=json_mode,
         )
-        provider = _get_fulfillment_provider()
+        fee_tools = _order_fee_tools()
+        provider = _get_fulfillment_provider(service)
         result = provider.place_order(
-            OrderRequest(
+            service.OrderRequest(
                 quote_id=quote_id,
                 shipping_option_id=shipping_id,
                 shipping_address=shipping_address,
@@ -5718,31 +6051,6 @@ def order_place(
                 shipping_confirmed=True,
             )
         )
-        order_data = result.to_dict()
-        if result.total_price and result.total_price > 0:
-            ledger = BillingLedger(db=get_db())
-            fee_calc = ledger.calculate_fee(
-                result.total_price,
-                currency=result.currency,
-            )
-            try:
-                mgr = PaymentManager()
-                if mgr.available_rails:
-                    pay_result = mgr.charge_fee(result.order_id, fee_calc)
-                    order_data["payment"] = pay_result.to_dict()
-                else:
-                    ledger.record_charge(result.order_id, fee_calc)
-                    order_data["payment"] = {"status": "no_payment_method"}
-            except PaymentError:
-                ledger.record_charge(
-                    result.order_id,
-                    fee_calc,
-                    payment_status="failed",
-                )
-                order_data["payment"] = {"status": "failed"}
-            order_data["kiln_fee"] = fee_calc.to_dict()
-            order_data["total_with_fee"] = float(fee_calc.total_cost)
-        click.echo(format_order(order_data, json_mode=json_mode))
     except click.ClickException:
         raise
     except FulfillmentError as exc:
@@ -5762,16 +6070,43 @@ def order_place(
         )
         sys.exit(1)
 
+    # The print service has the order now.  Nothing below may report it as
+    # failed: an order that reads as failed gets placed, and paid for, twice.
+    order_data = result.to_dict()
+    if result.total_price and result.total_price > 0:
+        _settle_order_fee(order_data, result, *fee_tools)
+    # The step that is left comes first: where to pay.
+    try:
+        routing = _order_routing(
+            provider.name, result.order_id, shipping_country=str(shipping_address.get("country") or ""),
+        )
+    except Exception:
+        logger.warning("Could not read the print service's terms", exc_info=True)
+        routing = {}
+    tell = _order_words(service, "order_message", result, routing)
+    if json_mode:
+        order_data = {"tell_the_person": tell, **order_data} if tell else order_data
+    else:
+        _echo_words(tell)
+    click.echo(format_order(order_data, json_mode=json_mode))
+
 
 @order.command("status")
 @click.argument("order_id")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def order_status(order_id: str, json_mode: bool) -> None:
     """Check the status of a fulfillment order."""
+    service = _require_order_service(json_mode)
     try:
-        provider = _get_fulfillment_provider()
+        provider = _get_fulfillment_provider(service)
         result = provider.get_order_status(order_id)
-        click.echo(format_order(result.to_dict(), json_mode=json_mode))
+        order_data = result.to_dict()
+        tell = _order_words(service, "status_message", result)
+        if json_mode:
+            order_data = {"tell_the_person": tell, **order_data} if tell else order_data
+        else:
+            _echo_words(tell)
+        click.echo(format_order(order_data, json_mode=json_mode))
     except click.ClickException:
         raise
     except FulfillmentError as exc:
@@ -5797,13 +6132,21 @@ def order_status(order_id: str, json_mode: bool) -> None:
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def order_cancel(order_id: str, json_mode: bool) -> None:
     """Cancel a fulfillment order (if still cancellable)."""
+    service = _require_order_service(json_mode)
     try:
-        provider = _get_fulfillment_provider()
+        provider = _get_fulfillment_provider(service)
         result = provider.cancel_order(order_id)
         click.echo(format_order(result.to_dict(), json_mode=json_mode))
     except click.ClickException:
         raise
     except FulfillmentError as exc:
+        from kiln.fulfillment_service import WORDED_CANCEL_REFUSALS
+
+        code = getattr(exc, "code", None)
+        if code in WORDED_CANCEL_REFUSALS:
+            # Already worded for the person, with what to do next.
+            click.echo(format_error(str(exc), code=code, json_mode=json_mode))
+            sys.exit(1)
         click.echo(
             format_error(
                 f"Failed to cancel order {order_id!r}: {exc}. The order may no longer be cancellable.",
@@ -6028,9 +6371,8 @@ def order_validate_address(
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def order_history(limit: int, provider: str, json_mode: bool) -> None:
     """View past fulfillment orders."""
-    from kiln.fulfillment.intelligence import get_order_history
-
-    history = get_order_history()
+    service = _require_order_service(json_mode)
+    history = service.get_order_history()
     orders = history.list_orders(limit=limit, provider=provider or None)
     data = [o.to_dict() for o in orders]
     if json_mode:
@@ -6053,9 +6395,8 @@ def order_insurance(order_value: float, json_mode: bool) -> None:
 
     ORDER_VALUE: Total order value in USD.
     """
-    from kiln.fulfillment.intelligence import get_insurance_options
-
-    options = get_insurance_options(order_value)
+    service = _require_order_service(json_mode)
+    options = service.get_insurance_options(order_value)
     data = [o.to_dict() for o in options]
     if json_mode:
         click.echo(json.dumps({"status": "success", "data": data}, indent=2))
@@ -7450,6 +7791,7 @@ def compare_cost(
     import json as _json
 
     from kiln.cost_estimator import CostEstimator
+    from kiln.fulfillment_service import NOT_INCLUDED, order_service
 
     result: dict = {}
 
@@ -7473,10 +7815,13 @@ def compare_cost(
         result["local"] = {"available": False, "error": str(exc)}
 
     # Fulfillment quote (optional)
-    if fulfillment_material:
+    service = order_service() if fulfillment_material else None
+    if fulfillment_material and service is None:
+        result["fulfillment"] = {"available": False, "error": NOT_INCLUDED}
+    elif fulfillment_material:
         try:
-            from kiln.fulfillment import QuoteRequest as QR
-            from kiln.fulfillment import get_provider
+            QR = service.QuoteRequest
+            get_provider = service.get_provider
 
             # Use explicit provider, or auto-detect, or fall back to
             # craftcloud (which works without any API key for quotes).
@@ -7496,7 +7841,7 @@ def compare_cost(
                 # Looks like a simple name, not a UUID — resolve it
                 try:
                     resolved_material = _resolve_fulfillment_material(
-                        fulfillment_material, provider_name=provider
+                        service, fulfillment_material, provider_name=provider
                     )
                     if not json_mode:
                         click.echo(f"  Resolved material {fulfillment_material!r} → {resolved_material}")
@@ -7595,6 +7940,7 @@ _MATERIAL_ALIASES: dict[str, list[str]] = {
 
 
 def _resolve_fulfillment_material(
+    service: Any,
     simple_name: str,
     provider_name: str | None = None,
 ) -> str:
@@ -7603,12 +7949,13 @@ def _resolve_fulfillment_material(
     Fetches the provider's material catalog, searches for matches by name,
     and returns the best matching material config ID.
 
+    :param service: The order service (:func:`kiln.fulfillment_service.order_service`).
     :param simple_name: Simple material name like "PLA", "Nylon", etc.
     :param provider_name: Fulfillment provider name (default: auto-detect).
     :returns: The material config ID string (e.g., a UUID for Craftcloud).
     :raises click.ClickException: If no matching material is found.
     """
-    from kiln.fulfillment import get_provider
+    get_provider = service.get_provider
 
     try:
         prov = get_provider(provider_name)
@@ -7704,8 +8051,9 @@ def fulfillment_materials(
     """
     import json
 
-    from kiln.fulfillment import get_provider
-    from kiln.fulfillment.base import FulfillmentError
+    service = _require_order_service(json_mode)
+    get_provider = service.get_provider
+    FulfillmentError = service.FulfillmentError
 
     try:
         try:
@@ -8483,6 +8831,26 @@ def donate(json_mode: bool) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _engaged_elsewhere(exc: BaseException) -> str | None:
+    """The one-printer rule's own words when *exc* is its refusal, else ``None``.
+
+    A connection probe that meets the rule has not failed to reach anything:
+    Kiln is working with another printer and was not allowed to look at this
+    one.  Reporting that as "cannot reach" or "check your credentials" sends
+    the person after a fault that is not there.
+    """
+    from kiln.printers.engagement import refusal_in_flight
+
+    verdict = refusal_in_flight(exc)
+    if verdict is None:
+        return None
+    parts = [str(verdict.get("reason") or "").strip()]
+    suggestions = verdict.get("suggestions") or []
+    if suggestions:
+        parts.append(str(suggestions[0]).strip())
+    return " ".join(part for part in parts if part) or None
+
+
 @cli.command()
 @click.option(
     "--skip-discovery",
@@ -8599,7 +8967,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
 
     # -- Manual entry (or refine selected) ---------------------------------
     if selected is not None:
-        host = selected.host
+        host = selected.address
         printer_type = selected.printer_type
         if printer_type == "unknown":
             printer_type = click.prompt(
@@ -8645,34 +9013,20 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
     name = name.strip().lower().replace(" ", "-")
 
     # -- Credentials -------------------------------------------------------
-    api_key = None
-    access_code = None
-    serial = None
+    # What this kind of printer needs, and where the person finds each, is
+    # one list every setup door reads (kiln.printer_backends).  A value
+    # discovery read off the printer (a Bambu serial) is said back, not asked.
+    from kiln.cli.connection_prompt import ask_connection_needs
 
-    if printer_type in ("octoprint", "moonraker", "creality", "prusalink", "duet"):
-        # RepRapFirmware authenticates with a machine password (set by M551),
-        # not an API key -- asking for the wrong thing by name sends people
-        # hunting for a key their printer never issues.
-        credential = "Machine password" if printer_type == "duet" else "API key"
-        api_key = click.prompt(
-            f"  {credential} for {PRINTER_TYPE_LABELS.get(printer_type, printer_type)}",
-            default="",
-            show_default=False,
-        )
-        if not api_key:
-            api_key = None
-    elif printer_type == "bambu":
-        access_code = click.prompt("  LAN access code (from printer screen)")
-        serial = click.prompt("  Printer serial number")
-    elif printer_type == "elegoo":
-        click.echo("  Elegoo SDCP printers require no authentication.")
-        serial = click.prompt(
-            "  Mainboard ID (optional, auto-discovered if blank)",
-            default="",
-            show_default=False,
-        )
-        if not serial:
-            serial = None
+    creds = ask_connection_needs(
+        printer_type,
+        found={"serial": getattr(selected, "serial", "") if selected is not None else ""},
+        discovered=selected is not None,
+        host=host,
+    )
+    api_key = creds.get("api_key")
+    access_code = creds.get("access_code")
+    serial = creds.get("serial")
 
     # -- printer_model (activates safety stack) ----------------------------
     # Incident #0 (2026-04-15) exposed that setup never asked for this
@@ -8685,33 +9039,27 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
         printer_type, serial=serial, allow_skip=False,
     )
 
-    # -- Save --------------------------------------------------------------
-    click.echo()
-    try:
-        path = save_printer(
-            name,
-            printer_type,
-            host,
-            api_key=api_key,
-            access_code=access_code,
-            serial=serial,
-            printer_model=printer_model,
-            set_active=True,
-        )
-        click.echo(f"  Saved printer '{name}' to {path}")
-    except OSError as exc:
-        click.echo(click.style(f"  Failed to save config: {exc}", fg="red"))
-        sys.exit(1)
-    except Exception as exc:
-        click.echo(click.style(f"  Failed to save config: {exc}", fg="red"))
-        sys.exit(1)
-
     # -- Test connection ---------------------------------------------------
+    # Before the save: a printer that answers is asked for the id it
+    # reports for itself, and the save under a name in use is judged by
+    # that id.  A printer that does not answer is still saved below.
+    click.echo()
     click.echo("  Testing connection...")
+    adapter = None
+    connected = False
+    # Built on the address as it will be saved, so the test speaks to the
+    # same URL the saved entry will.
+    live_cfg: dict[str, Any] = {"type": printer_type, "host": _normalize_host(host, printer_type)}
+    for key, value in (
+        ("api_key", api_key), ("access_code", access_code),
+        ("serial", serial), ("printer_model", printer_model),
+    ):
+        if value:
+            live_cfg[key] = value
     try:
-        cfg = load_printer_config(name)
-        adapter = _make_adapter(cfg)
+        adapter = _make_adapter(live_cfg)
         state = adapter.get_state()
+        connected = True
         click.echo(click.style("  Connected!", fg="green") + f" Printer state: {state.state.value}")
         if state.tool_temp_actual is not None:
             click.echo(f"  Hotend: {state.tool_temp_actual:.0f}C")
@@ -8744,20 +9092,66 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
                     click.echo(click.style("  AMS reachable, but no loaded trays were reported.", fg="yellow"))
             except Exception as exc:
                 click.echo(click.style(f"  AMS check failed: {exc}", fg="yellow"))
+        # The printer answered; now, without a frame, does its camera?
+        from kiln.camera_check import camera_setup_line
+
+        _camera_handshake, _camera_line = camera_setup_line(adapter, door="cli")
+        if _camera_line:
+            click.echo(f"  {_camera_line}")
     except PrinterError as exc:
-        click.echo(click.style(f"  Connection test failed: {exc}", fg="yellow"))
-        click.echo(
-            f"  The printer was saved but may need correct credentials.\n"
-            f"  Update with: kiln auth --name {name} --host {host} "
-            f"--type {printer_type} --api-key <key>"
-        )
+        if why := _engaged_elsewhere(exc):
+            click.echo(click.style(f"  Connection not tested: {why}", fg="yellow"))
+            click.echo("  The printer is saved anyway.")
+        else:
+            click.echo(click.style(f"  Connection test failed: {exc}", fg="yellow"))
+            click.echo(
+                f"  The printer is saved anyway but may need correct credentials.\n"
+                f"  Update with: kiln auth --name {name} --host {host} "
+                f"--type {printer_type} --api-key <key>"
+            )
     except Exception as exc:
         click.echo(click.style(f"  Connection test failed: {exc}", fg="yellow"))
         click.echo(
-            f"  The printer was saved but may need correct credentials.\n"
+            f"  The printer is saved anyway but may need correct credentials.\n"
             f"  Update with: kiln auth --name {name} --host {host} "
             f"--type {printer_type} --api-key <key>"
         )
+
+    machine_identity = None
+    if connected:
+        machine_identity = _machine_identity_for_save(printer_type, host, adapter=adapter)
+
+    # -- Save --------------------------------------------------------------
+    try:
+        while True:
+            try:
+                saved = save_printer(
+                    name,
+                    printer_type,
+                    host,
+                    api_key=api_key,
+                    access_code=access_code,
+                    serial=serial,
+                    machine_identity=machine_identity,
+                    printer_model=printer_model,
+                    set_active=True,
+                    probe=not connected,
+                )
+                break
+            except PrinterNameTaken as exc:
+                # Everything else is in hand, so ask only for another name.
+                click.echo(click.style(f"  {exc}", fg="yellow"))
+                name = click.prompt("  Friendly name for this printer", default=exc.suggested_name)
+                name = name.strip().lower().replace(" ", "-")
+        click.echo(f"  Saved printer '{name}' to {saved.path}")
+        if saved.notice:
+            click.echo(click.style(f"  {saved.notice}", fg="yellow"))
+    except OSError as exc:
+        click.echo(click.style(f"  Failed to save config: {exc}", fg="red"))
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(click.style(f"  Failed to save config: {exc}", fg="red"))
+        sys.exit(1)
 
     # -- Auto-print safety preferences -------------------------------------
     click.echo()
@@ -8964,23 +9358,37 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
         if first.printer_type == "bambu":
             serial_hint = getattr(first, "serial", None) or ""
             auto_model = suggest_bambu_model(serial_hint)
+        # What discovery read off the printer is kept, and what it still
+        # needs is named from the one list every setup door reads.
+        from kiln.printer_backends import missing_needs, needs_sentence
+
+        found_serial = getattr(first, "serial", None) or None
+        still_needed = missing_needs(first.printer_type, {"host": first.address, "serial": found_serial})
         try:
+            # The save asks the machine for the id it reports for itself
+            # once the address answers; a read that fails leaves the
+            # printer known by its address.
             save_printer(
                 printer_name,
                 first.printer_type,
-                first.host,
+                first.address,
+                serial=found_serial,
+                read_machine_identity=lambda: _machine_identity_for_save(
+                    first.printer_type, first.address, serial=found_serial, printer_model=auto_model,
+                ),
                 printer_model=auto_model,
                 set_active=True,
             )
             results["setup"] = {
                 "action": "auto_configured",
                 "printer": printer_name,
-                "host": first.host,
+                "host": first.address,
                 "type": first.printer_type,
                 "printer_model": auto_model,
+                "still_needed": [need.name for need in still_needed],
             }
             if not json_mode:
-                click.echo(f"    Auto-configured: {printer_name} [{first.printer_type}] at {first.host}")
+                click.echo(f"    Auto-configured: {printer_name} [{first.printer_type}] at {first.address}")
                 if auto_model:
                     click.echo(click.style(
                         f"    ✓ printer_model suggested from serial: {auto_model}",
@@ -8993,7 +9401,12 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
                         "      `kiln setup` for the interactive flow that asks for it.",
                         fg="yellow",
                     ))
-                click.echo("    Note: You may need to add an API key with 'kiln auth'.")
+                if still_needed:
+                    click.echo(click.style(
+                        f"    {needs_sentence(first.printer_type, still_needed)} "
+                        "Run `kiln setup` to add it.",
+                        fg="yellow",
+                    ))
         except OSError as exc:
             results["setup"] = {"action": "failed", "error": str(exc)}
             if not json_mode:
@@ -9032,14 +9445,29 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
                 click.echo(f"    Hotend: {state.tool_temp_actual:.0f}C")
             if state.bed_temp_actual is not None:
                 click.echo(f"    Bed:    {state.bed_temp_actual:.0f}C")
+        # The printer answered; now, without a frame, does its camera?
+        from kiln.camera_check import camera_setup_line
+
+        _camera_handshake, _camera_line = camera_setup_line(adapter, door="cli")
+        if _camera_handshake is not None:
+            results["status"]["camera_check"] = {**_camera_handshake.to_dict(), "line": _camera_line}
+        if _camera_line and not json_mode:
+            click.echo(f"    {_camera_line}")
     except ValueError as exc:
         results["status"] = {"error": str(exc), "connected": False}
         if not json_mode:
             click.echo(f"    No printer configured: {exc}")
     except PrinterError as exc:
-        results["status"] = {"error": str(exc), "connected": False}
-        if not json_mode:
-            click.echo(click.style(f"    Status check failed: {exc}", fg="yellow"))
+        if why := _engaged_elsewhere(exc):
+            # Not a failure: the rule did not let Kiln look.  ``connected`` is
+            # unknown, not False.
+            results["status"] = {"not_checked": why, "connected": None}
+            if not json_mode:
+                click.echo(click.style(f"    Status not checked: {why}", fg="yellow"))
+        else:
+            results["status"] = {"error": str(exc), "connected": False}
+            if not json_mode:
+                click.echo(click.style(f"    Status check failed: {exc}", fg="yellow"))
     except Exception as exc:
         results["status"] = {"error": str(exc), "connected": False}
         if not json_mode:
@@ -9338,6 +9766,7 @@ def generate(
     """
     import time as _time
 
+    from kiln.format_conversion import convert_generated_result
     from kiln.generation import (
         GenerationAuthError,
         GenerationError,
@@ -9367,8 +9796,11 @@ def generate(
         if not wait_for or job.status == GenerationStatus.SUCCEEDED:
             if job.status == GenerationStatus.SUCCEEDED:
                 # Download the result for synchronous providers.
-                result = gen.download_result(
-                    job.id, output_dir=output_dir or os.path.join(tempfile.gettempdir(), "kiln_generated")
+                result, conversion = convert_generated_result(
+                    gen.download_result(
+                        job.id, output_dir=output_dir or os.path.join(tempfile.gettempdir(), "kiln_generated")
+                    ),
+                    tool="generate",
                 )
                 val = validate_mesh(result.local_path)
                 preview_data: dict[str, Any] | None = None
@@ -9396,6 +9828,7 @@ def generate(
                                 "data": {
                                     "job": job.to_dict(),
                                     "result": result.to_dict(),
+                                    "conversion": conversion,
                                     "validation": val.to_dict(),
                                     "preview": preview_data,
                                     "preview_notified": preview_notified,
@@ -9407,6 +9840,7 @@ def generate(
                 else:
                     click.echo(f"Generated: {result.local_path}")
                     click.echo(f"  Format: {result.format}  Size: {result.file_size_bytes:,} bytes")
+                    _echo_conversion(conversion)
                     click.echo(f"  Triangles: {val.triangle_count:,}  Manifold: {val.is_manifold}")
                     if preview_data:
                         click.echo(f"  Preview: {preview_data['path']}")
@@ -9453,8 +9887,11 @@ def generate(
                 click.echo(f"\r  Progress: {job.progress}%  ", nl=False)
 
             if job.status == GenerationStatus.SUCCEEDED:
-                result = gen.download_result(
-                    job.id, output_dir=output_dir or os.path.join(tempfile.gettempdir(), "kiln_generated")
+                result, conversion = convert_generated_result(
+                    gen.download_result(
+                        job.id, output_dir=output_dir or os.path.join(tempfile.gettempdir(), "kiln_generated")
+                    ),
+                    tool="generate",
                 )
                 val = validate_mesh(result.local_path)
                 preview_data: dict[str, Any] | None = None
@@ -9482,6 +9919,7 @@ def generate(
                                 "data": {
                                     "job": job.to_dict(),
                                     "result": result.to_dict(),
+                                    "conversion": conversion,
                                     "validation": val.to_dict(),
                                     "preview": preview_data,
                                     "preview_notified": preview_notified,
@@ -9494,6 +9932,7 @@ def generate(
                 else:
                     click.echo(f"\nGenerated: {result.local_path}")
                     click.echo(f"  Format: {result.format}  Size: {result.file_size_bytes:,} bytes")
+                    _echo_conversion(conversion)
                     click.echo(f"  Triangles: {val.triangle_count:,}  Manifold: {val.is_manifold}")
                     if preview_data:
                         click.echo(f"  Preview: {preview_data['path']}")
@@ -9603,6 +10042,7 @@ def generate_download(
 
     JOB_ID is the ID returned by 'kiln generate'.
     """
+    from kiln.format_conversion import convert_generated_result
     from kiln.generation import (
         GenerationAuthError,
         GenerationError,
@@ -9612,7 +10052,9 @@ def generate_download(
     try:
         gen = _resolve_generation_provider(provider)
 
-        result = gen.download_result(job_id, output_dir=output_dir)
+        result, conversion = convert_generated_result(
+            gen.download_result(job_id, output_dir=output_dir), tool="generate-download"
+        )
 
         validation = None
         if validate and result.format in ("stl", "obj"):
@@ -9622,12 +10064,15 @@ def generate_download(
             import json
 
             data: dict[str, Any] = {"result": result.to_dict()}
+            if conversion:
+                data["conversion"] = conversion
             if validation:
                 data["validation"] = validation.to_dict()
             click.echo(json.dumps({"status": "success", "data": data}, indent=2))
         else:
             click.echo(f"Downloaded: {result.local_path}")
             click.echo(f"  Format: {result.format}  Size: {result.file_size_bytes:,} bytes")
+            _echo_conversion(conversion)
             if validation:
                 click.echo(f"  Triangles: {validation.triangle_count:,}  Manifold: {validation.is_manifold}")
                 if not validation.valid:
@@ -9665,7 +10110,10 @@ def generate_download(
     "-m",
     default=None,
     type=click.Choice(_MATERIAL_CHOICES),
-    help="Material type — sets the temperatures and what the print is weighed as (defaults to the loaded material, then PLA).",
+    help=(
+        "Material type — sets the slice's temperatures, melt rate and cooling, and what the "
+        "print is weighed as (defaults to the loaded material, then PLA)."
+    ),
 )
 @click.option(
     "--support-mode",
@@ -9716,6 +10164,7 @@ def generate_and_print_cmd(
     """
     import time as _time
 
+    from kiln.format_conversion import convert_generated_result
     from kiln.generation import (
         GenerationAuthError,
         GenerationError,
@@ -9765,11 +10214,15 @@ def generate_and_print_cmd(
             sys.exit(1)
 
         # --- Step 2: Download ---
+        # A GLB is handed on as an STL: the slicer below refuses a GLB.
         output_dir = os.path.join(tempfile.gettempdir(), "kiln_generated")
-        result = gen.download_result(job.id, output_dir=output_dir)
+        result, conversion = convert_generated_result(
+            gen.download_result(job.id, output_dir=output_dir), tool="generate-and-print"
+        )
         val = validate_mesh(result.local_path)
         if not json_mode:
             click.echo(f"Generated: {result.local_path} ({result.file_size_bytes:,} bytes, {val.triangle_count:,} triangles)")
+            _echo_conversion(conversion)
 
         preview_data: dict[str, Any] | None = None
         preview_notified = False
@@ -9884,6 +10337,7 @@ def generate_and_print_cmd(
                         "status": "success",
                         "data": {
                             "generation": job.to_dict(),
+                            **({"conversion": conversion} if conversion else {}),
                             "validation": val.to_dict(),
                             "preview": preview_data,
                             "preview_notified": preview_notified,
@@ -10281,7 +10735,14 @@ def doctor_prusa(ctx: click.Context, json_mode: bool) -> None:
 
 @cli.command("doctor-creality")
 @click.option("--host", default=None, help="Printer IP/hostname/URL to probe without loading saved config.")
-@click.option("--api-key", default=None, help="Moonraker API key, if local auth is enabled.")
+@click.option(
+    "--api-key",
+    default=None,
+    help=(
+        "Moonraker API key. Needed only when this computer is outside the "
+        "printer's Moonraker trusted_clients list; Moonraker always checks."
+    ),
+)
 @click.option("--model", default=None, help="Printer model hint (e.g. k1_max) for capability guidance.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
@@ -10436,15 +10897,24 @@ def _deep_network_diagnostics(host: str, printer_cfg: dict) -> list[dict]:
     Tests ICMP reachability, TCP port connectivity, and provides
     actionable guidance based on failure patterns.
 
-    :param host: Printer IP address or hostname.
+    :param host: The printer's saved host.  For the HTTP backends that is a
+        URL (``http://octopi.local:5000``); the hostname is taken out of it
+        here, and a port the URL names is probed before any default.
     :param printer_cfg: Full printer config dict.
     :returns: List of check dicts for the doctor output.
     """
     import socket
     import subprocess
+    from urllib.parse import urlsplit
 
     checks: list[dict] = []
     printer_type = str(printer_cfg.get("type", "")).strip().lower()
+
+    # A saved HTTP host is a URL; ping and sockets want its hostname.
+    parts = urlsplit(host if "//" in host else f"//{host}")
+    host = parts.hostname or host
+    configured_port = parts.port
+    is_https = parts.scheme.lower() == "https"
 
     # --- 1. ICMP Ping ---
     ping_ok = False
@@ -10469,7 +10939,7 @@ def _deep_network_diagnostics(host: str, printer_cfg: dict) -> list[dict]:
                 "detail": (
                     f"{host} does not respond to ping. "
                     "Check: is the printer powered on and connected to WiFi? "
-                    "Verify the IP address in printer Settings > Network."
+                    "Verify the IP address in the printer's network settings."
                 ),
             }
         )
@@ -10477,14 +10947,18 @@ def _deep_network_diagnostics(host: str, printer_cfg: dict) -> list[dict]:
         return checks
 
     # --- 2. TCP port scan ---
-    # Ports depend on printer type.
+    # Default ports per printer type.  The port the saved URL names (if
+    # any) comes first: it is the one Kiln itself will use.
+    from kiln.printers.elegoo import _WS_PORT as _ELEGOO_TCP_PORT
+
     port_map: dict[str, list[tuple[int, str]]] = {
         "bambu": [
             (8883, "MQTTS (control/status)"),
             (990, "FTPS (file upload)"),
         ],
         "octoprint": [
-            (80, "HTTP"),
+            (80, "HTTP (OctoPi / reverse proxy)"),
+            (5000, "OctoPrint's own port"),
             (443, "HTTPS"),
         ],
         "moonraker": [
@@ -10504,11 +10978,19 @@ def _deep_network_diagnostics(host: str, printer_cfg: dict) -> list[dict]:
             (80, "HTTP"),
             (443, "HTTPS"),
         ],
+        # The adapter's TCP service port; discovery is UDP and cannot be
+        # probed this way.
         "elegoo": [
-            (3000, "SDCP"),
+            (_ELEGOO_TCP_PORT, "SDCP (WebSocket + upload)"),
         ],
     }
-    ports_to_check = port_map.get(printer_type, [(80, "HTTP"), (443, "HTTPS")])
+    ports_to_check = list(port_map.get(printer_type, [(80, "HTTP"), (443, "HTTPS")]))
+    if is_https:
+        ports_to_check.sort(key=lambda entry: entry[0] != 443)
+    if configured_port is not None:
+        ports_to_check = [(configured_port, "the port your saved host names")] + [
+            entry for entry in ports_to_check if entry[0] != configured_port
+        ]
 
     any_port_open = False
     all_no_route = True
@@ -10566,8 +11048,8 @@ def _deep_network_diagnostics(host: str, printer_cfg: dict) -> list[dict]:
                     "name": "bambu_lan_check",
                     "ok": False,
                     "detail": (
-                        "Bambu printers require LAN Only Mode enabled on the "
-                        "touchscreen (Settings > Network). After enabling, "
+                        f"{' '.join(backend_for('bambu').first)} The access code "
+                        f"is {need_where('bambu', 'access_code')}. After enabling, "
                         "wait 30-60 seconds for MQTT to start. If it still "
                         "fails, power cycle the printer with LAN mode OFF, "
                         "let it fully boot, then enable LAN Only Mode."
@@ -11084,11 +11566,13 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
                     checks.append({"name": "printer_reachable", "ok": False, "detail": f"{host} (offline)"})
             except Exception as exc:
                 logger.debug("Printer reachability check failed for %s: %s", host, exc)
+                why = _engaged_elsewhere(exc)
                 checks.append(
                     {
                         "name": "printer_reachable",
-                        "ok": False,
-                        "detail": f"cannot reach {host}: {exc}",
+                        # The rule not letting Kiln look is not a fault of this printer.
+                        "ok": why is not None,
+                        "detail": f"not checked: {why}" if why else f"cannot reach {host}: {exc}",
                     }
                 )
 
@@ -11510,6 +11994,62 @@ cli.add_command(verify, name="doctor")
 # ---------------------------------------------------------------------------
 
 
+def _license_manager_or_none():
+    """kiln-pro's licence manager, or ``None`` on an install without it.
+
+    Licence KEYS are kiln-pro's to read.  Without it a plan comes from the
+    Kiln account this machine is signed in to, and the commands below say
+    so instead of failing on the missing manager.
+    """
+    try:
+        from kiln.licensing import get_license_manager
+    except ImportError:
+        return None
+    return get_license_manager()
+
+
+def _account_plan_summary() -> dict:
+    """The signed-in account's plan, asked of the account now."""
+    from kiln.account_plan import refresh_plan
+    from kiln.auth_session import _read_tokens, session_rejected
+
+    stored = _read_tokens()
+    signed_in = bool(str(stored.get("access_token") or "").strip())
+    return {
+        "tier": refresh_plan().value,
+        "source": "account" if signed_in else "none",
+        "signed_in": signed_in and not session_rejected(stored),
+        "email": str(stored.get("email") or "") if signed_in else "",
+    }
+
+
+def _echo_account_plan(json_mode: bool, *, title: str = "Kiln plan") -> None:
+    """Print the plan of the signed-in account (an install without kiln-pro)."""
+    from kiln.tiers_and_terms import upgrade_link
+
+    data = _account_plan_summary()
+    if json_mode:
+        import json as _json
+
+        click.echo(_json.dumps({"success": True, **data}, indent=2))
+        return
+    click.echo(f"\n  {title}")
+    click.echo("  " + "─" * len(title))
+    click.echo(f"  Plan:    {data['tier'].title()}")
+    if data["signed_in"]:
+        click.echo(f"  Account: {data['email'] or 'signed in'}")
+    elif data["source"] == "account":
+        click.echo("  Account: the sign-in on this machine has expired")
+        click.echo("\n  Run `kiln signin` to sign back in.")
+        return
+    else:
+        click.echo("  Account: not signed in")
+    if data["tier"] == "free":
+        if not data["signed_in"]:
+            click.echo("\n  Already subscribed?  Run `kiln signin` to connect this machine.")
+        click.echo(f"  See the plans:       {upgrade_link(src='cli')}")
+
+
 @cli.command()
 @click.option(
     "--key",
@@ -11527,9 +12067,22 @@ cli.add_command(verify, name="doctor")
 @click.pass_context
 def upgrade(ctx: click.Context, key: str | None, session: str | None, json_mode: bool) -> None:
     """Activate a Kiln Pro or Business license, or view current tier."""
-    from kiln.licensing import LicenseTier, get_license_manager
-
-    mgr = get_license_manager()
+    mgr = _license_manager_or_none()
+    if mgr is None:
+        if key or session:
+            click.echo(
+                format_error(
+                    "This install takes its plan from your Kiln account, not from a "
+                    "license key. Run `kiln signin` and sign in with the email you "
+                    "subscribed with; your plan applies as soon as you are signed in.",
+                    code="SIGN_IN_INSTEAD",
+                    json_mode=json_mode,
+                )
+            )
+            sys.exit(1)
+        _echo_account_plan(json_mode)
+        return
+    from kiln.licensing import LicenseTier
 
     if session:
         try:
@@ -11650,103 +12203,36 @@ def upgrade(ctx: click.Context, key: str | None, session: str | None, json_mode:
                 click.echo("\n  ✓ Active and valid.")
 
 
-@cli.command()
-@click.option(
-    "--email",
-    "-e",
-    default=None,
-    help="Email address for registration.",
-)
+@cli.command(hidden=True)
+@click.option("--email", "-e", default=None, hidden=True, help="Ignored; kept so older scripts still run.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def register(email: str | None, json_mode: bool) -> None:
-    """Register for a free Kiln license key.
+    """A free Kiln account is created by signing in: run `kiln signin`.
 
-    Sends your email to api.kiln3d.com and saves the returned license key.
-    Required for outsourced manufacturing via the fulfillment proxy.
-    If you already have a license key, shows your current tier.
+    This command once traded an email for a free licence key, with no
+    account behind it -- nothing to sign in to and nothing kept.  It was
+    retired on 2026-10-11 and now only points at sign-in, so a habit or an
+    old guide that says ``kiln register`` still leads somewhere.  It sends
+    nothing anywhere.
     """
-    from kiln.licensing import get_license_manager
-
-    mgr = get_license_manager()
-    info = mgr.get_info()
-
-    # If user already has a valid key, show it and exit.
-    if info.is_valid and info.tier.value != "free":
-        if json_mode:
-            import json as _json
-
-            click.echo(_json.dumps({"success": True, "already_registered": True, **info.to_dict()}, indent=2))
-        else:
-            click.echo(f"\n  Already registered: Kiln {info.tier.value.title()}")
-            if info.license_key_hint:
-                click.echo(f"  Key: ...{info.license_key_hint}")
-        return
-
-    # Prompt for email if not provided.
-    if not email:
-        email = click.prompt("  Email address", type=str)
-
-    if not email or "@" not in email:
-        click.echo(format_error("Valid email address required.", code="INVALID_EMAIL", json_mode=json_mode))
-        sys.exit(1)
-
-    # Call registration endpoint.
-    proxy_url = os.environ.get("KILN_PROXY_URL", "https://api.kiln3d.com").rstrip("/")
-    try:
-        import requests
-
-        resp = requests.post(
-            f"{proxy_url}/api/license/register",
-            json={"email": email},
-            timeout=15,
+    click.echo(
+        format_error(
+            "A free Kiln account is created by signing in: run `kiln signin`.",
+            code="SIGN_IN_INSTEAD",
+            json_mode=json_mode,
         )
-        if not resp.ok:
-            body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
-            error_msg = body.get("error", f"HTTP {resp.status_code}")
-            click.echo(format_error(f"Registration failed: {error_msg}", code="REGISTER_ERROR", json_mode=json_mode))
-            sys.exit(1)
-
-        data = resp.json()
-        license_key = data.get("license_key", "")
-        if not license_key:
-            click.echo(format_error("Server returned no license key.", code="REGISTER_ERROR", json_mode=json_mode))
-            sys.exit(1)
-
-        # Activate locally.
-        activated = mgr.activate_license(license_key)
-        if json_mode:
-            import json as _json
-
-            click.echo(_json.dumps({"success": True, **activated.to_dict()}, indent=2))
-        else:
-            click.echo(f"\n  ✓ Registered! Kiln {activated.tier.value.title()} license saved.")
-            if activated.license_key_hint:
-                click.echo(f"    Key: ...{activated.license_key_hint}")
-            click.echo(f"    Email: {email}")
-            click.echo("\n  You can now use outsourced manufacturing via Kiln.")
-            click.echo("  Upgrade anytime: kiln upgrade --key <pro-or-business-key>")
-
-    except ImportError:
-        click.echo(
-            format_error(
-                "requests package not installed. Install with: pip install requests",
-                code="MISSING_DEPENDENCY",
-                json_mode=json_mode,
-            )
-        )
-        sys.exit(1)
-    except Exception as exc:
-        click.echo(format_error(f"Registration failed: {exc}", code="REGISTER_ERROR", json_mode=json_mode))
-        sys.exit(1)
+    )
+    sys.exit(1)
 
 
 @cli.command()
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def license_info(json_mode: bool) -> None:
     """Show current license tier and details."""
-    from kiln.licensing import get_license_manager
-
-    mgr = get_license_manager()
+    mgr = _license_manager_or_none()
+    if mgr is None:
+        _echo_account_plan(json_mode)
+        return
     info = mgr.get_info()
     data = info.to_dict()
 
@@ -12406,7 +12892,7 @@ def versions_save(design_id: str, file_path: str, notes: str, design_prompt: str
     try:
         from kiln.design_versions import DesignVersionStore
 
-        source = Path(file_path).read_text()
+        source = Path(file_path).read_text(encoding="utf-8")
         store = DesignVersionStore()
         try:
             version = store.save_version(design_id, source, notes=notes, prompt=design_prompt)
@@ -12495,106 +12981,6 @@ def versions_rollback(design_id: str, version_id: str, json_mode: bool) -> None:
                 click.echo(f"✓ Rolled back '{design_id}' to {version_id[:8]} → new v{new_version.version_number}")
         finally:
             store.close()
-    except Exception as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
-        sys.exit(1)
-
-
-# ---------------------------------------------------------------------------
-# goals — saved design sessions (kiln-pro DesignBrief artifacts)
-# ---------------------------------------------------------------------------
-
-
-@cli.group("goals")
-def goals_group() -> None:
-    """Manage saved design goals captured by `design_session`."""
-    pass
-
-
-@goals_group.command("list")
-@click.option(
-    "--filter",
-    "filter_status",
-    type=click.Choice([
-        "all", "needs_questions", "ready_to_generate",
-        "matches_what_you_asked_for",
-    ]),
-    default="all",
-    help="Filter by goal status (default: all).",
-)
-@click.option("--limit", default=50, help="Max sessions to show (default 50).")
-@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def goals_list(filter_status: str, limit: int, json_mode: bool) -> None:
-    """List your saved design goals.
-
-    A saved goal is what `design_session` writes when you tell Kiln
-    what you're making and answer the duty / environment / materials /
-    safety questions. This is the CLI equivalent of the web /goals
-    inbox: shows what you've committed and which prints have honored
-    each goal.
-
-    Requires Kiln Pro.
-    """
-    try:
-        from kiln_pro.design_brief import list_briefs
-    except ImportError:
-        click.echo(
-            format_error(
-                "Saved goals are a Kiln Pro feature. Already subscribed? Run "
-                "`kiln signin` on this machine. New? https://kiln3d.com/pricing",
-                code="REQUIRES_KILN_PRO",
-                json_mode=json_mode,
-            )
-        )
-        sys.exit(1)
-
-    # Map the friendly CLI filter to the substrate enum.
-    substrate_filter: str | None = {
-        "all": None,
-        "needs_questions": "needs_clarification",
-        "ready_to_generate": "ready",
-        "matches_what_you_asked_for": "honored",
-    }[filter_status]
-
-    try:
-        briefs = list_briefs(filter_status=substrate_filter)[:max(1, min(limit, 1000))]
-        if json_mode:
-            click.echo(format_response(
-                "success",
-                data={
-                    "sessions": [b.to_dict() for b in briefs],
-                    "count": len(briefs),
-                    "filter_status": filter_status,
-                },
-                json_mode=True,
-            ))
-            return
-        if not briefs:
-            click.echo(
-                "No saved goals yet."
-                if filter_status == "all"
-                else f"No goals with status '{filter_status}'."
-            )
-            click.echo(
-                "  Start one by telling the agent: "
-                "'design_session(verb=\"start\", idea=\"...\")'"
-            )
-            return
-        click.echo(f"Saved goals ({len(briefs)} shown):")
-        for b in briefs:
-            short = b.brief_id[:8]
-            status_label = {
-                "needs_clarification": "needs questions",
-                "ready":               "ready",
-                "honored":             "honored",
-            }.get(b.status, b.status)
-            env = ", ".join(b.environment) if b.environment else "-"
-            click.echo(
-                f"  {short}  [{status_label}]  {b.idea or '<no idea>'}"
-            )
-            click.echo(
-                f"           duty: {b.duty or '-'} | environment: {env}"
-            )
     except Exception as exc:
         click.echo(format_error(str(exc), json_mode=json_mode))
         sys.exit(1)
@@ -12798,8 +13184,13 @@ def health(ctx: click.Context, json_mode: bool) -> None:
             checks["printer_online"] = True
             checks["printer_state"] = state.status.value if hasattr(state.status, "value") else str(state.status)
         except (PrinterError, click.ClickException, Exception) as exc:
-            checks["printer_online"] = False
-            checks["printer_error"] = str(exc)
+            if why := _engaged_elsewhere(exc):
+                # Unknown, not offline: the rule did not let Kiln look.
+                checks["printer_online"] = None
+                checks["printer_not_checked"] = why
+            else:
+                checks["printer_online"] = False
+                checks["printer_error"] = str(exc)
 
         # Slicer availability
         try:
@@ -12868,7 +13259,8 @@ def health(ctx: click.Context, json_mode: bool) -> None:
             checks["mcp_clients_repaired"] = []
             checks["mcp_clients_error"] = str(exc)
 
-        healthy = checks.get("printer_online", False)
+        # A printer Kiln was not allowed to look at is not a fault.
+        healthy = checks.get("printer_online", False) is not False
         checks["healthy"] = healthy
 
         if json_mode:
@@ -12880,6 +13272,8 @@ def health(ctx: click.Context, json_mode: bool) -> None:
             # Printer
             if checks.get("printer_online"):
                 click.echo(f"  [{mark_ok}] Printer: online ({checks.get('printer_state', 'unknown')})")
+            elif checks.get("printer_online") is None and checks.get("printer_not_checked"):
+                click.echo(f"  [~] Printer: not checked ({checks['printer_not_checked']})")
             else:
                 click.echo(f"  [{mark_fail}] Printer: offline ({checks.get('printer_error', 'unknown')})")
             # Slicer
@@ -13058,13 +13452,16 @@ def repair(file_path: str, output: str | None, json_mode: bool) -> None:
     try:
         import os as _os
 
+        from kiln import edit_lineage
         from kiln.generation.validation import repair_stl
 
         if not output:
             base, ext = _os.path.splitext(file_path)
             output = f"{base}_repaired{ext or '.stl'}"
 
-        result = repair_stl(file_path, output_path=output)
+        with edit_lineage.around("kiln repair", file_path) as edit:
+            result = edit.finish(repair_stl(file_path, output_path=output))
+        kept = result.get(edit_lineage.SAVED_VERSION_KEY) if isinstance(result, dict) else None
         if json_mode:
             click.echo(
                 format_response("success", data=result, json_mode=True)
@@ -13077,6 +13474,8 @@ def repair(file_path: str, output: str | None, json_mode: bool) -> None:
                 f"(removed {result.get('degenerate_removed', 0)} degenerate, "
                 f"recomputed {result.get('normals_recomputed', 0)} normals)"
             )
+            if isinstance(kept, dict) and kept.get("note"):
+                click.echo(f"  {kept['note']}")
     except ValueError as exc:
         click.echo(
             format_error(

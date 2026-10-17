@@ -37,6 +37,21 @@ from kiln.printers import bed_fit
 
 pytest.importorskip("OCP", reason="a real STEP file needs the CAD kernel to write and measure")
 
+#: The beds the checks are measured against.  A printer's bed is its catalogue
+#: record, which public CI does not hold, so: a synthetic printer the session
+#: holds with a 256 mm cube bed (tests/fixtures/printer_catalogue_test.json),
+#: and the MK4 case below with its bed stated where every bed read starts
+#: (bed_fit's own table of stated volumes) -- the MK4's bundled slicer profile
+#: is still the one its slices use.
+_CUBE_256 = "kilntest_enclosed"
+_MK4 = "prusa_mk4"
+_MK4_BED = (250.0, 210.0, 220.0)
+
+
+@pytest.fixture(autouse=True)
+def _the_mk4_bed(monkeypatch):
+    monkeypatch.setitem(bed_fit._BUILD_VOLUME_OVERRIDES, _MK4, _MK4_BED)
+
 
 def _step(path: Path, x: float, y: float, z: float, at: tuple[float, float, float] = (0.0, 0.0, 0.0)) -> str:
     from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
@@ -76,27 +91,27 @@ class TestTheReader:
         step = _step(tmp_path / "bracket.step", 300.0, 300.0, 10.0)
         unavailable = bed_fit.step_import._exact_unavailable("no CAD kernel on this machine")
         with patch("kiln.step_import.read_exact_geometry", return_value=unavailable):
-            fit = bed_fit.validate_mesh_for_printer(step, "bambu_a1")
+            fit = bed_fit.validate_mesh_for_printer(step, _CUBE_256)
         assert fit["ok"] and fit["error_code"] == "BBOX_UNKNOWN"
 
 
 class TestTheFitCheck:
     def test_a_step_too_big_for_the_bed_is_refused_in_kilns_words(self, tmp_path: Path) -> None:
-        fit = bed_fit.validate_mesh_for_printer(_step(tmp_path / "big.step", 300.0, 300.0, 10.0), "bambu_a1")
+        fit = bed_fit.validate_mesh_for_printer(_step(tmp_path / "big.step", 300.0, 300.0, 10.0), _CUBE_256)
         assert not fit["ok"] and fit["error_code"] == "EXCEEDS_BED"
         assert "300.0×300.0×10.0mm" in fit["error_message"] and "256×256×256mm" in fit["error_message"]
 
     def test_a_step_modelled_far_from_the_origin_is_never_refused(self, tmp_path: Path) -> None:
         """The slicer centres it; refusing it would block a slice that works."""
         step = _step(tmp_path / "far.step", 30.0, 20.0, 10.0, at=(500.0, -500.0, 0.0))
-        fit = bed_fit.validate_mesh_for_printer(step, "bambu_a1")
+        fit = bed_fit.validate_mesh_for_printer(step, _CUBE_256)
         assert fit["ok"] and fit["error_code"] is None
 
     def test_a_step_that_fits_only_lying_on_another_face_is_not_refused_by_the_check(self, tmp_path: Path) -> None:
         """The check measures and says so; the slice gate does the turning."""
         # MK4: 250 x 210 x 220.  245 deep as modelled is too deep; turned a quarter turn it fits.
         step = _step(tmp_path / "tall.step", 200.0, 245.0, 215.0)
-        fit = bed_fit.validate_mesh_for_printer(step, "prusa_mk4")
+        fit = bed_fit.validate_mesh_for_printer(step, _MK4)
         assert fit["ok"] and fit["error_code"] is None
         assert fit["fits_on_another_face"] is True
         assert "another face" in fit["note"]
@@ -109,11 +124,11 @@ class TestTheFitCheck:
         box = trimesh.creation.box(extents=(200.0, 245.0, 215.0))
         box.apply_translation([100.0, 122.5, 107.5])
         box.export(str(stl))
-        fit = bed_fit.validate_mesh_for_printer(str(stl), "prusa_mk4")
+        fit = bed_fit.validate_mesh_for_printer(str(stl), _MK4)
         assert not fit["ok"] and fit["error_code"] == "EXCEEDS_BED"
 
     def test_no_face_fits(self, tmp_path: Path) -> None:
-        fit = bed_fit.validate_mesh_for_printer(_step(tmp_path / "huge.step", 260.0, 100.0, 100.0), "prusa_mk4")
+        fit = bed_fit.validate_mesh_for_printer(_step(tmp_path / "huge.step", 260.0, 100.0, 100.0), _MK4)
         assert not fit["ok"] and fit["error_code"] == "EXCEEDS_BED"
 
 
@@ -135,7 +150,7 @@ class TestTheSliceGate:
     def _gate(self, path: str, auto_center: bool = True):
         from kiln.plugins.slicer_tools import _apply_bed_fit_gate
 
-        return _apply_bed_fit_gate(path, "prusa_mk4", auto_center)
+        return _apply_bed_fit_gate(path, _MK4, auto_center)
 
     def test_a_step_that_fits_only_on_another_face_is_turned_as_kilns_mesh(self, tmp_path: Path) -> None:
         # Modelled far from the origin on purpose: the mesh Kiln makes of a
@@ -220,6 +235,11 @@ class TestTheSliceModelTool:
 
     @pytest.fixture(autouse=True)
     def _isolated(self, monkeypatch, tmp_path):
+        from .conftest import serve_synthetic_roster_records
+
+        # The MK4's profile is its served record since 2026-10-12: synthetic
+        # here, on the bed the scenario states.
+        serve_synthetic_roster_records(monkeypatch, volumes={_MK4: _MK4_BED})
         from kiln import monitor_twin
 
         monkeypatch.setenv("KILN_HOME", str(tmp_path / "home"))
@@ -228,7 +248,7 @@ class TestTheSliceModelTool:
         monkeypatch.setattr(monitor_twin, "_SLICES_FILE", twin / "slices.json")
         monkeypatch.setattr(monitor_twin, "_ACTIVE_FILE", twin / "active.json")
 
-    def _slice_model(self, path: str, out: Path, printer_id: str = "bambu_a1") -> dict:
+    def _slice_model(self, path: str, out: Path, printer_id: str = _CUBE_256) -> dict:
         from kiln.plugins.slicer_tools import _SlicerToolsPlugin
 
         tools: dict = {}
@@ -262,7 +282,7 @@ class TestTheSliceModelTool:
         """MK4 bed 250 x 210 x 220; the part is 245 deep as modelled.  The
         slicer used to get it as modelled and refuse it in its own words."""
         step = _light_step(tmp_path / "tall.step", 200.0, 245.0, 215.0, at=(500.0, -500.0, 40.0))
-        result = self._slice_model(step, tmp_path / "out", printer_id="prusa_mk4")
+        result = self._slice_model(step, tmp_path / "out", printer_id=_MK4)
         assert result.get("success"), result
         fit = result["bed_fit"]
         assert fit["auto_oriented"] and fit["approval_carries"] is False
@@ -285,7 +305,7 @@ class TestTheSliceModelTool:
         # 2.5 mm each side is too little room for PrusaSlicer's skirt, which
         # printed at X -3.7 .. 253.7: the file a person is handed is the one
         # the check before a print takes, sliced again without the skirt.
-        verdict = bed_fit.validate_gcode_for_printer(result["output_path"], "prusa_mk4")
+        verdict = bed_fit.validate_gcode_for_printer(result["output_path"], _MK4)
         assert verdict["ok"], verdict
         assert "3.7 mm past the edge of the bed" in fit["skirt_dropped"] and "without one" in fit["skirt_dropped"]
         assert "prints_past_bed" not in fit and not result.get("warnings")
@@ -306,7 +326,7 @@ class TestTheSliceModelTool:
         _SlicerToolsPlugin().register(_FakeMcp())
         with patch("kiln.server._check_auth", return_value=None):
             return tools["reslice_with_overrides"](
-                input_path=path, output_dir=str(out), printer_id="prusa_mk4", slicer_path=_real_prusaslicer(),
+                input_path=path, output_dir=str(out), printer_id=_MK4, slicer_path=_real_prusaslicer(),
                 overrides={"brim_width": brim_width},
             )
 
@@ -318,5 +338,5 @@ class TestTheSliceModelTool:
         # The width it names prints: the brim stays, the skirt goes.
         kept = self._reslice(step, tmp_path / "out", "2")
         assert kept.get("success"), kept
-        assert bed_fit.validate_gcode_for_printer(kept["output_path"], "prusa_mk4")["ok"]
+        assert bed_fit.validate_gcode_for_printer(kept["output_path"], _MK4)["ok"]
         assert "kept the 2 mm brim" in kept["bed_fit"]["skirt_dropped"]

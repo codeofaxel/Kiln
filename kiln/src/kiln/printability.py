@@ -1708,6 +1708,14 @@ _THIN_FEATURE_LINK_MAX_MM: float = 25.0
 _THIN_FEATURE_CAP: int = 50
 
 
+def _union_root(parent: np.ndarray, k: int) -> int:
+    """The root of *k* in a union-find forest, halving the path as it goes."""
+    while parent[k] != k:
+        parent[k] = parent[parent[k]]
+        k = parent[k]
+    return k
+
+
 def _thin_wall_features(
     points: np.ndarray,
     thickness: np.ndarray,
@@ -1737,22 +1745,15 @@ def _thin_wall_features(
         # Single-linkage clustering within the band (union-find over the
         # pairs closer than ``link_mm``).
         parent = np.arange(band.size)
-
-        def root(k: int) -> int:
-            while parent[k] != k:
-                parent[k] = parent[parent[k]]
-                k = parent[k]
-            return k
-
         pts = points[band]
         near = np.linalg.norm(pts[:, None, :] - pts[None, :, :], axis=2) < link_mm
         for a, b in zip(*np.nonzero(np.triu(near, k=1)), strict=True):
-            ra, rb = root(int(a)), root(int(b))
+            ra, rb = _union_root(parent, int(a)), _union_root(parent, int(b))
             if ra != rb:
                 parent[rb] = ra
         groups: dict[int, list[int]] = {}
         for k in range(band.size):
-            groups.setdefault(root(k), []).append(int(band[k]))
+            groups.setdefault(_union_root(parent, k), []).append(int(band[k]))
         for members in groups.values():
             idx = np.asarray(members)
             best = idx[np.argmin(thickness[idx])]
@@ -2999,7 +3000,7 @@ def _load_materials_json() -> dict[str, Any]:
     """Load the materials.json knowledge base (cached)."""
     path = Path(__file__).resolve().parent / "data" / "design_knowledge" / "materials.json"
     try:
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             return json.load(f)
     except (OSError, json.JSONDecodeError):
         return {}
@@ -4228,6 +4229,30 @@ def _material_wall_floor(
     return floor if floor > 0.0 else None
 
 
+def _tell_whoever_runs_this_machine(file_path: str, stopped: Exception) -> None:
+    """Pass a stopped hole check to the operator's alert, when one is installed.
+
+    A machine with an allowance is someone's server; they need to hear that
+    a model went past it, or the allowance quietly becomes a size limit
+    nobody chose.  Never raises: an alert that fails changes no answer.
+    """
+    try:
+        from kiln_pro.bridge import pro_features  # type: ignore[import-not-found]
+
+        tell = getattr(pro_features, "ops_alert", None)
+        if tell is not None:
+            tell(
+                "hole_check_stopped",
+                {
+                    "triangles": max(0, (Path(file_path).stat().st_size - 84) // 50),
+                    "held_mb": getattr(stopped, "held_mb", None),
+                    "allowed_mb": getattr(stopped, "allowed_mb", None),
+                },
+            )
+    except Exception:  # noqa: BLE001 -- see the docstring
+        logger.debug("no operator alert for a stopped hole check", exc_info=True)
+
+
 def analyze_printability(
     file_path: str,
     *,
@@ -4299,7 +4324,61 @@ def analyze_printability(
         :class:`~kiln.step_import.NoBackendError` carries ``remedy``).
         Raised, never swallowed: a CAD file nobody could read must not come
         back looking analysed.
+
+    Where it runs: with kiln-pro installed, the analysis goes through
+    kiln-pro's ``run_mesh_analysis``, which may run it outside the calling
+    process on a server that answers many people at once, so that one
+    large mesh cannot take that server's memory with it.  The arguments
+    and the report are the same either way.  Without kiln-pro, or without
+    that runner, it runs here.
     """
+    kwargs: dict[str, Any] = {
+        "nozzle_diameter": nozzle_diameter,
+        "layer_height": layer_height,
+        "max_overhang_angle": max_overhang_angle,
+        "build_volume": build_volume,
+        "material": material,
+        "infill_percent": infill_percent,
+        "include_hole_detection": include_hole_detection,
+        "printer_id": printer_id,
+        "slicer_style": slicer_style,
+    }
+    runner = _analysis_runner()
+    if runner is None:
+        return _analyze_printability_here(file_path, **kwargs)
+    return runner(_analyze_printability_here, file_path, **kwargs)
+
+
+def _analysis_runner() -> Callable[..., Any] | None:
+    """kiln-pro's runner for a whole-mesh analysis, or ``None``.
+
+    The contract: ``runner(fn, file_path, **kwargs)`` returns what
+    ``fn(file_path, **kwargs)`` returns and raises what it raises -- a
+    ``MemoryError`` when the analysis needed more memory than the machine
+    that ran it could give.  ``None`` on a plain install and on a kiln-pro
+    that has no runner, and the analysis then runs in this process.
+    """
+    try:
+        from kiln_pro.bridge import pro_features  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    return getattr(pro_features, "run_mesh_analysis", None)
+
+
+def _analyze_printability_here(
+    file_path: str,
+    *,
+    nozzle_diameter: float | None = None,
+    layer_height: float = 0.2,
+    max_overhang_angle: float | None = None,
+    build_volume: tuple[float, float, float] | None = None,
+    material: str = "pla",
+    infill_percent: float = 20.0,
+    include_hole_detection: bool = True,
+    printer_id: str | None = None,
+    slicer_style: Literal["grid", "snug", "organic", "tree"] = "grid",
+) -> PrintabilityReport:
+    """:func:`analyze_printability`'s work, wherever it is run."""
     from kiln.assumed_nozzle import assumed_nozzle
     from kiln.design_intelligence import load_pro_overlay_or_empty
 
@@ -4323,6 +4402,28 @@ def analyze_printability(
             raise ValueError(str(exc)) from exc
         except step_import.StepImportError as exc:
             raise ValueError(f"Could not read that CAD file: {exc}") from exc
+
+    # Holes first, before this function holds the mesh itself: on a machine
+    # that gives the hole check an allowance (kiln.hole_check) the check runs
+    # in a process of its own, and the two are then never held at once.
+    # A hole-detection failure must never break the wider printability
+    # path; an empty list is the documented degraded output.  A check the
+    # machine stopped is a different thing from no holes, and is said.
+    holes: list[dict[str, Any]] = []
+    hole_diagnostics: dict[str, int] = {}
+    holes_not_checked: str | None = None
+    if include_hole_detection:
+        from kiln.hole_check import HoleCheckStopped, find_holes
+
+        try:
+            holes = find_holes(file_path, diagnostics=hole_diagnostics)
+        except (ValueError, OSError) as exc:
+            # A path that cannot be read is the parser's to refuse, just below.
+            logger.debug("detect_holes failed silently on %s: %s", file_path, exc)
+        except HoleCheckStopped as exc:
+            holes_not_checked = str(exc)
+            logger.warning("hole check stopped on %s: %s", Path(file_path).name, exc)
+            _tell_whoever_runs_this_machine(file_path, exc)
 
     triangles, vertices = _parse_mesh(file_path)
     # Membranes must go BEFORE winding normalization: a zero-thickness
@@ -4586,24 +4687,6 @@ def analyze_printability(
         overhangs, max_free_air_overhang_deg=round(_free_air_max_deg, 1),
     )
 
-    # Detect cylindrical-hole features.  Wrapped in try/except — a
-    # malformed mesh or coarse triangulation can raise inside the
-    # detector, but a hole-detection failure must never break the
-    # wider printability path.  Empty list is the documented degraded
-    # output, matching the contract the kiln-pro overlay engine
-    # expects when reading ``report["holes"]``.
-    holes: list[dict[str, Any]] = []
-    hole_diagnostics: dict[str, int] = {}
-    if include_hole_detection:
-        from kiln.generation.validation import detect_holes
-        try:
-            holes = detect_holes(file_path, diagnostics=hole_diagnostics)
-        except (ValueError, FileNotFoundError) as exc:
-            logger.debug(
-                "detect_holes failed silently on %s: %s",
-                file_path, exc,
-            )
-
     warping = _analyze_warping(
         triangles, vertices, bbox, material=material, overlay=judgment_overlay,
     )
@@ -4673,6 +4756,14 @@ def analyze_printability(
             f"without supports — no action needed.  Force-enable supports "
             f"in your slicer if the underside is a show surface and you "
             f"want a smoother finish."
+        )
+
+    if holes_not_checked is not None:
+        recommendations.append(
+            f"Kiln did not check this model's holes: {len(triangles):,} triangles is more than the "
+            "hole check is given on this machine, so no hole here has been counted or sized. "
+            "Everything else in this report stands. To have the holes checked, run it with Kiln "
+            "installed on your own computer, where the check has no limit."
         )
 
     # Hole-detection diagnostic notices: surface features the detector

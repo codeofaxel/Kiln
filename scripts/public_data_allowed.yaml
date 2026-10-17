@@ -1,0 +1,133 @@
+# Bundled data files that hold a table keyed by several printer makers and
+# carrying limit-shaped fields, and why each may ship in public Kiln.
+#
+# Read by scripts/audit_public_sme_leak.py, which finds those tables by the
+# SHAPE of their fields, never by file name: a file nobody listed here fails
+# the day it lands.  Paths are relative to kiln/src/kiln/data/.
+#
+# classification:
+#   roster              ids and display names, plus the fields named in
+#                       `fields`; every row may carry only those.  `full_rows`
+#                       names the generic rows that stay whole (never a
+#                       printer).
+#   safety_floor        a free floor every install needs offline; `fields`
+#                       names what each row may carry, enforced the same way.
+#   standard_reference  published standard or catalogue facts anyone can look
+#                       up; `fields` enforced the same way.
+#   pending_move        a per-model dataset that moves to kiln-pro, one record
+#                       per printer, served.  Needs `why` and an ISO `by`; the
+#                       gate fails once the date has passed.
+#   not_printer_keyed   the maker names are a coincidence of keying; say why.
+#
+# Every row carries `why`.  A row whose file is gone, or whose file no longer
+# holds the shape, fails as stale: delete the row.
+
+files:
+  safety_profiles.json:
+    classification: roster
+    fields: [display_name]
+    full_rows: [default]
+    why: >-
+      The printer roster: each printer's id and display name.  A printer's
+      limits are served one printer at a time from kiln-pro; the default row
+      is the generic floor an unknown or signed-out printer is held to, so it
+      stays whole.
+
+  printer_intelligence.json:
+    classification: roster
+    fields: [display_name, motion, rated_build_volume_mm]
+    full_rows: [default]
+    why: >-
+      The printer roster plus each printer's motion block, which stays public
+      because the check that refuses a blind head move must work offline with
+      no kiln-pro installed, and its rated (marketed) bed, which stays public
+      because the print-start bed check, the G-code bounds check and the park
+      planner must hold a SIGNED-OUT install to the real bed (2026-10-15:
+      without it they switched off for every roster printer).  The rated bed
+      is on the box; the measured usable envelope, the ceilings, the recipes
+      and the slicer profile are the record, served one printer at a time
+      from kiln-pro (kiln-pro's scripts/sync_public_rated_bed.py writes the
+      bed here and tests/test_printer_catalogue.py pins the two equal); the
+      default row is the generic floor.
+
+  design_knowledge/printer_profiles.json:
+    classification: roster
+    fields: [printer_id, display_name]
+    full_rows: [default]
+    why: >-
+      The printer capability roster: each printer's id and display name.
+      A printer's capability profile (ceilings, build volume, chamber,
+      tolerance, speed, layer ladder, materials) is its catalogue record,
+      served one printer at a time from kiln-pro; the default row is the
+      generic floor a printer with no record is answered from, so it stays
+      whole.
+
+  slicer_profiles.json:
+    classification: roster
+    fields: [display_name]
+    full_rows: [default]
+    why: >-
+      The slicer-profile roster: each printer's display name.  A printer's
+      tuned slicer settings are its catalogue record, served one printer at
+      a time from kiln-pro; a roster printer with no record slices with the
+      generic default profile, which stays whole, and the multi-material
+      add-on table under _multi_material_addons is not keyed by printer.
+
+  design_knowledge/printer_material_compatibility.json:
+    classification: safety_floor
+    fields: [abs, abs_esd, asa, cf_nylon, cf_petg, cf_pla, nylon, pa612_esd,
+             pa6_gf, pc_abs, pc_esd, peek, pei_1010, pei_9085, pei_esd, pekk,
+             pekk_esd, pet_cf, petg, petg_cf, petg_esd, petg_hf, pla, pla_esd,
+             pla_matte, pla_plus, pla_tough, polycarbonate, pp, pps, ppsu, pva,
+             pvb, silk_pla, tpu, tpu_85a, tpu_95a, wood_pla]
+    full_rows: [default]
+    why: >-
+      The compatibility VERDICT per printer and material -- a status and the
+      upgrades it needs -- is the free floor every install answers "can this
+      printer run this material?" from, and the upgrade prompt; it is public
+      at every tier.  Each row's fields are the materials the matrix judges
+      (a new material is a conscious addition here).  The sentence explaining
+      each verdict, which quoted the printer's ceilings, is the Pro overlay's
+      since 2026-10-12; the default row keeps its notes, as the floor.
+
+  # ---- Tables of verified records (the second shape, judged from 2026-10-16):
+  # no maker in a key, no sentence in a row, and still the year's work.
+
+  design_knowledge/materials.json:
+    classification: safety_floor
+    fields: [display_name, category, thermal, slicing, chemical, design_limits,
+             bonding, brand_profiles]
+    why: >-
+      38 materials' floor: softening and service temperatures, print and bed
+      ranges, warping, the volumetric ceiling, the UV / food / outgassing
+      words, the eight design limits and the hazards, because the free heat
+      and food verdicts, the enclosure check, a signed-out slice and every
+      free make's validation read them offline.  brand_profiles is a ROSTER
+      since 2026-10-16 (brand and product name per profile id); a brand's own
+      tune (ranges, optimum, enclosure, hardened nozzle, AMS) is the family's
+      catalogue record in kiln-pro, part of Kiln Pro, served one material at
+      a time through kiln._pro_material_bridge; free is warned at the family
+      level (a filled filament is abrasive whoever makes it).
+
+  design_knowledge/environment_compatibility.json:
+    classification: standard_reference
+    fields: [uv_resistance, temperature_range, moisture, chemicals,
+             abrasion_resistance, vibration_fatigue]
+    why: >-
+      38 materials' qualitative survival ratings (poor / moderate / good) with a
+      few round figures; the file's own meta says "qualitative and intended for
+      fast agent triage".  The curated depth (the hours to noticeable UV
+      degradation, moved out 2026-10-16, and the reasoning) is the environment
+      overlay in kiln-pro.  Kept public as the floor the free environment check
+      runs offline; re-judge if a measured field joins a row.
+
+  design_knowledge/material_troubleshooting.json:
+    classification: safety_floor
+    fields: [storage_requirements]
+    why: >-
+      Per material, the storage block (humidity sensitivity, a drying
+      temperature and time) is all that is left here.  Drying a spool wrong ruins
+      it and a wet spool jams the hotend, so the storage numbers are a floor
+      every install needs offline; the curated root causes and fixes are the
+      troubleshooting overlay in kiln-pro.
+

@@ -85,7 +85,7 @@ class TestPublishResultIsRead:
         adapter = _connected(rc=mqtt.MQTT_ERR_NO_CONN)
 
         with pytest.raises(PrinterError, match="NOT delivered"):
-            adapter.set_tool_temp(250)
+            adapter.set_tool_temp(220)
 
         # And the next call reconnects instead of reusing the dead client.
         assert not adapter._mqtt_connected.is_set()
@@ -123,7 +123,7 @@ class TestTemperatureVerdict:
     def test_no_report_means_accepted_not_confirmed(self) -> None:
         """The exact session shape: sent, nothing heard back, nozzle cold."""
         adapter = _connected()
-        verdict = adapter.set_tool_temp(250)
+        verdict = adapter.set_tool_temp(220)
 
         assert isinstance(verdict, CommandVerdict)
         assert verdict.state == ACCEPTED
@@ -131,39 +131,39 @@ class TestTemperatureVerdict:
         assert verdict.ok is True
         assert bool(verdict) is True  # legacy `if adapter.set_tool_temp(t)` keeps meaning
         assert verdict.evidence["corroboration"] == "no_report_since_command"
-        assert verdict.evidence["sent"] == "M104 S250"
+        assert verdict.evidence["sent"] == "M104 S220"
         assert "NOT confirmed" in verdict.message
         assert "nozzle_target_temper" in verdict.message
 
     def test_report_after_command_confirms(self) -> None:
         adapter = _connected(window=1.0)
-        _reply_on_publish(adapter, nozzle_target_temper=250)
+        _reply_on_publish(adapter, nozzle_target_temper=220)
 
-        verdict = adapter.set_tool_temp(250)
+        verdict = adapter.set_tool_temp(220)
 
         assert verdict.state == CONFIRMED
         assert verdict.confirmed is True
         assert verdict.evidence["corroboration"] == "read_back"
-        assert verdict.evidence["observed"] == 250
+        assert verdict.evidence["observed"] == 220
 
     def test_report_before_command_does_not_confirm(self) -> None:
         """A reading that predates the command is not a verdict on it."""
         adapter = _connected()
-        _push(adapter, nozzle_target_temper=250)  # the PREVIOUS command's effect
+        _push(adapter, nozzle_target_temper=220)  # the PREVIOUS command's effect
         time.sleep(0.005)
 
-        verdict = adapter.set_tool_temp(250)
+        verdict = adapter.set_tool_temp(220)
 
         assert verdict.state == ACCEPTED
         assert verdict.confirmed is False
-        assert adapter._last_status["nozzle_target_temper"] == 250  # cache says 250 and it is not enough
+        assert adapter._last_status["nozzle_target_temper"] == 220  # cache says 220 and it is not enough
 
     def test_report_after_command_with_wrong_value_stays_accepted(self) -> None:
         """A contradicting frame is reported, not promoted to 'failed'."""
         adapter = _connected()
         _reply_on_publish(adapter, nozzle_target_temper=0)
 
-        verdict = adapter.set_tool_temp(250)
+        verdict = adapter.set_tool_temp(220)
 
         assert verdict.state == ACCEPTED
         assert verdict.evidence["corroboration"] == "read_back_mismatch"
@@ -174,7 +174,7 @@ class TestTemperatureVerdict:
         adapter = _connected()
         _reply_on_publish(adapter, nozzle_temper=27.5)  # spoke, but not about the target
 
-        verdict = adapter.set_tool_temp(250)
+        verdict = adapter.set_tool_temp(220)
 
         assert verdict.state == ACCEPTED
         assert verdict.evidence["corroboration"] == "report_without_field"
@@ -192,7 +192,7 @@ class TestTemperatureVerdict:
         adapter = _connected()
         _push(adapter, hms=[{"attr": 0x12008000, "code": 0x00010001}])
 
-        verdict = adapter.set_tool_temp(250)
+        verdict = adapter.set_tool_temp(220)
 
         assert verdict.state == ACCEPTED
         assert verdict.evidence["printer_faults"]
@@ -269,7 +269,7 @@ class TestServerDoors:
         adapter = _connected()
         get_adapter.return_value = adapter
 
-        result = set_temperature(tool_temp=250)
+        result = set_temperature(tool_temp=220)
 
         assert result["success"] is True
         assert result["tool"]["outcome"] == "accepted"
@@ -282,10 +282,10 @@ class TestServerDoors:
         from kiln.server import set_temperature
 
         adapter = _connected()
-        _reply_on_publish(adapter, nozzle_target_temper=250)
+        _reply_on_publish(adapter, nozzle_target_temper=220)
         get_adapter.return_value = adapter
 
-        result = set_temperature(tool_temp=250)
+        result = set_temperature(tool_temp=220)
 
         assert result["tool"]["outcome"] == "confirmed"
         assert result["tool"]["confirmed"] is True
@@ -326,7 +326,7 @@ class TestServerDoors:
 
         get_adapter.return_value = _connected(rc=mqtt.MQTT_ERR_NO_CONN)
 
-        result = set_temperature(tool_temp=250)
+        result = set_temperature(tool_temp=220)
 
         # The refused publish marks the session dropped, so the write's own
         # _ensure_mqtt tries to reconnect and, with no printer, fails: either
@@ -357,13 +357,13 @@ class TestTheStampIsTakenWithTheLinkUp:
             # the session; the publish path's own call finds it up.
             if not connects:
                 connects.append(1)
-                _push(adapter, nozzle_target_temper=250)
+                _push(adapter, nozzle_target_temper=220)
                 time.sleep(0.01)
             return adapter._mqtt_client
 
         adapter._ensure_mqtt = _slow_connect  # type: ignore[method-assign]
 
-        verdict = adapter.set_tool_temp(250)
+        verdict = adapter.set_tool_temp(220)
 
         assert verdict.state == ACCEPTED
         assert verdict.confirmed is False
@@ -476,15 +476,15 @@ class TestAlreadyAtTheRequestedValue:
 
     def test_a_no_change_request_says_so(self) -> None:
         adapter = _connected()
-        _push(adapter, nozzle_target_temper=250)  # the printer is ALREADY at 250
+        _push(adapter, nozzle_target_temper=220)  # the printer is ALREADY at 220
         time.sleep(0.005)
 
-        verdict = adapter.set_tool_temp(250)
+        verdict = adapter.set_tool_temp(220)
 
         assert verdict.state == ACCEPTED
         assert verdict.confirmed is False  # still not evidence about THIS command
         assert verdict.evidence["already_at_requested_value"] is True
-        assert verdict.evidence["reported_before_command"] == 250
+        assert verdict.evidence["reported_before_command"] == 220
         assert "already reported" in verdict.message
         assert "in the requested state either way" in verdict.message
 
@@ -493,7 +493,7 @@ class TestAlreadyAtTheRequestedValue:
         _push(adapter, nozzle_target_temper=200)
         time.sleep(0.005)
 
-        verdict = adapter.set_tool_temp(250)
+        verdict = adapter.set_tool_temp(220)
 
         assert verdict.state == ACCEPTED
         assert "already_at_requested_value" not in verdict.evidence
@@ -501,16 +501,16 @@ class TestAlreadyAtTheRequestedValue:
 
     def test_a_never_reported_field_is_not_called_already_there(self) -> None:
         adapter = _connected()
-        verdict = adapter.set_tool_temp(250)
+        verdict = adapter.set_tool_temp(220)
         assert "already_at_requested_value" not in verdict.evidence
 
     def test_a_real_confirmation_still_wins(self) -> None:
         adapter = _connected()
-        _push(adapter, nozzle_target_temper=250)
+        _push(adapter, nozzle_target_temper=220)
         time.sleep(0.005)
-        _reply_on_publish(adapter, nozzle_target_temper=250)
+        _reply_on_publish(adapter, nozzle_target_temper=220)
 
-        verdict = adapter.set_tool_temp(250)
+        verdict = adapter.set_tool_temp(220)
 
         assert verdict.state == CONFIRMED
         assert "already_at_requested_value" not in verdict.evidence

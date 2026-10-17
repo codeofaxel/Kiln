@@ -253,6 +253,11 @@ class BedLevelManager:
 
         Returns:
             Dict with ``success``, ``message``, and timing info.
+
+        Raises:
+            PrinterEngagementError: Kiln is working with a different printer
+                and declined this one.  Nothing was sent, so it is not
+                recorded as a failed leveling.
         """
         # Probing needs a CLEAR bed: while a job is printing or paused the
         # plate carries a part, and G29 / BED_MESH_CALIBRATE would drive
@@ -350,6 +355,13 @@ class BedLevelManager:
             }
 
         except Exception as exc:
+            from kiln.printers.engagement import refusal_in_flight
+
+            if refusal_in_flight(exc) is not None:
+                # Kiln declined this machine, so nothing was sent and nothing
+                # failed: no failed leveling on record, and the caller answers
+                # with the refusal's own words.
+                raise
             logger.error("Bed leveling failed on %s: %s", printer_name, exc)
             if self._db is not None:
                 self._db.save_leveling(

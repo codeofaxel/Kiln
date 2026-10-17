@@ -167,7 +167,7 @@ class TestGetState:
 
         assert state.state == PrinterStatus.ERROR
 
-    def test_attention_maps_to_error(self):
+    def test_attention_without_a_job_maps_to_error(self):
         a = _adapter()
         resp = _mock_response(json_data={
             "printer": {"state": "ATTENTION"},
@@ -177,6 +177,20 @@ class TestGetState:
             state = a.get_state()
 
         assert state.state == PrinterStatus.ERROR
+
+    def test_attention_during_a_job_is_paused_not_failed(self):
+        """A Prusa showing a prompt mid-print (a filament change, a feed
+        problem) is waiting for a person.  Reading it as ERROR made the
+        watchers report a healthy print as failed."""
+        a = _adapter()
+        resp = _mock_response(json_data={
+            "printer": {"state": "ATTENTION"},
+            "job": {"id": 7, "progress": 42.0},
+        })
+        with patch.object(a._session, "request", return_value=resp):
+            state = a.get_state()
+
+        assert state.state == PrinterStatus.PAUSED
 
     def test_unknown_state(self):
         a = _adapter()
@@ -745,3 +759,87 @@ class TestGetPrinterInfo:
             "api_version_type_code": "prusa_mini",
             "api_version_original": "prusa_mk3s",
         }
+
+
+# ---------------------------------------------------------------------------
+# a wrong key on PrusaLink-on-a-Raspberry-Pi
+# ---------------------------------------------------------------------------
+
+
+class TestBadApiKeyOnRaspberryPiPrusaLink:
+    """An MK3S running PrusaLink on a Pi answers a wrong or empty API key with
+    HTTP 403 and the body ``Bad X-Api-Key.``, not 401.  That is an authentication
+    failure and has to be said as one: the key is made in PrusaLink's web
+    page, not on the printer's screen, and is empty until someone makes it.
+    """
+
+    @staticmethod
+    def _bad_key() -> MagicMock:
+        resp = _mock_response(status_code=403, ok=False)
+        resp.text = "Bad X-Api-Key."
+        return resp
+
+    def test_bad_key_is_reported_as_an_authentication_failure(self):
+        a = _adapter()
+        with (
+            patch.object(a._session, "request", return_value=self._bad_key()),
+            pytest.raises(PrinterError) as exc_info,
+        ):
+            a._request("GET", "/api/v1/status")
+
+        message = str(exc_info.value)
+        assert "Bad X-Api-Key" in message
+        assert "API key" in message
+        assert "web page" in message
+        assert "permissions" not in message
+        assert "storage" not in message
+
+    def test_bad_key_on_a_files_endpoint_is_not_a_storage_problem(self):
+        a = _adapter()
+        with (
+            patch.object(a._session, "request", return_value=self._bad_key()),
+            pytest.raises(PrinterError) as exc_info,
+        ):
+            a._request("POST", "/api/v1/files/usb/WHISTL~1.GCO")
+
+        message = str(exc_info.value)
+        assert "8.3" not in message
+        assert "Bad X-Api-Key" in message
+
+    def test_list_files_does_not_fall_back_across_roots_on_a_bad_key(self):
+        a = _adapter()
+        with (
+            patch.object(a._session, "request", side_effect=[self._bad_key(), self._bad_key()]) as req,
+            pytest.raises(PrinterError) as exc_info,
+        ):
+            a.list_files()
+
+        assert "Bad X-Api-Key" in str(exc_info.value)
+        assert "storage roots" not in str(exc_info.value)
+        assert req.call_count == 1, "a refused key is the same on every root; stop at the first"
+
+
+class TestReadMachineIdentity:
+    """``/api/v1/info`` ``serial`` is the printer's own serial."""
+
+    def test_serial_is_read_from_info(self):
+        a = _adapter()
+        resp = _mock_response(json_data={"serial": "CZPX4720X004XC34242", "nozzle_diameter": 0.4})
+        with patch.object(a._session, "request", return_value=resp) as req:
+            identity = a.read_machine_identity()
+        assert identity is not None
+        assert identity.value == "CZPX4720X004XC34242"
+        assert identity.source == "prusalink_info.serial"
+        assert identity.kind == "printer_serial"
+        assert req.call_args[0][1].endswith("/api/v1/info")
+
+    def test_info_without_a_serial_is_none(self):
+        a = _adapter()
+        resp = _mock_response(json_data={"nozzle_diameter": 0.4, "serial": ""})
+        with patch.object(a._session, "request", return_value=resp):
+            assert a.read_machine_identity() is None
+
+    def test_an_unreachable_printer_is_none_not_an_error(self):
+        a = _adapter()
+        with patch.object(a._session, "request", side_effect=requests.ConnectionError("down")):
+            assert a.read_machine_identity() is None

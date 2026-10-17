@@ -384,6 +384,7 @@ class _PrintWatcher:
 
     def _run(self) -> None:
         """Main monitoring loop — runs in a background thread."""
+        from kiln.hardware_stops import observe as _observe_hardware
         from kiln.printers import PrinterStatus
         from kiln.printers.base import adapter_has_camera
 
@@ -426,6 +427,26 @@ class _PrintWatcher:
                                 "completion": job.completion,
                             }
                         )
+
+                # A print carrying a hardware plan hands its moments back to
+                # the person: a stop close enough to get ready for, and one the
+                # print went past without stopping.  The stop itself is a
+                # pause, answered with the other pauses below.
+                hardware = _observe_hardware(adapter, state, job, announce="chat")
+                if hardware and hardware["new"] and hardware["stage"] in ("coming_up", "missed", "passed_unseen"):
+                    self._finish({
+                        "success": True,
+                        "watch_id": self._watch_id,
+                        "outcome": "hardware_stop",
+                        "hardware": hardware,
+                        "message": hardware["say"],
+                        "elapsed_seconds": round(elapsed, 1),
+                        "progress_log": list(self._progress_log[-20:]),
+                        "snapshots": list(self._snapshots),
+                        "snapshot_failures": self._snapshot_failures,
+                        "final_state": state.to_dict(),
+                    })
+                    return
 
                 # Auto-cancel at target percentage
                 if (
@@ -517,6 +538,9 @@ class _PrintWatcher:
                         "snapshot_failures": self._snapshot_failures,
                         "final_state": state.to_dict(),
                     }
+                    if hardware and hardware["stage"] == "after_print":
+                        result["hardware"] = hardware
+                        result["message"] = hardware["say"]
                     self._finish(result)
                     return
 
@@ -573,6 +597,12 @@ class _PrintWatcher:
                         "final_state": state.to_dict(),
                         "message": ("Print is paused. Call resume_print to continue, or cancel_print to abort."),
                     }
+                    if hardware and hardware["stage"] == "now":
+                        # Stopped for hardware: what goes in, never an
+                        # invitation to resume.
+                        result["outcome"] = "hardware_stop"
+                        result["hardware"] = hardware
+                        result["message"] = hardware["say"]
                     self._finish(result)
                     return
 
@@ -1097,6 +1127,13 @@ class _MonitoringToolsPlugin:
                reaches or exceeds this percentage.  Use this for test prints,
                calibration runs, or any case where you want to stop at a specific
                progress point without writing a polling script.
+            5. **Hardware stop** -- the print carries a hardware plan (pauses
+               written in for nuts, magnets or bearings) and a stop is a few
+               minutes away, the printer has stopped for the parts, or it went
+               past a stop without stopping: ``outcome: "hardware_stop"`` with a
+               ``hardware`` block saying what goes in.  Tell the person; at the
+               stop itself, resume only on their word that every piece is in
+               (``resume_print(hardware_confirmed=true)``).  Then watch again.
 
             **Camera ground-truth**: each captured snapshot is hashed and compared to
             the previous frame.  If the camera shows the print bed changing but
@@ -1501,7 +1538,7 @@ class _MonitoringToolsPlugin:
                 # the printer's last word about the previous one.
                 sent_at = time.monotonic()
                 print_result = adapter.start_print(file_name)
-                _srv._note_print_started(adapter)
+                _srv._note_print_started(adapter, print_result)
                 _srv._audit(
                     "start_monitored_print", "print_started", details={"file": file_name}
                 )

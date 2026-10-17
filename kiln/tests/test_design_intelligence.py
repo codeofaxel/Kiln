@@ -472,7 +472,7 @@ class TestMaterialProfiles:
     def test_get_polycarbonate(self):
         p = get_material_profile("polycarbonate")
         assert p is not None
-        assert p.thermal["max_service_temp_c"] == 120
+        assert p.thermal["max_service_temp_c"] == 104
 
     def test_unknown_material_returns_none(self):
         assert get_material_profile("unobtanium") is None
@@ -898,34 +898,50 @@ class TestDesignBrief:
 # ---------------------------------------------------------------------------
 
 
+def _synthetic_cell(cross_section_mm2: float, cantilever_length_mm: float) -> float:
+    """One cell of the grid the session serves for every rigid material
+    (``conftest.synthetic_material_record``): the bending formula
+    ``capacity x A^1.5 / 6 / L`` with the made-up capacity of 10 N/mm^2,
+    floored to 2 decimals.  Recomputed here so the tests below exercise
+    the lookup, the interpolation and the derating against figures that
+    belong to no real material -- the real grids are kiln-pro's and are
+    pinned there."""
+    import math
+
+    return math.floor(10.0 * (cross_section_mm2 ** 1.5 / 6.0) / cantilever_length_mm * 100.0) / 100.0
+
+
 class TestLoadEstimation:
-    def test_known_petg_load_at_100mm(self):
-        # Derived table (2026-07-16): PETG capacity 15.0 N/mm^2, so
-        # A=24 at L=100 → 15.0 x (24^1.5/6) / 100 = 2.93 N (floor2),
-        # then the default weak-orientation derate (0.4).
+    def test_known_petg_load_at_100mm(self, served_material_records):
+        # A grid cell (A=24 at L=100) straight from the served record, then
+        # the default weak-orientation derate (0.4).
         estimate = estimate_load_capacity("petg", 24.0, 100.0)
         assert isinstance(estimate, LoadEstimate)
         assert estimate is not None
-        assert estimate.max_load_n == pytest.approx(2.93 * 0.4, abs=0.01)
+        assert estimate.max_load_n == pytest.approx(_synthetic_cell(24.0, 100.0) * 0.4, abs=0.01)
         assert estimate.derating_applied == pytest.approx(0.4)
 
     def test_unknown_material_returns_none(self):
         assert estimate_load_capacity("unobtanium", 20.0, 100.0) is None
 
-    def test_cross_section_interpolation(self):
+    def test_cross_section_interpolation(self, served_material_records):
         estimate = estimate_load_capacity("petg", 30.0, 100.0)
         assert estimate is not None
-        # Interpolated between 24 mm^2 (2.93N) and 36 mm^2 (5.40N),
+        # Interpolated between the 24 mm^2 and 36 mm^2 cells at 100 mm,
         # then the default weak-orientation derate (0.4).
-        assert estimate.max_load_n == pytest.approx((2.93 + 5.40) / 2 * 0.4, abs=0.01)
+        expected = (_synthetic_cell(24.0, 100.0) + _synthetic_cell(36.0, 100.0)) / 2 * 0.4
+        assert estimate.max_load_n == pytest.approx(expected, abs=0.01)
+        assert any("100 mm" in msg for msg in estimate.reasoning)
 
-    def test_cantilever_length_interpolation(self):
+    def test_cantilever_length_interpolation(self, served_material_records):
         estimate = estimate_load_capacity("petg", 24.0, 75.0)
         assert estimate is not None
-        # Interpolated between 50 mm (5.87N) and 100 mm (2.93N),
-        # then the default weak-orientation derate (0.4); the function
-        # rounds to 2 decimals.
-        assert estimate.max_load_n == pytest.approx((5.87 + 2.93) / 2 * 0.4, abs=0.01)
+        # Interpolated between the 50 mm and 100 mm rows at 24 mm^2, then
+        # the default weak-orientation derate (0.4); the function floors
+        # to 2 decimals.
+        expected = (_synthetic_cell(24.0, 50.0) + _synthetic_cell(24.0, 100.0)) / 2 * 0.4
+        assert estimate.max_load_n == pytest.approx(expected, abs=0.01)
+        assert any("Interpolated between 50 mm and 100 mm" in msg for msg in estimate.reasoning)
 
     def test_longer_cantilever_reduces_capacity(self):
         short_arm = estimate_load_capacity("nylon", 24.0, 50.0)
@@ -1075,84 +1091,81 @@ class TestEnvironmentCompatibility:
 
 
 class TestPrinterProfiles:
-    # NOTE: every test that calls ``get_printer_design_profile`` or
-    # ``list_printer_profiles`` exercises a constructor that
-    # hard-keys the overlay-supplied ``agent_notes`` field; without the
-    # kiln-pro printer_profiles overlay those calls raise KeyError.
-    # The unknown-printer path is the one exception — it returns
-    # None before touching the constructor.
+    # The session fixture's synthetic printers (``kilntest_*``) are the full
+    # rows here.  A real printer's capability profile is its served record
+    # since 2026-10-12, pinned in kiln-pro's
+    # ``tests/test_printer_catalogue_numbers.py``; in public CI every real
+    # roster printer answers the generic floor, marked ``generic``.
 
-    @requires_printer_profiles_overlay
     def test_get_known_printer_profile(self):
-        profile = get_printer_design_profile("bambu_x1c")
+        profile = get_printer_design_profile("kilntest_enclosed")
         assert isinstance(profile, PrinterDesignProfile)
-        assert profile is not None
-        assert profile.display_name == "Bambu Lab X1 Carbon"
+        assert profile.display_name == "Kilntest Enclosed 256"
         assert profile.has_enclosure is True
+        assert profile.resolved_from == "curated"
+        assert profile.build_volume_mm == {"x": 256, "y": 256, "z": 256}
 
     def test_unknown_printer_returns_none(self):
         assert get_printer_design_profile("unknown_printer") is None
 
-    @requires_printer_profiles_overlay
     def test_case_insensitive_lookup(self):
-        profile = get_printer_design_profile("BAMBU_X1C")
+        profile = get_printer_design_profile("KILNTEST_ENCLOSED")
         assert profile is not None
-        assert profile.printer_id == "bambu_x1c"
+        assert profile.printer_id == "kilntest_enclosed"
 
-    @requires_printer_profiles_overlay
-    def test_list_printers_includes_all_known_profiles(self):
+    def test_a_roster_printer_with_no_record_is_the_marked_floor(self, signed_out_install):
+        """A machine Kiln lists whose record this install does not hold is
+        answered from the generic row under its own name, and says so."""
+        profile = get_printer_design_profile("bambu_x1c")
+        assert profile is not None and profile.printer_id == "bambu_x1c"
+        assert profile.resolved_from == "generic"
+        generic = get_printer_design_profile("default")
+        assert profile.max_hotend_temp_c == generic.max_hotend_temp_c
+        assert profile.build_volume_mm == generic.build_volume_mm
+        assert profile.agent_notes == []
+
+    def test_list_printers_includes_every_roster_printer(self):
         profiles = list_printer_profiles()
         assert len(profiles) >= 9
         ids = {p.printer_id for p in profiles}
-        assert "bambu_x1c" in ids
-        assert "voron_2" in ids
-        assert "prusa_mk4" in ids
+        assert {"bambu_x1c", "voron_2", "prusa_mk4", "kilntest_open", "kilntest_enclosed"} <= ids
+        assert all(p.resolved_from in {"curated", "derived", "generic"} for p in profiles)
 
-    @requires_printer_profiles_overlay
     def test_filter_has_enclosure(self):
-        enclosed = [p for p in list_printer_profiles() if p.has_enclosure]
-        ids = {p.printer_id for p in enclosed}
-        assert "bambu_x1c" in ids
-        assert "voron_2" in ids
-        assert "prusa_mini" not in ids
+        enclosed = {p.printer_id for p in list_printer_profiles() if p.has_enclosure}
+        assert {"kilntest_enclosed", "kilntest_hot"} <= enclosed
+        assert "kilntest_open" not in enclosed
 
-    @requires_printer_profiles_overlay
     def test_filter_supported_materials(self):
-        nylon_capable = [p.printer_id for p in list_printer_profiles() if "nylon" in p.supported_materials]
-        assert "bambu_x1c" in nylon_capable
-        assert "voron_2" in nylon_capable
-        assert "prusa_mini" not in nylon_capable
+        asa_capable = {p.printer_id for p in list_printer_profiles() if "asa" in p.supported_materials}
+        assert "kilntest_enclosed" in asa_capable
+        assert "kilntest_open" not in asa_capable
 
-    @requires_printer_profiles_overlay
-    def test_polycarbonate_support_subset(self):
-        pc_capable = [p.printer_id for p in list_printer_profiles() if "polycarbonate" in p.supported_materials]
-        assert "bambu_x1c" in pc_capable
-        assert "voron_2" in pc_capable
-        assert "ender3_v2" not in pc_capable
+    def test_high_temperature_support_subset(self):
+        peek_capable = {p.printer_id for p in list_printer_profiles() if "peek" in p.supported_materials}
+        assert "kilntest_hot" in peek_capable
+        assert "kilntest_small" not in peek_capable
 
-    @requires_printer_profiles_overlay
     def test_default_layer_heights_present(self):
-        profile = get_printer_design_profile("prusa_mk4")
+        profile = get_printer_design_profile("kilntest_open")
         assert profile is not None
-        assert profile.default_layer_heights_mm == [0.08, 0.12, 0.16, 0.2, 0.28]
+        assert profile.default_layer_heights_mm == [0.12, 0.16, 0.2, 0.28]
 
-    @requires_printer_profiles_overlay
-    def test_direct_drive_capability_differs_between_enders(self):
-        v2 = get_printer_design_profile("ender3_v2")
-        s1 = get_printer_design_profile("ender3_s1")
-        assert v2 is not None
-        assert s1 is not None
-        assert v2.has_direct_drive is False
-        assert s1.has_direct_drive is True
+    def test_direct_drive_capability_differs_between_rows(self):
+        bowden = get_printer_design_profile("kilntest_ptfe")
+        direct = get_printer_design_profile("kilntest_open")
+        assert bowden is not None and direct is not None
+        assert bowden.has_direct_drive is False
+        assert direct.has_direct_drive is True
 
-    @requires_printer_profiles_overlay
     def test_printer_profile_to_dict(self):
-        profile = get_printer_design_profile("bambu_a1")
+        profile = get_printer_design_profile("kilntest_open")
         assert profile is not None
         data = profile.to_dict()
-        assert data["printer_id"] == "bambu_a1"
+        assert data["printer_id"] == "kilntest_open"
         assert "supported_materials" in data
         assert isinstance(data["agent_notes"], list)
+        assert data["resolved_from"] == "curated"
 
 
 class TestIntelDerivedDesignProfiles:
@@ -1170,14 +1183,20 @@ class TestIntelDerivedDesignProfiles:
         assert _derive_manufacturer("mystery_9000", "Acme Rocket") == "Acme"
 
     def test_profile_derived_from_intelligence(self):
+        """Derived from a spec sheet this process holds.  ``_raw_cache`` holds
+        the full rows -- the generic row, the session's synthetic printers,
+        and any catalogue record a door has fetched -- never a roster row,
+        which carries no spec sheet; a real printer's is kiln-pro's
+        catalogue, which public CI does not hold."""
         from kiln import printer_intelligence as pi
         from kiln.design_intelligence import _design_profile_from_intel
         pi._load_raw()
-        raw = pi._raw_cache["ender3"]
-        prof = _design_profile_from_intel("ender3", raw)
-        assert prof.printer_id == "ender3"
-        assert prof.manufacturer == "Creality"
-        assert {"x", "y", "z"} <= set(prof.build_volume_mm)
+        raw = pi._raw_cache["kilntest_open"]
+        prof = _design_profile_from_intel("kilntest_open", raw)
+        assert prof.printer_id == "kilntest_open"
+        # No known maker prefix: the first word of the display name.
+        assert prof.manufacturer == "Kilntest"
+        assert prof.build_volume_mm == {"x": 220, "y": 220, "z": 250}
         assert prof.supported_materials == sorted(m.lower() for m in raw["materials"])
         assert prof.default_layer_heights_mm  # non-empty layer ladder
         assert prof.agent_notes == []  # curated notes come from the pro overlay

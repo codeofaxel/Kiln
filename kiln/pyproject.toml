@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kiln3d"
-version = "1.4.1.1"
-description = "MCP server + CLI that gives AI agents safe access to 3D printers (Bambu Lab, Creality, Prusa Link, Elegoo, Moonraker/Klipper, OctoPrint, Duet, USB) — 939 MCP capabilities for AI-driven print workflows"
+version = "1.5.0"
+description = "MCP server + CLI that gives AI agents safe access to 3D printers (compatible with Bambu Lab, Creality, Prusa Link, Elegoo, Moonraker/Klipper, OctoPrint, Duet, USB) — 921 MCP capabilities for AI-driven print workflows"
 readme = "README.md"
 license = {text = "AGPL-3.0-or-later"}
 requires-python = ">=3.10"
@@ -124,7 +124,13 @@ mesh-diagnostics = []
 # never open a STEP file; `kiln install-step-backend` installs it for the
 # ones who do.  Anyone who already has full cadquery keeps working — the OCP
 # backend uses whichever build provides the `OCP` module.
-step = ["cadquery-ocp-novtk>=7.9"]
+#
+# The ceiling is the newest kernel Kiln's own kernel code has been run
+# against (CI's cad-kernel job), not a guess at what will break: kernel 8.0
+# renamed calls, and code written on 7.9 stopped at its first import on it.
+# kiln.step_import.KERNEL_RANGE states the same range; a test holds them
+# together.
+step = ["cadquery-ocp-novtk>=7.9,<8.1"]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
@@ -218,7 +224,18 @@ kiln = [
     "data/scad_libraries/BOSL2/*.scad",
     "data/scad_libraries/BOSL2/LICENSE",
     "data/scad_libraries/MCAD/*.scad",
+    "data/scad_libraries/MCAD/bitmap/*.scad",
+    # MCAD is LGPL-2.1: its licence text and the README that says which
+    # files it covers travel with the library.
+    "data/scad_libraries/MCAD/lgpl-2.1.txt",
+    "data/scad_libraries/MCAD/README.markdown",
     "py.typed",
+    # Read by server.py beside itself at every start: the served tools an
+    # install without kiln-pro registers.  At the package root, so no data/
+    # glob ever reached it, and no release from 1.1.3 to 1.4.1.1 carried it.
+    # scripts/audit_wheel_inventory.py now derives what must ship from the
+    # tree and from what the code reads, so the next such file fails there.
+    "pro_tool_manifest.json",
     "generation/scad_library/*.scad",
     # The print-code banner's own notifier: Kiln.app on a Mac, the icon on
     # Windows (kiln/scripts/build_notifier.py writes both).

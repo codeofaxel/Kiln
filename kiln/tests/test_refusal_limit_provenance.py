@@ -31,6 +31,11 @@ from kiln.gcode import validate_gcode_for_printer
 _OWNER_NOTE = "(owner-set limit, not Kiln-verified)"
 _GENERIC_NOTE = "generic fallback"
 
+#: A curated printer the session's bundled copy holds: the synthetic
+#: PTFE-lined machine from tests/fixtures/printer_catalogue_test.json.  A
+#: real printer's limits are kiln-pro's catalogue and are not in public CI.
+_CURATED = "kilntest_ptfe"
+
 _BASE = {
     "display_name": "My Machine",
     "max_hotend_temp": 200.0,
@@ -57,37 +62,37 @@ def _isolated_overrides(monkeypatch, tmp_path):
 
 
 def _override(payload: dict) -> None:
-    sp._LOCAL_OVERRIDE_FILE.write_text(json.dumps({"ender3": payload}), encoding="utf-8")
+    sp._LOCAL_OVERRIDE_FILE.write_text(json.dumps({_CURATED: payload}), encoding="utf-8")
     sp._local_overrides_loaded = False
     sp._local_override_cache.clear()
 
 
 class TestAVerifiedLimitRefusesQuietly:
     def test_curated_hotend_refusal_carries_no_clause(self) -> None:
-        err = validate_gcode_for_printer("M104 S400", "ender3").errors[0]
+        err = validate_gcode_for_printer("M104 S400", _CURATED).errors[0]
         assert "exceeds" in err
         assert _OWNER_NOTE not in err
         assert _GENERIC_NOTE not in err
 
     def test_curated_bed_refusal_carries_no_clause(self) -> None:
-        err = validate_gcode_for_printer("M140 S250", "ender3").errors[0]
+        err = validate_gcode_for_printer("M140 S250", _CURATED).errors[0]
         assert _OWNER_NOTE not in err
 
 
 class TestAnOwnerSetLimitSaysSo:
     def test_hotend(self) -> None:
         _override(dict(_BASE))
-        err = validate_gcode_for_printer("M104 S250", "ender3").errors[0]
+        err = validate_gcode_for_printer("M104 S250", _CURATED).errors[0]
         assert "200" in err and _OWNER_NOTE in err
 
     def test_bed(self) -> None:
         _override(dict(_BASE))
-        err = validate_gcode_for_printer("M140 S150", "ender3").errors[0]
+        err = validate_gcode_for_printer("M140 S150", _CURATED).errors[0]
         assert _OWNER_NOTE in err
 
     def test_feedrate_warning(self) -> None:
         _override(dict(_BASE))
-        res = validate_gcode_for_printer("G1 X10 Y10 F99000", "ender3")
+        res = validate_gcode_for_printer("G1 X10 Y10 F99000", _CURATED)
         feed = [w for w in res.warnings if "feedrate" in w]
         assert feed and _OWNER_NOTE in feed[0]
 
@@ -95,9 +100,9 @@ class TestAnOwnerSetLimitSaysSo:
         """The owner tried to RAISE the hotend, so the clamp put Kiln's
         number back — the refusal is enforcing Kiln's limit and must not
         blame the owner for it."""
-        curated = sp.get_profile("ender3").max_hotend_temp
+        curated = sp.get_profile(_CURATED).max_hotend_temp
         _override({**_BASE, "max_hotend_temp": curated + 100})
-        err = validate_gcode_for_printer("M104 S499", "ender3").errors[0]
+        err = validate_gcode_for_printer("M104 S499", _CURATED).errors[0]
         assert f"{curated:g}" in err
         assert _OWNER_NOTE not in err
 
@@ -106,7 +111,7 @@ class TestTheNoteIsPerFieldNotPerProfile:
     def test_bed_refusal_is_clean_when_only_hotend_was_owner_set(self) -> None:
         """The sharp case: an owner-set hotend must not put a clause on a
         refusal about the BED, whose limit is still Kiln's."""
-        curated = sp.get_profile("ender3")
+        curated = sp.get_profile(_CURATED)
         _override(
             {
                 "display_name": "Mixed",
@@ -116,12 +121,12 @@ class TestTheNoteIsPerFieldNotPerProfile:
                 "build_volume": [200, 200, 200],
             }
         )
-        got = sp.get_profile("ender3")
+        got = sp.get_profile(_CURATED)
         assert "max_hotend_temp" in got.owner_supplied
         assert "max_bed_temp" not in got.owner_supplied
 
-        hot = validate_gcode_for_printer("M104 S250", "ender3").errors[0]
-        bed = validate_gcode_for_printer("M140 S250", "ender3").errors[0]
+        hot = validate_gcode_for_printer("M104 S250", _CURATED).errors[0]
+        bed = validate_gcode_for_printer("M140 S250", _CURATED).errors[0]
         assert _OWNER_NOTE in hot
         assert _OWNER_NOTE not in bed
 
@@ -144,8 +149,8 @@ class TestTheNoteLeaksNothing:
         forbidden = ("http", "tds", "datasheet", "source", "manufacturer", "spec sheet")
         _override(dict(_BASE))
         for pid, cmd in (
-            ("ender3", "M104 S250"),
-            ("ender3", "M140 S150"),
+            (_CURATED, "M104 S250"),
+            (_CURATED, "M140 S150"),
             ("machine_kiln_never_heard_of", "M104 S400"),
         ):
             err = validate_gcode_for_printer(cmd, pid).errors[0].lower()
@@ -168,10 +173,10 @@ class TestTheInterceptorDoorCarriesItToo:
 
     def test_owner_set_hotend_reaches_the_block_rule(self) -> None:
         _override(dict(_BASE))
-        assert _OWNER_NOTE in self._hotend_rule("ender3").message
+        assert _OWNER_NOTE in self._hotend_rule(_CURATED).message
 
     def test_curated_profile_block_rule_stays_clean(self) -> None:
-        msg = self._hotend_rule("ender3").message
+        msg = self._hotend_rule(_CURATED).message
         assert _OWNER_NOTE not in msg
         assert _GENERIC_NOTE not in msg
 
@@ -179,7 +184,7 @@ class TestTheInterceptorDoorCarriesItToo:
         from kiln.gcode_interceptor import GcodeInterceptor
 
         _override(dict(_BASE))
-        rules = GcodeInterceptor().load_safety_rules("ender3")
+        rules = GcodeInterceptor().load_safety_rules(_CURATED)
         bed = [r for r in rules if r.name.startswith("max_bed_temp")]
         assert bed and _OWNER_NOTE in bed[0].message
 

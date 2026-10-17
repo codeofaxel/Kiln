@@ -20,16 +20,16 @@ _logger = logging.getLogger(__name__)
 def _attach_brief_to_iteration_result(
     brief_id: str, best_result: dict[str, Any],
 ) -> None:
-    """Write a ``design_brief:<id>`` intent sidecar next to the best mesh.
-
-    Best-effort: when kiln-pro isn't installed, the saved goal can't be
-    loaded, or the sidecar write fails for any reason, silently no-op
-    — the iteration result is still valid.  Same pattern as the audit
-    honor-gate hook in ``kiln.original_design``.
+    """Record the best mesh against the saved goal, through the one helper
+    every make door calls (``kiln.front_door.join_goal``), which also says
+    in the envelope what became of the id -- or, when none was named, what
+    starting with the front door would have kept.
 
     Reads the mesh path out of either ``best_result["result"]["local_path"]``
     (download_result envelope) or ``best_result["job"]["local_path"]``.
     """
+    from kiln.front_door import join_goal
+
     mesh_path: str | None = None
     for nested in ("result", "job"):
         block = best_result.get(nested)
@@ -38,18 +38,7 @@ def _attach_brief_to_iteration_result(
             if isinstance(v, str) and v:
                 mesh_path = v
                 break
-    if not mesh_path:
-        return
-    try:
-        from kiln_pro.design_brief.explicit_attach import (
-            attach_brief_id_to_result,
-        )
-        attach_brief_id_to_result(brief_id, {"local_path": mesh_path})
-    except Exception:
-        _logger.debug(
-            "iterate_design: brief sidecar attach skipped (best-effort)",
-            exc_info=True,
-        )
+    join_goal(brief_id, best_result, mesh_path)
 
 
 def _resolve_tool_build_volume(
@@ -61,9 +50,10 @@ def _resolve_tool_build_volume(
 
     resolved = resolve_build_volume(printer_id)
     if resolved is None:
+        from kiln.printers.bed_fit import no_bed_reason
+
         raise ValueError(
-            f"Unknown printer_id {printer_id!r}; omit printer_id and pass "
-            "explicit bed/plate dimensions, or use a supported printer model id."
+            no_bed_reason(printer_id, instead="omit printer_id and pass explicit bed/plate dimensions")
         )
     return resolved
 
@@ -163,10 +153,10 @@ class _DesignReasoningToolsPlugin:
             """Recommend specific reinforcements for an STL mesh.
 
             Analyzes geometry to find structural risks, then generates actionable
-            recommendations with **specific locations** and **estimated strength gains**:
-            - **gusset**: triangular support at cantilever bases (3-10x stronger)
-            - **fillet**: smooth transitions at stress concentrations (30-60% gain)
-            - **thicken_wall**: add material at thin necks (2-5x gain)
+            recommendations with **specific locations** and what each one does for the part:
+            - **gusset**: triangular support at cantilever bases
+            - **fillet**: smooth transitions at stress concentrations
+            - **thicken_wall**: add material at thin necks
             - **add_base**: widen the base for stability
             - **reorient**: change print orientation for layer strength
 
@@ -249,7 +239,7 @@ class _DesignReasoningToolsPlugin:
 
             The plan includes:
             1. **Risks**: all structural weak points with locations and severity
-            2. **Reinforcements**: specific fixes with estimated strength gains
+            2. **Reinforcements**: specific fixes and what each does for the part
             3. **Load analysis**: how the part handles forces, best print orientation
             4. **Score**: overall structural grade with summary
 
@@ -286,16 +276,36 @@ class _DesignReasoningToolsPlugin:
             fillet_radius_mm: float = 1.5,
             wall_thicken_mm: float = 0.6,
             base_height_mm: float = 2.0,
+            printer_id: str = "",
+            nozzle_mm: float | None = None,
+            layer_height_mm: float | None = None,
+            material: str = "",
+            fastener: str = "",
         ) -> dict:
-            """Analyze a mesh for structural risks, then auto-apply fixes.
+            """Analyze a part for structural risks, then auto-apply fixes.
 
             This is the **one-step design hardening tool** — it runs the full
             structural analysis pipeline, then applies every applicable fix:
 
             - **Thin necks** → thickened walls (+material at narrow sections)
-            - **Sharp corners** → filleted edges (stress concentration eliminated)
+            - **Sharp corners** → rounded edges (stress concentration reduced at inside corners)
             - **Insufficient base** → wider base plate (stabilizing geometry added)
-            - **Cantilevers** → triangular gusset ribs (deflection reduced 3-10x)
+            - **Cantilevers** → triangular gusset ribs
+
+            Thickening and edge rounding are done on the part's CAD file, so
+            pass its STEP file when there is one (or a mesh Kiln converted
+            from one that still sits beside it).  When every fix applied was
+            a CAD one the result carries ``step_path``, the reinforced part as
+            CAD.  On a mesh with no CAD file, edge rounding is skipped with
+            the reason.
+
+            Edge rounding is sized for the printer: name it (or the nozzle,
+            layer height and material) and each rounded edge keeps one nozzle
+            width of flat beside it.  Each rounded entry's ``edges`` lists
+            what was finished, what stayed sharp and why, and ``cautions``
+            for edges that will print badly; ``print_aware`` sums it up.
+            Choosing the finish edge by edge for the printer and material is
+            a Kiln Pro feature (https://kiln3d.com/pricing).
 
             Returns a before/after structural score so agents can see the
             improvement.  Reinforcements that can't be auto-applied (like
@@ -303,11 +313,23 @@ class _DesignReasoningToolsPlugin:
 
             Requires OpenSCAD for base plate and gusset operations.
 
-            :param file_path: Path to the STL file to reinforce.
+            AGENT DISPLAY CONTRACT: a result carries a before|after self-check
+            of the part.  Look at it and write what changed before calling
+            the job done.
+
+            :param file_path: The part: an STL, or its STEP file.
             :param output_path: Output path (defaults to ``<name>_reinforced.stl``).
             :param fillet_radius_mm: Fillet radius for sharp corners (default 1.5).
             :param wall_thicken_mm: Amount to add to thin walls (default 0.6).
             :param base_height_mm: Height of stabilizing base plate (default 2.0).
+            :param printer_id: The printer the part is for.
+            :param nozzle_mm: The nozzle size, when it differs from the one
+                Kiln has for the printer.
+            :param layer_height_mm: The layer height it will print at.
+            :param material: The material it will print in.
+            :param fastener: The fastener the part's holes take, e.g.
+                ``"M3"`` — pass only if the user actually named one.  Kiln
+                does not read the part looking for screw holes.
             :returns: Dict with before/after scores, applied/skipped reinforcements.
             """
             if err := _srv._check_auth("generate"):
@@ -321,6 +343,11 @@ class _DesignReasoningToolsPlugin:
                     fillet_radius_mm=fillet_radius_mm,
                     wall_thicken_mm=wall_thicken_mm,
                     base_height_mm=base_height_mm,
+                    printer_id=printer_id or None,
+                    nozzle_mm=nozzle_mm,
+                    layer_height_mm=layer_height_mm,
+                    material=material or None,
+                    fastener=fastener.strip() or None,
                 )
                 response = {"success": True, **result.to_dict()}
                 try:
@@ -328,7 +355,12 @@ class _DesignReasoningToolsPlugin:
                         attach_inspect_bundle,
                     )
 
-                    return attach_inspect_bundle(response, level="quick")
+                    from kiln.step_import import ensure_mesh_path
+
+                    # A STEP input is graded against Kiln's mesh of it.
+                    return attach_inspect_bundle(
+                        response, level="quick", self_check_before=ensure_mesh_path(file_path)[0],
+                    )
                 except ImportError:
                     return response
             except ValueError as exc:
@@ -907,8 +939,10 @@ class _DesignReasoningToolsPlugin:
                 asked for" gate, the brief failure_history wiring, and
                 the ``compare_design_versions`` intent diff all light
                 up against the saved goal — without the user having to
-                re-attach the brief after every iteration round.
-                Best-effort: kiln-pro not installed silently skips.
+                re-attach the brief after every iteration round.  The
+                result is also compared with any picture kept on the goal
+                (``reference_check``); where this install cannot read the
+                goal, ``reference_check`` says the result was not compared.
             :returns: Dict with the best result and iteration history.
             """
             if err := _srv._check_auth("generate"):
@@ -974,9 +1008,13 @@ class _DesignReasoningToolsPlugin:
                     best_result = {"job": job.to_dict()}
                     break
 
-                # Download and analyze
+                # Download and analyze (a GLB or OBJ as the STL beside it)
                 try:
-                    dl = gen.download_result(job.id)
+                    from kiln.format_conversion import convert_generated_result
+
+                    dl, conversion = convert_generated_result(gen.download_result(job.id), tool="iterate_design")
+                    if conversion:
+                        iteration["conversion"] = conversion
                     analysis = analyze_mesh(dl.local_path)
                     iteration["analysis"] = {
                         "mesh_check_score": analysis.mesh_check_score,
@@ -1038,8 +1076,7 @@ class _DesignReasoningToolsPlugin:
             # all light up against the saved goal.  Best-effort — kiln-pro
             # not installed silently skips, same pattern as the audit's
             # honor-gate hook in original_design.py.
-            if brief_id:
-                _attach_brief_to_iteration_result(brief_id, best_result)
+            _attach_brief_to_iteration_result(brief_id, best_result)
 
             response = {
                 "success": True,

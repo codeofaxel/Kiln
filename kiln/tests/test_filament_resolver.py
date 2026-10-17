@@ -4,7 +4,7 @@ Covers:
     - resolve_filament: brand lookup, parent fallback, unknown materials
     - Brand-specific density used in estimator
     - Printer compatibility warnings (enclosure, nozzle, AMS)
-    - brand_overrides_for_slicer: temp override generation
+    - a product's own temperatures reach the slice (kiln.slicer_material)
     - MaterialRecommendation.recommended_brands population
     - ResolvedFilament serialization
 """
@@ -20,7 +20,7 @@ from kiln.design_intelligence import (
     resolve_filament,
 )
 from kiln.pre_estimate import _get_material_profile
-from kiln.slicer_profiles import brand_overrides_for_slicer
+from kiln.slicer_material import material_needs
 
 # ---------------------------------------------------------------------------
 # resolve_filament — brand lookup
@@ -45,11 +45,6 @@ class TestResolveFilamentBrand:
         assert r.material_id == "tpu"
         assert r.density_g_per_cm3 == pytest.approx(1.23)
 
-    def test_polymaker_polyflex_resolves(self):
-        r = resolve_filament("polymaker_polyflex_tpu95")
-        assert r.is_brand_specific is True
-        assert r.nozzle_temp_optimal_c == 220
-
     @requires_engineering_overlay
     def test_bambu_pa6_cf_resolves(self):
         r = resolve_filament("bambu_pa6_cf")
@@ -57,11 +52,6 @@ class TestResolveFilamentBrand:
         assert r.hardened_nozzle_required is True
         assert r.enclosure_required is True
         assert r.density_g_per_cm3 == pytest.approx(1.10)
-
-    def test_bambu_petg_cf_resolves(self):
-        r = resolve_filament("bambu_petg_cf")
-        assert r.is_brand_specific is True
-        assert r.hardened_nozzle_required is True
 
     def test_case_insensitive(self):
         r = resolve_filament("Bambu_PLA_Basic")
@@ -108,13 +98,21 @@ class TestResolveFilamentParent:
 class TestResolveFilamentCompat:
     """Tests for printer compatibility warning generation."""
 
-    def test_hardened_nozzle_warning(self):
-        r = resolve_filament("bambu_pa6_cf", printer_id="bambu_a1")
-        assert any("hardened" in w.lower() for w in r.warnings)
+    def test_a_profile_that_needs_a_hardened_nozzle_warns_on_a_printer_without_one(self):
+        """The warning code, with figures that belong to no brand: the real
+        brand's flags are pinned in kiln-pro beside the catalogue."""
+        from kiln.design_intelligence import BrandFilamentProfile, _check_filament_printer_compat
 
-    def test_ams_incompatible_warning(self):
-        r = resolve_filament("bambu_tpu_95a", printer_id="bambu_a1")
-        assert any("AMS" in w for w in r.warnings)
+        profile = BrandFilamentProfile(
+            profile_id="kilntest_cf", brand="Kiln Test", product_name="CF", parent_material="petg_cf",
+            nozzle_temp_range_c=[231, 263], nozzle_temp_optimal_c=247, bed_temp_range_c=[52, 83],
+            bed_temp_optimal_c=66, max_volumetric_speed_mm3s=None, max_print_speed_mms=None,
+            density_g_cm3=None, drying_temp_c=None, drying_time_hours=None, enclosure_required=False,
+            hardened_nozzle_required=True, ams_compatible=False, notes=None, source="",
+        )
+        warnings = _check_filament_printer_compat(profile, "bambu_a1")
+        assert any("hardened" in w.lower() for w in warnings)
+        assert any("AMS" in w for w in warnings)
 
     def test_no_warnings_for_compatible(self):
         r = resolve_filament("bambu_pla_basic", printer_id="bambu_a1")
@@ -182,30 +180,20 @@ class TestEstimatorBrandIntegration:
 # ---------------------------------------------------------------------------
 
 
-class TestSlicerBrandOverrides:
-    """Tests for brand_overrides_for_slicer()."""
+class TestProductSettingsReachTheSlice:
+    """A product's own temperatures are what a slice for it is set to.
 
-    def test_brand_returns_overrides(self):
-        overrides = brand_overrides_for_slicer("bambu_petg_cf")
-        assert overrides is not None
-        assert "temperature" in overrides
-        assert overrides["temperature"] == "255"
-        assert "bed_temperature" in overrides
-        assert overrides["bed_temperature"] == "70"
+    These figures used to be produced by ``brand_overrides_for_slicer``, a
+    helper no slicing door ever called: a slice declared for a product got
+    the printer profile's PLA temperatures.  The same expectations now run
+    through the resolver the slicing chokepoint uses.
+    """
 
-    def test_prusament_tpu_overrides(self):
-        overrides = brand_overrides_for_slicer("prusament_tpu_95a")
-        assert overrides is not None
-        assert overrides["temperature"] == "230"
-        assert overrides["bed_temperature"] == "65"
+    def test_generic_material_is_not_a_product(self):
+        assert material_needs("PLA").product is False
 
-    def test_generic_returns_none(self):
-        overrides = brand_overrides_for_slicer("PLA")
-        assert overrides is None
-
-    def test_unknown_returns_none(self):
-        overrides = brand_overrides_for_slicer("nonexistent_brand_xyz")
-        assert overrides is None
+    def test_unknown_word_has_no_settings(self):
+        assert material_needs("nonexistent_brand_xyz") is None
 
 
 # ---------------------------------------------------------------------------

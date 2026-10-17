@@ -20,6 +20,51 @@ from kiln.tool_args import parse_json_object
 _logger = logging.getLogger(__name__)
 
 
+_ENCRYPTION_KEY_ENV = "KILN_ENCRYPTION_KEY"
+
+
+#: What is true of the files a person keeps in their Kiln account, on every
+#: install and at every tier: the server that stores them encrypts them, with
+#: a key the server holds.  This tool otherwise answers only about THIS
+#: computer, so the sentence is carried separately and never changes with
+#: the local key.
+_ACCOUNT_FILES_SENTENCE = (
+    "Print files you keep in your Kiln account are encrypted on Kiln's "
+    "servers with a key held there."
+)
+
+
+def _encryption_not_installed() -> dict[str, Any]:
+    """The answer to ``encryption_status`` where encryption at rest is not
+    installed: the same keys the full answer carries, every one of them
+    true of this machine, and a sentence saying what that means.
+
+    Encryption is applied by the machine that stores the G-code, so there
+    is nothing to ask anywhere else: a file written here is not encrypted.
+    The files kept in the account are another machine's -- Kiln's servers
+    encrypt those -- and the answer says so beside the local verdict.
+    """
+    import importlib.util
+
+    key_set = bool(os.environ.get(_ENCRYPTION_KEY_ENV, "").strip())
+    message = "G-code encryption at rest is not installed on this machine, so G-code files here are stored unencrypted."
+    if key_set:
+        message += f" {_ENCRYPTION_KEY_ENV} is set, but nothing on this machine uses it."
+    message += f" {_ACCOUNT_FILES_SENTENCE}"
+    message += " Encryption at rest is part of Kiln Enterprise: https://kiln3d.com/pricing"
+    return {
+        "success": True,
+        "encryption": {
+            "available": False,
+            "key_configured": key_set,
+            "library_installed": importlib.util.find_spec("cryptography") is not None,
+            "supports_rotation": False,
+        },
+        "account_files": _ACCOUNT_FILES_SENTENCE,
+        "message": message,
+    }
+
+
 class _EnterpriseToolsPlugin:
     """Enterprise administration and compliance tools.
 
@@ -33,7 +78,6 @@ class _EnterpriseToolsPlugin:
         - encryption_status
         - rotate_encryption_key
         - database_status
-        - report_printer_overage
         - configure_sso
         - sso_login_url
         - sso_exchange_code
@@ -243,27 +287,38 @@ class _EnterpriseToolsPlugin:
         # ------------------------------------------------------------------
 
         @mcp.tool()
-        @requires_tier(LicenseTier.ENTERPRISE)
         def printer_usage_summary() -> dict:
-            """Show printer count, included allowance, and overage charges.
+            """How many printers are registered with this Kiln, and what
+            they add to your bill on your plan, at the prices on
+            kiln3d.com/pricing.  Free on every plan.
 
-            Enterprise feature. Enterprise base includes 50 printers.
-            Additional printers are $15/month each.
+            Counts the machines registered here, so ask it on the computer
+            your printers are attached to.
             """
             if err := _srv._check_auth("read"):
                 return err
+            from kiln.licensing import get_tier
+            from kiln.tiers_and_terms import PRICING_URL
+
             try:
-                from kiln_pro.billing.printer_billing import PrinterUsageBilling
-
-                billing = PrinterUsageBilling()
-                active_count = _srv._get_registry().count
-                usage = billing.usage_summary(active_count)
-                estimate = billing.estimate_monthly_cost(active_count)
-
+                from kiln_pro.billing.printer_billing import extra_printer_cost
+            except ImportError:
+                extra_printer_cost = None
+            try:
+                printers = _srv._get_registry().count
+                plan = str(getattr(get_tier(), "value", "free"))
+                if extra_printer_cost is not None:
+                    return {"success": True, **extra_printer_cost(plan, printers)}
+                noun = "printer is" if printers == 1 else "printers are"
                 return {
                     "success": True,
-                    "usage": usage.to_dict(),
-                    "cost_estimate": estimate,
+                    "printers": printers,
+                    "your_plan": plan,
+                    "summary": (
+                        f"{printers} {noun} registered with this Kiln. What extra "
+                        f"printers cost on each plan: {PRICING_URL}"
+                    ),
+                    "pricing_url": PRICING_URL,
                 }
             except Exception as exc:
                 _logger.exception("Error in printer_usage_summary")
@@ -309,19 +364,30 @@ class _EnterpriseToolsPlugin:
         def encryption_status() -> dict:
             """Check G-code encryption status and configuration.
 
-            Enterprise feature. Reports whether encryption is active,
-            whether the encryption key is configured, and whether the
-            cryptography library is installed.
+            Enterprise feature. Reports whether encryption is active on
+            this computer, whether the local encryption key is configured,
+            and whether the cryptography library is installed.  On a
+            machine where encryption at rest is not installed, it answers
+            that encryption is not active here, in the same shape, and
+            says what enables it.  ``account_files`` says, on every
+            install, what is true of the print files kept in the person's
+            Kiln account: Kiln's servers encrypt those with a key held
+            there.  Local files on this computer are encrypted only when
+            the local key is set and encryption is installed here.
             """
             if err := _srv._check_auth("read"):
                 return err
             try:
-                from kiln.gcode_encryption import get_gcode_encryption
+                try:
+                    from kiln.gcode_encryption import get_gcode_encryption
+                except ImportError:
+                    return _encryption_not_installed()
 
                 enc = get_gcode_encryption()
                 return {
                     "success": True,
                     "encryption": enc.status(),
+                    "account_files": _ACCOUNT_FILES_SENTENCE,
                 }
             except Exception as exc:
                 _logger.exception("Error in encryption_status")
@@ -419,72 +485,6 @@ class _EnterpriseToolsPlugin:
             except Exception as exc:
                 _logger.exception("Error in database_status")
                 return _srv._error_dict(f"Failed to get database status: {exc}", code="INTERNAL_ERROR")
-
-        # ------------------------------------------------------------------
-        # Printer overage billing
-        # ------------------------------------------------------------------
-
-        @mcp.tool()
-        @requires_tier(LicenseTier.ENTERPRISE)
-        def report_printer_overage(
-            subscription_item_id: str,
-            active_printer_count: int | None = None,
-        ) -> dict:
-            """Report metered printer usage to Stripe for Enterprise billing.
-
-            Enterprise feature. The first 50 printers are included in the base
-            Enterprise price. This tool **automatically subtracts** the
-            50 included printers and reports only the overage count to Stripe's
-            ``active_printers`` meter at $15/printer/month.
-
-            If *active_printer_count* is omitted, the fleet registry is queried
-            automatically — no manual counting needed.
-
-            Args:
-                subscription_item_id: The Stripe SubscriptionItem ID (``si_...``) for
-                    the metered printer overage line item on the customer's subscription.
-                active_printer_count: Total number of active printers.  Leave empty
-                    to auto-detect from the fleet registry.
-
-            Example:
-                With 55 registered printers, this reports **5** to Stripe
-                (55 − 50 included = 5 overage × $15 = $75/mo).
-            """
-            if err := _srv._check_auth("admin"):
-                return err
-            try:
-                from kiln_pro.billing.printer_billing import INCLUDED_PRINTERS
-                from kiln_pro.payments.stripe_provider import StripeProvider
-
-                stripe_key = os.environ.get("KILN_STRIPE_SECRET_KEY", "")
-                if not stripe_key:
-                    return _srv._error_dict("Stripe not configured. Set KILN_STRIPE_SECRET_KEY.", code="CONFIG_MISSING")
-
-                # Auto-detect fleet size if not provided.
-                if active_printer_count is None:
-                    active_printer_count = _srv._get_registry().count
-                    if active_printer_count == 0:
-                        return _srv._error_dict(
-                            "No printers registered in the fleet. Register printers first or pass active_printer_count explicitly.",
-                            code="NO_PRINTERS",
-                        )
-
-                provider = StripeProvider(secret_key=stripe_key)
-                overage = max(0, active_printer_count - INCLUDED_PRINTERS)
-                result = provider.report_printer_usage(subscription_item_id, overage)
-
-                return {
-                    "success": True,
-                    "active_printers": active_printer_count,
-                    "included": INCLUDED_PRINTERS,
-                    "overage_reported_to_stripe": overage,
-                    "overage_cost": f"${overage * 15:.2f}/mo",
-                    "stripe_usage_record": result,
-                    "note": f"Reported {overage} overage printers to Stripe (total {active_printer_count} minus {INCLUDED_PRINTERS} included).",
-                }
-            except Exception as exc:
-                _logger.exception("Error in report_printer_overage")
-                return _srv._error_dict(f"Failed to report usage: {exc}", code="PAYMENT_ERROR")
 
         # ------------------------------------------------------------------
         # SSO (Enterprise)

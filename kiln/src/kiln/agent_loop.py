@@ -42,7 +42,7 @@ from typing import Any
 import requests
 from requests.exceptions import ConnectionError, ReadTimeout, RequestException
 
-from kiln.tiers_and_terms import TIERS_AND_TERMS
+from kiln.tiers_and_terms import OFFER_FIRST_LINE, TIERS_AND_TERMS
 
 logger = logging.getLogger(__name__)
 
@@ -643,6 +643,8 @@ def _get_default_system_prompt() -> str:
         "Always explain what you're doing before executing tool calls. "
         "If a tool returns an error, explain the issue clearly and suggest next steps.\n\n"
         + TIERS_AND_TERMS
+        + "\n\n"
+        + OFFER_FIRST_LINE
     )
 
 

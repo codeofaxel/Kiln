@@ -277,26 +277,38 @@ def test_free_tier_check_returns_prose_for_the_caller_to_show():
     assert "Business" in message
 
 
-def test_free_tier_fallback_gates_delegate_to_the_shared_copy():
+def test_plain_install_gates_delegate_to_the_shared_copy():
     """Pin the WIRING on every machine, including where kiln-pro shadows it.
 
-    A shared builder nobody calls is the same bug with extra steps, and the
-    behavioural tests above cannot run on a developer machine — so this reads
-    the fallback block itself and proves both gates route through the one
-    definition instead of re-typing a refusal.
+    A shared builder nobody calls is the same bug with extra steps.  The
+    gates a plain install runs live in ``kiln.account_plan``; this reads it
+    and proves every refusal is built from the shared copy, and that
+    ``kiln.server`` no longer carries a refusal of its own beside it.
     """
     import inspect
 
+    import kiln.account_plan as account_plan
     import kiln.server as server
+
+    gates = inspect.getsource(account_plan)
+    for builder in (
+        "tier_required_message(",
+        "plan_does_not_include_message(",
+        "plan_unconfirmed_message(",
+    ):
+        assert builder in gates, f"account_plan must build refusals with {builder}"
+    assert "**signin_hint_fields()" in gates, (
+        "a refusal a sign-in would fix must carry the agent-addressed fields"
+    )
+    assert "**_refusal(tool_name, needed)" in gates, (
+        "requires_tier must refuse through the one refusal builder"
+    )
 
     src = inspect.getsource(server)
     head = src[: src.index("from kiln.log_config import")]
-    assert head.count("tier_required_message(") == 2, (
-        "both fallback gates (check_tier, requires_tier) must build their "
-        "message from the shared builder"
-    )
-    assert "**signin_hint_fields()" in head, (
-        "the requires_tier fallback must carry the agent-addressed fields"
+    assert "from kiln.licensing import (" in head
+    assert "TIER_REQUIRED" not in head and "tier_required_message(" not in head, (
+        "kiln.server must not re-type a tier refusal beside kiln.account_plan"
     )
 
 

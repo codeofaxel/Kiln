@@ -1054,6 +1054,42 @@ def test_pip_backend_is_the_vtk_free_kernel():
     assert PIP_BACKEND == "cadquery-ocp-novtk"
 
 
+def test_the_kernel_kiln_installs_is_held_to_the_versions_ci_runs():
+    """A kernel major renames calls: 8.0 did, and code written on 7.9 stopped
+    at its first import on it (2026-09-22 for the STEP census, 2026-10-04 for
+    the thickening child, which nothing had run on 8.0).  So the install is a
+    range, stated once, and CI's cad-kernel job runs Kiln's kernel tests on a
+    version at each end of it.  The three statements are held together here:
+    the code's range, the package extra's, and the versions CI installs."""
+    import re
+    from pathlib import Path
+
+    from packaging.specifiers import SpecifierSet
+    from packaging.version import Version
+
+    from kiln.step_import import KERNEL_RANGE, PIP_BACKEND, PIP_INSTALL_COMMAND, PIP_REQUIREMENT
+
+    assert f"{PIP_BACKEND}{KERNEL_RANGE}" == PIP_REQUIREMENT
+    assert PIP_REQUIREMENT in PIP_INSTALL_COMMAND
+    package_root = Path(__file__).resolve().parents[1]
+    assert f'step = ["{PIP_REQUIREMENT}"]' in (package_root / "pyproject.toml").read_text(encoding="utf-8")
+
+    workflow = package_root.parent / ".github" / "workflows" / "ci.yml"
+    if not workflow.is_file():
+        pytest.skip("not run from a repository checkout: there is no CI workflow to read")
+    listed = re.search(r"kernel: \[([^\]]+)\]", workflow.read_text(encoding="utf-8"))
+    assert listed, "CI's cad-kernel job no longer lists the kernel versions it runs"
+    versions = [Version(v.strip().strip('"')) for v in listed.group(1).split(",")]
+    allowed = SpecifierSet(KERNEL_RANGE)
+    assert all(v in allowed for v in versions), (versions, KERNEL_RANGE)
+    # Both ends: the oldest release line the range admits, and the newest.
+    floor = Version(re.search(r">=([0-9.]+)", KERNEL_RANGE).group(1))
+    ceiling = Version(re.search(r"<([0-9.]+)", KERNEL_RANGE).group(1))
+    lines = {(v.major, v.minor) for v in versions}
+    assert (floor.major, floor.minor) in lines
+    assert max(lines) < (ceiling.major, ceiling.minor) and max(lines) >= (ceiling.major, ceiling.minor - 1)
+
+
 @patch("kiln.step_import._find_freecad_cmd", return_value=None)
 @patch("kiln.step_import._find_gmsh_cmd", return_value=None)
 @patch("kiln.step_import._ocp_available", return_value=True)
@@ -3489,6 +3525,33 @@ def test_a_same_named_file_kiln_did_not_make_is_left_alone(real_kernel, tmp_dir)
     assert any("bracket.stl" in w and "left as it was" in w for w in result.warnings)
 
 
+def test_every_name_a_conversion_gives_leads_back_to_its_step(real_kernel, tmp_dir):
+    """step_converted_from is the inverse of the naming rule, for every
+    name the rule can hand out -- bracket.stl, bracket.kiln.stl,
+    bracket.kiln-2.stl, ... -- and a mesh that is not Kiln's has no source."""
+    from kiln.step_import import convert_step, step_converted_from
+
+    step = _write_box_step(tmp_dir / "bracket.step", 5.0)
+    names = []
+    for _ in range(3):
+        result = convert_step(str(step))
+        names.append(Path(result.output_path).name)
+        assert Path(step_converted_from(result.output_path)).resolve() == step.resolve()
+        assert Path(step_converted_from(result.output_path)).name == "bracket.step"
+        Path(result.output_path).write_bytes(b"now the person's own file")  # the next conversion goes beside it
+        assert step_converted_from(result.output_path) is None
+    assert names == ["bracket.stl", "bracket.kiln.stl", "bracket.kiln-2.stl"]
+
+
+def test_a_step_edited_since_is_not_taken_for_the_source(real_kernel, tmp_dir):
+    from kiln.step_import import convert_step, step_converted_from
+
+    step = tmp_dir / "bracket.step"
+    mesh = convert_step(str(_write_box_step(step, 5.0))).output_path
+    _write_box_step(step, 8.0)  # re-exported taller; the mesh is still the 5 mm one
+    assert step_converted_from(mesh) is None
+
+
 def test_reconverting_an_edited_step_replaces_its_own_mesh(real_kernel, tmp_dir):
     from kiln.step_import import convert_step
 
@@ -3519,6 +3582,24 @@ def test_a_same_named_3mf_kiln_did_not_make_is_left_alone(real_kernel, tmp_dir):
     assert Path(result.output_path).name == "assembly.kiln.3mf"
     again = convert_step(str(step))  # the .kiln copy is Kiln's own: replaced
     assert again.output_path == result.output_path
+
+
+def test_a_real_3mf_is_told_apart_without_the_cad_kernel(tmp_dir):
+    """A 3MF is a zip: its model is read as bytes, Kiln's own is known by its
+    mark, and anyone else's names no STEP (the door the edge and wall edits
+    use) instead of raising."""
+    import zipfile
+
+    from kiln.step_import import _3MF_CREATED_BY, _made_by_step_conversion, step_converted_from
+
+    ours, theirs = tmp_dir / "ours.3mf", tmp_dir / "theirs.3mf"
+    for path, line in ((ours, _3MF_CREATED_BY), (theirs, ' <metadata name="Application">slicer</metadata>\n')):
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("3D/3dmodel.model", f'<?xml version="1.0" encoding="UTF-8"?>\n<model>\n{line}</model>\n')
+
+    assert _made_by_step_conversion(ours) is True
+    assert _made_by_step_conversion(theirs) is False
+    assert step_converted_from(str(theirs)) is None
 
 
 def test_the_implicit_door_names_its_mesh_after_the_step(real_kernel, tmp_dir):

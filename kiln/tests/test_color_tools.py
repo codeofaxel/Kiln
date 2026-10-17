@@ -1947,7 +1947,8 @@ class TestPaintedFormForSurfaceMethods:
 
 
 class TestSpoolAdvisoryOnColouringDoors:
-    """The tools that choose colours carry ``ams_advisory`` in their result."""
+    """The tools that choose colours say whether they are on the printer,
+    as ``colour_availability``, read through ``_spool_advisory``."""
 
     def _tools(self) -> dict[str, Any]:
         from kiln.plugins.color_tools import _ColorToolsPlugin
@@ -1999,12 +2000,19 @@ class TestSpoolAdvisoryOnColouringDoors:
         finally:
             os.unlink(stl)
         assert result["success"] is True
-        assert result["ams_advisory"]["verdict"] == "mismatch"
+        assert [c["state"] for c in result["colour_availability"]["colours"]] == ["missing", "missing"]
+        assert "ams_advisory" not in result
         assert seen["colours"] == ["#FFFFFF", "#F72323"]
         assert seen["printer_name"] == "bambu_a1"
 
     def test_colour_by_region_asks_about_its_palette(self, monkeypatch):
-        seen = self._fake_advisory(monkeypatch, {"verdict": "true", "message": "ok"})
+        seen = self._fake_advisory(monkeypatch, {
+            "verdict": "true", "message": "ok", "printer": "default", "missing": [],
+            "matched": [
+                {"color": c, "nearest_color": c, "where": f"slot A{i}"}
+                for i, c in enumerate(["#FF0000", "#00FF00", "#0000FF"], start=1)
+            ],
+        })
         stl = self._stl()
         try:
             result = self._tools()["auto_color_by_region"](
@@ -2013,7 +2021,9 @@ class TestSpoolAdvisoryOnColouringDoors:
         finally:
             os.unlink(stl)
         assert result["success"] is True
-        assert result["ams_advisory"]["verdict"] == "true"
+        availability = result["colour_availability"]
+        assert [c["state"] for c in availability["colours"]] == ["loaded"] * 3
+        assert availability["say"] == ""
         assert seen["colours"] == ["#FF0000", "#00FF00", "#0000FF"]
         assert seen["printer_name"] is None
 
@@ -2025,7 +2035,7 @@ class TestSpoolAdvisoryOnColouringDoors:
         finally:
             os.unlink(stl)
         assert result["success"] is True
-        assert "ams_advisory" not in result
+        assert "colour_availability" not in result
 
     def test_advice_never_fails_a_good_colouring(self, monkeypatch):
         self._fake_advisory(monkeypatch, RuntimeError("printer exploded"))
@@ -2035,4 +2045,4 @@ class TestSpoolAdvisoryOnColouringDoors:
         finally:
             os.unlink(stl)
         assert result["success"] is True
-        assert "ams_advisory" not in result
+        assert "colour_availability" not in result

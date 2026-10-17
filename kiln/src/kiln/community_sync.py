@@ -354,7 +354,7 @@ def _read_cache(path: Path) -> dict[str, Any] | None:
         age = time.time() - path.stat().st_mtime
         if age > _COMMUNITY_CACHE_TTL_SECONDS:
             return None
-        with path.open() as f:
+        with path.open(encoding="utf-8") as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return None
@@ -363,7 +363,7 @@ def _read_cache(path: Path) -> dict[str, Any] | None:
 def _write_cache(path: Path, data: dict[str, Any]) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("w") as f:
+        with path.open("w", encoding="utf-8") as f:
             json.dump(data, f)
     except OSError as exc:
         _logger.debug("Community cache write failed: %s", exc)

@@ -108,8 +108,7 @@ FRAMES
 ------
 ``"mesh"`` is the canonical frame: z-up millimetres in the MODEL FILE's
 coordinates (the mesh bbox the block was aligned to).  The hosted /view
-page and the desktop app load the mesh file itself, so this is the frame
-they need.  ``"viewer"`` is the same geometry rotated the way
+page loads the mesh file itself, so this is the frame it needs.  ``"viewer"`` is the same geometry rotated the way
 :mod:`kiln.mesh_payload` rotates positions — ``(x, y, z)_mesh → (x, z,
 -y)_viewer`` — which is what the inline panel reads, because its positions
 already arrive that way.  :func:`to_viewer_frame` is the one converter;

@@ -514,6 +514,7 @@ CALLERS = {
     "cli/main.py::generate_and_print_cmd": "reads: the triangle count it echoes; the verdict is _cli_print_gate's",
     "design_validator.py::validate_design": "reads: a design review report; prints nothing",
     "generation/validation.py::optimize_orientation": "reads: scores candidate orientations; prints nothing",
+    "mesh_edit_check.py::measure_mesh": "reads: walls and holes, to judge a mesh edit; prints nothing",
     "original_design.py::audit_original_design": "reads: an originality audit; prints nothing",
     "original_design.py::generate_original_design": "reads: checks a generated design; prints nothing",
     "plugins/design_tools.py::register.analyze_warping_risk": "reads: a warping report",

@@ -50,6 +50,7 @@ class _StepToolsPlugin:
             output_format: str = "auto",
             merge_bodies: bool = True,
             output_dir: str | None = None,
+            brief_id: str = "",
         ) -> dict:
             """Import a STEP (.step/.stp) CAD file and convert it for Kiln's mesh pipeline.
 
@@ -77,6 +78,9 @@ class _StepToolsPlugin:
             hand a hosted user an install instruction.
 
             Args:
+                brief_id: The saved goal's id from ``design_session``; pass it so
+                    this make joins the goal (recorded against it; Kiln Pro checks the
+                    result against it). Empty when there is no goal.
                 file_path: Path to the STEP/STP file.
                 output_format: ``"auto"`` (default — 3MF when colour or
                     multiple bodies are present, else STL), ``"stl"``, or
@@ -155,6 +159,9 @@ class _StepToolsPlugin:
                     response["cad_facts"] = read_step_facts(file_path)
                 except Exception:  # noqa: BLE001 — display material only
                     _logger.debug("step facts skipped", exc_info=True)
+                from kiln.front_door import join_goal
+
+                join_goal(brief_id, response, result.output_path)
                 try:
                     from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
                     return attach_inspect_bundle(response, level="quick")

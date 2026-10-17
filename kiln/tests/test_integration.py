@@ -33,6 +33,7 @@ try:
 except ImportError:
     BillingLedger = None
     FeePolicy = None
+from kiln.cli.config import PrinterSaveResult
 from kiln.cli.main import cli
 from kiln.events import Event, EventBus, EventType
 from kiln.gcode import validate_gcode, validate_gcode_for_printer
@@ -167,7 +168,7 @@ class TestFullPipeline:
 
         # Step 2: Auth with discovered printer
         cfg_path = tmp_path / "config.yaml"
-        with patch("kiln.cli.main.save_printer", return_value=cfg_path):
+        with patch("kiln.cli.main.save_printer", return_value=PrinterSaveResult(cfg_path, "p", "added")):
             result = runner.invoke(cli, [
                 "auth",
                 "--name", printer["name"],
@@ -1048,36 +1049,31 @@ class TestSafetyPrintFlow:
 
     def test_printer_specific_validation_uses_profile(self):
         """validate_gcode_for_printer should use printer-specific limits."""
-        # Use a known profile that has tighter limits than generic
-        # If profile not found, it falls back to generic — still valid test
+        # A synthetic PTFE-lined printer the session holds, rated to 260 C
+        # (tests/fixtures/printer_catalogue_test.json).  250 C is above the
+        # generic floor and under this printer's ceiling, so it passes only
+        # when the printer's own profile is the one read.
+        from kiln.safety_profiles import _UNKNOWN_PRINTER_MAX_HOTEND_C, get_profile
+
+        assert _UNKNOWN_PRINTER_MAX_HOTEND_C < 250 < get_profile("kilntest_ptfe").max_hotend_temp
         result = validate_gcode_for_printer(
-            "M104 S200\nG28",
-            printer_id="ender3",
+            "M104 S250\nG28",
+            printer_id="kilntest_ptfe",
         )
         assert result.valid is True
         assert len(result.commands) >= 1
 
     def test_printer_specific_rejects_above_profile_limit(self):
         """Printer-specific validation should reject temps above the profile max."""
-        # Ender 3 has PTFE hotend, max ~260C. Try 290C.
+        # The same synthetic printer, rated to 260 C.  Try 290 C.
+        from kiln.safety_profiles import get_profile
+
+        assert get_profile("kilntest_ptfe").max_hotend_temp < 290
         result = validate_gcode_for_printer(
             "M104 S290",
-            printer_id="ender3",
+            printer_id="kilntest_ptfe",
         )
-        # If ender3 profile exists with max < 290, should fail.
-        # If profile not found, falls back to generic (max 300) — would pass.
-        # Either outcome is valid; the important thing is the code path works.
-        # We test both branches:
-        from kiln.safety_profiles import get_profile
-        try:
-            profile = get_profile("ender3")
-            if profile.max_hotend_temp < 290:
-                assert result.valid is False
-            else:
-                assert result.valid is True
-        except KeyError:
-            # No profile — falls back to generic (300C max)
-            assert result.valid is True
+        assert result.valid is False
 
     def test_safety_integrates_with_queue_flow(self, event_bus, print_queue, registry):
         """Safety rejection should prevent job from being dispatched."""

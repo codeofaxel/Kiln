@@ -88,6 +88,18 @@ def _bambu_project(path: Path, **changes) -> str:
     return str(path)
 
 
+def _synthetic_project(path: Path, **changes) -> str:
+    """A Bambu-shaped project for the synthetic enclosed printer (a 256 mm
+    cube, tests/fixtures/printer_catalogue_test.json), whose record the
+    session holds.  A real printer's bed is kiln-pro's catalogue, not public
+    CI's, so a test comparing a file's bed with Kiln's uses this one."""
+    return _bambu_project(path, **{
+        "printer_model": "Kilntest Enclosed 256",
+        "printer_settings_id": "Kilntest Enclosed 256 0.4 nozzle",
+        **changes,
+    })
+
+
 def _prusa_project(path: Path, text: str = _PRUSA) -> str:
     """A project as PrusaSlicer saves it: ``; key = value`` lines."""
     with zipfile.ZipFile(path, "w") as zf:
@@ -240,7 +252,13 @@ class TestTheModelIsSet:
         set_printer_model("Bambu Lab A1", config_path=config)
         assert resolve_printer_model() == "bambu_a1"
         assert resolve_printer_model_for("garage") == "bambu_a1"
-        assert get_build_volume(resolve_printer_model()) is not None
+        # What the gate then reads is the model's record.  A real printer's
+        # record is kiln-pro's catalogue, not public CI's, so the bed read is
+        # proved on a synthetic printer set up the same way.
+        assert resolve_printer_model_for("shed") is None
+        set_printer_model("Kilntest Enclosed 256", printer_name="shed", config_path=config)
+        assert resolve_printer_model_for("shed") == "kilntest_enclosed"
+        assert get_build_volume(resolve_printer_model_for("shed")) == (256.0, 256.0, 256.0)
 
     def test_a_write_inside_the_files_own_clock_tick_is_still_seen(self, config):
         """The resolver remembers its answer per file timestamp.  A write
@@ -536,7 +554,7 @@ class TestAPrinterOutsideTheCatalogue:
         from kiln.slicer_profiles import resolve_slicer_profile
 
         monkeypatch.setattr("kiln.printers.bed_fit.get_build_volume", lambda printer_id: (999.0, 999.0, 999.0))
-        assert ini_to_settings(resolve_slicer_profile("bambu_a1"))["bed_shape"] == "0x0,256x0,256x256,0x256"
+        assert ini_to_settings(resolve_slicer_profile("kilntest_open"))["bed_shape"] == "0x0,220x0,220x220,0x220"
 
     def test_it_can_then_be_named_like_any_other(self, config, tmp_path):
         set_printer_model(slicer_file=_acme_project(tmp_path / "part.3mf"), printer_name="shed", config_path=config)
@@ -552,7 +570,7 @@ class TestAPrinterOutsideTheCatalogue:
         file is a second opinion about the bed, said as a note."""
         sp.set_local_printer_override(ACME, {
             "max_hotend_temp": 220.0, "max_bed_temp": 70.0, "max_feedrate": 6000.0, "build_volume": [280.0, 280.0, 380.0],
-        })
+        }, confirmed=True)
         out = set_printer_model(slicer_file=_acme_project(tmp_path / "part.3mf"), printer_name="shed", config_path=config)
         assert out["applied"] and sp.get_profile(ACME).max_hotend_temp == 220.0
         assert sp.get_profile(ACME).build_volume == [280.0, 280.0, 380.0]
@@ -603,7 +621,7 @@ class TestAPrinterOutsideTheCatalogue:
         catalogue = get_build_volume("Bambu Lab A1")
         sp.set_local_printer_override("bambu_lab_a1", {
             "max_hotend_temp": 200.0, "max_bed_temp": 60.0, "max_feedrate": 6000.0, "build_volume": [100.0, 100.0, 100.0],
-        })
+        }, confirmed=True)
         assert get_build_volume("Bambu Lab A1") == catalogue
         for spelling in ("Bambu Lab A1", "bambu_lab_a1", "bambu_a1"):
             assert owner_stated_build_volume(spelling) is None
@@ -613,7 +631,7 @@ class TestAPrinterOutsideTheCatalogue:
 
         sp.set_local_printer_override("default", {
             "max_hotend_temp": 200.0, "max_bed_temp": 60.0, "max_feedrate": 6000.0, "build_volume": [100.0, 100.0, 100.0],
-        })
+        }, confirmed=True)
         assert get_build_volume("default") is None and owner_stated_build_volume("default") is None
 
     def test_a_newer_file_corrects_the_bed_only_when_asked(self, config, tmp_path):
@@ -633,7 +651,7 @@ class TestAPrinterOutsideTheCatalogue:
     def test_limits_an_owner_typed_are_not_written_over_even_when_asked(self, config, tmp_path):
         sp.set_local_printer_override(ACME, {
             "max_hotend_temp": 220.0, "max_bed_temp": 70.0, "max_feedrate": 6000.0, "build_volume": [280.0, 280.0, 380.0],
-        })
+        }, confirmed=True)
         out = set_printer_model(
             slicer_file=_acme_project(tmp_path / "part.3mf"), printer_name="shed", replace=True, config_path=config,
         )
@@ -650,15 +668,16 @@ class TestAPrinterOutsideTheCatalogue:
 
 class TestWhatTheFileSaysBesideWhatKilnHolds:
     def test_a_bed_unlike_the_catalogues_is_said_and_changes_nothing(self, config, tmp_path):
-        project = _bambu_project(
+        project = _synthetic_project(
             tmp_path / "part.3mf", printable_area=["0x0", "300x0", "300x300", "0x300"], printable_height="300",
         )
-        out = set_printer_model(slicer_file=project, config_path=config)
-        assert out["applied"]
+        out = set_printer_model(slicer_file=project, printer_name="shed", config_path=config)
+        assert out["applied"] and out["printer_model"] == "kilntest_enclosed"
         assert any("300 x 300 x 300 mm printable volume" in note and "256" in note for note in out["notes"])
 
     def test_a_bed_that_matches_says_nothing(self, config, tmp_path):
-        assert set_printer_model(slicer_file=_bambu_project(tmp_path / "part.3mf"), config_path=config)["notes"] == []
+        out = set_printer_model(slicer_file=_synthetic_project(tmp_path / "part.3mf"), printer_name="shed", config_path=config)
+        assert out["applied"] and out["notes"] == []
 
     def test_a_nozzle_unlike_the_one_kiln_slices_for_is_said(self, config, tmp_path):
         project = _bambu_project(tmp_path / "part.3mf", nozzle_diameter=["0.6"], nozzle_type=["hardened_steel"])

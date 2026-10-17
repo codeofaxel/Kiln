@@ -122,6 +122,27 @@ print(json.dumps({{"ok": ok, "detail": f"success={{r.get('success')}} renderer={
 """,
     },
     {
+        "name": "served-tools-visible",
+        "why": (
+            "an agent on a default install is SHOWN Kiln's served tools: the "
+            "manifest beside server.py ships and its paid stubs register -- no "
+            "release from 1.1.3 to 1.4.1.1 carried it, so none did"
+        ),
+        "code": """
+import json
+import kiln.server as s
+from pathlib import Path
+manifest = Path(s.__file__).with_name("pro_tool_manifest.json")
+tools = {t.name: t for t in s.mcp._tool_manager.list_tools()}
+stubs = [n for n, t in tools.items() if getattr(t.fn, "__module__", "") == "kiln.pro_stubs"]
+paid = [n for n in stubs if n in s._PRO_TOOL_TIERS]
+ok = manifest.is_file() and len(paid) > 0
+print(json.dumps({"ok": ok, "detail": (
+    f"manifest={'present' if manifest.is_file() else 'MISSING'} "
+    f"tools={len(tools)} served_stubs={len(stubs)} paid={len(paid)}")}))
+""",
+    },
+    {
         "name": "stage-payload",
         "why": "the 3D stage panel every tier gets can read a mesh (trimesh)",
         "code": f"""

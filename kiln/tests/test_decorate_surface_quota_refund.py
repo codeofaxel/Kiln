@@ -155,7 +155,7 @@ def test_successful_decoration_keeps_the_consumed_slot(
     monkeypatch.setattr(emboss, "check_boolean_success", lambda *_a: True)
     # Keep the success tail hermetic (no inspect bundle / managed assets).
     monkeypatch.setattr(
-        server, "_finish_decoration_result", lambda result_dict, *, content: result_dict
+        server, "_finish_decoration_result", lambda result_dict, *, content, **_kw: result_dict
     )
     result = _decorate(model_path=dummy_stl, content="text:HI")
     assert result.get("success") is True, result

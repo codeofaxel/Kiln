@@ -13,6 +13,7 @@ import click
 import pytest
 from click.testing import CliRunner
 
+from kiln.cli.config import PrinterSaveResult
 from kiln.cli.main import cli
 from kiln.printers.base import (
     JobProgress,
@@ -895,7 +896,7 @@ class TestPrinterManagement:
 
 class TestAuth:
     def test_auth_octoprint(self, runner):
-        with patch("kiln.cli.main.save_printer", return_value=Path("/tmp/config.yaml")):
+        with patch("kiln.cli.main.save_printer", return_value=PrinterSaveResult(Path("/tmp/config.yaml"), "p", "added")):
             result = runner.invoke(cli, [
                 "auth",
                 "--name", "ender",
@@ -909,8 +910,27 @@ class TestAuth:
         assert data["status"] == "success"
         assert data["data"]["name"] == "ender"
 
+    def test_auth_usb_never_opens_the_port_for_a_camera_line(self, runner):
+        # Building a USB adapter opens the serial port, and opening it resets
+        # many boards.  A serial port has no camera of its own, so the camera
+        # line after a USB auth must not build one.
+        def _opened(*_a, **_k):
+            raise AssertionError("a USB adapter was built, which opens the port")
+
+        with (
+            patch("kiln.cli.main.save_printer", return_value=PrinterSaveResult(Path("/tmp/config.yaml"), "p", "added")),
+            patch("kiln.cli.main._make_adapter", side_effect=_opened),
+        ):
+            result = runner.invoke(cli, [
+                "auth", "--name", "marlin", "--host", "/dev/ttyUSB0", "--type", "usb", "--json",
+            ])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)["data"]
+        assert data["name"] == "marlin"
+        assert "camera_check" not in data
+
     def test_auth_bambu(self, runner):
-        with patch("kiln.cli.main.save_printer", return_value=Path("/tmp/config.yaml")):
+        with patch("kiln.cli.main.save_printer", return_value=PrinterSaveResult(Path("/tmp/config.yaml"), "p", "added")):
             result = runner.invoke(cli, [
                 "auth",
                 "--name", "x1c",
@@ -931,7 +951,7 @@ class TestAuth:
             "file_count": 16,
             "checks": [{"name": "storage_usb", "ok": True}],
         }
-        with patch("kiln.cli.main.save_printer", return_value=Path("/tmp/config.yaml")) as mock_save, \
+        with patch("kiln.cli.main.save_printer", return_value=PrinterSaveResult(Path("/tmp/config.yaml"), "p", "added")) as mock_save, \
              patch("kiln.cli.main.load_printer_config", return_value={
                  "type": "prusalink",
                  "host": "http://192.168.0.44",
@@ -964,7 +984,7 @@ class TestAuth:
         # stringified so the expectation matches on Windows too (where
         # the separator is a backslash).
         config_path = Path("/tmp/config.yaml")
-        with patch("kiln.cli.main.save_printer", return_value=config_path) as mock_save, \
+        with patch("kiln.cli.main.save_printer", return_value=PrinterSaveResult(config_path, "p", "added")) as mock_save, \
              patch("kiln.cli.main.load_printer_config", return_value={
                  "type": "prusalink",
                  "host": "http://192.168.0.44",
@@ -986,6 +1006,173 @@ class TestAuth:
         assert data["error"]["code"] == "PRUSA_DIAGNOSTICS_FAILED"
         assert data["data"]["config_path"] == str(config_path)
         assert mock_save.call_count == 1
+
+
+class TestSavingUnderASavedName:
+    """``kiln auth`` and ``kiln setup`` against a name already saved for a
+    different machine: auth refuses as a usage error, setup asks for
+    another name; a re-save of the same machine says it updated."""
+
+    _SERIAL = "01P00A000000001"
+
+    def _auth(self, runner, serial: str, *extra: str):
+        return runner.invoke(cli, [
+            "auth", "--name", "a1", "--host", "192.168.1.7", "--type", "bambu",
+            "--access-code", "12345678", "--serial", serial, *extra,
+        ])
+
+    @pytest.fixture
+    def cfg(self, tmp_path):
+        from kiln.cli.config import save_printer
+
+        path = tmp_path / "config.yaml"
+        save_printer(
+            "a1", "bambu", "192.168.1.6", access_code="x", serial=self._SERIAL,
+            printer_model="bambu_a1", config_path=path, probe=False,
+        )
+        with patch("kiln.cli.config.get_config_path", return_value=path):
+            yield path
+
+    def test_auth_refuses_a_different_serial_as_a_usage_error(self, runner, cfg):
+        before = cfg.read_text()
+        result = self._auth(runner, "01P00A000000002")
+        assert result.exit_code == 2, result.output
+        assert "serial ending 0001" in result.output
+        assert cfg.read_text() == before
+
+    def test_auth_says_it_updated_the_same_printer(self, runner, cfg):
+        import yaml
+
+        result = self._auth(runner, self._SERIAL, "--json")
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)["data"]
+        assert data["saved"] == "updated"
+        assert "Kept printer_model" in data["notice"]
+        assert yaml.safe_load(cfg.read_text())["printers"]["a1"]["printer_model"] == "bambu_a1"
+
+    def test_setup_asks_for_another_name_and_keeps_the_saved_printer(self, cfg):
+        import yaml
+
+        from kiln.discovery import DiscoveredPrinter
+
+        found = DiscoveredPrinter(
+            host="192.168.1.9", port=8883, printer_type="bambu", name="A1", serial="01P00A000000002",
+        )
+        with (
+            patch("kiln.terms.is_current", return_value=True),
+            patch("kiln.cli.discovery.discover_printers", return_value=[found]),
+            patch("kiln.cli.printer_model_prompt.prompt_for_printer_model", return_value="bambu_a1"),
+            patch("kiln.cli.main._make_adapter", return_value=MagicMock()),
+        ):
+            result = CliRunner().invoke(cli, ["setup"], input="add\n1\na1\n12345678\n\n" + "\n" * 8)
+        printers = yaml.safe_load(cfg.read_text())["printers"]
+        assert printers["a1"]["serial"] == self._SERIAL, result.output
+        assert printers["a1"]["host"] == "192.168.1.6"
+        assert printers["a1-2"]["serial"] == "01P00A000000002", result.output
+        assert "A different printer is already saved as 'a1'" in result.output
+
+    @staticmethod
+    def _moonraker_identity(value="b898bdb4"):
+        from kiln.printers.base import MachineIdentity
+
+        return MachineIdentity(
+            value=value, source="moonraker_system_info.cpu_info.serial_number", kind="host_board_serial",
+        )
+
+    @pytest.fixture
+    def voron(self, tmp_path):
+        from kiln.cli.config import save_printer
+
+        path = tmp_path / "config.yaml"
+        save_printer(
+            "voron", "moonraker", "http://10.0.0.5", api_key="k", printer_model="voron_2",
+            camera_stream_url="rtsp://user:secret@10.0.0.50/live",
+            machine_identity=self._moonraker_identity(), config_path=path, probe=False,
+        )
+        with patch("kiln.cli.config.get_config_path", return_value=path):
+            yield path
+
+    def test_setup_matches_a_moved_printer_by_the_id_it_reports(self, voron):
+        import yaml
+
+        from kiln.discovery import DiscoveredPrinter
+
+        found = DiscoveredPrinter(host="10.0.0.9", port=7125, printer_type="moonraker", name="Voron")
+        adapter = MagicMock()
+        adapter.get_state.return_value = PrinterState(state=PrinterStatus.IDLE, connected=True)
+        adapter.read_machine_identity.return_value = self._moonraker_identity()
+        with (
+            patch("kiln.terms.is_current", return_value=True),
+            patch("kiln.cli.discovery.discover_printers", return_value=[found]),
+            patch("kiln.cli.connection_prompt.ask_connection_needs", return_value={}),
+            patch("kiln.cli.printer_model_prompt.prompt_for_printer_model", return_value="voron_2"),
+            patch("kiln.cli.main._make_adapter", return_value=adapter) as make,
+        ):
+            result = CliRunner().invoke(cli, ["setup"], input="add\n1\nvoron\n" + "\n" * 10)
+        entry = yaml.safe_load(voron.read_text())["printers"]["voron"]
+        assert entry["host"] == "http://10.0.0.9:7125", result.output
+        assert entry["api_key"] == "k"
+        assert entry["camera_stream_url"] == "rtsp://user:secret@10.0.0.50/live"
+        assert entry["machine_id"] == "b898bdb4"
+        assert "Updated existing printer 'voron'" in result.output
+        # The connection was tested on the printer as entered, before the save.
+        assert make.call_args[0][0]["host"] == "http://10.0.0.9:7125"
+        assert result.output.index("Connected!") < result.output.index("Saved printer")
+
+    def test_setup_refuses_a_different_machine_under_the_name(self, voron):
+        import yaml
+
+        from kiln.discovery import DiscoveredPrinter
+
+        found = DiscoveredPrinter(host="10.0.0.9", port=7125, printer_type="moonraker", name="Voron")
+        adapter = MagicMock()
+        adapter.get_state.return_value = PrinterState(state=PrinterStatus.IDLE, connected=True)
+        adapter.read_machine_identity.return_value = self._moonraker_identity("0badf00d")
+        with (
+            patch("kiln.terms.is_current", return_value=True),
+            patch("kiln.cli.discovery.discover_printers", return_value=[found]),
+            patch("kiln.cli.connection_prompt.ask_connection_needs", return_value={}),
+            patch("kiln.cli.printer_model_prompt.prompt_for_printer_model", return_value="voron_2"),
+            patch("kiln.cli.main._make_adapter", return_value=adapter),
+        ):
+            result = CliRunner().invoke(cli, ["setup"], input="add\n1\nvoron\n\n" + "\n" * 10)
+        printers = yaml.safe_load(voron.read_text())["printers"]
+        assert printers["voron"]["host"] == "http://10.0.0.5", result.output
+        assert printers["voron"]["machine_id"] == "b898bdb4"
+        assert printers["voron-2"]["machine_id"] == "0badf00d"
+        assert "A different machine answers as 'voron'" in result.output
+
+    def test_auth_matches_a_moved_printer_by_the_id_it_reports(self, runner, voron):
+        import yaml
+
+        with (
+            patch("kiln.cli.config._check_printer_url", lambda url, *, printer_type, probe: (url, [], True)),
+            patch("kiln.cli.main._machine_identity_for_save", return_value=self._moonraker_identity()),
+        ):
+            result = runner.invoke(cli, [
+                "auth", "--name", "voron", "--host", "http://10.0.0.9", "--type", "moonraker", "--json",
+            ])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)["data"]
+        assert data["saved"] == "updated"
+        assert data["machine_identity"]["value"] == "b898bdb4"
+        entry = yaml.safe_load(voron.read_text())["printers"]["voron"]
+        assert entry["host"] == "http://10.0.0.9"
+        assert entry["api_key"] == "k"
+        assert entry["camera_stream_url"] == "rtsp://user:secret@10.0.0.50/live"
+
+    def test_auth_refuses_a_different_machine_as_a_usage_error(self, runner, voron):
+        before = voron.read_text()
+        with (
+            patch("kiln.cli.config._check_printer_url", lambda url, *, printer_type, probe: (url, [], True)),
+            patch("kiln.cli.main._machine_identity_for_save", return_value=self._moonraker_identity("0badf00d")),
+        ):
+            result = runner.invoke(cli, [
+                "auth", "--name", "voron", "--host", "http://10.0.0.9", "--type", "moonraker",
+            ])
+        assert result.exit_code == 2, result.output
+        assert "A different machine answers as 'voron'" in result.output
+        assert voron.read_text() == before
 
 
 class TestPrusaProfileDetection:
@@ -1162,8 +1349,8 @@ class TestErrorHandling:
 
 
 @pytest.mark.skipif(
-    not importlib.util.find_spec("kiln.licensing"),
-    reason="kiln.licensing extracted to kiln-pro",
+    not importlib.util.find_spec("kiln_pro"),
+    reason="exercises kiln-pro's licence manager and commands",
 )
 class TestLicenseCommands:
     """Tests for kiln upgrade and kiln license-info CLI commands."""
@@ -1324,8 +1511,8 @@ class TestLicenseCommands:
 
 
 @pytest.mark.skipif(
-    not importlib.util.find_spec("kiln.licensing"),
-    reason="kiln.licensing extracted to kiln-pro",
+    not importlib.util.find_spec("kiln_pro"),
+    reason="exercises kiln-pro's licence manager and commands",
 )
 class TestFleetCLI:
     """Tests for kiln fleet CLI commands."""
@@ -1465,10 +1652,6 @@ class TestFleetCLI:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(
-    not importlib.util.find_spec("kiln.licensing"),
-    reason="kiln.licensing extracted to kiln-pro",
-)
 class TestQueueCLI:
     """Tests for kiln queue CLI commands."""
 
@@ -1751,6 +1934,10 @@ class TestQueueCLI:
         data = json.loads(result.output)
         assert data["status"] == "success"
 
+    @pytest.mark.skipif(
+        not importlib.util.find_spec("kiln_pro"),
+        reason="builds kiln-pro's licence manager",
+    )
     def test_queue_submit_available_on_free_tier(self, runner, tmp_path):
         """kiln queue submit is available on Free tier (subject to queue cap)."""
         from kiln.licensing import LicenseManager

@@ -1321,13 +1321,32 @@ class TestBambuAdapterTemperature:
         # Should truncate to int
         assert "M104 S210" in payload["print"]["param"]
 
-    def test_unprofiled_hotend_net_matches_hottest_bambu(
+    def test_an_unprofiled_bambu_is_held_to_the_generic_floor(
         self, adapter_with_mqtt: BambuAdapter
     ) -> None:
-        # With no model profile bound, the adapter's own ceiling is the fallback.
-        # It must not sit below the hottest Bambu (H2S, 350C): at the old 300C
-        # net, registering an H2S with no model would refuse a 340C PPA print
-        # the firmware allows.
+        # Inverted 2026-10-13, deliberately, not deleted.  This test used to
+        # assert that with no model bound the adapter's own 350 C net applied,
+        # so an H2S registered without a model could run a 340 C print.  The
+        # rule shipped 2026-10-12 says the opposite on purpose: a printer Kiln
+        # has not been told the model of is held to the generic floor (a
+        # PTFE-safe ceiling, below every catalogued printer's), and a limit
+        # above it takes the model (set_printer_model) or a person's
+        # confirmation.  A green test asserting the old rule is how a decision
+        # gets reversed by accident.
+        from kiln.safety_profiles import get_profile
+
+        floor = get_profile("default").max_hotend_temp
+        assert adapter_with_mqtt.set_tool_temp(floor).ok
+        with pytest.raises(PrinterError, match="has not been told this printer's model"):
+            adapter_with_mqtt.set_tool_temp(floor + 1)
+
+    def test_the_adapter_net_still_binds_above_a_hotter_profile(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        # The other half of the old test's intent: the adapter's own net sits
+        # at the hottest Bambu (H2S, 350 C), so a bound profile rated above it
+        # (the session's synthetic 500 C row) is still clamped there.
+        adapter_with_mqtt.set_safety_profile("kilntest_hot")
         assert adapter_with_mqtt.set_tool_temp(350.0).ok
         with pytest.raises(PrinterError, match="exceeds safety limit"):
             adapter_with_mqtt.set_tool_temp(351.0)
@@ -1335,10 +1354,11 @@ class TestBambuAdapterTemperature:
     def test_bound_profile_lets_each_model_reach_its_rating(
         self, adapter_with_mqtt: BambuAdapter
     ) -> None:
-        # The per-model profile TIGHTENS the net to the machine's real rating.
-        # The X1E is rated 320C; before the net was raised it was clamped to
-        # 300 and could not reach its own firmware ceiling.
-        adapter_with_mqtt.set_safety_profile("bambu_x1e")
+        # The per-model profile TIGHTENS the net to the machine's real rating
+        # (the X1E's 320 C used to be clamped to 300 and could not reach its
+        # own firmware ceiling; its real number is pinned beside its record in
+        # kiln-pro).  On the session's synthetic 320 C row:
+        adapter_with_mqtt.set_safety_profile("kilntest_enclosed")
         assert adapter_with_mqtt.set_tool_temp(320.0).ok
         with pytest.raises(PrinterError, match="exceeds safety limit"):
             adapter_with_mqtt.set_tool_temp(321.0)
@@ -1346,9 +1366,9 @@ class TestBambuAdapterTemperature:
     def test_bound_profile_still_tightens_below_the_net(
         self, adapter_with_mqtt: BambuAdapter
     ) -> None:
-        # Raising the net must not loosen a cooler machine: the A1 profile
-        # (300C hotend) still caps at 300 even though the net is now 350.
-        adapter_with_mqtt.set_safety_profile("bambu_a1")
+        # Raising the net must not loosen a cooler machine: a 300 C profile
+        # still caps at 300 even though the net is now 350.
+        adapter_with_mqtt.set_safety_profile("kilntest_open")
         assert adapter_with_mqtt.set_tool_temp(300.0).ok
         with pytest.raises(PrinterError, match="exceeds safety limit"):
             adapter_with_mqtt.set_tool_temp(320.0)

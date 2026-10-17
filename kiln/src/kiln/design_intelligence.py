@@ -43,6 +43,13 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _DATA_DIR = Path(__file__).parent / "data" / "design_knowledge"
+#: The printer capability roster.  Since 2026-10-12 each printer's row is
+#: its id and display name; the capability profile itself is the printer's
+#: catalogue record's ``design`` block, fetched one printer at a time
+#: through :mod:`kiln._pro_catalogue_bridge` (see :func:`get_printer_design_profile`).
+#: The generic ``default`` row stays whole, as the floor.  Named on its own
+#: so the test suite can point the loader at a copy carrying synthetic rows.
+_PRINTER_PROFILES_FILE = _DATA_DIR / "printer_profiles.json"
 
 
 # ---------------------------------------------------------------------------
@@ -476,6 +483,10 @@ class MaterialProfile:
     # / compatible_adhesive_chemistries / bonding_note).  Present only when
     # the overlay merged (Pro+); empty for free tier.  See bonding_caveat().
     bonding: dict[str, Any] = field(default_factory=dict)
+    # What a slicer must be told for this material whatever the printer:
+    # the melt-rate ceiling and the part fan's range.  A floor every tier
+    # gets, read by kiln.slicer_material at every slice.
+    slicing: dict[str, Any] = field(default_factory=dict)
 
     def has_engineering_data(self) -> bool:
         """True when the kiln-pro engineering overlay is loaded.
@@ -723,6 +734,13 @@ class PrinterDesignProfile:
     max_print_speed_mm_s: int
     default_layer_heights_mm: list[float]
     agent_notes: list[str] = field(default_factory=list)
+    #: Where the numbers came from: ``"curated"`` (the printer's own record,
+    #: or a bundled full row), ``"derived"`` (synthesised from a spec sheet
+    #: this process holds), or ``"generic"`` -- the floor standing in for a
+    #: roster printer whose record this install does not hold (signed out,
+    #: or set up offline).  A consumer that would quote a number as this
+    #: machine's reads this first.
+    resolved_from: str = "curated"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -865,26 +883,58 @@ class PrintDiagnostic:
 
 @dataclass
 class BrandFilamentProfile:
-    """Brand-specific filament profile with printing parameters."""
+    """Brand-specific filament profile with printing parameters.
+
+    The names come from the public roster (``materials.json``, each family's
+    ``brand_profiles``); the figures are the family's catalogue record,
+    served one material at a time through :mod:`kiln._pro_material_bridge`.
+    A profile whose figures could not be had (signed out, offline) carries
+    its names and ``None`` for every figure -- :meth:`has_figures` says
+    which, and :func:`brand_figures_unanswered` says why.
+    """
 
     profile_id: str
     brand: str
     product_name: str
     parent_material: str
-    nozzle_temp_range_c: list[int]
-    nozzle_temp_optimal_c: int
-    bed_temp_range_c: list[int]
+    nozzle_temp_range_c: list[int] | None
+    nozzle_temp_optimal_c: int | None
+    bed_temp_range_c: list[int] | None
     bed_temp_optimal_c: int | None
     max_volumetric_speed_mm3s: float | None
     max_print_speed_mms: int | None
     density_g_cm3: float | None
     drying_temp_c: int | None
     drying_time_hours: int | None
-    enclosure_required: bool
-    hardened_nozzle_required: bool
+    #: ``None`` when the brand's record is not in hand: the FAMILY answers
+    #: then (:meth:`needs_hardened_nozzle`, :meth:`needs_enclosure`), never
+    #: a quiet ``False``.
+    enclosure_required: bool | None
+    hardened_nozzle_required: bool | None
     ams_compatible: bool | None
     notes: str | None
     source: str
+
+    def needs_hardened_nozzle(self) -> bool:
+        """The brand's own flag when in hand, else the family's: a filled
+        filament is abrasive whoever makes it (``material_safety``)."""
+        if self.hardened_nozzle_required is not None:
+            return bool(self.hardened_nozzle_required)
+        from kiln.material_safety import is_abrasive_filament
+
+        return is_abrasive_filament(self.parent_material) or is_abrasive_filament(self.product_name)
+
+    def needs_enclosure(self) -> bool:
+        """The brand's own flag when in hand, else whether the family's own
+        floor says it wants a heated chamber."""
+        if self.enclosure_required is not None:
+            return bool(self.enclosure_required)
+        thermal = (_get_kb().materials.get(self.parent_material) or {}).get("thermal") or {}
+        return bool(thermal.get("requires_heated_chamber"))
+
+    def has_figures(self) -> bool:
+        """True when the brand's own temperatures are in hand."""
+        return self.nozzle_temp_optimal_c is not None and bool(self.nozzle_temp_range_c)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -951,7 +1001,7 @@ class _DesignKnowledgeBase:
         ]
 
         for filename, attr in _tables:
-            path = _DATA_DIR / filename
+            path = _PRINTER_PROFILES_FILE if filename == "printer_profiles.json" else _DATA_DIR / filename
             if path.exists():
                 raw = json.loads(path.read_text(encoding="utf-8"))
                 setattr(self, attr, {k: v for k, v in raw.items() if not k.startswith("_")})
@@ -1290,6 +1340,7 @@ def get_material_profile(material_id: str) -> MaterialProfile | None:
         use_case_ratings=data.get("use_case_ratings", {}),
         agent_guidance=data.get("agent_guidance", []),
         bonding=data.get("bonding", {}),
+        slicing=data.get("slicing", {}),
     )
 
 
@@ -1483,6 +1534,19 @@ _PLA_FAMILY_IDS: frozenset[str] = frozenset({
 def _is_tpu_family(material_id: str) -> bool:
     """True if the material id belongs to the TPU/elastomer family."""
     return material_id.lower().startswith(_TPU_FAMILY_PREFIXES)
+
+
+def _load_judgement_is_paid() -> bool:
+    """True for a caller below Kiln Pro: the recommender's load judgement
+    is Pro's (2026-10-16), and free is told so in words.  A tier that
+    cannot be read is treated as free, the direction that promises less."""
+    try:
+        from kiln.account_plan import LicenseTier, check_tier
+
+        tier_ok, _msg = check_tier(LicenseTier.PRO)
+        return not tier_ok
+    except Exception:  # noqa: BLE001
+        return True
 
 
 def _is_pla_family(material_id: str) -> bool:
@@ -1749,7 +1813,10 @@ def _recommend_from_safety_floor(
                 )
             elif max_service_temp >= 65 and warping in ("low", "moderate", "none"):
                 score += 12
-                reasons.append("dimensional stability suitable for sustained-load applications.")
+                if _load_judgement_is_paid():
+                    warnings.append("Load not checked: Kiln Pro sizes the part for the weight and how long it's held.")
+                else:
+                    reasons.append("dimensional stability suitable for sustained-load applications.")
 
         if needs_hot_load and (_is_pla_family(mid) or mid.startswith("petg")):
             # Hot environment + load — eliminate PLA AND PETG (PETG
@@ -2158,9 +2225,9 @@ def _recommend_material_for_design(
                 "bed_temp_optimal_c": bp.bed_temp_optimal_c,
                 "density_g_cm3": bp.density_g_cm3,
             }
-            if bp.hardened_nozzle_required:
+            if bp.needs_hardened_nozzle():
                 brand_entry["hardened_nozzle_required"] = True
-            if bp.enclosure_required:
+            if bp.needs_enclosure():
                 brand_entry["enclosure_required"] = True
             if bp.ams_compatible is not None:
                 brand_entry["ams_compatible"] = bp.ams_compatible
@@ -2186,16 +2253,71 @@ def _recommend_material_for_design(
 # ---------------------------------------------------------------------------
 
 
+def _material_record(material_id: str) -> dict[str, Any] | None:
+    """ONE material's catalogue record -- its brand figures and load figures
+    -- through :mod:`kiln._pro_material_bridge`, or ``None`` (no row, or a
+    miss the bridge words).  Never raises."""
+    try:
+        from kiln import _pro_material_bridge as _bridge
+
+        return _bridge.material_record(material_id)
+    except Exception:  # noqa: BLE001 -- a door never fails for want of the figures
+        logger.debug("material record unavailable", exc_info=True)
+        return None
+
+
+def _figures_unanswered(material_id: str) -> str | None:
+    try:
+        from kiln import _pro_material_bridge as _bridge
+
+        return _bridge.unanswered(material_id)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def brand_figures_unanswered(parent_material: str) -> str | None:
+    """Why a family's brand figures could not be had, as a clause, or
+    ``None`` when they were (or the family has no catalogue row)."""
+    return _figures_unanswered(parent_material)
+
+
+def _family_floor_ranges(parent_material: str) -> tuple[list[int], int, list[int], int] | None:
+    """``(nozzle range, nozzle optimum, bed range, bed optimum)`` from the
+    family's own public floor (``materials.json`` thermal ranges, optimum at
+    the midpoint), or ``None`` when the family states no print range."""
+    thermal = (_get_kb().materials.get((parent_material or "").lower()) or {}).get("thermal") or {}
+    nozzle = thermal.get("print_temp_range_c")
+    if not (isinstance(nozzle, list) and len(nozzle) == 2):
+        return None
+    bed = thermal.get("bed_temp_range_c")
+    if not (isinstance(bed, list) and len(bed) == 2):
+        bed = [60, 60]
+    nozzle_range = [int(nozzle[0]), int(nozzle[1])]
+    bed_range = [int(bed[0]), int(bed[1])]
+    return nozzle_range, (nozzle_range[0] + nozzle_range[1]) // 2, bed_range, (bed_range[0] + bed_range[1]) // 2
+
+
+def _brand_figures(parent_material: str, record: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    """The family's brand figures from *record*, keyed by profile id."""
+    brands = (record or {}).get("brands") if isinstance(record, dict) else None
+    return brands if isinstance(brands, dict) else {}
+
+
 def get_brand_filament_profile(profile_id: str) -> BrandFilamentProfile | None:
     """Get a specific brand filament profile by ID.
+
+    The roster says which family the profile belongs to; the family's
+    catalogue record supplies the figures (one material, one record).
 
     :param profile_id: Profile key (e.g. ``"bambu_pla_basic"``, ``"prusament_petg"``).
     """
     kb = _get_kb()
-    for _mid, mat_data in kb.materials.items():
-        brand_profiles = mat_data.get("brand_profiles", {})
-        if profile_id.lower() in brand_profiles:
-            return _build_brand_profile(profile_id.lower(), _mid, brand_profiles[profile_id.lower()])
+    pid = profile_id.lower()
+    for mid, mat_data in kb.materials.items():
+        roster = mat_data.get("brand_profiles", {})
+        if pid in roster:
+            figures = _brand_figures(mid, _material_record(mid)).get(pid) or {}
+            return _build_brand_profile(pid, mid, {**roster[pid], **figures})
     return None
 
 
@@ -2206,18 +2328,33 @@ def list_brand_filament_profiles(
 ) -> list[BrandFilamentProfile]:
     """List brand filament profiles, optionally filtered by brand or parent material.
 
+    A list for ONE family carries that family's figures (one record).  An
+    unfiltered list on an install without kiln-pro is the roster -- names,
+    no figures -- because filling it would ask Kiln's servers for every
+    family's record in one call; with kiln-pro here every family is read.
+
     :param brand: Filter by brand name (case-insensitive partial match).
     :param parent_material: Filter by parent material ID (e.g. ``"pla"``, ``"petg"``).
     """
     kb = _get_kb()
     results: list[BrandFilamentProfile] = []
+    try:
+        from kiln._pro_material_bridge import available as _catalogue_here
+
+        every_family = _catalogue_here()
+    except Exception:  # noqa: BLE001
+        every_family = False
     for mid, mat_data in sorted(kb.materials.items()):
         if parent_material and mid != parent_material.lower():
             continue
-        for pid, pdata in sorted(mat_data.get("brand_profiles", {}).items()):
+        roster = mat_data.get("brand_profiles", {})
+        if not roster:
+            continue
+        figures = _brand_figures(mid, _material_record(mid)) if (parent_material or every_family) else {}
+        for pid, pdata in sorted(roster.items()):
             if brand and brand.lower() not in pdata.get("brand", "").lower():
                 continue
-            results.append(_build_brand_profile(pid, mid, pdata))
+            results.append(_build_brand_profile(pid, mid, {**pdata, **(figures.get(pid) or {})}))
     return results
 
 
@@ -2232,17 +2369,17 @@ def _build_brand_profile(
         brand=data["brand"],
         product_name=data["product_name"],
         parent_material=parent_material,
-        nozzle_temp_range_c=data["nozzle_temp_range_c"],
-        nozzle_temp_optimal_c=data["nozzle_temp_optimal_c"],
-        bed_temp_range_c=data["bed_temp_range_c"],
+        nozzle_temp_range_c=data.get("nozzle_temp_range_c"),
+        nozzle_temp_optimal_c=data.get("nozzle_temp_optimal_c"),
+        bed_temp_range_c=data.get("bed_temp_range_c"),
         bed_temp_optimal_c=data.get("bed_temp_optimal_c"),
         max_volumetric_speed_mm3s=data.get("max_volumetric_speed_mm3s"),
         max_print_speed_mms=data.get("max_print_speed_mms"),
         density_g_cm3=data.get("density_g_cm3"),
         drying_temp_c=data.get("drying_temp_c"),
         drying_time_hours=data.get("drying_time_hours"),
-        enclosure_required=data.get("enclosure_required", False),
-        hardened_nozzle_required=data.get("hardened_nozzle_required", False),
+        enclosure_required=data.get("enclosure_required"),
+        hardened_nozzle_required=data.get("hardened_nozzle_required"),
         ams_compatible=data.get("ams_compatible"),
         notes=data.get("notes"),
         source=data.get("source", ""),
@@ -2339,24 +2476,55 @@ def resolve_filament(
         if printer_id:
             warnings = _check_filament_printer_compat(brand, printer_id)
 
+        # A brand whose own figures are not in hand (below Kiln Pro, signed
+        # out, offline) prints at its FAMILY's own range -- the floor public
+        # materials.json carries for every family, never the cost table's
+        # generic default, which is PLA's for a family it lacks (2026-10-16:
+        # a high-temperature brand came out at 210C that way) -- and the
+        # warning says so: a brand name must never read as a tune it did
+        # not get.
+        if not brand.has_figures():
+            why = brand_figures_unanswered(brand.parent_material)
+            family = _family_floor_ranges(brand.parent_material)
+            family_name = _get_kb().materials.get(brand.parent_material, {}).get("display_name") or parent_row.name
+            warnings.append(
+                f"{brand.brand} {brand.product_name}'s own temperatures are not in hand"
+                + (f" because {why}" if why else "")
+                + f"; the {family_name} range is used."
+            )
+        else:
+            family = None
+        if brand.has_figures():
+            nozzle_opt = brand.nozzle_temp_optimal_c
+            nozzle_range = list(brand.nozzle_temp_range_c)
+            bed_opt = brand.bed_temp_optimal_c or 60
+            bed_range = list(brand.bed_temp_range_c) if brand.bed_temp_range_c else [bed_opt - 10, bed_opt + 10]
+        elif family is not None:
+            nozzle_range, nozzle_opt, bed_range, bed_opt = family
+        else:
+            nozzle_opt = int(parent_row.tool_temp_default)
+            nozzle_range = [nozzle_opt - 20, nozzle_opt + 20]
+            bed_opt = int(parent_row.bed_temp_default)
+            bed_range = [bed_opt - 10, bed_opt + 10]
+
         return ResolvedFilament(
             material_id=brand.parent_material,
             brand_profile_id=brand.profile_id,
             display_name=f"{brand.brand} {brand.product_name}",
-            is_brand_specific=True,
+            is_brand_specific=brand.has_figures(),
             density_g_per_cm3=brand.density_g_cm3 or parent_row.density_g_per_cm3,
             cost_per_kg_usd=cost,
             filament_diameter_mm=diameter,
-            nozzle_temp_optimal_c=brand.nozzle_temp_optimal_c,
-            nozzle_temp_range_c=brand.nozzle_temp_range_c,
-            bed_temp_optimal_c=brand.bed_temp_optimal_c or 60,
-            bed_temp_range_c=brand.bed_temp_range_c,
+            nozzle_temp_optimal_c=nozzle_opt,
+            nozzle_temp_range_c=nozzle_range,
+            bed_temp_optimal_c=bed_opt,
+            bed_temp_range_c=bed_range,
             max_volumetric_speed_mm3s=brand.max_volumetric_speed_mm3s,
             max_print_speed_mms=brand.max_print_speed_mms,
             drying_temp_c=brand.drying_temp_c,
             drying_time_hours=brand.drying_time_hours,
-            enclosure_required=brand.enclosure_required,
-            hardened_nozzle_required=brand.hardened_nozzle_required,
+            enclosure_required=brand.needs_enclosure(),
+            hardened_nozzle_required=brand.needs_hardened_nozzle(),
             ams_compatible=brand.ams_compatible,
             warnings=warnings,
         )
@@ -2409,7 +2577,7 @@ def _check_filament_printer_compat(
         return warnings
 
     # Enclosure check
-    if brand.enclosure_required:
+    if brand.needs_enclosure():
         has_enclosure = getattr(intel, "has_enclosure", False)
         if not has_enclosure:
             warnings.append(
@@ -2418,7 +2586,7 @@ def _check_filament_printer_compat(
             )
 
     # Hardened nozzle check
-    if brand.hardened_nozzle_required:
+    if brand.needs_hardened_nozzle():
         warnings.append(
             f"{brand.brand} {brand.product_name} requires a hardened steel nozzle "
             f"(HRC >= 40). Printing with brass will destroy the nozzle rapidly."
@@ -2433,7 +2601,7 @@ def _check_filament_printer_compat(
 
     # Temperature check
     max_hotend = getattr(intel, "max_hotend_temp", None)
-    if max_hotend and brand.nozzle_temp_optimal_c > max_hotend:
+    if max_hotend and brand.nozzle_temp_optimal_c is not None and brand.nozzle_temp_optimal_c > max_hotend:
         warnings.append(
             f"{brand.brand} {brand.product_name} needs {brand.nozzle_temp_optimal_c}°C "
             f"but '{printer_id}' max hotend is {max_hotend}°C."
@@ -2469,9 +2637,11 @@ def estimate_deflection_limited_load(
     the limit that actually governs, clearly labelled so it can never be read
     as a strength value.
     """
-    rec = _get_kb().load_tables.get((material_id or "").lower())
+    key = (material_id or "").lower()
+    rec = _get_kb().load_tables.get(key)
     if not isinstance(rec, dict) or rec.get("limit_mode") != "deflection":
         return None
+    rec = {**rec, **_load_figures(key)}
     rows = sorted(
         rec.get("cross_section_vs_deflection_load", []),
         key=lambda r: float(r.get("cantilever_length_mm", 0.0)),
@@ -2494,6 +2664,24 @@ def estimate_deflection_limited_load(
     }
 
 
+def _load_figures(material_key: str) -> dict[str, Any]:
+    """The material's load figures from its catalogue record (the tensile
+    capacity, the cross-section vs load grid, the orientation derating), or
+    ``{}`` when they could not be had -- :func:`load_figures_unanswered`
+    says why."""
+    record = _material_record(material_key)
+    load = record.get("load") if isinstance(record, dict) else None
+    return dict(load) if isinstance(load, dict) else {}
+
+
+def load_figures_unanswered(material_id: str) -> str | None:
+    """Why *material_id*'s load figures could not be had, as a clause, or
+    ``None`` when they were (or the roster has no such material)."""
+    kb = _get_kb()
+    key = resolve_material_key(material_id, kb.load_tables) or (material_id or "").lower()
+    return _figures_unanswered(key)
+
+
 def estimate_load_capacity(
     material_id: str,
     cross_section_mm2: float,
@@ -2502,6 +2690,12 @@ def estimate_load_capacity(
     load_across_layers: bool = True,
 ) -> LoadEstimate | None:
     """Estimate max safe load for a given cantilever geometry.
+
+    The roster (``load_tables.json``) says the material is one the lookup
+    answers for; its figures are the catalogue record, served one material
+    at a time.  ``None`` is an unknown material, an elastomer (see
+    :func:`estimate_deflection_limited_load`) or figures not in hand --
+    :func:`load_figures_unanswered` tells the last apart.
 
     Orientation convention (fixed 2026-07-16 — the pair was previously
     inverted): ``load_across_layers=True`` means the load pulls the
@@ -2512,15 +2706,16 @@ def estimate_load_capacity(
     layer planes — the strong direction (full table value).  ``True``
     is the conservative default.
 
-    The table itself is DERIVED data (square-section bending math; see
-    kiln/scripts/generate_load_tables.py) — wide or flat sections are
-    weaker than the square basis, and the reasoning says so.
+    The grid itself is DERIVED data (square-section bending math, generated
+    and pinned in kiln-pro beside the catalogue record) — wide or flat
+    sections are weaker than the square basis, and the reasoning says so.
     """
     kb = _get_kb()
     material_key = resolve_material_key(material_id, kb.load_tables) or material_id.lower()
     material_data = kb.load_tables.get(material_key)
     if material_data is None:
         return None
+    material_data = {**material_data, **_load_figures(material_key)}
 
     reasoning: list[str] = []
 
@@ -2608,8 +2803,8 @@ def estimate_load_capacity(
         safety_factor=3.0,
         derating_applied=derating,
         reasoning=reasoning,
-        # The number is the same at every tier; the material's own caveats
-        # are not.  When they could not be read, say so rather than hand
+        # The number is the catalogue's (Kiln Pro's); the material's own
+        # caveats are the floor's.  When they could not be read, say so rather than hand
         # back a bare figure that reads as a clearance.
         caution=(
             ""
@@ -2866,14 +3061,77 @@ def _design_profile_from_intel(
     )
 
 
-def _all_design_profiles() -> dict[str, PrinterDesignProfile]:
-    """Build the full design-capability map: an entry for every printer
-    Kiln supports.  ``printer_intelligence.json`` (the canonical supported-
-    printer set) is the base; a curated ``printer_profiles.json`` record,
-    when present, overrides the intel-derived one (hand-tuned specs + the
-    kiln-pro ``agent_notes`` overlay).  This keeps the design tools in sync
-    with the rest of the system instead of stranding ~80% of supported
-    printers behind an "Unknown printer" error.
+def _is_full_design_row(data: Any) -> bool:
+    """A bundled row a profile can be built from -- one that states its
+    envelope (the generic row; a fixture's rows).  A roster row (id and
+    name) never is: its profile is the catalogue record's."""
+    return isinstance(data, dict) and isinstance(data.get("build_volume_mm"), dict)
+
+
+def _profile_from_design_row(
+    printer_id: str,
+    data: dict[str, Any],
+    *,
+    display_name: str | None = None,
+    agent_notes: list[str] | None = None,
+    resolved_from: str = "curated",
+) -> PrinterDesignProfile:
+    """One capability profile from a design row: a bundled full row, or a
+    catalogue record's ``design`` block (the same keys, the printer's own
+    ``display_name`` and ``manufacturer`` riding along)."""
+    return PrinterDesignProfile(
+        printer_id=printer_id,
+        display_name=str(display_name or data.get("display_name") or printer_id),
+        manufacturer=str(data.get("manufacturer") or _derive_manufacturer(printer_id, str(data.get("display_name") or ""))),
+        build_volume_mm=dict(data["build_volume_mm"]),
+        max_hotend_temp_c=data["max_hotend_temp_c"],
+        max_bed_temp_c=data["max_bed_temp_c"],
+        has_enclosure=bool(data["has_enclosure"]),
+        has_direct_drive=bool(data["has_direct_drive"]),
+        supported_materials=list(data["supported_materials"]),
+        typical_tolerance_mm=data["typical_tolerance_mm"],
+        max_print_speed_mm_s=data["max_print_speed_mm_s"],
+        default_layer_heights_mm=list(data["default_layer_heights_mm"]),
+        agent_notes=list(agent_notes if agent_notes is not None else data.get("agent_notes", [])),
+        resolved_from=resolved_from,
+    )
+
+
+def _generic_design_profile(printer_id: str, display_name: str) -> PrinterDesignProfile | None:
+    """The generic floor standing in for roster printer *printer_id* whose
+    record this install does not hold: the ``default`` row's numbers under
+    the printer's own id and name, marked ``resolved_from="generic"`` so a
+    consumer never quotes them as the machine's.  The same posture
+    :mod:`kiln.safety_profiles` takes with its ceilings: a signed-out install
+    is held to the floor, and the setup nudge says sign in."""
+    generic = _get_kb().printers.get("default")
+    if not _is_full_design_row(generic):
+        return None
+    return _profile_from_design_row(
+        printer_id, generic, display_name=display_name, agent_notes=[], resolved_from="generic",
+    )
+
+
+def _all_design_profiles(*, resolve_roster: bool | None = None) -> dict[str, PrinterDesignProfile]:
+    """Build the design-capability map: an entry for every printer Kiln
+    supports.
+
+    Three sources, in rising precedence: a profile DERIVED from each spec
+    sheet this process holds (``printer_intelligence``'s full rows -- the
+    generic row, a fixture's, every record fetched); the catalogue records'
+    own ``design`` blocks, with the kiln-pro ``agent_notes`` overlay the
+    bundled roster row carries for that id merged on; and the bundled FULL
+    rows (the generic ``default`` row, a fixture's).  Every other roster
+    printer -- one whose record is not in hand -- gets the generic floor
+    under its own name, marked ``generic``.
+
+    *resolve_roster* says whether to FETCH the record of every roster
+    printer not yet held.  Left ``None`` it is decided by where the records
+    are: with kiln-pro's catalogue on this computer each is a dict read
+    away and the whole roster is resolved; on an install whose records are
+    served, a listing never asks the servers for every printer on the roster
+    -- that is the harvest the per-printer wire exists to prevent -- and a
+    single printer is fetched by :func:`get_printer_design_profile`.
     """
     from kiln import printer_intelligence as _pi
 
@@ -2882,42 +3140,58 @@ def _all_design_profiles() -> dict[str, PrinterDesignProfile]:
     for pid, raw in _pi._raw_cache.items():
         if pid == "default":  # sentinel fallback, not a real model
             continue
+        if not raw.get("build_volume_mm"):  # no spec sheet held: nothing to derive
+            continue
         profiles[pid] = _design_profile_from_intel(pid, raw)
+        profiles[pid].resolved_from = "derived"
 
-    # Curated records win on their own id (richer + carry agent_notes).
-    for cid, data in _get_kb().printers.items():
-        profiles[cid] = PrinterDesignProfile(
-            printer_id=cid,
-            display_name=data["display_name"],
-            manufacturer=data["manufacturer"],
-            build_volume_mm=data["build_volume_mm"],
-            max_hotend_temp_c=data["max_hotend_temp_c"],
-            max_bed_temp_c=data["max_bed_temp_c"],
-            has_enclosure=data["has_enclosure"],
-            has_direct_drive=data["has_direct_drive"],
-            supported_materials=data["supported_materials"],
-            typical_tolerance_mm=data["typical_tolerance_mm"],
-            max_print_speed_mm_s=data["max_print_speed_mm_s"],
-            default_layer_heights_mm=data["default_layer_heights_mm"],
-            agent_notes=list(data.get("agent_notes", [])),
-        )
+    bundled = _get_kb().printers
+    if resolve_roster is None:
+        resolve_roster = _pi.catalogue_here()
+    if resolve_roster:
+        for pid in bundled:
+            if pid != "default" and not _is_full_design_row(bundled[pid]):
+                _pi.catalogue_block(pid, "design", exact=True)
+    for pid, block in _pi.held_catalogue_blocks("design").items():
+        overlay_notes = bundled.get(pid, {}).get("agent_notes") if isinstance(bundled.get(pid), dict) else None
+        profiles[pid] = _profile_from_design_row(pid, block, agent_notes=list(overlay_notes or []))
+
+    # Bundled full rows win on their own id; a roster row with no record in
+    # hand is the floor under its own name.
+    for cid, data in bundled.items():
+        if _is_full_design_row(data):
+            profiles[cid] = _profile_from_design_row(cid, data)
+        elif cid not in profiles and cid != "default":
+            generic = _generic_design_profile(cid, str(data.get("display_name") or cid))
+            if generic is not None:
+                profiles[cid] = generic
     return profiles
 
 
 def get_printer_design_profile(printer_id: str) -> PrinterDesignProfile | None:
     """Get design capabilities for a specific printer.
 
-    Covers every supported printer: a curated ``printer_profiles.json``
-    record when one exists, otherwise a profile derived from
-    ``printer_intelligence.json``.  Returns ``None`` only for genuinely
-    unknown printer ids.
+    Covers every supported printer: the printer's own catalogue record
+    (fetched once through the bridge and held), a bundled full row, or a
+    profile derived from a spec sheet this process holds.  A roster printer
+    whose record this install cannot get is answered with the generic floor
+    under its own name (``resolved_from == "generic"``).  Returns ``None``
+    only for genuinely unknown printer ids.
     """
-    return _all_design_profiles().get(printer_id.lower())
+    from kiln import printer_intelligence as _pi
+
+    key = (printer_id or "").lower().replace("-", "_").strip()
+    if not key:
+        return None
+    if key != "default" and not _is_full_design_row(_get_kb().printers.get(key)):
+        _pi.catalogue_block(key, "design", exact=True)  # one printer: fetch it
+    return _all_design_profiles(resolve_roster=False).get(key)
 
 
 def list_printer_profiles() -> list[PrinterDesignProfile]:
-    """List design profiles for every supported printer (curated where
-    available, otherwise derived from printer_intelligence)."""
+    """List design profiles for every printer on the roster: curated where
+    the record is in hand, derived from a held spec sheet otherwise, and the
+    generic floor (marked) for a roster printer with no record here."""
     return [profile for _, profile in sorted(_all_design_profiles().items())]
 
 
@@ -3679,6 +3953,46 @@ def list_compatibility_printers() -> list[str]:
 # Public API — Post-Processing
 # ---------------------------------------------------------------------------
 
+#: Technique names the post-processing table used before it described each
+#: finish by its chemistry and form instead of a retail product, mapped to the
+#: name the table uses now.  An agent, a saved note or an older client holding
+#: one of these still reaches the technique.  Keys are casefolded.
+#: Technique names used to carry a product in brackets ("Epoxy Coating
+#: (<product>)", "Dyeing with <product>") and a form word ("Flexible Paint"
+#: became "Flexible Rubber Paint").  An agent or saved note may still hold
+#: an old spelling, so a lookup matches on the technique's CORE -- the name
+#: with any bracketed tail, any "with ..." tail and the form word "rubber"
+#: removed -- rather than on a table of old names, which would keep the
+#: products in this file.
+_TECHNIQUE_TAIL = re.compile(r"\s*\(.*\)\s*$|\s+with\s+.*$", re.IGNORECASE)
+_TECHNIQUE_FORM_WORDS = re.compile(r"\brubber\b", re.IGNORECASE)
+
+
+def technique_core(name: str) -> str:
+    """The comparable core of technique *name*: brackets, a ``with ...``
+    tail and the form word dropped, whitespace folded, casefolded."""
+    core = _TECHNIQUE_TAIL.sub("", str(name or "").strip())
+    core = _TECHNIQUE_FORM_WORDS.sub(" ", core)
+    return " ".join(core.split()).casefold()
+
+
+def find_post_processing_technique(
+    techniques: list[Any], name: str
+) -> dict[str, Any] | None:
+    """The technique in *techniques* called *name* (any case; an old
+    spelling that carried a product or a form word too).  An exact name
+    wins; otherwise the one technique with the same core."""
+    wanted = str(name or "").strip().casefold()
+    if not wanted:
+        return None
+    rows = [t for t in techniques if isinstance(t, dict)]
+    for technique in rows:
+        if str(technique.get("name", "")).strip().casefold() == wanted:
+            return technique
+    core = technique_core(name)
+    matches = [t for t in rows if technique_core(t.get("name", "")) == core]
+    return matches[0] if len(matches) == 1 else None
+
 
 def get_post_processing(material_id: str) -> PostProcessingGuide | None:
     """Get post-processing techniques for a material.
@@ -3704,8 +4018,30 @@ def get_post_processing(material_id: str) -> PostProcessingGuide | None:
     )
 
 
+def _technique_safety_note(guide: PostProcessingGuide, method: str) -> str:
+    """The safety note of the technique a strengthening *method* names, or ``""``.
+
+    "IPA Vapor Smoothing (Structural)" is the "IPA Vapor Smoothing" technique,
+    so a tip that recommends it carries that technique's fire warning.
+    """
+    wanted = technique_core(method)
+    if not wanted:
+        return ""
+    for technique in guide.techniques:
+        if not isinstance(technique, dict):
+            continue
+        if technique_core(technique.get("name", "")) == wanted:
+            return str(technique.get("safety_notes") or "").strip()
+    return ""
+
+
 def get_public_post_processing(material_id: str) -> PostProcessingGuide | None:
-    """Get the public post-processing floor without optional enrichment."""
+    """Get the public post-processing floor without optional enrichment.
+
+    Each technique keeps its ``safety_notes``: the fire, fume and dust
+    warnings are the floor, so an offline or signed-out install still says
+    them.
+    """
     raw = json.loads(
         (_DATA_DIR / "post_processing.json").read_text(encoding="utf-8")
     )
@@ -3717,7 +4053,7 @@ def get_public_post_processing(material_id: str) -> PostProcessingGuide | None:
     techniques = [
         {
             key: item[key]
-            for key in ("name", "difficulty", "tools_needed")
+            for key in ("name", "difficulty", "tools_needed", "safety_notes")
             if key in item
         }
         for item in (data.get("techniques") or [])
@@ -3914,10 +4250,14 @@ def get_print_diagnostic(
     if pp_guide and pp_guide.strengthening:
         for s in pp_guide.strengthening:
             if s.get("applicable"):
-                pp_tips.append(
+                tip = (
                     f"{s.get('method', 'Unknown')}: ~{s.get('strength_gain_pct', 0)}% "
                     f"strength gain. {s.get('tradeoffs', '')}"
                 )
+                safety = _technique_safety_note(pp_guide, str(s.get("method", "")))
+                if safety:
+                    tip = f"{tip.rstrip()} Safety: {safety}"
+                pp_tips.append(tip)
 
     # Build combined guidance
     combined: list[str] = []

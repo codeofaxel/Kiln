@@ -1,10 +1,10 @@
 {
   "_meta": {
-    "version": "1.0.0",
+    "version": "2.0.0",
     "domain": "fdm",
-    "description": "Desktop printer capability profiles for material feasibility and design-for-manufacturing decisions.",
-    "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Engineering depth (how each printer actually behaves and what to design for) is available in Kiln Pro; see https://kiln3d.com/pricing.",
-    "_default_profile_note": "The 'default' entry is the deliberately conservative stand-in for a printer Kiln has no profile for. Its numbers are the floor a commodity FDM machine can be assumed to meet, NOT a measurement of any product, so a feasibility answer given against it is the answer for the least capable plausible machine. Register the real printer to get a real answer."
+    "description": "Printer capability roster for material feasibility and design-for-manufacturing decisions. Since 2026-10-12 each printer's row is its id and display name; the capability profile itself (ceilings, build volume, chamber, tolerance, speed, layer ladder, supported materials) is the printer's catalogue record, served one printer at a time by Kiln and read through kiln.design_intelligence.get_printer_design_profile. The generic 'default' row stays whole.",
+    "_split_note": "The roster and the generic floor ship here.  A printer's profile is its catalogue record's (fetched when the printer is set up, kept on this computer); engineering depth (how each printer actually behaves and what to design for) is available in Kiln Pro; see https://kiln3d.com/pricing.",
+    "_default_profile_note": "The 'default' entry is the deliberately conservative stand-in for a printer Kiln has no record for here: a printer it has no profile for, or a catalogued printer on an install that is signed out. Its numbers are the floor a commodity FDM machine can be assumed to meet -- the same hotend and bed ceilings the generic safety profile states -- NOT a measurement of any product, so a feasibility answer given against it is the answer for the least capable plausible machine. Register the real printer (and sign in) to get a real answer."
   },
   "default": {
     "printer_id": "default",
@@ -15,8 +15,8 @@
       "y": 200,
       "z": 200
     },
-    "max_hotend_temp_c": 250,
-    "max_bed_temp_c": 100,
+    "max_hotend_temp_c": 240,
+    "max_bed_temp_c": 80,
     "has_enclosure": false,
     "has_direct_drive": true,
     "supported_materials": [
@@ -37,2276 +37,286 @@
   },
   "bambu_a1_mini": {
     "printer_id": "bambu_a1_mini",
-    "display_name": "Bambu Lab A1 Mini",
-    "manufacturer": "Bambu Lab",
-    "build_volume_mm": {
-      "x": 180,
-      "y": 180,
-      "z": 180
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 80,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "pla",
-      "petg",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 300,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Bambu Lab A1 Mini"
   },
   "bambu_x1c": {
     "printer_id": "bambu_x1c",
-    "display_name": "Bambu Lab X1 Carbon",
-    "manufacturer": "Bambu Lab",
-    "build_volume_mm": {
-      "x": 256,
-      "y": 256,
-      "z": 256
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 120,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "pla",
-      "petg",
-      "abs",
-      "tpu",
-      "asa",
-      "nylon",
-      "polycarbonate"
-    ],
-    "typical_tolerance_mm": 0.1,
-    "max_print_speed_mm_s": 500,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Bambu Lab X1 Carbon"
   },
   "bambu_x1e": {
     "printer_id": "bambu_x1e",
-    "display_name": "Bambu Lab X1E",
-    "manufacturer": "Bambu Lab",
-    "build_volume_mm": {
-      "x": 256,
-      "y": 256,
-      "z": 256
-    },
-    "max_hotend_temp_c": 320,
-    "max_bed_temp_c": 120,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "pla",
-      "petg",
-      "abs",
-      "tpu",
-      "asa",
-      "nylon",
-      "polycarbonate"
-    ],
-    "typical_tolerance_mm": 0.1,
-    "max_print_speed_mm_s": 500,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": 60,
-    "chamber_heated": true
+    "display_name": "Bambu Lab X1E"
   },
   "bambu_p2s": {
     "printer_id": "bambu_p2s",
-    "display_name": "Bambu Lab P2S",
-    "manufacturer": "Bambu Lab",
-    "build_volume_mm": {
-      "x": 256,
-      "y": 256,
-      "z": 256
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 110,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "pla",
-      "petg",
-      "abs",
-      "tpu",
-      "asa",
-      "nylon",
-      "polycarbonate"
-    ],
-    "typical_tolerance_mm": 0.1,
-    "max_print_speed_mm_s": 600,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Bambu Lab P2S"
   },
   "bambu_p1s": {
     "printer_id": "bambu_p1s",
-    "display_name": "Bambu Lab P1S",
-    "manufacturer": "Bambu Lab",
-    "build_volume_mm": {
-      "x": 256,
-      "y": 256,
-      "z": 256
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 100,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "pla",
-      "petg",
-      "abs",
-      "tpu",
-      "asa",
-      "nylon",
-      "polycarbonate"
-    ],
-    "typical_tolerance_mm": 0.12,
-    "max_print_speed_mm_s": 500,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Bambu Lab P1S"
   },
   "bambu_a1": {
     "printer_id": "bambu_a1",
-    "display_name": "Bambu Lab A1",
-    "manufacturer": "Bambu Lab",
-    "build_volume_mm": {
-      "x": 256,
-      "y": 256,
-      "z": 256
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 100,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "pla",
-      "petg",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.12,
-    "max_print_speed_mm_s": 500,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Bambu Lab A1"
   },
   "bambu_a2l": {
     "printer_id": "bambu_a2l",
-    "display_name": "Bambu Lab A2L",
-    "manufacturer": "Bambu Lab",
-    "build_volume_mm": {
-      "x": 330,
-      "y": 320,
-      "z": 325
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 80,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "pla",
-      "petg",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.12,
-    "max_print_speed_mm_s": 500,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Bambu Lab A2L"
   },
   "bambu_h2s": {
     "printer_id": "bambu_h2s",
-    "display_name": "Bambu Lab H2S",
-    "manufacturer": "Bambu Lab",
-    "build_volume_mm": {
-      "x": 340,
-      "y": 320,
-      "z": 340
-    },
-    "max_hotend_temp_c": 350,
-    "max_bed_temp_c": 120,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "asa",
-      "nylon",
-      "petg",
-      "pla",
-      "polycarbonate",
-      "pps",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.1,
-    "max_print_speed_mm_s": 1000,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": 65,
-    "chamber_heated": true
+    "display_name": "Bambu Lab H2S"
   },
   "prusa_mk4": {
     "printer_id": "prusa_mk4",
-    "display_name": "Prusa MK4",
-    "manufacturer": "Prusa Research",
-    "build_volume_mm": {
-      "x": 250,
-      "y": 210,
-      "z": 220
-    },
-    "max_hotend_temp_c": 290,
-    "max_bed_temp_c": 120,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "pla",
-      "petg",
-      "abs",
-      "tpu",
-      "asa",
-      "nylon"
-    ],
-    "typical_tolerance_mm": 0.1,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Prusa MK4"
   },
   "prusa_mini": {
     "printer_id": "prusa_mini",
-    "display_name": "Prusa MINI+",
-    "manufacturer": "Prusa Research",
-    "build_volume_mm": {
-      "x": 180,
-      "y": 180,
-      "z": 180
-    },
-    "max_hotend_temp_c": 280,
-    "max_bed_temp_c": 100,
-    "has_enclosure": false,
-    "has_direct_drive": false,
-    "supported_materials": [
-      "pla",
-      "petg"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 180,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Prusa MINI+"
   },
   "ender3_v2": {
     "printer_id": "ender3_v2",
-    "display_name": "Ender 3 V2",
-    "manufacturer": "Creality",
-    "build_volume_mm": {
-      "x": 220,
-      "y": 220,
-      "z": 250
-    },
-    "max_hotend_temp_c": 250,
-    "max_bed_temp_c": 110,
-    "has_enclosure": false,
-    "has_direct_drive": false,
-    "supported_materials": [
-      "pla",
-      "petg",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.2,
-    "max_print_speed_mm_s": 120,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Ender 3 V2"
   },
   "ender3_s1": {
     "printer_id": "ender3_s1",
-    "display_name": "Ender 3 S1",
-    "manufacturer": "Creality",
-    "build_volume_mm": {
-      "x": 220,
-      "y": 220,
-      "z": 270
-    },
-    "max_hotend_temp_c": 260,
-    "max_bed_temp_c": 100,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.18,
-    "max_print_speed_mm_s": 150,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Ender 3 S1"
   },
   "voron_2": {
     "printer_id": "voron_2",
-    "display_name": "Voron 2.4",
-    "manufacturer": "Voron Design",
-    "build_volume_mm": {
-      "x": 300,
-      "y": 300,
-      "z": 300
-    },
-    "max_hotend_temp_c": 270,
-    "max_bed_temp_c": 120,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "pla",
-      "petg",
-      "abs",
-      "tpu",
-      "asa",
-      "nylon",
-      "polycarbonate"
-    ],
-    "typical_tolerance_mm": 0.1,
-    "max_print_speed_mm_s": 350,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Voron 2.4"
   },
   "voron_trident": {
     "printer_id": "voron_trident",
-    "display_name": "Voron Trident",
-    "manufacturer": "Voron Design",
-    "build_volume_mm": {
-      "x": 300,
-      "y": 300,
-      "z": 250
-    },
-    "max_hotend_temp_c": 270,
-    "max_bed_temp_c": 120,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "pla",
-      "petg",
-      "abs",
-      "tpu",
-      "asa",
-      "nylon",
-      "polycarbonate"
-    ],
-    "typical_tolerance_mm": 0.1,
-    "max_print_speed_mm_s": 350,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Voron Trident"
   },
   "ender3": {
     "printer_id": "ender3",
-    "display_name": "Creality Ender 3 / Ender 3 Pro",
-    "manufacturer": "Creality",
-    "build_volume_mm": {
-      "x": 220,
-      "y": 220,
-      "z": 250
-    },
-    "max_hotend_temp_c": 250,
-    "max_bed_temp_c": 110,
-    "has_enclosure": false,
-    "has_direct_drive": false,
-    "supported_materials": [
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.2,
-    "max_print_speed_mm_s": 60,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Creality Ender 3 / Ender 3 Pro"
   },
   "k1": {
     "printer_id": "k1",
-    "display_name": "Creality K1",
-    "manufacturer": "Creality",
-    "build_volume_mm": {
-      "x": 220,
-      "y": 220,
-      "z": 250
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 100,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 300,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Creality K1"
   },
   "sparkx_i7": {
     "printer_id": "sparkx_i7",
-    "display_name": "Creality SPARKX i7",
-    "manufacturer": "SparkX",
-    "build_volume_mm": {
-      "x": 260,
-      "y": 260,
-      "z": 255
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 100,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "petg",
-      "pla",
-      "pla-cf",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Creality SPARKX i7"
   },
   "k1_max": {
     "printer_id": "k1_max",
-    "display_name": "Creality K1 Max",
-    "manufacturer": "Creality",
-    "build_volume_mm": {
-      "x": 300,
-      "y": 300,
-      "z": 300
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 100,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Creality K1 Max"
   },
   "k1c": {
     "printer_id": "k1c",
-    "display_name": "Creality K1C",
-    "manufacturer": "Creality",
-    "build_volume_mm": {
-      "x": 220,
-      "y": 220,
-      "z": 250
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 100,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "petg",
-      "pla",
-      "pla-cf"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Creality K1C"
   },
   "k1_se": {
     "printer_id": "k1_se",
-    "display_name": "Creality K1 SE",
-    "manufacturer": "Creality",
-    "build_volume_mm": {
-      "x": 220,
-      "y": 220,
-      "z": 250
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 100,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Creality K1 SE"
   },
   "k2": {
     "printer_id": "k2",
-    "display_name": "Creality K2",
-    "manufacturer": "Creality",
-    "build_volume_mm": {
-      "x": 260,
-      "y": 260,
-      "z": 260
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 100,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "petg",
-      "pla"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Creality K2"
   },
   "k2_pro": {
     "printer_id": "k2_pro",
-    "display_name": "Creality K2 Pro",
-    "manufacturer": "Creality",
-    "build_volume_mm": {
-      "x": 300,
-      "y": 300,
-      "z": 300
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 110,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "asa",
-      "petg",
-      "pla"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Creality K2 Pro"
   },
   "k2_plus": {
     "printer_id": "k2_plus",
-    "display_name": "Creality K2 Plus",
-    "manufacturer": "Creality",
-    "build_volume_mm": {
-      "x": 350,
-      "y": 350,
-      "z": 350
-    },
-    "max_hotend_temp_c": 350,
-    "max_bed_temp_c": 120,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "pc",
-      "petg",
-      "pla",
-      "pps"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": 60,
-    "chamber_heated": true
+    "display_name": "Creality K2 Plus"
   },
   "k2_se": {
     "printer_id": "k2_se",
-    "display_name": "Creality K2 SE",
-    "manufacturer": "Creality",
-    "build_volume_mm": {
-      "x": 220,
-      "y": 215,
-      "z": 245
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 100,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "petg",
-      "pla",
-      "pla-cf",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Creality K2 SE"
   },
   "creality_hi": {
     "printer_id": "creality_hi",
-    "display_name": "Creality Hi",
-    "manufacturer": "Creality",
-    "build_volume_mm": {
-      "x": 260,
-      "y": 260,
-      "z": 300
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 100,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "petg",
-      "pla",
-      "pla-cf"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Creality Hi"
   },
   "ender3_v4": {
     "printer_id": "ender3_v4",
-    "display_name": "Creality Ender-3 V4",
-    "manufacturer": "Creality",
-    "build_volume_mm": {
-      "x": 220,
-      "y": 220,
-      "z": 235
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 100,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "petg",
-      "pla",
-      "pla-cf",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Creality Ender-3 V4"
   },
   "ender3_v3": {
     "printer_id": "ender3_v3",
-    "display_name": "Creality Ender-3 V3",
-    "manufacturer": "Creality",
-    "build_volume_mm": {
-      "x": 220,
-      "y": 220,
-      "z": 250
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 110,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Creality Ender-3 V3"
   },
   "ender3_v3_ke": {
     "printer_id": "ender3_v3_ke",
-    "display_name": "Creality Ender-3 V3 KE",
-    "manufacturer": "Creality",
-    "build_volume_mm": {
-      "x": 220,
-      "y": 220,
-      "z": 240
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 100,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Creality Ender-3 V3 KE"
   },
   "ender3_v3_se": {
     "printer_id": "ender3_v3_se",
-    "display_name": "Creality Ender-3 V3 SE",
-    "manufacturer": "Creality",
-    "build_volume_mm": {
-      "x": 220,
-      "y": 220,
-      "z": 250
-    },
-    "max_hotend_temp_c": 260,
-    "max_bed_temp_c": 100,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.2,
-    "max_print_speed_mm_s": 150,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Creality Ender-3 V3 SE"
   },
   "ender3_v3_plus": {
     "printer_id": "ender3_v3_plus",
-    "display_name": "Creality Ender-3 V3 Plus",
-    "manufacturer": "Creality",
-    "build_volume_mm": {
-      "x": 300,
-      "y": 300,
-      "z": 330
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 100,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Creality Ender-3 V3 Plus"
   },
   "ender5_max": {
     "printer_id": "ender5_max",
-    "display_name": "Creality Ender-5 Max",
-    "manufacturer": "Creality",
-    "build_volume_mm": {
-      "x": 400,
-      "y": 400,
-      "z": 400
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 100,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Creality Ender-5 Max"
   },
   "cr10_se": {
     "printer_id": "cr10_se",
-    "display_name": "Creality CR-10 SE",
-    "manufacturer": "Creality",
-    "build_volume_mm": {
-      "x": 220,
-      "y": 220,
-      "z": 265
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 110,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Creality CR-10 SE"
   },
   "prusa_mk3s": {
     "printer_id": "prusa_mk3s",
-    "display_name": "Prusa i3 MK3S / MK3S+",
-    "manufacturer": "Prusa Research",
-    "build_volume_mm": {
-      "x": 250,
-      "y": 210,
-      "z": 210
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 120,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "asa",
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.2,
-    "max_print_speed_mm_s": 100,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Prusa i3 MK3S / MK3S+"
   },
   "elegoo_neptune4": {
     "printer_id": "elegoo_neptune4",
-    "display_name": "Elegoo Neptune 4 / 4 Pro",
-    "manufacturer": "Elegoo",
-    "build_volume_mm": {
-      "x": 225,
-      "y": 225,
-      "z": 265
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 100,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Elegoo Neptune 4 / 4 Pro"
   },
   "elegoo_centauri_carbon": {
     "printer_id": "elegoo_centauri_carbon",
-    "display_name": "Elegoo Centauri Carbon",
-    "manufacturer": "Elegoo",
-    "build_volume_mm": {
-      "x": 256,
-      "y": 256,
-      "z": 256
-    },
-    "max_hotend_temp_c": 320,
-    "max_bed_temp_c": 110,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "asa",
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.2,
-    "max_print_speed_mm_s": 150,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Elegoo Centauri Carbon"
   },
   "elegoo_centauri_carbon_2": {
     "printer_id": "elegoo_centauri_carbon_2",
-    "display_name": "Elegoo Centauri Carbon 2 / Carbon 2 Combo",
-    "manufacturer": "Elegoo",
-    "build_volume_mm": {
-      "x": 256,
-      "y": 256,
-      "z": 256
-    },
-    "max_hotend_temp_c": 350,
-    "max_bed_temp_c": 110,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "asa",
-      "petg",
-      "pla",
-      "pla-cf",
-      "polycarbonate",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 500,
-    "default_layer_heights_mm": [
-      0.12,
-      0.16,
-      0.2,
-      0.24,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Elegoo Centauri Carbon 2 / Carbon 2 Combo"
   },
   "elegoo_orangestorm_giga": {
     "printer_id": "elegoo_orangestorm_giga",
-    "display_name": "Elegoo OrangeStorm Giga",
-    "manufacturer": "Elegoo",
-    "build_volume_mm": {
-      "x": 800,
-      "y": 800,
-      "z": 1000
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 110,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "petg",
-      "pla"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Elegoo OrangeStorm Giga"
   },
   "qidi_x_plus3": {
     "printer_id": "qidi_x_plus3",
-    "display_name": "QIDI X-Plus 3",
-    "manufacturer": "QIDI",
-    "build_volume_mm": {
-      "x": 280,
-      "y": 280,
-      "z": 270
-    },
-    "max_hotend_temp_c": 350,
-    "max_bed_temp_c": 120,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "pa-cf",
-      "pc",
-      "petg",
-      "pla",
-      "pps"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": 65,
-    "chamber_heated": true
+    "display_name": "QIDI X-Plus 3"
   },
   "klipper_generic": {
     "printer_id": "klipper_generic",
-    "display_name": "Generic Klipper Printer (Moonraker)",
-    "manufacturer": "Generic",
-    "build_volume_mm": {
-      "x": 220,
-      "y": 220,
-      "z": 250
-    },
-    "max_hotend_temp_c": 260,
-    "max_bed_temp_c": 110,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "asa",
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 150,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Generic Klipper Printer (Moonraker)"
   },
   "ender5": {
     "printer_id": "ender5",
-    "display_name": "Creality Ender 5 / Ender 5 Plus",
-    "manufacturer": "Creality",
-    "build_volume_mm": {
-      "x": 220,
-      "y": 220,
-      "z": 300
-    },
-    "max_hotend_temp_c": 260,
-    "max_bed_temp_c": 110,
-    "has_enclosure": false,
-    "has_direct_drive": false,
-    "supported_materials": [
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.2,
-    "max_print_speed_mm_s": 150,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Creality Ender 5 / Ender 5 Plus"
   },
   "cr10": {
     "printer_id": "cr10",
-    "display_name": "Creality CR-10 / CR-10S",
-    "manufacturer": "Creality",
-    "build_volume_mm": {
-      "x": 300,
-      "y": 300,
-      "z": 400
-    },
-    "max_hotend_temp_c": 260,
-    "max_bed_temp_c": 100,
-    "has_enclosure": false,
-    "has_direct_drive": false,
-    "supported_materials": [
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.2,
-    "max_print_speed_mm_s": 150,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Creality CR-10 / CR-10S"
   },
   "voron_0": {
     "printer_id": "voron_0",
-    "display_name": "Voron 0 / 0.2",
-    "manufacturer": "Voron",
-    "build_volume_mm": {
-      "x": 120,
-      "y": 120,
-      "z": 120
-    },
-    "max_hotend_temp_c": 270,
-    "max_bed_temp_c": 120,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "asa",
-      "petg",
-      "pla"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Voron 0 / 0.2"
   },
   "ratrig_vcore3": {
     "printer_id": "ratrig_vcore3",
-    "display_name": "Rat Rig V-Core 3 / V-Core 3.1",
-    "manufacturer": "RatRig",
-    "build_volume_mm": {
-      "x": 300,
-      "y": 300,
-      "z": 300
-    },
-    "max_hotend_temp_c": 285,
-    "max_bed_temp_c": 120,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Rat Rig V-Core 3 / V-Core 3.1"
   },
   "elegoo_neptune3": {
     "printer_id": "elegoo_neptune3",
-    "display_name": "Elegoo Neptune 3 / 3 Pro / 3 Plus",
-    "manufacturer": "Elegoo",
-    "build_volume_mm": {
-      "x": 220,
-      "y": 220,
-      "z": 280
-    },
-    "max_hotend_temp_c": 260,
-    "max_bed_temp_c": 100,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.2,
-    "max_print_speed_mm_s": 60,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Elegoo Neptune 3 / 3 Pro / 3 Plus"
   },
   "anker_m5": {
     "printer_id": "anker_m5",
-    "display_name": "AnkerMake M5 / M5C",
-    "manufacturer": "AnkerMake",
-    "build_volume_mm": {
-      "x": 235,
-      "y": 235,
-      "z": 250
-    },
-    "max_hotend_temp_c": 260,
-    "max_bed_temp_c": 100,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "AnkerMake M5 / M5C"
   },
   "artillery_sw_x3": {
     "printer_id": "artillery_sw_x3",
-    "display_name": "Artillery Sidewinder X3 Pro",
-    "manufacturer": "Artillery",
-    "build_volume_mm": {
-      "x": 240,
-      "y": 240,
-      "z": 260
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 100,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Artillery Sidewinder X3 Pro"
   },
   "artillery_sw_x3_plus": {
     "printer_id": "artillery_sw_x3_plus",
-    "display_name": "Artillery Sidewinder X3 Plus",
-    "manufacturer": "Artillery",
-    "build_volume_mm": {
-      "x": 300,
-      "y": 300,
-      "z": 400
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 100,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Artillery Sidewinder X3 Plus"
   },
   "sovol_sv06": {
     "printer_id": "sovol_sv06",
-    "display_name": "Sovol SV06",
-    "manufacturer": "Sovol",
-    "build_volume_mm": {
-      "x": 220,
-      "y": 220,
-      "z": 250
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 100,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.2,
-    "max_print_speed_mm_s": 150,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Sovol SV06"
   },
   "sovol_sv06_plus": {
     "printer_id": "sovol_sv06_plus",
-    "display_name": "Sovol SV06 Plus",
-    "manufacturer": "Sovol",
-    "build_volume_mm": {
-      "x": 300,
-      "y": 300,
-      "z": 340
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 100,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.2,
-    "max_print_speed_mm_s": 150,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Sovol SV06 Plus"
   },
   "sovol_sv07": {
     "printer_id": "sovol_sv07",
-    "display_name": "Sovol SV07",
-    "manufacturer": "Sovol",
-    "build_volume_mm": {
-      "x": 220,
-      "y": 220,
-      "z": 250
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 100,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Sovol SV07"
   },
   "sovol_sv07_plus": {
     "printer_id": "sovol_sv07_plus",
-    "display_name": "Sovol SV07 Plus",
-    "manufacturer": "Sovol",
-    "build_volume_mm": {
-      "x": 300,
-      "y": 300,
-      "z": 350
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 100,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Sovol SV07 Plus"
   },
   "flashforge_adventurer5m": {
     "printer_id": "flashforge_adventurer5m",
-    "display_name": "FlashForge Adventurer 5M / 5M Pro",
-    "manufacturer": "FlashForge",
-    "build_volume_mm": {
-      "x": 220,
-      "y": 220,
-      "z": 220
-    },
-    "max_hotend_temp_c": 280,
-    "max_bed_temp_c": 110,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "FlashForge Adventurer 5M / 5M Pro"
   },
   "prusa_xl": {
     "printer_id": "prusa_xl",
-    "display_name": "Prusa XL",
-    "manufacturer": "Prusa Research",
-    "build_volume_mm": {
-      "x": 360,
-      "y": 360,
-      "z": 360
-    },
-    "max_hotend_temp_c": 290,
-    "max_bed_temp_c": 120,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "asa",
-      "pa-cf",
-      "petg",
-      "pla"
-    ],
-    "typical_tolerance_mm": 0.2,
-    "max_print_speed_mm_s": 150,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Prusa XL"
   },
   "bambu_p1p": {
     "printer_id": "bambu_p1p",
-    "display_name": "Bambu Lab P1P",
-    "manufacturer": "Bambu Lab",
-    "build_volume_mm": {
-      "x": 256,
-      "y": 256,
-      "z": 256
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 100,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 300,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Bambu Lab P1P"
   },
   "aon_m2_plus": {
     "printer_id": "aon_m2_plus",
-    "display_name": "AON3D AON-M2+",
-    "manufacturer": "AON3D",
-    "build_volume_mm": {
-      "x": 450,
-      "y": 450,
-      "z": 565
-    },
-    "max_hotend_temp_c": 500,
-    "max_bed_temp_c": 200,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "asa",
-      "pa-cf",
-      "pc",
-      "peek",
-      "pekk",
-      "petg",
-      "pla",
-      "pps",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.15,
-      0.2,
-      0.25,
-      0.3,
-      0.4
-    ],
-    "chamber_temp_c": 135,
-    "chamber_heated": true
+    "display_name": "AON3D AON-M2+"
   },
   "qidi_plus4": {
     "printer_id": "qidi_plus4",
-    "display_name": "QIDI Plus 4",
-    "manufacturer": "QIDI",
-    "build_volume_mm": {
-      "x": 305,
-      "y": 305,
-      "z": 280
-    },
-    "max_hotend_temp_c": 370,
-    "max_bed_temp_c": 120,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "pa-cf",
-      "pc",
-      "petg",
-      "pla",
-      "pps"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": 65,
-    "chamber_heated": true
+    "display_name": "QIDI Plus 4"
   },
   "qidi_q1_pro": {
     "printer_id": "qidi_q1_pro",
-    "display_name": "QIDI Q1 Pro",
-    "manufacturer": "QIDI",
-    "build_volume_mm": {
-      "x": 245,
-      "y": 245,
-      "z": 240
-    },
-    "max_hotend_temp_c": 350,
-    "max_bed_temp_c": 120,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "pa-cf",
-      "pc",
-      "petg",
-      "pla",
-      "pps"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": 60,
-    "chamber_heated": true
+    "display_name": "QIDI Q1 Pro"
   },
   "qidi_x_max3": {
     "printer_id": "qidi_x_max3",
-    "display_name": "QIDI X-Max 3",
-    "manufacturer": "QIDI",
-    "build_volume_mm": {
-      "x": 325,
-      "y": 325,
-      "z": 315
-    },
-    "max_hotend_temp_c": 350,
-    "max_bed_temp_c": 120,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "pa-cf",
-      "pc",
-      "petg",
-      "pla",
-      "pps"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": 65,
-    "chamber_heated": true
+    "display_name": "QIDI X-Max 3"
   },
   "qidi_q2": {
     "printer_id": "qidi_q2",
-    "display_name": "QIDI Q2",
-    "manufacturer": "QIDI",
-    "build_volume_mm": {
-      "x": 270,
-      "y": 270,
-      "z": 256
-    },
-    "max_hotend_temp_c": 370,
-    "max_bed_temp_c": 120,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "pa-cf",
-      "pc",
-      "petg",
-      "pla",
-      "pps"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": 65,
-    "chamber_heated": true
+    "display_name": "QIDI Q2"
   },
   "qidi_plus5": {
     "printer_id": "qidi_plus5",
-    "display_name": "QIDI Plus 5",
-    "manufacturer": "QIDI",
-    "build_volume_mm": {
-      "x": 320,
-      "y": 320,
-      "z": 300
-    },
-    "max_hotend_temp_c": 370,
-    "max_bed_temp_c": 120,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "pa-cf",
-      "pc",
-      "petg",
-      "pla",
-      "pps"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": 65,
-    "chamber_heated": true
+    "display_name": "QIDI Plus 5"
   },
   "qidi_q2c": {
     "printer_id": "qidi_q2c",
-    "display_name": "QIDI Q2C",
-    "manufacturer": "QIDI",
-    "build_volume_mm": {
-      "x": 270,
-      "y": 270,
-      "z": 256
-    },
-    "max_hotend_temp_c": 370,
-    "max_bed_temp_c": 120,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "pa-cf",
-      "pc",
-      "petg",
-      "pla"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 250,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "QIDI Q2C"
   },
   "qidi_max4": {
     "printer_id": "qidi_max4",
-    "display_name": "QIDI Max 4",
-    "manufacturer": "QIDI",
-    "build_volume_mm": {
-      "x": 390,
-      "y": 390,
-      "z": 340
-    },
-    "max_hotend_temp_c": 370,
-    "max_bed_temp_c": 120,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "pa-cf",
-      "pc",
-      "petg",
-      "pla",
-      "pps"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 300,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": 65,
-    "chamber_heated": true
+    "display_name": "QIDI Max 4"
   },
   "qidi_x_smart3": {
     "printer_id": "qidi_x_smart3",
-    "display_name": "QIDI X-Smart 3",
-    "manufacturer": "QIDI",
-    "build_volume_mm": {
-      "x": 175,
-      "y": 180,
-      "z": 170
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 120,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "asa",
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 200,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "QIDI X-Smart 3"
   },
   "ender3_s1_pro": {
-    "display_name": "Ender 3 S1 Pro",
-    "manufacturer": "Creality",
-    "build_volume_mm": {
-      "x": 220,
-      "y": 220,
-      "z": 270
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 100,
-    "has_enclosure": false,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "asa",
-      "petg",
-      "pla",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.18,
-    "max_print_speed_mm_s": 150,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
     "printer_id": "ender3_s1_pro",
-    "chamber_temp_c": null,
-    "chamber_heated": false
+    "display_name": "Ender 3 S1 Pro"
   },
   "aon_hylo": {
     "printer_id": "aon_hylo",
-    "display_name": "AON3D Hylo",
-    "manufacturer": "AON3D",
-    "build_volume_mm": {
-      "x": 650,
-      "y": 450,
-      "z": 450
-    },
-    "max_hotend_temp_c": 500,
-    "max_bed_temp_c": 250,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "asa",
-      "pa-cf",
-      "pc",
-      "peek",
-      "pei_1010",
-      "pei_9085",
-      "pekk",
-      "petg",
-      "pla",
-      "pps",
-      "ppsu",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 500,
-    "default_layer_heights_mm": [
-      0.15,
-      0.2,
-      0.3,
-      0.4,
-      0.6
-    ],
-    "chamber_temp_c": 250,
-    "chamber_heated": true
+    "display_name": "AON3D Hylo"
   },
   "intamsys_610ht": {
     "printer_id": "intamsys_610ht",
-    "display_name": "INTAMSYS FUNMAT PRO 610HT",
-    "manufacturer": "INTAMSYS",
-    "build_volume_mm": {
-      "x": 610,
-      "y": 508,
-      "z": 508
-    },
-    "max_hotend_temp_c": 500,
-    "max_bed_temp_c": 300,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "asa",
-      "pa-cf",
-      "pc",
-      "peek",
-      "pei_1010",
-      "pei_9085",
-      "pekk",
-      "petg",
-      "pla",
-      "pps",
-      "ppsu",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 500,
-    "default_layer_heights_mm": [
-      0.15,
-      0.2,
-      0.3,
-      0.4,
-      0.5
-    ],
-    "chamber_temp_c": 300,
-    "chamber_heated": true
+    "display_name": "INTAMSYS FUNMAT PRO 610HT"
   },
   "visionminer_22idex_v4": {
     "printer_id": "visionminer_22idex_v4",
-    "display_name": "Vision Miner 22 IDEX v4",
-    "manufacturer": "Vision Miner",
-    "build_volume_mm": {
-      "x": 350,
-      "y": 350,
-      "z": 450
-    },
-    "max_hotend_temp_c": 500,
-    "max_bed_temp_c": 200,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "asa",
-      "pa-cf",
-      "pc",
-      "petg",
-      "pla",
-      "pps",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.15,
-    "max_print_speed_mm_s": 200,
-    "default_layer_heights_mm": [
-      0.1,
-      0.15,
-      0.2,
-      0.3
-    ],
-    "chamber_temp_c": 100,
-    "chamber_heated": true
+    "display_name": "Vision Miner 22 IDEX v4"
   },
   "bambu_h2d": {
     "printer_id": "bambu_h2d",
-    "display_name": "Bambu Lab H2D",
-    "manufacturer": "Bambu Lab",
-    "build_volume_mm": {
-      "x": 300,
-      "y": 320,
-      "z": 320
-    },
-    "max_hotend_temp_c": 350,
-    "max_bed_temp_c": 120,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "asa",
-      "nylon",
-      "petg",
-      "pla",
-      "polycarbonate",
-      "pps",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.1,
-    "max_print_speed_mm_s": 1000,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": 65,
-    "chamber_heated": true
+    "display_name": "Bambu Lab H2D"
   },
   "bambu_h2d_pro": {
     "printer_id": "bambu_h2d_pro",
-    "display_name": "Bambu Lab H2D Pro",
-    "manufacturer": "Bambu Lab",
-    "build_volume_mm": {
-      "x": 300,
-      "y": 320,
-      "z": 320
-    },
-    "max_hotend_temp_c": 350,
-    "max_bed_temp_c": 120,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "asa",
-      "nylon",
-      "petg",
-      "pla",
-      "polycarbonate",
-      "pps",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.1,
-    "max_print_speed_mm_s": 1000,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": 65,
-    "chamber_heated": true
+    "display_name": "Bambu Lab H2D Pro"
   },
   "bambu_h2c": {
     "printer_id": "bambu_h2c",
-    "display_name": "Bambu Lab H2C",
-    "manufacturer": "Bambu Lab",
-    "build_volume_mm": {
-      "x": 300,
-      "y": 320,
-      "z": 320
-    },
-    "max_hotend_temp_c": 350,
-    "max_bed_temp_c": 120,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "abs",
-      "asa",
-      "nylon",
-      "petg",
-      "pla",
-      "polycarbonate",
-      "pps",
-      "tpu"
-    ],
-    "typical_tolerance_mm": 0.1,
-    "max_print_speed_mm_s": 1000,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": 65,
-    "chamber_heated": true
+    "display_name": "Bambu Lab H2C"
   },
   "bambu_x2d": {
     "printer_id": "bambu_x2d",
-    "display_name": "Bambu Lab X2D",
-    "manufacturer": "Bambu Lab",
-    "build_volume_mm": {
-      "x": 235,
-      "y": 256,
-      "z": 256
-    },
-    "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 120,
-    "has_enclosure": true,
-    "has_direct_drive": true,
-    "supported_materials": [
-      "pla",
-      "petg",
-      "abs",
-      "tpu",
-      "asa",
-      "nylon",
-      "polycarbonate"
-    ],
-    "typical_tolerance_mm": 0.1,
-    "max_print_speed_mm_s": 1000,
-    "default_layer_heights_mm": [
-      0.08,
-      0.12,
-      0.16,
-      0.2,
-      0.28
-    ],
-    "chamber_temp_c": 65,
-    "chamber_heated": true
+    "display_name": "Bambu Lab X2D"
   }
 }

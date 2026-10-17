@@ -15,15 +15,15 @@ from __future__ import annotations
 import os
 import struct
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import pytest
 from PIL import Image
 
-from unittest import mock
-
 from kiln import stage_paint
 from kiln.stage_paint import try_paint_stage_views
+from tests._child_memory import CHILD_PEAK_MB_FUNCTION
 
 _BG = (26, 34, 45)  # #1A222D
 _ISO = {"isometric": (55.0, 0.0, 25.0)}
@@ -583,7 +583,8 @@ def test_render_memory_stays_bounded(probe: str, tmp_path: Path) -> None:
         "    {'isometric': (55, 0, 25)},\n"
         f"    output_dir={str(tmp_path / 'membound')!r}, width=800, height=600)\n"
         "assert views, 'painter declined the probe'\n"
-        "print(int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))\n"
+        + CHILD_PEAK_MB_FUNCTION
+        + "print(_peak_mb())\n"
     )
     # A minimal, explicit environment: the child measures the PAINTER,
     # not the suite's fixtures.  The conftest relocates HOME (which would
@@ -599,7 +600,7 @@ def test_render_memory_stays_bounded(probe: str, tmp_path: Path) -> None:
         timeout=180, env=env,
     )
     assert out.returncode == 0, out.stderr[-1000:]
-    peak_mb = int(out.stdout.strip().splitlines()[-1]) / (1024 * 1024)
+    peak_mb = float(out.stdout.strip().splitlines()[-1])
     assert peak_mb < 2000, f"render peaked at {peak_mb:.0f} MB"
 
 

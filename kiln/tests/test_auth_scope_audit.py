@@ -101,6 +101,8 @@ def _scopes_used(body: str) -> set[str]:
 # ---------------------------------------------------------------------------
 
 READ_ONLY_TOOLS: set[str] = {
+    # Reads the signed-in account's spend caps; changes nothing.
+    "kiln_spend_caps_show",
     # Printer status / info (read-only queries)
     "printer_status",
     "printer_files",
@@ -337,14 +339,6 @@ READ_ONLY_TOOLS: set[str] = {
     "search_all_models",
     "search_models",
 
-    # material_catalog_tools.py -- catalog queries
-    "find_material_match",
-    "get_compatible_materials",
-    "get_material_info",
-    "get_material_purchase_urls",
-    "list_material_catalog",
-    "search_material_catalog",
-
     # material_inventory_tools.py -- inventory queries and pure
     # assignment/swap recommendations (nothing is submitted)
     "check_material_sufficiency",
@@ -370,11 +364,6 @@ READ_ONLY_TOOLS: set[str] = {
     "estimate_mesh_print_time",
     "mesh_quality_scorecard",
     "validate_generated_mesh",
-
-    # network_tools.py -- provider queries (connect/submit/sync are gated)
-    "find_provider_capacity",
-    "list_provider_capacity",
-    "provider_job_status",
 
     # printability_tools.py -- analysis (auto_orient_model can write a
     # reoriented STL and is gated)
@@ -620,7 +609,6 @@ class TestAuthScopeAudit:
             "retrieve_credential",
             "upgrade_kiln",
             "trim_serve_processes",
-            "submit_provider_job",
             "save_shipping_profile",
             "retry_print_with_fix",
             "repair_mesh",

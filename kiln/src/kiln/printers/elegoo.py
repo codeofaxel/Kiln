@@ -10,10 +10,12 @@ registration step, not SDCP, and Kiln has no adapter for it yet.
 
 The adapter uses:
 
-* **WebSocket** on port 3030 for status, commands, and control.
+* **WebSocket** on TCP port 3030 for status, commands, and control.
 * **UDP** broadcast on port 3000 for printer discovery.
-* **HTTP file server** for file uploads (the printer fetches files from a
-  URL you provide — Kiln starts a temporary HTTP server).
+* **HTTP upload** to the printer's own ``:3030/uploadFile/upload`` (SDCP V3,
+  tried first).  Older SDCP V2 firmware instead fetches the file from a URL,
+  for which Kiln starts a temporary HTTP server (the fallback; see
+  :meth:`ElegooAdapter.upload_file`).
 
 .. note::
 
@@ -44,6 +46,7 @@ import requests
 from kiln.printers.base import (
     STALE_STATE_WARN_AGE,
     ActiveSlotReading,
+    CameraHandshake,
     FilamentHandlingUnsupported,
     FilamentOpPlan,
     FilamentOpResult,
@@ -1617,6 +1620,22 @@ class ElegooAdapter(PrinterAdapter):
                 ),
             )
         ]
+
+    def _own_camera_handshake(self) -> CameraHandshake:
+        """Not checked: asking this printer where its camera is switches video on.
+
+        The one address this printer's camera answers on comes from SDCP
+        command 386 with ``Enable: 1`` — the printer starts its stream to
+        answer — so there is no way to ask without starting it, and the
+        handshake says so rather than send the command.
+        """
+        return CameraHandshake(
+            None,
+            "elegoo_video_url",
+            "This printer names its camera address only when asked to switch video on "
+            "(SDCP command 386), so Kiln did not ask; the camera check does, when you "
+            "ask for it.",
+        )
 
     def stream_capability(self) -> StreamCapability:
         """Whether Kiln's relay can carry this printer's video, from what the

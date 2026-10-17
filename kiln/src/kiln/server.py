@@ -53,7 +53,6 @@ import atexit
 # Import kiln-pro early so compatibility shims are installed before
 # any try/except imports of pro modules (kiln.billing, kiln.licensing, etc.).
 import contextlib
-import functools
 import logging
 import os
 import re
@@ -108,7 +107,9 @@ from kiln.print_consent import (
     unasked_look_noted,
     why_not_asked,
 )
+from kiln.provider_terms import CRAFTCLOUD_TERMS_URL, order_terms, pay_methods, tax_note
 from kiln.tool_args import parse_json_array, parse_json_object
+from kiln.untrusted_zip import UntrustedZipFile
 
 with contextlib.suppress(ImportError):
     import kiln_pro  # noqa: F401 — triggers compat shim installation
@@ -127,7 +128,15 @@ try:
     from kiln.billing_alerts import BillingAlertManager
 except ImportError:
     BillingAlertManager = None  # Available in kiln-pro
-from kiln.cli.config import _normalize_printer_type, _validate_printer_url, save_printer
+from kiln.cli.config import (
+    PrinterNameTaken,
+    SavedPrinterMatch,
+    _check_printer_url,
+    _normalize_printer_type,
+    save_printer,
+    saved_printer_for_update,
+    unsaved_printer_entry,
+)
 from kiln.cloud_sync import CloudSyncManager, SyncConfig
 from kiln.cost_estimator import (
     BUILTIN_MATERIALS,
@@ -138,6 +147,7 @@ from kiln.cost_estimator import (
 )
 from kiln.errors import HostedUnavailableError
 from kiln.events import Event, EventBus, EventType
+from kiln.format_conversion import ARRIVAL_CONVERSIONS, convert_on_arrival
 
 try:
     from kiln.fulfillment import (
@@ -153,7 +163,6 @@ except ImportError:
     FulfillmentProvider = None
     QuoteRequest = None
     get_fulfillment_provider = None
-from kiln.gateway.threedos import ThreeDOSClient
 from kiln.gcode import validate_gcode as _validate_gcode_impl
 from kiln.gcode import validate_gcode_for_printer
 from kiln.generation import (
@@ -167,126 +176,20 @@ from kiln.generation import (
     validate_mesh,
 )
 from kiln.heater_watchdog import HeaterWatchdog
-from kiln.tool_results import unwrap_tool_result
 
-try:
-    from kiln.licensing import (
-        FREE_TIER_MAX_PRINTERS,
-        LicenseTier,
-        check_tier,
-        get_tier,
-        requires_tier,
-    )
-    # Pro / Business caps are supplied by kiln-pro's licensing module
-    # when installed.  Free users never have kiln-pro so the fallback
-    # block below is their runtime state.
-    try:
-        from kiln.licensing import (
-            BUSINESS_TIER_MAX_PRINTERS,
-            PRO_TIER_MAX_PRINTERS,
-            max_printers_for_tier,
-        )
-    except ImportError:
-        PRO_TIER_MAX_PRINTERS = 1
-        BUSINESS_TIER_MAX_PRINTERS = 50
-
-        def max_printers_for_tier(tier: object) -> int | None:
-            value = getattr(tier, "value", tier)
-            if value == "free":
-                return FREE_TIER_MAX_PRINTERS
-            if value == "pro":
-                return PRO_TIER_MAX_PRINTERS
-            if value == "business":
-                return BUSINESS_TIER_MAX_PRINTERS
-            return None  # enterprise → unlimited
-
-except ImportError:
-    # Free-tier fallback when kiln-pro is not installed — which is nearly every
-    # install, so THIS is the cap most users actually run under, not the branch
-    # above.  That asymmetry is what let it rot: the numbers here read 2 and 5
-    # against an enforced 1 and 1 for months, and could not be noticed locally
-    # by anyone who HAD kiln-pro installed, because they never execute there.
-    # Public CI runs this branch on every job and asserted nothing about it.
-    # Pinned now by kiln-pro's scripts/audit_tier_claims.py, which compares
-    # these literals to the licensing constants across the repo boundary.
-    FREE_TIER_MAX_PRINTERS = 1
-    PRO_TIER_MAX_PRINTERS = 1
-    BUSINESS_TIER_MAX_PRINTERS = 50
-
-    def max_printers_for_tier(tier: object) -> int | None:  # type: ignore[no-redef]
-        value = getattr(tier, "value", tier)
-        if value == "free":
-            return FREE_TIER_MAX_PRINTERS
-        if value == "pro":
-            return PRO_TIER_MAX_PRINTERS
-        if value == "business":
-            return BUSINESS_TIER_MAX_PRINTERS
-        return None
-
-    class _DummyTier:
-        """Stub for LicenseTier when licensing module is not installed."""
-
-        PRO = "pro"
-        ENTERPRISE = "enterprise"
-        BUSINESS = "business"
-        FREE = "free"
-
-    LicenseTier = _DummyTier  # type: ignore[misc]
-
-    def check_tier(required, *_a, **_kw):
-        # Imported locally: this stub is defined above the module's import
-        # block, and the message is the one a caller shows a person.  The
-        # (ok, message) tuple is an established contract with no room for an
-        # agent-addressed field, so callers that build a response dict around
-        # it splat ``signin_hint_fields()`` in themselves.
-        from kiln.tiers_and_terms import tier_required_message
-
-        tier_label = getattr(required, "value", required) if required else "pro"
-        return (False, tier_required_message("This feature", str(tier_label)))
-
-    def get_tier(*_a, **_kw):
-        return "free"
-
-    def requires_tier(_tier):
-        """Gate pro/enterprise features when kiln-pro is not installed."""
-        tier_label = getattr(_tier, "value", _tier) if _tier else "pro"
-
-        def decorator(fn):
-            @functools.wraps(fn)
-            def wrapper(*args, **kwargs):
-                tool_name = fn.__name__
-                # Funnel-leak telemetry: every TIER_REQUIRED on this
-                # path is a user reaching for a locked door.  Counted
-                # in daily_stats and rolled up in the heartbeat so we
-                # can see which tools are driving "I paid but my agent
-                # doesn't know" support volume.  Best-effort; never
-                # blocks the error path.
-                try:
-                    from kiln.daily_stats import record_tier_denial
-                    record_tier_denial(tool_name)
-                except Exception:
-                    pass
-                from kiln.tiers_and_terms import (
-                    signin_hint_fields,
-                    tier_required_message,
-                )
-
-                return {
-                    "success": False,
-                    "error": tier_required_message(tool_name, str(tier_label)),
-                    "code": "TIER_REQUIRED",
-                    "required_tier": str(tier_label),
-                    "tool": tool_name,
-                    "retryable": False,
-                    "upgrade_url": "https://kiln3d.com/pricing",
-                    **signin_hint_fields(),
-                }
-
-            return wrapper
-
-        return decorator
-
-
+# The plan gates read.  ``kiln.licensing`` is kiln-pro's licensing module when
+# kiln-pro is installed, and otherwise the signed-in account's plan
+# (``kiln.account_plan``), so a subscriber on a plain install is on their plan.
+from kiln.licensing import (  # noqa: F401 — plugins read these off this module
+    BUSINESS_TIER_MAX_PRINTERS,
+    FREE_TIER_MAX_PRINTERS,
+    PRO_TIER_MAX_PRINTERS,
+    LicenseTier,
+    check_tier,
+    get_tier,
+    max_printers_for_tier,
+    requires_tier,
+)
 from kiln.log_config import configure_logging as _configure_log_rotation
 from kiln.marketplaces import (
     Cults3DAdapter,
@@ -300,6 +203,7 @@ from kiln.marketplaces import (
     MarketplaceNotFoundError as MktNotFoundError,
 )
 from kiln.materials import MaterialTracker
+from kiln.tool_results import unwrap_tool_result
 
 try:
     from kiln_pro.payments.base import PaymentError
@@ -310,6 +214,7 @@ try:
     from kiln_pro.payments.manager import PaymentManager
 except ImportError:
     PaymentManager = None  # Available in kiln-pro
+from kiln.front_door import FRONT_DOOR_LINE as _FRONT_DOOR_LINE
 from kiln.hotend_safety import MOLTEN_FILAMENT_WARNING, needs_burn_warning
 from kiln.persistence import get_db
 from kiln.pipelines import (
@@ -336,7 +241,13 @@ from kiln.pipelines import (
 from kiln.plugin_loader import register_all_plugins
 from kiln.plugins import PluginContext, PluginManager
 from kiln.print_start_verdict import resolve_print_start
-from kiln.printer_backends import DEFAULT_SERIAL_BAUDRATE, format_printer_types
+from kiln.printer_backends import (
+    DEFAULT_SERIAL_BAUDRATE,
+    format_printer_types,
+    missing_needs,
+    needs_sentence,
+    setup_summary,
+)
 from kiln.printer_intelligence import (
     diagnose_issue,
     extract_codes,
@@ -370,7 +281,11 @@ from kiln.printers import (
     status_is_unreachable,
     stuck_job_note,
 )
+from kiln.printers import engagement as _engagement
+from kiln.printers.base import PrinterEngagementError, read_machine_identity_bounded
 from kiln.printers.command_verdict import CommandVerdict
+from kiln.printers.engagement import refusal_in_flight as engagement_refusal_in_flight
+from kiln.printers.engagement import refusal_words as engagement_refusal_words
 from kiln.queue import JobNotFoundError, JobStatus, PrintQueue
 from kiln.registry import PrinterNotFoundError, PrinterRegistry
 from kiln.safety_profiles import export_profile as _export_profile
@@ -386,12 +301,17 @@ from kiln.thingiverse import (
 )
 from kiln.tiers_and_terms import (
     AGENT_ACCOUNT_NUDGE,
+    OFFER_FIRST_LINE,
+    PRICING_URL,
     TIERS_AND_TERMS,
     UPGRADE_NUDGE_SCHEMA_VERSION,
     account_required_message,
+    paywall_fields,
     session_expired_message,
     signin_hint_fields,
+    tag_pricing_links,
     tier_required_message,
+    upgrade_link,
     upgrade_nudge_block,
 )
 from kiln.tool_annotations import creates, read_only
@@ -791,8 +711,11 @@ def ensure_runtime_config() -> None:
 # connector, and the desktop chat prompt are the others); a literal here
 # meant three of the four silently shipped without it.  Aliased so both the
 # dynamic builder (``_build_instructions``) and the static FastMCP fallback
-# below keep reading one definition.
-_TIERS_AND_TERMS = TIERS_AND_TERMS
+# below keep reading one definition.  The offer-first line rides with it: on
+# an install without kiln-pro every paid tool is a stub whose tier is in its
+# description, which is exactly where an agent reads a tier and builds the
+# feature itself without ever calling the tool.
+_TIERS_AND_TERMS = TIERS_AND_TERMS + "\n\n" + OFFER_FIRST_LINE
 
 
 def _build_instructions() -> str:
@@ -840,6 +763,18 @@ def _build_instructions() -> str:
     # reach for tier-gated tools.  Shared constant -- see the static fallback.
     parts.append(_TIERS_AND_TERMS)
 
+    # The make story, one sentence, before any make tool is named: a make
+    # starts with design_session, and every other make tool is an engine it
+    # calls.  Judged against THIS registry -- a plain install has only the
+    # stub, and is told that compile_scad is the loop here.  Shared words --
+    # kiln.front_door is the one home; the hosted connector reads it too.
+    try:
+        from kiln.front_door import front_door_line, front_door_present
+
+        parts.append(front_door_line(front_door_present(mcp)))
+    except Exception:  # noqa: BLE001 -- instructions must never fail to build
+        parts.append(_FRONT_DOOR_LINE)
+
     # --- Update nudge (non-blocking; reads the cached PyPI check) ---
     # A new-version notice an agent reads on connect, so it can pass the
     # heads-up to the user.  Wrapped defensively: a nudge must never break
@@ -868,6 +803,9 @@ def _build_instructions() -> str:
 
         if not _read_tokens().get("access_token"):
             parts.append(f"ACCOUNT: {AGENT_ACCOUNT_NUDGE}")
+            from kiln.daily_stats import record_account_nudge
+
+            record_account_nudge("offered_connect")
     except Exception:  # noqa: BLE001 -- nudge is best-effort, never fatal
         pass
 
@@ -961,7 +899,7 @@ def _build_instructions() -> str:
         "previewed but not asked about, and every print result carries a "
         "`standing_window` block naming it. When the person says to close it, call "
         "`revoke_consent_window`; `consent_window_status` shows what is open. "
-        "Nothing you can call opens or extends one. The person can also turn on "
+        "Nothing you can call opens or extends one. On Kiln Pro the person can also turn on "
         "always allow for one printer, themselves: at a terminal (`kiln consent window "
         "--always --printer NAME`) or on their Kiln account page with their "
         "authenticator. Prints there start without asking until it is "
@@ -1010,9 +948,9 @@ def _build_instructions() -> str:
         "patterns). Key tools:\n"
         "  - `design_session(verb=\"start\", idea=\"...\")` — user-facing entry point for any new design (captures saved goal at duty / environment / materials / safety layer)\n"
         "  - `analyze_design_requirements(requirements)` — internal functional-analysis lookup `design_session` calls into\n"
-        "  - `recommend_design_material(use_case)` — intelligent material selection\n"
+        "  - `recommend_design_material(requirements)` — intelligent material selection\n"
         f"  - `find_design_templates(use_case)` — search {_parts_n} ready-made parametric parts (brackets, bins, stands, cases, hooks, jigs, clamps). Call this FIRST when the user wants a functional part to their own dimensions\n"
-        "  - `generate_from_template(id, params)` — build one to a printable STL, locally and free, no AI provider needed\n"
+        "  - `generate_from_template(template_id, parameters)` — build one to a printable STL, locally and free, no AI provider needed\n"
         "  - `get_material_design_profile(material)` — material-specific rules\n"
         "  - `estimate_structural_load(...)` — load capacity analysis\n"
         "  - `validate_design_for_requirements(...)` — design verification\n"
@@ -1137,8 +1075,18 @@ mcp = FastMCP(
         "hundreds of tools — use `ToolSearch(keyword)` to load schemas "
         "on demand instead of guessing names. Kiln — AI agent "
         "infrastructure for 3D printing.\n\n" + _TIERS_AND_TERMS
+        + "\n\n" + _FRONT_DOOR_LINE
     ),
 )
+
+# Before any tool registers: every tool that takes a location to write to
+# refuses one a caller names in a hidden or system folder, or with a file
+# type the tool does not make.  Every door that runs a tool ends at the
+# tool's function, which is where this sits (see kiln.output_paths).
+from kiln import output_paths as _output_paths  # noqa: E402
+
+if not _output_paths.install(mcp):
+    logger.warning("output-path guard not installed: unrecognised tool registry")
 
 _current_mcp_request_context: ContextVar[Any | None] = ContextVar(
     "kiln_current_mcp_request_context",
@@ -1425,7 +1373,7 @@ def _install_mcp_request_context_capture() -> None:
         convert_result: bool = False,
     ):
         token = _current_mcp_request_context.set(context)
-        tool_token = _tool_context.enter_tool(name)
+        tool_token = _tool_context.enter_tool(name, arguments)
         consent_token = None
         # Which app is on the other end of this connection, counted once
         # per process on the first tool call to land — the handshake is
@@ -1554,6 +1502,37 @@ _install_published_schema()
 
 _adapter: PrinterAdapter | None = None
 
+#: What the default-printer lookup raises when no printer is set up anywhere
+#: (no environment, no config.yaml entry, an empty registry).  A terminal
+#: prints it as it is, so it names the terminal's way to add one.  A tool
+#: reply never shows it: :func:`_error_dict` rebuilds any refusal carrying
+#: it into :func:`_no_printer_refusal`.
+NO_PRINTER_CONFIGURED = "No printer is set up in Kiln yet. Run `kiln setup` to add one."
+
+#: The one sentence a person reads when a printer tool finds none set up.
+#: No tool names: what to do next is the agent's to offer.
+NO_PRINTER_MESSAGE = "No printer is set up in Kiln yet."
+
+#: What the agent is asked to do about it, on a computer that can reach one.
+_NO_PRINTER_AGENT_HINT = (
+    "Offer to set the person's printer up now, in plain words. Ask which "
+    "printer they have (make and model), then look for it on their network "
+    "with discover_printers: each printer it finds says what it still needs, "
+    "where the person finds it, and anything to switch on in the printer "
+    "first. Ask the person only for those, add the printer with "
+    "register_printer, and retry what they asked for. Never show them tool "
+    "names. For a printer discover_printers cannot find, this is what each "
+    "kind needs:\n" + setup_summary()
+)
+
+#: The same refusal on Kiln's hosted server, which connects to no printer.
+_NO_PRINTER_HOSTED_HINT = (
+    "This is Kiln's hosted server, which connects to no printer. A printer is "
+    "set up in Kiln installed on a computer on the same network as the "
+    "printer (https://kiln3d.com/install); offer to walk the person through "
+    "that, in plain words."
+)
+
 
 def _get_adapter() -> PrinterAdapter:
     """Return the lazily-initialised printer adapter.
@@ -1619,11 +1598,7 @@ def _get_adapter() -> PrinterAdapter:
             ensure_runtime_config()
             if _PRINTER_HOST:
                 return _get_adapter()
-        raise RuntimeError(
-            "No printer configured. Set KILN_PRINTER_HOST environment variable "
-            "to the printer URL (e.g. http://octopi.local). Also set "
-            "KILN_PRINTER_API_KEY and optionally KILN_PRINTER_TYPE."
-        )
+        raise RuntimeError(NO_PRINTER_CONFIGURED)
     if printer_type == "octoprint":
         if not api_key:
             raise RuntimeError(
@@ -2188,6 +2163,22 @@ def _get_temp_limits(printer_name: str | None = None) -> tuple:
     return _UNKNOWN_PRINTER_MAX_HOTEND_C, _UNKNOWN_PRINTER_MAX_BED_C
 
 
+def _unknown_limit_ask(printer_name: str | None) -> str:
+    """The sentence after a refusal at the generic floor: the limit is not
+    the printer's, it is what Kiln holds a printer to when it has not been
+    told the model.  Empty when a model is known."""
+    try:
+        if _resolve_printer_model_live(printer_name) or (not printer_name and _PRINTER_MODEL):
+            return ""
+    except Exception:  # noqa: BLE001 — an unreadable model is an unknown one
+        pass
+    return (
+        " That is the generic floor: Kiln has not been told this printer's model. Set printer_model "
+        "to a printer Kiln knows, or find the maker's limits and have the person confirm them "
+        "with add_safety_profile."
+    )
+
+
 def _is_resume_mode_3mf(file_name: str) -> bool:
     """Return True if ``file_name`` looks like a mid-print resume 3MF.
 
@@ -2506,7 +2497,15 @@ def _consent_filament_line(
         plan = plan_ams_mapping(wanted, trays)
         if plan.ok:
             return plan.summary + (" (" + "; ".join(plan.warnings) + ")" if plan.warnings else "")
-        return "MISSING COLOUR — " + plan.summary
+        line = "MISSING COLOUR — " + plan.summary
+        if len(wanted) >= 2:
+            # The print gate will refuse this file; the dialog says what to
+            # load in the refusal's own words.  No question here: a dialog
+            # cannot answer one, and the refusal that follows carries it.
+            line += ". " + _unsuppliable_colour_words(
+                plan, wanted, trays, adapter=adapter, printer_name=printer_name, offer=False,
+            )
+        return line
     except Exception as exc:  # noqa: BLE001 — the dialog must still open
         logger.debug("consent: filament routing line skipped: %s", exc)
         return None
@@ -3393,6 +3392,11 @@ async def _consent_from_account_always(
         if not await asyncio.to_thread(consent_windows.is_live, entry.id, printer_name=aimed):
             return None
         look = unasked_look_noted(aimed)
+        if not entry.bed_check:
+            # The copy's first start: decide what it says about the bed, then
+            # look with that decided (a look taken before it was is not used).
+            entry = await asyncio.to_thread(consent_windows.settle_copy_bed_check, entry.id, aimed) or entry
+            look = None
         if look is None:
             look = await asyncio.to_thread(consent_windows.look_at_bed, aimed)
             note_unasked_look(aimed, look)
@@ -3733,11 +3737,23 @@ def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
         if signed_out
         else "in Kiln's web app on their phone or browser, at app.kiln3d.com/settings/agent (Always allow), or "
     )
-    always = (
-        f" To stop being asked on {aimed}, they turn on always allow for it themselves: {web}with "
-        f"`kiln consent window --always --printer {aimed}` in a terminal on the computer Kiln runs on. "
-        'You cannot turn it on; when they say "ask me first", you turn it off.'
-    )
+    from kiln.consent_windows import always_allow_is_yours
+
+    if always_allow_is_yours():
+        always = (
+            f" To stop being asked on {aimed}, they turn on always allow for it themselves: {web}with "
+            f"`kiln consent window --always --printer {aimed}` in a terminal on the computer Kiln runs on. "
+            'You cannot turn it on; when they say "ask me first", you turn it off.'
+        )
+    else:
+        # Below Pro, the way that is open to them -- and no plan named: a
+        # plan is said beside the phone and nowhere else on this text, and
+        # always allow says its own at its own door.
+        always = (
+            f" To stop being asked on {aimed} for a while, they can allow prints there for up to a day "
+            f"themselves: in the approval dialog, or with `kiln consent window --for 2h --printer {aimed}` "
+            "in a terminal on the computer Kiln runs on. You cannot open it."
+        )
     if why.startswith(NOT_ASKED_CODE_SHOWN):
         hook = ""
         if ":hook=" in why:
@@ -3878,12 +3894,20 @@ def _preview_gate_error(
     # has a camera the plate has to have been seen clear in a fresh frame.
     # A frame nobody has judged yet holds the start and is handed over;
     # asked before the token is touched, so the token is still good for
-    # the call that follows the look.
+    # the call that follows the look.  The yes was read on the look taken
+    # when the call arrived; a door that works for a while first (slicing)
+    # gets a fresh one here, and if that one shows nothing the print does
+    # not start on a bed nobody could see: the person is asked instead.
     bed_look = None
     if granted.source == SOURCE_ALWAYS:
-        from kiln.plate_state import LOOK_NEEDED
+        from kiln.plate_state import LOOK_BLIND, LOOK_NEEDED
 
         bed_look = unasked_look(aimed)
+        if bed_look.verdict == LOOK_BLIND:
+            print_signoff.clear()
+            note_unasked_look(aimed, bed_look)
+            _audit(tool_name, "always_allow_could_not_see", details={"file": file_name, "printer": aimed, "why": bed_look.why})
+            return _error_dict(_no_yes_message(tool_name, file_name, aimed), code="PREVIEW_NOT_CONFIRMED")
         if bed_look.verdict == LOOK_NEEDED:
             print_signoff.clear()
             _audit(tool_name, "always_allow_look_first", details={"file": file_name, "printer": aimed, "frame": bed_look.frame})
@@ -4015,6 +4039,8 @@ def _always_allow_dialog_row(aimed: str) -> str | None:
 
         if consent_windows.turned_itself_off(aimed) is not None:
             return "off. A different printer is now set up under this name, so Kiln is asking again"
+        if consent_windows.always_waiting_on_pro(aimed) is not None:
+            return f"on, but {_ALWAYS_ALLOW_NEEDS_SIGNED_IN_PRO}, so Kiln is asking"
         from kiln.plate_state import LOOK_BLIND
 
         look = unasked_look_noted(aimed)
@@ -4035,10 +4061,23 @@ def _always_allow_went_off(aimed: str) -> str:
         if closed is not None:
             line = consent_window_note.turned_off_line(consent_windows.describe_scope(closed.scope))
             return f"Tell the person first: {line} "
+        if consent_windows.always_waiting_on_pro(aimed) is not None:
+            return (
+                f"Tell the person first: always allow on {aimed} is still on, but "
+                f"{_ALWAYS_ALLOW_NEEDS_SIGNED_IN_PRO}, so Kiln is asking. If their account is on Pro, "
+                "`kiln signin` on this computer brings it back. "
+            )
         blind = _always_allow_could_not_see(aimed)
         if blind:
             return f"Tell the person first: {blind} "
     return ""
+
+
+#: Why always allow is asking when it is on and this computer holds no Pro
+#: plan now -- said where the person meets it, in its own words.
+_ALWAYS_ALLOW_NEEDS_SIGNED_IN_PRO = (
+    "it is part of Kiln Pro and this computer is not signed in on a Pro account right now"
+)
 
 
 def _always_allow_could_not_see(aimed: str) -> str:
@@ -4101,8 +4140,15 @@ def _retry_changes_the_object(overrides: dict[str, Any] | None, mesh_repaired: b
     )
 
 
-def _note_print_started(adapter: PrinterAdapter) -> None:
+def _note_print_started(adapter: PrinterAdapter, result: Any = None) -> None:
     """Tell the heater watchdog a print began — if it is watching *adapter*.
+
+    *result* is what ``adapter.start_print`` returned.  A start Kiln
+    refused before sending anything (``refused_before_send``) began no
+    print, and the watchdog is not told one did: marked busy, it would
+    stop cooling an idle printer until a print-ended notice that is never
+    coming.  A start that was sent is always notified, whatever the
+    adapter then said of it — the printer may be running it.
 
     The one door for this notification.  Every tool that starts a print
     used to call ``_get_heater_watchdog().notify_print_started()``
@@ -4118,6 +4164,8 @@ def _note_print_started(adapter: PrinterAdapter) -> None:
     once; a new start-side tool gets it by calling this instead of
     remembering to ask.
     """
+    if getattr(result, "refused_before_send", False) is True:
+        return
     try:
         if _is_heater_watchdog_machine(adapter):
             _get_heater_watchdog().notify_print_started()
@@ -4509,6 +4557,7 @@ def _local_copy_of(file_name: str | None) -> str | None:
 # Read-only tools have no limits.  Physically-dangerous tools get cooldowns.
 _TOOL_RATE_LIMITS: dict[str, tuple[int, int]] = {
     "set_temperature": (2000, 10),
+    "set_speed_profile": (2000, 10),
     "send_gcode": (500, 30),
     "emergency_stop": (5000, 3),
     "emergency_trip_input": (1000, 20),
@@ -5471,6 +5520,33 @@ def _get_thingiverse() -> ThingiverseClient:
 _marketplace_registry = MarketplaceRegistry()
 
 
+def _download_marketplace_file(
+    source: str, file_id: Any, dest_dir: str, *, file_name: str | None = None,
+) -> tuple[str | None, Any]:
+    """Download one file from the marketplace *source* names.
+
+    Returns ``(path, adapter)``; ``(None, adapter)`` when that marketplace
+    does not offer downloads.  Thingiverse is reached through its own client
+    (adapter ``None``), which leaves no note of its own, so the note is left
+    here.  Every single-file download door goes through this, so a file ID
+    is never sent to a marketplace it does not belong to.  (Until
+    2026-10-02 ``download_model`` sent every one to Thingiverse.)
+    """
+    if source != "thingiverse":
+        if _marketplace_registry.count == 0:
+            _init_marketplace_registry()
+        mkt = _marketplace_registry.get(source)
+        if not mkt.supports_download:
+            return None, mkt
+        named = {"file_name": file_name} if file_name else {}
+        return mkt.download_file(str(file_id), dest_dir, **named), mkt
+    path = _get_thingiverse().download_file(int(file_id), dest_dir, file_name=file_name)
+    from kiln.arrival import note_download
+
+    note_download("Thingiverse", path, file_id)
+    return path, None
+
+
 def _init_marketplace_registry() -> None:
     """Register marketplace adapters based on available credentials."""
     if _THINGIVERSE_TOKEN:
@@ -5554,38 +5630,24 @@ def _validate_quote_for_order(
     *,
     provider_name: str | None = None,
 ) -> Any:
-    """Validate a cached fulfillment quote before order placement."""
-    try:
-        from kiln.fulfillment.intelligence import validate_quote_for_order
-    except ImportError:
-        from kiln_pro.fulfillment.intelligence import validate_quote_for_order
+    """Validate a cached fulfillment quote before order placement.
 
-    return validate_quote_for_order(
+    Reached only from the ordering tool, which has already asked
+    :func:`kiln.fulfillment_service.order_service` for the order service.
+    """
+    from kiln.fulfillment_service import NOT_INCLUDED, order_service
+
+    service = order_service()
+    if service is None:
+        raise RuntimeError(NOT_INCLUDED)
+    return service.validate_quote_for_order(
         quote_id,
         provider_name=provider_name,
     )
 
 
-_threedos_client: ThreeDOSClient | None = None
-
-
-def _get_threedos_client() -> ThreeDOSClient:
-    """Return the lazily-initialised 3DOS gateway client.
-
-    Requires ``KILN_3DOS_API_KEY`` to be set.
-    """
-    global _threedos_client  # noqa: PLW0603
-
-    if _threedos_client is not None:
-        return _threedos_client
-
-    _threedos_client = ThreeDOSClient()
-    return _threedos_client
-
-
 _PROVIDER_TERMS_URLS: dict[str, str] = {
-    "craftcloud": "https://craftcloud3d.com/terms-and-conditions",
-    "3dos": "https://www.3dos.io/terms",
+    "craftcloud": CRAFTCLOUD_TERMS_URL,
 }
 
 
@@ -5593,7 +5655,8 @@ def _provider_routing_metadata(
     provider_name: str,
     *,
     provider_order_id: str = "",
-) -> dict[str, str]:
+    shipping_country: str = "",
+) -> dict[str, Any]:
     """Return normalized routing metadata for provider-managed orders.
 
     Kiln is orchestration infrastructure. For provider-routed jobs, the
@@ -5604,6 +5667,9 @@ def _provider_routing_metadata(
         "provider_name": provider_name,
         "provider_order_id": provider_order_id,
         "provider_terms_url": _PROVIDER_TERMS_URLS.get(normalized, ""),
+        "provider_order_terms": order_terms(normalized),
+        "provider_pay_methods": pay_methods(normalized),
+        "provider_tax_note": tax_note(normalized, shipping_country),
         "support_owner": "provider",
         "merchant_of_record": "provider",
     }
@@ -5832,6 +5898,23 @@ def _check_disk_space(path: str, required_mb: int = 100) -> dict[str, Any] | Non
     return None
 
 
+def _no_printer_refusal() -> dict[str, Any]:
+    """A printer door's answer when no printer is set up: one sentence for
+    the person, the setup conversation for the agent, and the code the
+    print monitor panels read to show setup rather than "printer offline"."""
+    hint = _NO_PRINTER_AGENT_HINT
+    with contextlib.suppress(Exception):
+        from kiln.runtime_env import is_hosted_multitenant
+
+        if is_hosted_multitenant():
+            hint = _NO_PRINTER_HOSTED_HINT
+    return {
+        "success": False,
+        "error": {"code": "NO_PRINTER_CONFIGURED", "message": NO_PRINTER_MESSAGE, "retryable": False},
+        "agent_hint": hint,
+    }
+
+
 def _error_dict(
     message: str,
     code: str = "ERROR",
@@ -5849,7 +5932,28 @@ def _error_dict(
     carry an agent-addressed field next to the human-readable ``message``
     (``**signin_hint_fields()``).  It cannot reach inside ``error``, so the
     envelope every existing caller depends on keeps its exact shape.
+
+    A message carrying :data:`NO_PRINTER_CONFIGURED` becomes
+    :func:`_no_printer_refusal` whatever the door wrapped around it: every
+    printer door puts the lookup's error inside its own "Failed to ..." and
+    adds a hint meant for a different fault, so it is rebuilt here, once,
+    and no door has to remember it.
+
+    The one-printer refusal is the same case for the same reason.  Built
+    inside an ``except`` block whose exception is Kiln declining a second
+    machine (:func:`kiln.printers.engagement.refusal_in_flight`), the answer
+    is the refusal's own words and code, with the structured verdict under
+    ``refusal`` -- never the door's "check that the printer is online".
+    Any other failure keeps the door's message exactly.
     """
+    if isinstance(message, str) and NO_PRINTER_CONFIGURED in message:
+        return _no_printer_refusal()
+    refusal = engagement_refusal_in_flight()
+    if refusal is not None:
+        message = engagement_refusal_words(refusal)
+        code = str(refusal.get("code") or "TIER_SINGLE_PRINTER_LIMIT")
+        retryable = False
+        extra = {**(extra or {}), "refusal": refusal}
     if retryable is None:
         retryable = code in _RETRYABLE_CODES
     payload: dict[str, Any] = {
@@ -6358,6 +6462,15 @@ def printer_status(
             "printer": printer_block,
             "job": job.to_dict(),
         }
+        # A print carrying a hardware plan: when the next stop comes, what
+        # goes in at it, or what goes in now that the print is done.  At both
+        # detail levels -- the lite read is the one polled through a print.
+        # Absent for an ordinary print.  See kiln.hardware_stops.
+        from kiln.hardware_stops import observe as _observe_hardware
+
+        hardware = _observe_hardware(adapter, state, job)
+        if hardware:
+            response["hardware"] = hardware
         # A cool-down a Kiln server left running (killed with the part fan
         # on) is finished from this read, the one every filament answer
         # names as its follow-up: fan off once the nozzle is at or below
@@ -6511,7 +6624,14 @@ def printer_status(
         # access code need different fixes, and laundering the second into
         # the first sends someone to check a power switch for a
         # credentials problem.
-        if isinstance(exc, PrinterError) and not _reads_as_auth_failure(str(exc)):
+        # Kiln declining to read a second machine is not a state of that
+        # machine either: it goes back as the refusal, below, never as
+        # "offline -- check it is powered on".
+        if (
+            isinstance(exc, PrinterError)
+            and not _reads_as_auth_failure(str(exc))
+            and engagement_refusal_in_flight() is None
+        ):
             # Which KIND of unreachable, from the same classifier the adapter
             # layer uses, so the tool and the adapter cannot name different
             # causes — or different fixes — for one silent printer.
@@ -6827,6 +6947,13 @@ def monitor_print(
     health commentary. For structured data + AI vision inspection, use
     ``monitor_print_vision``. For persistent background monitoring, use
     ``watch_print``.
+
+    This is the text report from the computer the printer is attached
+    to.  When Kiln's hosted connector (api.kiln3d.com) is also connected,
+    ``monitor_printer`` there is the door for the inline live monitor and
+    camera; call that one to show the person a live panel.  The report's
+    closing ``Live monitor:`` line says whether a panel came with THIS
+    result or where the live monitor is instead — repeat it as written.
 
     :param printer_name: Target printer name.  Omit for the default printer.
     :param include_snapshot: Whether to capture and save a camera snapshot.
@@ -7252,7 +7379,7 @@ def monitor_print(
                     _file_filaments = _get_cost_estimator().filament_pricing(_local)
                     from kiln.gcode import FIRST_PSEUDO_TOOL
 
-                    with open(_local, errors="replace") as _f:
+                    with open(_local, errors="replace", encoding="utf-8") as _f:
                         _seen = {
                             int(w[1:]) for w in (ln.split(";", 1)[0].strip() for ln in _f)
                             if len(w) > 1 and w[0] == "T" and w[1:].isdigit() and int(w[1:]) < FIRST_PSEUDO_TOOL
@@ -7314,6 +7441,16 @@ def monitor_print(
         goal_line = _format_goal_line_for_monitor(effective_brief_id)
         if goal_line:
             lines.append(goal_line)
+        # A print carrying a hardware plan says, in its own line, when the
+        # next stop comes and what goes in -- or, at the stop, the steps.
+        from kiln.hardware_stops import observe as _observe_hardware
+
+        _hardware = _observe_hardware(adapter, state, job)
+        if _hardware:
+            lines.append(f"- Hardware: {_hardware['say']}")
+            lines.extend(f"  {n}. {step}" for n, step in enumerate(_hardware.get("steps") or (), 1))
+            if _hardware.get("resume"):
+                lines.append(f"  {_hardware['resume']}")
 
         lines.extend(
             [
@@ -7854,12 +7991,50 @@ def _ams_tray_rows(ams_result: dict[str, Any]) -> list[tuple[int, str, dict[str,
     return rows
 
 
+def _unsuppliable_colour_words(
+    plan: Any,
+    wanted: list[Any],
+    trays: list[Any],
+    *,
+    adapter: Any = None,
+    printer_name: str | None = None,
+    offer: bool = True,
+) -> str:
+    """What to tell a person about the colours *plan* could not supply.
+
+    Worded by :func:`kiln.colour_availability.not_loaded_say`, so a print
+    door says what a colouring says about the same colours: a spool on
+    record is named with a reminder to load it, a colour with nothing on
+    record gets one offer of help.  The gate's decision is the plan's; this
+    is only its words.  Falls back to the plain instruction when there is
+    nothing more to say.
+    """
+    words = ""
+    try:
+        if printer_name is None:
+            registered = getattr(adapter, "_kiln_registered_name", None)
+            printer_name = registered if isinstance(registered, str) and registered else None
+        from kiln.colour_availability import not_loaded_say
+
+        in_use = {m.get("slot") for m in plan.matches if m.get("slot") is not None}
+        words = not_loaded_say(
+            [wanted[i] for i in plan.unmatched if i < len(wanted)],
+            printer_name=printer_name,
+            loaded=[f"#{t.hex6}" for t in trays if t.tray_id in in_use and t.hex6],
+            offer=offer,
+        )
+    except Exception:  # noqa: BLE001 -- words never change or break the gate's decision
+        logger.debug("unsupplied colours not worded", exc_info=True)
+    return words or "Load the missing colour."
+
+
 def _undriven_multi_material_decision(
     mm: Any,
     ams_mapping: list[int] | None,
     *,
     file_path: str | None = None,
     wanted: list[Any] | None = None,
+    adapter: Any = None,
 ) -> dict[str, Any]:
     """The routing decision for a printer whose filament changes Kiln does not drive.
 
@@ -7910,11 +8085,13 @@ def _undriven_multi_material_decision(
             warnings_out.extend(plan.warnings)
         elif len(wanted) >= 2:
             out["blocked"] = True
+            load = _unsuppliable_colour_words(plan, list(wanted), list(mm.slots), adapter=adapter)
             warnings_out.append(
                 f"This file needs {len(wanted)} filaments and the {mm.label}'s "
-                f"loaded slots cannot supply them all: {plan.summary}. Load the "
-                f"missing colour, or remap the unit's tool map yourself — Kiln "
-                f"does not drive this unit and cannot substitute a slot for you."
+                f"loaded slots cannot supply them all: {plan.summary}. {load} "
+                f"To print it with a substitute instead, remap the unit's tool "
+                f"map yourself — Kiln does not drive this unit and cannot "
+                f"substitute a slot for you."
             )
             warnings_out.extend(plan.warnings)
         else:
@@ -8071,7 +8248,7 @@ def _resolve_use_ams(
 
         return _undriven_multi_material_decision(
             multi_material_status(adapter), ams_mapping,
-            file_path=file_path, wanted=wanted,
+            file_path=file_path, wanted=wanted, adapter=adapter,
         )
 
     try:
@@ -8219,15 +8396,15 @@ def _resolve_use_ams(
             # A partial mapping is a wrong print.  Say which colour is
             # missing and stop; the caller decides what to do about it.
             logger.warning("AMS colour routing blocked: %s", plan.summary)
+            load = _unsuppliable_colour_words(plan, wanted, trays, adapter=adapter)
             return {
                 "use_ams": True,
                 "ams_mapping": None,
                 "warnings": [
                     "This file needs "
                     f"{len(wanted)} filaments and the loaded spools cannot "
-                    f"supply them all: {plan.summary}. Load the missing "
-                    "colour, or pass an explicit ams_mapping to print it "
-                    "with a substitute."
+                    f"supply them all: {plan.summary}. {load} To print it "
+                    "with a substitute instead, pass an explicit ams_mapping."
                 ]
                 + plan.warnings,
                 "selection": None,
@@ -8287,8 +8464,9 @@ def _spool_advisory(
 ) -> dict[str, Any] | None:
     """Say whether *colours* are loaded on the printer, for a colouring tool.
 
-    The colouring tools call this the moment a colour is chosen, so "make
-    it red" answers "made it red; no red is loaded on default" instead of
+    The reading under :func:`kiln.colour_availability.colour_availability`,
+    which every colouring door attaches the moment a colour is chosen, so
+    "make it red" is answered with whether red is on the printer instead of
     leaving the miss for a warning at print time.  Advice only — the
     print gate (:func:`_resolve_use_ams`) still decides, on whatever
     printer is in front of the job when it starts.
@@ -8569,6 +8747,12 @@ def start_print(
 
         if block := start_refusal(adapter, resume=bool(resume_from_paused or is_resume_3mf), file_name=file_name):
             return block
+        # The one-printer rule, asked before this machine is read to prepare
+        # the start.  Below the fleet tier a start on a second machine is
+        # refused whole and in the rule's words -- not at the first spool
+        # the preparation reads, worded for a read of a spool.
+        if refused := _engagement.check_command(adapter, "start_print"):
+            raise PrinterEngagementError(refused)
         # A file planned beside a part on the plate opens with Kiln's own
         # prologue, not the vendor's start; the verdict below must not
         # describe moves that file will not make.
@@ -8636,15 +8820,21 @@ def start_print(
 
                 detail_text = "\n".join(remediation_lines) if remediation_lines else ""
                 summary = pf.get("summary", "Pre-flight checks failed")
-                full_message = (
-                    (
-                        f"{summary}\n\nFailed checks:\n{detail_text}\n\n"
-                        "Resolve the issues above and retry. To bypass pre-flight "
-                        "checks (advanced users only), set KILN_SKIP_PREFLIGHT=1."
+                if pf.get("refusal"):
+                    # Kiln is working with another printer: a rule, not a
+                    # failed check, so there is nothing to bypass.  Its own
+                    # words, unchanged.
+                    full_message = summary
+                else:
+                    full_message = (
+                        (
+                            f"{summary}\n\nFailed checks:\n{detail_text}\n\n"
+                            "Resolve the issues above and retry. To bypass pre-flight "
+                            "checks (advanced users only), set KILN_SKIP_PREFLIGHT=1."
+                        )
+                        if detail_text
+                        else (f"{summary}\n\nTo bypass pre-flight checks (advanced users only), set KILN_SKIP_PREFLIGHT=1.")
                     )
-                    if detail_text
-                    else (f"{summary}\n\nTo bypass pre-flight checks (advanced users only), set KILN_SKIP_PREFLIGHT=1.")
-                )
 
                 _audit(
                     "start_print",
@@ -8855,7 +9045,7 @@ def start_print(
         # the command; ``resolve_print_start`` needs it to know which it has.
         sent_at = time.monotonic()
         result = adapter.start_print(file_name, **print_kwargs)
-        _note_print_started(adapter)
+        _note_print_started(adapter, result)
 
         # Layer 5, the print watchdog, attaches inside adapter.start_print --
         # a started hook, see _install_print_lifecycle_hooks -- so it follows
@@ -9094,6 +9284,27 @@ def _cancel_print_on(
         logger.debug("cancel_print: note_cancel_requested failed: %s", exc)
 
     result = adapter.cancel_print()
+
+    if not result.success:
+        # The print did not end: the adapter says so (a firmware with no
+        # abort command, paused instead).  Everything below assumes an
+        # ended print -- a recorded cancel, no watchdogs, targets restored
+        # -- and each of those is wrong while the job has not finished, so
+        # the ending bookkeeping is undone and the rest skipped.
+        # The pause keep-alive stays stopped: the firmware holds its own
+        # targets through this pause, and the adapter already said what the
+        # heaters are doing.
+        try:
+            from kiln.auto_record_hook import clear_cancel_intent
+            from kiln.printers.base import outcome_printer_name
+
+            clear_cancel_intent(outcome_printer_name(adapter))
+        except Exception as exc:  # pragma: no cover -- best-effort
+            logger.debug("cancel_print: intent withdrawal failed: %s", exc)
+        _audit("cancel_print", f"not cancelled on {target_name}: {result.message}")
+        out = result.to_dict()
+        out["printer_name"] = target_name
+        return out
 
     # The heater watchdog is a single process-wide instance bound to
     # ``_get_adapter()`` — it only ever watches the default printer.
@@ -9810,9 +10021,15 @@ def _pause_print_on(
 def pause_print(keep_temps: bool = True, printer_name: str | None = None) -> dict:
     """Pause the currently running print job.
 
-    Pausing lifts the nozzle and parks the head.
+    What happens next is decided by the printer's own firmware, not by
+    Kiln, and it differs a lot between machines.  Some lift the nozzle
+    and park the head; others leave it resting on the part.  Many lower
+    or switch off the nozzle heater while paused, and some switch the
+    heaters and motors off after a timeout, after which the print may
+    not be able to resume.  Do not tell the person the head will park or
+    that temperatures will hold; check ``printer_status`` instead.
 
-    Heater behaviour during pause varies by firmware:
+    One measured case:
 
       - Bambu A1 / A1 mini: the firmware sets a ~90°C hotend standby
         target IMMEDIATELY on pause, regardless of slicer settings (the
@@ -9825,10 +10042,6 @@ def pause_print(keep_temps: bool = True, printer_name: str | None = None) -> dic
         measurement says the damage starts at once.  A resume onto a
         cooled nozzle can't extrude until it re-heats — and bed adhesion
         can fail in the meantime.
-      - Bambu X1/P1 series: typically holds both targets, but a long
-        idle can still trigger cooldown.
-      - OctoPrint / Moonraker / Klipper: depends on firmware config;
-        most hold targets across pause.
 
     To fight this, ``pause_print`` spawns a best-effort daemon thread
     that re-asserts the pre-pause hotend + bed targets immediately, and
@@ -9836,7 +10049,9 @@ def pause_print(keep_temps: bool = True, printer_name: str | None = None) -> dic
     (resume, cancel, error, or manual button press).  This is enabled by
     default.  The immediate assert is the part that matters on an A1:
     without it, a pause shorter than the interval got no protection at
-    all, which is most pauses a person actually takes.
+    all, which is most pauses a person actually takes.  It can only help
+    on a printer Kiln can set temperatures on: Prusa Link offers no way
+    to, so on a Prusa the keep-alive does nothing.
 
     Args:
         keep_temps: When ``True`` (default), capture the pre-pause tool
@@ -9985,7 +10200,7 @@ def skip_print_objects(object_ids: list[str], plate_number: int = 1) -> dict:
 
 
 def _resume_print_on(
-    adapter: PrinterAdapter, target_name: str, *, force: bool = False,
+    adapter: PrinterAdapter, target_name: str, *, force: bool = False, hardware_confirmed: bool = False,
 ) -> dict:
     """Resume the print on *adapter*, refusing a latched machine.
 
@@ -10002,7 +10217,10 @@ def _resume_print_on(
     if block := _emergency_latch_error("resume_print", target_name):
         return block
 
-    result = adapter.resume_print(force=force)
+    # The person's word on a hardware stop rides only when given, so an
+    # adapter written before the stop existed keeps its two-argument resume.
+    confirmed = {"hardware_confirmed": True} if hardware_confirmed else {}
+    result = adapter.resume_print(force=force, **confirmed)
     # Stop this printer's pause keep-alive thread if one was running —
     # the print is back under firmware control and re-asserting targets
     # here would race with the resume preamble gcode.
@@ -10019,7 +10237,9 @@ def _resume_print_on(
 
 
 @mcp.tool()
-def resume_print(force: bool = False, printer_name: str | None = None) -> dict:
+def resume_print(
+    force: bool = False, printer_name: str | None = None, hardware_confirmed: bool = False,
+) -> dict:
     """Resume a paused print job.
 
     The printer must currently be in a paused state.  Resuming will return
@@ -10029,6 +10249,13 @@ def resume_print(force: bool = False, printer_name: str | None = None) -> dict:
     silently ignored the command reports a failure instead of a cheerful
     "Print resumed."
 
+    A print paused at a planned hardware stop (a pause written into the file
+    so a nut, a magnet or a bearing can go in) is refused with
+    ``code: "HARDWARE_NOT_CONFIRMED"`` and a ``hardware`` block saying what
+    goes in.  Tell the person, wait for them to say every piece is in and
+    sits level with or below the top of the print, then resume with
+    ``hardware_confirmed=true``.  Never pass it on your own judgement.
+
     Args:
         force: Send the resume even when Kiln believes the printer is not
             paused.  Use this when the printer's own screen disagrees with
@@ -10037,6 +10264,9 @@ def resume_print(force: bool = False, printer_name: str | None = None) -> dict:
             the wrong state word would leave you unable to recover the print.
         printer_name: Which printer to resume.  Omit for the default
             printer.  Pass the same name you paused with.
+        hardware_confirmed: The person has said every piece of hardware for
+            this stop is in and sits level with or below the top of the
+            print.  Only on their word.
     """
     if err := _check_auth("print"):
         return err
@@ -10058,7 +10288,7 @@ def resume_print(force: bool = False, printer_name: str | None = None) -> dict:
             adapter, target_name = _resolve_control_target(printer_name)
         except PrinterNotFoundError:
             return _unknown_printer_error(printer_name, "resume a print on")
-        return _resume_print_on(adapter, target_name, force=force)
+        return _resume_print_on(adapter, target_name, force=force, hardware_confirmed=hardware_confirmed)
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to resume print: {exc}. Check that the printer is in a paused state.")
     except Exception as exc:
@@ -10083,9 +10313,12 @@ def set_temperature(
             which is what this did before it could be aimed — so asking to
             preheat a second machine heated the default one instead.  The
             safety ceiling follows the named machine: a printer with no
-            declared model is held to the unknown-printer limit rather than
-            to the default printer's, which may be the more permissive of
-            the two.
+            declared model is held to the generic floor (the least capable
+            machine Kiln describes) rather than to the default printer's,
+            which may be the more permissive of the two.  When that floor
+            refuses a temperature, the fix is a model, not a number: set
+            ``printer_model`` to a printer Kiln knows, or find the maker's
+            limits and have the person confirm them (``add_safety_profile``).
 
     At least one of ``tool_temp`` or ``bed_temp`` must be provided.
 
@@ -10154,7 +10387,8 @@ def set_temperature(
             )
         if tool_temp > _MAX_TOOL:
             return _error_dict(
-                f"Hotend temperature {tool_temp}°C exceeds safety limit ({_MAX_TOOL}°C).",
+                f"Hotend temperature {tool_temp}°C exceeds safety limit ({_MAX_TOOL}°C)."
+                + _unknown_limit_ask(printer_name),
                 code="VALIDATION_ERROR",
             )
     if bed_temp is not None:
@@ -10165,7 +10399,8 @@ def set_temperature(
             )
         if bed_temp > _MAX_BED:
             return _error_dict(
-                f"Bed temperature {bed_temp}°C exceeds safety limit ({_MAX_BED}°C).",
+                f"Bed temperature {bed_temp}°C exceeds safety limit ({_MAX_BED}°C)."
+                + _unknown_limit_ask(printer_name),
                 code="VALIDATION_ERROR",
             )
 
@@ -10418,19 +10653,29 @@ def cfs_status() -> dict:
 
 
 @mcp.tool()
-def set_speed_profile(profile: str) -> dict:
-    """Set the printer speed profile (Bambu Lab printers only).
+def set_speed_profile(
+    profile: str | None = None, percent: int | None = None, printer_name: str | None = None,
+) -> dict:
+    """Set the print speed: a preset by name, or a percentage of the sliced speed.
+
+    One door for both ways a printer takes a speed.  Give exactly one of:
 
     Args:
-        profile: Speed profile name — one of ``"silent"`` (50% speed,
-            quiet), ``"standard"`` (100%, default), ``"sport"`` (124%,
-            faster), or ``"ludicrous"`` (166%, maximum speed).
+        profile: A preset — ``"silent"`` (50%), ``"standard"`` (100%),
+            ``"sport"`` (124%) or ``"ludicrous"`` (166%).  Bambu Lab
+            printers only; sport and ludicrous raise the nozzle
+            temperature to keep up with the flow.
+        percent: The speed as a percentage of the speed the file was
+            sliced at — the feedrate override every FDM firmware has (100
+            is the sliced speed; 10 to 300 is accepted).  A Bambu takes
+            only its four presets, so the nearest one is set and the
+            answer says which (``preset``, ``percent_actual``).
+        printer_name: Which printer.  Omit for the default printer.
 
-    Sport and Ludicrous modes automatically increase nozzle temperature
-    to prevent under-extrusion at higher flow rates.
-
-    Use ``printer_status()`` to see the current speed profile in the
-    response's ``printer.speed_profile`` field.
+    Nothing here judges whether a speed suits THIS printer or THIS layer:
+    Kiln's served ``set_speed_percent`` and ``set_speed_schedule`` do that
+    and hand the checked value here.  Use ``printer_status()`` to see the
+    current speed profile in ``printer.speed_profile``.
 
     Branch on ``outcome`` — one field, three values, the same shape
     ``start_print`` uses for ``print_start``:
@@ -10450,15 +10695,32 @@ def set_speed_profile(profile: str) -> dict:
         return err
     if err := _check_rate_limit("set_speed_profile"):
         return err
+    has_profile = isinstance(profile, str) and bool(profile.strip())
+    if has_profile == (percent is not None):
+        return _error_dict(
+            "Give exactly one of profile (a preset name) or percent (10 to 300).",
+            code="VALIDATION_ERROR",
+        )
+    if has_profile:
+        return _set_speed_preset(profile, printer_name)
+    return _set_speed_percent(percent, printer_name)
+
+
+def _set_speed_preset(profile: str, printer_name: str | None) -> dict:
+    """The preset half of :func:`set_speed_profile`."""
     try:
-        adapter = _get_adapter()
+        try:
+            adapter = _resolve_adapter(printer_name)
+        except PrinterNotFoundError:
+            return _unknown_printer_error(printer_name, "set the speed profile on")
         if not hasattr(adapter, "set_speed_profile"):
             return _error_dict(
-                "Speed profile control is only available on Bambu Lab printers.",
+                "Speed presets are only available on Bambu Lab printers; "
+                "pass percent instead.",
                 code="UNSUPPORTED",
             )
         verdict = CommandVerdict.coerce(adapter.set_speed_profile(profile), what="speed profile")
-        _audit("set_speed_profile", "executed", details={"profile": profile})
+        _audit("set_speed_profile", "executed", details={"profile": profile, "printer": printer_name})
         return {
             "success": verdict.ok,
             "profile": profile.strip().lower(),
@@ -10469,6 +10731,127 @@ def set_speed_profile(profile: str) -> dict:
     except Exception as exc:
         logger.exception("Unexpected error in set_speed_profile")
         return _error_dict(f"Unexpected error in set_speed_profile: {exc}", code="INTERNAL_ERROR")
+
+
+def _set_speed_percent(percent: Any, printer_name: str | None) -> dict:
+    """The percentage half of :func:`set_speed_profile`."""
+    if isinstance(percent, bool) or not isinstance(percent, int):
+        try:
+            percent = int(percent)
+        except (TypeError, ValueError):
+            return _error_dict("percent must be a whole number.", code="VALIDATION_ERROR")
+    if not 10 <= percent <= 300:
+        return _error_dict(
+            f"percent must be between 10 and 300, got {percent}.", code="VALIDATION_ERROR",
+        )
+    try:
+        try:
+            adapter, target_name = _resolve_control_target(printer_name)
+        except PrinterNotFoundError:
+            return _unknown_printer_error(printer_name, "set the speed on")
+        from kiln.speed_schedule_runner import PRESET_PERCENT, nearest_preset, set_speed, takes_presets
+
+        verdict = CommandVerdict.coerce(set_speed(adapter, percent), what="speed")
+        _audit("set_speed_profile", "executed", details={"percent": percent, "printer": target_name})
+        out: dict[str, Any] = {"success": verdict.ok, "percent": percent, **verdict.to_dict()}
+        if takes_presets(adapter):
+            preset = nearest_preset(percent)
+            out["preset"] = preset
+            out["percent_actual"] = PRESET_PERCENT[preset]
+            out["message"] = (
+                f"This printer takes only its presets: {percent}% was set as "
+                f"{preset} ({PRESET_PERCENT[preset]}%)."
+            )
+        return out
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(f"Failed to set the speed: {exc}")
+    except Exception as exc:
+        logger.exception("Unexpected error in set_speed_profile")
+        return _error_dict(f"Unexpected error in set_speed_profile: {exc}", code="INTERNAL_ERROR")
+
+
+#: The speed schedule running for each printer, by its lifecycle name.
+#: Written only once a printer resolved on this process; the hosted server
+#: resolves none (kiln_pro's registry switch), so it never holds one.
+_speed_schedule_runs: dict[str, Any] = {}
+
+
+@mcp.tool()
+def run_speed_schedule(
+    schedule: list[dict] | None = None,
+    printer_name: str | None = None,
+    action: str = "run",
+) -> dict:
+    """Run, report or stop a layer-based speed schedule on this computer.
+
+    A schedule is a list of ``{"from_layer", "to_layer", "speed_percent"}``
+    segments.  With ``action="run"`` it starts on the printer that is
+    printing now, replacing a schedule already running for that printer:
+    the printer is asked which layer it is on every few seconds and each
+    segment's speed is set once, as the print reaches it.  It stops on its
+    own when the print ends, when the printer is found running a different
+    print, or on ``action="stop"`` (the printer stays at the last speed set).
+    ``action="status"`` reports what has been applied so far.
+
+    Only the schedule's shape is checked here.  Which speeds suit this
+    printer and which layers a speed is unsafe on is decided by Kiln's
+    served ``set_speed_schedule``, which hands the checked schedule here.
+
+    Args:
+        schedule: The segments to run (``action="run"`` only).
+        printer_name: Which printer.  Omit for the default printer.
+        action: ``"run"`` (default), ``"status"`` or ``"stop"``.
+    """
+    if err := _check_auth("printer_control"):
+        return err
+    if action not in ("run", "status", "stop"):
+        return _error_dict(f"action must be run, status or stop, got {action!r}.", code="VALIDATION_ERROR")
+    from kiln import speed_schedule_runner as runner
+
+    try:
+        try:
+            _adapter, target_name = _resolve_control_target(printer_name)
+        except PrinterNotFoundError:
+            return _unknown_printer_error(printer_name, "run a speed schedule on")
+        run = _speed_schedule_runs.get(target_name)
+        if action == "status":
+            if run is None:
+                return {"success": True, "active": False, "printer_name": target_name,
+                        "message": "No speed schedule is running on this printer."}
+            return {"success": True, "active": run.to_dict()["running"], **run.to_dict()}
+        if action == "stop":
+            if run is None:
+                return {"success": True, "active": False, "printer_name": target_name,
+                        "message": "No speed schedule is running on this printer."}
+            runner.stop(run)
+            _speed_schedule_runs.pop(target_name, None)
+            _audit("run_speed_schedule", "stopped", details={"printer": target_name})
+            return {"success": True, "active": False, **run.to_dict(),
+                    "message": "Speed schedule stopped. The printer stays at the last speed set."}
+        if run is not None:
+            runner.stop(run)
+            _speed_schedule_runs.pop(target_name, None)
+        try:
+            started = runner.start(
+                schedule, lambda: _resolve_control_target(printer_name)[0], printer_name=target_name,
+            )
+        except runner.ScheduleRefused as exc:
+            return _error_dict(str(exc), code="VALIDATION_ERROR")
+        _speed_schedule_runs[target_name] = started
+        _audit("run_speed_schedule", "started", details={"printer": target_name, "segments": len(started.segments)})
+        return {
+            "success": True, "active": True, **started.to_dict(),
+            "message": (
+                f"Speed schedule running on {target_name}: {len(started.segments)} segment(s), "
+                f"the layer checked every {runner.POLL_INTERVAL_S:g}s. It stops on its own when "
+                "the print ends or another print starts; run_speed_schedule(action=\"stop\") stops it."
+            ),
+        }
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(f"Speed schedule failed: {exc}")
+    except Exception as exc:
+        logger.exception("Unexpected error in run_speed_schedule")
+        return _error_dict(f"Unexpected error in run_speed_schedule: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -10637,10 +11020,9 @@ def set_fan(percent: int, node: str = "part") -> dict:
 
 def _wrapped_filament_type(threemf_path: str) -> str | None:
     """The first filament type a wrapped archive declares to the printer, or ``None``."""
-    import zipfile
 
     try:
-        with zipfile.ZipFile(threemf_path) as zf:
+        with UntrustedZipFile(threemf_path) as zf:
             info = zf.read("Metadata/slice_info.config").decode("utf-8", errors="replace")
     except Exception:  # noqa: BLE001 -- a report, never a failure of the wrap
         return None
@@ -10703,6 +11085,13 @@ def wrap_gcode_as_3mf(
     Returns a dict with ``output_path`` pointing to the generated 3MF.
     Use ``upload_file()`` to send it to the printer, then ``start_print()``
     to begin printing.
+
+    When ``filament_colors`` are given, the result says whether they are on
+    the printer, as ``colour_availability`` (absent when Kiln cannot see
+    what is loaded).  Relay its ``say`` as written and add nothing about
+    filament: never suggest buying filament unless the person asks for one
+    or says yes to the offer in ``say``.  On a yes, call
+    ``find_closest_filaments`` with these colours and the print's material.
     """
     if err := _check_auth("files"):
         return err
@@ -10797,10 +11186,20 @@ def wrap_gcode_as_3mf(
             "num_filaments": num_filaments,
         }
         if filament_colors:
-            # The colours were chosen here; say now whether they are loaded.
-            advisory = _spool_advisory(list(filament_colors), adapter=adapter)
-            if advisory:
-                result["ams_advisory"] = advisory
+            # The colours were chosen here; say now whether they are on the
+            # printer.  The material counts only when the print has one.
+            from kiln.colour_availability import attach_colour_availability
+
+            types = {str(t).strip().upper() for t in (filament_types or []) if t}
+            if len(types) > 1:
+                material = None  # several materials: no one material to hold a spool to
+            elif types:
+                material = next(iter(types))
+            else:
+                material = result.get("filament_type")
+            attach_colour_availability(
+                result, list(filament_colors), adapter=adapter, material=material,
+            )
         return result
     except FileNotFoundError as exc:
         return _error_dict(f"G-code file not found: {exc}")
@@ -11378,7 +11777,7 @@ def preflight_check(
                 try:
                     from kiln.gcode import check_missing_temperatures
 
-                    with open(file_path, errors="replace") as _fh:
+                    with open(file_path, errors="replace", encoding="utf-8") as _fh:
                         gcode_content = _fh.read()
                     temp_warnings = check_missing_temperatures(gcode_content)
                     if temp_warnings:
@@ -11783,6 +12182,18 @@ def preflight_check(
         except ImportError:
             return result
 
+    except PrinterEngagementError as exc:
+        # Not a fault with the printer: below the fleet tier Kiln works with
+        # one machine at a time and this is a different one.  The refusal's
+        # own words go back whole -- what Kiln is doing, what the person can
+        # do now, the tier once -- rather than "check the printer is online",
+        # and every door that prints a pre-flight ``summary`` carries them.
+        words = engagement_refusal_words(exc.verdict)
+        return _error_dict(
+            words,
+            code=str(exc.verdict.get("code") or "TIER_SINGLE_PRINTER_LIMIT"),
+            extra={"ready": False, "summary": words, "refusal": exc.verdict},
+        )
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(
             f"Failed to run preflight check: {exc}. Check that the printer is online and KILN_PRINTER_HOST is correct."
@@ -12293,6 +12704,25 @@ def fleet_status() -> dict:
 # fleet_analytics — extracted to plugins/fleet_tools.py
 
 
+#: Printers ``register_printer`` put in the registry WITHOUT saving them,
+#: as entries shaped like saved ones, so a later registration under the same
+#: name is judged by the rule the config file applies.  Only names still in
+#: the registry count; a saved registration drops its name from here.
+_SESSION_PRINTERS: dict[str, dict[str, Any]] = {}
+
+
+def _session_replace_notice(name: str, match: SavedPrinterMatch) -> str:
+    """One sentence for a session-only registration under a name in use."""
+    if match.outcome == "updated":
+        return f"Updated printer {name!r} for this session; it is not saved."
+    was = f" (was at {match.previous_host})" if match.previous_host else ""
+    dropped = f" Nothing carried over: {', '.join(match.dropped)}." if match.dropped else ""
+    return (
+        f"Replaced printer {name!r} for this session{was}; it is not saved. Kiln cannot "
+        f"tell from an address alone whether this is the same machine.{dropped}"
+    )
+
+
 @mcp.tool()
 def register_printer(
     name: str,
@@ -12327,10 +12757,16 @@ def register_printer(
             "serial" is accepted as a legacy alias for "usb".
         host: Base URL or IP address of the printer.  For USB printers,
             this is the port path (e.g. "/dev/ttyUSB0", "COM3").
-        api_key: API key (required for OctoPrint and Bambu, optional for
-            Moonraker/Creality, unused for USB).  For Bambu printers
-            this is the LAN Access Code.
-        serial: Printer serial number (required for Bambu printers).
+        api_key: The printer's credential: an API key (OctoPrint, Prusa
+            Link, a Moonraker or Creality printer with its login turned
+            on), a Bambu Lab printer's LAN access code, or a Duet's
+            machine password.  For OctoPrint it can be left out: Kiln asks
+            OctoPrint for a key and the reply (code ``AWAITING_APPROVAL``)
+            carries ``approve_url``, a page where the person clicks Allow.
+            Give them that link, then call again with the same arguments;
+            the request stays open for ten minutes.
+        serial: A Bambu Lab printer's serial number (``discover_printers``
+            reads it off the network).
         verify_ssl: Whether to verify SSL certificates (default True).
             Set to False for printers using self-signed certificates.
             For Bambu, True maps to TLS pin mode and False maps to
@@ -12356,6 +12792,19 @@ def register_printer(
             camera are what Kiln looks at; they do not switch on the
             printer's own failure detection, which runs on the printer
             against its own cameras.
+
+    When something this kind of printer needs is missing, the refusal
+    names it and says where the person finds it; ``discover_printers``
+    says the same for each printer it finds, before anything is asked.
+
+    Once the address has answered, Kiln reads the id the machine reports
+    for itself (a Prusa Link printer's serial, a Duet board's unique id,
+    the host serial Moonraker reports) and saves it with the printer, so a
+    later registration under this name at a new address is matched to the
+    same machine -- or refused as a different one -- by that id rather
+    than by the address.  The reply's ``machine_identity`` carries what
+    was read; a read that fails is noted in ``warnings`` and never fails
+    the registration.
 
     Once registered the printer can be targeted by name — ``printer_status``,
     ``monitor_print``, ``cancel_print``, ``pause_print`` and ``resume_print``
@@ -12403,20 +12852,80 @@ def register_printer(
         # the tool honours the same aliases config.yaml and the env var do.
         printer_type = _normalize_printer_type(printer_type)
 
-        # Validate and clean the printer URL
-        host, url_warnings = _validate_printer_url(host, printer_type=printer_type)
+        # Validate and clean the printer URL.  Asked over the network once,
+        # here: the save below reuses the answer, and so does the bench
+        # offer, which talks to the printer and would otherwise wait out
+        # the adapter's retries on an address that already did not answer.
+        host, url_warnings, url_answered = _check_printer_url(host, printer_type=printer_type)
         if not host:
             return _error_dict(
                 "Invalid printer URL: " + "; ".join(url_warnings),
                 code="INVALID_ARGS",
             )
 
-        if printer_type == "octoprint":
-            if not api_key:
+        # A name already used for a different machine -- saved, or
+        # registered earlier in this session without saving -- is refused
+        # before anything is asked of the printer, built, saved or
+        # registered, whether or not this registration persists.  An update
+        # of the same machine keeps the model and camera stated before, so
+        # the live adapter is built with them too; a replaced one inherits
+        # nothing from the old address.
+        session_entries = {n: e for n, e in _SESSION_PRINTERS.items() if n in _get_registry()}
+        try:
+            saved_match = saved_printer_for_update(
+                name, printer_type, host, serial=serial, session=session_entries
+            )
+        except PrinterNameTaken as exc:
+            return _error_dict(
+                str(exc),
+                code="NAME_TAKEN",
+                extra={"suggested_name": exc.suggested_name},
+            )
+        inherited = saved_match.entry if saved_match is not None else {}
+        live_model = printer_model or inherited.get("printer_model") or None
+        if camera_snapshot_url or camera_stream_url:
+            live_camera = (camera_snapshot_url, camera_stream_url)
+        else:
+            live_camera = (
+                inherited.get("camera_snapshot_url") or None,
+                inherited.get("camera_stream_url") or None,
+            )
+
+        # What this kind of printer needs is one list every setup door reads
+        # (kiln.printer_backends); the refusal says what is missing and where
+        # the person finds it.
+        gaps = missing_needs(printer_type, {"api_key": api_key, "serial": serial}, by_argument=True)
+        request_note = ""
+        if len(gaps) == 1 and gaps[0].request:
+            # The printer's own software can hand the credential over once the
+            # person approves it there: ask it, rather than send them to copy it.
+            from kiln.credential_requests import for_agent
+
+            asked = for_agent(gaps[0], host) or {}
+            state = asked.get("state")
+            if state == "granted" and asked.get("api_key"):
+                api_key, gaps = str(asked["api_key"]), []
+            elif state == "pending":
                 return _error_dict(
-                    "api_key is required for OctoPrint printers.",
-                    code="INVALID_ARGS",
+                    f"Kiln asked the printer at {host} for its {gaps[0].name}. Ask the person to "
+                    f"{asked.get('how')}, then call register_printer again with the same arguments. "
+                    "The request stays open for ten minutes.",
+                    code="AWAITING_APPROVAL",
+                    retryable=True,
+                    extra={"approve_url": asked.get("approve_url")},
                 )
+            elif state == "refused":
+                request_note = " The request Kiln sent was denied or ran out, so the key has to be copied instead."
+            elif state == "error" and asked.get("detail"):
+                request_note = f" Kiln could not ask the printer for it: {asked['detail']}"
+        if gaps:
+            arguments = " and ".join(need.argument for need in gaps)
+            return _error_dict(
+                f"{needs_sentence(printer_type, gaps)} Pass it as {arguments}.{request_note}",
+                code="INVALID_ARGS",
+            )
+
+        if printer_type == "octoprint":
             adapter = OctoPrintAdapter(host=host, api_key=api_key, verify_ssl=verify_ssl)
         elif printer_type == "moonraker":
             adapter = MoonrakerAdapter(host=host, api_key=api_key or None, verify_ssl=verify_ssl)
@@ -12430,7 +12939,7 @@ def register_printer(
             adapter = CrealityAdapter(
                 host=host,
                 api_key=api_key or None,
-                model=printer_model or None,
+                model=live_model,
                 verify_ssl=verify_ssl,
             )
         elif printer_type == "bambu":
@@ -12439,16 +12948,6 @@ def register_printer(
                     "Bambu support requires paho-mqtt.  Install it with: pip install paho-mqtt",
                     code="MISSING_DEPENDENCY",
                 )
-            if not api_key:
-                return _error_dict(
-                    "api_key (LAN Access Code) is required for Bambu printers.",
-                    code="INVALID_ARGS",
-                )
-            if not serial:
-                return _error_dict(
-                    "serial is required for Bambu printers.",
-                    code="INVALID_ARGS",
-                )
             adapter = BambuAdapter(
                 host=host,
                 access_code=api_key,
@@ -12456,7 +12955,7 @@ def register_printer(
                 # Like the Creality branch: the declared model is the
                 # adapter's identity too, not just a safety-profile hint —
                 # bed-aware planners read it back off the registry.
-                printer_model=printer_model or None,
+                printer_model=live_model,
                 tls_mode="pin" if verify_ssl else "insecure",
             )
         elif printer_type == "elegoo":
@@ -12485,11 +12984,60 @@ def register_printer(
                 code="INVALID_ARGS",
             )
 
-        if printer_model:
-            adapter.set_safety_profile(printer_model)
+        # The machine's own id, read now that the adapter exists and the
+        # address has answered (an address that did not is not asked again
+        # at the adapter's retry pace).  With it, the saved name is judged
+        # once more: a printer that moved is matched by this id and nothing
+        # else, and what it inherits (its model, its camera, its credential)
+        # follows that judgement.  A read that fails is said, never fatal.
+        machine_identity = None
+        identity_warning: str | None = None
+        _identity_reader = getattr(type(adapter), "read_machine_identity", None)
+        reads_identity = (
+            _identity_reader is not None
+            and _identity_reader is not PrinterAdapter.read_machine_identity
+        )
+        if reads_identity and url_answered is not False:
+            machine_identity = read_machine_identity_bounded(adapter.read_machine_identity)
+            if machine_identity is None:
+                identity_warning = (
+                    "Kiln could not read this printer's own id, so it is known by its address "
+                    "only; a later registration under this name at a new address cannot be "
+                    "matched to it."
+                )
+        if machine_identity is not None:
+            try:
+                saved_match = saved_printer_for_update(
+                    name, printer_type, host,
+                    serial=serial, machine_identity=machine_identity, session=session_entries,
+                )
+            except PrinterNameTaken as exc:
+                _disconnect = getattr(adapter, "disconnect", None)
+                if _disconnect is not None:
+                    with contextlib.suppress(Exception):
+                        _disconnect()
+                return _error_dict(
+                    str(exc),
+                    code="NAME_TAKEN",
+                    extra={"suggested_name": exc.suggested_name},
+                )
+            inherited = saved_match.entry if saved_match is not None else {}
+            live_model = printer_model or inherited.get("printer_model") or None
+            if not (camera_snapshot_url or camera_stream_url):
+                live_camera = (
+                    inherited.get("camera_snapshot_url") or None,
+                    inherited.get("camera_stream_url") or None,
+                )
+
+        limits_note: str | None = None
+        if live_model:
+            adapter.set_safety_profile(live_model)
+            from kiln.safety_profiles import pending_limits_nudge
+
+            limits_note = pending_limits_nudge()
             from kiln.printer_profile_ids import resolve_declared_model
 
-            resolved, close = resolve_declared_model(printer_model)
+            resolved, close = resolve_declared_model(live_model)
             if resolved is None:
                 # The CLI's setup asks before recording an unknown model; this
                 # door records it, so it says here what home_axes and
@@ -12497,24 +13045,27 @@ def register_printer(
                 hint = f" Closest catalogue rows: {', '.join(close)}." if close else ""
                 url_warnings = [
                     *url_warnings,
-                    f"printer_model {printer_model!r} is not a catalogue row Kiln knows, so the "
+                    f"printer_model {live_model!r} is not a catalogue row Kiln knows, so the "
                     "per-model safety checks stay off and home_axes / park_head will refuse to home Z "
                     f"or park until printer_model names one.{hint}",
                 ]
 
         # A camera the user supplies.  Judged before anything is written,
         # so a bad URL refuses the registration rather than saving half.
-        if camera_snapshot_url or camera_stream_url:
+        if live_camera[0] or live_camera[1]:
             try:
                 adapter.set_external_camera(
-                    snapshot_url=camera_snapshot_url,
-                    stream_url=camera_stream_url,
+                    snapshot_url=live_camera[0],
+                    stream_url=live_camera[1],
                 )
             except ValueError as exc:
                 return _error_dict(str(exc), code="INVALID_ARGS")
 
         warnings_out: list[str] = list(url_warnings)
+        if identity_warning:
+            warnings_out.append(identity_warning)
         persisted_path: str | None = None
+        saved_outcome: Any = None
         if persist:
             try:
                 persisted = save_printer(
@@ -12524,13 +13075,24 @@ def register_printer(
                     api_key=api_key if printer_type != "bambu" else None,
                     access_code=api_key if printer_type == "bambu" else None,
                     serial=serial,
+                    machine_identity=machine_identity,
                     printer_model=printer_model,
                     baudrate=baudrate,
                     camera_snapshot_url=camera_snapshot_url,
                     camera_stream_url=camera_stream_url,
                     set_active=True,
+                    probe=False,
                 )
-                persisted_path = str(persisted)
+                persisted_path = str(persisted.path)
+                saved_outcome = persisted
+            except PrinterNameTaken as exc:
+                # Checked above; the config changed in between.  Still a
+                # refusal: nothing is registered under the taken name.
+                return _error_dict(
+                    str(exc),
+                    code="NAME_TAKEN",
+                    extra={"suggested_name": exc.suggested_name},
+                )
             except Exception as exc:
                 warnings_out.append(f"Printer registered for this session but could not be saved: {exc}")
 
@@ -12542,6 +13104,19 @@ def register_printer(
         _adapter = adapter  # Update immediately so tools use the new one.
 
         _get_registry().register(name, adapter)
+        if saved_outcome is not None:
+            # The config file now answers for this name.
+            _SESSION_PRINTERS.pop(name, None)
+        else:
+            _SESSION_PRINTERS[name] = unsaved_printer_entry(
+                printer_type,
+                host,
+                serial=serial,
+                machine_identity=machine_identity,
+                printer_model=live_model,
+                camera_snapshot_url=live_camera[0],
+                camera_stream_url=live_camera[1],
+            )
 
         # If the boot-time adapter was a different object (not in the
         # registry), disconnect it to stop orphaned MQTT threads.
@@ -12560,11 +13135,27 @@ def register_printer(
             "message": f"Registered printer {name!r} ({printer_type} @ {host}).",
             "name": name,
         }
+        if machine_identity is not None:
+            result["machine_identity"] = machine_identity.to_dict()
+        if saved_outcome is not None:
+            result["saved"] = saved_outcome.outcome
+            if saved_outcome.notice:
+                result["notice"] = saved_outcome.notice
+                result["message"] += " " + saved_outcome.notice
+        elif saved_match is not None:
+            notice = _session_replace_notice(name, saved_match)
+            result["notice"] = notice
+            result["message"] += " " + notice
         _camera = getattr(adapter, "external_camera", None)
         if _camera is not None:
             # Redacted by construction; the note is the honesty every door
             # points at, said here where the camera is first accepted.
             result["camera"] = _camera.describe()
+        if limits_note:
+            # Said once, here, where the printer was set up: what limits
+            # Kiln is holding this machine to and what would change them.
+            result["limits_note"] = limits_note
+            result["message"] += " " + limits_note
         if fleet_note:
             result["fleet_note"] = fleet_note
             result["upgrade_url"] = "https://kiln3d.com/pricing"
@@ -12595,15 +13186,34 @@ def register_printer(
             result["config_path"] = persisted_path
 
         # Once, for a model whose motion record has blanks: the offer of the
-        # short session that fills them (kiln.bench).  Never twice.
-        try:
-            from kiln.bench import offer_after_registration
+        # short session that fills them (kiln.bench).  Never twice.  Not for
+        # an address that just failed to answer: the offer reads the printer's
+        # own settings, which there means waiting out every retry (3 x 30 s on
+        # Moonraker) to learn nothing, and offline is not a reason to nag --
+        # the offer stays unspent for a registration the printer answers.
+        if url_answered is not False:
+            try:
+                from kiln.bench import offer_after_registration
 
-            _offer = offer_after_registration(adapter, name)
-            if _offer is not None:
-                result["bench_offer"] = _offer
-        except Exception:
-            logger.debug("bench offer after registration skipped", exc_info=True)
+                _offer = offer_after_registration(adapter, name)
+                if _offer is not None:
+                    result["bench_offer"] = _offer
+            except Exception:
+                logger.debug("bench offer after registration skipped", exc_info=True)
+
+        # Does the camera answer?  Asked once, here, without a frame: the
+        # printer's own camera only when the printer's address answered (an
+        # offline printer is not asked twice), and a camera the user supplied
+        # always, since it is on its own host.  A camera that does not answer
+        # is a warning, never a refusal: it may simply be off.
+        if url_answered is not False or getattr(adapter, "external_camera", None) is not None:
+            from kiln.camera_check import camera_setup_line
+
+            _handshake, _camera_line = camera_setup_line(adapter, door="tool")
+            if _handshake is not None:
+                result["camera_check"] = {**_handshake.to_dict(), "line": _camera_line}
+                if _handshake.answered is False and _handshake.where == "external":
+                    warnings_out.append(_camera_line)
 
         if printer_type == "bambu" and verify_connection:
             try:
@@ -12634,15 +13244,30 @@ def register_printer(
                     "tray_tar": ams_info.get("tray_tar"),
                 }
             except Exception as exc:
-                result["bambu_ready"] = False
-                result["ams_summary"] = {
-                    "error": str(exc),
-                    "retryable": True,
-                }
-                warnings_out.append(
-                    "Bambu printer was registered, but the live AMS verification failed. "
-                    "Check LAN mode, host, serial, and access code, then call ams_status()."
-                )
+                refusal = engagement_refusal_in_flight(exc)
+                if refusal is not None:
+                    # Kiln is working with another printer and was not
+                    # allowed to look at this one's spools.  Nothing failed:
+                    # the printer is registered, and its spools were not
+                    # checked.  "Check LAN mode and the access code" would
+                    # send the person after a fault that is not there.
+                    result["ams_summary"] = {
+                        "not_checked": engagement_refusal_words(refusal),
+                        "refusal": refusal,
+                    }
+                    warnings_out.append(
+                        "Spools not checked: " + engagement_refusal_words(refusal)
+                    )
+                else:
+                    result["bambu_ready"] = False
+                    result["ams_summary"] = {
+                        "error": str(exc),
+                        "retryable": True,
+                    }
+                    warnings_out.append(
+                        "Bambu printer was registered, but the live AMS verification failed. "
+                        "Check LAN mode, host, serial, and access code, then call ams_status()."
+                    )
 
         if warnings_out:
             result["warnings"] = warnings_out
@@ -13440,7 +14065,9 @@ def download_and_upload(
 
     When ``file_id`` is provided, downloads and uploads that single file.
     When ``model_id`` is provided without ``file_id``, downloads and
-    uploads all printable files (.stl, .gcode, .3mf) for the model.
+    uploads all printable files (.stl, .gcode, .3mf, .glb) for the model.
+    A GLB goes to the printer as an STL beside it, never as a GLB; the
+    upload's ``conversion`` names the original, which stays on disk.
 
     Args:
         file_id: File ID (from ``model_files`` results).  For Thingiverse
@@ -13488,8 +14115,9 @@ def download_and_upload(
                     code="NOT_FOUND",
                 )
 
-            # Filter to printable extensions
-            _printable_exts = {"stl", "gcode", "gco", "g", "3mf"}
+            # Filter to printable extensions.  A GLB counts: it is uploaded
+            # as the STL it is converted to.
+            _printable_exts = {"stl", "gcode", "gco", "g", "3mf"} | ARRIVAL_CONVERSIONS
             printable_files = [
                 mf
                 for mf in all_files
@@ -13497,7 +14125,7 @@ def download_and_upload(
             ]
             if not printable_files:
                 return _error_dict(
-                    f"No printable files (.stl, .gcode, .3mf) found for model {model_id} on {source}.",
+                    f"No printable files (.stl, .gcode, .3mf, .glb) found for model {model_id} on {source}.",
                     code="NOT_FOUND",
                 )
 
@@ -13505,7 +14133,9 @@ def download_and_upload(
             errors: list[dict] = []
             for mf in printable_files:
                 try:
-                    local_path = mkt.download_file(mf.id, _dl_dir)
+                    local_path, conversion = convert_on_arrival(
+                        mkt.download_file(mf.id, _dl_dir), tool="download_and_upload"
+                    )
                     upload_result = adapter.upload_file(local_path)
                     up_name = upload_result.file_name or os.path.basename(local_path)
                     uploaded.append(
@@ -13514,9 +14144,10 @@ def download_and_upload(
                             "file_name": up_name,
                             "local_path": local_path,
                             "upload": upload_result.to_dict(),
+                            **({"conversion": conversion} if conversion else {}),
                         }
                     )
-                except (MarketplaceError, PrinterError, RuntimeError) as exc:
+                except (MarketplaceError, PrinterError, RuntimeError, ValueError, OSError) as exc:
                     errors.append(
                         {
                             "file_id": mf.id,
@@ -13554,20 +14185,23 @@ def download_and_upload(
                 code="INVALID_INPUT",
             )
 
-        mkt = _marketplace_registry.get(source) if source != "thingiverse" else None
+        # Step 1: Download from the marketplace the file belongs to
+        local_path, mkt = _download_marketplace_file(source, file_id, _dl_dir)
+        if local_path is None:
+            return _error_dict(
+                f"{mkt.display_name} does not support direct downloads.",
+                code="UNSUPPORTED",
+            )
 
-        # Step 1: Download from marketplace
-        if mkt is not None:
-            if not mkt.supports_download:
-                return _error_dict(
-                    f"{mkt.display_name} does not support direct downloads.",
-                    code="UNSUPPORTED",
-                )
-            local_path = mkt.download_file(str(file_id), _dl_dir)
-        else:
-            # Fallback to legacy Thingiverse client
-            client = _get_thingiverse()
-            local_path = client.download_file(int(file_id), _dl_dir)
+        # Step 1.5: a GLB goes to the printer as an STL, never as a GLB.
+        try:
+            local_path, conversion = convert_on_arrival(local_path, tool="download_and_upload")
+        except (ValueError, OSError) as exc:
+            return _error_dict(
+                f"{os.path.basename(local_path)} could not be turned into an STL ({exc}), "
+                "so it was not sent to the printer.",
+                code="CONVERSION_FAILED",
+            )
 
         # Step 2: Upload to printer
         upload_result = adapter.upload_file(local_path)
@@ -13626,7 +14260,7 @@ def download_and_upload(
             )
             sent_at = time.monotonic()
             print_res = adapter.start_print(file_name)
-            _note_print_started(adapter)
+            _note_print_started(adapter, print_res)
             print_verdict = resolve_print_start(
                 adapter, print_res, sent_at=sent_at, file_name=file_name,
             )
@@ -13643,6 +14277,8 @@ def download_and_upload(
             "verification_status": "unverified",
             "auto_print_enabled": _AUTO_PRINT_MARKETPLACE,
         }
+        if conversion:
+            resp["conversion"] = conversion
 
         if auto_printed:
             resp["print"] = print_data
@@ -14103,8 +14739,12 @@ def set_material(
         printer_name: Target printer name.
         material: Material type (PLA, PETG, ABS, etc.).
         color: Optional filament color.
-        spool_id: Optional ID of a tracked spool.
-        tool_index: Extruder index for multi-tool printers (default 0).
+        spool_id: Optional ID of a tracked spool (see ``list_spools``).
+            Linking one is what lets Kiln count that spool down as this
+            printer prints from it.
+        tool_index: Extruder index for multi-tool printers (default 0).  On
+            a printer with a multi-material unit, the tray's id as
+            ``ams_status`` reports it.
     """
     if err := _check_auth("write"):
         return err
@@ -14190,7 +14830,18 @@ def check_material_match(
 
 @mcp.tool()
 def list_spools() -> dict:
-    """List all tracked filament spools in inventory."""
+    """List all tracked filament spools in inventory.
+
+    ``remaining_grams`` is what Kiln believes is left on each spool, and
+    ``remaining_determined_by`` says who set it: ``inferred`` is Kiln's own
+    count (what the spool held, less what the prints Kiln started were
+    sliced to use), ``observed`` is the printer's reading of a spool it can
+    measure, ``user_reported`` is what the person said.  A count misses
+    prints started outside Kiln, so report a counted figure as Kiln's
+    count, never as a measurement.  When the person says the figure is
+    wrong, correct it with ``add_spool(spool_id=..., remaining_grams=...)``;
+    when they say a spool is used up, ``remove_spool``.
+    """
     try:
         spools = _get_material_tracker().list_spools()
         return {
@@ -14204,30 +14855,81 @@ def list_spools() -> dict:
 
 @mcp.tool()
 def add_spool(
-    material: str,
+    material: str | None = None,
     color: str | None = None,
     brand: str | None = None,
     weight_grams: float = 1000.0,
     cost_usd: float | None = None,
+    remaining_grams: float | None = None,
+    spool_id: str | None = None,
 ) -> dict:
-    """Add a new filament spool to inventory.
+    """Add a filament spool to inventory, or correct how much is left on one.
+
+    To ADD a spool, give its ``material``.  ``remaining_grams`` is what is
+    left on a spool that is not new; left out, the spool is full.
+
+    To CORRECT a spool already on record, pass its ``spool_id`` (from
+    ``list_spools``) with ``remaining_grams``: the person says they have
+    more left than Kiln shows, or less.  Only the amount changes.  Kiln
+    counts a spool down as the prints it starts use it, and a count drifts,
+    so the person's word wins.  ``remaining_grams=0`` records the spool as
+    used up and keeps it on the list; ``remove_spool`` takes it off.
 
     Args:
-        material: Material type (PLA, PETG, ABS, etc.).
+        material: Material type (PLA, PETG, ABS, etc.).  Required to add.
         color: Filament color.
         brand: Manufacturer brand.
         weight_grams: Total spool weight in grams (default 1000).
         cost_usd: Cost of the spool in USD.
+        remaining_grams: Grams left on the spool.
+        spool_id: A spool already on record whose remaining amount to set.
     """
     if err := _check_auth("write"):
         return err
     try:
-        spool = _get_material_tracker().add_spool(
+        if remaining_grams is not None and remaining_grams < 0:
+            return _error_dict("remaining_grams cannot be negative.", code="VALIDATION_ERROR")
+        tracker = _get_material_tracker()
+        if spool_id:
+            if remaining_grams is None:
+                return _error_dict(
+                    "Give remaining_grams with spool_id: it is the amount left on that spool. "
+                    "To add another spool, leave spool_id out.",
+                    code="VALIDATION_ERROR",
+                )
+            existing = tracker.get_spool(spool_id)
+            if existing is None:
+                return _error_dict(f"Spool {spool_id!r} not found.", code="NOT_FOUND")
+            if remaining_grams > existing.weight_grams:
+                return _error_dict(
+                    f"{remaining_grams:g} g is more than the {existing.weight_grams:g} g this spool was "
+                    "recorded with. Add it as a new spool with its real weight instead.",
+                    code="VALIDATION_ERROR",
+                )
+            updated = tracker.set_spool_remaining(
+                spool_id,
+                remaining_grams,
+                # Stated at the writer: a caller of this tool is a person or
+                # an agent saying what is left.  No sensor is involved.
+                determined_by="user_reported",
+            )
+            if updated is None:
+                return _error_dict(f"Spool {spool_id!r} not found.", code="NOT_FOUND")
+            return {"success": True, "spool": updated.to_dict(), "updated": True}
+        if not material or not str(material).strip():
+            return _error_dict("Give the spool's material (PLA, PETG, ...) to add it.", code="VALIDATION_ERROR")
+        if remaining_grams is not None and remaining_grams > weight_grams:
+            return _error_dict(
+                f"remaining_grams ({remaining_grams:g}) cannot be more than weight_grams ({weight_grams:g}).",
+                code="VALIDATION_ERROR",
+            )
+        spool = tracker.add_spool(
             material_type=material,
             color=color,
             brand=brand,
             weight_grams=weight_grams,
             cost_usd=cost_usd,
+            remaining_grams=remaining_grams,
         )
         return {"success": True, "spool": spool.to_dict()}
     except Exception as exc:
@@ -14238,6 +14940,13 @@ def add_spool(
 @mcp.tool()
 def remove_spool(spool_id: str) -> dict:
     """Remove a filament spool from inventory.
+
+    When the person says a spool is used up, finished or gone, remove it
+    here (``list_spools`` gives its id) so Kiln stops treating it as
+    filament they have.  If they have more or less left than Kiln shows,
+    correct the figure with ``add_spool(spool_id=..., remaining_grams=...)``
+    instead.  A used-up spool is not a reason to suggest buying filament:
+    say nothing about that unless the person asks.
 
     Args:
         spool_id: The spool's unique identifier.
@@ -14503,11 +15212,6 @@ def list_plugins() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 3DOS Network tools — moved to plugins/network_tools.py
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
@@ -14700,6 +15404,13 @@ def await_print_completion(
     Returns a dict with ``outcome`` (completed / failed / cancelled /
     timeout), final printer state, elapsed time, completion percentage
     history, and (when ``brief_id`` resolves) a ``design_goal`` block.
+
+    A print carrying a hardware plan (pauses written in for nuts, magnets or
+    bearings) also returns early with ``outcome: "hardware_stop"`` and a
+    ``hardware`` block: when a stop is a few minutes away, when the printer
+    has stopped for the parts, and when it went past a stop without
+    stopping.  Tell the person what the block says, then wait again.  A
+    finished print's ``hardware`` block names what goes in after the print.
     """
     if err := _check_auth("print"):
         return err
@@ -14833,6 +15544,28 @@ def await_print_completion(
                 )
                 last_pct = pct
 
+            # A print carrying a hardware plan comes back to the person at its
+            # moments: a stop close enough to get ready for, a stop gone past
+            # without stopping, and the stop itself -- every time, since a
+            # printer waiting there resumes only by a person's hands and
+            # waiting here would only run the clock out.
+            from kiln.hardware_stops import observe as _observe_hardware
+
+            hardware = _observe_hardware(adapter, state, job_progress, announce="chat")
+            if hardware and (
+                hardware["stage"] == "now"
+                or (hardware["new"] and hardware["stage"] in ("coming_up", "missed", "passed_unseen"))
+            ):
+                return {
+                    "success": True,
+                    "outcome": "hardware_stop",
+                    "hardware": hardware,
+                    "message": hardware["say"],
+                    "state": state.state.value,
+                    "elapsed_seconds": round(elapsed, 1),
+                    "progress_log": progress_log[-20:],
+                }
+
             # ``confirmed_state``: it looks through a FAULT headline, so a
             # fault raised while the machine kept working still matches here,
             # and it is as strict about staleness as the bare state word was:
@@ -14846,13 +15579,16 @@ def await_print_completion(
                 # covers every caller that polls, not just this tool, and it
                 # refuses a duration when the ending was noticed too late to
                 # have been watched; this call site could do neither.
-                return _attach_goal({
+                done = {
                     "success": True,
                     "outcome": "completed",
                     "state": state.state.value,
                     "elapsed_seconds": round(elapsed, 1),
                     "progress_log": progress_log[-20:],
-                })
+                }
+                if hardware and hardware["stage"] == "after_print":
+                    done["hardware"] = hardware
+                return _attach_goal(done)
             # ``confirmed_state``: it looks through a FAULT headline, so a
             # fault raised while the machine kept working still matches here,
             # and it is as strict about staleness as the bare state word was:
@@ -14955,7 +15691,11 @@ def compare_print_options(
     # --- Fulfillment quote ------------------------------------------------
     fulfillment_quote_data = None
     fulfillment_error = None
-    if fulfillment_material_id:
+    from kiln.fulfillment_service import NOT_INCLUDED, order_service
+
+    if fulfillment_material_id and order_service() is None:
+        fulfillment_error = NOT_INCLUDED
+    elif fulfillment_material_id:
         try:
             provider = _get_fulfillment()
             quote = provider.get_quote(
@@ -15667,14 +16407,14 @@ def list_design_templates() -> dict:
     Prefer ``find_design_templates(use_case)`` when you know what the
     user is making — it searches this library by use case and ranks
     matches, instead of returning all of them.  Then call
-    ``generate_from_template(id, {...})`` to render a printable STL.
+    ``generate_from_template(template_id, {...})`` to render a printable STL.
     """
     try:
         import json as _json
         from pathlib import Path as _Path
 
         tpl_path = _Path(__file__).parent / "data" / "design_templates.json"
-        with open(tpl_path) as fh:
+        with open(tpl_path, encoding="utf-8") as fh:
             data = _json.load(fh)
 
         templates = []
@@ -15750,6 +16490,7 @@ def _fastener_advice_free(names: list[str]) -> dict[str, Any] | None:
 def generate_from_template(
     template_id: str,
     parameters: dict | None = None,
+    brief_id: str = "",
 ) -> dict:
     """Build a printable STL from a parametric part, to the user's dimensions.
 
@@ -15789,6 +16530,9 @@ def generate_from_template(
     Read its ``agent_instruction`` before repeating any of it to the user.
 
     Args:
+        brief_id: The saved goal's id from ``design_session``; pass it so
+            this make joins the goal (recorded against it; Kiln Pro checks the
+            result against it). Empty when there is no goal.
         template_id: Parametric part id, from ``find_design_templates``
             or ``list_design_templates`` (e.g. ``"shelf_bracket"``).
         parameters: Dict of parameter overrides carrying the user's own
@@ -15804,7 +16548,7 @@ def generate_from_template(
         from kiln.parametric import render_template_scad
 
         tpl_path = _Path(__file__).parent / "data" / "design_templates.json"
-        with open(tpl_path) as fh:
+        with open(tpl_path, encoding="utf-8") as fh:
             data = _json.load(fh)
 
         tpl = data.get(template_id)
@@ -15960,6 +16704,9 @@ def generate_from_template(
             except Exception:  # noqa: BLE001
                 pass
 
+            from kiln.front_door import join_goal
+
+            join_goal(brief_id, result_dict, dl.local_path)
             try:
                 from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
                 return attach_inspect_bundle(
@@ -16328,12 +17075,11 @@ def resolve_model_source(file_path: str) -> dict:
         # Fall back to generic 3MF metadata extraction
         import json as _json
         import xml.etree.ElementTree as ET
-        import zipfile
 
         model_xml: str | None = None
         plate_json_raw: bytes | None = None
 
-        with zipfile.ZipFile(file_path, "r") as zf:
+        with UntrustedZipFile(file_path, "r") as zf:
             for candidate in ["3D/3dmodel.model", "3d/3dmodel.model"]:
                 if candidate in zf.namelist():
                     model_xml = zf.read(candidate).decode("utf-8")
@@ -16548,6 +17294,7 @@ def design_to_gcode_pipeline(
     printer_model: str = "",
     infill_percent: float = 20.0,
     placement: str | list[float] | None = None,
+    brief_id: str = "",
 ) -> dict:
     """End-to-end pipeline: description → template → STL → analysis → GCode.
 
@@ -16558,9 +17305,13 @@ def design_to_gcode_pipeline(
     4. Estimates weight
     5. Slices to G-code (if slicer available)
 
+    :param brief_id: The saved goal's id from ``design_session``; pass it so
+        this make joins the goal (recorded against it; Kiln Pro checks the
+        result against it). Empty when there is no goal.
     :param description: Natural-language design description.
     :param output_dir: Directory for output files (uses tempdir if empty).
-    :param material: Material for weight estimation and slicing.
+    :param material: Material the slice is set for -- temperatures, melt
+        rate and cooling -- and weighed as.
     :param printer_model: Printer model for slicer profile lookup.
     :param infill_percent: Infill percentage for weight estimation.
     :returns: Dict with paths to SCAD, STL, G-code files, weight, risks.
@@ -16580,7 +17331,12 @@ def design_to_gcode_pipeline(
             # plate refuses the slice step.  Same gate as slice_model.
             placement=placement if placement is not None else "auto",
         )
-        return {"success": result.success, **result.to_dict()}
+        result_dict = {"success": result.success, **result.to_dict()}
+        if result.success:
+            from kiln.front_door import join_goal
+
+            join_goal(brief_id, result_dict, result.stl_file)
+        return result_dict
     except Exception as exc:
         return _error_dict(f"Design-to-gcode pipeline failed: {exc}")
 
@@ -16646,6 +17402,7 @@ def compose_multicolor_3mf(
     plate_width: float = 256.0,
     plate_depth: float = 256.0,
     printer_id: str = "",
+    material: str = "",
 ) -> dict:
     """Compose a multi-color / multi-material .3mf from multiple STL files.
 
@@ -16691,6 +17448,9 @@ def compose_multicolor_3mf(
         plate_width: Print plate X dimension in mm (default 256 for legacy
             callers without a printer id).
         plate_depth: Print plate Y dimension in mm (default 256).
+        material: Optional material the parts will be printed in (e.g.
+            ``"PETG"``).  A spool on record in a clearly different
+            material is then not named as one to load.
         printer_id: Optional supported printer model id.  When it resolves,
             its build volume overrides ``plate_width`` / ``plate_depth``.
             The composer centres an off-plate group on THIS plate, so name
@@ -16700,7 +17460,13 @@ def compose_multicolor_3mf(
 
     Returns:
         Dict with ``success``, ``output_path``, ``parts``, ``total_triangles``,
-        ``total_vertices``, ``extruder_map``, and ``message``.
+        ``total_vertices``, ``extruder_map``, and ``message``.  It also says
+        whether the part colours are on the printer, as
+        ``colour_availability`` (absent when Kiln cannot see what is loaded).
+        Relay its ``say`` as written and add nothing about filament: never
+        suggest buying filament unless the person asks for one or says yes
+        to the offer in ``say``.  On a yes, call ``find_closest_filaments``
+        with these colours and the print's material.
     """
     _check_auth("design:compose")
 
@@ -16741,16 +17507,15 @@ def compose_multicolor_3mf(
         printer_id=printer_id or None,
     )
     if result.get("success"):
-        # The part colours were chosen here; say now whether they are loaded.
-        try:
-            advisory = _spool_advisory(
-                [p.get("color") for p in parts], printer_name=printer_id or None,
-            )
-        except Exception as exc:  # advice never fails a good composition
-            logger.debug("compose: spool advisory skipped (%s)", exc)
-            advisory = None
-        if advisory:
-            result["ams_advisory"] = advisory
+        # The part colours were chosen here; say now whether they are on
+        # the printer.  A part's ``material`` is a display label ("PLA
+        # Grey"), not the print's material, so it is not passed.
+        from kiln.colour_availability import attach_colour_availability
+
+        attach_colour_availability(
+            result, [p.get("color") for p in parts], printer_name=printer_id or None,
+            material=material or None,
+        )
     return result
 
 
@@ -17260,7 +18025,13 @@ def troubleshoot_printer(
             # A reading kiln-pro just put on the wire (a free row, served to
             # a signed-in caller of any tier) makes "can't read a fault code
             # here" a lie; that caller gets the generic line instead.
-            if named_signals and intel.firmware == "bambu" and not private_reading_attached:
+            # The firmware family is read off the public roster when the
+            # record is not in hand (a signed-out install resolves to the
+            # generic row), so the Bambu-specific line is still said.
+            from kiln.printer_intelligence import roster_firmware
+
+            firmware = intel.firmware if intel.id != "default" else (roster_firmware(printer_id) or intel.firmware)
+            if named_signals and firmware == "bambu" and not private_reading_attached:
                 # Leads with what the free tier does NOT do, then what it
                 # still DOES, then what Pro adds. That order is deliberate:
                 # opening by telling users they did something clever and
@@ -17420,10 +18191,11 @@ def run_quick_print(
         printer_id: Printer model ID for auto-profile selection
             (e.g. ``"ender3"``, ``"bambu_x1c"``, ``"klipper_generic"``).
         profile_path: Explicit slicer profile. Overrides printer_id auto-selection.
-        material: Filament material (e.g. ``"PLA"``).  Its density is what
-            the slicer weighs the print with (omitted: the spool the
-            printer reports loaded, then PLA — the slice step says which),
-            and AMS auto-routing prefers a loaded tray whose type matches.
+        material: Filament material (e.g. ``"PLA"``).  It sets the slice's
+            temperatures, melt rate and cooling, its density weighs the
+            print (omitted: the spool the printer reports loaded, then PLA —
+            the slice step says which), and AMS auto-routing prefers a
+            loaded tray whose type matches.
         use_ams: AMS feeding mode (Bambu): ``"auto"`` (default — detect and
             route to a loaded tray), ``"true"``, or ``"false"``.
         ams_mapping: Explicit AMS slot mapping as a JSON array string,
@@ -17552,9 +18324,11 @@ def run_reslice_and_print(
         overrides: JSON string of PrusaSlicer INI key-value pairs to override.
         profile_path: Explicit slicer profile. Overrides printer_id auto-selection.
         slicer_path: Explicit path to the slicer binary.
-        material: Filament material (e.g. ``"PLA"``).  Its density is what
-            the slicer weighs the print with (omitted: the spool the
-            printer reports loaded, then PLA — the slice step says which).
+        material: Filament material (e.g. ``"PLA"``).  It sets the slice's
+            temperatures, melt rate and cooling -- a setting you also pass in
+            ``overrides`` stays yours -- and its density weighs the print
+            (omitted: the spool the printer reports loaded, then PLA — the
+            slice step says which).
             For fully-auto raw-gcode reslices, AMS routing prefers a loaded
             tray of this material.  (3MF plates carry their own filament
             map, so routing defers to the adapter there.)
@@ -17729,17 +18503,22 @@ def multi_copy_print(
             # Fallback: STL mesh duplication
             from kiln.auto_orient import duplicate_stl_on_plate
 
-            # Get bed dimensions from safety profiles if printer_id available
+            # The bed the copies are laid out on: the one helper every bed
+            # reader uses (the record, else the roster's rated bed, else
+            # the owner's stated one), never the generic profile's 200 mm
+            # cube -- which is what a roster printer with no record in hand
+            # was answered with, so two copies were arranged for a bed the
+            # machine does not have.
             bed_w = 256.0
             bed_d = 256.0
             if printer_id:
                 try:
-                    from kiln.safety_profiles import get_profile
+                    from kiln.printers.bed_fit import get_build_volume, owner_stated_build_volume
 
-                    profile = get_profile(printer_id)
-                    if profile and profile.build_volume:
-                        bed_w = float(profile.build_volume[0])
-                        bed_d = float(profile.build_volume[1])
+                    volume = get_build_volume(printer_id) or owner_stated_build_volume(printer_id)
+                    if volume:
+                        bed_w = float(volume[0])
+                        bed_d = float(volume[1])
                 except Exception:
                     pass
 
@@ -18155,12 +18934,23 @@ def _served_wait_seconds(tool_name: str) -> float:
     return _SERVED_MAKE_WAIT_S if kind == "made" else _SERVED_WAIT_S
 
 
-def _pro_api_call(tool_name: str, _timeout: float | None = None, **kwargs) -> dict:
+def _pro_api_call(
+    tool_name: str,
+    _timeout: float | None = None,
+    _asked_by_user: bool = True,
+    **kwargs,
+) -> dict:
     """Call a hosted kiln-pro tool through the public REST API.
 
     ``_timeout`` is how long to wait for the answer.  Left out, it follows
     what the tool does (:func:`_served_wait_seconds`); a caller that must
     fail fast -- a check made on the way into a print -- passes its own.
+
+    ``_asked_by_user=False`` marks an ask the person never made -- extra
+    information a tool fetches on its own, like the blade status behind a
+    pre-flight.  Without a sign-in it gets the same answer, but it is not
+    counted as someone reaching for the feature: that counter
+    (:func:`kiln.daily_stats.record_account_wall`) means a person asked.
 
     Bearer-token resolution order:
       1. ``KILN_LICENSE_KEY`` env var (operator-supplied license)
@@ -18224,13 +19014,15 @@ def _pro_api_call(tool_name: str, _timeout: float | None = None, **kwargs) -> di
     if not bearer:
         # The most-hit refusal in the product, and until now the only one
         # that recorded nothing: it returns here without ever reaching a
-        # server, so no server-side counter could see it.  Best-effort.
-        try:
-            from kiln.daily_stats import record_account_wall
+        # server, so no server-side counter could see it.  Best-effort, and
+        # only for an ask a person made (see ``_asked_by_user``).
+        if _asked_by_user:
+            try:
+                from kiln.daily_stats import record_account_wall
 
-            record_account_wall(tool_name)
-        except Exception:
-            pass
+                record_account_wall(tool_name)
+            except Exception:
+                pass
         required_tier = _PRO_TOOL_TIERS.get(tool_name, "")
         allowance = _PRO_TOOL_QUOTA.get(tool_name)
         # Two audiences, two fields — the same split ``_tier_required_error``
@@ -18266,9 +19058,10 @@ def _pro_api_call(tool_name: str, _timeout: float | None = None, **kwargs) -> di
             "code": "KILN_ACCOUNT_NOT_PAIRED",
             "tool": tool_name,
             "required_tier": required_tier or "free",
-            "upgrade_url": "https://kiln3d.com/pricing",
+            "upgrade_url": upgrade_link(tool_name),
             "why": "signed_out",
             **signin_hint_fields(),
+            **paywall_fields(required_tier),
         }
         # Machine-readable twin of the sentence, for a caller that would rather
         # render the allowance its own way than parse prose.  Omitted entirely
@@ -18311,6 +19104,14 @@ def _pro_api_call(tool_name: str, _timeout: float | None = None, **kwargs) -> di
         # floor (e.g. force an upgrade for a release with new terms / fixes).
         # A client that never sends this is treated as below the floor.
         headers["X-Kiln-Client-Version"] = _current_version()
+        # A heavy make (a texture over a whole model) runs for minutes, longer
+        # than one request stays open.  The servers accept such a tool as a
+        # job when asked this way and answer every other tool as usual.
+        headers[_SERVED_JOB_HEADER] = "1"
+        # This install saves the files an answer names (kiln.served_makes).
+        headers[_SERVED_FILES_HEADER] = "1"
+        # ...and carries out the steps a tool may ask of it (kiln.served_steps).
+        headers[_SERVED_STEPS_HEADER] = "1"
         req = urllib.request.Request(
             f"{api_url.rstrip('/')}/api/tools/{tool_name}",
             data=json.dumps(kwargs).encode() if kwargs else None,
@@ -18321,7 +19122,11 @@ def _pro_api_call(tool_name: str, _timeout: float | None = None, **kwargs) -> di
         for attempt in (1, 2):
             try:
                 with urllib.request.urlopen(req, timeout=wait_s) as resp:
-                    return json.loads(resp.read())
+                    answer = json.loads(resp.read())
+                    accepted = getattr(resp, "status", 200) == 202
+                if accepted and isinstance(answer, dict) and answer.get("job_id"):
+                    return _await_served_job(tool_name, api_url, headers, answer)
+                return answer
             except urllib.error.HTTPError as exc:
                 # Preserve the server's own error body when present — it
                 # usually carries a structured ``code`` + ``error`` the agent
@@ -18352,6 +19157,126 @@ def _pro_api_call(tool_name: str, _timeout: float | None = None, **kwargs) -> di
         )
 
 
+#: The version of a manifest entry's ``local_steps`` block this build reads
+#: (what a served tool needs read here first, and whether it may ask this
+#: computer to act on the printer).
+_LOCAL_STEPS_SCHEMA_VERSION = 1
+#: Asks the servers to run a heavy tool as a job (they ignore it for any
+#: other tool).
+_SERVED_JOB_HEADER = "X-Kiln-Tool-Async"
+_SERVED_FILES_HEADER = "X-Kiln-Result-Files"
+_SERVED_STEPS_HEADER = "X-Kiln-Local-Steps"
+#: How long a job is waited for: the servers stop one at fifteen minutes.
+_SERVED_JOB_WAIT_S = 15 * 60 + 30
+_SERVED_JOB_POLL_S = 3.0
+
+
+def _await_served_job(
+    tool_name: str, api_url: str, headers: dict[str, str], accepted: dict
+) -> dict:
+    """Wait for a job the servers accepted, and return the tool's answer.
+
+    The job lives on the one machine that took it, so each poll names that
+    machine.  The answer is the tool's own, exactly as a direct call would
+    have returned it; a miss is worded the way every served miss is.
+    """
+    import json
+    import time
+    import urllib.error
+    import urllib.request
+
+    from kiln.served_answer import envelope_for_http
+
+    kind = _PRO_TOOL_OFFLINE_KIND.get(tool_name)
+    poll = str(accepted.get("poll") or f"/api/tools/jobs/{accepted.get('job_id')}")
+    poll_headers = {k: v for k, v in headers.items() if k != _SERVED_JOB_HEADER}
+    machine = str(accepted.get("machine_id") or "").strip()
+    if machine:
+        poll_headers["fly-force-instance-id"] = machine
+    deadline = time.monotonic() + _SERVED_JOB_WAIT_S
+    too_long = {
+        "status": "error",
+        "code": "JOB_TIMEOUT",
+        "error": (
+            "That took longer than Kiln's servers allow, so Kiln stopped "
+            "waiting. Nothing was charged."
+        ),
+    }
+    while time.monotonic() <= deadline:
+        time.sleep(_SERVED_JOB_POLL_S)
+        # A job outlives a sign-in token (they last an hour and are renewed
+        # near their end), so each poll carries the current one.
+        try:
+            from kiln.auth_session import resolve_api_bearer
+
+            bearer = resolve_api_bearer().token
+            if bearer:
+                poll_headers["Authorization"] = f"Bearer {bearer}"
+        except Exception:
+            pass
+        req = urllib.request.Request(
+            f"{api_url.rstrip('/')}{poll}", headers=poll_headers, method="GET",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=_SERVED_WAIT_S) as resp:
+                answer = json.loads(resp.read())
+        except urllib.error.HTTPError as exc:
+            try:
+                body = json.loads(exc.read().decode("utf-8"))
+            except Exception:
+                body = None
+            if exc.code >= 500 and not (isinstance(body, dict) and body.get("code")):
+                # The machine is busy with the job itself; ask again.
+                continue
+            return envelope_for_http(tool_name, exc.code, body, kind=kind)
+        except Exception:
+            # One poll that got no answer says nothing about the job: the
+            # machine running a heavy make can be slow to answer anything.
+            continue
+        if not (isinstance(answer, dict) and answer.get("status") == "running"):
+            return answer
+    # The whole wait passed with no answer.  Whatever the last poll did, what
+    # the person needs to hear is that the make ran out of time, not that a
+    # minute's wait will fix it.
+    return envelope_for_http(tool_name, 504, too_long, kind=kind)
+
+
+_UNNAMED_PRINTER = frozenset({"", "default", "active"})
+
+
+def _with_local_printer(kwargs: dict, inputs: dict | None) -> dict:
+    """*kwargs* naming this install's printer, when the tool builds a file
+    for one and the call left it unnamed.
+
+    Kiln's servers have no printer.  A served tool that writes a file for a
+    machine (a resume file) has to be told which kind, and "default" tells
+    them nothing: only this process knows what that is.  The manifest names
+    the parameter (``inputs["printer"]``); it is filled with the printer's
+    model when Kiln knows it, else its connection type.  A call that named a
+    printer is left as it was.
+    """
+    param = (inputs or {}).get("printer")
+    if not isinstance(param, str) or not param:
+        return kwargs
+    said = kwargs.get(param)
+    if isinstance(said, str) and said.strip().lower() not in _UNNAMED_PRINTER:
+        return kwargs
+    try:
+        known = _resolve_printer_model_live(None)
+        if not known and (_PRINTER_HOST or _read_config_printers()):
+            # A connected printer whose model Kiln was never told: its
+            # connection type still says which kind of file it takes.  With
+            # no printer set up at all there is nothing to say, and the
+            # type's built-in default must not be passed off as one.
+            known = _PRINTER_TYPE
+    except Exception:
+        known = ""
+    known = str(known or "").strip()
+    if not known:
+        return kwargs
+    return {**kwargs, param: known}
+
+
 def _register_pro_tool_stubs(mcp_instance) -> None:
     """Register stub tools for pro features from the tool manifest.
 
@@ -18373,11 +19298,17 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
 
     manifest_path = Path(__file__).parent / "pro_tool_manifest.json"
     if not manifest_path.exists():
-        logger.debug("No pro tool manifest at %s — no stubs registered", manifest_path)
+        # Every release carries this file, so its absence is a broken
+        # package, not a configuration: said where an operator will see it.
+        logger.warning(
+            "No pro tool manifest at %s — Kiln's served tools are not "
+            "registered on this install. Reinstall or upgrade kiln3d.",
+            manifest_path,
+        )
         return
 
     try:
-        manifest = json.loads(manifest_path.read_text())
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except Exception as exc:
         logger.warning("Failed to load pro tool manifest: %s", exc)
         return
@@ -18401,6 +19332,12 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
         name = tool_def.get("name", "")
         if not name or name.startswith("_"):
             continue
+        if tool_def.get("served") is False:
+            # Kiln's servers refuse this tool whoever asks: it works on
+            # state that lives on the caller's own machine, and without
+            # kiln-pro there is no code here to run it.  A stub would list
+            # a tool that can never run on this install, at any tier.
+            continue
 
         description = tool_def.get("description", name)
         # Say what this costs, in the one place an agent always reads.
@@ -18418,8 +19355,11 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                 description = (
                     f"{description}\n\n"
                     f"Requires Kiln {tier.capitalize()}. "
-                    f"Pricing: https://kiln3d.com/pricing"
+                    f"Pricing: {PRICING_URL}"
                 )
+        # The link an agent relays carries the tool that sent the person,
+        # so a visit to the pricing page can be counted back to it.
+        description = tag_pricing_links(description, name)
         # Metered tools carry their real monthly allowance; unmetered ones
         # carry no block at all, and get no entry, so the account wall can
         # only ever state a number the server actually charges.
@@ -18453,11 +19393,66 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
             if offline_kind in _OFFLINE_KINDS:
                 _PRO_TOOL_OFFLINE_KIND[name] = offline_kind
         params_schema = tool_def.get("parameters", {})
+        # Which parameter takes the caller's own model, and which their
+        # image: files the servers cannot read off this disk.
+        served_inputs = tool_def.get("inputs")
+        if not isinstance(served_inputs, dict):
+            served_inputs = None
+        # What the tool needs read on this computer before it is asked at
+        # all, and whether it may ask this computer to ACT on the printer
+        # (kiln.served_steps).  Read only from a block of the version this
+        # build understands; anything else leaves the tool as it was.
+        local_steps_def = tool_def.get("local_steps")
+        reads_first: list = []
+        may_act = False
+        if (
+            isinstance(local_steps_def, dict)
+            and local_steps_def.get("schema_version") == _LOCAL_STEPS_SCHEMA_VERSION
+        ):
+            reads_first = [r for r in (local_steps_def.get("reads_first") or []) if isinstance(r, dict)]
+            may_act = local_steps_def.get("acts") is True
 
         # Build the stub function.  Closures capture `name` by reference,
         # so we use a factory to freeze the value.
-        def _make_stub(_name: str):
+        def _make_stub(_name: str, _inputs: dict | None, _reads: list, _may_act: bool):
             def _stub(**kwargs):
+                from kiln import served_makes, served_steps
+
+                # Whether the user's agent has seen the actions this tool
+                # wants done on the printer and said to run them.  The
+                # stub's own switch, never forwarded.
+                # The digest of the proposal the agent saw (served_steps.propose);
+                # the stub's own argument, never forwarded.  A bare ``true`` names
+                # no list and runs nothing.
+                run_actions = kwargs.pop("run_actions", None) if _may_act else None
+                approved = run_actions.strip() if isinstance(run_actions, str) else ""
+                # The printer the call is about, as the person named it,
+                # before the model name goes in its place below.
+                _printer_param = (_inputs or {}).get("printer")
+                asked_printer = kwargs.get(_printer_param) if isinstance(_printer_param, str) else None
+                # What the tool needs read here before it can answer: the
+                # servers have no printer, so which one a speed is for is
+                # read on this computer and sent with the request.  A
+                # listing may ask for more when the call's own arguments say
+                # so (every printer, for a recovery that may move the job).
+                pre_read: dict = {}
+                if _reads:
+                    pre_read, not_read = served_steps.read_first(
+                        _name, _reads, printer_name=str(asked_printer or ""), call=kwargs,
+                    )
+                    if not_read is not None:
+                        return not_read
+                # The printer a file is being made for is one only this
+                # computer can name.
+                kwargs = _with_local_printer(kwargs, _inputs)
+                # Every file the call names on this computer goes up first,
+                # and a make still on the servers is named by its token.
+                trip: dict = {}
+                kwargs, cannot_send = served_makes.send_inputs(
+                    _name, kwargs, _inputs, trip,
+                )
+                if cannot_send is not None:
+                    return cannot_send
                 # A nozzle tool is about a printer only this process can
                 # reach: read it here and send the reading with the request,
                 # so the hosted side can compare it with the record it holds.
@@ -18466,24 +19461,92 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
 
                 # Likewise a blade-status request carries this install's
                 # recent fault codes: the hosted side has no event log.
-                answer = _pro_api_call(
-                    _name, **with_recent_faults(_name, with_local_reading(_name, kwargs))
-                )
+                call = with_recent_faults(_name, with_local_reading(_name, kwargs))
+
+                def ask(**more):
+                    if pre_read:
+                        more = {**more, "step_results": {**pre_read, **more.get("step_results", {})}}
+                    if trip.get("files_sent") or more:
+                        # A tool handed files works through them before it
+                        # answers, whatever kind of answer it gives.
+                        return _pro_api_call(
+                            _name, _timeout=_SERVED_MAKE_WAIT_S, **call, **more,
+                        )
+                    return _pro_api_call(_name, **call)
+
+                answer = ask()
+                # The tool may need one thing only this computer can do
+                # (slice a part with this computer's slicer, start the
+                # resume file it built).  It is done here, from an
+                # allow-list, and the same call is made again with the
+                # result.  Once: a tool that asks twice is told no.
+                steps = served_steps.wanted(answer)
+                if steps:
+                    # The list's name is taken over the servers' own answer,
+                    # BEFORE arrive() saves the handed files under names of
+                    # this computer's choosing: those names carry a fresh
+                    # token per call, and a name that changes every call is
+                    # a digest that never matches.
+                    digest = served_steps.actions_digest(steps)
+                    # What a step works on is saved in Kiln's own folder,
+                    # never where the call asked for its OUTPUT: it is not
+                    # the person's file, and a step runs only on a file
+                    # that is there.
+                    answer = served_makes.arrive(_name, answer)
+                    steps = served_steps.wanted(answer)
+                    acting = bool(served_steps.actions_in(steps))
+                    if acting and not approved:
+                        # An action on the printer runs only once the
+                        # user's agent has seen it: show it, run nothing.
+                        return served_steps.propose(_name, steps, digest=digest)
+                    if acting and approved != digest:
+                        # The servers decided differently from what the agent
+                        # approved: run nothing, show the new list.
+                        return served_steps.propose(_name, steps, changed=True, digest=digest)
+                    done, refused = served_steps.carry_out(
+                        _name, steps, served_makes._upload_file, act=acting,
+                    )
+                    if refused is not None:
+                        return refused
+                    answer = ask(step_results=done)
+                    if served_steps.wanted(answer):
+                        return served_steps._refusal(
+                            _name, "LOCAL_STEP_REFUSED",
+                            f"{_name} asked this computer for the same thing "
+                            "twice. Nothing more was run.",
+                        )
                 if _name in ("set_nozzle_state", "record_nozzle_replacement"):
                     # The record just changed: a check must not answer from
                     # the size it remembered a moment ago.
                     from kiln._pro_nozzle_bridge import forget_recorded_nozzle
 
                     forget_recorded_nozzle()
-                return answer
+                # A make was built on the servers: its paths are there, not
+                # here.  Say so, and fetch its look for the stage.
+                return served_makes.arrive(
+                    _name, answer, allowance=_PRO_TOOL_QUOTA.get(_name), trip=trip,
+                )
             return _stub
 
-        stub = _make_stub(name)
+        stub = _make_stub(name, served_inputs, reads_first, may_act)
 
         # Reconstruct a typed Python signature from the JSON Schema so
         # that FastMCP generates the correct tool schema for clients.
-        properties = params_schema.get("properties", {})
+        properties = dict(params_schema.get("properties", {}))
         required_set = set(params_schema.get("required", []))
+        if may_act and "run_actions" not in properties:
+            # The switch the agent flips once it has seen what the tool
+            # wants done on the printer (kiln.served_steps.propose).
+            properties["run_actions"] = {"type": "string", "default": ""}
+            description = (
+                f"{description}\n\nThis tool may ask this computer to act on "
+                "your printer (upload, start, pause, resume, set a speed "
+                "preset). It first answers with the actions it wants and "
+                "why, and runs nothing; call it again with run_actions set "
+                "to the actions_digest it answered with to carry out exactly "
+                "those actions through Kiln's own tools here, with every "
+                "check those tools make."
+            )
 
         sig_params = []
         for pname, pschema in properties.items():
@@ -18535,11 +19598,58 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
         except Exception as exc:
             logger.debug("Failed to register stub %s: %s", name, exc)
 
+    _register_keep_design(mcp_instance)
     logger.info(
         "Registered %d pro tool stubs from manifest (%d categories)",
         registered,
         len(manifest.get("categories", {})),
     )
+
+
+def _register_keep_design(mcp_instance) -> None:
+    """The keep verb for makes built on Kiln's servers.
+
+    Registered beside the stubs, so it exists exactly where a served make
+    can arrive: an install without kiln-pro.  (With kiln-pro a make is
+    built on this computer and is already a file here.)
+    """
+
+    def keep_design(artifact_token: str) -> dict:
+        """Keep a make that Kiln's servers built: save its file to this computer.
+
+        A make from one of Kiln's served tools (a coaster, a textured part,
+        a decorated model) is built on Kiln's servers and shown on the
+        stage.  Looking at it and changing it are free.  Call this when the
+        user wants to KEEP it: to slice, print or export it.  It saves the
+        full-quality file on this computer and returns its path
+        (``mesh_path``), which every local tool takes.
+
+        On the Free plan a keep counts toward that kind of make's monthly
+        allowance, and the answer says how many are left (``keep``).  Paid
+        plans keep without limit.  A make is only ever counted once.
+
+        Args:
+            artifact_token: The token of the make to keep.  It is in the
+                make's own answer, under ``made_on_kiln_servers``.
+        """
+        from kiln import served_makes
+
+        return served_makes.keep(artifact_token)
+
+    # Stamped here, at registration, to open the stage on the kept file: the
+    # shared stage roster is read by the hosted connector too, where keeping
+    # is a different verb that opens no panel.
+    from kiln.local_stage import MESH_VIEWER_RESOURCE_URI
+
+    try:
+        mcp_instance.tool(
+            meta={"ui": {"resourceUri": MESH_VIEWER_RESOURCE_URI}},
+        )(keep_design)
+    except TypeError:
+        # A registry that takes no ``meta`` (older SDK): the verb still works.
+        mcp_instance.tool()(keep_design)
+    except Exception as exc:
+        logger.debug("Failed to register keep_design: %s", exc)
 
 
 def _ensure_internal_tool_plugins_registered() -> None:
@@ -19078,6 +20188,26 @@ def _start() -> None:
         local_stage.install(mcp)
     except Exception:
         logger.debug("inline stage not installed", exc_info=True)
+
+    # The front door, said on every make door.  Same timing as the stage
+    # stamp and for the same reason: it reads the registry, and judges
+    # whether the REAL design_session is here or only its stub.
+    try:
+        from kiln import front_door
+
+        front_door.install(mcp)
+    except Exception:
+        logger.debug("front-door clause not stamped", exc_info=True)
+
+    # An edit of a part keeps its result as that part's next version.  Same
+    # timing as the two above: it reads the registered tools.  A no-op
+    # without kiln-pro (see kiln.edit_lineage).
+    try:
+        from kiln import edit_lineage
+
+        edit_lineage.install(mcp)
+    except Exception:
+        logger.debug("edit lineage not installed", exc_info=True)
 
     # restart_server's exec keeps the pipe but not the MCP handshake: this
     # records the handshake, lets the fresh process take it up, and, when
@@ -19630,118 +20760,72 @@ def build_material_overrides(
     material_id: str,
     printer_id: str | None = None,
 ) -> dict:
-    """Auto-generate slicer override dict for a specific material.
+    """The slicer settings a material gets on a printer: temperatures, melt rate, cooling.
 
-    Combines material thermal data (from the material database) with
-    printer-specific tuning (from printer intelligence) to produce a
-    ready-to-use JSON override dict for ``reslice_with_overrides`` or
-    ``run_reslice_and_print``.
+    Every slicing door applies these itself when it is told the material --
+    ``material=`` on ``slice_model``, ``slice_and_print``,
+    ``reslice_with_overrides``, ``run_quick_print``, ``run_reslice_and_print``
+    and ``kiln slice`` -- so naming the material is all a slice needs.  This
+    tool shows what that will be and why, from the same resolver
+    (:mod:`kiln.slicer_material`): a product's own figures when you name one
+    (``"bambu_tpu_95a"``), else Kiln's settings for the material on this
+    printer, else the middle of the material's range, never above what the
+    printer is rated for.  The melt-rate ceiling
+    (``filament_max_volumetric_speed``) slows every feature of the print to
+    suit the material, the outer wall and the first layer included.
 
-    This is the key tool for material switching — call it to get the
-    correct temperatures, speeds, and retraction settings when changing
-    from one material to another.
+    Its ``overrides`` can still be passed to ``reslice_with_overrides`` to
+    pin them; a setting passed that way is the caller's, and a slice leaves
+    it alone.
 
-    Example workflow::
+    Example::
 
-        # 1. Get overrides for PETG on your printer
-        overrides = build_material_overrides("petg", "bambu_a1")
-        # 2. Reslice and print with those overrides
-        run_reslice_and_print(model_path, overrides=json.dumps(overrides["overrides"]))
+        build_material_overrides("tpu", "bambu_a1")
+        # overrides: temperature 225, bed_temperature 50, max_fan_speed 50, ...
 
     Args:
-        material_id: Target material (e.g. ``"petg"``, ``"tpu"``).
-        printer_id: Optional printer model for printer-specific tuning.
-            If omitted, uses material database defaults.
+        material_id: Material (``"petg"``, ``"tpu"``, ``"PA-CF"``) or a
+            product (``"bambu_tpu_95a"``).
+        printer_id: Printer model, for its own settings and limits.
+            Omitted, the material's own.
     """
     if err := _check_auth("slicer"):
         return err
     try:
-        from kiln.design_intelligence import get_material_profile
+        from kiln.slicer_material import CONCEPT_KEYS, apply_material_needs, material_needs
+        from kiln.slicer_profiles import get_slicer_profile
 
-        profile = get_material_profile(material_id)
-        if profile is None:
-            return _error_dict(
-                f"Unknown material '{material_id}'.",
-                code="NOT_FOUND",
-            )
+        needs = material_needs(material_id, printer_id=printer_id)
+        if needs is None:
+            return _error_dict(f"Unknown material '{material_id}'.", code="NOT_FOUND")
+        if needs.refusal is not None:
+            refused = _error_dict(str(needs.refusal.get("reason")), code=str(needs.refusal.get("code")))
+            refused["refusal"] = needs.refusal
+            return refused
 
-        thermal = profile.thermal
-        overrides: dict[str, str] = {}
-
-        # Temperature overrides from material database
-        temp_range = thermal.get("print_temp_range_c", [])
-        if len(temp_range) >= 2:
-            # Use midpoint of the recommended range
-            mid_temp = (temp_range[0] + temp_range[1]) // 2
-            overrides["temperature"] = str(mid_temp)
-            # First layer slightly hotter for adhesion
-            overrides["first_layer_temperature"] = str(mid_temp + 5)
-
-        bed_range = thermal.get("bed_temp_range_c", [])
-        if len(bed_range) >= 2:
-            overrides["bed_temperature"] = str((bed_range[0] + bed_range[1]) // 2)
-            overrides["first_layer_bed_temperature"] = str(bed_range[1])
-
-        # Material-specific speed/retraction adjustments
-        mat_lower = material_id.lower()
-        if mat_lower in ("petg", "cf_petg", "petg_cf", "pet_cf", "petg_hf"):
-            overrides.setdefault("perimeter_speed", "40")
-            overrides.setdefault("retract_length", "4.0")
-            overrides.setdefault("retract_speed", "30")
-        elif mat_lower == "tpu_85a":
-            # Ultra-soft TPU — even slower than standard TPU
-            overrides.setdefault("perimeter_speed", "15")
-            overrides.setdefault("infill_speed", "15")
-            overrides.setdefault("retract_length", "0.8")
-            overrides.setdefault("retract_speed", "15")
-        elif mat_lower in ("tpu", "tpu_95a"):
-            overrides.setdefault("perimeter_speed", "20")
-            overrides.setdefault("infill_speed", "20")
-            overrides.setdefault("retract_length", "1.0")
-            overrides.setdefault("retract_speed", "20")
-        elif mat_lower in ("abs", "asa", "asa_plus", "hips"):
-            overrides.setdefault("perimeter_speed", "40")
-            overrides.setdefault("retract_length", "3.5")
-        elif mat_lower in ("nylon", "cf_nylon", "pa6_gf"):
-            overrides.setdefault("perimeter_speed", "35")
-            overrides.setdefault("retract_length", "4.0")
-            overrides.setdefault("retract_speed", "25")
-        elif mat_lower in ("polycarbonate", "pc_abs"):
-            overrides.setdefault("perimeter_speed", "35")
-            overrides.setdefault("retract_length", "3.5")
-
-        # Printer-specific tuning (overrides material defaults if available)
-        printer_tuning: dict[str, Any] | None = None
+        # What a slice for this printer would be: its bundled profile with
+        # the material written in -- or kept, where the profile is already
+        # tuned for it -- so this answer and the slice are the same answer.
+        settings: dict[str, str] = {}
         if printer_id:
-            try:
-                from kiln.printer_intelligence import get_material_settings
-
-                mp = get_material_settings(printer_id, material_id)
-                if mp is not None:
-                    printer_tuning = {
-                        "hotend_temp": mp.hotend,
-                        "bed_temp": mp.bed,
-                        "fan_speed": mp.fan,
-                        "notes": mp.notes,
-                    }
-                    # Printer-specific temps override material defaults
-                    overrides["temperature"] = str(mp.hotend)
-                    overrides["first_layer_temperature"] = str(mp.hotend + 5)
-                    overrides["bed_temperature"] = str(mp.bed)
-            except (KeyError, ValueError, TypeError):
-                pass  # Fall back to material database defaults
-
+            with contextlib.suppress(KeyError):
+                settings = dict(get_slicer_profile(printer_id).settings)
+        report = apply_material_needs(settings, needs)
+        overrides = {
+            key: settings[key]
+            for keys in CONCEPT_KEYS.values()
+            for key in keys
+            if key in settings and key != "max_volumetric_speed"
+        }
         return {
             "success": True,
             "material": material_id,
             "printer_id": printer_id,
             "overrides": overrides,
-            "printer_tuning": printer_tuning,
+            "settings": report.to_dict(),
             "notes": (
-                f"Slicer overrides for {profile.display_name}"
-                + (f" on {printer_id}" if printer_id else "")
-                + ". Pass this as the 'overrides' parameter to "
-                "reslice_with_overrides or run_reslice_and_print."
+                f"{report.note} A slice told material={material_id!r} applies these by itself; "
+                "pass them as overrides only to pin them."
             ),
         }
     except Exception as exc:
@@ -19763,12 +20847,13 @@ def reprint_with_material(
     ams_mapping: str | list[int] | None = None,
     preview_token: str | None = None,
 ) -> dict:
-    """Reprint a model with a different material — auto-adjusts temperatures,
-    speeds, and retraction for the new material.
+    """Reprint a model with a different material — the slice is set for it.
 
-    One-shot convenience tool: looks up the target material's optimal slicer
-    settings, merges any extra overrides you provide, reslices the model,
-    runs a safety check, uploads to the printer, and starts the print.
+    One-shot convenience tool: reslices the model for the new material
+    (its temperatures, melt rate and cooling, from the same resolver every
+    slice uses -- see ``build_material_overrides``), merges any extra
+    overrides you provide, runs a safety check, uploads to the printer, and
+    starts the print.  The file is labelled and weighed as the new material.
 
     Use this when you want to reprint an existing model in a different
     material (e.g. PLA → PETG for outdoor durability, or PLA → TPU for
@@ -19807,28 +20892,33 @@ def reprint_with_material(
     try:
         import json as _json
 
-        # Step 1: Build material-specific overrides
-        mat_result = build_material_overrides(material_id, printer_id)
+        # Step 1: The material's settings on the printer this slice is for
+        # -- what the slice will apply, and the refusal when the printer
+        # cannot melt it, before anything is resliced.
+        mat_result = build_material_overrides(
+            material_id, _resolve_printer_profile_id(printer_id, printer_name),
+        )
         if not mat_result.get("success"):
             return mat_result
 
-        overrides = dict(mat_result["overrides"])
-
-        # Step 2: Merge extra overrides if provided
+        # Step 2: Extra overrides are the caller's, and win.
         extra, _arg_err = parse_json_object(extra_overrides, "extra_overrides")
         if _arg_err is not None:
             return _arg_err
-        if extra:
-            overrides.update(extra)
+        applied = {**mat_result["overrides"], **{str(k): str(v) for k, v in (extra or {}).items()}}
 
-        # Step 3: Delegate to run_reslice_and_print
+        # Step 3: Delegate to run_reslice_and_print, TOLD the material: the
+        # slice writes its settings and labels and weighs the file as it.
+        # Passing the settings as overrides instead used to leave the label
+        # and the weight at whatever spool was loaded.
         # Token and all: it is the same file the person previewed, so the
         # inner gate is the gate.
         result = run_reslice_and_print(
             model_path=file_path,
             printer_name=printer_name,
             printer_id=printer_id,
-            overrides=_json.dumps(overrides),
+            overrides=_json.dumps(extra) if extra else None,
+            material=material_id,
             use_ams=use_ams,
             ams_mapping=ams_mapping,
             preview_token=preview_token,
@@ -19837,11 +20927,8 @@ def reprint_with_material(
         # Enrich the result with material context
         if isinstance(result, dict) and result.get("success"):
             result["material"] = material_id
-            result["material_overrides_applied"] = overrides
-            result["notes"] = (
-                f"Resliced and printing with {material_id.upper()} settings. "
-                f"Overrides applied: {', '.join(f'{k}={v}' for k, v in overrides.items())}"
-            )
+            result["material_overrides_applied"] = applied
+            result["notes"] = f"Resliced and printing for {material_id.upper()}. {mat_result['settings']['note']}"
 
         return result
     except Exception as exc:
@@ -20246,7 +21333,8 @@ def multi_material_print(
         1. Looks up each material's properties (temps, colors)
         2. Arranges the objects side by side on the plate (per ``group``)
            and builds a multi-object 3MF with per-object material assignments
-        3. Generates merged slicer overrides (uses the highest-temp material)
+        3. Sets the plate for its materials: the hottest one's temperatures,
+           the slowest one's melt rate, the gentlest cooling
         4. Checks AMS slots for matching materials
         5. Slices and prints with correct AMS mapping
 
@@ -20500,30 +21588,38 @@ def multi_material_print(
                 code="INTERNAL_ERROR",
             )
 
-        # Step 3: Build merged overrides (use highest-temp material)
-        max_temp = 0
-        max_bed = 0
-        dominant_mat: str | None = None
-        dominant_overrides: dict[str, str] = {}
-        for mat_id in unique_mat_ids:
-            mat_result = build_material_overrides(mat_id, printer_id)
-            if mat_result.get("success"):
-                ov = mat_result["overrides"]
-                temp = int(ov.get("temperature", "0"))
-                bed = int(ov.get("bed_temperature", "0"))
-                if temp > max_temp:
-                    max_temp = temp
-                    dominant_mat = mat_id
-                    dominant_overrides = dict(ov)
-                if bed > max_bed:
-                    max_bed = bed
+        # Step 3: One set of settings for the plate.  Every slot shares one
+        # nozzle and one bed, so the plate prints at the hottest material's
+        # temperatures -- and at the SLOWEST material's melt rate and the
+        # gentlest cooling, because a ceiling one material needs is a
+        # ceiling for the whole file.  (The hottest material's own set used
+        # to be applied whole: TPU beside PETG printed at PETG's pace.)
+        # From the one resolver every slice uses (kiln.slicer_material).
+        from kiln.slicer_material import material_needs as _material_needs
 
-        # Use the dominant (highest temp) material's full overrides
+        _plate_pid = _resolve_printer_profile_id(printer_id, printer_name)
+        per_material = {m: _material_needs(m, printer_id=_plate_pid) for m in unique_mat_ids}
+        for needs in per_material.values():
+            if needs is not None and needs.refusal is not None:
+                return _error_dict(str(needs.refusal.get("reason")), code=str(needs.refusal.get("code")))
+        known = {m: n.values() for m, n in per_material.items() if n is not None}
+
+        def _plate_values(key: str) -> list[float]:
+            return [float(v[key]) for v in known.values() if v.get(key)]
+
         merged_overrides: dict[str, str] = {}
-        if dominant_mat:
-            merged_overrides = dominant_overrides
-            # Override bed temp with the max across all materials
-            merged_overrides["bed_temperature"] = str(max_bed)
+        dominant_mat: str | None = None
+        if known:
+            dominant_mat = max(known, key=lambda m: float(known[m].get("temperature") or 0))
+            for key in ("temperature", "first_layer_temperature"):
+                if key in known[dominant_mat]:
+                    merged_overrides[key] = known[dominant_mat][key]
+            if beds := _plate_values("bed_temperature"):
+                merged_overrides["bed_temperature"] = merged_overrides["first_layer_bed_temperature"] = f"{max(beds):g}"
+            if flows := _plate_values("filament_max_volumetric_speed"):
+                merged_overrides["filament_max_volumetric_speed"] = f"{min(flows):g}"
+            if fans := _plate_values("max_fan_speed"):
+                merged_overrides["max_fan_speed"] = f"{min(fans):g}"
 
         # Merge extra overrides
         extra, _arg_err = parse_json_object(extra_overrides, "extra_overrides")
@@ -21007,14 +22103,10 @@ def multi_color_copies(
                 code="INTERNAL_ERROR",
             )
 
-        # --- Build slicer overrides for the material ---
-        overrides: dict[str, str] = {}
-        try:
-            mat_overrides = build_material_overrides(material.lower(), printer_id)
-            if mat_overrides.get("success"):
-                overrides = dict(mat_overrides["overrides"])
-        except Exception:
-            pass  # best-effort — slicer profile defaults are fine
+        # The material's settings are the slice's own business: it is told
+        # the material below, and writes them for every copy.  (This door
+        # used to build them itself and swallow any failure as "the profile
+        # defaults are fine" -- PLA settings under any material's name.)
 
         # --- Refuse honestly, or slice and print with explicit AMS mapping ---
         # The slot map below is a Bambu instruction.  At a printer Kiln does
@@ -21029,8 +22121,8 @@ def multi_color_copies(
             result = run_reslice_and_print(
                 model_path=output_3mf,
                 printer_id=printer_id,
-                overrides=_json.dumps(overrides) if overrides else None,
                 slicer_path=slicer_path,
+                material=material,
                 use_ams=True,
                 ams_mapping=_json.dumps(resolved_slots),
             )
@@ -21574,8 +22666,7 @@ def list_snapshots(
 # (export_audit_trail, lock_safety_profile, unlock_safety_profile,
 #  manage_team_member, printer_usage_summary, uptime_report,
 #  encryption_status, rotate_encryption_key, database_status,
-#  report_printer_overage, configure_sso, sso_login_url,
-#  sso_exchange_code, sso_status)
+#  configure_sso, sso_login_url, sso_exchange_code, sso_status)
 
 # ---------------------------------------------------------------------------
 # Print trend analysis & ambient safety
@@ -21688,7 +22779,7 @@ def _refund_decoration_quota(consumed: bool) -> None:
         logger.debug("Decoration quota refund failed", exc_info=True)
 
 
-def _finish_decoration_result(result_dict: dict, *, content: str) -> dict:
+def _finish_decoration_result(result_dict: dict, *, content: str, before: str | None = None) -> dict:
     """Common tail for every SUCCESSFUL decorate_surface exit.
 
     Quota tile, managed-asset lineage, then the inspect bundle.  It is one
@@ -21725,7 +22816,9 @@ def _finish_decoration_result(result_dict: dict, *, content: str) -> dict:
     try:
         from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
 
-        return attach_inspect_bundle(result_dict, level="quick")
+        # The carved part beside the one it was carved into, so the change is
+        # graded before anyone calls it done (kiln-pro's self-check gate).
+        return attach_inspect_bundle(result_dict, level="quick", self_check_before=before)
     except ImportError:
         return result_dict
 
@@ -22247,7 +23340,7 @@ def decorate_surface(
                 record_event("decorations", detail=wall_event)
             except Exception:
                 pass
-            return _finish_decoration_result(result_dict, content=content)
+            return _finish_decoration_result(result_dict, content=content, before=model_path)
 
         # --- Step 2: Find the target face (needed before SVG prep for sizing) ---
         from kiln.surface_intelligence import (
@@ -22307,7 +23400,7 @@ def decorate_surface(
                         "Free tier supports PNG/JPG photos and text",
                     ),
                     code="PRO_REQUIRED",
-                    extra=signin_hint_fields(),
+                    extra={**signin_hint_fields(), **paywall_fields("pro")},
                 )
 
             from kiln.image_to_surface import prepare_svg_for_emboss
@@ -22735,7 +23828,7 @@ def decorate_surface(
         # sees where they stand ("2 of 3 used") before the wall instead of
         # only hitting it as an error next time. Best-effort — never blocks
         # a decoration that already succeeded.
-        return _finish_decoration_result(result_dict, content=content)
+        return _finish_decoration_result(result_dict, content=content, before=model_path)
 
     except FileNotFoundError as exc:
         _refund_decoration_quota(quota_consumed)
