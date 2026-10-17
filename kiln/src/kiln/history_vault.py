@@ -22,6 +22,12 @@ A call sends :meth:`HistoryVault.bundle` for the designs it names, and writes
 back the delta the server answers with (:meth:`HistoryVault.apply_delta`).
 Meshes are kept once each, by SHA-256, under ``~/.kiln/history_vault/meshes``.
 
+**Saved features and decoration presets** are kept the same way, as plain
+rows keyed by kind (``features`` / ``presets``): their branches, versions,
+memberships and releases, in the shape their cloud clone and pull move.  A
+preset version's art travels inside its record as ``image_asset_bytes_b64``
+and is kept here once by SHA-256.
+
 **The design library is the start of every history.**  A design saved with
 the version tools lives under ``~/.kiln/designs/<design_id>/`` as recipe
 files, one per version.  The first time a design is asked about, its versions
@@ -124,6 +130,17 @@ def _library_mesh(folder: Path, stl_path: Any) -> Path | None:
     return Path(real)
 
 
+#: Each library kind's record keys: the interface contract of the records.
+LIBRARY_KINDS: dict[str, dict[str, str]] = {
+    "features": {"id": "feature_id", "version": "feature_version_id", "head": "head_feature_version_id"},
+    "presets": {"id": "preset_id", "version": "preset_version_id", "head": "head_preset_version_id"},
+}
+_ART_KEY = "image_asset_bytes_b64"
+_ART_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".bmp")
+#: The art one call carries, across every item it sends.
+_ART_BUDGET = 8 * 1024 * 1024
+
+
 def _rows(items: Any, *keys: str) -> list[dict[str, Any]]:
     """The well-formed rows of an answer's list: dicts carrying every *keys* as text."""
     if not isinstance(items, list):
@@ -168,6 +185,7 @@ class HistoryVault:
         home = _kiln_home()
         self._db_path = db_path or str(home / "history_vault.db")
         self._mesh_dir = Path(mesh_dir or home / "history_vault" / "meshes")
+        self._art_dir = self._mesh_dir.parent / "art"
         os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
@@ -203,6 +221,15 @@ class HistoryVault:
                 record TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_hv_releases_design ON releases(design_id);
+            CREATE TABLE IF NOT EXISTS library_rows (
+                kind TEXT NOT NULL,
+                row_type TEXT NOT NULL,
+                row_id TEXT NOT NULL,
+                item_id TEXT NOT NULL,
+                record TEXT NOT NULL,
+                PRIMARY KEY (kind, row_type, row_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_hv_library_item ON library_rows(kind, item_id);
             CREATE TABLE IF NOT EXISTS checkouts (
                 design_id TEXT PRIMARY KEY,
                 branch_id TEXT NOT NULL
@@ -553,6 +580,176 @@ class HistoryVault:
             "releases": len(bundle_like["releases"]),
         }
 
+
+    # -- saved features and decoration presets --------------------------------
+
+    def _lib_put(self, kind: str, row_type: str, row_id: str, item_id: str, record: dict[str, Any]) -> bool:
+        """Put one library row; ``False`` when *row_id* belongs to another item."""
+        row = self._conn.execute(
+            "SELECT item_id FROM library_rows WHERE kind = ? AND row_type = ? AND row_id = ?",
+            (kind, row_type, row_id),
+        ).fetchone()
+        if row is not None and row["item_id"] != item_id:
+            return False
+        self._conn.execute(
+            "INSERT OR REPLACE INTO library_rows (kind, row_type, row_id, item_id, record) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (kind, row_type, row_id, item_id, _canonical(record)),
+        )
+        return True
+
+    def _lib_rows(self, kind: str, row_type: str, item_id: str) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT record FROM library_rows WHERE kind = ? AND row_type = ? AND item_id = ?",
+            (kind, row_type, item_id),
+        ).fetchall()
+        return [json.loads(r["record"]) for r in rows]
+
+    def library_items(self, kind: str) -> list[str]:
+        rows = self._conn.execute(
+            "SELECT DISTINCT item_id FROM library_rows WHERE kind = ?", (kind,)
+        ).fetchall()
+        return [r["item_id"] for r in rows]
+
+    def library_item_of(self, kind: str, row_type: str, row_id: str) -> str | None:
+        row = self._conn.execute(
+            "SELECT item_id FROM library_rows WHERE kind = ? AND row_type = ? AND row_id = ?",
+            (kind, row_type, row_id),
+        ).fetchone()
+        return row["item_id"] if row else None
+
+    def has_library_item(self, kind: str, item_id: str) -> bool:
+        return bool(self._conn.execute(
+            "SELECT 1 FROM library_rows WHERE kind = ? AND item_id = ? LIMIT 1", (kind, item_id),
+        ).fetchone())
+
+    def _put_art(self, record: dict[str, Any]) -> dict[str, Any]:
+        """Keep a version's art once by SHA-256; the record keeps only its name."""
+        record = dict(record)
+        art = record.pop(_ART_KEY, None)
+        if art:
+            try:
+                data = base64.b64decode(art)
+            except (ValueError, TypeError):
+                data = b""
+            if data:
+                sha = hashlib.sha256(data).hexdigest()
+                suffix = Path(str(record.get("image_asset_path") or "")).suffix.lower()
+                suffix = suffix if suffix in _ART_SUFFIXES else ".png"
+                target = self._art_dir / f"{sha}{suffix}"
+                if not target.is_file():
+                    self._art_dir.mkdir(parents=True, exist_ok=True)
+                    tmp = target.with_suffix(target.suffix + ".part")
+                    tmp.write_bytes(data)
+                    os.replace(tmp, target)
+                record["image_asset_sha256"] = sha
+        return _no_paths(record)
+
+    def _art_path(self, sha: Any) -> Path | None:
+        if not _sha(sha):
+            return None
+        for suffix in _ART_SUFFIXES:
+            path = self._art_dir / f"{sha}{suffix}"
+            if path.is_file():
+                return path
+        return None
+
+    def _with_art(self, record: dict[str, Any], budget: list[int]) -> dict[str, Any]:
+        path = self._art_path(record.get("image_asset_sha256"))
+        if path is None:
+            return record
+        size = path.stat().st_size
+        if size > budget[0]:
+            return record
+        budget[0] -= size
+        return {**record, _ART_KEY: base64.b64encode(path.read_bytes()).decode("ascii"),
+                "image_asset_path": path.name}
+
+    def library_bundle(self, kind: str, item_id: str, *, budget: list[int] | None = None) -> dict[str, Any]:
+        """One item's records, in the clone shape, art attached within *budget*."""
+        keys = LIBRARY_KINDS[kind]
+        budget = budget if budget is not None else [_ART_BUDGET]
+        return {
+            keys["id"]: item_id,
+            "branches": self._lib_rows(kind, "branch", item_id),
+            "versions": [self._with_art(v, budget) for v in self._lib_rows(kind, "version", item_id)],
+            "memberships": self._lib_rows(kind, "membership", item_id),
+            "releases": self._lib_rows(kind, "release", item_id),
+        }
+
+    def library_branch_payload(self, kind: str, item_id: str, branch_id: str) -> dict[str, Any] | None:
+        """A branch, its versions (art attached) and memberships: what a push sends."""
+        keys = LIBRARY_KINDS[kind]
+        branch = next((b for b in self._lib_rows(kind, "branch", item_id) if b.get("branch_id") == branch_id), None)
+        if branch is None:
+            return None
+        members = [m for m in self._lib_rows(kind, "membership", item_id) if m.get("branch_id") == branch_id]
+        members.sort(key=lambda m: (int(m.get("position") or 0), float(m.get("added_at") or 0.0)))
+        wanted = {m.get(keys["version"]) for m in members}
+        budget = [_ART_BUDGET]
+        versions = [
+            self._with_art(v, budget) for v in self._lib_rows(kind, "version", item_id)
+            if v.get(keys["version"]) in wanted
+        ]
+        return {"branch": branch, "versions": versions, "memberships": members}
+
+    def _put_library(self, kind: str, item_id: str, payload: dict[str, Any], *, expected: dict[str, Any] | None) -> list[str]:
+        """Write a delta's or a pull's rows for *item_id*; returns branches left as they were here."""
+        keys = LIBRARY_KINDS[kind]
+        moved_here: list[str] = []
+        for branch in _rows(payload.get("branches"), "branch_id"):
+            if branch.get(keys["id"]) not in (None, item_id):
+                continue
+            if expected is not None and branch["branch_id"] in expected:
+                now = next(
+                    (b for b in self._lib_rows(kind, "branch", item_id) if b.get("branch_id") == branch["branch_id"]),
+                    None,
+                )
+                if now is not None and now.get(keys["head"]) != expected[branch["branch_id"]]:
+                    moved_here.append(branch["branch_id"])
+                    continue
+            self._lib_put(kind, "branch", branch["branch_id"], item_id, {**branch, keys["id"]: item_id})
+        for version in _rows(payload.get("versions"), keys["version"]):
+            if version.get(keys["id"]) not in (None, item_id):
+                continue
+            self._lib_put(kind, "version", version[keys["version"]], item_id, self._put_art(version))
+        for membership in _rows(payload.get("memberships"), "branch_id", keys["version"]):
+            if membership["branch_id"] in moved_here:
+                continue
+            row_id = f"{membership['branch_id']}:{membership[keys['version']]}"
+            self._lib_put(kind, "membership", row_id, item_id, membership)
+        for release in _rows(payload.get("releases"), "release_id"):
+            if release.get(keys["id"]) not in (None, item_id):
+                continue
+            self._lib_put(kind, "release", release["release_id"], item_id, {**release, keys["id"]: item_id})
+        return moved_here
+
+    def apply_library_delta(self, kind: str, delta: dict[str, Any]) -> dict[str, Any] | None:
+        """Write what a served call changed in one feature or preset."""
+        keys = LIBRARY_KINDS.get(kind)
+        item_id = delta.get(keys["id"]) if keys else None
+        if not isinstance(item_id, str) or not item_id:
+            return None
+        expected = delta.get("expected_heads") if isinstance(delta.get("expected_heads"), dict) else {}
+        with self._lock:
+            moved_here = self._put_library(kind, item_id, delta, expected=expected)
+            self._conn.commit()
+        return {"kind": kind, "item_id": item_id, "branches_changed_here": moved_here}
+
+    def apply_library_remote(self, kind: str, item_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Record a pull or clone answer for one feature or preset."""
+        bundle = {
+            "branches": payload.get("branches") or ([payload["branch"]] if payload.get("branch") else []),
+            "versions": payload.get("versions") or [],
+            "memberships": payload.get("memberships") or [],
+            "releases": payload.get("releases") or [],
+        }
+        with self._lock:
+            self._put_library(kind, item_id, bundle, expected=None)
+            self._conn.commit()
+        return {"kind": kind, "item_id": item_id, "branches": len(bundle["branches"]),
+                "versions": len(bundle["versions"]), "releases": len(bundle["releases"])}
+
     # -- the design library -----------------------------------------------------
 
     def sync_from_library(self, design_id: str) -> int:
@@ -747,4 +944,4 @@ def _created_at(recipe: dict[str, Any], path: Path) -> float:
         return time.time()
 
 
-__all__ = ["SCHEMA_VERSION", "HistoryVault"]
+__all__ = ["LIBRARY_KINDS", "SCHEMA_VERSION", "HistoryVault"]

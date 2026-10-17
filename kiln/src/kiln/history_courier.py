@@ -88,26 +88,81 @@ def designs_for_call(vault: Any, arguments: dict[str, Any]) -> tuple[list[str], 
     return designs, versions
 
 
-def records_for_call(arguments: dict[str, Any], vault: Any = None) -> dict[str, Any]:
-    """The ``history_records`` a served history call sends."""
-    from kiln.history_vault import HistoryVault
+#: The most saved features or presets one call sends (a listing sends all).
+_MAX_LIBRARY_ITEMS = 200
+
+
+def library_items_for_call(vault: Any, kind: str, arguments: dict[str, Any], tool: str = "") -> list[str]:
+    """The features or presets a call is about, by argument name.
+
+    The item's own id, anything ending in ``version_id`` / ``branch_id``, or a
+    ``release_id``, looked up in this computer's records.  A listing that
+    names none is about every one this computer keeps.
+    """
+    from kiln.history_vault import LIBRARY_KINDS
+
+    keys = LIBRARY_KINDS[kind]
+    found: list[str] = []
+
+    def add(item_id: Any) -> None:
+        if isinstance(item_id, str) and item_id and item_id not in found:
+            found.append(item_id)
+
+    for key, value in (arguments or {}).items():
+        name = str(key)
+        singular = name[:-1] if name.endswith("_ids") else name
+        if singular == keys["id"]:
+            for item_id in _ids(value):
+                add(item_id)
+        elif singular.endswith("version_id"):
+            for vid in _ids(value):
+                add(vault.library_item_of(kind, "version", vid))
+        elif singular.endswith("branch_id"):
+            for bid in _ids(value):
+                add(vault.library_item_of(kind, "branch", bid))
+        elif singular == "release_id":
+            for rid in _ids(value):
+                add(vault.library_item_of(kind, "release", rid))
+    if not found and tool.startswith("list_"):
+        found = vault.library_items(kind)
+    return found[:_MAX_LIBRARY_ITEMS]
+
+
+def records_for_call(
+    arguments: dict[str, Any], vault: Any = None, *, kinds: tuple[str, ...] = ("designs",), tool: str = "",
+) -> dict[str, Any]:
+    """The ``history_records`` a served history call sends.
+
+    *kinds* is the manifest's say of which records the tool works on: design
+    history (the default), ``features`` or ``presets``.
+    """
+    from kiln.history_vault import LIBRARY_KINDS, HistoryVault
 
     own = vault is None
     vault = vault or HistoryVault()
     try:
-        designs, versions = designs_for_call(vault, arguments)
-        bundles = []
-        left = _MESH_BUDGET
-        for design_id in designs[:_MAX_DESIGNS]:
-            vault.sync_from_library(design_id)
-            if vault.has_design(design_id):
-                bundle = vault.bundle(design_id, meshes_for=versions, mesh_budget=left)
-                left -= sum(
-                    len(s["recipe_dict"].get("mesh_bytes_b64") or "") * 3 // 4
-                    for s in bundle["provenance_sidecars"]
-                )
-                bundles.append(bundle)
-        return {"schema_version": SCHEMA_VERSION, "designs": bundles, "named": designs[:_MAX_DESIGNS]}
+        out: dict[str, Any] = {"schema_version": SCHEMA_VERSION, "designs": [], "named": []}
+        if "designs" in kinds:
+            designs, versions = designs_for_call(vault, arguments)
+            left = _MESH_BUDGET
+            for design_id in designs[:_MAX_DESIGNS]:
+                vault.sync_from_library(design_id)
+                if vault.has_design(design_id):
+                    bundle = vault.bundle(design_id, meshes_for=versions, mesh_budget=left)
+                    left -= sum(
+                        len(s["recipe_dict"].get("mesh_bytes_b64") or "") * 3 // 4
+                        for s in bundle["provenance_sidecars"]
+                    )
+                    out["designs"].append(bundle)
+            out["named"] = designs[:_MAX_DESIGNS]
+        for kind in kinds:
+            if kind not in LIBRARY_KINDS:
+                continue
+            budget = [8 * 1024 * 1024]
+            items = library_items_for_call(vault, kind, arguments, tool)
+            out[kind] = [vault.library_bundle(kind, i, budget=budget) for i in items if vault.has_library_item(kind, i)]
+            out[f"named_{kind}"] = items
+        return out
     finally:
         if own:
             vault.close()
@@ -146,6 +201,7 @@ def take_delta(
     vault = vault or HistoryVault()
     try:
         summaries = [vault.apply_delta(d) for d in deltas]
+        library = _take_library_deltas(vault, delta, sent)
         continues = None
         made = answer.get("branch") if isinstance(answer.get("branch"), dict) else {}
         if tool in _CHECKS_OUT and made.get("branch_id") and summaries:
@@ -154,12 +210,15 @@ def take_delta(
     finally:
         if own:
             vault.close()
-    if summaries:
-        kept: dict[str, Any] = {
-            "where": "on this computer",
-            "designs": [s["design_id"] for s in summaries],
-        }
-        changed_here = [b for s in summaries for b in s["branches_changed_here"]]
+    if summaries or library:
+        kept: dict[str, Any] = {"where": "on this computer"}
+        if summaries:
+            kept["designs"] = [s["design_id"] for s in summaries]
+        for kind in ("features", "presets"):
+            items = [s["item_id"] for s in library if s["kind"] == kind]
+            if items:
+                kept[kind] = items
+        changed_here = [b for s in summaries + library for b in s["branches_changed_here"]]
         if changed_here:
             kept["not_moved"] = changed_here
             kept["note"] = (
@@ -173,7 +232,32 @@ def take_delta(
     return answer
 
 
-def call_served(tool: str, **kwargs: Any) -> dict[str, Any]:
+def _take_library_deltas(vault: Any, delta: dict[str, Any], sent: dict[str, Any]) -> list[dict[str, Any]]:
+    """Keep each feature or preset a call changed: one it named, or a new one.
+
+    An item this computer already keeps and the call did not name is left as
+    it is, whatever the answer says about it.
+    """
+    from kiln.history_vault import LIBRARY_KINDS
+
+    out = []
+    for kind, keys in LIBRARY_KINDS.items():
+        named = set(sent.get(f"named_{kind}") or [])
+        for d in delta.get(kind) or []:
+            if not isinstance(d, dict):
+                continue
+            item_id = d.get(keys["id"])
+            if not isinstance(item_id, str) or not item_id:
+                continue
+            if item_id not in named and vault.has_library_item(kind, item_id):
+                continue
+            summary = vault.apply_library_delta(kind, d)
+            if summary is not None:
+                out.append(summary)
+    return out
+
+
+def call_served(tool: str, *, kinds: tuple[str, ...] = ("designs",), **kwargs: Any) -> dict[str, Any]:
     """Call a served history tool with this computer's records, and keep the change.
 
     The command line's way in; the MCP stubs do the same around their own
@@ -181,7 +265,7 @@ def call_served(tool: str, **kwargs: Any) -> dict[str, Any]:
     """
     from kiln.server import _pro_api_call
 
-    records = records_for_call(kwargs)
+    records = records_for_call(kwargs, kinds=kinds, tool=tool)
     return take_delta(_pro_api_call(tool, **kwargs, history_records=records), records, tool=tool)
 
 
@@ -392,6 +476,96 @@ def remote_releases(tool: str, design_id: str) -> dict[str, Any]:
     return {"status": "success", "design_id": design_id, "releases": releases or []}
 
 
+#: The cloud routes of each library kind, and the CLI's word for it.
+_LIBRARY_ROUTE = {"features": "features", "presets": "presets"}
+
+
+def push_library(tool: str, kind: str, item_id: str, branch_id: str, *, design_id: str | None = None,
+                 vault: Any = None) -> dict[str, Any]:
+    """Send one branch of a feature or preset from this computer to the account."""
+    from kiln.history_vault import HistoryVault
+
+    own = vault is None
+    vault = vault or HistoryVault()
+    try:
+        payload = vault.library_branch_payload(kind, item_id, branch_id)
+    finally:
+        if own:
+            vault.close()
+    if payload is None:
+        return _refused(tool, "BRANCH_NOT_FOUND", f"No branch {branch_id} of {item_id} on this computer.")
+    body = {**payload, "design_id": design_id}
+    answer = _request(tool, "POST", f"/api/cloud/{_LIBRARY_ROUTE[kind]}/{_quote(item_id)}/branches/push", body)
+    if answer.get("status") == "error":
+        return answer
+    return {"status": "success", "push": answer, "item_id": item_id, "branch_id": branch_id}
+
+
+def pull_library(tool: str, kind: str, item_id: str, branch_id: str | None = None,
+                 branch_name: str | None = None, *, vault: Any = None) -> dict[str, Any]:
+    """Bring one branch of a feature or preset from the account to this computer."""
+    if not branch_id and not branch_name:
+        branch_name = "main"
+    body = {"branch_id": branch_id, "branch_name": branch_name}
+    answer = _request(tool, "POST", f"/api/cloud/{_LIBRARY_ROUTE[kind]}/{_quote(item_id)}/branches/pull", body)
+    if answer.get("status") == "error":
+        return answer
+    return _keep_library_remote(kind, item_id, answer, vault)
+
+
+def clone_library(tool: str, kind: str, item_id: str, *, vault: Any = None) -> dict[str, Any]:
+    """Bring a whole feature or preset from the account to this computer."""
+    answer = _request(tool, "POST", f"/api/cloud/{_LIBRARY_ROUTE[kind]}/{_quote(item_id)}/clone", {})
+    if answer.get("status") == "error":
+        return answer
+    return _keep_library_remote(kind, item_id, answer, vault)
+
+
+def _keep_library_remote(kind: str, item_id: str, answer: dict[str, Any], vault: Any) -> dict[str, Any]:
+    from kiln.history_vault import HistoryVault
+
+    own = vault is None
+    vault = vault or HistoryVault()
+    try:
+        applied = vault.apply_library_remote(kind, item_id, answer)
+    finally:
+        if own:
+            vault.close()
+    return {"status": "success", "applied": applied, "item_id": item_id}
+
+
+def push_library_release(tool: str, kind: str, release_id: str, *, vault: Any = None) -> dict[str, Any]:
+    """Send a feature or preset release kept on this computer to the account."""
+    from kiln.history_vault import HistoryVault
+
+    own = vault is None
+    vault = vault or HistoryVault()
+    try:
+        item_id = vault.library_item_of(kind, "release", release_id)
+        record = next(
+            (r for r in vault._lib_rows(kind, "release", item_id) if r.get("release_id") == release_id),
+            None,
+        ) if item_id else None
+    finally:
+        if own:
+            vault.close()
+    if record is None:
+        return _refused(tool, "RELEASE_NOT_FOUND", f"No release {release_id} on this computer.")
+    answer = _request(tool, "POST", f"/api/cloud/{_LIBRARY_ROUTE[kind]}/{_quote(item_id)}/releases/push", record)
+    if answer.get("status") == "error":
+        return answer
+    return {"status": "success", "release_id": release_id, "item_id": item_id, "push": answer}
+
+
+#: The library cloud doors: the manifest's mode -> (kind, what it does).
+_LIBRARY_MODES = {
+    "feature_push": ("features", "push"), "feature_pull": ("features", "pull"),
+    "feature_clone": ("features", "clone"), "feature_release_push": ("features", "release_push"),
+    "preset_push": ("presets", "push"), "preset_pull": ("presets", "pull"),
+    "preset_clone": ("presets", "clone"), "preset_release_push": ("presets", "release_push"),
+}
+
+
 def run_local(tool: str, mode: str, kwargs: dict[str, Any]) -> dict[str, Any]:
     """Run the cloud door *mode* for a stub of *tool* on this computer."""
     remote = kwargs.get("remote") or "default"
@@ -400,6 +574,26 @@ def run_local(tool: str, mode: str, kwargs: dict[str, Any]) -> dict[str, Any]:
             tool, "REMOTE_NOT_AVAILABLE",
             "This install pushes to and pulls from your Kiln account only.",
         )
+    if mode in _LIBRARY_MODES:
+        kind, does = _LIBRARY_MODES[mode]
+        from kiln.history_vault import LIBRARY_KINDS
+
+        if does == "release_push":
+            release_id = str(kwargs.get("release_id") or "")
+            if not release_id:
+                return _refused(tool, "INVALID_INPUT", "release_id is required.")
+            return push_library_release(tool, kind, release_id)
+        item_id = str(kwargs.get(LIBRARY_KINDS[kind]["id"]) or "")
+        if not item_id:
+            return _refused(tool, "INVALID_INPUT", f"{LIBRARY_KINDS[kind]['id']} is required.")
+        if does == "push":
+            branch_id = str(kwargs.get("branch_id") or "")
+            if not branch_id:
+                return _refused(tool, "INVALID_INPUT", "branch_id is required.")
+            return push_library(tool, kind, item_id, branch_id, design_id=kwargs.get("design_id"))
+        if does == "pull":
+            return pull_library(tool, kind, item_id, kwargs.get("branch_id"), kwargs.get("branch_name"))
+        return clone_library(tool, kind, item_id)
     if mode == "release_push":
         release_id = str(kwargs.get("release_id") or "")
         if not release_id:
@@ -425,6 +619,11 @@ def run_local(tool: str, mode: str, kwargs: dict[str, Any]) -> dict[str, Any]:
 
 
 __all__ = [
+    "clone_library",
+    "library_items_for_call",
+    "pull_library",
+    "push_library",
+    "push_library_release",
     "SCHEMA_VERSION",
     "call_served",
     "clone",

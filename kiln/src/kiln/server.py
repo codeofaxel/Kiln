@@ -19436,8 +19436,12 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
         # build understands.
         history_def = tool_def.get("history")
         history_mode = ""
+        history_kinds: tuple[str, ...] = ("designs",)
         if isinstance(history_def, dict) and history_def.get("schema_version") == _HISTORY_SCHEMA_VERSION:
             history_mode = str(history_def.get("mode") or "")
+            history_kinds = tuple(
+                k for k in (history_def.get("kinds") or ["designs"]) if isinstance(k, str)
+            )
         local_steps_def = tool_def.get("local_steps")
         reads_first: list = []
         may_act = False
@@ -19452,6 +19456,7 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
         # so we use a factory to freeze the value.
         def _make_stub(
             _name: str, _inputs: dict | None, _reads: list, _may_act: bool, _history: str = "",
+            _kinds: tuple[str, ...] = ("designs",),
         ):
             def _stub(**kwargs):
                 from kiln import served_makes, served_steps
@@ -19512,7 +19517,7 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                     # rides with the call and what changed comes back.
                     from kiln.history_courier import records_for_call
 
-                    history_sent = records_for_call(call)
+                    history_sent = records_for_call(call, kinds=_kinds, tool=_name)
                     call = {**call, "history_records": history_sent}
 
                 def ask(**more):
@@ -19584,7 +19589,7 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                 )
             return _stub
 
-        stub = _make_stub(name, served_inputs, reads_first, may_act, history_mode)
+        stub = _make_stub(name, served_inputs, reads_first, may_act, history_mode, history_kinds)
 
         # Reconstruct a typed Python signature from the JSON Schema so
         # that FastMCP generates the correct tool schema for clients.

@@ -305,6 +305,66 @@ def cloud_release_list(design_id: str, json_mode: bool) -> None:
     ) or "(none)")
 
 
+def _library_group(kind: str, word: str, id_name: str) -> click.Group:
+    """``kiln cloud feature`` / ``kiln cloud preset``: one group per library kind."""
+    group = click.Group(word, help=f"Push a saved {word}'s history to your Kiln account, or bring it here.")
+
+    @group.command("push")
+    @click.argument("item_id", metavar=id_name.upper())
+    @click.argument("branch_id")
+    @click.option("--design-id", default=None, help="The design it belongs to, if any.")
+    @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+    def push_cmd(item_id: str, branch_id: str, design_id: str | None, json_mode: bool) -> None:
+        """Push BRANCH_ID of this item from this computer to your Kiln account."""
+        from kiln.history_courier import push_library
+
+        answer = push_library(f"cloud_push_{kind[:-1]}_branch", kind, item_id, branch_id, design_id=design_id)
+        _finish(answer, json_mode, lambda a: f"Pushed {item_id} to your Kiln account.")
+
+    @group.command("pull")
+    @click.argument("item_id", metavar=id_name.upper())
+    @click.option("--branch", "branch_name", default=None, help="Branch name (main by default).")
+    @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+    def pull_cmd(item_id: str, branch_name: str | None, json_mode: bool) -> None:
+        """Bring a branch of this item from your Kiln account to this computer."""
+        from kiln.history_courier import pull_library
+
+        answer = pull_library(f"cloud_pull_{kind[:-1]}_branch", kind, item_id, branch_name=branch_name)
+        _finish(answer, json_mode, lambda a: f"Pulled {item_id} from your Kiln account.")
+
+    @group.command("clone")
+    @click.argument("item_id", metavar=id_name.upper())
+    @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+    def clone_cmd(item_id: str, json_mode: bool) -> None:
+        """Bring all of this item from your Kiln account to this computer."""
+        from kiln.history_courier import clone_library
+
+        answer = clone_library(f"cloud_clone_{kind[:-1]}", kind, item_id)
+        _finish(answer, json_mode, lambda a: f"Cloned {item_id} from your Kiln account.")
+
+    release = click.Group("release", help=f"Signed releases of a saved {word}.")
+
+    @release.command("push")
+    @click.argument("release_id")
+    @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+    def release_push_cmd(release_id: str, json_mode: bool) -> None:
+        """Push signed release RELEASE_ID from this computer to your Kiln account."""
+        from kiln.history_courier import push_library_release
+
+        answer = push_library_release(f"cloud_push_{kind[:-1]}_release", kind, release_id)
+        _finish(answer, json_mode, lambda a: f"Pushed release {release_id} to your Kiln account.")
+
+    group.add_command(release)
+    return group
+
+
+_feature_group = _library_group("features", "feature", "feature_id")
+_preset_group = _library_group("presets", "preset", "preset_id")
+cloud_group.add_command(_feature_group, name="feature")
+cloud_group.add_command(_preset_group, name="preset")
+cloud_group.add_command(_preset_group, name="decoration")
+
+
 # ---------------------------------------------------------------------------
 # kiln release
 # ---------------------------------------------------------------------------

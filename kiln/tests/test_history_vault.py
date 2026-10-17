@@ -544,3 +544,116 @@ def test_the_mesh_folder_files_by_content(home):
     sha = vault._put_mesh(MESH_V1)
     assert sha == hashlib.sha256(MESH_V1).hexdigest()
     assert vault.mesh_path(sha).read_bytes() == MESH_V1
+
+
+# ---------------------------------------------------------------------------
+# Saved features and decoration presets
+# ---------------------------------------------------------------------------
+
+
+def _feature_delta(item="f1", branch="fb1", head="fv2", parent="fv1", *, expected=None, art=None):
+    version = {"feature_version_id": head, "feature_id": item, "name": "fillet",
+               "parent_feature_version_id": parent, "version_number": 2}
+    if art is not None:
+        version["image_asset_bytes_b64"] = base64.b64encode(art).decode()
+        version["image_asset_path"] = "/srv/ws/x/art.png"
+    return {
+        "feature_id": item,
+        "branches": [{"branch_id": branch, "feature_id": item, "name": "main",
+                      "head_feature_version_id": head}],
+        "expected_heads": {branch: expected} if expected is not None or expected is None else {},
+        "versions": [version],
+        "memberships": [{"branch_id": branch, "feature_version_id": head, "position": 1}],
+        "releases": [],
+    }
+
+
+class TestFeaturesAndPresetsAreKeptHere:
+    def test_a_new_feature_from_the_server_is_kept_and_sent_back_whole(self, home):
+        vault = _vault(home)
+        answer = courier.take_delta(
+            {"status": "success", "history_delta": {"features": [_feature_delta()]}},
+            {"named_features": []}, vault=vault,
+        )
+        assert answer["history_kept"]["features"] == ["f1"]
+        sent = courier.records_for_call({"feature_id": "f1"}, vault=vault, kinds=("features",))
+        (bundle,) = sent["features"]
+        assert [b["branch_id"] for b in bundle["branches"]] == ["fb1"]
+        assert sent["named_features"] == ["f1"]
+
+    def test_a_listing_sends_every_feature_kept_here(self, home):
+        vault = _vault(home)
+        for item in ("f1", "f2"):
+            vault.apply_library_delta("features", _feature_delta(item=item, branch=f"b-{item}", head=f"v-{item}"))
+        sent = courier.records_for_call({}, vault=vault, kinds=("features",), tool="list_features")
+        assert sorted(b["feature_id"] for b in sent["features"]) == ["f1", "f2"]
+        none = courier.records_for_call({}, vault=vault, kinds=("features",), tool="save_feature")
+        assert none["features"] == []
+
+    def test_a_branch_moved_here_meanwhile_is_left_as_it_is(self, home):
+        vault = _vault(home)
+        vault.apply_library_delta("features", _feature_delta())
+        moved = vault.apply_library_delta("features", _feature_delta(head="fv3", parent="fv2", expected="fv-other"))
+        assert moved["branches_changed_here"] == ["fb1"]
+        (branch,) = vault.library_bundle("features", "f1")["branches"]
+        assert branch["head_feature_version_id"] == "fv2"
+
+    def test_an_answer_about_an_item_the_call_did_not_name_changes_nothing(self, home):
+        vault = _vault(home)
+        vault.apply_library_delta("features", _feature_delta(item="mine"))
+        answer = courier.take_delta(
+            {"history_delta": {"features": [_feature_delta(item="mine", head="evil", parent="fv2")]}},
+            {"named_features": []}, vault=vault,
+        )
+        assert "history_kept" not in answer
+        assert vault.library_bundle("features", "mine")["branches"][0]["head_feature_version_id"] == "fv2"
+
+    def test_a_row_belonging_to_another_item_is_never_rewritten(self, home):
+        vault = _vault(home)
+        vault.apply_library_delta("features", _feature_delta(item="a", branch="shared-branch", head="va"))
+        vault.apply_library_delta("features", _feature_delta(item="b", branch="shared-branch", head="vb"))
+        assert vault.library_bundle("features", "a")["branches"][0]["head_feature_version_id"] == "va"
+        assert vault.library_bundle("features", "b")["branches"] == []
+
+    def test_art_is_kept_once_and_travels_back_by_name_never_by_the_servers_path(self, home):
+        vault = _vault(home)
+        art = b"\\x89PNG fake art"
+        vault.apply_library_delta("presets", {
+            "preset_id": "p1",
+            "branches": [{"branch_id": "pb", "preset_id": "p1", "name": "main", "head_preset_version_id": "pv1"}],
+            "versions": [{"preset_version_id": "pv1", "preset_id": "p1",
+                          "image_asset_bytes_b64": base64.b64encode(art).decode(),
+                          "image_asset_path": "/srv/ws/kiln/preset_assets/x.png"}],
+            "memberships": [{"branch_id": "pb", "preset_version_id": "pv1", "position": 0}],
+            "releases": [],
+        })
+        (kept,) = vault._lib_rows("presets", "version", "p1")
+        assert "image_asset_bytes_b64" not in kept and kept["image_asset_sha256"] == hashlib.sha256(art).hexdigest()
+        (sent,) = vault.library_bundle("presets", "p1")["versions"]
+        assert base64.b64decode(sent["image_asset_bytes_b64"]) == art
+        assert "/srv/" not in json.dumps(sent)
+
+
+class TestALibraryPush:
+    def test_a_feature_branch_is_pushed_from_this_computers_records(self, home, monkeypatch):
+        vault = _vault(home)
+        vault.apply_library_delta("features", _feature_delta())
+        vault.close()
+        sent = {}
+        monkeypatch.setattr(courier, "_request", lambda tool, method, path, body=None: sent.update(path=path, body=body) or {})
+        answer = courier.run_local("cloud_push_feature_branch", "feature_push", {"feature_id": "f1", "branch_id": "fb1"})
+        assert answer["status"] == "success", answer
+        assert sent["path"] == "/api/cloud/features/f1/branches/push"
+        assert sent["body"]["branch"]["branch_id"] == "fb1"
+        assert [v["feature_version_id"] for v in sent["body"]["versions"]] == ["fv2"]
+
+    def test_a_pulled_preset_is_kept_here(self, home, monkeypatch):
+        monkeypatch.setattr(courier, "_request", lambda *a, **k: {
+            "branch": {"branch_id": "pb", "preset_id": "p9", "name": "main", "head_preset_version_id": "pv"},
+            "versions": [{"preset_version_id": "pv", "preset_id": "p9"}],
+            "memberships": [{"branch_id": "pb", "preset_version_id": "pv", "position": 0}],
+        })
+        answer = courier.run_local("cloud_pull_preset_branch", "preset_pull", {"preset_id": "p9"})
+        assert answer["status"] == "success", answer
+        vault = _vault(home)
+        assert vault.has_library_item("presets", "p9")

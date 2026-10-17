@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-17T21:39:36.290739+00:00",
+  "generated": "2026-10-17T22:09:29.572758+00:00",
   "tool_count": 415,
   "categories": {
     "product_generators": {
@@ -1689,6 +1689,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "feature_clone"
       }
     },
     {
@@ -1718,6 +1722,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "preset_clone"
       }
     },
     {
@@ -1989,6 +1997,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "feature_pull"
       }
     },
     {
@@ -2042,6 +2054,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "preset_pull"
       }
     },
     {
@@ -2135,6 +2151,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "feature_push"
       }
     },
     {
@@ -2164,6 +2184,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "feature_release_push"
       }
     },
     {
@@ -2210,6 +2234,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "preset_push"
       }
     },
     {
@@ -2239,6 +2267,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "preset_release_push"
       }
     },
     {
@@ -3969,6 +4001,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -4031,6 +4070,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -4670,6 +4716,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -4721,6 +4774,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -5049,6 +5109,13 @@
         "files": {
           "image_asset_path": "one"
         }
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -5119,6 +5186,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -5315,6 +5389,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -5472,6 +5553,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -5506,6 +5594,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -5686,6 +5781,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -5760,6 +5862,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -5894,6 +6003,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -6287,6 +6403,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -6316,6 +6439,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -6350,6 +6480,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -6374,6 +6511,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -6422,6 +6566,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -6613,6 +6764,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -6642,6 +6800,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -6692,6 +6857,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -6716,6 +6888,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -6764,6 +6943,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -6859,6 +7045,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -7040,6 +7233,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -8076,6 +8276,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -8190,6 +8397,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -8424,6 +8638,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -8651,6 +8872,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -9097,6 +9325,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
