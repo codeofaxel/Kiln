@@ -48,6 +48,38 @@ def _not_found_error(name: str) -> dict[str, Any]:
     }
 
 
+def _memory_refusal(tool: str, answer: dict[str, Any]) -> dict[str, Any]:
+    """What a decoration-memory tool says when Kiln's servers gave no plan.
+
+    A plan without decoration memory gets the servers' own Kiln Pro answer;
+    anything else (offline, signed out, silent) is worded here, and in every
+    case nothing in the decoration's folder changed.
+    """
+    from kiln.served_answer import classify_answer, clause, fields
+
+    if str(answer.get("code") or "") == "TIER_REQUIRED":
+        return {**answer, "status": "error", "success": False, "tool": tool}
+    miss = classify_answer(answer)
+    reason = clause(
+        miss, feature="servers", cannot="reach decoration memory",
+    ) if miss is not None else "Kiln's servers gave no answer"
+    envelope: dict[str, Any] = {
+        "status": "error",
+        "success": False,
+        "tool": tool,
+        "code": str(answer.get("code") or "DECORATION_MEMORY_UNAVAILABLE"),
+        "error": (
+            f"{tool} is Kiln Pro decoration memory, worked out on Kiln's "
+            f"servers. {reason}. Nothing in the decoration's folder changed."
+        ),
+        **fields(miss),
+    }
+    for key in ("upgrade_url", "required_tier"):
+        if answer.get(key):
+            envelope[key] = answer[key]
+    return envelope
+
+
 class _DecorationLibraryPlugin:
     """Save and reuse decorations across models — photos, SVGs, QR codes, text."""
 
@@ -398,6 +430,9 @@ class _DecorationLibraryPlugin:
             if isinstance(result, dict):
                 result["decoration_used"] = name
                 result["settings_source"] = settings.get("source", "proven")
+                for key in ("note", "upgrade_url"):
+                    if settings.get(key):
+                        result.setdefault(f"settings_{key}", settings[key])
             try:
                 from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
 
@@ -461,9 +496,171 @@ class _DecorationLibraryPlugin:
                     "error": f"Failed to check decoration quota: {exc}",
                 }
 
-        # Decoration versioning (iterate, history) and proven recipe
-        # recording are Pro features.
-        # See kiln_pro/plugins/decoration_learning_tools.py.
+        # ------------------------------------------------------------------
+        # Decoration memory (Kiln Pro): what printed well, versions, history
+        # and rollback.  Worked out on Kiln's servers and written into the
+        # decoration's own folder here (kiln.decoration_library).
+        # ------------------------------------------------------------------
+
+        @mcp.tool()
+        def record_decoration_success(
+            name: str,
+            material: str,
+            depth_mm: float,
+            mode: str = "emboss",
+            image_style: str = "auto",
+            source_job_id: str = "",
+        ) -> dict:
+            """Record a successful print with a saved decoration (Kiln Pro).
+
+            After a decoration prints well, call this with the settings that
+            worked.  ``apply_decoration`` then replays them on that material.
+
+            :param name: Decoration name or slug.
+            :param material: Material used (e.g. ``"PLA"``, ``"PETG"``).
+            :param depth_mm: Depth in mm that printed well.
+            :param mode: ``"emboss"`` or ``"deboss"``.
+            :param image_style: Image style that worked (e.g. ``"coin"``).
+            :param source_job_id: The print's job id when known: the same
+                print reported twice (here and through
+                ``record_print_outcome``) counts once.
+            :returns: Dict with the updated decoration.
+            """
+            import kiln.server as _srv
+            if err := _srv._check_auth("cache"):
+                return err
+
+            from kiln import _pro_decoration_bridge as bridge
+            from kiln.decoration_library import record_decoration_success as _record
+
+            try:
+                dec = _record(
+                    name, material=material, depth_mm=depth_mm, mode=mode,
+                    image_style=image_style, source_job_id=source_job_id or None,
+                )
+            except bridge.MemoryUnavailable as miss:
+                return _memory_refusal("record_decoration_success", miss.answer)
+            except ValueError as exc:
+                return {"status": "error", "error": str(exc), "code": "VALIDATION_ERROR"}
+            return {
+                "status": "success",
+                "decoration": dec.to_dict(),
+                "message": (
+                    f"Recorded success for '{dec.name}' on {material} "
+                    f"(depth={depth_mm}mm, mode={mode})."
+                ),
+            }
+
+        @mcp.tool()
+        def iterate_decoration(
+            name: str,
+            content_path: str = "",
+            depth_mm: float = 0.0,
+            mode: str = "",
+            image_style: str = "",
+            notes: str = "",
+        ) -> dict:
+            """Create a new version of a saved decoration, archiving the current one (Kiln Pro).
+
+            Use this when tuning a decoration -- a new depth, mode, style or
+            content file -- and the previous version stays available for
+            ``rollback_decoration``.
+
+            :param name: Decoration name or slug.
+            :param content_path: New content file (empty = keep current).
+            :param depth_mm: New depth in mm (0 = keep current).
+            :param mode: New mode (empty = keep current).
+            :param image_style: New image style (empty = keep current).
+            :param notes: Free-text notes for this iteration.
+            :returns: Dict with the new version and what changed.
+            """
+            import kiln.server as _srv
+            if err := _srv._check_auth("cache"):
+                return err
+
+            from kiln import _pro_decoration_bridge as bridge
+            from kiln.decoration_library import iterate_decoration as _iterate
+
+            try:
+                dec = _iterate(
+                    name, content_path=content_path or None,
+                    depth_mm=depth_mm if depth_mm > 0 else None,
+                    mode=mode or None, image_style=image_style or None, notes=notes,
+                )
+            except bridge.MemoryUnavailable as miss:
+                return _memory_refusal("iterate_decoration", miss.answer)
+            except FileNotFoundError as exc:
+                return {"status": "error", "error": str(exc), "code": "FILE_NOT_FOUND"}
+            except ValueError as exc:
+                return {"status": "error", "error": str(exc), "code": "VALIDATION_ERROR"}
+            return {
+                "status": "success",
+                "decoration": dec.to_dict(),
+                "version": dec.version,
+                "changes": dec.changes,
+            }
+
+        @mcp.tool()
+        def decoration_history(name: str) -> dict:
+            """Get every version of a saved decoration (Kiln Pro).
+
+            Each version with when it was made, what changed, the materials
+            it has printed well on and its print count.
+
+            :param name: Decoration name or slug.
+            :returns: Dict with the version history and the current version.
+            """
+            from kiln import _pro_decoration_bridge as bridge
+            from kiln.decoration_library import decoration_history as _history
+            from kiln.decoration_library import get_decoration as _get
+
+            current = _get(name)
+            if current is None:
+                return _not_found_error(name)
+            try:
+                versions = _history(name)
+            except bridge.MemoryUnavailable as miss:
+                return _memory_refusal("decoration_history", miss.answer)
+            except ValueError as exc:
+                return {"status": "error", "error": str(exc), "code": "VALIDATION_ERROR"}
+            return {
+                "status": "success",
+                "name": name,
+                "versions": versions,
+                "current_version": current.version,
+            }
+
+        @mcp.tool()
+        def rollback_decoration(name: str, version: int) -> dict:
+            """Restore an earlier version of a saved decoration (Kiln Pro).
+
+            The current version is archived and the earlier one comes back
+            as a NEW version number, so history is never rewritten.
+
+            :param name: Decoration name or slug.
+            :param version: Version number to restore.
+            :returns: Dict with the restored decoration.
+            """
+            import kiln.server as _srv
+            if err := _srv._check_auth("cache"):
+                return err
+
+            from kiln import _pro_decoration_bridge as bridge
+            from kiln.decoration_library import rollback_decoration as _rollback
+
+            try:
+                dec = _rollback(name, version=version)
+            except bridge.MemoryUnavailable as miss:
+                return _memory_refusal("rollback_decoration", miss.answer)
+            except ValueError as exc:
+                return {"status": "error", "error": str(exc), "code": "VALIDATION_ERROR"}
+            return {
+                "status": "success",
+                "decoration": dec.to_dict(),
+                "version": dec.version,
+                "restored_from": version,
+                "message": f"Restored '{dec.name}' from v{version} as v{dec.version}.",
+            }
 
         _logger.debug("Registered decoration library tools")
 

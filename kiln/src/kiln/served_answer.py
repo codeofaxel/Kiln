@@ -490,6 +490,7 @@ HOSTED_DOORS: dict[str, tuple[str, str]] = {
     "kiln.plugins.fleet_tools": ("served_answer", "fleet routing on an install without the router; a miss routes nothing"),
     "kiln._pro_camera_bridge": ("served_answer", "whether a printer model ships with a camera, for always allow; a miss asks the person instead"),
     "kiln._pro_catalogue_bridge": ("served_answer", "one printer's catalogue record (limits, variants, spec sheet) at setup, kept on this computer; a miss is the record last kept, else the generic floor, said once at setup"),
+    "kiln._pro_decoration_bridge": ("served_answer", "a saved decoration's memory (what printed well, versions, rollback), worked out on Kiln's servers and written into the decoration's own folder; a miss changes nothing on disk, and applying uses the standard settings"),
     "kiln._pro_material_bridge": ("served_answer", "one material's catalogue record (a family's brand figures, its load figures) the first time a door asks, kept on this computer; a miss is the record last kept, else the family's own range for a brand and no load figure, each door saying why"),
     "kiln.stage_link": ("served_answer", "browser stage links; the four served causes word through here, the local stage is the floor"),
     "kiln.stage_cache": ("infrastructure", "the stage document upload behind stage_link; its refusals surface through stage_link"),
