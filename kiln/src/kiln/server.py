@@ -16585,7 +16585,10 @@ def generate_from_template(
         params = {**defaults, **(parameters or {})}
 
         # Substitute parameters; the shared renderer adds the curve rule
-        scad_code = render_template_scad(tpl, params)
+        try:
+            scad_code = render_template_scad(tpl, params)
+        except ValueError as exc:
+            return _error_dict(str(exc), code="VALIDATION_ERROR")
 
         # Generate via OpenSCAD provider
         gen = _get_generation_provider("openscad")

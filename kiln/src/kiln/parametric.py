@@ -8,6 +8,7 @@ the file. Users can tweak parameters without re-prompting.
 from __future__ import annotations
 
 import logging
+import math
 import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
@@ -749,6 +750,87 @@ def insert_into_scad_module(
 # ---------------------------------------------------------------------------
 
 
+_SLOT = re.compile(r"\$\{([A-Za-z_]\w*)\}")
+_TEXT_SLOT = re.compile(r'"\$\{([A-Za-z_]\w*)\}"')
+_NUMBER = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?")
+_TEXT_ESCAPES = {"\\": "\\\\", '"': '\\"', "\n": "\\n", "\r": "\\r", "\t": "\\t"}
+
+
+def template_slot_values(scad_template: str, params: dict[str, Any]) -> dict[str, str]:
+    """What each ``${name}`` slot of a template is filled with.
+
+    A parameter is a VALUE, and this is where that is made true.  The
+    template decides what kind: a slot that only ever sits inside a string
+    literal (``txt = "${text_string}";``) takes text, escaped so it cannot
+    end the string; every other slot takes one number.  Substituting what
+    the caller sent verbatim let a value carry statements of its own --
+    ``thickness="5; cube(99)"`` built a different part -- so a "parametric
+    part" was whatever OpenSCAD the value happened to contain.
+
+    Only names the template has a slot for are returned; anything else in
+    *params* never reaches the source.
+
+    :param scad_template: The template source, with ``${name}`` slots.
+    :param params: Parameter values as the caller gave them.
+    :returns: Slot name to the exact text substituted for it.
+    :raises ValueError: If a value is not a number (or, for a text slot,
+        not text), naming the parameter.
+    """
+    # A slot is ``${name}``.  A bare ``$name`` is OpenSCAD's own (``$fn``),
+    # and a parameter that happens to share its name must not rewrite it.
+    seen: dict[str, int] = {}
+    for name in _SLOT.findall(scad_template):
+        seen[name] = seen.get(name, 0) + 1
+    quoted: dict[str, int] = {}
+    for name in _TEXT_SLOT.findall(scad_template):
+        quoted[name] = quoted.get(name, 0) + 1
+
+    values: dict[str, str] = {}
+    for name, value in params.items():
+        if name not in seen:
+            continue
+        if quoted.get(name) == seen[name]:
+            values[name] = _slot_text(name, value)
+        else:
+            values[name] = _slot_number(name, value)
+    return values
+
+
+def _slot_number(name: str, value: Any) -> str:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ValueError(f"Parameter {name!r} takes a finite number, got {value!r}.")
+        return str(value)
+    if isinstance(value, str) and _NUMBER.fullmatch(value.strip()):
+        return value.strip()
+    raise ValueError(
+        f"Parameter {name!r} takes a number, got {_shown(value)}. "
+        "A template parameter is one value; to change the shape itself, "
+        "write the OpenSCAD and compile it with compile_scad."
+    )
+
+
+def _slot_text(name: str, value: Any) -> str:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        value = str(value)
+    if not isinstance(value, str):
+        raise ValueError(f"Parameter {name!r} takes text, got {_shown(value)}.")
+    out: list[str] = []
+    for ch in value:
+        if ch in _TEXT_ESCAPES:
+            out.append(_TEXT_ESCAPES[ch])
+        elif ord(ch) < 32 or ord(ch) == 127:
+            raise ValueError(f"Parameter {name!r} contains a control character.")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def _shown(value: Any) -> str:
+    text = repr(value)
+    return text if len(text) <= 60 else text[:57] + "..."
+
+
 def render_template_scad(template: dict[str, Any], params: dict[str, Any]) -> str:
     """The OpenSCAD a parametric part from ``data/design_templates.json`` builds.
 
@@ -767,7 +849,8 @@ def render_template_scad(template: dict[str, Any], params: dict[str, Any]) -> st
 
     from kiln.curve_resolution import SCAD_TRAILER
 
-    return Template(template["scad_template"]).safe_substitute(params) + SCAD_TRAILER
+    source = template["scad_template"]
+    return Template(source).safe_substitute(template_slot_values(source, params)) + SCAD_TRAILER
 
 
 def compile_scad_code(

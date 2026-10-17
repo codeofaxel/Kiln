@@ -919,3 +919,150 @@ class TestScadModuleToDict:
         assert d["line_start"] == 1
         assert d["line_end"] == 3
         assert d["description"] == "A test"
+
+
+# ---------------------------------------------------------------------------
+# Template parameters are values
+# ---------------------------------------------------------------------------
+
+
+def _catalogue() -> dict:
+    import json
+    from pathlib import Path
+
+    import kiln
+
+    path = Path(kiln.__file__).parent / "data" / "design_templates.json"
+    return {k: v for k, v in json.loads(path.read_text()).items() if not k.startswith("_")}
+
+
+def _defaults(tpl: dict) -> dict:
+    return {name: spec["default"] for name, spec in tpl["parameters"].items()}
+
+
+_needs_openscad = pytest.mark.skipif(
+    __import__("shutil").which("openscad") is None,
+    reason="OpenSCAD binary not installed",
+)
+
+
+class TestTemplateValuesAreValues:
+    """A template parameter fills one slot with one value.  It used to be
+    pasted into the source as written, so a value carrying statements of its
+    own built whatever those statements said."""
+
+    INJECTED = "5; translate([200,0,0]) cube([10,10,77])"
+
+    def test_a_number_slot_refuses_statements(self):
+        from kiln.parametric import render_template_scad
+
+        tpl = _catalogue()["phone_stand"]
+        with pytest.raises(ValueError, match="'thickness' takes a number"):
+            render_template_scad(tpl, {**_defaults(tpl), "thickness": self.INJECTED})
+
+    def test_the_template_tool_refuses_it_before_compiling(self):
+        from kiln.server import generate_from_template
+
+        with patch("kiln.server._get_generation_provider") as provider:
+            result = generate_from_template("phone_stand", {"thickness": self.INJECTED})
+
+        assert result.get("success") is False
+        assert result["error"]["code"] == "VALIDATION_ERROR"
+        assert "thickness" in result["error"]["message"]
+        provider.assert_not_called()
+
+    @pytest.mark.parametrize("value, rendered", [(6, "6"), (6.5, "6.5"), ("6", "6"), (" 6.5 ", "6.5"), ("-1e1", "-1e1")])
+    def test_numbers_and_numeric_text_still_fill_the_slot(self, value, rendered):
+        from kiln.parametric import render_template_scad
+
+        tpl = _catalogue()["phone_stand"]
+        source = render_template_scad(tpl, {**_defaults(tpl), "thickness": value})
+        before = tpl["scad_template"]
+        assert before.count("${thickness}") >= 1
+        assert source.count(rendered) >= before.count("${thickness}")
+        assert "${thickness}" not in source
+
+    @pytest.mark.parametrize("value", [True, None, [5], {"a": 1}, float("nan"), float("inf"), "5mm", "", "5 6"])
+    def test_a_number_slot_refuses_everything_else(self, value):
+        from kiln.parametric import render_template_scad
+
+        tpl = _catalogue()["phone_stand"]
+        with pytest.raises(ValueError, match="thickness"):
+            render_template_scad(tpl, {**_defaults(tpl), "thickness": value})
+
+    def test_text_cannot_end_the_string_it_sits_in(self):
+        from kiln.parametric import render_template_scad
+
+        tpl = _catalogue()["plant_label_stake"]
+        label = 'A"; cube(99); x="'
+        source = render_template_scad(tpl, {**_defaults(tpl), "text_string": label})
+        assert 'txt = "A\\"; cube(99); x=\\"";' in source
+
+    def test_a_trailing_backslash_cannot_swallow_the_closing_quote(self):
+        from kiln.parametric import render_template_scad
+
+        tpl = _catalogue()["plant_label_stake"]
+        source = render_template_scad(tpl, {**_defaults(tpl), "text_string": "A\\"})
+        assert 'txt = "A\\\\";' in source
+
+    def test_text_keeps_ordinary_punctuation(self):
+        from kiln.parametric import render_template_scad
+
+        tpl = _catalogue()["plant_label_stake"]
+        source = render_template_scad(tpl, {**_defaults(tpl), "text_string": "Mom's Basil #2; (hot)"})
+        assert 'txt = "Mom\'s Basil #2; (hot)";' in source
+
+    def test_text_refuses_control_characters(self):
+        from kiln.parametric import render_template_scad
+
+        tpl = _catalogue()["plant_label_stake"]
+        with pytest.raises(ValueError, match="text_string"):
+            render_template_scad(tpl, {**_defaults(tpl), "text_string": "A\x00B"})
+
+    def test_a_parameter_named_like_a_special_variable_does_not_rewrite_it(self):
+        from kiln.parametric import render_template_scad
+
+        tpl = {"scad_template": "$fn = 64;\nw = ${w};\ncube(w);\n", "parameters": {"w": {"default": 5}}}
+        source = render_template_scad(tpl, {"w": 5, "fn": "3; cube(99)"})
+        assert source.startswith("$fn = 64;\nw = 5;\ncube(w);\n")
+
+    def test_text_in_an_unquoted_slot_is_refused(self):
+        """What makes a slot take text is where it sits, not what the
+        template says about it: a slot outside a string takes a number."""
+        from kiln.parametric import render_template_scad
+
+        tpl = {"scad_template": 'a = "${s}";\nb = ${s};\n', "parameters": {"s": {"default": "x", "type": "string"}}}
+        with pytest.raises(ValueError, match="'s' takes a number"):
+            render_template_scad(tpl, {"s": "cube(99)"})
+
+    def test_every_catalogue_template_still_renders_at_its_defaults(self):
+        from kiln.parametric import render_template_scad
+
+        for template_id, tpl in _catalogue().items():
+            source = render_template_scad(tpl, _defaults(tpl))
+            assert "${" not in source, template_id
+
+    def test_every_text_parameter_in_the_catalogue_sits_inside_a_string(self):
+        """A text default in a slot outside a string would stop rendering;
+        this is the catalogue-side half of the rule."""
+        from kiln.parametric import template_slot_values
+
+        for template_id, tpl in _catalogue().items():
+            assert "$$" not in tpl["scad_template"], template_id
+            values = template_slot_values(tpl["scad_template"], _defaults(tpl))
+            assert set(values) == set(tpl["parameters"]), template_id
+
+    @_needs_openscad
+    @pytest.mark.use_real_openscad_probe
+    def test_injected_label_text_builds_no_extra_geometry(self):
+        """The part itself: a label carrying a far-away cube must come back
+        the size of a label stake."""
+        import trimesh
+
+        from kiln.parametric import compile_scad_code, render_template_scad
+
+        tpl = _catalogue()["plant_label_stake"]
+        label = 'A"; translate([500,0,0]) cube(50); x="'
+        source = render_template_scad(tpl, {**_defaults(tpl), "text_string": label})
+        mesh = trimesh.load(compile_scad_code(source, timeout=120))
+        assert max(mesh.extents) < 300
