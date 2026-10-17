@@ -1801,6 +1801,33 @@ def _coverage_for(
         return None, None
 
 
+def _fault_reading_note(faults: Any) -> tuple[str, dict[str, str]] | None:
+    """The one line about why a fault on the status door reads as its family
+    line alone, and its machine-readable why, or ``None``.
+
+    Asks the fault bridge what it already knows (never a request) for each
+    code the status shows, and claims the line once per session per cause,
+    so a polled status says it the first time and stays quiet after.
+    """
+    if not isinstance(faults, list):
+        return None
+    from kiln import _pro_fault_bridge
+    from kiln.tiers_and_terms import claim_once
+
+    for entry in faults:
+        if not isinstance(entry, dict) or not entry.get("code"):
+            continue
+        code, kind = str(entry["code"]), str(entry.get("kind") or "print_error")
+        note = _pro_fault_bridge.note_for(code, kind=kind)
+        if not note:
+            continue
+        why = _pro_fault_bridge.miss_for(code, kind=kind)
+        if claim_once(f"fault_reading.note.{why.get('why') or 'plan'}"):
+            return note, why
+        return None
+    return None
+
+
 def _coverage_line_for(printer_name: str | None) -> str | None:
     """The report's one short coverage line for *printer_name*, or ``None``:
     the watching sentence, with the agent's own door named where the
@@ -6566,6 +6593,14 @@ def printer_status(
         fault_note = response["printer"].get("fault_note")
         if isinstance(fault_note, str) and fault_note:
             response["fault_warning"] = fault_note
+            # Why that reading is the family line alone -- this install could
+            # not ask Kiln's servers, or the code's reading is in a plan this
+            # account does not have -- said once per session, never per poll.
+            said = _fault_reading_note(response["printer"].get("faults"))
+            if said is not None:
+                response["fault_reading_note"], why = said
+                if why:
+                    response["fault_reading_why"] = why
         # A printer holding a job it already finished, which is also what
         # greys out Load and Unload on its own screen.  Named with its
         # remedy, because no amount of retrying from here clears it.
@@ -18022,6 +18057,9 @@ def troubleshoot_printer(
         named_codes = extract_codes(f"{hms_code} {symptom}")
         fault_readings: list[dict[str, Any]] = []
         private_reading_attached = False
+        # Why a code's reading is the family line alone (this install could
+        # not ask Kiln's servers), said once; the first such code speaks.
+        reading_note: tuple[str, dict[str, str]] | None = None
         for bare in named_codes:
             grouped = _normalize_hms_code(bare)
             _link, kind, fault = _hms_reference(grouped)
@@ -18032,7 +18070,18 @@ def troubleshoot_printer(
             }
             if fault.remedy:
                 entry["remedy"] = fault.remedy
+            if fault.safety_alert:
+                entry["safety"] = fault.safety_alert["means"]
             private_reading_attached = private_reading_attached or fault.private
+            if fault.note and reading_note is None:
+                from kiln import _pro_fault_bridge
+
+                why = _pro_fault_bridge.miss_for(grouped, kind=kind)
+                # The plan line is this door's own nudge's job (upgrade_hint
+                # below), so only a reading the install could not ASK for is
+                # said here: a paywall is said once.
+                if why:
+                    reading_note = (fault.note, why)
             fault_readings.append(entry)
         # Said ONCE per session, and only when there is something to say.
         # A user debugging a stuck load calls this repeatedly, and the tenth
@@ -18094,6 +18143,9 @@ def troubleshoot_printer(
         }
         if fault_readings:
             result["fault_readings"] = fault_readings
+        if reading_note is not None and claim_once(f"fault_reading.note.{reading_note[1].get('why')}"):
+            result["fault_reading_note"] = reading_note[0]
+            result["fault_reading_why"] = reading_note[1]
         # A named code the playbook does not carry is said out loud.  The
         # matcher keeps its word matches -- they are labelled matched_on:
         # "text" -- but until 2026-09-19 nothing said the codes had gone
@@ -18124,6 +18176,10 @@ def troubleshoot_printer(
                 result["hms_wiki_url"] = link
             if fault.decoded:
                 result["hms_decoded"] = dict(fault.decoded)
+            # The protective action the code carries, before anything about
+            # tiers: the same block the hosted boundary attaches.
+            if fault.safety_alert:
+                result["hms_safety_alert"] = dict(fault.safety_alert)
             # One sentence when the code maps to a maker's guide: the door
             # is repair_guide, which serves the maker's steps one at a time.
             # The mapping lives in kiln-pro beside the code's reading; a

@@ -815,13 +815,20 @@ class BambuFaultReading:
     kiln-pro's row when kiln-pro supplied the reading -- the same
     allowlisted shape the hosted boundary serves as ``hms_decoded`` -- so a
     door that carries the structured block can carry it without a second
-    lookup.
+    lookup.  ``safety_alert`` is the immediate protective action the code
+    carries, when it carries one (``{"code", "means", "action",
+    "severity"}``: the AMS dryer's thermal-runaway code says to switch the
+    AMS off), at every tier.  ``note`` is why kiln-pro's reading is not
+    here when it is not -- the install could not ask, or the row is beyond
+    the plan -- for the doors a person reads to say once.
     """
 
     reading: str
     remedy: str | None = None
     url: str | None = None
     decoded: dict[str, Any] | None = None
+    safety_alert: dict[str, Any] | None = None
+    note: str | None = None
 
     @property
     def private(self) -> bool:
@@ -829,32 +836,39 @@ class BambuFaultReading:
         return self.decoded is not None
 
 
-def read_bambu_fault(code: str, *, kind: str = "hms") -> BambuFaultReading:
+def read_bambu_fault(code: str, *, kind: str = "hms", wait: bool = True) -> BambuFaultReading:
     """Read a Bambu fault code, once, for every door that shows it.
 
     Asks kiln-pro first (``kiln._pro_fault_bridge``): its catalog holds the
     cause and the fix, and decides per row whether the caller's tier
     unlocks them -- a safety or fix floor is free at every tier, the rest
-    is paid depth.  Without kiln-pro, or for a row it does not unlock, the
-    public tables below answer: the vendor's own page title for an HMS
-    code, a family line for a print_error.
+    is paid depth.  Without kiln-pro installed here the bridge asks Kiln's
+    servers for the one code.  With no reading for this caller, the public
+    tables below answer: the vendor's own page title for an HMS code, a
+    family line for a print_error -- and ``note`` says why.
 
     Every door goes through here -- ``printer_status``'s fault fields, the
     filament-op results, the fault event, ``troubleshoot_printer`` -- which
-    is what keeps them saying the same thing about the same code.
+    is what keeps them saying the same thing about the same code.  *wait*
+    false is for the printer's own message thread, which must never wait
+    on the network: it reads what is already known.
     """
     from kiln import _pro_fault_bridge
 
-    decoded = _pro_fault_bridge.decode_fault(code, kind=kind)
+    decoded = _pro_fault_bridge.decode_fault(code, kind=kind, wait=wait)
+    alert = _pro_fault_bridge.safety_alert(code, kind=kind, wait=wait)
     public_reading, url = describe_bambu_filament_fault_public(code, kind=kind)
     if decoded is None:
-        return BambuFaultReading(reading=public_reading, url=url)
+        return BambuFaultReading(
+            reading=public_reading, url=url, safety_alert=alert,
+            note=_pro_fault_bridge.note_for(code, kind=kind),
+        )
     reading = str(decoded["cause"]).strip()
     fix = decoded.get("fix")
     remedy = fix.strip() if isinstance(fix, str) and fix.strip() else None
     # The vendor's page stays attached to an HMS code whoever wrote the
     # reading; a print_error has none (``url`` is already ``None`` there).
-    return BambuFaultReading(reading=reading, remedy=remedy, url=url, decoded=decoded)
+    return BambuFaultReading(reading=reading, remedy=remedy, url=url, decoded=decoded, safety_alert=alert)
 
 
 def describe_bambu_filament_fault(
@@ -1065,6 +1079,11 @@ def _attach_reading(entry: dict[str, Any]) -> None:
     entry["reading"] = fault.reading
     if fault.remedy:
         entry["remedy"] = fault.remedy
+    # The protective action rides with the code wherever the code is shown:
+    # the AMS dryer's thermal-runaway code must say to switch the AMS off
+    # on the status door, not only when someone asks troubleshoot_printer.
+    if fault.safety_alert:
+        entry["safety"] = fault.safety_alert["means"]
 
 
 # Bambu LED node names.
@@ -3011,7 +3030,9 @@ class BambuAdapter(PrinterAdapter):
         push path that keeps the status cache current.
         """
         pretty = format_error_code(code)
-        fault = read_bambu_fault(pretty or str(code), kind="print_error")
+        # What is already known, never a request: this is paho's thread.
+        # The event published below reads the code again, off it.
+        fault = read_bambu_fault(pretty or str(code), kind="print_error", wait=False)
         reading = fault.reading
         logger.warning(
             "Printer %s reported fault %s: %s",
@@ -3046,6 +3067,13 @@ class BambuAdapter(PrinterAdapter):
             import kiln.server as _srv
             from kiln.events import Event, EventType
 
+            # Read again here, off the network thread, where waiting on the
+            # served reading is allowed: the notice was composed from what
+            # was known on paho's thread, which on a first sighting is the
+            # family line alone.
+            fresh = read_bambu_fault(pretty or str(code), kind="print_error")
+            if fresh.decoded is not None:
+                reading, remedy = fresh.reading, fresh.remedy
             data: dict[str, Any] = {
                 "printer_name": printer_name,
                 "print_error": int(code),

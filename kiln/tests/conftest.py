@@ -1240,11 +1240,23 @@ def _public_fault_readings_only(monkeypatch):
     So the bridge is silent by default, and a test that wants kiln-pro's
     answer patches ``decode_fault`` itself with the row it is testing
     (``tests/test_fault_reading_doors.py`` does).  A later ``monkeypatch``
-    in the test body overrides this one for that test.
+    in the test body overrides this one for that test.  The AMS safety alert
+    is read beside the reading, from the same private data or the same
+    served answer, so it is silenced the same way, and the bridge forgets
+    what it was told between tests.
     """
     import kiln._pro_fault_bridge as fault_bridge
+    import kiln._pro_guide_bridge as guide_bridge
 
+    fault_bridge.forget()
+    guide_bridge._last_miss.clear()
+    guide_bridge._coverage.clear()
     monkeypatch.setattr(fault_bridge, "decode_fault", lambda *args, **kwargs: None)
+    monkeypatch.setattr(fault_bridge, "safety_alert", lambda *args, **kwargs: None)
+    yield
+    fault_bridge.forget()
+    guide_bridge._last_miss.clear()
+    guide_bridge._coverage.clear()
 
 
 @pytest.fixture(autouse=True)
