@@ -737,7 +737,10 @@ class _DesignReasoningToolsPlugin:
 
             Returns:
                 Dict with ``success``, ``parts`` list (each part has ``x``, ``y`` set),
-                ``group_count``, and ``message``.
+                ``group_count``, ``fits_bed`` (``False`` when the rows run past
+                the bed: the message then gives the layout's size, the bed's, and
+                what to do, instead of the next step), ``bed_fit``, and
+                ``message``.
             """
             _srv._check_auth("design:compose")
 
@@ -782,15 +785,32 @@ class _DesignReasoningToolsPlugin:
             ]
 
             group_count = len(groups_seen) if groups_seen else len(arranged)
+            # The row layout keeps adding rows past the plate when the parts
+            # run out of room, so the layout is judged before it is called a
+            # plate -- by the same judgment the slice and start gates make.
+            from kiln.multicolor_3mf import placed_bbox, plate_bed
+            from kiln.printers.bed_fit import plate_fit
+
+            bed_w, bed_d, bed_h, bed_words = plate_bed(plate_width, plate_depth, resolved_model_id)
+            fit = plate_fit(placed_bbox(arranged), (bed_w, bed_d, bed_h), bed=bed_words)
+            if fit["fits"] is False:
+                message = (
+                    f"Laid out {len(arranged)} parts ({group_count} groups) in rows with a "
+                    f"{gap_mm}mm gap, and they do not fit. {fit['message']}"
+                )
+            else:
+                message = (
+                    f"Arranged {len(arranged)} parts ({group_count} groups) "
+                    f"on a {plate_width}\u00d7{plate_depth}mm plate with {gap_mm}mm gap. "
+                    f"Pass 'parts' directly to compose_multicolor_3mf()."
+                )
             response = {
                 "success": True,
                 "parts": result_parts,
                 "group_count": group_count,
-                "message": (
-                    f"Arranged {len(arranged)} parts ({group_count} groups) "
-                    f"on a {plate_width}\u00d7{plate_depth}mm plate with {gap_mm}mm gap. "
-                    f"Pass 'parts' directly to compose_multicolor_3mf()."
-                ),
+                "fits_bed": fit["fits"],
+                "bed_fit": fit,
+                "message": message,
             }
             if resolved_model_id:
                 response["bed_size_source"] = "printer_intelligence"

@@ -58,6 +58,14 @@ def _quiet_start_contract(file_name: str, kwargs: dict[str, Any]) -> dict[str, s
         return None
 
 
+def _discard_copies(paths: list[str]) -> None:
+    """Delete the read-back copies a start held for its adapter.  Never raises."""
+    for path in paths:
+        with contextlib.suppress(OSError):
+            os.unlink(path)
+    paths.clear()
+
+
 def is_resume_mode_3mf(file_name: str) -> bool:
     """Return True if ``file_name`` looks like a mid-print resume 3MF.
 
@@ -3472,10 +3480,14 @@ class PrinterAdapter(ABC):
             from kiln.plate_state import quiet_start_flags
 
             kwargs = {**kwargs, **quiet_start_flags(quiet_contract)}
+        # The printer's own copy, when the gate reads one back for a start
+        # by name: kept until the command is sent, so the adapter routes the
+        # plate it was judged on (see print_gate.with_judged_plate).
+        kept: list[str] = []
         try:
             from kiln.printers.print_gate import run_adapter_gate
 
-            blocked = run_adapter_gate(self, file_name, kwargs)
+            blocked = run_adapter_gate(self, file_name, kwargs, keep=kept)
         except Exception:  # noqa: BLE001 — a gate failure must never block a print
             import logging as _logging
 
@@ -3492,6 +3504,7 @@ class PrinterAdapter(ABC):
                     ),
                 }
         if blocked is not None:
+            _discard_copies(kept)
             hint = blocked.get("override_hint", "")
             reason = blocked.get("reason", "Print blocked by the pre-print safety gate.")
             return PrintResult(
@@ -3515,8 +3528,18 @@ class PrinterAdapter(ABC):
             )
             unsigned = None
         if unsigned is not None:
+            _discard_copies(kept)
             return PrintResult(success=False, message=unsigned["reason"], refused_before_send=True)
-        result = self._start_print_impl(file_name, **kwargs)
+        try:
+            try:
+                from kiln.printers.print_gate import with_judged_plate
+
+                impl_kwargs = with_judged_plate(file_name, kwargs, kept)
+            except Exception:  # noqa: BLE001 — the plate is help for routing, never a reason to refuse
+                impl_kwargs = kwargs
+            result = self._start_print_impl(file_name, **impl_kwargs)
+        finally:
+            _discard_copies(kept)
         if getattr(result, "success", False) and not is_resume_mode_3mf(file_name):
             # A resume 3MF continues the print that's already running (a
             # mid-print swap), so it isn't a new print to count.

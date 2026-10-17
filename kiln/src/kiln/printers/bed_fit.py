@@ -725,6 +725,64 @@ def check_bed_fit(
 
 
 # ---------------------------------------------------------------------------
+# Does a laid-out plate fit?
+# ---------------------------------------------------------------------------
+
+#: What a person can do about a plate bigger than its bed, in the same words
+#: from every door that lays out or composes one.
+PLATE_TOO_BIG_REMEDY = (
+    "Use fewer parts or copies, split them across plates, or print on a "
+    "printer with a bigger bed."
+)
+
+
+def plate_fit(
+    bbox: dict[str, float] | None,
+    build_volume: tuple[float, float, float | None] | None,
+    *,
+    bed: str = "the bed",
+) -> dict[str, Any]:
+    """Whether a laid-out plate fits the bed it was laid out for.
+
+    The judgment is :func:`check_bed_fit`, the one the slice and start gates
+    make on every file, so no door that lays out or composes a plate can
+    call it fitting when those gates will refuse it.  ``fits`` is ``None``
+    when the plate or the bed cannot be measured (nothing is claimed either
+    way), and ``False`` when the plate is bigger than the bed, with
+    ``message``: both sizes and what to do.  A plate that is small enough
+    but sits off the bed fits; the composers move it on.  A bed height of
+    ``None`` (a plate size with no printer behind it) judges the footprint
+    alone.  *bed* names the bed in the sentence ("the Bambu Lab A1's bed").
+    """
+    if bbox is None or build_volume is None:
+        return {"fits": None, "error_code": "BBOX_UNKNOWN" if bbox is None else "VOLUME_UNKNOWN"}
+    bed_x, bed_y, bed_z = build_volume
+    fit = check_bed_fit(bbox, (bed_x, bed_y, float("inf") if bed_z is None else bed_z), source="plate")
+    extent = [round(bbox[f"{axis}_max"] - bbox[f"{axis}_min"], 1) for axis in "xyz"]
+    bed_mm = [float(bed_x), float(bed_y), None if bed_z is None else float(bed_z)]
+    verdict: dict[str, Any] = {
+        "fits": fit["error_code"] != "EXCEEDS_BED",
+        "error_code": fit["error_code"],
+        "extent_mm": extent,
+        "bed_mm": bed_mm,
+    }
+    if verdict["fits"]:
+        return verdict
+    wide = extent[0] > bed_mm[0] + _FIT_EPSILON_MM or extent[1] > bed_mm[1] + _FIT_EPSILON_MM
+    tall = bed_mm[2] is not None and extent[2] > bed_mm[2] + _FIT_EPSILON_MM
+    sizes = []
+    if wide:
+        sizes.append(
+            f"is {extent[0]:g} × {extent[1]:g} mm laid out, and {bed} is {bed_mm[0]:g} × {bed_mm[1]:g} mm"
+        )
+    if tall:
+        sizes.append(f"stands {extent[2]:g} mm tall, and {bed} takes parts up to {bed_mm[2]:g} mm")
+    verdict["message"] = f"This plate {' and '.join(sizes)}, so it does not fit. {PLATE_TOO_BIG_REMEDY}"
+    verdict["remedy"] = PLATE_TOO_BIG_REMEDY
+    return verdict
+
+
+# ---------------------------------------------------------------------------
 # What prints past the bed
 # ---------------------------------------------------------------------------
 

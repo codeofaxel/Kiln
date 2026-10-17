@@ -285,7 +285,7 @@ class TestTheVerdict:
         printer = _Printer("SERIAL-A")
         monkeypatch.setattr(
             "kiln.printers.print_gate.run_adapter_gate",
-            lambda adapter, file_name, kwargs: {"blocked": True, "reason": "too hot for this hotend"},
+            lambda adapter, file_name, kwargs, **_: {"blocked": True, "reason": "too hot for this hotend"},
         )
         gated = printer.start_print("part.gcode")
         assert gated.success is False and gated.refused_before_send is True and printer.sent == []
