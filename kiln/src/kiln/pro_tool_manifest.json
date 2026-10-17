@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-17T11:08:22.251144+00:00",
-  "tool_count": 415,
+  "generated": "2026-10-17T20:10:08.138372+00:00",
+  "tool_count": 414,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -131,101 +131,6 @@
     }
   },
   "tools": [
-    {
-      "name": "ams_filament_drying",
-      "description": "Start or stop an AMS 2 Pro / AMS HT active dry cycle.",
-      "tier": "free",
-      "access": "free",
-      "category": "ams_control",
-      "parameters": {
-        "properties": {
-          "ams_id": {
-            "title": "Ams Id",
-            "type": "integer"
-          },
-          "mode": {
-            "title": "Mode",
-            "type": "integer"
-          },
-          "duration_min": {
-            "default": 0,
-            "title": "Duration Min",
-            "type": "integer"
-          },
-          "temp_c": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Temp C"
-          },
-          "cooling_temp_c": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Cooling Temp C"
-          },
-          "humidity": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Humidity"
-          },
-          "rotate_tray": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Rotate Tray"
-          },
-          "printer_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Printer Name"
-          }
-        },
-        "required": [
-          "ams_id",
-          "mode"
-        ],
-        "title": "ams_filament_dryingArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "action"
-      },
-      "served": false
-    },
     {
       "name": "auto_generate_manual_for_print",
       "description": "Fire the automatic manual trigger for a multi-part print (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
