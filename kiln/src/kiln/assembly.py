@@ -27,20 +27,22 @@ _MAX_FREE_TIER_PARTS = 10
 
 
 def _has_pro_license() -> bool:
-    """True when the CALLER's effective tier is Pro or above.
+    """True when the CALLER's plan is Pro or above.
 
-    Routes through the standard tier gate rather than a process-level
-    license check: on a hosted multi-tenant server the process itself
-    holds a valid license, so asking whether THIS PROCESS is licensed
-    would wave every caller past the free-tier limit.  ``check_pro``
-    consults the per-request tier override first (hosted) and falls back
-    to the local license manager (CLI / laptop), failing closed on errors.
+    Asks :mod:`kiln.licensing`, the one name every gate imports: on Kiln's
+    hosted server it reads the per-request tier (the process itself holds a
+    licence, so a process check would wave every caller past the cap), and
+    on a plain install it reads the plan of the Kiln account signed in on
+    this machine.  An unreadable plan is Free.
     """
+    from kiln.licensing import LicenseTier, check_tier
+
     try:
-        from kiln_pro.pro_gate import check_pro
-        return check_pro("unlimited assembly parts") is None
-    except ImportError:
+        allowed, _ = check_tier(LicenseTier.PRO)
+    except Exception:  # noqa: BLE001 -- an unreadable plan is Free
         return False
+    return bool(allowed)
+
 
 # Joint type clearance ranges (mm) — used when design_templates.json
 # doesn't have specific values
