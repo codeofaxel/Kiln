@@ -136,11 +136,6 @@ TIER_FULL: list[str] = [
     "recent_events",
     # --- Tier diagnostic ---
     "check_my_tier",
-    # --- Billing ---
-    "billing_summary",
-    "billing_setup_url",
-    "billing_status",
-    "billing_history",
     # --- Marketplace ---
     "search_all_models",
     "marketplace_info",

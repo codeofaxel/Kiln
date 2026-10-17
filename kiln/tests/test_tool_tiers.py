@@ -266,9 +266,3 @@ class TestToolPresence:
         assert "analyze_design_requirements" in TIER_FULL
         assert "analyze_printability" in TIER_FULL
 
-    def test_billing_tools_only_in_full(self):
-        billing = ["billing_summary", "billing_setup_url", "billing_status", "billing_history"]
-        for tool in billing:
-            assert tool in TIER_FULL
-            assert tool not in TIER_STANDARD
-            assert tool not in TIER_ESSENTIAL

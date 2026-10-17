@@ -6202,7 +6202,7 @@ def _billing_hook(event: Event) -> None:
         logger.error(
             "Failed to record billing for job %s — "
             "this job may not appear in billing history. "
-            "Check billing_history for accuracy.",
+            "Check the billing ledger for this job.",
             event.data.get("job_id"),
             exc_info=True,
         )
