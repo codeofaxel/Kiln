@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-17T23:39:49.915260+00:00",
+  "generated": "2026-10-17T23:46:49.590108+00:00",
   "tool_count": 415,
   "categories": {
     "product_generators": {
@@ -4218,6 +4218,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -4266,6 +4273,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -9290,6 +9304,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -9338,6 +9359,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -15372,7 +15400,13 @@
         "schema_version": 1,
         "kind": "record"
       },
-      "served": false
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
+      }
     },
     {
       "name": "delete_design",
@@ -15440,6 +15474,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {

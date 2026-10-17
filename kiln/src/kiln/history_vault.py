@@ -799,7 +799,19 @@ class HistoryVault:
             return None
         expected = delta.get("expected_heads") if isinstance(delta.get("expected_heads"), dict) else {}
         with self._lock:
+            if delta.get("removed") is True:
+                # Erased for good, after the two-call confirmation the tool asks for.
+                self._conn.execute(
+                    "DELETE FROM library_rows WHERE kind = ? AND item_id = ?", (kind, item_id),
+                )
+                self._conn.commit()
+                return {"kind": kind, "item_id": item_id, "branches_changed_here": [], "removed": True}
             moved_here = self._put_library(kind, item_id, delta, expected=expected)
+            flags = delta.get("archived_versions")
+            for version in self._lib_rows(kind, "version", item_id) if isinstance(flags, dict) else []:
+                vid = version.get(keys["version"])
+                if vid in flags and isinstance(flags[vid], bool):
+                    self._lib_put(kind, "version", vid, item_id, {**version, "archived": flags[vid]})
             self._conn.commit()
         return {"kind": kind, "item_id": item_id, "branches_changed_here": moved_here}
 

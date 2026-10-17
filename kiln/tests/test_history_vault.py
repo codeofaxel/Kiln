@@ -810,3 +810,23 @@ class TestAFeaturesPartMeshIsKeptHere:
         name = f"{hashlib.sha256(b'the real mesh').hexdigest()}.stl"
         vault.apply_library_delta("features", self._delta(name, b"something else"))
         assert all("part_asset_b64" not in v for v in vault.library_bundle("features", "f1")["versions"])
+
+
+class TestArchiveAndDeleteOfAFeatureKeptHere:
+    def test_an_archive_marks_each_version_and_an_unarchive_clears_it(self, home):
+        vault = _vault(home)
+        vault.apply_library_delta("features", _feature_delta())
+        vids = [v["feature_version_id"] for v in vault.library_bundle("features", "f1")["versions"]]
+        vault.apply_library_delta("features", {"feature_id": "f1", "archived_versions": {vids[0]: True, "not-mine": True}})
+        flags = {v["feature_version_id"]: v.get("archived") for v in vault.library_bundle("features", "f1")["versions"]}
+        assert flags[vids[0]] is True and "not-mine" not in flags
+        vault.apply_library_delta("features", {"feature_id": "f1", "archived_versions": {vids[0]: False}})
+        assert {v["feature_version_id"]: v.get("archived") for v in vault.library_bundle("features", "f1")["versions"]}[vids[0]] is False
+
+    def test_a_permanent_delete_removes_the_item_and_nothing_else(self, home):
+        vault = _vault(home)
+        vault.apply_library_delta("features", _feature_delta())
+        vault.apply_library_delta("features", _feature_delta(item="f2", branch="fb2", head="gv2", parent="gv1"))
+        kept = vault.apply_library_delta("features", {"feature_id": "f1", "removed": True})
+        assert kept["removed"] is True
+        assert not vault.has_library_item("features", "f1") and vault.has_library_item("features", "f2")
