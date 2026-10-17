@@ -300,7 +300,7 @@ class TestPrinterFacts:
         class _Adapter:
             def get_printer_config(self):
                 asked.append("voron")
-                return {"printer": {"kinematics": "corexy"}}
+                return {"probe": {"z_offset": "1.2"}, "printer": {"kinematics": "corexy"}}
 
         class _Registry:
             def get(self, name):
@@ -340,7 +340,8 @@ class TestPrinterFacts:
     def test_a_klipper_configuration_is_read_only_when_asked_and_only_for_that_printer(self, printers):
         done, _ = self._read(printer_name="voron", want=["klipper_config"])
         by_name = {p["name"]: p for p in done["printer_facts"]["data"]["printers"]}
-        assert by_name["voron"]["klipper_config"] == {"printer": {"kinematics": "corexy"}}
+        # Only what the power-loss check reads leaves (KLIPPER_CONFIG_FACTS).
+        assert by_name["voron"]["klipper_config"] == {"probe": {"z_offset": "1.2"}}
         assert "klipper_config" not in by_name["default"]
         assert printers == ["voron"]
 

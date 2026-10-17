@@ -19,7 +19,8 @@ makes the toolpath; the servers then judge the result.
 ``printer_facts``: say which printers this install has -- each one's name,
 connection kind and model, and when asked, a Klipper printer's own
 configuration (one printer's, or every Klipper printer's for a fleet
-triage), what a printer is doing, the named printer's current reading (its
+triage; only the probe and bed settings a power-loss check reads, never its
+serial port, CAN id or macros), what a printer is doing, the named printer's current reading (its
 state, temperatures and progress, as numbers and words), or the nozzle each
 printer holds as its own setting -- with the time they were read.  Never an address, a serial number or a
 credential: a served tool needs to know WHAT the printer is and what it
@@ -194,6 +195,55 @@ _FACTS_EXTRAS = frozenset({
     "klipper_config", "job", "every_job", "telemetry", "hardware",
     "every_klipper_config", "every_nozzle",
 })
+#: What of a Klipper printer's configuration ever leaves this computer: the
+#: sections and settings the served power-loss check reads (whether the
+#: probe can re-find Z on a bare spot, and the bed's size), and nothing
+#: else.  A printer.cfg also holds the controller's serial port and CAN id,
+#: macro bodies that may run shell commands or carry tokens, and include
+#: paths; none of it is sent.  A probe or homing section is sent as present
+#: even when none of its settings here are set.
+KLIPPER_CONFIG_FACTS: dict[str, tuple[str, ...]] = {
+    "force_move": ("enable_force_move",),
+    "probe": ("z_offset",),
+    "bltouch": ("z_offset",),
+    "probe_eddy_current": ("z_offset",),
+    "smart_effector": ("z_offset",),
+    "beacon": ("z_offset",),
+    "cartographer": ("z_offset",),
+    "scanner": ("z_offset",),
+    "stepper_x": ("position_max",),
+    "stepper_y": ("position_max",),
+    "stepper_z": ("endstop_pin", "position_max"),
+    "safe_z_home": (),
+}
+_CONFIG_VALUE_LIMIT = 64
+
+
+def klipper_config_fact(config: Any) -> dict[str, Any] | None:
+    """*config* (Moonraker's ``configfile.config``) cut to :data:`KLIPPER_CONFIG_FACTS`.
+
+    ``None`` for anything that is not a configuration.  Values are kept as
+    the short strings Klipper reports; a longer one is not a setting this
+    check reads, and is dropped rather than cut.
+    """
+    if not isinstance(config, dict):
+        return None
+    out: dict[str, Any] = {}
+    for section, keys in KLIPPER_CONFIG_FACTS.items():
+        body = config.get(section)
+        if not isinstance(body, dict):
+            continue
+        kept: dict[str, Any] = {}
+        for key in keys:
+            value = body.get(key)
+            if isinstance(value, bool) or (isinstance(value, (int, float)) and value == value):
+                kept[key] = value
+            elif isinstance(value, str) and len(value) <= _CONFIG_VALUE_LIMIT:
+                kept[key] = value
+        out[section] = kept
+    return out
+
+
 #: What of a printer's own nozzle report a fleet sweep is sent.
 _NOZZLE_FACT_KEYS = (
     "material", "nozzle_diameter_mm", "read_from", "firmware_version",
@@ -357,9 +407,9 @@ def _printer_facts(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | No
             pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
             try:
                 adapter = server._get_registry().get(str(name))
-                fact["klipper_config"] = pool.submit(adapter.get_printer_config).result(
+                fact["klipper_config"] = klipper_config_fact(pool.submit(adapter.get_printer_config).result(
                     timeout=_FACTS_DEADLINE_S,
-                )
+                ))
             except Exception as exc:  # noqa: BLE001 — said, never guessed
                 fact["klipper_config"] = None
                 fact["klipper_config_error"] = _did_not_answer(exc)
@@ -405,7 +455,7 @@ def _read_fleet(server: Any, facts: list[dict[str, Any]], *, configs: bool, nozz
     import concurrent.futures
 
     def config_of(name: str) -> Any:
-        return server._get_registry().get(name).get_printer_config()
+        return klipper_config_fact(server._get_registry().get(name).get_printer_config())
 
     asks: dict[tuple[str, str], Any] = {}
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=_FACTS_WORKERS)

@@ -935,3 +935,66 @@ class TestTheFleetReads:
     def test_neither_is_read_unless_asked(self, fleet):
         by_name, _ = self._read([])
         assert all("klipper_config" not in p and "nozzle_reading" not in p for p in by_name.values())
+
+
+
+#: A printer.cfg as Moonraker reports it, with what must never leave.
+REAL_CONFIG = {
+    "mcu": {"serial": "/dev/serial/by-id/usb-Klipper_stm32f446xx_2A0036000851313133353932-if00", "restart_method": "command"},
+    "mcu toolhead": {"canbus_uuid": "61755fe321ac"},
+    "printer": {"kinematics": "corexy", "max_velocity": "300"},
+    "stepper_x": {"step_pin": "PF13", "position_max": "350", "endstop_pin": "^PG6"},
+    "stepper_y": {"position_max": "350"},
+    "stepper_z": {"endstop_pin": "probe:z_virtual_endstop", "position_max": "340", "step_pin": "PF11"},
+    "probe": {"pin": "^PG15", "z_offset": "1.85", "x_offset": "0"},
+    "force_move": {"enable_force_move": "True"},
+    "safe_z_home": {"home_xy_position": "175,175"},
+    "gcode_macro NOTIFY": {"gcode": "RUN_SHELL_COMMAND CMD=curl PARAMS='https://hooks.example.com/abc?token=s3cr3t'"},
+    "gcode_shell_command curl": {"command": "curl -s -H 'Authorization: Bearer s3cr3t'"},
+    "include": {"path": "/home/pi/printer_data/config/private.cfg"},
+    "webhooks": {"api_key": "s3cr3t"},
+}
+
+
+class TestAConfigLeavesCutToWhatIsRead:
+    """Security review 2026-10-17: a Klipper config sent to the servers held
+    the controller's serial port, CAN id and macro bodies.  Both reads now
+    send only the probe and bed settings the power-loss check reads."""
+
+    def test_the_cut_keeps_only_the_checks_settings(self):
+        cut = served_steps.klipper_config_fact(REAL_CONFIG)
+        assert cut == {
+            "force_move": {"enable_force_move": "True"},
+            "probe": {"z_offset": "1.85"},
+            "stepper_x": {"position_max": "350"},
+            "stepper_y": {"position_max": "350"},
+            "stepper_z": {"endstop_pin": "probe:z_virtual_endstop", "position_max": "340"},
+            "safe_z_home": {},
+        }
+
+    @pytest.mark.parametrize("want, name", [(["klipper_config"], "voron"), (["every_klipper_config"], "")])
+    def test_neither_read_sends_a_serial_an_id_a_macro_or_a_token(self, monkeypatch, want, name):
+        import kiln.server as server
+
+        monkeypatch.setattr(server, "_read_config_printers", lambda: {
+            "voron": {"type": "moonraker", "printer_model": "voron_2", "host": "voron.local"},
+        })
+        monkeypatch.setattr(server, "_resolve_effective_printer_name", lambda name=None: "voron")
+
+        class _Klipper:
+            def get_printer_config(self):
+                return REAL_CONFIG
+
+        class _Registry:
+            def get(self, _name):
+                return _Klipper()
+
+        monkeypatch.setattr(server, "_get_registry", lambda: _Registry())
+        done, refused = served_steps.carry_out(
+            "t", [{"kind": "printer_facts", "id": "printer_facts", "printer_name": name, "want": want}], _send,
+        )
+        assert refused is None
+        sent = json.dumps(done)
+        assert '"z_offset": "1.85"' in sent
+        for secret in ("usb-Klipper", "61755fe321ac", "s3cr3t", "hooks.example.com", "private.cfg", "PF13", "^PG15"):
+            assert secret not in sent, secret
