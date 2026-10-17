@@ -18,9 +18,10 @@ makes the toolpath; the servers then judge the result.
 
 ``printer_facts``: say which printers this install has -- each one's name,
 connection kind and model, and when asked, a Klipper printer's own
-configuration, what a printer is doing, or the named printer's current
-reading (its state, temperatures and progress, as numbers and words) --
-with the time they were read.  Never an address, a serial number or a
+configuration, what a printer is doing, the named printer's current
+reading (its state, temperatures and progress, as numbers and words), or
+the nozzle size the named printer reports for itself -- with the time they
+were read.  Never an address, a serial number or a
 credential: a served tool needs to know WHAT the printer is and what it
 reads, and nothing here tells it where the printer is or how to reach it.
 
@@ -182,10 +183,12 @@ def _slice(tool: str, step: dict[str, Any]) -> tuple[str | None, dict[str, Any] 
 #: for each printer asked about (``hardware``: what :mod:`kiln.hardware_stops`
 #: answers for it -- a stop ahead, close, reached or passed, or ``None`` for
 #: an ordinary print -- for a served board of every machine waiting for
-#: hands).  A job is its state and how far along it is -- never the file's
-#: name, for the same reason the print-history step sends none.  A reading
-#: is numbers and words (:func:`_telemetry_fact`).
-_FACTS_EXTRAS = frozenset({"klipper_config", "job", "every_job", "telemetry", "hardware"})
+#: hands); the nozzle size the named printer reports for itself (``nozzle``,
+#: for a served design check judged for that nozzle).  A job is its state
+#: and how far along it is -- never the file's name, for the same reason the
+#: print-history step sends none.  A reading is numbers and words
+#: (:func:`_telemetry_fact`).
+_FACTS_EXTRAS = frozenset({"klipper_config", "job", "every_job", "telemetry", "hardware", "nozzle"})
 #: How long a printer is given to answer for its configuration or its job.
 _FACTS_DEADLINE_S = 8.0
 #: How many printers are asked at once for a fleet-wide read.
@@ -326,6 +329,12 @@ def _printer_facts(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | No
     try:
         entries = server._read_config_printers() or {}
         default = server._resolve_effective_printer_name(None)
+        if default not in entries:
+            # The registry holds the active printer under "default" as well
+            # as its own name; these facts name printers as config.yaml does.
+            from kiln.printer_model_resolver import resolve_active_printer_name
+
+            default = resolve_active_printer_name() or default
     except Exception:  # noqa: BLE001
         entries, default = {}, ""
     target = _facts_target(asked, entries, default)
@@ -340,6 +349,13 @@ def _printer_facts(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | No
             "model": str(entry.get("printer_model") or ""),
             "is_default": str(name) == default,
         }
+        if "nozzle" in want and str(name) == target:
+            # The printer's own setting, read the way the nozzle check here
+            # reads it (fresh only, one printer at a time); a size, nothing
+            # that identifies the machine.
+            from kiln.assumed_nozzle import _printer_setting_mm
+
+            fact["nozzle_setting_mm"] = _printer_setting_mm(str(name))[0]
         if "klipper_config" in want and kind == "moonraker" and str(name) == target:
             pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
             try:

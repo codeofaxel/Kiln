@@ -13,7 +13,11 @@ steps: the files it names are sent (:func:`kiln.served_makes.send_inputs`),
 the same tool runs on Kiln's servers (:func:`kiln.server._pro_api_call`),
 and the files it wrote come back, saved where the call asked for them or
 under ``~/.kiln/served/files``, with their paths on this computer in the
-answer.  The answer is otherwise the servers' own, word for word.
+answer.  The answer is otherwise the servers' own, word for word.  A tool
+that answers for one of this computer's printers (the manifest names it
+``reads_first``) first reads what its printers ARE -- name, model, the
+nozzle size the printer reports -- and sends that with the call, never an
+address or a credential (:func:`kiln.served_steps.read_first`).
 
 Signed out, offline, or turned away, the tool runs on this computer
 instead, and the first such answer for each of the four causes
@@ -103,6 +107,9 @@ def ask(
         if not bearer:
             code = SESSION_EXPIRED_CODE if expired is not None else "KILN_ACCOUNT_NOT_PAIRED"
             return None, Miss("signed_out", code)
+        facts, not_read = _read_first(name, arguments, entry)
+        if not_read is not None:
+            return None, classify_answer(not_read) or Miss("refused")
         trip: dict[str, Any] = {}
         kwargs, refusal = served_makes.send_inputs(
             name, dict(arguments), entry.get("inputs"), trip,
@@ -111,6 +118,8 @@ def ask(
             if refusal.get("code") == "FILE_NOT_FOUND":
                 return None, None
             return None, classify_answer(refusal) or Miss("unanswered")
+        if facts:
+            kwargs["step_results"] = facts
         http: dict[str, Any] = {}
         answer = srv._pro_api_call(
             name, _timeout=srv._SERVED_MAKE_WAIT_S, _http=http, **kwargs,
@@ -129,6 +138,30 @@ def ask(
     except Exception as exc:  # noqa: BLE001 -- the tool still runs here
         logger.debug("served public: %s not run on Kiln's servers", name, exc_info=True)
         return None, Miss("unanswered", "SERVER_UNREACHABLE", str(exc)[:400])
+
+
+def _read_first(
+    name: str, arguments: dict[str, Any], entry: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """What this computer reads for the call before it goes (the manifest
+    entry's ``reads_first``: which printer the call is about, its model,
+    the nozzle it reports), as ``step_results``; ``({}, None)`` when the
+    entry asks for nothing, ``({}, refusal)`` when a reading is refused."""
+    reads = entry.get("reads_first")
+    if not reads:
+        return {}, None
+    from kiln import served_steps
+
+    param = entry.get("printer_param")
+    asked = arguments.get(param) if isinstance(param, str) else None
+    facts, refusal = served_steps.read_first(
+        name, reads, printer_name=str(asked or ""), call=arguments,
+    )
+    listed = (facts.get("printer_facts") or {}).get("data") or {}
+    if refusal is None and not listed.get("printers"):
+        # No printer set up here: nothing to say about one.
+        facts.pop("printer_facts", None)
+    return facts, refusal
 
 
 def _in_their_words(miss: Any, answer: Any) -> Any:

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-17T19:17:01.336154+00:00",
+  "generated": "2026-10-17T20:18:30.731337+00:00",
   "tool_count": 415,
   "categories": {
     "product_generators": {
@@ -24250,7 +24250,16 @@
           "outputs": {
             "output_path": "file"
           }
-        }
+        },
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "nozzle"
+            ]
+          }
+        ],
+        "printer_param": "printer_id"
       },
       "add_mesh_fillet": {
         "inputs": {
@@ -24260,14 +24269,32 @@
           "outputs": {
             "output_path": "file"
           }
-        }
+        },
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "nozzle"
+            ]
+          }
+        ],
+        "printer_param": "printer_id"
       },
       "analyze_printability": {
         "inputs": {
           "files": {
             "file_path": "one"
           }
-        }
+        },
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "nozzle"
+            ]
+          }
+        ],
+        "printer_param": "printer_id"
       },
       "apply_design_reinforcements": {
         "inputs": {
@@ -24277,7 +24304,16 @@
           "outputs": {
             "output_path": "file"
           }
-        }
+        },
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "nozzle"
+            ]
+          }
+        ],
+        "printer_param": "printer_id"
       },
       "check_print_readiness": {
         "inputs": {
@@ -24287,7 +24323,16 @@
           "outputs": {
             "output_path": "file"
           }
-        }
+        },
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "nozzle"
+            ]
+          }
+        ],
+        "printer_param": "printer_id"
       },
       "compile_scad": {
         "inputs": {
@@ -24309,6 +24354,15 @@
       },
       "recommend_design_material": {},
       "recommend_material": {
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "nozzle"
+            ]
+          }
+        ],
+        "printer_param": "printer_id",
         "stays_here_when": {
           "on_hand_only": [
             true

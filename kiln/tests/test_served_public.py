@@ -159,6 +159,59 @@ class TestTheCallGoesToKilnsServers:
         assert len(servers.calls) == 1
 
 
+class TestTheCallersPrinterGoesWithTheCall:
+    """A tool that takes ``printer_id`` is answered for the caller's printer,
+    and the servers have none: what the printer IS goes with the call."""
+
+    @pytest.fixture
+    def shop(self, monkeypatch):
+        monkeypatch.setattr(srv, "_read_config_printers", lambda: {
+            "shop-mini": {"type": "bambu", "printer_model": "bambu_a1_mini",
+                          "host": "10.0.0.9", "access_code": "12345678"},
+            "garage": {"type": "moonraker", "printer_model": "voron_2", "host": "voron.local"},
+        })
+        monkeypatch.setattr(srv, "_resolve_effective_printer_name", lambda *_a: "shop-mini")
+        asked: list[str] = []
+
+        def setting(name):
+            asked.append(name)
+            return 0.6, None
+
+        monkeypatch.setattr("kiln.assumed_nozzle._printer_setting_mm", setting)
+        return asked
+
+    def test_the_printers_model_and_nozzle_go_never_its_address(self, servers, part, shop):
+        servers.answer = {"success": True, "report": {}}
+        _call("analyze_printability", file_path=str(part), printer_id="garage")
+        (name, sent), = servers.calls
+        facts = sent["step_results"]["printer_facts"]["data"]
+        assert {p["name"]: (p["model"], p.get("nozzle_setting_mm")) for p in facts["printers"]} == {
+            "shop-mini": ("bambu_a1_mini", None), "garage": ("voron_2", 0.6),
+        }
+        assert shop == ["garage"]
+        assert not {"10.0.0.9", "12345678", "voron.local"} & set(json.dumps(sent).split('"'))
+
+    def test_an_unnamed_call_reads_the_default_printer(self, servers, part, shop):
+        servers.answer = {"success": True, "report": {}}
+        _call("analyze_printability", file_path=str(part))
+        assert shop == ["shop-mini"] and "step_results" in servers.calls[0][1]
+
+    def test_a_tool_that_names_no_printer_sends_none(self, servers, shop):
+        servers.answer = {"success": True}
+        _call("tax_estimate", manufacturer_quote_usd=40.0, jurisdiction="US-CA")
+        assert "step_results" not in servers.calls[0][1] and shop == []
+
+    def test_a_reading_this_computer_refuses_sends_nothing_and_runs_here(self, servers, part, monkeypatch):
+        from kiln import served_steps
+
+        monkeypatch.setattr(served_steps, "read_first", lambda *_a, **_k: ({}, {
+            "status": "error", "code": "LOCAL_STEP_REFUSED", "error": "not handed over",
+        }))
+        result = _call("analyze_printability", file_path=str(part), printer_id="garage")
+        assert "analyze_printability" not in [name for name, _ in servers.calls]
+        assert result["answered_on_this_computer"]["why"] == "refused"
+
+
 class TestTheFilesItWroteComeHome:
     def test_a_made_model_lands_here_where_the_answer_names_it(self, servers, tmp_path):
         theirs = f"{SERVER_DIR}/openscad-1.stl"
