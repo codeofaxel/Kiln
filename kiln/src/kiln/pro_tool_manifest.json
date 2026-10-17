@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-17T20:10:08.138372+00:00",
+  "generated": "2026-10-17T20:24:19.435857+00:00",
   "tool_count": 414,
   "categories": {
     "product_generators": {
@@ -14130,7 +14130,18 @@
         "schema_version": 1,
         "kind": "action"
       },
-      "served": false
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "every_job"
+            ]
+          }
+        ],
+        "acts": true
+      }
     },
     {
       "name": "fleet_skip_objects",
