@@ -99,7 +99,7 @@ Eight backends. The name in backticks is the `KILN_PRINTER_TYPE` value.
 
 | Backend | Transport | Printers |
 |---------|-----------|----------|
-| **Bambu Lab** (`bambu`) | LAN MQTT + FTPS | X1C, X1E, P1S, P1P, P2S, A1, A1 Mini, A2L, H2S |
+| **Bambu Lab** (`bambu`) | LAN MQTT + FTPS | X1C, X1E, P1S, P1P, P2S, A1, A1 Mini, A2L, H2S, H2D, H2D Pro, H2C, X2D |
 | **Creality** (`creality`) | Moonraker HTTP API (port-probed) | K1, K1C, K1 Max, Ender-3 V3 / V3 KE, CR-10 SE; K2 family and Hi where Fluidd/Moonraker is present. Marlin-era Enders use `serial` or `octoprint` |
 | **Prusa Link** (`prusalink`) | Prusa Link HTTP API | MK4, XL, Mini+ |
 | **Elegoo** (`elegoo`) | SDCP over WebSocket | Centauri Carbon and other SDCP machines. Neptune 4 and OrangeStorm Giga run Klipper — use `moonraker` for those |

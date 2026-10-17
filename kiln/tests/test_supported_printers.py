@@ -152,3 +152,47 @@ def test_public_surface_exposes_only_name_not_specs():
             f"the README printer block contains '{banned}' — specs must not ship "
             "to the public surface. Remove it from render_readme_block()."
         )
+
+
+def _bambu_short_name(printer_id: str) -> str:
+    """``bambu_h2d_pro`` -> ``H2D Pro``: the spelling the backend tables use."""
+    words = printer_id.removeprefix("bambu_").split("_")
+    return " ".join(w.capitalize() if w in ("mini", "pro") else w.upper() for w in words)
+
+
+def _bambu_row_of_the_printers_table(text: str) -> str | None:
+    """The Bambu row of the table whose last column is ``Printers``."""
+    in_printers_table = False
+    for line in text.splitlines():
+        if not line.startswith("|"):
+            in_printers_table = False
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if cells and cells[-1] == "Printers":
+            in_printers_table = True
+        elif in_printers_table and line.startswith("| **Bambu"):
+            return line
+    return None
+
+
+def test_the_bambu_backend_rows_name_every_bambu_printer():
+    """Both READMEs list Bambu models by hand in their backend tables, and
+    nothing tied that list to the roster: the PyPI page stopped at the H2S
+    while four newer machines shipped.  Every Bambu row in the roster must
+    be named in each README's Bambu backend row."""
+    import json
+    import re
+
+    roster = json.loads(gen.INTEL.read_text())
+    wanted = sorted(_bambu_short_name(k) for k in roster if k.startswith("bambu_"))
+    assert wanted, "the roster names no Bambu printer"
+
+    for readme in (gen.README, gen.PYPI_README):
+        if not readme.exists():
+            continue
+        row = _bambu_row_of_the_printers_table(readme.read_text())
+        assert row is not None, f"{readme.name}: no Bambu row in a table with a Printers column"
+        printers = row.rstrip(" |").rsplit("|", 1)[-1]
+        named = {name.strip() for name in re.sub(r"\([^)]*\)", "", printers).replace("Bambu Lab", "").split(",")}
+        missing = [name for name in wanted if name not in named]
+        assert not missing, f"{readme.relative_to(ROOT)} Bambu row is missing {missing}"

@@ -601,7 +601,7 @@ Entry-point plugins are **default-deny** in production (`KILN_PLUGIN_POLICY=stri
 | `gcode_interceptor.py` | Rule-based G-code interception and safety rewriting |
 | `safety_profiles.py` | Per-printer safety limits (temps, feedrates, flow) for every supported model, served per printer from Kiln's catalogue, over a bundled generic floor for any other machine |
 | `slicer_profiles.py` | Bundled slicer profiles (auto-generates .ini files per printer) |
-| `printer_intelligence.py` | Printer knowledge base (firmware quirks, materials, failure modes) |
+| `printer_intelligence.py` | Printer roster and spec sheets: each machine's limits, per-material temperatures and motion facts, with the spec sheet served per printer from Kiln's catalogue (curated quirks, calibration recipes and failure modes are in Kiln Pro) |
 | `pipelines.py` | Pre-validated print pipelines (quick_print, calibrate, benchmark) |
 | `assembly.py` | Multi-part assembly validation and manual planning support |
 | `design_versions.py` | Local design history, version records, diffs, and rollback primitives |
