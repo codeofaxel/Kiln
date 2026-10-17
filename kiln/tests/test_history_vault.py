@@ -735,3 +735,64 @@ class TestTheHistoryLogIsKeptHere:
         })
         assert kept == {"log_entries": 0, "bisect_sessions": 0}
         assert vault.log_entries() == [] and vault.bisect_sessions() == []
+
+
+class TestTheRecipeFilesACallSends:
+    """The provenance readers run on Kiln's servers on copies of this
+    computer's own files; these are the files they get."""
+
+    def test_the_ancestry_sends_the_recipe_and_every_parent_it_names(self, tmp_path):
+        a, b, c = (tmp_path / f".kiln_recipe.v{n}.json" for n in (1, 2, 3))
+        a.write_text(json.dumps({"version_id": "v1"}))
+        b.write_text(json.dumps({"version_id": "v2", "parent_version": str(a)}))
+        c.write_text(json.dumps({"version_id": "v3", "parent_version": str(b)}))
+        sent = courier.files_for_call("get_design_ancestry", str(c))
+        assert [i["record"]["version_id"] for i in sent["items"]] == ["v3", "v2", "v1"]
+        assert sent["arg"] == str(c)
+
+    def test_a_cycle_or_a_missing_parent_ends_the_files(self, tmp_path):
+        a, b = tmp_path / "a.json", tmp_path / "b.json"
+        a.write_text(json.dumps({"version_id": "a", "parent_version": str(b)}))
+        b.write_text(json.dumps({"version_id": "b", "parent_version": str(a)}))
+        assert len(courier.files_for_call("get_design_ancestry", str(a))["items"]) == 2
+        b.write_text(json.dumps({"version_id": "b", "parent_version": str(tmp_path / "gone.json")}))
+        assert len(courier.files_for_call("get_design_ancestry", str(a))["items"]) == 2
+
+    def test_the_sidecar_sends_what_sits_beside_the_model(self, tmp_path):
+        stl = tmp_path / "part.stl"
+        stl.write_bytes(b"solid\nendsolid\n")
+        (tmp_path / ".kiln_recipe.json").write_text(json.dumps({"version_id": "v9"}))
+        (tmp_path / "part.kiln.json").write_text(json.dumps({"legacy": True}))
+        sent = courier.files_for_call("read_design_sidecar", str(stl))
+        assert sorted(Path(i["path"]).name for i in sent["items"]) == [".kiln_recipe.json", "part.kiln.json"]
+        assert all(i["record"] for i in sent["items"]) and sent["arg"] == str(stl)
+
+    def test_the_answer_names_this_computers_own_paths_again(self, tmp_path):
+        recipe = tmp_path / ".kiln_recipe.json"
+        recipe.write_text(json.dumps({"version_id": "v1"}))
+        sent = {"files": courier.files_for_call("get_design_ancestry", str(recipe))}
+        answer = courier.take_delta(
+            {"status": "success", "ancestry": [{"_recipe_path": "kiln-file:0"}], "note": "kiln-file:arg"}, sent,
+        )
+        assert answer["ancestry"][0]["_recipe_path"] == str(recipe) and answer["note"] == str(recipe)
+
+
+class TestAFeaturesPartMeshIsKeptHere:
+    def _delta(self, name: str, data: bytes) -> dict:
+        d = _feature_delta()
+        d["versions"][0].update({"part_asset_name": name, "part_asset_b64": base64.b64encode(data).decode()})
+        return d
+
+    def test_the_mesh_is_kept_by_its_digest_and_sent_back_with_its_version(self, home):
+        vault = _vault(home)
+        data = b"solid clip\nendsolid clip\n"
+        name = f"{hashlib.sha256(data).hexdigest()}.stl"
+        vault.apply_library_delta("features", self._delta(name, data))
+        (version,) = [v for v in vault.library_bundle("features", "f1")["versions"] if v.get("part_asset_name")]
+        assert base64.b64decode(version["part_asset_b64"]) == data
+
+    def test_bytes_that_are_not_the_named_mesh_are_never_kept(self, home):
+        vault = _vault(home)
+        name = f"{hashlib.sha256(b'the real mesh').hexdigest()}.stl"
+        vault.apply_library_delta("features", self._delta(name, b"something else"))
+        assert all("part_asset_b64" not in v for v in vault.library_bundle("features", "f1")["versions"])

@@ -19437,11 +19437,14 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
         history_def = tool_def.get("history")
         history_mode = ""
         history_kinds: tuple[str, ...] = ("designs",)
+        history_file = ""
         if isinstance(history_def, dict) and history_def.get("schema_version") == _HISTORY_SCHEMA_VERSION:
             history_mode = str(history_def.get("mode") or "")
             history_kinds = tuple(
                 k for k in (history_def.get("kinds") or ["designs"]) if isinstance(k, str)
             )
+            # The parameter whose file rides in the records, not as a path.
+            history_file = str(history_def.get("file_param") or "")
         local_steps_def = tool_def.get("local_steps")
         reads_first: list = []
         may_act = False
@@ -19456,7 +19459,7 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
         # so we use a factory to freeze the value.
         def _make_stub(
             _name: str, _inputs: dict | None, _reads: list, _may_act: bool, _history: str = "",
-            _kinds: tuple[str, ...] = ("designs",),
+            _kinds: tuple[str, ...] = ("designs",), _file_param: str = "",
         ):
             def _stub(**kwargs):
                 from kiln import served_makes, served_steps
@@ -19517,8 +19520,14 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                     # rides with the call and what changed comes back.
                     from kiln.history_courier import records_for_call
 
-                    history_sent = records_for_call(call, kinds=_kinds, tool=_name)
+                    history_sent = records_for_call(
+                        call, kinds=_kinds, tool=_name, file_param=_file_param,
+                    )
                     call = {**call, "history_records": history_sent}
+                    if _file_param:
+                        # The file is in the records; a path of this computer
+                        # names nothing on the servers.
+                        call[_file_param] = ""
 
                 def ask(**more):
                     if pre_read:
@@ -19589,7 +19598,7 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                 )
             return _stub
 
-        stub = _make_stub(name, served_inputs, reads_first, may_act, history_mode, history_kinds)
+        stub = _make_stub(name, served_inputs, reads_first, may_act, history_mode, history_kinds, history_file)
 
         # Reconstruct a typed Python signature from the JSON Schema so
         # that FastMCP generates the correct tool schema for clients.

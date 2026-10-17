@@ -21,7 +21,9 @@ leaves this computer, and only when the person asks.
 from __future__ import annotations
 
 import base64
+import json
 import logging
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -130,6 +132,7 @@ def library_items_for_call(vault: Any, kind: str, arguments: dict[str, Any], too
 
 def records_for_call(
     arguments: dict[str, Any], vault: Any = None, *, kinds: tuple[str, ...] = ("designs",), tool: str = "",
+    file_param: str = "",
 ) -> dict[str, Any]:
     """The ``history_records`` a served history call sends.
 
@@ -164,6 +167,8 @@ def records_for_call(
             out[f"named_{kind}"] = items
         if "reflog" in kinds or "bisect" in kinds:
             _add_log_rows(vault, out, arguments, tool)
+        if "files" in kinds and file_param:
+            out["files"] = files_for_call(tool, arguments.get(file_param))
         return out
     finally:
         if own:
@@ -225,6 +230,80 @@ def _add_log_rows(vault: Any, out: dict[str, Any], arguments: dict[str, Any], to
         out[f"named_{library}"] = [item_id]
 
 
+#: The most recipe files one call sends (a start and fifty ancestors), and the
+#: largest one read.
+_MAX_FILES = 51
+_MAX_FILE_BYTES = 256 * 1024
+#: The model files whose recipe sits beside them in their folder.
+_MODEL_SUFFIXES = (".stl", ".3mf")
+
+
+def _json_file(path: Path) -> dict[str, Any] | None:
+    try:
+        if not path.is_file() or path.stat().st_size > _MAX_FILE_BYTES:
+            return None
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def files_for_call(tool: str, value: Any) -> dict[str, Any]:
+    """This computer's own recipe files a provenance reader opens, to send with it.
+
+    The ancestry reader opens a recipe and every ``parent_version`` it names;
+    the sidecar reader, the recipe in a model's folder and the ``.kiln.json``
+    beside it, or the recipe it is given.  Kiln's servers open nothing of
+    this computer's: they read copies of these.
+    """
+    arg = value if isinstance(value, str) else ""
+    items: list[dict[str, Any]] = []
+    if not arg:
+        return {"arg": arg, "items": items}
+    start = Path(arg).expanduser()
+    if tool == "read_design_sidecar":
+        candidates = (
+            [start.parent / ".kiln_recipe.json", start.with_suffix(".kiln.json")]
+            if start.suffix.lower() in _MODEL_SUFFIXES else [start]
+        )
+        for path in candidates:
+            record = _json_file(path)
+            if record is not None:
+                items.append({"path": str(path), "record": record})
+        return {"arg": arg, "items": items}
+    seen: set[str] = set()
+    current: Any = str(start)
+    while isinstance(current, str) and current and current not in seen and len(items) < _MAX_FILES:
+        seen.add(current)
+        record = _json_file(Path(current))
+        if record is None:
+            break
+        items.append({"path": current, "record": record})
+        current = record.get("parent_version")
+    return {"arg": str(start), "items": items}
+
+
+#: How an answer names a file this computer sent (``kiln-file:<n>``, or
+#: ``kiln-file:arg`` for the one the call named).
+_FILE_MARK = "kiln-file:"
+
+
+def _own_paths(value: Any, files: dict[str, Any]) -> Any:
+    """*value* with each sent file named by this computer's own path again."""
+    if isinstance(value, dict):
+        return {k: _own_paths(v, files) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_own_paths(v, files) for v in value]
+    if isinstance(value, str) and value.startswith(_FILE_MARK):
+        key = value[len(_FILE_MARK):]
+        if key == "arg":
+            return files.get("arg") or value
+        items = files.get("items") or []
+        if key.isdigit() and int(key) < len(items):
+            return items[int(key)]["path"]
+    return value
+
+
 #: The tools whose new branch this computer's saves continue, as
 #: ``create_design_branch`` describes ("Subsequent saves on this design flow
 #: to the new branch").
@@ -241,6 +320,8 @@ def take_delta(
     here.  A branch made by *tool* ``create_design_branch`` is checked out, so
     the next version saved here continues it.
     """
+    if isinstance(answer, dict) and isinstance((sent or {}).get("files"), dict):
+        answer = _own_paths(answer, sent["files"])
     if not isinstance(answer, dict) or not isinstance(answer.get("history_delta"), dict):
         return answer
     from kiln.history_vault import HistoryVault

@@ -101,6 +101,19 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _NOT_ID_CHARS = re.compile(r"[^A-Za-z0-9_-]")
 
 
+#: A feature version's part mesh travels beside it under this key, named by
+#: ``part_asset_name``: the SHA-256 of its bytes and a mesh type.
+_PART_KEY = "part_asset_b64"
+_PART_SUFFIXES = (".stl", ".3mf", ".obj")
+
+
+def _part_name(name: Any) -> bool:
+    if not isinstance(name, str) or "." not in name:
+        return False
+    digest, ext = name.split(".", 1)
+    return len(digest) == 64 and all(c in "0123456789abcdef" for c in digest) and f".{ext}" in _PART_SUFFIXES
+
+
 #: What a log entry or a bisect session is about.
 _ARTIFACT_TYPES = ("design", "preset", "feature")
 
@@ -670,6 +683,21 @@ class HistoryVault:
                     tmp.write_bytes(data)
                     os.replace(tmp, target)
                 record["image_asset_sha256"] = sha
+        part = record.pop(_PART_KEY, None)
+        name = record.get("part_asset_name")
+        if part and _part_name(name):
+            try:
+                data = base64.b64decode(part)
+            except (ValueError, TypeError):
+                data = b""
+            # Kept only as the bytes it names: never another part's mesh.
+            if data and hashlib.sha256(data).hexdigest() == name.split(".", 1)[0]:
+                target = self._art_dir / name
+                if not target.is_file():
+                    self._art_dir.mkdir(parents=True, exist_ok=True)
+                    tmp = target.with_suffix(target.suffix + ".part")
+                    tmp.write_bytes(data)
+                    os.replace(tmp, target)
         return _no_paths(record)
 
     def _art_path(self, sha: Any) -> Path | None:
@@ -682,6 +710,7 @@ class HistoryVault:
         return None
 
     def _with_art(self, record: dict[str, Any], budget: list[int]) -> dict[str, Any]:
+        record = self._with_part(record, budget)
         path = self._art_path(record.get("image_asset_sha256"))
         if path is None:
             return record
@@ -691,6 +720,17 @@ class HistoryVault:
         budget[0] -= size
         return {**record, _ART_KEY: base64.b64encode(path.read_bytes()).decode("ascii"),
                 "image_asset_path": path.name}
+
+    def _with_part(self, record: dict[str, Any], budget: list[int]) -> dict[str, Any]:
+        """A feature version with the part mesh it imports, when it is kept here."""
+        name = record.get("part_asset_name")
+        if not _part_name(name):
+            return record
+        path = self._art_dir / name
+        if not path.is_file() or path.stat().st_size > budget[0]:
+            return record
+        budget[0] -= path.stat().st_size
+        return {**record, _PART_KEY: base64.b64encode(path.read_bytes()).decode("ascii")}
 
     def library_bundle(self, kind: str, item_id: str, *, budget: list[int] | None = None) -> dict[str, Any]:
         """One item's records, in the clone shape, art attached within *budget*."""

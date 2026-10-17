@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-17T22:38:10.032987+00:00",
+  "generated": "2026-10-17T23:06:41.325431+00:00",
   "tool_count": 415,
   "categories": {
     "product_generators": {
@@ -5147,17 +5147,17 @@
         "schema_version": 1,
         "kind": "record"
       },
-      "inputs": {
-        "files": {
-          "image_asset_path": "one"
-        }
-      },
       "history": {
         "schema_version": 1,
         "mode": "served",
         "kinds": [
           "presets"
         ]
+      },
+      "inputs": {
+        "files": {
+          "image_asset_path": "one"
+        }
       }
     },
     {
@@ -5974,11 +5974,13 @@
         "schema_version": 1,
         "kind": "read"
       },
-      "served": false,
-      "inputs": {
-        "files": {
-          "recipe_path": "one"
-        }
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "files"
+        ],
+        "file_param": "recipe_path"
       }
     },
     {
@@ -6238,7 +6240,13 @@
         "schema_version": 1,
         "kind": "made"
       },
-      "served": false,
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
+      },
       "inputs": {
         "files": {
           "asset_path": "one"
@@ -7567,9 +7575,13 @@
         "schema_version": 1,
         "kind": "read"
       },
-      "served": false,
-      "inputs": {
-        "mesh": "stl_path"
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "files"
+        ],
+        "file_param": "stl_path"
       }
     },
     {
