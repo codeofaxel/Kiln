@@ -741,6 +741,20 @@ class TestTheRecipeFilesACallSends:
     """The provenance readers run on Kiln's servers on copies of this
     computer's own files; these are the files they get."""
 
+    def test_a_pointer_to_any_other_file_sends_nothing_of_it(self, tmp_path):
+        secret = tmp_path / "credentials.json"
+        secret.write_text(json.dumps({"token": "not-for-the-servers"}))
+        link = tmp_path / ".kiln_recipe.v0.json"
+        link.symlink_to(secret)
+        start = tmp_path / ".kiln_recipe.v2.json"
+        start.write_text(json.dumps({"version_id": "v2", "parent_version": str(secret)}))
+        sent = courier.files_for_call("get_design_ancestry", str(start))
+        assert [i["path"] for i in sent["items"]] == [str(start)]
+        start.write_text(json.dumps({"version_id": "v2", "parent_version": str(link)}))
+        assert [i["path"] for i in courier.files_for_call("get_design_ancestry", str(start))["items"]] == [str(start)]
+        assert courier.files_for_call("read_design_sidecar", str(secret))["items"] == []
+        assert "not-for-the-servers" not in json.dumps(sent)
+
     def test_the_ancestry_sends_the_recipe_and_every_parent_it_names(self, tmp_path):
         a, b, c = (tmp_path / f".kiln_recipe.v{n}.json" for n in (1, 2, 3))
         a.write_text(json.dumps({"version_id": "v1"}))
@@ -751,11 +765,11 @@ class TestTheRecipeFilesACallSends:
         assert sent["arg"] == str(c)
 
     def test_a_cycle_or_a_missing_parent_ends_the_files(self, tmp_path):
-        a, b = tmp_path / "a.json", tmp_path / "b.json"
+        a, b = tmp_path / ".kiln_recipe.va.json", tmp_path / ".kiln_recipe.vb.json"
         a.write_text(json.dumps({"version_id": "a", "parent_version": str(b)}))
         b.write_text(json.dumps({"version_id": "b", "parent_version": str(a)}))
         assert len(courier.files_for_call("get_design_ancestry", str(a))["items"]) == 2
-        b.write_text(json.dumps({"version_id": "b", "parent_version": str(tmp_path / "gone.json")}))
+        b.write_text(json.dumps({"version_id": "b", "parent_version": str(tmp_path / ".kiln_recipe.gone.json")}))
         assert len(courier.files_for_call("get_design_ancestry", str(a))["items"]) == 2
 
     def test_the_sidecar_sends_what_sits_beside_the_model(self, tmp_path):

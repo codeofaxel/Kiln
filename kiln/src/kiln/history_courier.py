@@ -238,8 +238,25 @@ _MAX_FILE_BYTES = 256 * 1024
 _MODEL_SUFFIXES = (".stl", ".3mf")
 
 
+def _is_recipe_name(name: str) -> bool:
+    """A recipe (``.kiln_recipe.json``, ``.kiln_recipe.v3.json``) or a sidecar (``part.kiln.json``)."""
+    return (
+        name == ".kiln_recipe.json"
+        or (name.startswith(".kiln_recipe.") and name.endswith(".json"))
+        or (name.endswith(".kiln.json") and len(name) > len(".kiln.json"))
+    )
+
+
 def _json_file(path: Path) -> dict[str, Any] | None:
+    """A recipe or sidecar file's record, or ``None``.
+
+    Only a regular file named as one (never a link, never any other file):
+    a pointer inside a recipe is the recipe's say, and what it names leaves
+    this computer with the call.
+    """
     try:
+        if not _is_recipe_name(path.name) or path.is_symlink():
+            return None
         if not path.is_file() or path.stat().st_size > _MAX_FILE_BYTES:
             return None
         data = json.loads(path.read_text(encoding="utf-8"))
