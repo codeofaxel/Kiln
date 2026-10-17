@@ -1300,9 +1300,10 @@ def _parse_binary_stl_bbox(path: str) -> dict[str, Any]:
     # converting their file and a user re-exporting a file that was fine.
     if looks_like_step(path):
         raise AdaptiveSlicerError(
-            "This is a STEP (CAD) file, not a mesh. Nothing is wrong with it "
-            "— convert it at the door (`ensure_mesh_path`) before a mesh tool "
-            "reads it."
+            "This is a STEP (CAD) file, not a mesh, and nothing is wrong with "
+            "it: this check reads meshes. Import it with import_step_file "
+            '(output_format="stl") and run this on the STL it hands back, or '
+            "export the part as STL from your CAD program."
         )
 
     with open(path, "rb") as fh:

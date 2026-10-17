@@ -1567,6 +1567,10 @@ def test_a_cad_file_is_refused_instead_of_measured_as_geometry(tmp_path):
     with pytest.raises(AdaptiveSlicerError) as caught:
         _parse_model_file(str(step))
     assert "STEP (CAD) file" in str(caught.value)
+    # The way forward is one a person or their agent can take: the import
+    # tool, or an STL export -- never the name of an internal function.
+    assert "import_step_file" in str(caught.value)
+    assert "ensure_mesh_path" not in str(caught.value)
 
 
 def test_an_unreadable_file_yields_no_height_rather_than_one_from_its_size(tmp_path):
