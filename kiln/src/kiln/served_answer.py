@@ -488,6 +488,7 @@ HOSTED_DOORS: dict[str, tuple[str, str]] = {
     "kiln._pro_melt_bridge": ("served_answer", "a printer's own melt rates for a slice; the material's cautious figure is the floor"),
     "kiln._pro_material_rules_bridge": ("served_answer", "whether a material meets the rules a part must meet; a miss judges no requirement met"),
     "kiln._pro_fault_bridge": ("served_answer", "what one printer fault code means and how to clear it; a miss keeps the code's family line and says why once"),
+    "kiln.start_narrative": ("served_answer", "what one Bambu model's print start looks like; a miss keeps the generic line and says why instead of pointing at a sign-in the install already has"),
     "kiln._pro_guide_bridge": ("served_answer", "one step of the maker's repair guide; a miss points at the maker's own pages and never claims the maker has no guide"),
     "kiln.plugins.fleet_tools": ("served_answer", "fleet routing on an install without the router; a miss routes nothing"),
     "kiln._pro_camera_bridge": ("served_answer", "whether a printer model ships with a camera, for always allow; a miss asks the person instead"),

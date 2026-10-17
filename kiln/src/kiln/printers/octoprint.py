@@ -927,30 +927,15 @@ class OctoPrintAdapter(PrinterAdapter):
     def _fire_extrusion_event(self, event_type: str, severity: str) -> None:
         """Feed a flow-anomaly signal into kiln-pro's nozzle wear cross-check.
 
-        Wrapped in ``try/except ImportError`` so free-tier installs without
-        kiln-pro silently skip the wire.  A broad ``Exception`` catch keeps
-        the SockJS / REST hot path alive if the kiln-pro recorder raises
-        (signature drift, transient storage failure, ...).
+        Reported through :func:`kiln._pro_nozzle_bridge.report_flow_anomaly`,
+        which never raises and never waits, so the SockJS / REST hot path
+        stays alive whatever the recorder or the network does.
         """
-        try:
-            from kiln_pro.nozzle_intelligence.sensor_signal import (
-                record_extrusion_event_for_printer,
-            )
+        # The one door every adapter reports through: local with
+        # kiln-pro, else to Kiln's servers off this thread.
+        from kiln._pro_nozzle_bridge import report_flow_anomaly
 
-            record_extrusion_event_for_printer(
-                printer_id=self.name,
-                event_type=event_type,
-                severity=severity,
-            )
-        except ImportError:
-            # Free tier — kiln-pro nozzle module not installed.
-            # Drop the signal silently.
-            pass
-        except Exception as exc:  # pragma: no cover
-            logger.debug(
-                "Flow-anomaly cross-check raised (non-fatal): %s",
-                exc,
-            )
+        report_flow_anomaly(self.name, event_type, severity)
 
     def _check_flow_flag_transitions(self, flags: dict[str, Any]) -> None:
         """Detect ``state.flags`` transitions that should fire a flow-anomaly.

@@ -11632,6 +11632,13 @@ def preflight_check(
                         reading=status_block(_switch),
                         file=_facts,
                     )
+                    if _judged is None:
+                        # Kiln could not ask for the curated judgement: the
+                        # catalogue's facts above stand, and the entry says
+                        # why the rest is missing rather than going quiet.
+                        _clump_gap = _pro_nozzle_bridge.clumping_unchecked(_pf_model)
+                        if _clump_gap is not None:
+                            _entry["detail_unchecked"] = _clump_gap
                     if isinstance(_judged, dict):
                         _entry["detail"] = _judged
                         # The curated judgement adds what it knows beyond the

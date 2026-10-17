@@ -697,8 +697,6 @@ class ElegooAdapter(PrinterAdapter):
         # the firmware uses (Data, Status, PrintInfo, etc.) and we
         # already mirrored them into _last_status above — so we
         # read the merged cache instead of re-walking the message.
-        # Free-tier installs without kiln-pro silently skip via
-        # try/except ImportError.
         with self._state_lock:
             cause_code = self._last_status.get("ErrorStatusReason")
         if isinstance(cause_code, (int, str)):
@@ -709,24 +707,11 @@ class ElegooAdapter(PrinterAdapter):
             flow = _classify_flow_anomaly(code_int)
             if flow is not None:
                 event_type, severity = flow
-                try:
-                    from kiln_pro.nozzle_intelligence.sensor_signal import (
-                        record_extrusion_event_for_printer,
-                    )
-                    record_extrusion_event_for_printer(
-                        printer_id=self.name,
-                        event_type=event_type,
-                        severity=severity,
-                    )
-                except ImportError:
-                    # Free tier — kiln-pro nozzle module not
-                    # installed.  Drop the signal silently.
-                    pass
-                except Exception as exc:  # pragma: no cover
-                    logger.debug(
-                        "Flow-anomaly cross-check raised (non-fatal): %s",
-                        exc,
-                    )
+                # The one door every adapter reports through: local with
+                # kiln-pro, else to Kiln's servers off this thread.
+                from kiln._pro_nozzle_bridge import report_flow_anomaly
+
+                report_flow_anomaly(self.name, event_type, severity)
 
     def _discover_mainboard_id(self) -> None:
         """Attempt to discover the mainboard ID via get-attributes command."""

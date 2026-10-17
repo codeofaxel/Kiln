@@ -787,13 +787,13 @@ def recommend_material(
     if availability and availability.get("as_recorded"):
         _filament = availability["as_recorded"][0]
 
-    # Nozzle overlays — when the caller supplied a printer_id AND
-    # kiln-pro is installed, consult the bridge for (a) abrasive
-    # escalation against the top pick (prepended NOZZLE ADVISORY) and
-    # (b) a one-sentence nozzle-context line (appended after the
-    # reasoning).  Both surface as reasoning-string mutations to
-    # preserve the existing return shape for callers that parse it.
-    # Free-tier installs without kiln-pro silently skip both wires.
+    # Nozzle overlays — when the caller supplied a printer_id, consult
+    # the bridge (kiln-pro in-process, else Kiln's servers) for (a)
+    # abrasive escalation against the top pick (prepended NOZZLE
+    # ADVISORY, a Kiln Pro answer) and (b) a one-sentence nozzle-context
+    # line (appended after the reasoning).  Both surface as
+    # reasoning-string mutations to preserve the existing return shape
+    # for callers that parse it.  No answer leaves the floor below.
     _nozzle_advisory_shown = False
     if printer_id:
         try:
@@ -803,9 +803,13 @@ def recommend_material(
                 filament_material=_filament,
                 printer_id=printer_id,
             )
+            # The verdict's own contract: red, raised by the nozzle (an
+            # abrasive on brass).  It never carried an ``escalation_reason``,
+            # so a check on one never fired, with kiln-pro or without.
             if (
                 _nozzle_advisory is not None
-                and _nozzle_advisory.get("escalation_reason") == "abrasive_brass"
+                and _nozzle_advisory.get("severity") == "red"
+                and _nozzle_advisory.get("escalated") is True
             ):
                 reasoning = (
                     f"NOZZLE ADVISORY: {_nozzle_advisory.get('user_warning', '')} "

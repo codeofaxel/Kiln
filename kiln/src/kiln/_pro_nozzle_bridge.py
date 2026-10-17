@@ -23,18 +23,31 @@ Why a bridge file rather than try/except at each call site:
 
 Used by:
 - ``preflight_check`` (kiln/src/kiln/server.py) — surfaces nozzle
-  capacity check before slicing.
+  capacity check before slicing, and what the printer's
+  nozzle-clumping-detection switch means for the file.
 - ``recommend_settings`` (kiln/src/kiln/plugins/learning_tools.py)
   — warns when active nozzle is incompatible with the recommended
   material.
 - ``recommend_material`` (kiln/src/kiln/material_routing.py) —
   warns when a recommended material would hit the abrasive
   threshold against the active nozzle.
+- every printer adapter that reads a flow anomaly off the machine
+  (:func:`report_flow_anomaly`), and the print-start chokepoint
+  (:func:`record_print_odometer`).
+
+Where kiln-pro is not installed, every helper asks Kiln's servers
+instead, over the door every served tool uses: the capacity verdict,
+the nozzle on record, the abrasive escalation, the clumping judgement;
+a flow anomaly is reported fire-and-forget like the cutter counter, off
+the calling thread.  The servers decide the tier from the account
+asking; a refusal or no answer reads as ``None`` and the public floor
+the caller already has stands.
 """
 
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Any
 
@@ -268,26 +281,43 @@ def consult_recorded_nozzle(printer_id: str) -> dict[str, Any]:
     return answer
 
 
-def _served_recorded_nozzle(printer_id: str) -> dict[str, Any]:
+#: The servers' last answer for each printer's nozzle record, for
+#: :data:`RECORD_MEMO_S`: one request answers the record comparison and the
+#: nozzle summary alike.  ``None`` held for a printer is "could not ask".
+_state_memo: dict[str, tuple[float, dict[str, Any] | None]] = {}
+
+
+def _served_state(printer_id: str) -> dict[str, Any] | None:
+    """The servers' record of *printer_id*'s nozzle, or ``None`` when it
+    could not be asked; remembered for :data:`RECORD_MEMO_S`."""
     global _service_down_until, _service_down_miss
     from kiln.served_answer import classify_transport_error
 
-    unanswered = {"diameter_mm": None, "answered": False}
-    if time.monotonic() < _service_down_until:
-        return unanswered
-    try:
-        from kiln.server import _pro_api_call
+    now = time.monotonic()
+    held = _state_memo.get(printer_id)
+    if held is not None and now - held[0] < RECORD_MEMO_S:
+        return held[1]
+    answer: dict[str, Any] | None = None
+    if now >= _service_down_until:
+        try:
+            from kiln.server import _pro_api_call
 
-        answer = _pro_api_call(
-            RECORD_TOOL, _timeout=_CONSULT_TIMEOUT_S, _asked_by_user=False, printer_id=printer_id
-        )
-    except Exception as exc:  # noqa: BLE001 -- the network is a degrade, never a check
-        logger.debug("nozzle record not served", exc_info=True)
-        _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
-        _service_down_miss = classify_transport_error(exc)
-        return unanswered
-    if not (isinstance(answer, dict) and answer.get("success")):
-        return unanswered
+            got = _pro_api_call(
+                RECORD_TOOL, _timeout=_CONSULT_TIMEOUT_S, _asked_by_user=False, printer_id=printer_id
+            )
+            answer = got if isinstance(got, dict) and got.get("success") else None
+        except Exception as exc:  # noqa: BLE001 -- the network is a degrade, never a check
+            logger.debug("nozzle record not served", exc_info=True)
+            _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
+            _service_down_miss = classify_transport_error(exc)
+    _state_memo[printer_id] = (now, answer)
+    return answer
+
+
+def _served_recorded_nozzle(printer_id: str) -> dict[str, Any]:
+    answer = _served_state(printer_id)
+    if answer is None:
+        return {"diameter_mm": None, "answered": False}
     stated = answer.get("found") and answer.get("trusted_for_verdicts")
     return {"diameter_mm": answer.get("diameter_mm") if stated else None, "answered": True}
 
@@ -358,6 +388,7 @@ def _served_only_recorded_nozzle() -> dict[str, Any]:
 def forget_recorded_nozzle() -> None:
     """Drop every remembered record lookup: the record was just written."""
     _record_memo.clear()
+    _state_memo.clear()
 
 
 def consult_sliced_file(printer_id: str, file_nozzle_mm: float) -> dict[str, Any] | None:
@@ -469,7 +500,7 @@ def consult_clumping_detection(
             clumping_switch_block,
         )
     except ImportError:
-        return None
+        return _served_clumping(printer_model, reading, file)
     facts = file or {}
     try:
         return clumping_switch_block(
@@ -481,6 +512,91 @@ def consult_clumping_detection(
         )
     except Exception:  # noqa: BLE001 -- a sentence beside the check, never the check
         return None
+
+
+#: The hosted door for the clumping-detection judgement.
+CLUMPING_TOOL = "clumping_detection"
+#: Why the last clumping judgement for each model had no answer.
+_last_clumping_miss: dict[str, Any] = {}
+
+
+def _served_clumping(
+    printer_model: str | None, reading: dict[str, Any] | None, file: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """The hosted clumping judgement, or ``None`` with why in :data:`_last_clumping_miss`."""
+    model = str(printer_model or "").strip()
+    if not model:
+        return None
+    facts = file or {}
+    kwargs: dict[str, Any] = {"printer_model": model}
+    if isinstance(reading, dict):
+        kwargs["reading"] = dict(reading)
+    for key in ("footprint", "print_mode", "prime_tower_in_file"):
+        if facts.get(key) is not None:
+            kwargs[key] = facts[key]
+    answer = _ask(CLUMPING_TOOL, kwargs, misses=_last_clumping_miss, key=model)
+    block = answer.get("block") if answer else None
+    return dict(block) if isinstance(block, dict) else None
+
+
+def clumping_unchecked(printer_model: str | None) -> dict[str, Any] | None:
+    """Why the last clumping judgement for *printer_model* could not be asked
+    for, as the line a pre-flight carries, or ``None`` when it was answered.
+    With kiln-pro installed it never misses, and this stays ``None``."""
+    miss = _last_clumping_miss.get(str(printer_model or "").strip())
+    if miss is None:
+        return None
+    from kiln.served_answer import fields, sentence
+
+    line = sentence(
+        miss, feature="servers",
+        on_the_line="This pre-flight says what the printer's nozzle clumping detection means for this file on this model",
+        cannot="judge the switch against the file", wont="says only what the printer itself reports",
+        safe_remedy="Keep the part out of the probe's path the printer's own documentation names",
+        then="run the pre-flight again",
+    )
+    return {"word": "unchecked", "line": line, **fields(miss)}
+
+
+def _ask(
+    tool_name: str, kwargs: dict[str, Any], *, misses: dict[str, Any], key: str,
+) -> dict[str, Any] | None:
+    """One served consult, with the shared backoff: the answer, or ``None``
+    with why kept under *key* in *misses*."""
+    global _service_down_until, _service_down_miss
+    from kiln.served_answer import Miss, classify_answer, classify_transport_error
+
+    if time.monotonic() < _service_down_until:
+        if _service_down_miss is not None:
+            misses[key] = _service_down_miss
+        return None
+    try:
+        from kiln.server import _pro_api_call
+    except Exception:  # noqa: BLE001
+        misses[key] = Miss("unanswered", detail="the served door could not be opened on this install")
+        return None
+    try:
+        answer = _pro_api_call(tool_name, _timeout=_CONSULT_TIMEOUT_S, _asked_by_user=False, **kwargs)
+    except Exception as exc:  # noqa: BLE001 -- the network is a degrade, never a check
+        logger.debug("%s not served", tool_name, exc_info=True)
+        miss = classify_transport_error(exc)
+        _service_down_until, _service_down_miss = time.monotonic() + SERVICE_BACKOFF_S, miss
+        misses[key] = miss
+        return None
+    if isinstance(answer, dict) and answer.get("success"):
+        misses.pop(key, None)
+        return answer
+    miss = classify_answer(answer) or Miss("unanswered", detail="an answer with nothing in it")
+    if isinstance(answer, dict) and answer.get("code") == "SERVER_UNREACHABLE":
+        _service_down_until, _service_down_miss = time.monotonic() + SERVICE_BACKOFF_S, miss
+    misses[key] = miss
+    return None
+
+
+#: The hosted door for the abrasive escalation (Kiln Pro, decided on the
+#: servers from the account asking).
+ABRASIVE_TOOL = "abrasive_escalation"
+_last_abrasive_miss: dict[str, Any] = {}
 
 
 def consult_abrasive_escalation(
@@ -497,6 +613,9 @@ def consult_abrasive_escalation(
     The caller uses this to warn when a recommended material would
     hit the abrasive ceiling against the active nozzle (e.g.
     "Polymaker PolyTerra-CF on brass — expect ~360 g lifetime").
+    Without kiln-pro here it is asked of Kiln's servers, which answer a
+    Kiln Pro account; a lower plan's refusal and no answer both read as
+    ``None``, and the caller's material-only floor stands.
     """
     if not filament_material or not printer_id:
         return None
@@ -509,7 +628,11 @@ def consult_abrasive_escalation(
             abrasive_escalation,
         )
     except ImportError:
-        return None
+        answer = _ask(
+            ABRASIVE_TOOL, {"material": filament_material, "printer_id": printer_id},
+            misses=_last_abrasive_miss, key=printer_id,
+        )
+        return dict(answer) if answer and answer.get("severity") else None
 
     backend, _nudge = resolve_backend(tool_name="recommend_material_abrasive")
     if backend is None:
@@ -532,7 +655,9 @@ def consult_nozzle_summary(printer_id: str) -> dict[str, Any] | None:
     bias to compensate."
 
     Returns ``{material, diameter_mm, provenance, grams_through,
-    trusted_for_verdicts}`` or ``None`` when the lookup fails.
+    trusted_for_verdicts}`` or ``None`` when the lookup fails.  Without
+    kiln-pro here the same summary is read off the servers' record of the
+    nozzle (the answer that also serves :func:`consult_recorded_nozzle`).
     """
     if not printer_id:
         return None
@@ -542,7 +667,12 @@ def consult_nozzle_summary(printer_id: str) -> dict[str, Any] | None:
             resolve_state_or_factory_default,
         )
     except ImportError:
-        return None
+        state = _served_state(printer_id)
+        if not state or not state.get("material"):
+            return None
+        return {key: state.get(key) for key in (
+            "material", "diameter_mm", "provenance", "grams_through", "trusted_for_verdicts",
+        )}
 
     backend, _nudge = resolve_backend(tool_name="recommend_settings_nozzle")
     if backend is None:
@@ -557,6 +687,75 @@ def consult_nozzle_summary(printer_id: str) -> dict[str, Any] | None:
         "grams_through": state.grams_through,
         "trusted_for_verdicts": state.trusted_for_verdicts(),
     }
+
+
+#: The hosted door a flow anomaly is reported to (Kiln Pro: the sensor
+#: cross-check on the wear estimate is what it sells, decided on the servers).
+FLOW_TOOL = "record_extrusion_event"
+#: A printer reports the same anomaly on every status message while the
+#: fault stands; the served path sends one report per anomaly per window.
+FLOW_REPORT_WINDOW_S: float = 60.0
+_flow_sent: dict[tuple[str, str, str], float] = {}
+_flow_lock = threading.Lock()
+
+
+def report_flow_anomaly(printer_id: str, event_type: str, severity: str) -> None:
+    """A printer read a flow anomaly off its own sensors: feed the nozzle
+    wear cross-check.  Never raises and never waits.
+
+    The one door every adapter calls.  With kiln-pro installed the signal
+    is recorded locally; otherwise it is reported to Kiln's servers on a
+    short-lived thread, fire-and-forget like the cutter counter, so a
+    status message or a print never waits on the network.  An account
+    whose plan does not include the cross-check is refused by the servers
+    and nothing is kept; no answer is the same.
+    """
+    if not printer_id or not isinstance(printer_id, str):
+        return
+    try:
+        from kiln_pro.nozzle_intelligence.sensor_signal import (
+            record_extrusion_event_for_printer,
+        )
+    except ImportError:
+        record_extrusion_event_for_printer = None
+    if record_extrusion_event_for_printer is not None:
+        try:
+            record_extrusion_event_for_printer(printer_id=printer_id, event_type=event_type, severity=severity)
+        except Exception as exc:  # noqa: BLE001 -- a wear signal never breaks a status read
+            logger.debug("Flow-anomaly cross-check raised (non-fatal): %s", exc)
+        return
+    key = (printer_id, str(event_type), str(severity))
+    now = time.monotonic()
+    with _flow_lock:
+        if now < _service_down_until or now - _flow_sent.get(key, float("-inf")) < FLOW_REPORT_WINDOW_S:
+            return
+        _flow_sent[key] = now
+    threading.Thread(
+        target=_served_flow_report, args=(printer_id, str(event_type), str(severity)),
+        name="kiln-flow-report", daemon=True,
+    ).start()
+
+
+def _served_flow_report(printer_id: str, event_type: str, severity: str) -> None:
+    """POST one flow anomaly to the hosted door.  Runs off the calling thread."""
+    global _service_down_until, _service_down_miss
+    from kiln.served_answer import classify_transport_error
+
+    try:
+        from kiln.server import _pro_api_call
+
+        answer = _pro_api_call(
+            FLOW_TOOL, _timeout=_CONSULT_TIMEOUT_S, _asked_by_user=False,
+            printer_id=printer_id, event_type=event_type, severity=severity,
+        )
+    except Exception as exc:  # noqa: BLE001 -- the network is a degrade, never a print
+        logger.debug("flow anomaly not served", exc_info=True)
+        _service_down_until, _service_down_miss = time.monotonic() + SERVICE_BACKOFF_S, classify_transport_error(exc)
+        return
+    if isinstance(answer, dict) and answer.get("code") == "SERVER_UNREACHABLE":
+        from kiln.served_answer import classify_answer
+
+        _service_down_until, _service_down_miss = time.monotonic() + SERVICE_BACKOFF_S, classify_answer(answer)
 
 
 def record_print_odometer(
@@ -590,11 +789,16 @@ def record_print_odometer(
 
 
 __all__ = [
+    "ABRASIVE_TOOL",
+    "CLUMPING_TOOL",
+    "FLOW_REPORT_WINDOW_S",
+    "FLOW_TOOL",
     "RECORD_MEMO_S",
     "RECORD_TOOL",
     "SERVICE_BACKOFF_S",
     "WIRE_TOOL",
     "available",
+    "clumping_unchecked",
     "consult_capacity",
     "consult_only_recorded_nozzle",
     "consult_recorded_nozzle",
@@ -605,4 +809,5 @@ __all__ = [
     "consult_abrasive_escalation",
     "consult_nozzle_summary",
     "record_print_odometer",
+    "report_flow_anomaly",
 ]

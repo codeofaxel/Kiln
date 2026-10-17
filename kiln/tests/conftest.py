@@ -1400,11 +1400,24 @@ def _forget_served_misses() -> None:
         ("kiln._pro_material_bridge", "_last_miss"),
         ("kiln._pro_material_bridge", "_answers"),
         ("kiln._pro_material_bridge", "_retry_after"),
+        # The nozzle bridge's served answers and misses beyond the capacity
+        # verdict, and the flow reports' send clock.
+        ("kiln._pro_nozzle_bridge", "_state_memo"),
+        ("kiln._pro_nozzle_bridge", "_last_clumping_miss"),
+        ("kiln._pro_nozzle_bridge", "_last_abrasive_miss"),
+        ("kiln._pro_nozzle_bridge", "_flow_sent"),
+        # The start reading, per model and per nozzle target.
+        ("kiln.start_narrative", "_served_blocks"),
+        ("kiln.start_narrative", "_served_lines"),
+        ("kiln.start_narrative", "_last_miss"),
     ):
         record = getattr(sys.modules.get(module), attr, None)
         if isinstance(record, dict):
             record.clear()
-    for name in ("kiln._pro_melt_bridge", "kiln._pro_catalogue_bridge", "kiln._pro_material_bridge"):
+    for name in (
+        "kiln._pro_melt_bridge", "kiln._pro_catalogue_bridge", "kiln._pro_material_bridge",
+        "kiln._pro_nozzle_bridge", "kiln.start_narrative",
+    ):
         bridge = sys.modules.get(name)
         if bridge is not None:
             bridge._service_down_until, bridge._service_down_miss = 0.0, None

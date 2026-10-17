@@ -2935,30 +2935,16 @@ class BambuAdapter(PrinterAdapter):
             # message that carries the same HMS code re-fires the
             # event.  The kiln-pro recorder de-dupes by (printer, code,
             # time-bucket) so a steady-state error doesn't flood the
-            # event log.  Free-tier installs without kiln-pro silently
-            # skip via try/except ImportError.
+            # event log, and the served report sends one per window.
             if print_error_for_hook:
                 _flow = _classify_flow_anomaly(print_error_for_hook)
                 if _flow is not None:
                     _event_type, _severity = _flow
-                    try:
-                        from kiln_pro.nozzle_intelligence.sensor_signal import (
-                            record_extrusion_event_for_printer,
-                        )
-                        record_extrusion_event_for_printer(
-                            printer_id=self.name,
-                            event_type=_event_type,
-                            severity=_severity,
-                        )
-                    except ImportError:
-                        # Free tier — kiln-pro nozzle module not
-                        # installed.  Drop the signal silently.
-                        pass
-                    except Exception as exc:  # pragma: no cover
-                        logger.debug(
-                            "Flow-anomaly cross-check raised (non-fatal): %s",
-                            exc,
-                        )
+                    # The one door every adapter reports through: local with
+                    # kiln-pro, else to Kiln's servers off this thread.
+                    from kiln._pro_nozzle_bridge import report_flow_anomaly
+
+                    report_flow_anomaly(self.name, _event_type, _severity)
 
             # A fault Kiln can plainly see, on a printer nobody asked it to
             # watch.  The push stream is already open and already parsed --
