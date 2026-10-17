@@ -2,10 +2,10 @@
 
 <!-- mcp-name: io.github.codeofaxel/kiln -->
 
-<!-- kiln-highlights: 1.4.1.1
-* preview images get the web app's studio look on every computer, with the print bed and lighting built in
-* a full set of preview angles arrives in seconds
-* fixed a bug so preview renders no longer bring annoying popups to your screen
+<!-- kiln-highlights: 1.5.0
+* watch your print from inside the chat: a live monitor panel opens in your AI app with your printer's camera in it, so you never leave the conversation
+* ordering from a manufacturing service is rebuilt: the full price up front, payment on the service's own checkout, and status from paid to delivered
+* approve a print from your phone, with the model to turn in 3D and what it costs in time and filament, once or for the next few hours
 kiln-highlights:end -->
 <!-- The block above is machine-read, not rendered: installed Kilns parse it
      out of the PyPI JSON description so their update nudge can say what the
@@ -123,7 +123,7 @@ The full searchable list of **70 tuned printer profiles across 15 brands** is at
 
 ## Features
 
-- **<!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 926 MCP capabilities** for design intelligence, model generation, printability analysis, slicing, printing, monitoring, failure recovery, fleet management, and fulfillment
+- **<!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 921 MCP capabilities** for design intelligence, model generation, printability analysis, slicing, printing, monitoring, failure recovery, fleet management, and fulfillment
 - **<!-- KILN_CLI_COUNT:OLD --> 245 CLI commands** with `--json` output for agent consumption
 - **Multi-printer fleet** management with job queue and background scheduler
 - **Model marketplaces** — search/download from MyMiniFactory, Cults3D (Thingiverse deprecated — acquired by MMF, Feb 2026)

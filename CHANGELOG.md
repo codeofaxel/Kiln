@@ -5,6 +5,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-10-16
+
 ### Added
 
 - **Quotes and ordering, revamped.** Ask for a print-service quote and see exactly what you'll pay: printing, the shop's minimum, shipping, and a note that tax is added at checkout. Then place the order and pay on the print service's checkout however is easiest. Card, PayPal, Apple Pay and Google Pay all work. Order status follows your print from paid to delivered.
@@ -51,112 +53,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **The 3D stage shows what's already on your plate.** The print still standing there shows as itself, by name, beside where your new part would go, with a plain "fits here" or "doesn't fit here".
 
-### Changed
-
-- **Everything your AI makes stays tied to what you asked for.** Kiln Pro also checks the design against it.
-
-- **A saved printer's name is never written over by a different printer.**
-
-- **A printer Kiln doesn't know is held to cautious limits until you confirm its real ones.**
-
-- **Kiln tells you when it's working with your other printer, instead of calling this one offline.**
-
-- `kiln register` now points you to `kiln signin`.
-
-- **Screw seams on split parts now use a standard screw you can buy (Pro).** See https://kiln3d.com/pricing.
-
-- **A session that has run out says so everywhere, and signing back in restores your plan.** Your plan stays on your account; this machine just needs you to sign in again before anything that uses Kiln's servers.
-
-- **Name a screw or insert the way you'd say it and get the right hole first time (Pro+).** See https://kiln3d.com/pricing.
-
-- **Whole-object wrapped textures look better, including on round objects like cups.**
-
-- **Agreeing to the Terms before you sign in now counts for your account too.**
-
-- **Cost estimates price each filament as the material your file was sliced for.**
-
-- **After slicing, the 3D stage shows the file going to your printer.** Asking to see it again gives a one-line "already on the stage above" instead of a second identical stage.
-
-- **Designs agents write come out rounder.**
-
-- **Kiln makes multi-colour Bambu files for the A1 only.** Single-colour prints, and multi-colour files you slice in Bambu Studio, work on every Bambu as before.
-
-- **When Kiln can't reach its servers, it says so in plain words.** Every feature that leans on them names which of four things happened — this computer is offline, you're signed out, the servers didn't answer, or they said no — and what to do next.
-
-- **A check Kiln couldn't make is never reported as a pass.** A pre-flight that can't reach the servers lists the check as not made, instead of quietly leaving it out.
-
-- **Kiln tells you when your nozzle crosses a wear milestone.** Approaching the end of its life, past the point half of nozzles like it wore out, past the budget: each said once, on every signed-in Kiln, and a print at the budget is refused until you swap it.
-
-- **The weight on your printer's screen is for the filament you're actually using.** Every slice is weighed with the material you name or the spool your printer reports loaded, and Kiln tells you which one it used.
-
-- **Your Bambu is told the filament you're actually printing.** It warms up for that filament, and its screen shows the right one.
-
-- **Prusa and Duet touchscreens now show the part before it prints.** The picture used to appear only on the printer's browser page (PrusaLink, Duet Web Control) while the touchscreen on the printer stayed blank; the screen now gets its own copy. Elegoo files get a preview too.
-
-- **Bambu fault codes now come with the cause and the fix.** Every code
-  your printer is holding — including ones the screen never shows you — is
-  explained right where you see it.
-
-- **Tell Kiln a Bambu fault code in plain words and it looks it up.** If
-  Kiln has nothing on that code, it says so instead of guessing.
-
-- **The pre-print nozzle check is free; its community half is Pro+.**
-  Everyone gets the verdict against the curated budget; Kiln Pro adds how
-  long that nozzle lasts on that filament across the community.
-
-- **You see the print before it starts, from every door — and it starts only when you say go.** One yes is one print on one printer, and a time-boxed window exists only when you open it yourself; a yes that covers several printers or the whole fleet is Business+. See https://kiln3d.com/pricing.
-
-- **The picture you sign off on is the part on Kiln's stage.** The live 3D panel where your app draws one; otherwise the stage picture and a 30-minute viewer link, together — never a plain render — and the record says which pixels you were shown.
-
-- **Every print file leaves with a preview and a real weight, or not at all.** Your printer's screen or web page shows the part and the filament it will use — Bambu tiles in true colours, Klipper, OctoPrint, PrusaLink and Duet the way each reads it — or Kiln refuses to send it. Printers whose screens show nothing get the weight only.
-
-- **The 3D panel never fails silently.** When a panel can't load its part you get the viewer link instead, and a restart tells you which open chats need reconnecting.
-
-- **A long print is never mistaken for a stuck one.** Kiln used to give up
-  after two hours and could send the same file again. It now leaves a running
-  print alone and tells you when one stops moving. Thanks to @qjkme.
-
-- **An emergency stop says whether it landed.** Kiln checks the printer really
-  stopped, and tells you to stop it by hand when it can't confirm. Stopping
-  all your printers reaches every one at once.
-
-- **A monitored print no longer reports failure after it started.** It says
-  the print started, and the first-layer check actually runs. `kiln watch`
-  works again.
-
-- **The safety watchdog covers every print Kiln starts, and leaves when that
-  print ends.** It no longer cancels a print your printer paused itself, like
-  a filament runout.
-
-- **Bambu's H2D, H2D Pro, H2C and X2D are now supported.** Paid tiers add
-  per-material guidance for each one, plus additional depth.
-
-- **Your colours go to the spools that hold them.** Kiln stops rather than
-  printing a colour you don't have loaded.
-
-- **Your AI assistant can better say what each tier gets.**
-
-- **History answers say what they cover.** Your print, job, failure and model
-  histories now say they're this machine's records, and how many entries
-  exist in total — so a page of twenty is never mistaken for everything
-  you've printed.
-
-- **Kiln catches a handle that didn't actually join the body.** A part built
-  flush against a curved wall only touches it — it looks attached, then
-  prints as two loose pieces. Kiln now measures the join and tells you how
-  far to sink the part in.
-
-- **A printability report now names its placement fault, and says what the
-  part's shape scored on its own.** When a part is judged unprintable for
-  hanging below the plate or overrunning the bed, the report carries a
-  stable name for that fault beside the sentence describing it, plus the
-  grade the part would have earned sitting correctly. The wording you
-  already see is unchanged, word for word — this is what lets a viewer say
-  "hangs below the bed" instead of just turning red, and lets anything
-  reading the report tell a badly made part from a well made one in the
-  wrong place.
-
-### Added
 
 - **Describe a flat part by its rules and Kiln works out the shape.** Say where the holes sit relative to the edges and each other, and Kiln finds the exact geometry, tells you plainly what is still loose, and warns you when two rules can't both hold or a hole would break through.
 
@@ -337,6 +233,111 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   part and one Approve button — that press is the yes your printer waits for.
   Free at home; from anywhere through Kiln is Pro. See
   https://kiln3d.com/pricing.
+
+### Changed
+
+- **Everything your AI makes stays tied to what you asked for.** Kiln Pro also checks the design against it.
+
+- **A saved printer's name is never written over by a different printer.**
+
+- **A printer Kiln doesn't know is held to cautious limits until you confirm its real ones.**
+
+- **Kiln tells you when it's working with your other printer, instead of calling this one offline.**
+
+- `kiln register` now points you to `kiln signin`.
+
+- **Screw seams on split parts now use a standard screw you can buy (Pro).** See https://kiln3d.com/pricing.
+
+- **A session that has run out says so everywhere, and signing back in restores your plan.** Your plan stays on your account; this machine just needs you to sign in again before anything that uses Kiln's servers.
+
+- **Name a screw or insert the way you'd say it and get the right hole first time (Pro+).** See https://kiln3d.com/pricing.
+
+- **Whole-object wrapped textures look better, including on round objects like cups.**
+
+- **Agreeing to the Terms before you sign in now counts for your account too.**
+
+- **Cost estimates price each filament as the material your file was sliced for.**
+
+- **After slicing, the 3D stage shows the file going to your printer.** Asking to see it again gives a one-line "already on the stage above" instead of a second identical stage.
+
+- **Designs agents write come out rounder.**
+
+- **Kiln makes multi-colour Bambu files for the A1 only.** Single-colour prints, and multi-colour files you slice in Bambu Studio, work on every Bambu as before.
+
+- **When Kiln can't reach its servers, it says so in plain words.** Every feature that leans on them names which of four things happened — this computer is offline, you're signed out, the servers didn't answer, or they said no — and what to do next.
+
+- **A check Kiln couldn't make is never reported as a pass.** A pre-flight that can't reach the servers lists the check as not made, instead of quietly leaving it out.
+
+- **Kiln tells you when your nozzle crosses a wear milestone.** Approaching the end of its life, past the point half of nozzles like it wore out, past the budget: each said once, on every signed-in Kiln, and a print at the budget is refused until you swap it.
+
+- **The weight on your printer's screen is for the filament you're actually using.** Every slice is weighed with the material you name or the spool your printer reports loaded, and Kiln tells you which one it used.
+
+- **Your Bambu is told the filament you're actually printing.** It warms up for that filament, and its screen shows the right one.
+
+- **Prusa and Duet touchscreens now show the part before it prints.** The picture used to appear only on the printer's browser page (PrusaLink, Duet Web Control) while the touchscreen on the printer stayed blank; the screen now gets its own copy. Elegoo files get a preview too.
+
+- **Bambu fault codes now come with the cause and the fix.** Every code
+  your printer is holding — including ones the screen never shows you — is
+  explained right where you see it.
+
+- **Tell Kiln a Bambu fault code in plain words and it looks it up.** If
+  Kiln has nothing on that code, it says so instead of guessing.
+
+- **The pre-print nozzle check is free; its community half is Pro+.**
+  Everyone gets the verdict against the curated budget; Kiln Pro adds how
+  long that nozzle lasts on that filament across the community.
+
+- **You see the print before it starts, from every door — and it starts only when you say go.** One yes is one print on one printer, and a time-boxed window exists only when you open it yourself; a yes that covers several printers or the whole fleet is Business+. See https://kiln3d.com/pricing.
+
+- **The picture you sign off on is the part on Kiln's stage.** The live 3D panel where your app draws one; otherwise the stage picture and a 30-minute viewer link, together — never a plain render — and the record says which pixels you were shown.
+
+- **Every print file leaves with a preview and a real weight, or not at all.** Your printer's screen or web page shows the part and the filament it will use — Bambu tiles in true colours, Klipper, OctoPrint, PrusaLink and Duet the way each reads it — or Kiln refuses to send it. Printers whose screens show nothing get the weight only.
+
+- **The 3D panel never fails silently.** When a panel can't load its part you get the viewer link instead, and a restart tells you which open chats need reconnecting.
+
+- **A long print is never mistaken for a stuck one.** Kiln used to give up
+  after two hours and could send the same file again. It now leaves a running
+  print alone and tells you when one stops moving. Thanks to @qjkme.
+
+- **An emergency stop says whether it landed.** Kiln checks the printer really
+  stopped, and tells you to stop it by hand when it can't confirm. Stopping
+  all your printers reaches every one at once.
+
+- **A monitored print no longer reports failure after it started.** It says
+  the print started, and the first-layer check actually runs. `kiln watch`
+  works again.
+
+- **The safety watchdog covers every print Kiln starts, and leaves when that
+  print ends.** It no longer cancels a print your printer paused itself, like
+  a filament runout.
+
+- **Bambu's H2D, H2D Pro, H2C and X2D are now supported.** Paid tiers add
+  per-material guidance for each one, plus additional depth.
+
+- **Your colours go to the spools that hold them.** Kiln stops rather than
+  printing a colour you don't have loaded.
+
+- **Your AI assistant can better say what each tier gets.**
+
+- **History answers say what they cover.** Your print, job, failure and model
+  histories now say they're this machine's records, and how many entries
+  exist in total — so a page of twenty is never mistaken for everything
+  you've printed.
+
+- **Kiln catches a handle that didn't actually join the body.** A part built
+  flush against a curved wall only touches it — it looks attached, then
+  prints as two loose pieces. Kiln now measures the join and tells you how
+  far to sink the part in.
+
+- **A printability report now names its placement fault, and says what the
+  part's shape scored on its own.** When a part is judged unprintable for
+  hanging below the plate or overrunning the bed, the report carries a
+  stable name for that fault beside the sentence describing it, plus the
+  grade the part would have earned sitting correctly. The wording you
+  already see is unchanged, word for word — this is what lets a viewer say
+  "hangs below the bed" instead of just turning red, and lets anything
+  reading the report tell a badly made part from a well made one in the
+  wrong place.
 
 ### Fixed
 
@@ -694,7 +695,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Stronger protection against harmful 3MF files.**
 - **Kiln only saves files where it should.** A misled AI agent can no longer make Kiln overwrite your settings or startup files. Thanks to Filip Kulig ([@KulFilip](https://github.com/KulFilip)) for reporting this privately.
-
 
 ## [1.4.1.1] - 2026-08-19
 
