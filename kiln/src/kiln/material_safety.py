@@ -218,12 +218,26 @@ def use_case_implies_food_contact(use_case: str) -> bool:
     text = _fold_separators(use_case)
     sensitive = _food_sensitive_forms()
     for match in _food_contact_pattern().finditer(text):
-        if match.group(0) in sensitive:
-            before = re.search(r"([a-z]+)\s*$", text[: match.start()])
-            if before and before.group(1) in FOOD_MECHANICAL_QUALIFIERS:
-                continue
+        if match.group(0) in sensitive and _word_before(text, match.start()) in FOOD_MECHANICAL_QUALIFIERS:
+            continue
         return True
     return False
+
+
+def _word_before(text: str, end: int) -> str:
+    """The run of letters ending just before *end*, skipping whitespace.
+
+    A backward scan rather than a regex over ``text[:end]``: that regex
+    backtracks across the whole prefix at every match, which grows with the
+    square of a long brief.
+    """
+    stop = end
+    while stop > 0 and text[stop - 1].isspace():
+        stop -= 1
+    start = stop
+    while start > 0 and "a" <= text[start - 1] <= "z":
+        start -= 1
+    return text[start:stop]
 
 
 def _materials_json_path() -> Path:

@@ -175,3 +175,16 @@ class TestTheDetector:
 
         assert assess_food_safety("unobtainium")["verdict"] == "refuse"
         assert filter_food_safe_materials(["unobtainium"], "yes_or_conditional") == []
+
+
+def test_a_long_brief_is_read_in_linear_time():
+    """The word in front of each match is found by a backward scan: a regex
+    over the whole prefix took seconds per match on a 20,000-letter brief."""
+    import time
+
+    from kiln.material_safety import use_case_implies_food_contact
+
+    brief = ("a" * 50_000 + ", plate ") * 3
+    started = time.perf_counter()
+    use_case_implies_food_contact(brief)
+    assert time.perf_counter() - started < 1.0
