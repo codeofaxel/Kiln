@@ -18885,7 +18885,11 @@ def _with_local_log_tail(kwargs: dict) -> dict:
         tail = read_log_tail()
         if not tail:
             return kwargs
-        return {**kwargs, "context": {**context, "log_tail": tail}}
+        # Redacted again at the door, whatever the reader did: the tail is
+        # read off this computer and leaves it (kiln.outbound_guard).
+        from kiln.outbound_guard import redact_text
+
+        return {**kwargs, "context": {**context, "log_tail": redact_text(tail)}}
     except Exception:  # noqa: BLE001 — the report matters more than its attachment
         return kwargs
 
@@ -18931,7 +18935,7 @@ def _anonymous_api_call(tool_name: str, **kwargs) -> dict:
     ).strip() or _HOSTED_KILN_API_URL
     route = _ANONYMOUS_TOOL_ROUTES[tool_name]
 
-    payload = _with_local_log_tail(dict(kwargs))
+    payload = _guarded_for_the_wire(_with_local_log_tail(dict(kwargs)), asked_by_user=True)
     context = payload.get("context")
     context = dict(context) if isinstance(context, dict) else {}
     context.setdefault("app_version", _current_version())
@@ -19028,6 +19032,26 @@ def _served_wait_seconds(tool_name: str) -> float:
 
     kind = _PRO_TOOL_OFFLINE_KIND.get(tool_name) or kind_of_tool(tool_name)
     return _SERVED_MAKE_WAIT_S if kind == "made" else _SERVED_WAIT_S
+
+
+#: Call arguments this install adds from what it read itself, beside what
+#: the person asked: a served step's facts and answers, a printer's own
+#: nozzle reading, its recent fault codes.  (A bug report's log tail is
+#: redacted where it is attached, :func:`_with_local_log_tail`.)
+_MACHINE_READ_ARGS = frozenset({"step_results", "printer_reading", "recent_faults"})
+
+
+def _guarded_for_the_wire(kwargs: dict[str, Any], *, asked_by_user: bool) -> dict[str, Any]:
+    """*kwargs* with every machine-read value passed through
+    :func:`kiln.outbound_guard.scrub`: all of them for an ask the person
+    never made (a bridge fetching something on its own), and the arguments
+    this install added from its own reads on one they did.  The person's
+    own words and files go as they gave them."""
+    from kiln.outbound_guard import scrub
+
+    if not asked_by_user:
+        return scrub(kwargs)
+    return {key: scrub(value) if key in _MACHINE_READ_ARGS else value for key, value in kwargs.items()}
 
 
 def _pro_api_call(
@@ -19177,6 +19201,7 @@ def _pro_api_call(
     # reads no log), before the payload is serialized.
     if tool_name == "report_issue":
         kwargs = _with_local_log_tail(kwargs)
+    kwargs = _guarded_for_the_wire(kwargs, asked_by_user=_asked_by_user)
 
     import json
     import urllib.error
