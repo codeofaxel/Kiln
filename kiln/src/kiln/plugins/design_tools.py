@@ -2103,7 +2103,8 @@ class _DesignToolsPlugin:
                 profile_id: Brand filament ID (e.g. "bambu_pla_basic",
                     "prusament_petg", "polymaker_polyterra_pla")
             """
-            from kiln.design_intelligence import brand_figures_unanswered, get_brand_filament_profile as _get
+            from kiln.design_intelligence import brand_figures_unanswered
+            from kiln.design_intelligence import get_brand_filament_profile as _get
 
             profile = _get(profile_id)
             if profile is None:
@@ -2136,7 +2137,8 @@ class _DesignToolsPlugin:
                 brand: Filter by brand (e.g. "Bambu", "Prusament", "Polymaker")
                 parent_material: Filter by parent material (e.g. "pla", "petg", "abs")
             """
-            from kiln.design_intelligence import brand_figures_unanswered, list_brand_filament_profiles as _list
+            from kiln.design_intelligence import brand_figures_unanswered
+            from kiln.design_intelligence import list_brand_filament_profiles as _list
 
             profiles = _list(
                 brand=brand or None,
