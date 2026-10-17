@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-17T11:08:22.251144+00:00",
+  "generated": "2026-10-17T19:16:55.928062+00:00",
   "tool_count": 415,
   "categories": {
     "product_generators": {
@@ -10182,8 +10182,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      },
-      "served": false
+      }
     },
     {
       "name": "get_calibration_freshness",
@@ -10364,7 +10363,6 @@
         "schema_version": 1,
         "kind": "made"
       },
-      "served": false,
       "inputs": {
         "files": {
           "config_path": "one"
