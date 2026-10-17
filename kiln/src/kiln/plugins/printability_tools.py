@@ -203,9 +203,11 @@ class _PrintabilityToolsPlugin:
         ) -> dict:
             """Find the optimal print orientation for a 3D model.
 
-            Evaluates multiple rotations of the model and scores each based
-            on bed adhesion, support requirements, print height, and
-            overhang coverage.  Optionally applies the best orientation and
+            Evaluates multiple rotations of the model, ranks them, and
+            reports each candidate's bed contact, support volume, print
+            height and overhang share.  On a plain install the ranking is
+            by bed contact; on Kiln's hosted service Kiln's own scorer
+            ranks them.  Optionally applies the best orientation and
             writes a reoriented STL file.
 
             Args:

@@ -7,6 +7,7 @@ only stdlib math.
 
 from __future__ import annotations
 
+import logging
 import math
 import os
 import struct
@@ -25,6 +26,8 @@ from kiln.printability import (
     _triangle_normal,
 )
 from kiln.untrusted_zip import UntrustedZipFile
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Dataclasses
@@ -214,17 +217,13 @@ def _score_orientation(
     Returns ``(score, support_volume, bed_contact, print_height,
     overhang_pct)``.
 
-    Tiering: free tier uses a single-factor "largest bed contact"
-    ranking — safe, defensible, never picks an unstable orientation.
-    Pro+ unlocks Kiln's curated multi-factor weighted ranking
-    (bed/support/height/overhang) via the ``orientation_scoring``
-    overlay. The four returned facts (volume, contact area, height,
-    overhang %) are identical from both paths — only the ``score``
-    differs.
+    The four geometry facts are measured here and are the same wherever
+    Kiln runs; only ``score`` can differ.  On a plain install the score is
+    the bed-contact percentage, the safe floor: a wide base is the
+    orientation least likely to topple or lift.  Where kiln-pro is present,
+    as on Kiln's hosted service (https://kiln3d.com), Kiln's own scorer
+    ranks the candidates instead.
     """
-    from kiln.design_intelligence import load_pro_overlay_or_empty
-
-    # --- Geometry facts (textbook; identical from both tiers) ---------
     triangles = _translate_to_bed(triangles)
     all_verts: list[tuple[float, ...]] = []
     for tri in triangles:
@@ -244,15 +243,16 @@ def _score_orientation(
     bed_adhesion = _analyze_bed_adhesion(triangles, z_min, bbox)
     supports = _analyze_supports(triangles, z_min)
 
-    # --- Scoring (overlay-driven, safe-default single-factor) ---------
-    overlay = load_pro_overlay_or_empty("orientation_scoring")
-    score = _apply_orientation_scoring(
-        overlay=overlay,
-        bed_contact_pct=bed_adhesion.contact_percentage,
-        support_pct=supports.support_percentage,
-        print_height_mm=print_height,
-        overhang_pct=overhangs.overhang_percentage,
-    )
+    score = _kiln_pro_score({
+        "bed_contact_pct": bed_adhesion.contact_percentage,
+        "bed_contact_area_mm2": bed_adhesion.contact_area_mm2,
+        "support_pct": supports.support_percentage,
+        "support_volume_mm3": supports.estimated_support_volume_mm3,
+        "print_height_mm": print_height,
+        "overhang_pct": overhangs.overhang_percentage,
+    })
+    if score is None:
+        score = float(bed_adhesion.contact_percentage)
 
     return (
         round(score, 1),
@@ -263,46 +263,25 @@ def _score_orientation(
     )
 
 
-def _apply_orientation_scoring(
-    *,
-    overlay: dict,
-    bed_contact_pct: float,
-    support_pct: float,
-    print_height_mm: float,
-    overhang_pct: float,
-) -> float:
-    """Compute an orientation score from raw geometric facts.
+def _kiln_pro_score(facts: dict[str, float]) -> float | None:
+    """Kiln Pro's score for one candidate, or ``None`` for the floor.
 
-    Free path (``overlay`` empty): single-factor "largest bed
-    contact" — bigger base, less likely to topple or lift, no
-    chance of picking a wildly wrong orientation. Returns the
-    bed-contact percentage directly (0..100 scale).
-
-    Pro+ path (``overlay`` populated): weighted multi-factor
-    combination using the curated combination_weights +
-    normalization params from the ``orientation_scoring`` overlay.
+    ``facts`` is everything measured for the candidate.  ``None`` means
+    the caller ranks by bed contact: kiln-pro is not installed, it had no
+    ranking to give for this call, or it failed.  The floor always answers.
     """
-    weights = overlay.get("combination_weights")
-    norm = overlay.get("normalization")
-    if not (weights and norm):
-        # Free-tier safe default. Already 0..100, no scaling needed.
-        return float(bed_contact_pct)
-
-    bed = min(
-        norm["bed_contact"]["cap"],
-        bed_contact_pct * norm["bed_contact"]["multiplier"],
-    )
-    sup = max(0.0, norm["support_volume"]["invert_from"] - support_pct)
-    h_cap = norm["print_height"]["cap"]
-    h_ref = norm["print_height"]["reference_mm"]
-    height = max(0.0, min(h_cap, h_cap - (print_height_mm / h_ref) * h_cap))
-    over = max(0.0, norm["overhang"]["invert_from"] - overhang_pct)
-    return (
-        bed * weights["bed_contact"]
-        + sup * weights["support_volume"]
-        + height * weights["print_height"]
-        + over * weights["overhang"]
-    )
+    try:
+        from kiln_pro.orientation_scoring import score_orientation  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    try:
+        score = score_orientation(facts)
+    except Exception as exc:  # noqa: BLE001 -- the bed-contact floor still answers
+        logger.warning(
+            "kiln-pro orientation scorer failed, ranking by bed contact: %s", exc,
+        )
+        return None
+    return None if score is None else float(score)
 
 
 # ---------------------------------------------------------------------------
