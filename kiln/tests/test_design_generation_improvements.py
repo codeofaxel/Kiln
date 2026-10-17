@@ -4648,6 +4648,56 @@ class TestSmartGenerateFromTemplate:
         assert "fastener_advice" not in result
 
     @patch("kiln.server._check_auth", return_value=None)
+    @patch("kiln.server._get_generation_provider")
+    def test_a_build_whose_preview_rendered_still_comes_back(
+        self, mock_gen, mock_auth, tmp_path, monkeypatch,
+    ):
+        """With kiln-pro installed, generate_from_template attaches its
+        preview and answers [Image, payload].  This tool calls it in-process,
+        so it has to read the payload out of that pair; reading ``.get`` off
+        the pair failed every successful build on the hosted connector
+        ("'list' object has no attribute 'get'", 2026-10-16)."""
+        import sys
+        import types
+
+        from kiln.tool_results import unwrap_tool_result
+
+        class _Image:
+            """Stands in for the inline preview image a client draws."""
+
+        def _attach_inspect_bundle(result, **_kwargs):
+            return [_Image(), result]
+
+        preview_module = types.ModuleType("kiln_pro.plugins.git_render_tools")
+        preview_module.attach_inspect_bundle = _attach_inspect_bundle
+        monkeypatch.setitem(sys.modules, "kiln_pro.plugins.git_render_tools", preview_module)
+
+        stl_path = str(tmp_path / "result.stl")
+        _write_cube_stl(stl_path, 20.0)
+        job = MagicMock()
+        job.status.value = "succeeded"
+        job.error = None
+        job.to_dict.return_value = {"id": "job-1", "status": "succeeded"}
+        download = MagicMock()
+        download.local_path = stl_path
+        download.to_dict.return_value = {"local_path": stl_path}
+        provider = MagicMock()
+        provider.generate.return_value = job
+        provider.download_result.return_value = download
+        mock_gen.return_value = provider
+
+        smart_generate_from_template = _get_plugin_tool(
+            "generation_ai_tools", "smart_generate_from_template",
+        )
+        answered = smart_generate_from_template("phone_stand", material="PETG")
+
+        result = unwrap_tool_result(answered)
+        assert result.get("success") is True, result
+        assert result["stl_path"] == stl_path
+        assert result["structural_analysis"]["grade"] in ("A", "B", "C", "D", "F")
+        assert result["recommended_print_settings"]["perimeters"] >= 1
+
+    @patch("kiln.server._check_auth", return_value=None)
     def test_the_reinforcements_are_made_for_the_printer_and_material_named(
         self, mock_auth, tmp_path,
     ):

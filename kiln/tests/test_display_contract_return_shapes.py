@@ -127,9 +127,17 @@ def _consumption_violations(root: pathlib.Path) -> list[str]:
     TOOL, made inside a function that never references
     ``unwrap_tool_result``, is a violation.  A same-module UNdecorated
     def with the same name is an engine twin, not the tool — skipped.
+
+    A call through a module alias (``_srv.generate_from_template(...)``,
+    the plugin idiom) counts when the alias is imported from the module
+    that defines the tool.  Skipping every attribute call hid exactly
+    that shape: ``smart_generate_from_template`` read ``.get`` off the
+    composite and failed on every successful build (2026-10-17).
     """
-    # Pass 1: composite-capable tool names (decorated, returns a helper).
+    # Pass 1: composite-capable tool names (decorated, returns a helper),
+    # and the module file each is defined in.
     tool_names: set[str] = set()
+    tool_files: dict[str, set[pathlib.Path]] = {}
     for f in sorted(root.rglob("*.py")):
         if "tests" in f.parts or f.name.startswith("test_"):
             continue
@@ -147,6 +155,7 @@ def _consumption_violations(root: pathlib.Path) -> list[str]:
                     n = getattr(r.value.func, "id", getattr(r.value.func, "attr", ""))
                     if n in COMPOSITE_HELPERS:
                         tool_names.add(node.name)
+                        tool_files.setdefault(node.name, set()).add(f)
     # Pass 2: assignments from those names without an unwrap in scope.
     out: list[str] = []
     for f in sorted(root.rglob("*.py")):
@@ -163,6 +172,7 @@ def _consumption_violations(root: pathlib.Path) -> list[str]:
             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
             and not any("mcp.tool" in ast.unparse(d) for d in n.decorator_list)
         }
+        module_aliases = _module_aliases(tree, root)
         for fn in ast.walk(tree):
             if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
@@ -173,15 +183,92 @@ def _consumption_violations(root: pathlib.Path) -> list[str]:
                 if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Call):
                     continue
                 func = node.value.func
-                if not isinstance(func, ast.Name):
-                    continue  # attribute calls (self.x, module.x) resolve elsewhere
-                name = func.id
-                if name in tool_names and name not in top_level_plain and name != fn.name:
-                    out.append(f"{f.relative_to(root)}::{fn.name} assigns from {name} (line {node.lineno})")
+                if isinstance(func, ast.Attribute):
+                    # module.tool(...): a violation only when the alias is
+                    # the module that defines that tool (self.x and engine
+                    # modules sharing a tool's name are not the tool).
+                    if not isinstance(func.value, ast.Name):
+                        continue
+                    module_file = module_aliases.get(func.value.id)
+                    if module_file is None or module_file not in tool_files.get(func.attr, set()):
+                        continue
+                    shown = f"{func.value.id}.{func.attr}"
+                elif isinstance(func, ast.Name):
+                    name = func.id
+                    if name not in tool_names or name in top_level_plain or name == fn.name:
+                        continue
+                    shown = name
+                else:
+                    continue
+                out.append(f"{f.relative_to(root)}::{fn.name} assigns from {shown} (line {node.lineno})")
     return out
 
 
+def _module_aliases(tree: ast.AST, root: pathlib.Path) -> dict[str, pathlib.Path]:
+    """Local names bound to a module inside *root*, mapped to its file.
+
+    Covers ``import kiln.server as _srv`` and ``from kiln import server``
+    wherever they appear (plugins import inside ``register``).
+    """
+    package = root.name
+
+    def _file_for(dotted: str) -> pathlib.Path | None:
+        parts = dotted.split(".")
+        if parts[0] != package:
+            return None
+        base = root.joinpath(*parts[1:])
+        for candidate in (base.with_suffix(".py"), base / "__init__.py"):
+            if candidate.is_file():
+                return candidate
+        return None
+
+    aliases: dict[str, pathlib.Path] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                if a.asname:
+                    found = _file_for(a.name)
+                    if found is not None:
+                        aliases[a.asname] = found
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            for a in node.names:
+                found = _file_for(f"{node.module}.{a.name}")
+                if found is not None:
+                    aliases[a.asname or a.name] = found
+    return aliases
+
+
 class TestInProcessConsumption:
+    def test_a_call_through_the_server_module_alias_is_seen(self, tmp_path):
+        """The gate must be able to fail on the plugin idiom it once skipped."""
+        pkg = tmp_path / "kiln"
+        (pkg / "plugins").mkdir(parents=True)
+        (pkg / "__init__.py").write_text("")
+        (pkg / "server.py").write_text(
+            "@mcp.tool()\n"
+            "def make_part():\n"
+            "    return attach_inspect_bundle({})\n"
+        )
+        (pkg / "plugins" / "caller.py").write_text(
+            "def register(mcp):\n"
+            "    import kiln.server as _srv\n"
+            "    def smart():\n"
+            "        made = _srv.make_part()\n"
+            "        return made.get('result')\n"
+        )
+        hits = _consumption_violations(pkg)
+        assert hits and all("_srv.make_part" in h for h in hits), hits
+
+        (pkg / "plugins" / "caller.py").write_text(
+            "from kiln.tool_results import unwrap_tool_result\n"
+            "def register(mcp):\n"
+            "    import kiln.server as _srv\n"
+            "    def smart():\n"
+            "        made = unwrap_tool_result(_srv.make_part())\n"
+            "        return made.get('result')\n"
+        )
+        assert _consumption_violations(pkg) == []
+
     def test_composite_results_are_unwrapped_before_consumption(self):
         violations = _consumption_violations(SRC)
         assert not violations, (
