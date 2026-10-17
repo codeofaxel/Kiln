@@ -120,9 +120,13 @@ class _MarketplaceToolsPlugin:
 
         # ---------------------------------------------------------------
         # Multi-marketplace unified search
+        #
+        # The search, browse and detail tools are open-world: they read
+        # public model sites Kiln does not own, so each says so
+        # (open_world=True) rather than leaving a host to guess.
         # ---------------------------------------------------------------
 
-        @mcp.tool(annotations=read_only("Search all marketplaces"))
+        @mcp.tool(annotations=read_only("Search all marketplaces", open_world=True))
         def search_all_models(
             query: str,
             page: int = 1,
@@ -208,7 +212,7 @@ class _MarketplaceToolsPlugin:
         # Thingiverse-specific tools
         # ---------------------------------------------------------------
 
-        @mcp.tool(annotations=read_only("Search Thingiverse"))
+        @mcp.tool(annotations=read_only("Search Thingiverse", open_world=True))
         def search_models(
             query: str,
             page: int = 1,
@@ -252,7 +256,7 @@ class _MarketplaceToolsPlugin:
                 logger.exception("Unexpected error in search_models")
                 return _error_dict(f"Unexpected error in search_models: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool(annotations=read_only("Get model details"))
+        @mcp.tool(annotations=read_only("Get model details", open_world=True))
         def model_details(thing_id: int) -> dict:
             """Get full details for a Thingiverse model.
 
@@ -564,7 +568,7 @@ class _MarketplaceToolsPlugin:
                 logger.exception("Unexpected error in download_model")
                 return _error_dict(f"Unexpected error in download_model: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool(annotations=read_only("Browse marketplace models"))
+        @mcp.tool(annotations=read_only("Browse marketplace models", open_world=True))
         def browse_models(
             browse_type: str = "popular",
             page: int = 1,
@@ -615,7 +619,7 @@ class _MarketplaceToolsPlugin:
                 logger.exception("Unexpected error in browse_models")
                 return _error_dict(f"Unexpected error in browse_models: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool(annotations=read_only("List model categories"))
+        @mcp.tool(annotations=read_only("List model categories", open_world=True))
         def list_model_categories() -> dict:
             """List available Thingiverse content categories.
 
