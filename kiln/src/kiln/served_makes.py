@@ -67,7 +67,7 @@ _KIND_SUFFIX = {"stl": ".stl", "3mf": ".3mf", "obj": ".obj", "step": ".step"}
 _SENDABLE_FILE_TYPES = (
     _SENDABLE_MODEL_TYPES
     | _SENDABLE_IMAGE_TYPES
-    | frozenset({".gcode", ".gco", ".g", ".step", ".stp", ".pdf", ".dxf", ".mtl", ".json"})
+    | frozenset({".gcode", ".gco", ".g", ".step", ".stp", ".pdf", ".dxf", ".mtl", ".json", ".ini"})
 )
 _GCODE_TYPES = frozenset({".gcode", ".gco", ".g"})
 #: The largest G-code sent, before compressing, and the most of anything

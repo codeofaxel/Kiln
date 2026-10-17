@@ -226,11 +226,29 @@ class TestSend:
         assert uploads == []
 
     def test_a_kind_of_file_the_servers_do_not_take_is_said_plainly(self, wire, tmp_path):
-        ini = _file(tmp_path, "profile.ini", b"[print]\n")
+        blend = _file(tmp_path, "part.blend", b"BLENDER-v300")
         _kwargs, refusal = served_makes.send_inputs(
-            "decorate_during_print", {"gcode_path": ini}, MID_PRINT,
+            "decorate_during_print", {"gcode_path": blend}, MID_PRINT,
         )
-        assert refusal["code"] == "FILE_KIND_NOT_SENT" and ".ini" in refusal["error"]
+        assert refusal["code"] == "FILE_KIND_NOT_SENT" and ".blend" in refusal["error"]
+
+    def test_a_prusaslicer_profile_goes_up(self, wire, tmp_path):
+        """PrusaSlicer keeps a filament profile as a flat ``.ini``; the
+        calibration grader on Kiln's servers reads it (2026-10-17: only
+        OrcaSlicer and Bambu Studio's ``.json`` profiles could be sent)."""
+        uploads, _ = wire
+        ini = _file(tmp_path, "PLA.ini", b"filament_type = PLA\nextrusion_multiplier = 0.98\n")
+        kwargs, refusal = served_makes.send_inputs(
+            "import_third_party_calibration",
+            {"tool_name": "prusaslicer", "config_path": ini},
+            {"files": {"config_path": "one"}},
+        )
+        assert refusal is None
+        assert kwargs == {
+            "tool_name": "prusaslicer",
+            "file_tokens": {"config_path": {"token": "file-token-00000001xxxxxx", "name": "PLA.ini"}},
+        }
+        assert uploads[0]["data"] == b"filament_type = PLA\nextrusion_multiplier = 0.98\n"
 
     def test_a_refused_upload_stops_the_call_with_the_servers_words(self, wire, tmp_path, monkeypatch):
         import httpx
