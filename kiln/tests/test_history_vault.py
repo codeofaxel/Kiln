@@ -447,6 +447,46 @@ class TestARefusalIsAnError:
         assert vault.branches("mug") == []
 
 
+class TestAReleasePush:
+    def test_a_release_kept_here_is_sent_whole_to_its_designs_route(self, home, monkeypatch):
+        _library(home, "mug", [MESH_V1])
+        vault = _vault(home)
+        vault.sync_from_library("mug")
+        record = {
+            "release_id": "r1", "design_id": "mug", "version_id": "v1", "name": "1.0.0",
+            "naming_scheme": "semver", "manifest": {"release_name": "1.0.0"},
+            "signature_b64": "c2ln", "public_key_pem": "-----BEGIN PUBLIC KEY-----", "signed_at": 5.0,
+            "signed_by": None, "status": "active",
+        }
+        vault._put_release(record)
+        vault._conn.commit()
+        vault.close()
+        sent = {}
+        monkeypatch.setattr(courier, "_request", lambda tool, method, path, body=None: sent.update(path=path, body=body) or {})
+        answer = courier.run_local("cloud_push_release", "release_push", {"release_id": "r1"})
+        assert answer["status"] == "success"
+        assert sent["path"] == "/api/cloud/designs/mug/releases/push"
+        assert sent["body"] == {k: record[k] for k in courier._RELEASE_PUSH_FIELDS}
+
+    def test_a_release_this_computer_does_not_have_sends_nothing(self, home, monkeypatch):
+        monkeypatch.setattr(courier, "_request", lambda *a, **k: pytest.fail("nothing should be sent"))
+        assert courier.push_release("cloud_push_release", "nope")["code"] == "RELEASE_NOT_FOUND"
+
+
+def test_the_couriers_are_the_cli_only_without_kiln_pro():
+    import click
+
+    from kiln.cli.history_commands import register_history_cli
+
+    root = click.Group("kiln")
+    register_history_cli(root)
+    assert {"branch", "merge", "release", "cloud"} <= set(root.commands)
+    assert "push" in root.commands["cloud"].commands["release"].commands
+    taken = click.Group("kiln", commands={"release": click.Group("release")})
+    register_history_cli(taken)
+    assert taken.commands["release"].commands == {}  # an existing group is left as it is
+
+
 class TestTheStubCarriesTheRecords:
     def test_a_served_history_stub_sends_records_and_keeps_what_comes_back(self, home, tmp_path, monkeypatch):
         from kiln import server

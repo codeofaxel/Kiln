@@ -1,4 +1,4 @@
-"""``kiln branch / merge / cloud / release`` on a computer without kiln-pro.
+"""``kiln branch / merge / release / cloud`` on a computer without kiln-pro.
 
 Each command is a courier: it sends the design's history records from this
 computer (:mod:`kiln.history_vault`) with a call to Kiln's servers, which do
@@ -273,9 +273,104 @@ def cloud_list_branches(design_id: str, json_mode: bool) -> None:
     _finish(answer, json_mode, lambda a: "\n".join(b.get("name", "") for b in a.get("branches") or []) or "(none)")
 
 
+@cloud_group.group("release")
+def cloud_release_group() -> None:
+    """Signed releases in your Kiln account."""
+
+
+@cloud_release_group.command("push")
+@click.argument("release_id")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def cloud_release_push(release_id: str, json_mode: bool) -> None:
+    """Push signed release RELEASE_ID from this computer to your Kiln account."""
+    from kiln.history_courier import push_release
+
+    answer = push_release("cloud_push_release", release_id)
+    _finish(answer, json_mode, lambda a: (
+        f"Pushed release {release_id} to your Kiln account; anyone with the "
+        f"release can check it at kiln3d.com/verify."
+    ))
+
+
+@cloud_release_group.command("list")
+@click.argument("design_id")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def cloud_release_list(design_id: str, json_mode: bool) -> None:
+    """The signed releases of DESIGN_ID in your Kiln account."""
+    from kiln.history_courier import remote_releases
+
+    answer = remote_releases("cloud_list_remote_releases", design_id)
+    _finish(answer, json_mode, lambda a: "\n".join(
+        f"{r.get('name', ''):16s} {r.get('release_id', '')}" for r in a.get("releases") or []
+    ) or "(none)")
+
+
+# ---------------------------------------------------------------------------
+# kiln release
+# ---------------------------------------------------------------------------
+
+
+@click.group("release")
+def release_group() -> None:
+    """Signed, tamper-evident releases of a design (Kiln Pro)."""
+
+
+@release_group.command("sign")
+@click.argument("design_id")
+@click.argument("version_id")
+@click.argument("name")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def release_sign(design_id: str, version_id: str, name: str, json_mode: bool) -> None:
+    """Sign VERSION_ID of DESIGN_ID as release NAME, with the key Kiln holds for your account."""
+    answer = _served("sign_design_release", design_id=design_id, version_id=version_id, name=name)
+    _finish(answer, json_mode, lambda a: (
+        f"Signed {design_id} {name} ({(a.get('release') or {}).get('release_id', '')}). "
+        "Kept on this computer; `kiln cloud release push` puts it in your account."
+    ))
+
+
+@release_group.command("verify")
+@click.argument("release_id")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def release_verify(release_id: str, json_mode: bool) -> None:
+    """Check release RELEASE_ID's signature, and that Kiln's key for your account made it."""
+    answer = _served("verify_design_release", release_id=release_id)
+
+    def say(a: dict[str, Any]) -> str:
+        verdict = "valid" if a.get("valid") else "NOT valid"
+        return f"Release {release_id}: {verdict}" + (f" ({a.get('reason')})" if a.get("reason") else "")
+
+    _finish(answer, json_mode, say)
+    if isinstance(answer, dict) and answer.get("valid") is False:
+        sys.exit(1)
+
+
+@release_group.command("list")
+@click.argument("design_id")
+@click.option("--all", "include_retired", is_flag=True, help="Include retired releases.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def release_list(design_id: str, include_retired: bool, json_mode: bool) -> None:
+    """The signed releases of DESIGN_ID on this computer."""
+    answer = _served("list_design_releases", design_id=design_id, include_retired=include_retired)
+    _finish(answer, json_mode, lambda a: "\n".join(
+        f"{r.get('name', ''):16s} {r.get('release_id', '')} {r.get('status', '')}"
+        for r in a.get("releases") or []
+    ) or "(no releases)")
+
+
+@release_group.command("retire")
+@click.argument("release_id")
+@click.option("--reason", default="", help="Why it is retired.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def release_retire(release_id: str, reason: str, json_mode: bool) -> None:
+    """Retire release RELEASE_ID: kept for the record, its name no longer resolves."""
+    answer = _served("retire_design_release", release_id=release_id, reason=reason)
+    _finish(answer, json_mode, lambda a: f"Retired release {release_id}.")
+
+
 def register_history_cli(cli_group: click.Group) -> None:
     """Attach the design-history couriers.  Only for an install without kiln-pro."""
-    for group in (branch_group, merge_group, cloud_group):
+    for group in (branch_group, merge_group, release_group, cloud_group):
         if group.name not in cli_group.commands:
             cli_group.add_command(group)
 

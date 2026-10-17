@@ -350,6 +350,48 @@ def remote_branches(tool: str, design_id: str) -> dict[str, Any]:
     return {"status": "success", "design_id": design_id, "branches": branches or []}
 
 
+#: The fields of a release row the cloud release push takes.
+_RELEASE_PUSH_FIELDS = (
+    "release_id", "version_id", "name", "naming_scheme", "manifest",
+    "signature_b64", "public_key_pem", "signed_at", "signed_by",
+)
+
+
+def push_release(tool: str, release_id: str, *, vault: Any = None) -> dict[str, Any]:
+    """Send one signed release from this computer's records to the person's account."""
+    from kiln.history_vault import HistoryVault
+
+    own = vault is None
+    vault = vault or HistoryVault()
+    try:
+        row = vault._conn.execute(
+            "SELECT design_id, record FROM releases WHERE release_id = ?", (release_id,)
+        ).fetchone()
+    finally:
+        if own:
+            vault.close()
+    if row is None:
+        return _refused(tool, "RELEASE_NOT_FOUND", f"No release {release_id} on this computer.")
+    import json
+
+    record = json.loads(row["record"])
+    body = {k: record.get(k) for k in _RELEASE_PUSH_FIELDS}
+    design_id = str(row["design_id"])
+    answer = _request(tool, "POST", f"/api/cloud/designs/{_quote(design_id)}/releases/push", body)
+    if answer.get("status") == "error":
+        return answer
+    return {"status": "success", "release_id": release_id, "design_id": design_id, "push": answer}
+
+
+def remote_releases(tool: str, design_id: str) -> dict[str, Any]:
+    """The signed releases of a design in the person's Kiln account."""
+    answer = _request(tool, "GET", f"/api/cloud/designs/{_quote(design_id)}/releases")
+    if answer.get("status") == "error":
+        return answer
+    releases = answer.get("items") if "items" in answer else answer.get("releases", [])
+    return {"status": "success", "design_id": design_id, "releases": releases or []}
+
+
 def run_local(tool: str, mode: str, kwargs: dict[str, Any]) -> dict[str, Any]:
     """Run the cloud door *mode* for a stub of *tool* on this computer."""
     remote = kwargs.get("remote") or "default"
@@ -358,9 +400,16 @@ def run_local(tool: str, mode: str, kwargs: dict[str, Any]) -> dict[str, Any]:
             tool, "REMOTE_NOT_AVAILABLE",
             "This install pushes to and pulls from your Kiln account only.",
         )
+    if mode == "release_push":
+        release_id = str(kwargs.get("release_id") or "")
+        if not release_id:
+            return _refused(tool, "INVALID_INPUT", "release_id is required.")
+        return push_release(tool, release_id)
     design_id = str(kwargs.get("design_id") or "")
     if not design_id:
         return _refused(tool, "INVALID_INPUT", "design_id is required.")
+    if mode == "remote_releases":
+        return remote_releases(tool, design_id)
     if mode == "push":
         return push(tool, design_id, kwargs.get("branch_id") or None)
     if mode == "pull":
@@ -382,8 +431,10 @@ __all__ = [
     "designs_for_call",
     "pull",
     "push",
+    "push_release",
     "records_for_call",
     "remote_branches",
+    "remote_releases",
     "run_local",
     "take_delta",
 ]
