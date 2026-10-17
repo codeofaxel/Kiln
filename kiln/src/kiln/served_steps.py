@@ -63,6 +63,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from kiln import callers_printers
+
 logger = logging.getLogger(__name__)
 
 #: What a served tool answers when it needs a step done first.
@@ -193,7 +195,7 @@ _FACTS_EXTRAS = frozenset({"klipper_config", "job", "every_job", "telemetry", "h
 _FACTS_DEADLINE_S = 8.0
 #: How many printers are asked at once for a fleet-wide read.
 _FACTS_WORKERS = 8
-_UNNAMED = frozenset({"", "default", "active"})
+_UNNAMED = callers_printers.UNNAMED
 
 
 def _facts_target(asked: str, entries: dict[str, Any], default: str) -> str:

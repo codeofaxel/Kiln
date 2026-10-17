@@ -28,7 +28,8 @@ _facts: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
     "kiln_callers_printers", default=None,
 )
 
-_UNNAMED = frozenset({"", "default", "active"})
+#: Names that name no printer in particular: the caller's default is meant.
+UNNAMED = frozenset({"", "default", "active"})
 
 
 @contextlib.contextmanager
@@ -70,7 +71,7 @@ def printer(name: str | None) -> dict[str, Any] | None:
     ``None`` when it names none of them."""
     listed = printers()
     asked = str(name or "").strip()
-    if asked.lower() not in _UNNAMED:
+    if asked.lower() not in UNNAMED:
         for key in ("name", "model"):
             chosen = [p for p in listed if str(p.get(key) or "") == asked]
             if len(chosen) == 1:
@@ -98,4 +99,4 @@ def nozzle_setting_mm(name: str | None) -> float | None:
     return float(value)
 
 
-__all__ = ["known", "machines", "model_of", "nozzle_setting_mm", "printer", "printers", "serving"]
+__all__ = ["UNNAMED", "known", "machines", "model_of", "nozzle_setting_mm", "printer", "printers", "serving"]

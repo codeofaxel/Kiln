@@ -191,6 +191,13 @@ class TestTheCallersPrinterGoesWithTheCall:
         assert shop == ["garage"]
         assert not {"10.0.0.9", "12345678", "voron.local"} & set(json.dumps(sent).split('"'))
 
+    def test_a_call_that_states_its_nozzle_does_not_read_the_printers(self, servers, part, shop):
+        servers.answer = {"success": True, "report": {}}
+        _call("analyze_printability", file_path=str(part), printer_id="garage", nozzle_diameter=0.8)
+        printers = servers.calls[0][1]["step_results"]["printer_facts"]["data"]["printers"]
+        assert shop == [] and not any("nozzle_setting_mm" in p for p in printers)
+        assert {p["name"]: p["model"] for p in printers}["garage"] == "voron_2"
+
     def test_an_unnamed_call_reads_the_default_printer(self, servers, part, shop):
         servers.answer = {"success": True, "report": {}}
         _call("analyze_printability", file_path=str(part))

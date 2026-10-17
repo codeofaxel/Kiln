@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-17T20:18:30.731337+00:00",
+  "generated": "2026-10-17T21:06:18.562948+00:00",
   "tool_count": 415,
   "categories": {
     "product_generators": {
@@ -24259,7 +24259,10 @@
             ]
           }
         ],
-        "printer_param": "printer_id"
+        "printer_param": "printer_id",
+        "nozzle_params": [
+          "nozzle_mm"
+        ]
       },
       "add_mesh_fillet": {
         "inputs": {
@@ -24278,7 +24281,10 @@
             ]
           }
         ],
-        "printer_param": "printer_id"
+        "printer_param": "printer_id",
+        "nozzle_params": [
+          "nozzle_mm"
+        ]
       },
       "analyze_printability": {
         "inputs": {
@@ -24294,7 +24300,10 @@
             ]
           }
         ],
-        "printer_param": "printer_id"
+        "printer_param": "printer_id",
+        "nozzle_params": [
+          "nozzle_diameter"
+        ]
       },
       "apply_design_reinforcements": {
         "inputs": {
@@ -24313,7 +24322,10 @@
             ]
           }
         ],
-        "printer_param": "printer_id"
+        "printer_param": "printer_id",
+        "nozzle_params": [
+          "nozzle_mm"
+        ]
       },
       "check_print_readiness": {
         "inputs": {

@@ -69,6 +69,7 @@ from pathlib import Path
 from types import MethodType
 from typing import Any
 
+from kiln import callers_printers
 from kiln import tool_context as _tool_context
 from kiln.mcp_compat import (
     FastMCP,
@@ -19014,7 +19015,7 @@ def _served_bearer() -> tuple[str, str | None]:
     if resolved.token:
         return resolved.token, None
     if resolved.state == "needs_signin":
-        return "", resolved.detail
+        return "", str(resolved.detail or "")
     return "", None
 
 
@@ -19336,7 +19337,7 @@ def _await_served_job(
     return envelope_for_http(tool_name, 504, too_long, kind=kind)
 
 
-_UNNAMED_PRINTER = frozenset({"", "default", "active"})
+_UNNAMED_PRINTER = callers_printers.UNNAMED
 
 
 def _with_local_printer(kwargs: dict, inputs: dict | None) -> dict:

@@ -16,8 +16,9 @@ under ``~/.kiln/served/files``, with their paths on this computer in the
 answer.  The answer is otherwise the servers' own, word for word.  A tool
 that answers for one of this computer's printers (the manifest names it
 ``reads_first``) first reads what its printers ARE -- name, model, the
-nozzle size the printer reports -- and sends that with the call, never an
-address or a credential (:func:`kiln.served_steps.read_first`).
+nozzle size the printer reports, unless the call states one -- and sends
+that with the call, never an address or a credential
+(:func:`kiln.served_steps.read_first`).
 
 Signed out, offline, or turned away, the tool runs on this computer
 instead, and the first such answer for each of the four causes
@@ -154,6 +155,13 @@ def _read_first(
 
     param = entry.get("printer_param")
     asked = arguments.get(param) if isinstance(param, str) else None
+    if any(_a_size(arguments.get(p)) for p in entry.get("nozzle_params") or [] if isinstance(p, str)):
+        # The call states its nozzle; the printer's own setting would lose.
+        reads = [
+            dict(read, want=[w for w in read.get("want") or [] if w != "nozzle"])
+            if isinstance(read, dict) else read
+            for read in reads
+        ]
     facts, refusal = served_steps.read_first(
         name, reads, printer_name=str(asked or ""), call=arguments,
     )
@@ -162,6 +170,11 @@ def _read_first(
         # No printer set up here: nothing to say about one.
         facts.pop("printer_facts", None)
     return facts, refusal
+
+
+def _a_size(value: Any) -> bool:
+    """Whether *value* states a size: a positive number."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
 
 
 def _in_their_words(miss: Any, answer: Any) -> Any:
