@@ -318,6 +318,26 @@ def test_a_part_declaring_an_encoding_kiln_cannot_count_is_refused(tmp_path):
     assert counted is not None and counted > mesh_frame.MAX_MESH_ENTRIES
 
 
+@pytest.mark.parametrize("encoding", ["utf-16-le", "utf-16-be"])
+def test_a_wide_part_with_no_bom_at_all_is_refused(tmp_path, encoding):
+    """The nastiest of the three: UTF-16LE with no BOM OPENS with ``<``, so
+    a check for "does it start with a tag" says countable -- and its second
+    byte is a NUL, so the byte pattern matches none of its elements.  Both
+    halves of the check are load-bearing, and each was tried alone first.
+    """
+    model = (
+        "<model><triangles>"
+        + '<triangle v1="0" v2="1" v3="2"/>' * 2000
+        + "</triangles></model>"
+    ).encode(encoding)
+    path = tmp_path / f"{encoding}.3mf"
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", _CT)
+        z.writestr("3D/3dmodel.model", model)
+    counted = mesh_frame.declared_mesh_entries(str(path))
+    assert counted is not None and counted > mesh_frame.MAX_MESH_ENTRIES
+
+
 def test_an_ordinary_utf8_3mf_with_a_bom_is_still_counted(tmp_path):
     """A UTF-8 BOM is still UTF-8 -- refusing it would turn away real
     files written by editors that add one."""
