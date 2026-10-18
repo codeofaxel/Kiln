@@ -243,6 +243,65 @@ def test_a_3mf_the_archive_guard_refuses_is_refused_here_too(tmp_path):
         mesh_frame.load_mesh(str(path), force="mesh")
 
 
+def test_a_face_continued_over_many_lines_is_counted_whole(tmp_path):
+    """A line ending in a backslash continues, and a reader joins them --
+    measured 2026-10-18: trimesh reads a backslash-continued face as the
+    whole face.  So one face may be spread over a thousand lines, and
+    finishing the line at each newline counted only its first part."""
+    path = tmp_path / "continued.obj"
+    corners = mesh_frame.MAX_MESH_ENTRIES + 10
+    with open(path, "wb") as fh:
+        fh.write(b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf")
+        for _ in range(corners // 100 + 10):
+            fh.write(b" 1" * 100 + b" \\\n")
+        fh.write(b"\n")
+    counted = mesh_frame.declared_mesh_entries(str(path))
+    assert counted is not None and counted > mesh_frame.MAX_MESH_ENTRIES
+    with pytest.raises(mesh_frame.MeshTooLargeError):
+        mesh_frame.load_mesh(str(path), force="mesh")
+
+
+def test_a_short_continued_face_still_loads(tmp_path):
+    """The real reason continuations exist: a tidy exporter wrapping a long
+    face.  It must still load."""
+    path = tmp_path / "wrapped.obj"
+    path.write_bytes(
+        b"v 0 0 0\nv 1 0 0\nv 0 1 0\nv 1 1 0\nf 1 2 \\\n3 4\n"
+    )
+    assert mesh_frame.declared_mesh_entries(str(path)) == 4 + 2
+    assert len(mesh_frame.load_mesh(str(path), force="mesh").faces) == 2
+
+
+def test_a_3mf_written_in_utf16_is_refused(tmp_path):
+    """The census reads bytes, and UTF-16 spells ``<vertex`` as
+    ``<\\x00v\\x00...``: a byte pattern matches none of it while the reader
+    decodes it and reads every element.  So it refuses rather than counting
+    nothing and calling that none."""
+    model = (
+        '<?xml version="1.0" encoding="UTF-16"?><model><triangles>'
+        + '<triangle v1="0" v2="1" v3="2"/>' * 2000
+        + "</triangles></model>"
+    ).encode("utf-16")
+    path = tmp_path / "wide.3mf"
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", _CT)
+        z.writestr("3D/3dmodel.model", model)
+    counted = mesh_frame.declared_mesh_entries(str(path))
+    assert counted is not None and counted > mesh_frame.MAX_MESH_ENTRIES
+
+
+def test_an_ordinary_utf8_3mf_with_a_bom_is_still_counted(tmp_path):
+    """A UTF-8 BOM is still UTF-8 -- refusing it would turn away real
+    files written by editors that add one."""
+    path = _three_mf(tmp_path / "bom.3mf", vertices=3, triangles=3)
+    with zipfile.ZipFile(path) as z:
+        model = z.read("3D/3dmodel.model")
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", _CT)
+        z.writestr("3D/3dmodel.model", b"\xef\xbb\xbf" + model)
+    assert mesh_frame.declared_mesh_entries(str(path)) == 6
+
+
 def test_a_corrupt_3mf_is_left_to_the_reader(tmp_path):
     """Not every unreadable archive is an oversized one: a corrupt file
     fails cheaply in the reader, with the reader's own wording, and must not

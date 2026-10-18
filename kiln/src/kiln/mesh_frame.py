@@ -86,8 +86,43 @@ _MESH_ELEMENT_RE = re.compile(rb"[<:](?:vertex|triangle)[\s/>]")
 _MESH_ELEMENT_MAX = 1 + len("triangle") + 1
 
 
+#: How much of an XML part is read to see what it is written in.
+_ENCODING_WINDOW = 256
+
+#: Byte orders a BOM announces that this census cannot read.
+_WIDE_BOMS = (b"\xff\xfe", b"\xfe\xff", b"\x00\x00\xfe\xff", b"\xff\xfe\x00\x00")
+
+#: The ``encoding="..."`` of an XML declaration.
+_XML_ENCODING_RE = re.compile(rb"""encoding\s*=\s*["']([\w.\-]+)["']""", re.I)
+
+#: What the byte census can read: ASCII's own spellings, where an element
+#: name is the same bytes as its text.
+_BYTE_ENCODINGS = frozenset({"utf-8", "utf8", "us-ascii", "ascii"})
+
+
+def _counts_as_utf8(opening: bytes) -> bool:
+    """Whether *opening* is XML this census can count by its bytes.
+
+    A part in UTF-16 spells ``<vertex`` as ``<\\x00v\\x00e\\x00...``, which a
+    byte pattern cannot match while the reader decodes it and reads every
+    element -- so the census has to know it cannot count, rather than
+    counting nothing and calling that none.
+    """
+    if opening.startswith(_WIDE_BOMS):
+        return False
+    if opening.startswith(b"\xef\xbb\xbf"):  # a UTF-8 BOM is still UTF-8
+        return True
+    found = _XML_ENCODING_RE.search(opening)
+    if found is None:
+        # No declaration: XML's own default is UTF-8.  A wide encoding
+        # without a BOM is not well-formed XML, and a reader that guesses
+        # one anyway would also fail on the elements.
+        return b"\x00" not in opening[:64]
+    return found.group(1).decode("ascii", "ignore").lower() in _BYTE_ENCODINGS
+
+
 def _count_matches(fh: Any, pattern: re.Pattern[bytes], ceiling: int,
-                   overlap: int) -> int:
+                   overlap: int, opening: bytes = b"") -> int:
     """How many times *pattern* matches in the rest of *fh*, counted a chunk
     at a time and stopped once *ceiling* is passed.
 
@@ -97,8 +132,9 @@ def _count_matches(fh: Any, pattern: re.Pattern[bytes], ceiling: int,
     """
     total = 0
     tail = b""
+    first = opening
     while True:
-        chunk = fh.read(_CENSUS_CHUNK)
+        chunk, first = (first, b"") if first else (fh.read(_CENSUS_CHUNK), b"")
         if not chunk:
             return total
         window = tail + chunk
@@ -166,6 +202,7 @@ def _census_obj(fh: Any, ceiling: int) -> int:
     head = b""                  # its first bytes, when a chunk split them
     corners = 0                 # words seen so far on a face line
     mid_word = False            # the last chunk ended inside a word
+    line_last = b""             # last byte of the line in progress
 
     while True:
         chunk = fh.read(_LINE_CHUNK)
@@ -174,11 +211,26 @@ def _census_obj(fh: Any, ceiling: int) -> int:
         pieces = chunk.split(b"\n")
         for index, piece in enumerate(pieces):
             if index:
-                # A newline ended the line before this one.
-                total += _entries_for_line(kind or b"?", corners)
-                if total > ceiling:
-                    return total
-                kind, head, corners, mid_word = None, b"", 0, False
+                # A newline ended the line before this one -- unless that
+                # line ended in a backslash, which continues it.  A reader
+                # joins those, so one face may be spread over a thousand
+                # lines (measured 2026-10-18: trimesh reads a
+                # backslash-continued face as the whole face), and
+                # finishing the line here counted only its first part.
+                #
+                # Decided from the last byte of the line WHEREVER it fell:
+                # reading it off this chunk's pieces meant a line split
+                # across a chunk boundary was judged on half of itself.
+                if line_last == b"\\":
+                    mid_word = False  # the mark separates the two halves
+                else:
+                    total += _entries_for_line(kind or b"?", corners)
+                    if total > ceiling:
+                        return total
+                    kind, head, corners, mid_word = None, b"", 0, False
+                line_last = b""
+            stripped = piece.rstrip(b"\r")
+            line_last = stripped[-1:] or line_last
             if kind is None:
                 probe = head + piece
                 if len(probe) < 2 and index == len(pieces) - 1:
@@ -189,11 +241,18 @@ def _census_obj(fh: Any, ceiling: int) -> int:
                     continue
             elif kind != b"f":
                 continue
-            words = len(piece.split())
-            if mid_word and piece[:1] and not piece[:1].isspace():
+            # What is left of this piece after the keyword, without the
+            # trailing backslash, which is the continuation mark and not a
+            # corner.  Taken from ``piece`` and not ``stripped``, because a
+            # face's FIRST piece has had its keyword removed above.
+            counted = piece.rstrip(b"\r")
+            if counted.endswith(b"\\"):
+                counted = counted[:-1]
+            words = len(counted.split())
+            if mid_word and counted[:1] and not counted[:1].isspace():
                 words -= 1  # one word straddled the chunk boundary
             corners += max(0, words)
-            mid_word = bool(piece) and not piece[-1:].isspace()
+            mid_word = bool(counted) and not counted[-1:].isspace()
             if corners - 2 > ceiling:
                 return corners
     return total + _entries_for_line(kind or b"?", corners)
@@ -222,8 +281,17 @@ def _census_3mf(path: str, ceiling: int) -> int | None:
                     # declares more than the budget either way.
                     return ceiling + 1
                 with zf.open(info) as fh:
+                    opening = fh.read(_ENCODING_WINDOW)
+                    if not _counts_as_utf8(opening):
+                        # The census reads bytes; a part in some other
+                        # encoding spells its elements in bytes this cannot
+                        # match (``<\x00v\x00`` in UTF-16), while the
+                        # reader decodes it and reads every one.  Refuse
+                        # rather than count nothing: a real 3MF is UTF-8.
+                        return ceiling + 1
                     total += _count_matches(
                         fh, _MESH_ELEMENT_RE, ceiling, _MESH_ELEMENT_MAX,
+                        opening=opening,
                     )
                 if total > ceiling:
                     return total
