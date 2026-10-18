@@ -151,12 +151,46 @@ def test_one_face_line_of_millions_of_corners_is_refused(tmp_path):
         mesh_frame.load_mesh(str(path), force="mesh")
 
 
-def test_a_face_line_separated_by_tabs_is_still_a_face(tmp_path):
-    """``f\\t1 2 3`` is a face to every reader, and was not to a census that
-    looked for ``f`` and a space."""
-    path = tmp_path / "tabs.obj"
-    path.write_bytes(b"v 0 0 0\nv 1 0 0\nv 0 1 0\n" + b"f\t1 2 3\n" * 7)
+@pytest.mark.parametrize("gap", [b" ", b"\t", b"\x0c", b"\x0b", b"  "])
+def test_a_face_is_a_face_however_it_is_separated(tmp_path, gap):
+    """``f`` and then ANY separator is a face to a reader that splits on
+    whitespace.  A census looking for ``f`` and a space disagreed with the
+    reader, which is this whole class of bug."""
+    path = tmp_path / "gap.obj"
+    path.write_bytes(b"v 0 0 0\nv 1 0 0\nv 0 1 0\n" + (b"f" + gap + b"1 2 3\n") * 7)
     assert mesh_frame.declared_mesh_entries(str(path)) == 3 + 7
+
+
+@pytest.mark.parametrize("keyword", [b"vn", b"vt", b"vp"])
+def test_a_normal_or_texture_coordinate_is_not_a_vertex(tmp_path, keyword):
+    """``vn`` / ``vt`` / ``vp`` are longer keywords, not geometric
+    vertices -- counting them would refuse real files."""
+    path = tmp_path / "kw.obj"
+    path.write_bytes(b"v 0 0 0\n" + (keyword + b" 0 0 1\n") * 50)
+    assert mesh_frame.declared_mesh_entries(str(path)) == 1
+
+
+def test_a_3mf_with_a_long_namespace_prefix_is_still_counted(tmp_path):
+    """Bounding the prefix length in the pattern meant a longer prefix than
+    the bound walked past the census.  Counted on the character before the
+    element's own name instead, so the prefix may be any length."""
+    prefix = b"n" * 70  # longer than the 63 the pattern used to allow
+    path = tmp_path / "longprefix.3mf"
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+        z.writestr("[Content_Types].xml", _CT)
+        with z.open("3D/3dmodel.model", "w", force_zip64=True) as fh:
+            fh.write(
+                b'<?xml version="1.0"?><' + prefix + b":model><" + prefix
+                + b":triangles>"
+            )
+            tri = b"<" + prefix + b':triangle v1="0" v2="1" v3="2"/>'
+            for _ in range(6_100):
+                fh.write(tri * 1000)
+            fh.write(b"</" + prefix + b":triangles></" + prefix + b":model>")
+    counted = mesh_frame.declared_mesh_entries(str(path))
+    assert counted is not None and counted > mesh_frame.MAX_MESH_ENTRIES
+    with pytest.raises(mesh_frame.MeshTooLargeError):
+        mesh_frame.load_mesh(str(path), force="mesh")
 
 
 def test_a_3mf_using_a_namespace_prefix_is_refused(tmp_path):
@@ -182,6 +216,40 @@ def test_a_3mf_using_a_namespace_prefix_is_refused(tmp_path):
             )
     with pytest.raises(mesh_frame.MeshTooLargeError):
         mesh_frame.load_mesh(str(path), force="mesh")
+
+
+def test_a_3mf_the_archive_guard_refuses_is_refused_here_too(tmp_path):
+    """An archive declaring more than Kiln's ZIP guard unpacks used to make
+    the census answer "not counted" -- and trimesh reads a 3MF with plain
+    ``zipfile``, which has no such guard, so the reader was handed exactly
+    the archive the guard had just turned away."""
+    path = tmp_path / "enormous.3mf"
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+        z.writestr("[Content_Types].xml", _CT)
+        with z.open("3D/3dmodel.model", "w", force_zip64=True) as fh:
+            fh.write(_MODEL_HEAD)
+            one = b'<vertex x="1.5" y="2.5" z="3.5"/>'
+            for _ in range(40_000):  # declares well over the guard's ceiling
+                fh.write(one * 1000)
+            fh.write(b"</vertices><triangles>" + _MODEL_TAIL)
+
+    from kiln.untrusted_zip import UntrustedArchiveError
+
+    from kiln.threemf_parser import open_untrusted_zip
+
+    with pytest.raises(UntrustedArchiveError), open_untrusted_zip(str(path)):
+        pass  # the guard refuses it on the way in
+    with pytest.raises(mesh_frame.MeshTooLargeError):
+        mesh_frame.load_mesh(str(path), force="mesh")
+
+
+def test_a_corrupt_3mf_is_left_to_the_reader(tmp_path):
+    """Not every unreadable archive is an oversized one: a corrupt file
+    fails cheaply in the reader, with the reader's own wording, and must not
+    be reported as too large."""
+    path = tmp_path / "corrupt.3mf"
+    path.write_bytes(b"PK\x03\x04" + b"\x00" * 200)
+    assert mesh_frame.declared_mesh_entries(str(path)) is None
 
 
 def test_the_declared_type_decides_the_census_not_the_name(tmp_path):
@@ -241,6 +309,32 @@ def _census_peak(path: str) -> int:
     finally:
         tracemalloc.stop()
     return peak
+
+
+def test_a_file_that_is_one_enormous_line_stays_cheap(tmp_path):
+    """The file with NO newline in it is the one a census can get wrong
+    twice: once by missing its mesh, and once by accumulating bytes until a
+    newline that never comes -- copying its growing buffer per chunk, which
+    is quadratic in the file, on exactly the file it exists to refuse.
+
+    So: never holds the line, and stops as soon as the count is past the
+    limit rather than reading to the end.
+    """
+    import time
+
+    path = tmp_path / "one_line.obj"
+    with open(path, "wb") as fh:
+        fh.write(b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf")
+        piece = b" 1" * 4000
+        for _ in range(4000):  # ~32 MB on a single line, 16 M corners
+            fh.write(piece)
+    started = time.time()
+    peak = _census_peak(str(path))
+    elapsed = time.time() - started
+    assert peak < 4 * 1024 * 1024, f"the census held {peak} bytes"
+    assert elapsed < 5.0, f"the census took {elapsed:.1f}s on one line"
+    with pytest.raises(mesh_frame.MeshTooLargeError):
+        mesh_frame.load_mesh(str(path), force="mesh")
 
 
 def test_the_census_does_not_hold_the_file(tmp_path):

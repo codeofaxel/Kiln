@@ -74,21 +74,16 @@ class MeshTooLargeError(ValueError):
     """
 
 
-#: A 3MF's vertex or triangle element, with or without a namespace prefix.
-#: A prefix is the hole a plain ``<vertex`` search leaves: a file may bind
-#: the core namespace to any prefix it likes and write ``<c:vertex``, which
-#: every namespace-aware reader reads and a flat byte search misses.
-_MESH_ELEMENT_RE = re.compile(rb"<(?:[A-Za-z_][\w.\-]{0,62}:)?(?:vertex|triangle)[\s/>]")
+#: A 3MF's vertex or triangle element, whatever namespace prefix it carries.
+#: Anchored on the character immediately BEFORE the element's own name --
+#: ``<`` when it has no prefix, ``:`` when it has one -- so the prefix may be
+#: any length and the match stays ten bytes.  Anchoring on ``<`` instead
+#: meant bounding the prefix, and a longer one than the bound walked past.
+_MESH_ELEMENT_RE = re.compile(rb"[<:](?:vertex|triangle)[\s/>]")
 
-#: Longest run _MESH_ELEMENT_RE can match, so a chunk boundary cannot hide
-#: one: ``<`` + a 63-character prefix + ``:`` + ``triangle`` + one delimiter.
-_MESH_ELEMENT_MAX = 1 + 63 + 1 + len("triangle") + 1
-
-#: An OBJ vertex line and a face line.  Anchored at the line start and
-#: followed by ANY whitespace -- ``f\\t1 2 3`` is a face, and a ``v`` inside
-#: a comment or a material name is not a vertex.
-_OBJ_VERTEX_RE = re.compile(rb"^v[ \t]")
-_OBJ_FACE_RE = re.compile(rb"^f[ \t]")
+#: Longest run :data:`_MESH_ELEMENT_RE` can match, so a chunk boundary
+#: cannot hide one.
+_MESH_ELEMENT_MAX = 1 + len("triangle") + 1
 
 
 def _count_matches(fh: Any, pattern: re.Pattern[bytes], ceiling: int,
@@ -116,57 +111,92 @@ def _count_matches(fh: Any, pattern: re.Pattern[bytes], ceiling: int,
         tail = window[-overlap:] if overlap else b""
 
 
-#: Bytes the LINE census reads at a time.  Smaller than
-#: :data:`_CENSUS_CHUNK` on purpose: splitting a chunk into lines turns it
-#: into one small object per line, which costs several times the chunk
-#: itself, so the chunk is sized for what the split holds rather than for
-#: the read.  Measured 2026-10-18: 64 KiB keeps one count's peak near a
-#: megabyte, where a 1 MiB chunk held ~14 MB.
+#: Bytes the OBJ census reads at a time.  Smaller than
+#: :data:`_CENSUS_CHUNK` on purpose: the census splits a chunk on
+#: whitespace, which turns it into one small object per word and costs
+#: several times the chunk itself, so the chunk is sized for what the split
+#: holds rather than for the read.
 _LINE_CHUNK = 1 << 16
 
+#: Letters that make a longer OBJ keyword out of a leading ``v`` or ``f``
+#: (``vn``, ``vt``, ``vp``).  Anything else after them is a separator to
+#: some reader, so the census counts the line.
+_OBJ_WORD_TAIL = re.compile(rb"[A-Za-z]")
 
-def _iter_lines(fh: Any) -> Any:
-    """Complete lines of *fh*, a chunk at a time.
 
-    What this holds is the chunk plus the line in progress, never the file.
-    A file of one enormous line costs that line, which the upload doors have
-    already capped.
+def _obj_line_kind(head: bytes) -> bytes:
+    """What an OBJ line beginning with *head* declares: ``b"v"`` a vertex,
+    ``b"f"`` a face, ``b"?"`` neither.
+
+    A leading ``v`` or ``f`` followed by anything that is not a letter is
+    the keyword itself however it is separated -- a space, a tab, a form
+    feed.  Looking for a space or a tab alone meant a reader and this census
+    disagreed about what a face line was, which is the whole bug class.
     """
-    tail = b""
-    while True:
-        chunk = fh.read(_LINE_CHUNK)
-        if not chunk:
-            if tail:
-                yield tail
-            return
-        tail += chunk
-        pieces = tail.split(b"\n")
-        tail = pieces.pop()
-        for piece in pieces:
-            yield piece
+    first = head[:1]
+    if first not in (b"v", b"f"):
+        return b"?"
+    if _OBJ_WORD_TAIL.match(head[1:2] or b" "):
+        return b"?"  # vn, vt, vp -- not a geometric vertex
+    return first
+
+
+def _entries_for_line(kind: bytes, corners: int) -> int:
+    """What one finished OBJ line adds to the census."""
+    if kind == b"v":
+        return 1
+    if kind == b"f" and corners:
+        # A reader fans an n-corner face into n-2 triangles.
+        return max(1, corners - 2)
+    return 0
 
 
 def _census_obj(fh: Any, ceiling: int) -> int:
-    """Vertices and triangles an OBJ declares.
+    """Vertices and triangles an OBJ declares, counted as it streams.
 
-    A face line is counted by the triangles it becomes, not as one face: a
-    face may name any number of corners and a reader fans an n-corner face
-    into n-2 triangles, so ONE line of sixteen million indices is sixteen
-    million triangles.  Counting lines missed exactly that.
+    Deliberately never holds a LINE: an OBJ may put its whole mesh on one
+    face line, and a census that accumulated bytes until a newline arrived
+    would copy its growing buffer once per chunk -- quadratic in the file,
+    on exactly the file it exists to refuse.  So corners are counted per
+    chunk and only a word's worth of state is carried across the boundary,
+    and a face already past the ceiling stops the count mid-line.
     """
     total = 0
-    for line in _iter_lines(fh):
-        line = line.rstrip(b"\r")
-        if _OBJ_VERTEX_RE.match(line):
-            total += 1
-        elif _OBJ_FACE_RE.match(line):
-            corners = len(line.split()) - 1
-            total += max(1, corners - 2)
-        else:
-            continue
-        if total > ceiling:
-            return total
-    return total
+    kind: bytes | None = None   # the line in progress
+    head = b""                  # its first bytes, when a chunk split them
+    corners = 0                 # words seen so far on a face line
+    mid_word = False            # the last chunk ended inside a word
+
+    while True:
+        chunk = fh.read(_LINE_CHUNK)
+        if not chunk:
+            break
+        pieces = chunk.split(b"\n")
+        for index, piece in enumerate(pieces):
+            if index:
+                # A newline ended the line before this one.
+                total += _entries_for_line(kind or b"?", corners)
+                if total > ceiling:
+                    return total
+                kind, head, corners, mid_word = None, b"", 0, False
+            if kind is None:
+                probe = head + piece
+                if len(probe) < 2 and index == len(pieces) - 1:
+                    head = probe  # not enough yet to tell; carry it
+                    continue
+                kind, head, piece = _obj_line_kind(probe), b"", probe[1:]
+                if kind != b"f":
+                    continue
+            elif kind != b"f":
+                continue
+            words = len(piece.split())
+            if mid_word and piece[:1] and not piece[:1].isspace():
+                words -= 1  # one word straddled the chunk boundary
+            corners += max(0, words)
+            mid_word = bool(piece) and not piece[-1:].isspace()
+            if corners - 2 > ceiling:
+                return corners
+    return total + _entries_for_line(kind or b"?", corners)
 
 
 def _census_3mf(path: str, ceiling: int) -> int | None:
@@ -174,6 +204,7 @@ def _census_3mf(path: str, ceiling: int) -> int | None:
     archive guard without holding the mesh."""
     try:
         from kiln.threemf_parser import open_untrusted_zip
+        from kiln.untrusted_zip import UntrustedArchiveError
     except ImportError:  # pragma: no cover - part of this package
         return None
     try:
@@ -197,6 +228,13 @@ def _census_3mf(path: str, ceiling: int) -> int | None:
                 if total > ceiling:
                     return total
             return total
+    except UntrustedArchiveError:
+        # Kiln's archive guard will not open it at all -- too many members,
+        # or it declares more than the guard unpacks.  trimesh reads a 3MF
+        # with plain ``zipfile``, which has no such guard, so answering "not
+        # counted" here would hand the reader exactly the archive Kiln's own
+        # guard just turned away.
+        return ceiling + 1
     except Exception:  # noqa: BLE001 - an unreadable archive is the reader's to report
         return None
 
