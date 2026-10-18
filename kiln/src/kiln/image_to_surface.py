@@ -433,7 +433,11 @@ def _alpha_verdict(image_path: str) -> str | None:
     except ImportError:
         return None
     try:
-        img = Image.open(image_path)
+        # Reduced as it opens: this probe only asks what the alpha channel
+        # SAYS, and a decision about coverage survives a smaller copy --
+        # while a full-size RGBA decode here is four bytes a pixel of a
+        # picture the carve is about to shrink to 250 px anyway.
+        img = _open_reduced(image_path)
         has_alpha = img.mode in ("RGBA", "LA", "PA") or "transparency" in img.info
         if not has_alpha:
             return None
@@ -443,17 +447,140 @@ def _alpha_verdict(image_path: str) -> str | None:
         return None
 
 
+#: The most pixels this module will decode.  A relief is carved from an
+#: image this pipeline then shrinks to 200-250 px, so what the decode is
+#: really sized for is the machine, not the carve.  Measured 2026-10-18 on
+#: the hosted box (2 GB, one process for every customer): decoding a
+#: 169 M-pixel image costs about a gigabyte, and the copies the pipeline
+#: then makes of it took the relief preview to 3,961 MB and 55 s from a
+#: 657 KB upload.
+#:
+#: Eighty million clears every real photograph with room to spare -- a
+#: 50 M-pixel phone picture, a stitched panorama -- and is refused before
+#: a pixel is decoded, because an image file states its own dimensions in
+#: its header.  Pillow's own ceiling is 179 M pixels, which is above what
+#: this machine can afford and so never caught any of this.
+MAX_IMAGE_PIXELS = 80_000_000
+
+#: Longest edge kept when an image is reduced as it is opened.  The carve
+#: itself is 200-250 px, so this leaves an eightfold margin for the crop,
+#: the background cut and the LANCZOS resize to work in, and makes every
+#: copy after it cheap.  A JPEG is reduced BY THE DECODER (``draft``), so
+#: its full size is never held at all.
+DECODE_TARGET_PX = 2000
+
+
+class ImageTooLargeError(ValueError):
+    """An image declares more pixels than this module will decode.
+
+    A :class:`ValueError`, like every other "this file cannot be read"
+    answer here, so a caller that already declines an undecodable image
+    declines this one in the same place.
+    """
+
+
+def _webp_canvas(head: bytes) -> tuple[int, int] | None:
+    """The canvas size a WebP's header declares, or ``None`` when these
+    bytes are not a WebP this can read.
+
+    Read by hand because Pillow's WebP reader is NOT lazy: it decodes the
+    whole image inside ``Image.open``, so asking the opened image for its
+    size has already spent the memory the size check exists to prevent
+    (measured 2026-10-18: a 5.5 KB WebP declaring 144 M pixels cost
+    1,183 MB to find out how big it was).  Every other format Pillow reads
+    here parses its header and decodes on demand.
+    """
+    if len(head) < 30 or head[:4] != b"RIFF" or head[8:12] != b"WEBP":
+        return None
+    chunk = head[12:16]
+    if chunk == b"VP8X":
+        # Extended: canvas width-1 and height-1, three bytes each.
+        return (
+            int.from_bytes(head[24:27], "little") + 1,
+            int.from_bytes(head[27:30], "little") + 1,
+        )
+    if chunk == b"VP8L":
+        # Lossless: a signature byte, then 14 bits of width-1 and 14 of
+        # height-1, packed little-endian.
+        if head[20:21] != b"\x2f":
+            return None
+        bits = int.from_bytes(head[21:25], "little")
+        return ((bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1)
+    if chunk == b"VP8 ":
+        # Lossy: the key-frame start code, then 14 bits each way.
+        if head[23:26] != b"\x9d\x01\x2a":
+            return None
+        return (
+            int.from_bytes(head[26:28], "little") & 0x3FFF,
+            int.from_bytes(head[28:30], "little") & 0x3FFF,
+        )
+    return None
+
+
+def _declared_size(image_path: str) -> tuple[int, int] | None:
+    """The size an image file's own header states, without decoding it, or
+    ``None`` when it cannot be read that way."""
+    try:
+        with open(image_path, "rb") as fh:
+            return _webp_canvas(fh.read(30))
+    except OSError:
+        return None
+
+
+def _open_reduced(image_path: str):
+    """An open image, no larger than :data:`DECODE_TARGET_PX` on its long
+    edge, reduced as early as the format allows.
+
+    The size check comes FIRST and costs nothing: an image file states its
+    dimensions in its header, so an absurd one is refused before a pixel is
+    decoded.  Then ``draft`` asks the decoder itself for a smaller image,
+    which for a JPEG means the full size is never held -- measured
+    2026-10-18: a 169 M-pixel JPEG opens in 0.09 s and 23 MB this way,
+    against 36 s and 3,119 MB. A format with no reduced decode (PNG, WebP)
+    costs one decode and is shrunk immediately, so the copies that follow
+    are the only thing this pipeline then holds.
+
+    :raises ImageTooLargeError: past :data:`MAX_IMAGE_PIXELS`.
+    """
+    from PIL import Image
+
+    def _too_large(width: int, height: int) -> ImageTooLargeError:
+        return ImageTooLargeError(
+            f"{os.path.basename(image_path)} is {width}x{height} "
+            f"({width * height // 1_000_000} million pixels), more than the "
+            f"{MAX_IMAGE_PIXELS // 1_000_000} million Kiln reads for a relief. "
+            "Scale it down and send it again -- the carve is a few hundred "
+            "pixels across, so nothing is lost."
+        )
+
+    # The header first, where a format's own reader would decode to answer.
+    stated = _declared_size(image_path)
+    if stated is not None and stated[0] * stated[1] > MAX_IMAGE_PIXELS:
+        raise _too_large(*stated)
+
+    img = Image.open(image_path)
+    width, height = img.size
+    if width * height > MAX_IMAGE_PIXELS:
+        raise _too_large(width, height)
+    if max(width, height) > DECODE_TARGET_PX:
+        # Before load(), so a JPEG decoder can skip most of the work.
+        img.draft(None, (DECODE_TARGET_PX, DECODE_TARGET_PX))
+        if max(img.size) > DECODE_TARGET_PX:
+            img.thumbnail((DECODE_TARGET_PX, DECODE_TARGET_PX), Image.LANCZOS)
+    return img
+
+
 def _open_grayscale(image_path: str, *, exif_transpose: bool = False):
     """The one way any door in this module opens an image as grayscale.
 
     Every style block used to call ``Image.open(path).convert("L")``
     itself, and each of those bare calls was an alpha-dropping door.
     Routing them all through here is what keeps the next style block
-    from reintroducing the transparent-surround carve.
+    from reintroducing the transparent-surround carve -- and now also what
+    keeps it from decoding an image at a size the machine cannot hold
+    (:func:`_open_reduced`).
     """
-    from PIL import Image
-
-    img = Image.open(image_path)
+    img = _open_reduced(image_path)
     if exif_transpose:
         from PIL import ImageOps
 
@@ -996,7 +1123,7 @@ def prepare_image_for_emboss(
             try:
                 from rembg import remove as _rembg_remove
 
-                img_rgba = ImageOps.exif_transpose(Image.open(image_path))
+                img_rgba = ImageOps.exif_transpose(_open_reduced(image_path))
                 img_rgba = _rembg_remove(img_rgba)
                 # Convert removed background (transparent) to white
                 bg = Image.new("RGBA", img_rgba.size, (255, 255, 255, 255))
