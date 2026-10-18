@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-17T21:38:09.750920+00:00",
-  "tool_count": 404,
+  "generated": "2026-10-18T17:38:57.771644+00:00",
+  "tool_count": 403,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -1046,54 +1046,6 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
-    },
-    {
-      "name": "load_assembly_manual",
-      "description": "Load a previously generated manual's spec back into a dict (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
-      "category": "assembly_manuals",
-      "parameters": {
-        "properties": {
-          "pdf_path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Pdf Path"
-          },
-          "spec_json_path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Spec Json Path"
-          }
-        },
-        "title": "load_assembly_manualArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "action"
-      },
-      "served": false,
-      "inputs": {
-        "files": {
-          "pdf_path": "one",
-          "spec_json_path": "one"
-        }
       }
     },
     {
