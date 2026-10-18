@@ -218,11 +218,13 @@ def _score_orientation(
     overhang_pct)``.
 
     The four geometry facts are measured here and are the same wherever
-    Kiln runs; only ``score`` can differ.  On a plain install the score is
-    the bed-contact percentage, the safe floor: a wide base is the
-    orientation least likely to topple or lift.  Where kiln-pro is present,
-    as on Kiln's hosted service (https://kiln3d.com), Kiln's own scorer
-    ranks the candidates instead.
+    Kiln runs; only ``score`` can differ.  On a plain install, and for a
+    caller below Kiln Pro on Kiln's hosted service, the score is the
+    bed-contact percentage, the safe floor: a wide base is the orientation
+    least likely to topple or lift (and between equal scores the lower part
+    ranks first).  For a Kiln Pro caller on Kiln's hosted service
+    (https://kiln3d.com/pricing), Kiln's own scorer ranks the candidates
+    instead.
     """
     triangles = _translate_to_bed(triangles)
     all_verts: list[tuple[float, ...]] = []
@@ -261,6 +263,25 @@ def _score_orientation(
         round(print_height, 2),
         overhangs.overhang_percentage,
     )
+
+
+def _kiln_pro_ranking_note() -> str | None:
+    """One line for a caller who was ranked on the floor because Kiln Pro's
+    ranking is not in their plan, or ``None``.
+
+    kiln-pro words it, since it knows what was withheld from THIS caller; a
+    plain install, a caller who got the ranking, or any failure says nothing.
+    """
+    try:
+        from kiln_pro.orientation_scoring import ranking_withheld_note  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    try:
+        note = ranking_withheld_note()
+    except Exception:  # noqa: BLE001 -- a note never breaks the answer
+        logger.debug("kiln-pro ranking note unavailable", exc_info=True)
+        return None
+    return note if isinstance(note, str) and note.strip() else None
 
 
 def _kiln_pro_score(facts: dict[str, float]) -> float | None:
@@ -388,8 +409,11 @@ def find_optimal_orientation(
             )
         )
 
-    # Sort by score descending.
-    scored.sort(key=lambda c: c.score, reverse=True)
+    # Best score first; between equal scores, the lower part first.  A lower
+    # part is the steadier one, and on the bed-contact floor every flat face
+    # of a block scores the same, so without this a tall pillar kept its
+    # upright pose and the stability check had no lay-flat turn to offer.
+    scored.sort(key=lambda c: (c.score, -c.print_height_mm), reverse=True)
 
     best = scored[0]
     alternatives = scored[1:4]  # Top 3 alternatives

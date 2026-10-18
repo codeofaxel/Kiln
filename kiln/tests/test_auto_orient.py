@@ -968,3 +968,89 @@ class TestOrientationScoringSeam:
 
         assert dataclasses.fields(type(free)) == dataclasses.fields(type(pro))
         assert dataclasses.fields(type(free.best)) == dataclasses.fields(type(pro.best))
+
+
+class TestTheFloorKeepsAPartSteady:
+    """On the bed-contact floor every flat face of a block scores the same, so
+    a tall pillar's upright pose tied with lying down and, listed first, won:
+    auto_orient_model kept it standing and check_stability's high wobble risk
+    came with no turn to lay it flat.  Between equal scores the lower part
+    now ranks first."""
+
+    def test_a_tall_pillar_is_laid_down(self, tmp_path, monkeypatch):
+        _hide_scorer(monkeypatch)
+        result = find_optimal_orientation(_make_flat_cube_stl(tmp_path, 10, 10, 80))
+        assert result.best.print_height_mm == pytest.approx(10.0, abs=0.01)
+        assert result.best.score == result.original_score  # the floor's scores are unchanged
+
+    def test_the_wobble_warning_comes_with_the_turn_that_fixes_it(self, tmp_path, monkeypatch):
+        _hide_scorer(monkeypatch)
+        stability = check_stability(_make_flat_cube_stl(tmp_path, 10, 10, 80))
+        assert stability.risk_level == "high"
+        assert stability.suggested_rotation is not None
+        assert "Try rotating" in stability.recommendation
+
+    def test_a_part_already_lying_flat_stays(self, tmp_path, monkeypatch):
+        _hide_scorer(monkeypatch)
+        result = find_optimal_orientation(_make_flat_cube_stl(tmp_path, 20, 20, 5))
+        assert (result.best.rotation_x, result.best.rotation_y, result.best.rotation_z) == (0.0, 0.0, 0.0)
+
+    def test_a_scorer_s_ranking_still_decides_between_unequal_scores(self, tmp_path, monkeypatch):
+        """The lower-part order only splits equal scores: a scorer that
+        prefers the tall pose keeps it."""
+        _stand_in_scorer(monkeypatch, lambda facts: facts["print_height_mm"])
+        result = find_optimal_orientation(_make_flat_cube_stl(tmp_path, 10, 10, 80))
+        assert result.best.print_height_mm == pytest.approx(80.0, abs=0.01)
+
+
+def _auto_orient_tool():
+    from kiln.plugins.printability_tools import plugin
+
+    tools: dict = {}
+
+    class _Mcp:
+        def tool(self, *_a, **_kw):
+            def keep(fn):
+                tools[fn.__name__] = fn
+                return fn
+
+            return keep
+
+    plugin.register(_Mcp())
+    return tools["auto_orient_model"]
+
+
+def _stand_in_note(monkeypatch, note_fn) -> None:
+    module = types.ModuleType(_SCORER_MODULE)
+    module.score_orientation = lambda facts: None
+    module.ranking_withheld_note = note_fn
+    monkeypatch.setitem(sys.modules, _SCORER_MODULE, module)
+
+
+class TestTheRankingNote:
+    """A caller ranked on the floor because Kiln Pro's ranking is not in
+    their plan is told so once, in ``upgrade_hint``; kiln-pro words it and
+    decides when.  A plain install says nothing."""
+
+    def test_the_note_is_said_once(self, tmp_path, monkeypatch):
+        note = "Ranked by bed contact. Kiln Pro ranks them its own way: https://kiln3d.com/pricing"
+        _stand_in_note(monkeypatch, lambda: note)
+        out = _auto_orient_tool()(file_path=_make_flat_cube_stl(tmp_path, 10, 10, 80))
+        assert out["success"] is True and out["upgrade_hint"] == note
+        assert str(out).count("kiln3d.com/pricing") == 1
+
+    @pytest.mark.parametrize("answer", [None, "", "boom"])
+    def test_no_note_when_kiln_pro_has_none_or_fails(self, tmp_path, monkeypatch, answer):
+        def note_fn():
+            if answer == "boom":
+                raise RuntimeError("note broke")
+            return answer
+
+        _stand_in_note(monkeypatch, note_fn)
+        out = _auto_orient_tool()(file_path=_make_flat_cube_stl(tmp_path, 10, 10, 80))
+        assert out["success"] is True and "upgrade_hint" not in out
+
+    def test_a_plain_install_says_nothing(self, tmp_path, monkeypatch):
+        _hide_scorer(monkeypatch)
+        out = _auto_orient_tool()(file_path=_make_flat_cube_stl(tmp_path, 10, 10, 80))
+        assert out["success"] is True and "upgrade_hint" not in out
