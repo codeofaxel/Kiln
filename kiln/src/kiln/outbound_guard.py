@@ -181,4 +181,10 @@ SENDERS: dict[str, tuple[str, str]] = {
         "made coming back; machine-read values ride the call through the served door",
     ),
     "kiln/stage_cache.py": ("own_schema", "fetches the 3D stage's own page; sends nothing of the person's"),
+    "kiln/served_public.py": (
+        "person's_own",
+        "a public tool's own call run on Kiln's servers, with the files it names; the "
+        "printer facts read first ride the served door, which scrubs them, and a made "
+        "file comes back by its server-minted token",
+    ),
 }

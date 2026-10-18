@@ -93,13 +93,17 @@ def resolve_stage_plate(printer_id: str | None = None) -> dict[str, Any]:
 
     Falls back to :func:`default_stage_plate` for every unknown: no printer
     model configured, a model the catalogue does not carry, a hosted process,
-    or any error at all along the way.
+    or any error at all along the way.  A hosted call that carries the
+    caller's printers (:mod:`kiln.callers_printers`) resolves the caller's.
     """
     try:
+        from kiln import callers_printers
         from kiln.runtime_env import is_hosted_multitenant
 
-        if printer_id is None and is_hosted_multitenant():
+        if printer_id is None and is_hosted_multitenant() and not callers_printers.known():
             # One shared ~/.kiln, many customers — its printer is nobody's.
+            # A call that brought the caller's own printers is resolved
+            # from those, through the model resolver below.
             return default_stage_plate()
 
         if printer_id is None:

@@ -113,7 +113,15 @@ def _valid(size: Any) -> float | None:
 def _printer_setting_mm(printer_id: str) -> tuple[float | None, str | None]:
     """The printer's own setting when it can be read and is fresh, memoized
     for :data:`_SETTING_MEMO_S` whether or not it could be -- and, when the
-    one-printer rule refused the read, the machine Kiln was working with."""
+    one-printer rule refused the read, the machine Kiln was working with.
+
+    During a call Kiln's servers run for another computer, the setting is
+    the one that computer's install read from its printer for the call
+    (:mod:`kiln.callers_printers`); it is theirs, so nothing is memoized."""
+    from kiln import callers_printers
+
+    if callers_printers.known():
+        return _valid(callers_printers.nozzle_setting_mm(printer_id)), None
     now = time.monotonic()
     memo = _setting_memo.get(printer_id)
     if memo is not None and now - memo[0] < _SETTING_MEMO_S:
@@ -196,7 +204,12 @@ def _stock_mm(printer_id: str) -> float | None:
 
 
 def _registered_machines() -> list[str]:
-    """The printers registered here, one name per machine."""
+    """The printers registered here, one name per machine -- or, during a
+    call Kiln's servers run for another computer, that computer's."""
+    from kiln import callers_printers
+
+    if callers_printers.known():
+        return callers_printers.machines()
     try:
         from kiln.registry import get_printer_registry
 

@@ -21,8 +21,9 @@ connection kind and model, and when asked, a Klipper printer's own
 configuration (one printer's, or every Klipper printer's for a fleet
 triage; only the probe and bed settings a power-loss check reads, never its
 serial port, CAN id or macros), what a printer is doing, the named printer's current reading (its
-state, temperatures and progress, as numbers and words), the nozzle each
-printer holds as its own setting, or the spools each printer reports loaded
+state, temperatures and progress, as numbers and words), the nozzle size the
+named printer reports for itself, the nozzle each printer holds as its own
+setting, or the spools each printer reports loaded
 and, for the colours the call asked about, whether each is loaded there, a
 spool the person recorded owning, or neither (only the matching spools, as
 recorded: brand, colour, material) -- with the time they were read.  Never an address, a serial number or a
@@ -66,6 +67,8 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+from kiln import callers_printers
 
 logger = logging.getLogger(__name__)
 
@@ -187,16 +190,18 @@ def _slice(tool: str, step: dict[str, Any]) -> tuple[str | None, dict[str, Any] 
 #: for each printer asked about (``hardware``: what :mod:`kiln.hardware_stops`
 #: answers for it -- a stop ahead, close, reached or passed, or ``None`` for
 #: an ordinary print -- for a served board of every machine waiting for
-#: hands).  A job is its state and how far along it is -- never the file's
-#: name, for the same reason the print-history step sends none.  A reading
-#: is numbers and words (:func:`_telemetry_fact`).
+#: hands); the nozzle size the named printer reports for itself (``nozzle``,
+#: for a served design check judged for that nozzle).  A job is its state
+#: and how far along it is -- never the file's name, for the same reason the
+#: print-history step sends none.  A reading is numbers and words
+#: (:func:`_telemetry_fact`).
 #: For a fleet sweep, every Klipper printer's own configuration
 #: (``every_klipper_config``) and the nozzle every printer holds as its own
 #: setting (``every_nozzle``: size, material and when it was said, never a
 #: serial or fingerprint).
 _FACTS_EXTRAS = frozenset({
     "klipper_config", "job", "every_job", "telemetry", "hardware",
-    "every_klipper_config", "every_nozzle", "every_loaded_spools",
+    "every_klipper_config", "every_nozzle", "every_loaded_spools", "nozzle",
 })
 #: Text that can locate a printer: an address, a URL, a host name.
 _NAMES_A_PLACE = re.compile(r"://|\bhost\b|\d{1,3}(?:\.\d{1,3}){3}|[a-z0-9-]+\.(?:local|lan|home)\b", re.IGNORECASE)
@@ -261,7 +266,7 @@ _NOZZLE_FACT_KEYS = (
 _FACTS_DEADLINE_S = 8.0
 #: How many printers are asked at once for a fleet-wide read.
 _FACTS_WORKERS = 8
-_UNNAMED = frozenset({"", "default", "active"})
+_UNNAMED = callers_printers.UNNAMED
 
 
 def _facts_target(asked: str, entries: dict[str, Any], default: str) -> str:
@@ -397,6 +402,12 @@ def _printer_facts(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | No
     try:
         entries = server._read_config_printers() or {}
         default = server._resolve_effective_printer_name(None)
+        if default not in entries:
+            # The registry holds the active printer under "default" as well
+            # as its own name; these facts name printers as config.yaml does.
+            from kiln.printer_model_resolver import resolve_active_printer_name
+
+            default = resolve_active_printer_name() or default
     except Exception:  # noqa: BLE001
         entries, default = {}, ""
     target = _facts_target(asked, entries, default)
@@ -411,6 +422,13 @@ def _printer_facts(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | No
             "model": str(entry.get("printer_model") or ""),
             "is_default": str(name) == default,
         }
+        if "nozzle" in want and str(name) == target:
+            # The printer's own setting, read the way the nozzle check here
+            # reads it (fresh only, one printer at a time); a size, nothing
+            # that identifies the machine.
+            from kiln.assumed_nozzle import _printer_setting_mm
+
+            fact["nozzle_setting_mm"] = _printer_setting_mm(str(name))[0]
         if "klipper_config" in want and kind == "moonraker" and str(name) == target:
             pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
             try:

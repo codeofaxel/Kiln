@@ -55,8 +55,16 @@ def resolve_printer_model() -> str | None:
     frozen module global.  It reflects the latest config.yaml contents
     on every call (mtime-cached, so the cost is one stat + one parse
     per config change).
+
+    During a call Kiln's servers run for another computer, the answer is
+    that computer's default printer as its install described it
+    (:mod:`kiln.callers_printers`), never this machine's.
     """
     global _cache  # noqa: PLW0603
+    from kiln import callers_printers
+
+    if callers_printers.known():
+        return callers_printers.model_of(None)
     try:
         mtime = _CONFIG_PATH.stat().st_mtime if _CONFIG_PATH.is_file() else 0.0
     except OSError:
@@ -183,7 +191,14 @@ def resolve_printer_model_for(printer_name: str | None) -> str | None:
     gates soft-pass and say so, which is the posture this module already
     takes for an unknown model — a skipped check is recoverable, a check
     passed against the wrong hardware is not.
+
+    During a call Kiln's servers run for another computer, the name is
+    that computer's printer (:mod:`kiln.callers_printers`).
     """
+    from kiln import callers_printers
+
+    if callers_printers.known():
+        return callers_printers.model_of(printer_name)
     if not printer_name:
         return resolve_printer_model()
     cfg = _load_yaml_config()

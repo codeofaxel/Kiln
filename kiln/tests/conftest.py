@@ -972,6 +972,22 @@ def _bypass_terms_gate(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _served_public_tools_stay_here(monkeypatch):
+    """Default every test to "no public tool is sent to Kiln's servers".
+
+    On an install without kiln-pro (public CI is one) the bundled manifest
+    sends some public tools to Kiln's servers, and a signed-out call notes
+    once per process why it ran here instead.  Left on, whichever test first
+    called such a tool through the MCP dispatch would carry that note.  Tests
+    of the served path load the manifest block themselves
+    (``tests/test_served_public.py``).
+    """
+    module = sys.modules.get("kiln.served_public")
+    if module is not None:
+        monkeypatch.setattr(module, "_tools", {})
+
+
+@pytest.fixture(autouse=True)
 def _isolate_decoration_quota(tmp_path_factory, monkeypatch):
     """Give every test its own decoration-quota file and a fresh singleton.
 

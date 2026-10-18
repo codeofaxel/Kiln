@@ -211,7 +211,7 @@ class TestThroughTheStub:
                 return register
 
         server._register_pro_tool_stubs(_Registry())
-        monkeypatch.setattr(served_makes, "_upload_file", lambda p: (f"tok-{p.suffix[1:]}-0123456789abcdef", ""))
+        monkeypatch.setattr(served_makes, "_upload_file", lambda p, **_k: (f"tok-{p.suffix[1:]}-0123456789abcdef", ""))
         return server, registered["add_feature_during_print"]
 
     def _files(self, tmp_path):
@@ -359,6 +359,41 @@ class TestPrinterFacts:
         assert voron["klipper_config"] is None
         assert voron["klipper_config_error"] == "the printer could not be asked"
         assert "voron.local" not in json.dumps(done)  # not even in the error
+
+    def test_a_nozzle_is_read_only_when_asked_and_only_for_that_printer(self, printers, monkeypatch):
+        asked: list[str] = []
+
+        def setting(name):
+            asked.append(name)
+            return 0.6, None
+
+        monkeypatch.setattr("kiln.assumed_nozzle._printer_setting_mm", setting)
+        done, refused = self._read(printer_name="voron", want=["nozzle"])
+        assert refused is None
+        by_name = {p["name"]: p for p in done["printer_facts"]["data"]["printers"]}
+        assert by_name["voron"]["nozzle_setting_mm"] == 0.6
+        assert "nozzle_setting_mm" not in by_name["default"]
+        assert asked == ["voron"]
+        done, _ = self._read(printer_name="voron", want=[])
+        assert asked == ["voron"]  # not asked when not wanted
+
+    def test_the_default_is_the_active_printer_by_its_own_name(self, monkeypatch):
+        """The registry also holds the active printer as "default"; the facts
+        name it as config.yaml does, so an unnamed call reads that printer."""
+        import kiln.server as server
+
+        monkeypatch.setattr(server, "_read_config_printers", lambda: {
+            "shop": {"type": "bambu", "printer_model": "bambu_a1_mini"},
+            "garage": {"type": "moonraker", "printer_model": "voron_2"},
+        })
+        monkeypatch.setattr(server, "_resolve_effective_printer_name", lambda name=None: "default")
+        monkeypatch.setattr("kiln.printer_model_resolver.resolve_active_printer_name", lambda: "shop")
+        monkeypatch.setattr("kiln.assumed_nozzle._printer_setting_mm", lambda name: (0.6, None))
+        done, _ = self._read(printer_name="", want=["nozzle"])
+        by_name = {p["name"]: p for p in done["printer_facts"]["data"]["printers"]}
+        assert by_name["shop"]["is_default"] and not by_name["garage"]["is_default"]
+        assert by_name["shop"]["nozzle_setting_mm"] == 0.6
+        assert "nozzle_setting_mm" not in by_name["garage"]
 
     @pytest.mark.parametrize("want", [["access_code"], ["host"], ["klipper_config", "serial"], "klipper_config", [1]])
     def test_asking_for_anything_else_about_a_printer_sends_nothing(self, printers, want):

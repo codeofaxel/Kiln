@@ -480,6 +480,7 @@ def _tool_sentence(tool_name: str, miss: Miss, kind: str | None = None) -> str:
 #: moment the door is added, not found later.
 HOSTED_DOORS: dict[str, tuple[str, str]] = {
     "kiln.server": ("served_answer", "the paid-tool manifest stubs and the served door every bridge uses"),
+    "kiln.served_public": ("served_answer", "public design and analysis tools a signed-in install runs on Kiln's servers; a miss runs the tool here and says why once per cause"),
     "kiln._pro_motion_bridge": ("served_answer", "head-motion plans; a miss is worded by the Bambu doors"),
     "kiln._pro_cutter_bridge": ("served_answer", "blade status for the pre-flight; cut reports are fire-and-forget"),
     "kiln._pro_nozzle_bridge": ("served_answer", "the pre-print nozzle-life verdict for the pre-flight, a start and a slice; the nozzle on record, for the pre-flight's comparison and for the size a check or a slice runs with"),
