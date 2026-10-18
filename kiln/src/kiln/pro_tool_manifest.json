@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-17T22:46:56.797819+00:00",
-  "tool_count": 414,
+  "generated": "2026-10-18T21:28:45.342613+00:00",
+  "tool_count": 409,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -15975,36 +15975,6 @@
       }
     },
     {
-      "name": "cancel_auto_recover",
-      "description": "Stop an active recovery run.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "auto_recover_id": {
-            "title": "Auto Recover Id",
-            "type": "string"
-          },
-          "reason": {
-            "default": "",
-            "title": "Reason",
-            "type": "string"
-          }
-        },
-        "required": [
-          "auto_recover_id"
-        ],
-        "title": "cancel_auto_recoverArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "record"
-      },
-      "served": false
-    },
-    {
       "name": "check_assembly_stands",
       "description": "Judge how an object LIVES and whether it STANDS \u2014 from geometry and the words, with every assumption said out loud.",
       "tier": "free",
@@ -16279,31 +16249,6 @@
         },
         "printer": "printer_name"
       }
-    },
-    {
-      "name": "confirm_auto_recover",
-      "description": "Approve a recovery run that is waiting for operator confirmation.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "auto_recover_id": {
-            "title": "Auto Recover Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "auto_recover_id"
-        ],
-        "title": "confirm_auto_recoverArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "record"
-      },
-      "served": false
     },
     {
       "name": "cutter_wear_status",
@@ -16764,31 +16709,6 @@
           "output_dir": "folder"
         }
       }
-    },
-    {
-      "name": "get_auto_recover_status",
-      "description": "Check the current state and outcome of a recovery run.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "auto_recover_id": {
-            "title": "Auto Recover Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "auto_recover_id"
-        ],
-        "title": "get_auto_recover_statusArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "read"
-      },
-      "served": false
     },
     {
       "name": "get_auto_tuned_settings",
@@ -21540,40 +21460,6 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      },
-      "served": false
-    },
-    {
-      "name": "cancel_speed_schedule",
-      "description": "Cancel the active speed schedule (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "speed_control",
-      "parameters": {
-        "properties": {},
-        "title": "cancel_speed_scheduleArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "record"
-      },
-      "served": false
-    },
-    {
-      "name": "get_speed_schedule",
-      "description": "Get the current active speed schedule and status (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "speed_control",
-      "parameters": {
-        "properties": {},
-        "title": "get_speed_scheduleArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "read"
       },
       "served": false
     },
