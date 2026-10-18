@@ -1430,14 +1430,12 @@ def list_public_material_profiles() -> list[_PublicMaterialProfile]:
 # properties, design_limits beyond process floor, use_case_ratings,
 # agent_guidance paragraphs) ships in kiln-pro's overlay.
 #
-# When the overlay isn't loaded, the curated
-# ``recommend_material_for_design`` path is missing the
-# use_case_ratings + mechanical signals it relies on for fine-grained
-# scoring.  This fallback uses ONLY the safety-floor fields plus a
-# small set of public-domain DIY heuristics (UV, food, heat, load,
-# outgassing, flexibility) to produce a useful recommendation —
-# never as good as the engineering-overlay path, but honest about
-# what it can and can't see.
+# When Kiln Pro has no pick to give (a plain install, a caller below Pro
+# on Kiln's servers), ``recommend_material_for_design`` answers with this
+# fallback.  It uses ONLY the safety-floor fields plus a small set of
+# public-domain DIY heuristics (UV, food, heat, load, outgassing,
+# flexibility) to produce a useful recommendation, honest about what it
+# can and can't see.
 #
 # Inputs are public-domain trigger keywords + material datasheet
 # common knowledge.  No curated data ships in this function.
@@ -1601,8 +1599,8 @@ def _recommend_from_safety_floor(
 ) -> MaterialRecommendation:
     """Recommend a material using ONLY safety-floor fields.
 
-    Fallback for ``recommend_material_for_design`` when the kiln-pro
-    engineering overlay isn't loaded.  Scores materials against
+    Fallback for ``recommend_material_for_design`` when Kiln Pro has no
+    pick to give.  Scores materials against
     thermal limits, chemical safety (UV/food/outgassing), and a
     small set of public-domain DIY heuristics (heat / outdoor /
     food / flexibility / sustained-load / cosmetic).
@@ -2014,11 +2012,13 @@ def _recommend_material_for_design(
     max_hotend_temp_c: int = 300,
     supported_materials: list[str] | None = None,
 ) -> MaterialRecommendation:
-    """Recommend the best material for a set of functional requirements.
+    """Recommend a material for a set of functional requirements.
 
-    Matches requirement text against known functional requirement
-    profiles, then scores each material based on constraint compatibility,
-    use-case ratings, and printer capability filtering.
+    Where kiln-pro is present, as on Kiln's hosted service, Kiln Pro's own
+    recommender picks (https://kiln3d.com/pricing).  On a plain install, and
+    whenever kiln-pro has no pick for this call or fails, the safety-floor
+    recommender answers (:func:`_recommend_from_safety_floor`), with its
+    warnings.
 
     :param requirements_text: Natural language description of what the
         object needs to do (e.g. ``"hold 5 kg of books outdoors"``).
@@ -2031,199 +2031,36 @@ def _recommend_material_for_design(
     :param supported_materials: Optional allowlist from the target printer
         profile. Materials outside this set are heavily penalized.
     """
-    kb = _get_kb()
+    printer = {
+        "printer_has_enclosure": printer_has_enclosure,
+        "printer_has_direct_drive": printer_has_direct_drive,
+        "max_hotend_temp_c": max_hotend_temp_c,
+        "supported_materials": supported_materials,
+    }
+    curated = _kiln_pro_recommendation(requirements_text, printer)
+    if curated is not None:
+        return curated
+    return _recommend_from_safety_floor(requirements_text, _get_kb().materials, **printer)
 
-    # No-overlay dispatch: when the kiln-pro engineering overlay
-    # isn't loaded, ``mechanical`` and ``use_case_ratings`` are empty
-    # across all materials.  The curated path below relies on those
-    # fields for fine-grained scoring; without them it produces
-    # degraded answers (e.g. recommends PLA for load-bearing because
-    # it can't see structural_load_bearing="poor").  Route those
-    # callers to the safety-floor fallback, which uses ONLY thermal
-    # / chemical / process-floor design_limits + a small set of
-    # public-domain DIY heuristics.  Probe a representative material
-    # (PLA — always present) for the overlay marker.
-    sample = kb.materials.get("pla") or next(iter(kb.materials.values()), None)
-    if sample is None or not sample.get("mechanical"):
-        return _recommend_from_safety_floor(
-            requirements_text,
-            kb.materials,
-            printer_has_enclosure=printer_has_enclosure,
-            printer_has_direct_drive=printer_has_direct_drive,
-            max_hotend_temp_c=max_hotend_temp_c,
-            supported_materials=supported_materials,
-        )
 
-    matched = match_requirements(requirements_text)
-    supported = {m.lower() for m in supported_materials} if supported_materials else None
+def _kiln_pro_recommendation(
+    requirements_text: str, printer: dict[str, Any],
+) -> MaterialRecommendation | None:
+    """Kiln Pro's pick, or ``None`` for the safety floor.
 
-    # Collect material constraints from all matched requirements
-    preferred: set[str] = set()
-    required: set[str] = set()
-    excluded: set[str] = set()
-
-    for cs in matched:
-        rules = cs.constraint_rules
-        if "material_prefer" in rules:
-            preferred.update(rules["material_prefer"])
-        if "material_require" in rules:
-            required.update(rules["material_require"])
-        if "material_exclude" in rules:
-            excluded.update(rules["material_exclude"])
-
-    # Score each material
-    scores: list[tuple[float, str, list[str], list[str]]] = []
-    over_ceiling: list[tuple[str, int]] = []  # (material, its minimum temp)
-    for mid, mdata in kb.materials.items():
-        score = 50.0  # baseline
-        reasons: list[str] = []
-        warnings: list[str] = []
-
-        thermal = mdata.get("thermal", {}) or {}
-        min_print_temp = (thermal.get("print_temp_range_c") or [0, 0])[0]
-
-        # --- Hard exclusions (skip the material entirely) -----------
-        if mid in excluded:
-            continue
-
-        # Hotend ceiling: the printer cannot melt this filament, so it is not
-        # a candidate to be scored against the others.  Same rule, same place
-        # in the loop, as the safety-floor path.
-        if min_print_temp and min_print_temp > max_hotend_temp_c:
-            over_ceiling.append((mdata.get("display_name") or mid, min_print_temp))
-            continue
-
-        if supported is not None and mid not in supported:
-            warnings.append("Not in the target printer's supported material set.")
-            score -= 60
-
-        # Requirement match bonuses
-        if mid in required:
-            score += 30
-            reasons.append("Required by functional constraints.")
-        elif mid in preferred:
-            score += 20
-            reasons.append("Preferred for these requirements.")
-
-        # Use-case rating scoring
-        for cs in matched:
-            req_id = cs.requirement_id
-            rating_key = _requirement_to_rating_key(req_id)
-            if rating_key and rating_key in mdata.get("use_case_ratings", {}):
-                rating = mdata["use_case_ratings"][rating_key]
-                rating_score = _RATING_ORDER.get(rating, 2)
-                score += rating_score * 3
-                if rating_score <= 1:
-                    warnings.append(
-                        f"{mdata['display_name']} rated '{rating}' for {cs.display_name}."
-                    )
-
-        # Printer capability filtering (the hotend ceiling is a hard exclusion
-        # handled at the top of the loop).
-        needs_enclosure = thermal.get("warping_tendency", "low") in (
-            "high",
-            "very_high",
-        )
-
-        if needs_enclosure and not printer_has_enclosure:
-            warnings.append("Requires enclosure — printer does not have one.")
-            score -= 30
-
-        if mid == "tpu" and not printer_has_direct_drive:
-            warnings.append("Requires direct drive extruder.")
-            score -= 40
-
-        # Ease of print bonus (mild — prefer easier materials all else equal)
-        ease = mdata.get("mechanical", {}).get("layer_adhesion", "")
-        if ease == "excellent":
-            score += 3
-        elif ease == "good":
-            score += 2
-
-        scores.append((score, mid, reasons, warnings))
-
-    scores.sort(key=lambda x: x[0], reverse=True)
-
-    if not scores:
-        # Absolute fallback
-        pla = get_material_profile("pla")
-        if pla is None:
-            raise RuntimeError("PLA material profile not found in knowledge base")
-        # The warning has to SAY the constraints went unmet, in the same words
-        # the safety-floor path uses.  "PLA may not meet your requirements" is
-        # a hedge, and a caller reading it for a real miss cannot tell this
-        # apart from an ordinary recommendation — so a fallback here used to
-        # surface as an answer.
-        if over_ceiling:
-            unmet = _hotend_ceiling_warning(over_ceiling, max_hotend_temp_c)
-        else:
-            unmet = (
-                "No material in the catalogue satisfied your constraints — "
-                "falling back to PLA, which may not meet your requirements."
-            )
-        return MaterialRecommendation(
-            material=pla,
-            score=50.0,
-            reasons=["Fallback — all materials filtered out."],
-            warnings=[unmet],
-            design_limits_summary=pla.design_limits,
-            alternatives=[],
-        )
-
-    top_score, top_mid, top_reasons, top_warnings = scores[0]
-    top_profile = get_material_profile(top_mid)
-    if top_profile is None:
-        raise RuntimeError(f"Material profile {top_mid!r} not found in knowledge base")
-
-    # Build alternatives
-    alternatives: list[dict[str, Any]] = []
-    for alt_score, alt_mid, alt_reasons, alt_warnings in scores[1:4]:
-        alt_profile = get_material_profile(alt_mid)
-        if alt_profile:
-            alternatives.append(
-                {
-                    "material_id": alt_mid,
-                    "display_name": alt_profile.display_name,
-                    "score": round(alt_score, 1),
-                    "reasons": alt_reasons,
-                    "warnings": alt_warnings,
-                }
-            )
-
-    # Build brand recommendations for the top material
-    recommended_brands: list[dict[str, Any]] = []
+    ``None`` means kiln-pro is not installed, it had no pick to give for this
+    call, or it failed.  The safety floor always answers.
+    """
     try:
-        brand_profiles = list_brand_filament_profiles(parent_material=top_mid)
-        for bp in brand_profiles:
-            brand_entry: dict[str, Any] = {
-                "profile_id": bp.profile_id,
-                "brand": bp.brand,
-                "product_name": bp.product_name,
-                "nozzle_temp_optimal_c": bp.nozzle_temp_optimal_c,
-                "bed_temp_optimal_c": bp.bed_temp_optimal_c,
-                "density_g_cm3": bp.density_g_cm3,
-            }
-            if bp.needs_hardened_nozzle():
-                brand_entry["hardened_nozzle_required"] = True
-            if bp.needs_enclosure():
-                brand_entry["enclosure_required"] = True
-            if bp.ams_compatible is not None:
-                brand_entry["ams_compatible"] = bp.ams_compatible
-            if bp.drying_temp_c:
-                brand_entry["drying"] = f"{bp.drying_temp_c}°C / {bp.drying_time_hours}h"
-            recommended_brands.append(brand_entry)
-    except Exception:
-        pass  # Brand profiles not available — continue without
-
-    return MaterialRecommendation(
-        material=top_profile,
-        score=round(top_score, 1),
-        reasons=top_reasons,
-        warnings=top_warnings,
-        design_limits_summary=top_profile.design_limits,
-        alternatives=alternatives,
-        recommended_brands=recommended_brands,
-    )
+        from kiln_pro.material_recommendation import recommend_material  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    try:
+        rec = recommend_material(requirements_text, **printer)
+    except Exception as exc:  # noqa: BLE001 -- the safety floor still answers
+        logger.warning("kiln-pro material recommender failed, answering with the safety floor: %s", exc)
+        return None
+    return rec if isinstance(rec, MaterialRecommendation) else None
 
 
 # ---------------------------------------------------------------------------
@@ -4126,22 +3963,6 @@ def _find_templates_from_text(text: str) -> list[DesignTemplate]:
                 seen.add(tid)
 
     return results
-
-
-def _requirement_to_rating_key(requirement_id: str) -> str | None:
-    """Map a requirement ID to the corresponding use_case_ratings key."""
-    mapping = {
-        "load_bearing": "structural_load_bearing",
-        "watertight": "water_tight",
-        "outdoor_use": "outdoor_use",
-        "food_contact": "food_contact",
-        "heat_exposure": "high_temp_environment",
-        "flexibility_required": "repeated_flexing",
-        "impact_resistant": "impact_resistance",
-        "precision_fit": "dimensional_accuracy",
-        "aesthetic_decorative": "cosmetic_finish",
-    }
-    return mapping.get(requirement_id)
 
 
 # ---------------------------------------------------------------------------
