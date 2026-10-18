@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import ast
 import os
+import re
 from typing import Any
 
 import trimesh
@@ -73,14 +74,32 @@ class MeshTooLargeError(ValueError):
     """
 
 
-def _count_tokens(fh: Any, tokens: tuple[bytes, ...], ceiling: int) -> int:
-    """How many times *tokens* appear in the rest of *fh*, counted a chunk
+#: A 3MF's vertex or triangle element, with or without a namespace prefix.
+#: A prefix is the hole a plain ``<vertex`` search leaves: a file may bind
+#: the core namespace to any prefix it likes and write ``<c:vertex``, which
+#: every namespace-aware reader reads and a flat byte search misses.
+_MESH_ELEMENT_RE = re.compile(rb"<(?:[A-Za-z_][\w.\-]{0,62}:)?(?:vertex|triangle)[\s/>]")
+
+#: Longest run _MESH_ELEMENT_RE can match, so a chunk boundary cannot hide
+#: one: ``<`` + a 63-character prefix + ``:`` + ``triangle`` + one delimiter.
+_MESH_ELEMENT_MAX = 1 + 63 + 1 + len("triangle") + 1
+
+#: An OBJ vertex line and a face line.  Anchored at the line start and
+#: followed by ANY whitespace -- ``f\\t1 2 3`` is a face, and a ``v`` inside
+#: a comment or a material name is not a vertex.
+_OBJ_VERTEX_RE = re.compile(rb"^v[ \t]")
+_OBJ_FACE_RE = re.compile(rb"^f[ \t]")
+
+
+def _count_matches(fh: Any, pattern: re.Pattern[bytes], ceiling: int,
+                   overlap: int) -> int:
+    """How many times *pattern* matches in the rest of *fh*, counted a chunk
     at a time and stopped once *ceiling* is passed.
 
-    Chunks overlap by the longest token less one byte, so a token split
-    across a chunk boundary is still counted once.
+    Chunks overlap by *overlap* bytes so a match split across a boundary is
+    found, and the overlap is excluded from the next count so it is found
+    exactly once.
     """
-    overlap = max(len(t) for t in tokens) - 1
     total = 0
     tail = b""
     while True:
@@ -88,11 +107,66 @@ def _count_tokens(fh: Any, tokens: tuple[bytes, ...], ceiling: int) -> int:
         if not chunk:
             return total
         window = tail + chunk
-        for token in tokens:
-            total += window.count(token)
+        # Matches wholly inside the carried-over tail were counted last
+        # round; count only those reaching into the new bytes.
+        start = max(0, len(tail) - overlap)
+        total += sum(1 for _ in pattern.finditer(window, start))
         if total > ceiling:
             return total
         tail = window[-overlap:] if overlap else b""
+
+
+#: Bytes the LINE census reads at a time.  Smaller than
+#: :data:`_CENSUS_CHUNK` on purpose: splitting a chunk into lines turns it
+#: into one small object per line, which costs several times the chunk
+#: itself, so the chunk is sized for what the split holds rather than for
+#: the read.  Measured 2026-10-18: 64 KiB keeps one count's peak near a
+#: megabyte, where a 1 MiB chunk held ~14 MB.
+_LINE_CHUNK = 1 << 16
+
+
+def _iter_lines(fh: Any) -> Any:
+    """Complete lines of *fh*, a chunk at a time.
+
+    What this holds is the chunk plus the line in progress, never the file.
+    A file of one enormous line costs that line, which the upload doors have
+    already capped.
+    """
+    tail = b""
+    while True:
+        chunk = fh.read(_LINE_CHUNK)
+        if not chunk:
+            if tail:
+                yield tail
+            return
+        tail += chunk
+        pieces = tail.split(b"\n")
+        tail = pieces.pop()
+        for piece in pieces:
+            yield piece
+
+
+def _census_obj(fh: Any, ceiling: int) -> int:
+    """Vertices and triangles an OBJ declares.
+
+    A face line is counted by the triangles it becomes, not as one face: a
+    face may name any number of corners and a reader fans an n-corner face
+    into n-2 triangles, so ONE line of sixteen million indices is sixteen
+    million triangles.  Counting lines missed exactly that.
+    """
+    total = 0
+    for line in _iter_lines(fh):
+        line = line.rstrip(b"\r")
+        if _OBJ_VERTEX_RE.match(line):
+            total += 1
+        elif _OBJ_FACE_RE.match(line):
+            corners = len(line.split()) - 1
+            total += max(1, corners - 2)
+        else:
+            continue
+        if total > ceiling:
+            return total
+    return total
 
 
 def _census_3mf(path: str, ceiling: int) -> int | None:
@@ -117,7 +191,9 @@ def _census_3mf(path: str, ceiling: int) -> int | None:
                     # declares more than the budget either way.
                     return ceiling + 1
                 with zf.open(info) as fh:
-                    total += _count_tokens(fh, (b"<vertex", b"<triangle"), ceiling)
+                    total += _count_matches(
+                        fh, _MESH_ELEMENT_RE, ceiling, _MESH_ELEMENT_MAX,
+                    )
                 if total > ceiling:
                     return total
             return total
@@ -125,9 +201,18 @@ def _census_3mf(path: str, ceiling: int) -> int | None:
         return None
 
 
-def declared_mesh_entries(path: str) -> int | None:
+#: A facet of an ASCII STL, followed by any whitespace.
+_STL_FACET_RE = re.compile(rb"facet\s")
+
+
+def declared_mesh_entries(path: str, file_type: str | None = None) -> int | None:
     """How many vertices and triangles the mesh file at *path* declares, or
     ``None`` when this format has no cheap census.
+
+    *file_type* wins when given, as it does for ``trimesh.load``; otherwise
+    the path's suffix decides.  It has to win: a reader told the type reads
+    the file as that type whatever the name says, so censusing by the name
+    alone would count nothing for ``load_mesh(tmp, file_type="obj")``.
 
     ``None`` means "not counted", never "none": a format the census cannot
     read cheaply is read exactly as it was before.  The counts are what the
@@ -135,13 +220,17 @@ def declared_mesh_entries(path: str) -> int | None:
     allocate for, and reading the claim costs a header or a byte count
     rather than the mesh.
     """
-    try:
-        suffix = os.path.splitext(path)[1].lower()
-    except (AttributeError, TypeError):
-        return None
+    if file_type is None:
+        try:
+            kind = os.path.splitext(path)[1]
+        except (AttributeError, TypeError):
+            return None
+    else:
+        kind = file_type
+    kind = str(kind).lower().lstrip(".")
     ceiling = MAX_MESH_ENTRIES
     try:
-        if suffix == ".stl":
+        if kind == "stl":
             with open(path, "rb") as fh:
                 head = fh.read(84)
                 if len(head) == 84 and not head.lstrip()[:5].lower().startswith(b"solid"):
@@ -149,25 +238,18 @@ def declared_mesh_entries(path: str) -> int | None:
                     # costs 84 bytes however large the claim.
                     return int.from_bytes(head[80:84], "little", signed=False)
                 fh.seek(0)
-                return _count_tokens(fh, (b"facet normal",), ceiling)
-        if suffix == ".obj":
+                return _count_matches(fh, _STL_FACET_RE, ceiling, len("facet") + 1)
+        if kind == "obj":
             with open(path, "rb") as fh:
-                # Line-anchored, so a ``v`` inside a comment or a material
-                # name is not a vertex.  The FIRST line has no newline
-                # before it, so it is counted on its own.
-                first = 1 if fh.read(2) in (b"v ", b"f ") else 0
-                fh.seek(0)
-                return first + _count_tokens(
-                    fh, (b"\nv ", b"\nf ", b"\rv ", b"\rf "), ceiling,
-                )
-        if suffix == ".3mf":
+                return _census_obj(fh, ceiling)
+        if kind == "3mf":
             return _census_3mf(path, ceiling)
     except OSError:
         return None
     return None
 
 
-def refuse_an_oversized_mesh(path: Any) -> None:
+def refuse_an_oversized_mesh(path: Any, file_type: str | None = None) -> None:
     """Refuse *path* when it declares more mesh than one read may hold.
 
     :raises MeshTooLargeError: past :data:`MAX_MESH_ENTRIES`.
@@ -178,7 +260,7 @@ def refuse_an_oversized_mesh(path: Any) -> None:
         return
     if not isinstance(text, str):
         return
-    declared = declared_mesh_entries(text)
+    declared = declared_mesh_entries(text, file_type)
     if declared is not None and declared > MAX_MESH_ENTRIES:
         raise MeshTooLargeError(
             f"{os.path.basename(text)} declares {declared} vertices and "
@@ -329,7 +411,7 @@ def load_mesh(source: Any, **kwargs: Any) -> Any:
 
     :raises MeshTooLargeError: past :data:`MAX_MESH_ENTRIES`.
     """
-    refuse_an_oversized_mesh(source)
+    refuse_an_oversized_mesh(source, kwargs.get("file_type"))
     if "resolver" not in kwargs:
         resolver = _confined_resolver(source)
         if resolver is not None:
