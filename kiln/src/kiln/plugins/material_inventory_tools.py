@@ -1,9 +1,12 @@
-"""Material inventory tools plugin — fleet tracking, forecasting, assignment.
+"""Material inventory tools plugin — stock, use, runout, sufficiency, jobs.
 
-Registers MCP tools for fleet-wide material inventory management:
-consumption tracking, stock forecasting, sufficiency checks, restock
-suggestions, printer-material lookup, fleet job assignment, and spool
-swap optimisation.
+Registers MCP tools for material inventory: what is on hand, consumption,
+runout forecasts, sufficiency checks, restock suggestions, which printer
+holds a material, which spool takes each job, and spool swaps.  On an
+install with one machine every one answers from this install's own records,
+offline.  Across several machines the answer is Kiln Business and comes from
+Kiln's servers; every door asks through one router,
+:func:`kiln.material_inventory.inventory_answer`.
 
 Auto-discovered by :func:`~kiln.plugin_loader.register_all_plugins` —
 no manual imports needed.
@@ -53,21 +56,15 @@ class _MaterialInventoryToolsPlugin:
             import kiln.server as _srv
 
             try:
-                from kiln.material_inventory import fleet_scope_verdict
-
-                if blocked := fleet_scope_verdict("Fleet material summary"):
-                    return blocked
-
-                from kiln.material_inventory import (
-                    get_fleet_material_summary as _summary,
-                )
+                from kiln.material_inventory import inventory_answer
                 from kiln.persistence import get_db
 
-                db = get_db()
-                results = _summary(db)
+                results, refused = inventory_answer("summary", get_db(), feature="Fleet material summary")
+                if refused is not None:
+                    return refused
                 return {
                     "success": True,
-                    "summary": [r.to_dict() for r in results],
+                    "summary": results,
                     "material_types": len(results),
                 }
             except Exception as exc:
@@ -88,19 +85,17 @@ class _MaterialInventoryToolsPlugin:
             import kiln.server as _srv
 
             try:
-                from kiln.material_inventory import fleet_scope_verdict
-
-                if blocked := fleet_scope_verdict("Fleet consumption history"):
-                    return blocked
-
-                from kiln.material_inventory import get_consumption_history
+                from kiln.material_inventory import inventory_answer
                 from kiln.persistence import get_db
 
-                db = get_db()
-                results = get_consumption_history(db, days=days)
+                results, refused = inventory_answer(
+                    "history", get_db(), feature="Fleet consumption history", days=days,
+                )
+                if refused is not None:
+                    return refused
                 return {
                     "success": True,
-                    "history": [r.to_dict() for r in results],
+                    "history": results,
                     "period_days": days,
                     "material_types": len(results),
                 }
@@ -125,21 +120,16 @@ class _MaterialInventoryToolsPlugin:
             import kiln.server as _srv
 
             try:
-                from kiln.material_inventory import fleet_scope_verdict
-
-                if blocked := fleet_scope_verdict("Fleet consumption forecasting"):
-                    return blocked
-
-                from kiln.material_inventory import forecast_consumption
+                from kiln.material_inventory import inventory_answer
                 from kiln.persistence import get_db
 
-                db = get_db()
-                forecast = forecast_consumption(
-                    db,
-                    material_type=material_type,
-                    days_ahead=days_ahead,
+                forecast, refused = inventory_answer(
+                    "forecast", get_db(), feature="Fleet consumption forecasting",
+                    material_type=material_type, days_ahead=days_ahead,
                 )
-                return {"success": True, "forecast": forecast.to_dict()}
+                if refused is not None:
+                    return refused
+                return {"success": True, "forecast": forecast}
             except Exception as exc:
                 _logger.exception("Unexpected error in forecast_material_consumption")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
@@ -173,22 +163,51 @@ class _MaterialInventoryToolsPlugin:
                 from kiln.material_inventory import (
                     check_material_sufficiency as _check,
                 )
-                from kiln.material_inventory import fleet_scope_verdict
+                from kiln.material_inventory import (
+                    fleet_scope_verdict,
+                    inventory_answer,
+                    registered_machines,
+                )
                 from kiln.persistence import get_db
 
                 db = get_db()
+                # The single-machine verdict is never gated — a user must
+                # always be able to ask whether the printer in front of
+                # them has enough filament.  Only the cross-machine half
+                # ("printer B has 800g") is the fleet answer: on Business it
+                # comes from Kiln's servers through the one router, asked
+                # only when this printer falls short; below it it is counted
+                # here and withheld, as before.
+                many = registered_machines() > 1
+                withheld = many and fleet_scope_verdict("Alternative printers") is not None
+                others = None
+                unanswered = None
+                if many and not withheld:
+                    first = _check(
+                        db, printer_name=printer_name, required_grams=required_grams,
+                        material_type=material_type, other_machines=[],
+                    )
+                    others = []
+                    if not first.sufficient and first.material_type:
+                        others, miss = inventory_answer(
+                            "alternatives", db, feature="Alternative printers",
+                            material_type=first.material_type, min_grams=required_grams,
+                        )
+                        if miss is not None:
+                            others, unanswered = [], miss
                 check = _check(
                     db,
                     printer_name=printer_name,
                     required_grams=required_grams,
                     material_type=material_type,
+                    other_machines=others,
                 )
                 payload = check.to_dict()
-                # The single-machine verdict is never gated — a user must
-                # always be able to ask whether the printer in front of
-                # them has enough filament.  Only the cross-machine half
-                # ("printer B has 800g") is the fleet answer.
-                if fleet_scope_verdict("Alternative printers") is not None:
+                if unanswered is not None and not payload.get("sufficient"):
+                    payload["fleet_alternatives"] = {
+                        k: unanswered[k] for k in ("error", "code", "why", "why_code", "why_detail") if k in unanswered
+                    }
+                if withheld:
                     hidden = len(payload.get("alternative_printers") or [])
                     payload["alternative_printers"] = []
                     payload["suggestions"] = [
@@ -218,21 +237,15 @@ class _MaterialInventoryToolsPlugin:
             import kiln.server as _srv
 
             try:
-                from kiln.material_inventory import fleet_scope_verdict
-
-                if blocked := fleet_scope_verdict("Fleet restock suggestions"):
-                    return blocked
-
-                from kiln.material_inventory import (
-                    get_restock_suggestions as _restock,
-                )
+                from kiln.material_inventory import inventory_answer
                 from kiln.persistence import get_db
 
-                db = get_db()
-                suggestions = _restock(db)
+                suggestions, refused = inventory_answer("restock", get_db(), feature="Fleet restock suggestions")
+                if refused is not None:
+                    return refused
                 return {
                     "success": True,
-                    "suggestions": [s.to_dict() for s in suggestions],
+                    "suggestions": suggestions,
                     "count": len(suggestions),
                 }
             except Exception as exc:
@@ -259,23 +272,15 @@ class _MaterialInventoryToolsPlugin:
             import kiln.server as _srv
 
             try:
-                from kiln.material_inventory import fleet_scope_verdict
-
-                if blocked := fleet_scope_verdict("Finding which printers hold a material"):
-                    return blocked
-
-                from kiln.material_inventory import (
-                    find_printers_with_material as _find,
-                )
+                from kiln.material_inventory import inventory_answer
                 from kiln.persistence import get_db
 
-                db = get_db()
-                results = _find(
-                    db,
-                    material_type=material_type,
-                    color=color,
-                    min_grams=min_grams,
+                results, refused = inventory_answer(
+                    "find", get_db(), feature="Finding which printers hold a material",
+                    material_type=material_type, color=color, min_grams=min_grams,
                 )
+                if refused is not None:
+                    return refused
                 return {
                     "success": True,
                     "printers": results,
@@ -290,9 +295,11 @@ class _MaterialInventoryToolsPlugin:
             """Assign print jobs to printers by material availability.
 
             Each job dict should contain ``file_name``, ``material_type``,
-            ``required_grams``, and optionally ``color``.  Returns optimal
-            printer assignments that minimise spool swaps and prefer
-            colour matches.
+            ``required_grams``, and optionally ``color``.  On one machine it
+            says which jobs its loaded spool can take, in order; across
+            several machines it picks a printer for each job, preferring
+            colour matches and fewer spool swaps (Kiln Business,
+            https://kiln3d.com/pricing).
 
             Args:
                 jobs: List of job dicts to assign.
@@ -300,21 +307,17 @@ class _MaterialInventoryToolsPlugin:
             import kiln.server as _srv
 
             try:
-                from kiln.material_inventory import fleet_scope_verdict
-
-                if blocked := fleet_scope_verdict("Fleet job assignment"):
-                    return blocked
-
-                from kiln.material_inventory import (
-                    optimize_fleet_assignment as _assign,
-                )
+                from kiln.material_inventory import inventory_answer
                 from kiln.persistence import get_db
 
-                db = get_db()
-                assignments = _assign(db, jobs=jobs)
+                assignments, refused = inventory_answer(
+                    "assign", get_db(), feature="Fleet job assignment", jobs=jobs,
+                )
+                if refused is not None:
+                    return refused
                 return {
                     "success": True,
-                    "assignments": [a.to_dict() for a in assignments],
+                    "assignments": assignments,
                     "count": len(assignments),
                 }
             except Exception as exc:
@@ -325,9 +328,11 @@ class _MaterialInventoryToolsPlugin:
         def suggest_spool_swaps(jobs: list[dict[str, Any]]) -> dict:
             """Suggest minimal spool swaps to run all queued jobs.
 
-            Analyses which jobs need which materials, compares against
-            what is currently loaded on each printer, and suggests the
-            fewest physical spool changes needed.
+            Compares what the jobs need with what is loaded and says which
+            shelf spools to load, and where.  On one machine it answers for
+            that machine; across several machines it plans the fewest
+            physical spool changes between them (Kiln Business,
+            https://kiln3d.com/pricing).
 
             Args:
                 jobs: List of job dicts with ``material_type`` and ``required_grams``.
@@ -335,16 +340,14 @@ class _MaterialInventoryToolsPlugin:
             import kiln.server as _srv
 
             try:
-                from kiln.material_inventory import fleet_scope_verdict
-
-                if blocked := fleet_scope_verdict("Fleet spool-swap planning"):
-                    return blocked
-
-                from kiln.material_inventory import suggest_spool_swaps as _swaps
+                from kiln.material_inventory import inventory_answer
                 from kiln.persistence import get_db
 
-                db = get_db()
-                suggestions = _swaps(db, jobs=jobs)
+                suggestions, refused = inventory_answer(
+                    "swaps", get_db(), feature="Fleet spool-swap planning", jobs=jobs,
+                )
+                if refused is not None:
+                    return refused
                 return {
                     "success": True,
                     "swap_suggestions": suggestions,
