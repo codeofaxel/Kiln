@@ -112,13 +112,16 @@ def _counts_as_utf8(opening: bytes) -> bool:
         return False
     if opening.startswith(b"\xef\xbb\xbf"):  # a UTF-8 BOM is still UTF-8
         return True
-    found = _XML_ENCODING_RE.search(opening)
-    if found is None:
-        # No declaration: XML's own default is UTF-8.  A wide encoding
-        # without a BOM is not well-formed XML, and a reader that guesses
-        # one anyway would also fail on the elements.
-        return b"\x00" not in opening[:64]
-    return found.group(1).decode("ascii", "ignore").lower() in _BYTE_ENCODINGS
+    body = opening[3:] if opening.startswith(b"\xef\xbb\xbf") else opening
+    found = _XML_ENCODING_RE.search(body)
+    if found is not None:
+        return found.group(1).decode("ascii", "ignore").lower() in _BYTE_ENCODINGS
+    # No declaration, so XML's own default is UTF-8 -- but only say so when
+    # the opening POSITIVELY reads as ASCII-compatible XML.  Asking instead
+    # whether it merely lacks a NUL byte was fail-OPEN: anything unfamiliar
+    # answered "countable", and the census then counted none of it and
+    # called that none.
+    return body.lstrip()[:1] == b"<"
 
 
 def _count_matches(fh: Any, pattern: re.Pattern[bytes], ceiling: int,

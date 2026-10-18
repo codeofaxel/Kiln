@@ -290,6 +290,34 @@ def test_a_3mf_written_in_utf16_is_refused(tmp_path):
     assert counted is not None and counted > mesh_frame.MAX_MESH_ENTRIES
 
 
+def test_a_model_part_that_is_not_recognisable_xml_is_refused(tmp_path):
+    """Asking only whether the opening lacks a NUL byte was fail-OPEN:
+    anything unfamiliar answered "countable", and the census then counted
+    none of it and called that none.  It now says yes only to an opening
+    that positively reads as ASCII-compatible XML."""
+    path = tmp_path / "odd.3mf"
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", _CT)
+        # No NUL bytes, no declaration, and not XML either.
+        z.writestr("3D/3dmodel.model", b"%!PS-Adobe-3.0\nnot xml at all\n")
+    counted = mesh_frame.declared_mesh_entries(str(path))
+    assert counted is not None and counted > mesh_frame.MAX_MESH_ENTRIES
+
+
+def test_a_part_declaring_an_encoding_kiln_cannot_count_is_refused(tmp_path):
+    """A declaration naming a wide or unfamiliar encoding, with no BOM to
+    give it away."""
+    path = tmp_path / "declared.3mf"
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", _CT)
+        z.writestr(
+            "3D/3dmodel.model",
+            b'<?xml version="1.0" encoding="ISO-10646-UCS-2"?><model/>',
+        )
+    counted = mesh_frame.declared_mesh_entries(str(path))
+    assert counted is not None and counted > mesh_frame.MAX_MESH_ENTRIES
+
+
 def test_an_ordinary_utf8_3mf_with_a_bom_is_still_counted(tmp_path):
     """A UTF-8 BOM is still UTF-8 -- refusing it would turn away real
     files written by editors that add one."""
