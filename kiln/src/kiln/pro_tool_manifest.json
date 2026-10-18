@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-17T23:46:49.590108+00:00",
+  "generated": "2026-10-18T00:15:03.675507+00:00",
   "tool_count": 415,
   "categories": {
     "product_generators": {
@@ -21961,7 +21961,13 @@
         "schema_version": 1,
         "kind": "read"
       },
-      "served": false
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "proven"
+        ]
+      }
     },
     {
       "name": "record_proven_recipe",
@@ -22031,7 +22037,13 @@
         "schema_version": 1,
         "kind": "record"
       },
-      "served": false
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "designs"
+        ]
+      }
     },
     {
       "name": "cancel_speed_schedule",

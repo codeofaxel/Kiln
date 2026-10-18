@@ -830,3 +830,25 @@ class TestArchiveAndDeleteOfAFeatureKeptHere:
         kept = vault.apply_library_delta("features", {"feature_id": "f1", "removed": True})
         assert kept["removed"] is True
         assert not vault.has_library_item("features", "f1") and vault.has_library_item("features", "f2")
+
+
+class TestProvenRecipesKeptBesideTheirDesigns:
+    def test_a_lookup_sends_every_proven_recipe_and_nothing_else(self, home):
+        folder = _library(home, "mug", [MESH_V1])
+        (folder / ".kiln_proven_recipe.json").write_text(json.dumps({"product_type": "mug"}))
+        (folder / ".kiln_proven_recipe.v1.json").write_text(json.dumps({"product_type": "mug", "v": 1}))
+        (folder / "notes.json").write_text(json.dumps({"secret": True}))
+        sent = courier.records_for_call({}, _vault(home), kinds=("proven",), tool="list_proven_recipes")
+        assert sorted(r["name"] for r in sent["proven"]) == [".kiln_proven_recipe.json", ".kiln_proven_recipe.v1.json"]
+        assert all(r["design_id"] == "mug" for r in sent["proven"])
+
+    def test_a_recorded_recipe_is_filed_beside_its_design_and_nowhere_else(self, home):
+        folder = _library(home, "mug", [MESH_V1])
+        answer = courier.take_delta({"status": "success", "history_delta": {"designs": [], "proven": [
+            {"design_id": "mug", "name": ".kiln_proven_recipe.json", "record": {"product_type": "mug"}},
+            {"design_id": "../outside", "name": ".kiln_proven_recipe.json", "record": {"x": 1}},
+            {"design_id": "mug", "name": "../../evil.json", "record": {"x": 1}},
+        ]}}, {}, vault=_vault(home))
+        assert answer["history_kept"]["proven_recipes"] == 1
+        assert json.loads((folder / ".kiln_proven_recipe.json").read_text()) == {"product_type": "mug"}
+        assert not (home / ".kiln" / "outside").exists() and not (home / "evil.json").exists()

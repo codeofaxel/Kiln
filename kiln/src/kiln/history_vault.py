@@ -114,6 +114,13 @@ def _part_name(name: Any) -> bool:
     return len(digest) == 64 and all(c in "0123456789abcdef" for c in digest) and f".{ext}" in _PART_SUFFIXES
 
 
+#: A proven recipe's file name beside its design (Kiln's servers apply the
+#: same rule to what they lay and hand back), and how many and how large.
+_PROVEN_NAME = re.compile(r"^\.kiln_proven_recipe(?:\.v\d{1,6})?\.json$")
+_MAX_PROVEN = 500
+_MAX_PROVEN_BYTES = 64 * 1024
+
+
 #: What a log entry or a bisect session is about.
 _ARTIFACT_TYPES = ("design", "preset", "feature")
 
@@ -903,6 +910,50 @@ class HistoryVault:
                 sessions += 1
             self._conn.commit()
         return {"log_entries": entries, "bisect_sessions": sessions}
+
+    # -- proven recipes -----------------------------------------------------
+    #
+    # A proven recipe is a small file beside a design in the library: what
+    # worked, recorded after a good print.  They go out with the calls that
+    # look them up, and one Kiln's servers record comes back to be filed here.
+
+    def proven_recipes(self) -> list[dict[str, Any]]:
+        """Every proven recipe in the design library, as ``{design_id, name, record}``."""
+        root = _designs_root()
+        out: list[dict[str, Any]] = []
+        if not root.is_dir():
+            return out
+        for folder in sorted(p for p in root.iterdir() if p.is_dir() and not p.is_symlink()):
+            for path in sorted(folder.iterdir()):
+                if len(out) >= _MAX_PROVEN or not _PROVEN_NAME.match(path.name) or path.is_symlink():
+                    continue
+                try:
+                    if path.stat().st_size > _MAX_PROVEN_BYTES:
+                        continue
+                    record = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                if isinstance(record, dict):
+                    out.append({"design_id": folder.name, "name": path.name, "record": record})
+        return out
+
+    def keep_proven_recipes(self, rows: Any) -> int:
+        """File each proven recipe a served call recorded beside its design; how many."""
+        kept = 0
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict) or not isinstance(row.get("record"), dict):
+                continue
+            name = row.get("name")
+            folder = _design_folder(row.get("design_id"))
+            if folder is None or not isinstance(name, str) or not _PROVEN_NAME.match(name):
+                continue
+            folder.mkdir(parents=True, exist_ok=True)
+            target = folder / name
+            tmp = target.with_suffix(target.suffix + ".part")
+            tmp.write_text(json.dumps(_no_paths(row["record"]), indent=2) + "\n", encoding="utf-8")
+            os.replace(tmp, target)
+            kept += 1
+        return kept
 
     def sync_from_library(self, design_id: str) -> int:
         """Record the library's versions of *design_id* that are not recorded yet.

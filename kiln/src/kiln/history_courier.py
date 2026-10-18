@@ -169,6 +169,8 @@ def records_for_call(
             _add_log_rows(vault, out, arguments, tool)
         if "files" in kinds and file_param:
             out["files"] = files_for_call(tool, arguments.get(file_param))
+        if "proven" in kinds:
+            out["proven"] = vault.proven_recipes()
         return out
     finally:
         if own:
@@ -358,6 +360,9 @@ def take_delta(
         summaries = [vault.apply_delta(d) for d in deltas]
         library = _take_library_deltas(vault, delta, sent)
         log = vault.apply_log_delta(delta)
+        proven = vault.keep_proven_recipes(delta.get("proven"))
+        if proven:
+            log = {**log, "proven_recipes": proven}
         continues = None
         made = answer.get("branch") if isinstance(answer.get("branch"), dict) else {}
         if tool in _CHECKS_OUT and made.get("branch_id") and summaries:
