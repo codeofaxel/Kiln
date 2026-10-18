@@ -66,7 +66,8 @@ def load_figure(
 
     ``(estimate, None)`` when kiln-pro sized the part -- the answer's own
     fields, ``limit_mode: "deflection"`` marking an elastomer's
-    serviceability limit; ``(None, None)`` when Kiln has no load figures for
+    serviceability limit, ``load_checked: False`` with no figure for a part
+    outside the sizes Kiln covers; ``(None, None)`` when Kiln has no load figures for
     *material* (a settled answer); ``(None, miss)`` when nothing answered.
     Never raises.
     """
