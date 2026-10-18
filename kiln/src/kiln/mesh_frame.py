@@ -44,6 +44,149 @@ GLTF_TO_KILN = (
 MAX_ASSET_BYTES = 16 * 1024 * 1024
 
 
+#: Mesh entries -- vertices and triangles together -- one read may hold.
+#: Read from the reader that already reasoned about it against real files
+#: (``threemf_parser``: the largest real model measured 2026-10-13 holds
+#: 2.2 M, and six million clears it about three times over), never copied,
+#: so the two readers of one file cannot drift apart again.
+try:
+    from kiln.threemf_parser import _MAX_KEPT_MESH_ENTRIES as MAX_MESH_ENTRIES
+except ImportError:  # pragma: no cover - the parser is part of this package
+    MAX_MESH_ENTRIES = 6_000_000
+
+#: Bytes the census reads at a time.  It only counts, so what it holds is
+#: this, not the file.
+_CENSUS_CHUNK = 1 << 20
+
+#: How much of a 3MF's model part the census reads before it stops counting.
+#: Past the budget the answer is already "too large"; reading further only
+#: spends time.  An honest model's whole part is far inside it.
+_CENSUS_MAX_MODEL_BYTES = 512 * 1024 * 1024
+
+
+class MeshTooLargeError(ValueError):
+    """A mesh file declares more mesh than one read may hold.
+
+    A :class:`ValueError`, like every other "this file cannot be read"
+    answer in Kiln, so a caller that already declines an unreadable mesh
+    declines this one in the same place, with the same wording.
+    """
+
+
+def _count_tokens(fh: Any, tokens: tuple[bytes, ...], ceiling: int) -> int:
+    """How many times *tokens* appear in the rest of *fh*, counted a chunk
+    at a time and stopped once *ceiling* is passed.
+
+    Chunks overlap by the longest token less one byte, so a token split
+    across a chunk boundary is still counted once.
+    """
+    overlap = max(len(t) for t in tokens) - 1
+    total = 0
+    tail = b""
+    while True:
+        chunk = fh.read(_CENSUS_CHUNK)
+        if not chunk:
+            return total
+        window = tail + chunk
+        for token in tokens:
+            total += window.count(token)
+        if total > ceiling:
+            return total
+        tail = window[-overlap:] if overlap else b""
+
+
+def _census_3mf(path: str, ceiling: int) -> int | None:
+    """Vertices and triangles a 3MF's model parts declare, read through the
+    archive guard without holding the mesh."""
+    try:
+        from kiln.threemf_parser import open_untrusted_zip
+    except ImportError:  # pragma: no cover - part of this package
+        return None
+    try:
+        with open_untrusted_zip(path) as zf:
+            members = [
+                info for info in zf.infolist()
+                if info.filename.lower().endswith(".model")
+            ]
+            if not members:
+                return None
+            total = 0
+            for info in members:
+                if info.file_size > _CENSUS_MAX_MODEL_BYTES:
+                    # It declares more than the census will read, so it
+                    # declares more than the budget either way.
+                    return ceiling + 1
+                with zf.open(info) as fh:
+                    total += _count_tokens(fh, (b"<vertex", b"<triangle"), ceiling)
+                if total > ceiling:
+                    return total
+            return total
+    except Exception:  # noqa: BLE001 - an unreadable archive is the reader's to report
+        return None
+
+
+def declared_mesh_entries(path: str) -> int | None:
+    """How many vertices and triangles the mesh file at *path* declares, or
+    ``None`` when this format has no cheap census.
+
+    ``None`` means "not counted", never "none": a format the census cannot
+    read cheaply is read exactly as it was before.  The counts are what the
+    FILE claims, which is the point -- a claim is what a reader is about to
+    allocate for, and reading the claim costs a header or a byte count
+    rather than the mesh.
+    """
+    try:
+        suffix = os.path.splitext(path)[1].lower()
+    except (AttributeError, TypeError):
+        return None
+    ceiling = MAX_MESH_ENTRIES
+    try:
+        if suffix == ".stl":
+            with open(path, "rb") as fh:
+                head = fh.read(84)
+                if len(head) == 84 and not head.lstrip()[:5].lower().startswith(b"solid"):
+                    # Binary: the triangle count is in the header, so this
+                    # costs 84 bytes however large the claim.
+                    return int.from_bytes(head[80:84], "little", signed=False)
+                fh.seek(0)
+                return _count_tokens(fh, (b"facet normal",), ceiling)
+        if suffix == ".obj":
+            with open(path, "rb") as fh:
+                # Line-anchored, so a ``v`` inside a comment or a material
+                # name is not a vertex.  The FIRST line has no newline
+                # before it, so it is counted on its own.
+                first = 1 if fh.read(2) in (b"v ", b"f ") else 0
+                fh.seek(0)
+                return first + _count_tokens(
+                    fh, (b"\nv ", b"\nf ", b"\rv ", b"\rf "), ceiling,
+                )
+        if suffix == ".3mf":
+            return _census_3mf(path, ceiling)
+    except OSError:
+        return None
+    return None
+
+
+def refuse_an_oversized_mesh(path: Any) -> None:
+    """Refuse *path* when it declares more mesh than one read may hold.
+
+    :raises MeshTooLargeError: past :data:`MAX_MESH_ENTRIES`.
+    """
+    try:
+        text = os.fspath(path)
+    except TypeError:
+        return
+    if not isinstance(text, str):
+        return
+    declared = declared_mesh_entries(text)
+    if declared is not None and declared > MAX_MESH_ENTRIES:
+        raise MeshTooLargeError(
+            f"{os.path.basename(text)} declares {declared} vertices and "
+            f"triangles, more than the {MAX_MESH_ENTRIES} Kiln reads at once. "
+            "Simplify it (simplify_mesh_model), or split it into parts."
+        )
+
+
 class BesideTheFileResolver(trimesh.resolvers.FilePathResolver):
     """Reads a mesh's companion files from the mesh's OWN folder, and no
     further.
@@ -179,7 +322,14 @@ def load_mesh(source: Any, **kwargs: Any) -> Any:
     those names were written by whoever made the file
     (:class:`BesideTheFileResolver`).  A caller that passes its own
     ``resolver`` keeps it.
+
+    A file declaring more mesh than one read may hold is refused before any
+    of that memory is spent (:func:`refuse_an_oversized_mesh`), at the limit
+    Kiln's own 3MF reader already uses.
+
+    :raises MeshTooLargeError: past :data:`MAX_MESH_ENTRIES`.
     """
+    refuse_an_oversized_mesh(source)
     if "resolver" not in kwargs:
         resolver = _confined_resolver(source)
         if resolver is not None:
