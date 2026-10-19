@@ -103,13 +103,12 @@ def machine_code(value: Any) -> str | None:
 
 
 def redact_text(text: str) -> str:
-    """*text* read off a machine, as it may leave for Kiln's servers: a bug
-    report's rules (:func:`kiln.redaction.redact_for_report`) and every
-    place besides (:func:`kiln.redaction.redact_places`).  A report keeps
-    the links the person wrote; nothing a printer says keeps one."""
-    from kiln.redaction import redact_for_report, redact_places
+    """*text* read off a machine, as it may leave for Kiln's servers
+    (:func:`kiln.redaction.redact_machine_text`).  A report keeps the links
+    the person wrote; nothing a printer says keeps one."""
+    from kiln.redaction import redact_machine_text
 
-    return redact_places(redact_for_report(text))
+    return redact_machine_text(text)
 
 
 def scrub(value: Any, _depth: int = 0) -> Any:

@@ -149,6 +149,18 @@ class TestReadLogTail:
         assert "jane" not in tail
         assert "192.168.1.9" not in tail
 
+    def test_the_log_loses_every_place_a_report_keeps(self, tmp_path):
+        """The log is what Kiln and the printers wrote, not the person's
+        words: it leaves with every place cut, like a printer reading."""
+        (tmp_path / "kiln.log").write_text(
+            "WARN webhook https://hooks.example.com/notify?t=abc123 failed for jane@example.com "
+            "at voron.local\n"
+        )
+        tail = read_log_tail(log_dir=str(tmp_path))
+        assert "webhook" in tail and "failed" in tail
+        for gone in ("hooks.example.com", "abc123", "jane@example.com", "voron.local"):
+            assert gone not in tail, tail
+
     def test_tail_semantics_and_partial_line_drop(self, tmp_path):
         log = tmp_path / "kiln.log"
         log.write_text("".join(f"row {i:04d}\n" for i in range(2000)))
