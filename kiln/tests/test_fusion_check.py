@@ -677,7 +677,11 @@ class TestDeclaredColor:
 
         response: dict = {}
         assert attach_declared_color(response, "teal", scad_code='color("red") cube(1);') == "teal"
-        assert response["color"] == {"shown": "teal", "source": "caller", "note": SHOWN_NOTE}
+        assert response["color"]["shown"] == "teal"
+        assert response["color"]["source"] == "caller"
+        assert response["color"]["note"] == SHOWN_NOTE
+        # A name Kiln knows resolves to the hex the stage and the AMS use.
+        assert response["color"]["hex"] == "#008080"
 
     def test_a_single_colour_in_the_source_is_read(self) -> None:
         from kiln.declared_color import attach_declared_color, single_scad_color

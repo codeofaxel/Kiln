@@ -971,6 +971,15 @@ def _slice_with_orca(
             f"signal {-result.returncode}; the output was verified complete "
             f"and kept)"
         )
+    # The colour the part was asked to be shown -- and printed -- in follows
+    # the file it was sliced into, so the print door that reads the G-code
+    # still knows it (kiln.declared_color).
+    try:
+        from kiln.declared_color import carry as _carry_colour
+
+        _carry_colour(input_abs, out_file)
+    except Exception:  # noqa: BLE001 -- a note never costs a slice
+        logger.debug("colour note not carried to %s", out_file, exc_info=True)
     return SliceResult(
         success=True,
         output_path=out_file,
@@ -1235,6 +1244,15 @@ def slice_file(
             f"signal {-result.returncode}; the output was verified complete "
             f"and kept)"
         )
+    # The colour the part was asked to be shown -- and printed -- in follows
+    # the file it was sliced into, so the print door that reads the G-code
+    # still knows it (kiln.declared_color).
+    try:
+        from kiln.declared_color import carry as _carry_colour
+
+        _carry_colour(input_path, out_file)
+    except Exception:  # noqa: BLE001 -- a note never costs a slice
+        logger.debug("colour note not carried to %s", out_file, exc_info=True)
     return SliceResult(
         success=True,
         output_path=out_file,

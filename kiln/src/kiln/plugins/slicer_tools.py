@@ -1921,6 +1921,20 @@ def _auto_wrap_bambu_3mf(
                 _loaded_color = _adapter.active_filament_color()
         except Exception as exc:  # noqa: BLE001
             _logger.debug("Filament colour unavailable for wrap: %s", exc)
+        # The colour the part was ASKED for outranks the one that happens to
+        # be loaded: the 3MF then says what the person said, and the AMS
+        # resolver routes it to the spool of that colour (or holds the print
+        # and says none is loaded) instead of quietly printing in whatever
+        # was in the active slot.
+        _asked_color: str | None = None
+        try:
+            from kiln.declared_color import read as _read_colour
+
+            _asked = _read_colour(gcode_path)
+            _asked_color = _asked.hex6 if _asked else None
+        except Exception as exc:  # noqa: BLE001
+            _logger.debug("asked colour unavailable for wrap: %s", exc)
+        _wrap_color = _asked_color or _loaded_color
 
         settings = BambuPrintSettings(
             model_name=_Path(gcode_path).stem,
@@ -1928,7 +1942,7 @@ def _auto_wrap_bambu_3mf(
             # reads them off the G-code -- the material the slice was
             # weighed as and the temperatures it heats to -- so the start
             # sequence and the tile agree with the toolpath.
-            filament_colors=[_loaded_color] if _loaded_color else None,
+            filament_colors=[_wrap_color] if _wrap_color else None,
         )
         wrap = build_bambu_3mf(
             gcode_body,
@@ -1961,6 +1975,14 @@ def _auto_wrap_bambu_3mf(
             note_wrapped(gcode_path, threemf_path)
         except Exception:  # noqa: BLE001 — bookkeeping never blocks a wrap
             _logger.debug("monitor-twin wrap note failed", exc_info=True)
+        # The asked colour follows the wrap too, so a later start_print on
+        # the 3MF is held to the same promise as the slice that made it.
+        try:
+            from kiln.declared_color import carry as _carry_colour
+
+            _carry_colour(gcode_path, threemf_path)
+        except Exception:  # noqa: BLE001 — a note never blocks a wrap
+            _logger.debug("colour note not carried to the wrap", exc_info=True)
         # A successful wrap can still hand back a file whose startup sequence
         # belongs to another machine.  That used to be a log line only, which
         # is invisible to the agent holding the 3MF — and it stopped being a
@@ -3076,8 +3098,22 @@ class _SlicerToolsPlugin:
             preview_token: str | None = None,
             placement: str | list[float] | None = None,
             hardware: list[str] | None = None,
+            color: str = "",
         ) -> dict:
             """Slice a 3D model (STL/3MF) + upload + print in one step (basic pipeline).
+
+            Colour is a promise kept here.  A part made in a colour (the
+            ``color`` the make was asked for, or the one its source named)
+            prints from a loaded spool of that colour: on a printer with an
+            AMS the slot is chosen and named in the result; with none of that
+            colour loaded the print is HELD (``code: "COLOR_NOT_LOADED"``),
+            naming the nearest loaded spool, so the person decides before
+            anything prints -- call again with ``color="<that colour>"`` to
+            print in it, or load the asked colour and call again; on a
+            printer with no unit Kiln can read it prints in whatever is
+            loaded and the result says so.  ``color`` here overrides the
+            make's: a colour word or hex to print in instead, or ``"any"``
+            to print in whatever is loaded.
 
             For a more comprehensive pipeline with validation and profile auto-detection,
             use ``run_quick_print``. For custom slicer overrides, use ``run_reslice_and_print``.
@@ -3198,6 +3234,31 @@ class _SlicerToolsPlugin:
                 # the validation gate below may swap input_path for a
                 # repaired copy that no longer carries the color story.
                 _multicolor_source = input_path
+
+                # The colour this part is to print in, decided before the
+                # slice so the slicer and the wrap carry it to the file the
+                # printer gets: the person's word on this call outranks the
+                # make's note; "any" means whatever is loaded.
+                try:
+                    from kiln import declared_color as _declared
+
+                    _said = str(color or "").strip()
+                    if _said.lower() == "any":
+                        _declared.forget(input_path)
+                    elif _said:
+                        _hex = _declared.hex_for(_said)
+                        if _hex is None:
+                            return _srv._error_dict(
+                                f"I don't know the colour {_said!r}. Say a colour "
+                                "name (teal, orange, navy ...) or a #rrggbb hex, "
+                                "or color=\"any\" to print in whatever is loaded.",
+                                code="UNKNOWN_COLOR",
+                            )
+                        _declared.record(
+                            input_path, _declared.ShownColour(shown=_said, hex6=_hex),
+                        )
+                except Exception:  # noqa: BLE001 — the note never costs a print
+                    _logger.debug("colour note not updated for %s", input_path, exc_info=True)
 
                 # --- Calibration overlay ---
                 # Same overlay as reslice_with_overrides: the settings the
@@ -3578,11 +3639,15 @@ class _SlicerToolsPlugin:
                 )
                 ams_routing_warnings = list(ams_decision.get("warnings") or [])
                 if ams_decision.get("blocked"):
+                    _extra: dict[str, Any] = {"ams_plan": ams_decision.get("plan")}
+                    if ams_decision.get("colour"):
+                        _extra["colour"] = ams_decision["colour"]
                     return _srv._error_dict(
                         " ".join(ams_routing_warnings) or "AMS routing blocked.",
-                        code="AMS_COLOR_MISMATCH",
+                        # A held colour is its own refusal: the person is asked.
+                        code=str(ams_decision.get("code") or "AMS_COLOR_MISMATCH"),
                         retryable=False,
-                        extra={"ams_plan": ams_decision.get("plan")},
+                        extra=_extra,
                     )
                 # Refuse to silent-route when AMS state is ambiguous
                 # (hardware bits say AMS present but no tray state, or
@@ -3707,6 +3772,10 @@ class _SlicerToolsPlugin:
                     )
                 if ams_routing is not None:
                     resp["ams_routing"] = ams_routing
+                # The colour the part was asked for, and what became of it
+                # (loaded from a named slot / a picture only on this printer).
+                if ams_decision.get("colour"):
+                    resp["colour"] = ams_decision["colour"]
                 if ams_routing_warnings:
                     resp["warnings"] = ams_routing_warnings
                 if cal_used is not None:
