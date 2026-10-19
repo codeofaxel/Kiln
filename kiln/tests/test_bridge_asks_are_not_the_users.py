@@ -46,6 +46,11 @@ _PERSONS_OWN_ASK = {
         "runs only when the person names the rules on check_material_environment; "
         "the per-requirement verdict is the feature they reached for"
     ),
+    "_pro_ams_bridge": (
+        "runs only when the person asks ams_filament_drying to START the dryer, and "
+        "the start is refused without the check, so a signed-out refusal is the "
+        "person meeting the sign-in wall"
+    ),
 }
 
 

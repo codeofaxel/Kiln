@@ -206,8 +206,13 @@ class TestRecommendMaterialNozzleSummaryWire:
         """Gap #8 + Gap #9 both fire when the top pick is abrasive on brass."""
         monkeypatch.setattr(
             _pro_nozzle_bridge, "consult_abrasive_escalation",
+            # The verdict's real shape (kiln_pro.nozzle_intelligence.verdicts
+            # .abrasive_escalation): red, raised by the brass nozzle.
             lambda **_: {
-                "escalation_reason": "abrasive_brass",
+                "severity": "red",
+                "escalated": True,
+                "filament_class": "abrasive",
+                "nozzle_material": "brass",
                 "user_warning": (
                     "PETG-CF on brass burns through ~360 g before "
                     "catastrophic tip wear."

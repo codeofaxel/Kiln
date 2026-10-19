@@ -25,7 +25,10 @@ Compatibility levels
 
 from __future__ import annotations
 
+import json
 import re
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -67,6 +70,310 @@ def food_contact_nozzle_advisory() -> str:
     keeps them from drifting into three slightly different warnings.
     """
     return FOOD_CONTACT_NOZZLE_ADVISORY
+
+
+# ---------------------------------------------------------------------------
+# Food contact: the rating and the detector every install carries
+# ---------------------------------------------------------------------------
+#
+# Whether a printed part will hold food, touch a mouth, or feed a pet decides
+# which materials may be recommended for it at all.  That is a safety floor,
+# so it lives here, in the public package, and answers the same way on every
+# install whether or not anything else is present.  There is ONE rating per
+# material, ``chemical.food_safe`` in ``data/design_knowledge/materials.json``;
+# anything layered on top (product classes, served depth) adds conditions and
+# never contradicts it.
+#
+# The recommendation rule is deliberately conservative in one direction:
+# ``"no"`` is dropped, ``"yes"`` and ``"conditional"`` stay.  A conditional
+# material keeps its conditions in the warning text and is never described as
+# food safe.
+
+#: Words and phrases that put a printed part against food, drink, the mouth,
+#: or a pet's bowl.  Wide on purpose: an unneeded match narrows the material
+#: list, while a miss can hand someone a ``food_safe="no"`` material for a
+#: bowl.  Matching is whole-word, and hyphens and underscores read as spaces,
+#: so "pet_bowl", "pet-bowl" and "pet bowl" are one phrase.  Bare "glass" and
+#: "bottle" are absent because glass-filled nylon and a spray bottle are not
+#: food; the drinkware phrases carry those.
+FOOD_CONTACT_TOKENS: frozenset[str] = frozenset({
+    # Direct statements of intent
+    "food", "food safe", "foodsafe", "food contact", "food grade",
+    "edible", "consumable", "ingested",
+    # Eating and drinking
+    "eat", "eating", "dining", "meal", "lunch", "lunchbox", "lunch box",
+    "snack", "breakfast", "dinner", "picnic", "bento", "cereal",
+    "drink", "drinking", "beverage",
+    # Drinkware
+    "cup", "mug", "tumbler", "stein", "goblet", "flask", "thermos",
+    "carafe", "pitcher", "straw", "sippy cup", "drinking glass",
+    "wine glass", "shot glass", "water bottle", "drink bottle",
+    "baby bottle", "coffee", "tea", "teapot", "kettle", "juice", "smoothie",
+    # Serving and preparation
+    "kitchen", "bowl", "plate", "platter", "dish", "saucer", "ramekin",
+    "tray", "utensil", "cutlery", "silverware", "spoon", "fork",
+    "chopstick", "skewer", "spatula", "ladle", "whisk", "scoop",
+    "colander", "strainer", "cutting board", "chopping board",
+    "measuring cup", "measuring spoon", "trivet", "placemat",
+    # Baking and cookery
+    "cookie", "cookie cutter", "baking", "pastry", "dough", "bread",
+    "cake", "icing", "fondant", "chocolate", "candy",
+    # Pantry and storage
+    "food container", "food storage", "spice", "spice rack", "salt",
+    "pepper", "sugar", "honey", "canister", "jar lid", "mason jar",
+    # Ice
+    "ice", "iced", "ice cube", "ice tray", "ice cream", "popsicle",
+    # Mouth and oral contact
+    "mouth", "mouthpiece", "mouthguard", "mouth guard", "oral",
+    "tooth", "teeth", "toothbrush", "toothpick", "dental", "denture",
+    "pacifier", "teether", "whistle", "mouthwash",
+    # Pets: a pet bowl is a food bowl
+    "pet bowl", "dog bowl", "cat bowl", "food bowl", "water bowl",
+    "feeder", "feeding", "pet treat", "treat dispenser",
+})
+
+#: A word directly in front of one of the qualifier-sensitive nouns below that
+#: marks its hardware sense: a "top plate" is structure, a "suction cup" is a
+#: foot, "cable feeding" is routing, a "pen cup" is one of Kiln's own
+#: generators.  A bare or food-qualified noun still fires, so "a dinner plate
+#: that sits on the build plate" is food contact and "the build plate" alone
+#: is not.  Qualifying the noun beats suppressing the brief, which would
+#: silence a real bowl.
+FOOD_MECHANICAL_QUALIFIERS: frozenset[str] = frozenset({
+    "top", "bottom", "base", "back", "front", "side", "wall", "face",
+    "cover", "mounting", "mount", "adapter", "adaptor", "license",
+    "number", "build", "kick", "switch", "blanking", "gusset",
+    "backing", "steel", "metal", "aluminum", "aluminium", "vesa",
+    "suction", "bearing", "cable", "wire", "filament", "paper",
+    "bed", "print", "parts", "part", "paint", "screw", "screws", "tool",
+    "tools", "desk", "drip", "sorting", "jewelry", "jewellery", "component",
+    "battery", "seed", "air", "dust", "ash",
+    "pen", "pencil", "brush", "soap", "rolling", "satellite",
+})
+
+#: The nouns whose sense the qualifier in front of them settles.
+_FOOD_QUALIFIER_SENSITIVE: frozenset[str] = frozenset({
+    "plate", "cup", "feeding", "tray", "scoop", "dish",
+})
+
+#: The recommendation bar: a candidate stays when its rating is one of these.
+FOOD_SAFE_KEEP: dict[str, frozenset[str]] = {
+    "yes": frozenset({"yes"}),
+    "yes_or_conditional": frozenset({"yes", "conditional"}),
+}
+
+
+def _fold_separators(text: str) -> str:
+    """Lowercase and read hyphens and underscores as spaces."""
+    return re.sub(r"[_\-]+", " ", text.lower())
+
+
+def _whole_word_alternation(tokens: frozenset[str]) -> re.Pattern[str]:
+    """One pattern matching any token as whole words, plural suffix allowed.
+
+    A phrase tolerates any run of whitespace between its words, so a wrapped
+    line still reads "cutting board" as one phrase.
+    """
+    alternatives = [
+        r"\s+".join(re.escape(word) + r"(?:e?s)?" for word in token.split())
+        for token in sorted(tokens, key=len, reverse=True)
+    ]
+    return re.compile(r"\b(?:" + "|".join(alternatives) + r")\b")
+
+
+@lru_cache(maxsize=1)
+def _food_contact_pattern() -> re.Pattern[str]:
+    """The trigger vocabulary compiled once, with design intelligence's own
+    food keywords folded in so a word added there reaches this detector too.
+
+    Built on first use so importing this module never imports
+    ``design_intelligence``.
+    """
+    tokens = {_fold_separators(t) for t in FOOD_CONTACT_TOKENS}
+    from kiln.design_intelligence import _FOOD_KEYWORDS
+
+    tokens.update(_fold_separators(str(k)) for k in _FOOD_KEYWORDS)
+    return _whole_word_alternation(frozenset(tokens))
+
+
+@lru_cache(maxsize=1)
+def _food_sensitive_forms() -> frozenset[str]:
+    """The qualifier-sensitive nouns plus the plurals the pattern can match."""
+    return frozenset(
+        form
+        for base in _FOOD_QUALIFIER_SENSITIVE
+        for form in (base, base + "s", base + "es")
+    )
+
+
+def use_case_implies_food_contact(use_case: str) -> bool:
+    """True when a brief suggests the part meets food, drink, a mouth or a pet.
+
+    Whole words only, so *slice*, *device* and *cupboard* are not food.  See
+    :data:`FOOD_MECHANICAL_QUALIFIERS` for how "build plate" and "pen cup" are
+    told apart from a dinner plate and a coffee cup.
+    """
+    if not isinstance(use_case, str) or not use_case.strip():
+        return False
+    text = _fold_separators(use_case)
+    sensitive = _food_sensitive_forms()
+    for match in _food_contact_pattern().finditer(text):
+        if match.group(0) in sensitive and _word_before(text, match.start()) in FOOD_MECHANICAL_QUALIFIERS:
+            continue
+        return True
+    return False
+
+
+def _word_before(text: str, end: int) -> str:
+    """The run of letters ending just before *end*, skipping whitespace.
+
+    A backward scan rather than a regex over ``text[:end]``: that regex
+    backtracks across the whole prefix at every match, which grows with the
+    square of a long brief.
+    """
+    stop = end
+    while stop > 0 and text[stop - 1].isspace():
+        stop -= 1
+    start = stop
+    while start > 0 and "a" <= text[start - 1] <= "z":
+        start -= 1
+    return text[start:stop]
+
+
+def _materials_json_path() -> Path:
+    return Path(__file__).resolve().parent / "data" / "design_knowledge" / "materials.json"
+
+
+@lru_cache(maxsize=1)
+def _food_ratings() -> dict[str, str]:
+    """``{catalog key: food_safe rating}`` read from the public catalog.
+
+    Read straight from the file rather than through the design-intelligence
+    loader, because that loader merges served depth on top and this rating is
+    the one every install must agree on.  A catalog that cannot be read gives
+    an empty map, which every caller below treats as "not rated": refused for
+    food contact, never assumed safe.
+    """
+    try:
+        data = json.loads(_materials_json_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    ratings: dict[str, str] = {}
+    for key, entry in data.items():
+        if key.startswith("_") or not isinstance(entry, dict):
+            continue
+        rating = str((entry.get("chemical") or {}).get("food_safe") or "").lower()
+        if rating:
+            ratings[key] = rating
+    return ratings
+
+
+def food_catalog_key(material: str) -> str:
+    """A material name in the catalog's key form: ``"PETG-HF"`` -> ``"petg_hf"``,
+    ``"PLA+"`` -> ``"pla_plus"``."""
+    if not isinstance(material, str):
+        return ""
+    key = material.strip().lower().replace("+", "_plus")
+    return re.sub(r"[\s\-]+", "_", key)
+
+
+def food_safe_rating(material: str) -> str | None:
+    """The catalog's ``food_safe`` rating for *material*, or ``None`` when the
+    material is not in the catalog (which callers treat as not food safe)."""
+    return _food_ratings().get(food_catalog_key(material))
+
+
+def filter_food_safe_materials(
+    candidates: list[str], require: str = "yes"
+) -> list[str]:
+    """The candidates whose rating clears the bar, in their given order and
+    spelling.
+
+    :param require: ``"yes"`` keeps only food-safe ratings;
+        ``"yes_or_conditional"`` drops only ``"no"`` (and anything unrated).
+    """
+    keep = FOOD_SAFE_KEEP.get(require)
+    if keep is None:
+        raise ValueError(f"require must be one of {sorted(FOOD_SAFE_KEEP)}")
+    return [c for c in candidates if food_safe_rating(c) in keep]
+
+
+def approved_food_safe_materials() -> list[str]:
+    """Catalog keys rated ``food_safe="yes"``, computed from the catalog so a
+    newly rated material joins without a code change."""
+    return sorted(k for k, v in _food_ratings().items() if v == "yes")
+
+
+def _food_display(key: str) -> str:
+    """``"petg_hf"`` -> ``"PETG-HF"``, for prose only."""
+    return key.upper().replace("_", "-")
+
+
+def _food_display_csv(keys: list[str]) -> str:
+    return ", ".join(_food_display(k) for k in keys)
+
+
+_FOOD_REFUSE = (
+    "Material '{material}' is rated not food safe in Kiln's material catalog. "
+    "It is not safe for food, drink, mouth or pet contact in any condition: "
+    "it can off-gas, leach or shed into whatever touches it. Use one of the "
+    "food-safe options instead: {approved}."
+)
+
+_FOOD_CONDITIONAL = (
+    "Material '{material}' is food safe only under conditions: water only (no "
+    "acidic, fatty or hot food), hand wash with mild soap in warm (not hot) "
+    "water, and replace it every 6-12 months as the layer lines wear. If any "
+    "of those does not fit, use {approved} instead."
+)
+
+_FOOD_APPROVED = (
+    "Material '{material}' is rated food safe in Kiln's material catalog. An "
+    "FDM print is still not certified for food contact even in a food-safe "
+    "filament: the gaps between layers hold bacteria over time. Hand wash, no "
+    "dishwasher, replace it yearly."
+)
+
+_FOOD_UNKNOWN = (
+    "Material '{material}' is not in Kiln's material catalog, so it is treated "
+    "as unsafe for food, drink, mouth or pet contact."
+)
+
+
+def assess_food_safety(material: str) -> dict[str, Any]:
+    """The food-contact verdict for one material.
+
+    ``verdict`` is ``"approved"`` (rated yes, with the not-certified caveat),
+    ``"warn"`` (conditional: the conditions are in ``user_warning``) or
+    ``"refuse"`` (rated no, or not in the catalog).  ``approved_alternatives``
+    lists the catalog keys rated yes.
+    """
+    key = food_catalog_key(material)
+    rating = _food_ratings().get(key)
+    approved = approved_food_safe_materials()
+    name = _food_display(material) if isinstance(material, str) else str(material)
+    if rating == "yes":
+        verdict, message = "approved", _FOOD_APPROVED.format(material=name)
+    elif rating == "conditional":
+        verdict = "warn"
+        message = _FOOD_CONDITIONAL.format(
+            material=name, approved=_food_display_csv(approved) or "PETG"
+        )
+    elif rating == "no":
+        verdict = "refuse"
+        message = _FOOD_REFUSE.format(
+            material=name, approved=_food_display_csv(approved) or "(none rated)"
+        )
+    else:
+        verdict, message = "refuse", _FOOD_UNKNOWN.format(material=material)
+    return {
+        "material": key,
+        "found_in_catalog": rating is not None,
+        "food_safe": rating,
+        "verdict": verdict,
+        "user_warning": message,
+        "approved_alternatives": approved,
+    }
 
 
 # ---------------------------------------------------------------------------

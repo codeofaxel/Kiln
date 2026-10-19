@@ -79,7 +79,7 @@ def bridge_answers(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
     """kiln-pro present: the bridge returns PRIVATE_ROW for the cutter code."""
     asked: list[tuple[str, str]] = []
 
-    def _decode(code: str, *, kind: str = "print_error") -> dict[str, Any] | None:
+    def _decode(code: str, *, kind: str = "print_error", wait: bool = True) -> dict[str, Any] | None:
         asked.append((code, kind))
         digits = "".join(c for c in code.upper() if c in "0123456789ABCDEF")
         if kind == "print_error" and digits.startswith("12008001"):

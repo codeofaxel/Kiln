@@ -589,26 +589,21 @@ def recommend_material(
         if budget_filtered:
             candidates = budget_filtered
 
-    # Food-safety overlay (kiln-pro feature; free-tier silently skips):
-    # when the user's intent implies food / pet / mouth contact, drop
-    # candidates whose chemical.food_safe rating is "no".  Conditional
-    # materials (PLA) stay in but rank below food_safe=yes options
-    # because the scorer doesn't know about food-safety on its own.
-    try:
-        from kiln_pro.material_safety import (  # noqa: WPS433
-            filter_materials_by_food_safety,
-            use_case_implies_food_contact,
-        )
-    except ImportError:
-        filter_materials_by_food_safety = None  # type: ignore[assignment]
-        use_case_implies_food_contact = None  # type: ignore[assignment]
-    if (
-        use_case_implies_food_contact is not None
-        and use_case_implies_food_contact(intent)
-    ):
-        names = [getattr(m, "name", str(m)) for m in candidates]
+    # Food-safety floor: when the intent implies food, drink, mouth or pet
+    # contact, drop candidates rated food_safe="no" (or unrated).  Conditional
+    # materials (PLA) stay in; the rating and the rule are public Kiln's own,
+    # so every install filters the same way.
+    from kiln.material_safety import (
+        filter_food_safe_materials,
+        use_case_implies_food_contact,
+    )
+
+    if use_case_implies_food_contact(intent):
         safe_set = set(
-            filter_materials_by_food_safety(names, require="yes_or_conditional")
+            filter_food_safe_materials(
+                [getattr(m, "name", str(m)) for m in candidates],
+                require="yes_or_conditional",
+            )
         )
         food_filtered = [
             m for m in candidates
@@ -787,13 +782,13 @@ def recommend_material(
     if availability and availability.get("as_recorded"):
         _filament = availability["as_recorded"][0]
 
-    # Nozzle overlays — when the caller supplied a printer_id AND
-    # kiln-pro is installed, consult the bridge for (a) abrasive
-    # escalation against the top pick (prepended NOZZLE ADVISORY) and
-    # (b) a one-sentence nozzle-context line (appended after the
-    # reasoning).  Both surface as reasoning-string mutations to
-    # preserve the existing return shape for callers that parse it.
-    # Free-tier installs without kiln-pro silently skip both wires.
+    # Nozzle overlays — when the caller supplied a printer_id, consult
+    # the bridge (kiln-pro in-process, else Kiln's servers) for (a)
+    # abrasive escalation against the top pick (prepended NOZZLE
+    # ADVISORY, a Kiln Pro answer) and (b) a one-sentence nozzle-context
+    # line (appended after the reasoning).  Both surface as
+    # reasoning-string mutations to preserve the existing return shape
+    # for callers that parse it.  No answer leaves the floor below.
     _nozzle_advisory_shown = False
     if printer_id:
         try:
@@ -803,9 +798,13 @@ def recommend_material(
                 filament_material=_filament,
                 printer_id=printer_id,
             )
+            # The verdict's own contract: red, raised by the nozzle (an
+            # abrasive on brass).  It never carried an ``escalation_reason``,
+            # so a check on one never fired, with kiln-pro or without.
             if (
                 _nozzle_advisory is not None
-                and _nozzle_advisory.get("escalation_reason") == "abrasive_brass"
+                and _nozzle_advisory.get("severity") == "red"
+                and _nozzle_advisory.get("escalated") is True
             ):
                 reasoning = (
                     f"NOZZLE ADVISORY: {_nozzle_advisory.get('user_warning', '')} "

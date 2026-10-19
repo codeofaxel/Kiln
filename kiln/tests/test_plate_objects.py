@@ -606,3 +606,33 @@ class TestMultiPlate:
                 "bracket",
                 plate_number=1,
             )
+
+
+class TestAPlateFileFromAStranger:
+    """The shared server opens print files a stranger brought: a plate entry
+    is unpacked only up to PLATE_JSON_LIMIT, whatever the archive says."""
+
+    def test_a_plate_entry_that_unpacks_past_the_limit_is_refused_not_read(self, tmp_path):
+        from kiln.generation.validation import PLATE_JSON_LIMIT
+
+        path = tmp_path / "padded.gcode.3mf"
+        # Valid JSON, honestly declared, a few KB on the wire once deflated.
+        padded = json.dumps(_PLATE_JSON) + " " * (PLATE_JSON_LIMIT + 1)
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("Metadata/plate_1.json", padded)
+            zf.writestr("Metadata/plate_1.gcode", _GCODE)
+        assert path.stat().st_size < 64 * 1024
+        with pytest.raises(ValueError, match="not readable"):
+            list_plate_objects(str(path))
+
+    def test_a_plate_entry_just_under_the_limit_still_reads(self, tmp_path):
+        from kiln.generation.validation import PLATE_JSON_LIMIT
+
+        path = tmp_path / "roomy.gcode.3mf"
+        body = json.dumps(_PLATE_JSON)
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("Metadata/plate_1.json", body + " " * (PLATE_JSON_LIMIT - len(body)))
+            zf.writestr("Metadata/plate_1.gcode", _GCODE)
+        assert [o["name"] for o in list_plate_objects(str(path))["objects"]] == [
+            "PartA - body.stl", "PartA - lid.stl",
+        ]

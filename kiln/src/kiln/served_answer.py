@@ -480,6 +480,7 @@ def _tool_sentence(tool_name: str, miss: Miss, kind: str | None = None) -> str:
 #: moment the door is added, not found later.
 HOSTED_DOORS: dict[str, tuple[str, str]] = {
     "kiln.server": ("served_answer", "the paid-tool manifest stubs and the served door every bridge uses"),
+    "kiln.served_public": ("served_answer", "public design and analysis tools a signed-in install runs on Kiln's servers; a miss runs the tool here and says why once per cause"),
     "kiln._pro_motion_bridge": ("served_answer", "head-motion plans; a miss is worded by the Bambu doors"),
     "kiln._pro_cutter_bridge": ("served_answer", "blade status for the pre-flight; cut reports are fire-and-forget"),
     "kiln._pro_nozzle_bridge": ("served_answer", "the pre-print nozzle-life verdict for the pre-flight, a start and a slice; the nozzle on record, for the pre-flight's comparison and for the size a check or a slice runs with"),
@@ -487,6 +488,10 @@ HOSTED_DOORS: dict[str, tuple[str, str]] = {
     "kiln._pro_cost_bridge": ("served_answer", "cost intelligence for a print file's estimate; the estimate itself is the floor"),
     "kiln._pro_melt_bridge": ("served_answer", "a printer's own melt rates for a slice; the material's cautious figure is the floor"),
     "kiln._pro_material_rules_bridge": ("served_answer", "whether a material meets the rules a part must meet; a miss judges no requirement met"),
+    "kiln._pro_fault_bridge": ("served_answer", "what one printer fault code means and how to clear it; a miss keeps the code's family line and says why once"),
+    "kiln._pro_ams_bridge": ("served_answer", "the check an AMS dryer START passes before it is sent; a miss sends nothing, and a stop never needs it"),
+    "kiln.start_narrative": ("served_answer", "what one Bambu model's print start looks like; a miss keeps the generic line and says why instead of pointing at a sign-in the install already has"),
+    "kiln._pro_guide_bridge": ("served_answer", "one step of the maker's repair guide; a miss points at the maker's own pages and never claims the maker has no guide"),
     "kiln.plugins.fleet_tools": ("served_answer", "fleet routing on an install without the router; a miss routes nothing"),
     "kiln._pro_camera_bridge": ("served_answer", "whether a printer model ships with a camera, for always allow; a miss asks the person instead"),
     "kiln._pro_catalogue_bridge": ("served_answer", "one printer's catalogue record (limits, variants, spec sheet) at setup, kept on this computer; a miss is the record last kept, else the generic floor, said once at setup"),

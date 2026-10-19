@@ -74,15 +74,16 @@ def _act(tool: str, step_id: str, **args) -> dict:
 
 
 class TestTheFence:
-    def test_the_allow_list_is_the_five_decided_tools_and_nothing_hot(self):
+    def test_the_allow_list_is_the_decided_tools_and_nothing_hot(self):
         """Adding a tool a server may run on a printer is a decision, and
-        this is where it is recorded."""
+        this is where it is recorded.  The cancel and the skip joined on
+        2026-10-17 (Adam), behind the same approve-the-exact-list step."""
         assert set(served_steps.ACT_TOOLS) == {
             "upload_file", "start_print", "pause_print", "resume_print", "set_speed_profile",
-            "run_speed_schedule",
+            "run_speed_schedule", "cancel_print", "skip_print_objects",
         }
         for forbidden in ("send_gcode", "set_temperature", "update_printer_firmware",
-                          "emergency_stop", "cancel_print", "register_printer", "confirm_action"):
+                          "emergency_stop", "register_printer", "confirm_action"):
             assert forbidden not in served_steps.ACT_TOOLS
 
     @pytest.mark.parametrize(
@@ -91,7 +92,6 @@ class TestTheFence:
             _act("send_gcode", "g", commands="M104 S300"),
             _act("set_temperature", "t", tool_temp=300),
             _act("update_printer_firmware", "f"),
-            _act("cancel_print", "c"),
             _act("emergency_stop", "e"),
             {"kind": "act", "id": "x", "tool": None, "args": {}},
             {"kind": "act", "id": "x", "args": {}},
@@ -129,6 +129,16 @@ class TestTheFence:
             _act("set_speed_profile", "v", percent=5),
             _act("set_speed_profile", "v", percent="115"),
             _act("set_speed_profile", "v", percent=True),
+            _act("cancel_print", "c", printer_name="voron", expected_tool_target=300),
+            _act("cancel_print", "c", printer_name="voron", preserve_temperatures="yes"),
+            # an object id never carries a second argument or command
+            _act("skip_print_objects", "k", object_ids=["Part1 RESET=1"]),
+            _act("skip_print_objects", "k", object_ids=["Part1\nM104 S300"]),
+            _act("skip_print_objects", "k", object_ids=["a;M112"]),
+            _act("skip_print_objects", "k", object_ids=[]),
+            _act("skip_print_objects", "k", object_ids=[757]),
+            _act("skip_print_objects", "k", object_ids="757"),
+            _act("skip_print_objects", "k", object_ids=[str(i) for i in range(40)]),
             _act("run_speed_schedule", "r", schedule=[{"from_layer": 1, "to_layer": 5, "speed_percent": 100},
                                                       {"from_layer": 3, "to_layer": 8, "speed_percent": 100}]),
             _act("run_speed_schedule", "r", schedule=[{"from_layer": 1, "to_layer": 5, "speed_percent": 900}]),
@@ -206,6 +216,25 @@ class TestThroughTheDoor:
             ("run_speed_schedule", {"schedule": segments, "printer_name": "voron", "action": "run"}),
         ]
         assert done["speed"]["data"]["percent"] == 115 and done["sched"]["data"]["active"] is True
+
+    def test_a_checked_cancel_and_a_checked_skip_reach_their_doors(self, doors, monkeypatch):
+        """The fleet cancel and the fleet skip reach each machine through
+        this install's own cancel_print and skip_print_objects."""
+        import kiln.server as server
+
+        calls, _ = doors
+        monkeypatch.setattr(server, "cancel_print", lambda **kw: calls.append(("cancel_print", kw)) or {"success": True, "message": "cancelled"})
+        monkeypatch.setattr(server, "skip_print_objects", lambda **kw: calls.append(("skip_print_objects", kw)) or {"success": True, "skipped_objects": kw["object_ids"], "outcome": "accepted"})
+        done, refused = served_steps.carry_out("t", [
+            _act("cancel_print", "cancel", printer_name="voron", preserve_temperatures=True),
+            _act("skip_print_objects", "skip", object_ids=["757", "Part_2.stl_id_1"], printer_name="a1", plate_number=2),
+        ], _send, act=True)
+        assert refused is None
+        assert calls == [
+            ("cancel_print", {"printer_name": "voron", "preserve_temperatures": True}),
+            ("skip_print_objects", {"object_ids": ["757", "Part_2.stl_id_1"], "printer_name": "a1", "plate_number": 2}),
+        ]
+        assert done["skip"]["data"] == {"ran": True, "success": True, "outcome": "accepted"}
 
     def test_an_action_runs_the_tool_with_exactly_the_checked_arguments(self, doors, handed_file):
         calls, _ = doors
@@ -644,7 +673,7 @@ class TestThroughTheStub:
                 return register
 
         server._register_pro_tool_stubs(_Registry())
-        monkeypatch.setattr(served_makes, "_upload_file", lambda p: (f"tok-{p.suffix[1:]}-0123456789abcdef", ""))
+        monkeypatch.setattr(served_makes, "_upload_file", lambda p, **_k: (f"tok-{p.suffix[1:]}-0123456789abcdef", ""))
         monkeypatch.setattr(served_makes, "_bring_files", lambda answer, trip: None)
         monkeypatch.setattr(server, "_read_config_printers", lambda: {
             "default": {"type": "bambu", "printer_model": "bambu_a1", "host": "10.0.0.5"}})
@@ -685,7 +714,11 @@ class TestThroughTheStub:
         facts = first["step_results"]["printer_facts"]["data"]
         assert facts["printers"][0]["job"]["current_layer"] == 9
         assert facts["printers"][0]["type"] == "bambu"
-        assert first["printer_name"] == "bambu_a1"  # the stub's own naming of an unnamed printer
+        # The printers went with the call, the default one marked, so an
+        # unnamed printer stays unnamed: its model in the name's place used
+        # to lose it (two of one model, or one whose model is unknown).
+        assert "printer_name" not in first
+        assert facts["printers"][0]["is_default"] is True
         assert "run_actions" not in first
 
     def test_an_action_is_shown_first_and_nothing_runs(self, stub, doors, handed_file, monkeypatch, tmp_path):
@@ -835,3 +868,233 @@ class TestThroughTheStub:
         monkeypatch.setattr(server, "_pro_api_call", lambda name, **kw: self._asks(handed_file))
         answer = tool(original_gcode_path=self._gcode(tmp_path))
         assert answer["code"] == "ACTIONS_PROPOSED" and door_calls == []
+
+
+class TestTheFleetReads:
+    """Every Klipper printer's configuration and every printer's own nozzle
+    setting, for a served fleet sweep (2026-10-17): asked at once, each with
+    the deadline, and never an address or a machine's identity."""
+
+    class _Klipper:
+        def __init__(self, config):
+            self._config = config
+
+        def get_printer_config(self):
+            if isinstance(self._config, Exception):
+                raise self._config
+            return self._config
+
+    @pytest.fixture
+    def fleet(self, monkeypatch):
+        import kiln.printer_nozzle_reading as reading
+        import kiln.server as server
+
+        monkeypatch.setattr(server, "_read_config_printers", lambda: {
+            "a1": {"type": "bambu", "printer_model": "bambu_a1", "host": "10.0.0.5"},
+            "voron": {"type": "moonraker", "printer_model": "voron_2", "host": "voron.local"},
+            "trident": {"type": "moonraker", "printer_model": "voron_trident", "host": "trident.local"},
+        })
+        monkeypatch.setattr(server, "_resolve_effective_printer_name", lambda name=None: "a1")
+        klippers = {"voron": self._Klipper({"probe": {"z_offset": "1.2"}}),
+                    "trident": self._Klipper(OSError("no route to trident.local"))}
+
+        class _Registry:
+            def get(self, name):
+                return klippers[name]
+
+        monkeypatch.setattr(server, "_get_registry", lambda: _Registry())
+        seen = {
+            "a1": {"machine": "a1", "fingerprint": "serial:01P00A000000001", "family": "bambu",
+                   "resolved_by": "name", "material": "hardened_steel", "nozzle_diameter_mm": 0.4,
+                   "read_from": "mqtt", "firmware_version": "01.04", "state_age_seconds": 2,
+                   "stale_after_seconds": 60, "read_at": "2026-10-17T10:00:00+00:00", "value_kind": "configured"},
+        }
+        monkeypatch.setattr(reading, "observe_printer_nozzle", lambda name: seen.get(name))
+        return klippers
+
+    def _read(self, want):
+        done, refused = served_steps.carry_out(
+            "t", [{"kind": "printer_facts", "id": "printer_facts", "printer_name": "", "want": want}], _send,
+        )
+        assert refused is None
+        return {p["name"]: p for p in done["printer_facts"]["data"]["printers"]}, done
+
+    def test_every_klipper_printers_configuration_is_read(self, fleet):
+        by_name, done = self._read(["every_klipper_config"])
+        assert by_name["voron"]["klipper_config"] == {"probe": {"z_offset": "1.2"}}
+        assert by_name["trident"]["klipper_config"] is None
+        assert by_name["trident"]["klipper_config_error"] == "the printer could not be asked"
+        assert "klipper_config" not in by_name["a1"], "only a Klipper printer has one"
+        assert "trident.local" not in json.dumps(done)
+
+    def test_every_printers_nozzle_is_read_without_its_identity(self, fleet):
+        by_name, done = self._read(["every_nozzle"])
+        assert by_name["a1"]["nozzle_reading"]["nozzle_diameter_mm"] == 0.4
+        assert by_name["a1"]["nozzle_reading"]["material"] == "hardened_steel"
+        assert by_name["voron"]["nozzle_reading"] is None
+        assert by_name["voron"]["nozzle_reading_error"] == "it did not say what nozzle it holds"
+        text = json.dumps(done)
+        assert "01P00A000000001" not in text and "fingerprint" not in text and "10.0.0.5" not in text
+
+    def test_neither_is_read_unless_asked(self, fleet):
+        by_name, _ = self._read([])
+        assert all("klipper_config" not in p and "nozzle_reading" not in p for p in by_name.values())
+
+
+
+#: A printer.cfg as Moonraker reports it, with what must never leave.
+REAL_CONFIG = {
+    "mcu": {"serial": "/dev/serial/by-id/usb-Klipper_stm32f446xx_2A0036000851313133353932-if00", "restart_method": "command"},
+    "mcu toolhead": {"canbus_uuid": "61755fe321ac"},
+    "printer": {"kinematics": "corexy", "max_velocity": "300"},
+    "stepper_x": {"step_pin": "PF13", "position_max": "350", "endstop_pin": "^PG6"},
+    "stepper_y": {"position_max": "350"},
+    "stepper_z": {"endstop_pin": "probe:z_virtual_endstop", "position_max": "340", "step_pin": "PF11"},
+    "probe": {"pin": "^PG15", "z_offset": "1.85", "x_offset": "0"},
+    "force_move": {"enable_force_move": "True"},
+    "safe_z_home": {"home_xy_position": "175,175"},
+    "gcode_macro NOTIFY": {"gcode": "RUN_SHELL_COMMAND CMD=curl PARAMS='https://hooks.example.com/abc?token=s3cr3t'"},
+    "gcode_shell_command curl": {"command": "curl -s -H 'Authorization: Bearer s3cr3t'"},
+    "include": {"path": "/home/pi/printer_data/config/private.cfg"},
+    "webhooks": {"api_key": "s3cr3t"},
+}
+
+
+class TestAConfigLeavesCutToWhatIsRead:
+    """Security review 2026-10-17: a Klipper config sent to the servers held
+    the controller's serial port, CAN id and macro bodies.  Both reads now
+    send only the probe and bed settings the power-loss check reads."""
+
+    def test_the_cut_keeps_only_the_checks_settings(self):
+        cut = served_steps.klipper_config_fact(REAL_CONFIG)
+        assert cut == {
+            "force_move": {"enable_force_move": "True"},
+            "probe": {"z_offset": "1.85"},
+            "stepper_x": {"position_max": "350"},
+            "stepper_y": {"position_max": "350"},
+            "stepper_z": {"endstop_pin": "probe:z_virtual_endstop", "position_max": "340"},
+            "safe_z_home": {},
+        }
+
+    @pytest.mark.parametrize("want, name", [(["klipper_config"], "voron"), (["every_klipper_config"], "")])
+    def test_neither_read_sends_a_serial_an_id_a_macro_or_a_token(self, monkeypatch, want, name):
+        import kiln.server as server
+
+        monkeypatch.setattr(server, "_read_config_printers", lambda: {
+            "voron": {"type": "moonraker", "printer_model": "voron_2", "host": "voron.local"},
+        })
+        monkeypatch.setattr(server, "_resolve_effective_printer_name", lambda name=None: "voron")
+
+        class _Klipper:
+            def get_printer_config(self):
+                return REAL_CONFIG
+
+        class _Registry:
+            def get(self, _name):
+                return _Klipper()
+
+        monkeypatch.setattr(server, "_get_registry", lambda: _Registry())
+        done, refused = served_steps.carry_out(
+            "t", [{"kind": "printer_facts", "id": "printer_facts", "printer_name": name, "want": want}], _send,
+        )
+        assert refused is None
+        sent = json.dumps(done)
+        assert '"z_offset": "1.85"' in sent
+        for secret in ("usb-Klipper", "61755fe321ac", "s3cr3t", "hooks.example.com", "private.cfg", "PF13", "^PG15"):
+            assert secret not in sent, secret
+
+
+class TestTheSpoolRead:
+    """Every printer's loaded spools, read once, and -- for the colours a
+    fleet colour check asked about -- whether each is loaded there, a spool
+    the person recorded, or neither (2026-10-17, Adam: the matching spools
+    go with the one call and are not kept)."""
+
+    @pytest.fixture
+    def fleet(self, monkeypatch):
+        import kiln.colour_availability as availability
+        import kiln.server as server
+        from kiln.ams_routing import Tray
+        from kiln.multi_material import MultiMaterialStatus
+
+        monkeypatch.setattr(server, "_read_config_printers", lambda: {
+            "a1": {"type": "bambu", "printer_model": "bambu_a1", "host": "10.0.0.5"},
+            "voron": {"type": "moonraker", "printer_model": "voron_2", "host": "voron.local"},
+        })
+        monkeypatch.setattr(server, "_resolve_effective_printer_name", lambda name=None: "a1")
+        reading = MultiMaterialStatus(kind="ams", driven_by_kiln=True, source="bambu:mqtt", num_slots=4,
+                                      slots=(Tray(slot=0, material="PLA", hex6="C12E1F", unit=0, name="A1"),))
+
+        class _A1:
+            def get_multi_material_status(self):
+                return reading
+
+        class _Voron:
+            def get_multi_material_status(self):
+                raise OSError("HTTPConnectionPool(host='192.168.1.40', port=7125): timed out")
+
+        adapters = {"a1": _A1(), "voron": _Voron()}
+        monkeypatch.setattr(server, "_resolve_adapter", lambda name=None: adapters[name])
+        asked: list = []
+
+        def answer(colours, *, printer_name=None, adapter=None, material=None):
+            asked.append((list(colours), printer_name, adapter.get_multi_material_status(), material))
+            return {"printer": printer_name, "colours": [
+                {"colour": "#C12E1F", "state": "loaded", "slot": "slot A1"},
+                {"colour": "#00AE42", "state": "owned", "spool": "Polymaker green PLA"},
+            ], "say": "You have Polymaker green PLA but it isn't loaded on a1."}
+
+        monkeypatch.setattr(availability, "colour_availability", answer)
+        return asked, reading
+
+    def _read(self, **step):
+        done, refused = served_steps.carry_out(
+            "t", [{"kind": "printer_facts", "id": "printer_facts", "printer_name": "",
+                   "want": ["every_loaded_spools"], **step}], _send,
+        )
+        assert refused is None
+        return {p["name"]: p for p in done["printer_facts"]["data"]["printers"]}, done
+
+    def test_each_printers_spools_and_the_asked_colours_on_that_same_reading(self, fleet):
+        asked, reading = fleet
+        by_name, _ = self._read(colours=["#C12E1F", "#00AE42"], material="PLA")
+        assert by_name["a1"]["loaded_spools"]["loaded_slots"][0]["color"] == "C12E1F"
+        assert by_name["a1"]["colour_availability"]["colours"][1]["state"] == "owned"
+        (colours, name, seen, material) = next(a for a in asked if a[1] == "a1")
+        assert colours == ["#C12E1F", "#00AE42"] and material == "PLA"
+        assert seen is reading, "the colours are judged on the reading that was sent"
+
+    def test_a_printer_that_fails_is_said_without_its_address(self, fleet):
+        by_name, done = self._read(colours=["#C12E1F"])
+        voron = by_name["voron"]["loaded_spools"]
+        assert voron["kind"] == "unknown" and voron["warnings"] == ["the printer could not be read"]
+        assert "192.168.1.40" not in json.dumps(done) and "voron.local" not in json.dumps(done)
+
+    def test_no_colours_asked_reads_only_what_is_loaded(self, fleet):
+        asked, _ = fleet
+        by_name, _ = self._read()
+        assert "colour_availability" not in by_name["a1"] and asked == []
+
+    def test_the_colours_come_from_the_calls_own_arguments(self, fleet, monkeypatch):
+        asked, _ = fleet
+        done, refused = served_steps.read_first(
+            "fleet_colour_match",
+            [{"kind": "printer_facts", "want": ["every_loaded_spools"], "colours_from": "colours", "material_from": "material"}],
+            printer_name="", call={"colours": "#C12E1F;#00AE42", "material": "PLA"},
+        )
+        assert refused is None and asked[0][0] == ["#C12E1F", "#00AE42"] and asked[0][3] == "PLA"
+
+    @pytest.mark.parametrize("colours", [["x" * 41], [7], "", None])
+    def test_a_colour_that_is_not_one_asks_nothing(self, fleet, colours):
+        asked, _ = fleet
+        self._read(colours=colours)
+        assert asked == []
+
+    def test_a_reading_comes_back_the_same(self, fleet):
+        from kiln.multi_material import status_from_dict
+
+        _, reading = fleet
+        back = status_from_dict(reading.to_dict())
+        assert back.to_dict() == reading.to_dict()
+        assert status_from_dict({"kind": "ams", "loaded_slots": [{"slot": "zero"}]}) is None
+        assert status_from_dict("ams") is None

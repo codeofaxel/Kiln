@@ -465,6 +465,20 @@ class TestSkipObjectsIsReadBack:
         assert "irreversible" in result["message"]
 
 
+    def test_the_door_skips_on_the_printer_it_is_aimed_at(self) -> None:
+        """A fleet skip reaches each machine through this door, so it takes
+        the printer to act on, like cancel_print and pause_print."""
+        from kiln.server import skip_print_objects
+
+        aimed = _connected()
+        door = getattr(skip_print_objects, "__wrapped__", skip_print_objects)
+        with mock.patch("kiln.server._resolve_control_target", return_value=(aimed, "a1")) as resolve, \
+                mock.patch("kiln.server._get_adapter", side_effect=AssertionError("the default printer was used")):
+            result = door(object_ids=[3], printer_name="a1")
+        resolve.assert_called_once_with("a1")
+        assert result["printer_name"] == "a1" and result["skipped_objects"] == [3]
+
+
 class TestAlreadyAtTheRequestedValue:
     """A printer that reports on CHANGE says nothing when nothing changes.
 

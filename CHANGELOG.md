@@ -341,6 +341,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Food-safe picks on every install.** When something will hold food or touch a mouth, Kiln never suggests a plastic that isn't food safe, on any plan, signed in or not.
+- **Your plan counts in the terminal too.** Kiln on your own computer now reads your Pro or Business plan, so paid limits like assembly part counts lift when you're signed in.
 - **Elegoo cameras open at the address the printer gives.** Kiln asks the printer for its video address instead of guessing one, and says when a feed can't be relayed.
 - **Cancelling a print on an older USB-connected printer no longer claims it stopped when it didn't.** Kiln pauses it, turns the heaters off, and tells you to press Stop on the printer.
 

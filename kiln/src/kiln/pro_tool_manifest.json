@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-19T01:07:36.731620+00:00",
-  "tool_count": 415,
+  "generated": "2026-10-19T04:24:17.594765+00:00",
+  "tool_count": 409,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -131,101 +131,6 @@
     }
   },
   "tools": [
-    {
-      "name": "ams_filament_drying",
-      "description": "Start or stop an AMS 2 Pro / AMS HT active dry cycle.",
-      "tier": "free",
-      "access": "free",
-      "category": "ams_control",
-      "parameters": {
-        "properties": {
-          "ams_id": {
-            "title": "Ams Id",
-            "type": "integer"
-          },
-          "mode": {
-            "title": "Mode",
-            "type": "integer"
-          },
-          "duration_min": {
-            "default": 0,
-            "title": "Duration Min",
-            "type": "integer"
-          },
-          "temp_c": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Temp C"
-          },
-          "cooling_temp_c": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Cooling Temp C"
-          },
-          "humidity": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Humidity"
-          },
-          "rotate_tray": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Rotate Tray"
-          },
-          "printer_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Printer Name"
-          }
-        },
-        "required": [
-          "ams_id",
-          "mode"
-        ],
-        "title": "ams_filament_dryingArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "action"
-      },
-      "served": false
-    },
     {
       "name": "auto_generate_manual_for_print",
       "description": "Fire the automatic manual trigger for a multi-part print (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
@@ -14282,7 +14187,19 @@
         "schema_version": 1,
         "kind": "verdict"
       },
-      "served": false
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "every_job",
+              "every_klipper_config"
+            ]
+          }
+        ],
+        "acts": false
+      }
     },
     {
       "name": "decorate_during_print_fleet",
@@ -14461,7 +14378,18 @@
         "schema_version": 1,
         "kind": "action"
       },
-      "served": false
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "every_job"
+            ]
+          }
+        ],
+        "acts": true
+      }
     },
     {
       "name": "fleet_colour_match",
@@ -14516,7 +14444,21 @@
         "schema_version": 1,
         "kind": "read"
       },
-      "served": false
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "every_job",
+              "every_loaded_spools"
+            ],
+            "colours_from": "colours",
+            "material_from": "material"
+          }
+        ],
+        "acts": false
+      }
     },
     {
       "name": "fleet_hardware_stops",
@@ -14592,9 +14534,21 @@
       },
       "offline": {
         "schema_version": 1,
-        "kind": "action"
+        "kind": "read"
       },
-      "served": false
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "every_job",
+              "every_nozzle"
+            ]
+          }
+        ],
+        "acts": false
+      }
     },
     {
       "name": "fleet_pause",
@@ -14717,7 +14671,18 @@
         "schema_version": 1,
         "kind": "action"
       },
-      "served": false
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "every_job"
+            ]
+          }
+        ],
+        "acts": true
+      }
     },
     {
       "name": "fleet_skip_objects",
@@ -14746,7 +14711,18 @@
         "schema_version": 1,
         "kind": "action"
       },
-      "served": false
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "every_job"
+            ]
+          }
+        ],
+        "acts": true
+      }
     },
     {
       "name": "fleet_thermal_posture",
@@ -16504,36 +16480,6 @@
       }
     },
     {
-      "name": "cancel_auto_recover",
-      "description": "Stop an active recovery run.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "auto_recover_id": {
-            "title": "Auto Recover Id",
-            "type": "string"
-          },
-          "reason": {
-            "default": "",
-            "title": "Reason",
-            "type": "string"
-          }
-        },
-        "required": [
-          "auto_recover_id"
-        ],
-        "title": "cancel_auto_recoverArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "record"
-      },
-      "served": false
-    },
-    {
       "name": "check_assembly_stands",
       "description": "Judge how an object LIVES and whether it STANDS \u2014 from geometry and the words, with every assumption said out loud.",
       "tier": "free",
@@ -16808,31 +16754,6 @@
         },
         "printer": "printer_name"
       }
-    },
-    {
-      "name": "confirm_auto_recover",
-      "description": "Approve a recovery run that is waiting for operator confirmation.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "auto_recover_id": {
-            "title": "Auto Recover Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "auto_recover_id"
-        ],
-        "title": "confirm_auto_recoverArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "record"
-      },
-      "served": false
     },
     {
       "name": "cutter_wear_status",
@@ -17293,31 +17214,6 @@
           "output_dir": "folder"
         }
       }
-    },
-    {
-      "name": "get_auto_recover_status",
-      "description": "Check the current state and outcome of a recovery run.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "auto_recover_id": {
-            "title": "Auto Recover Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "auto_recover_id"
-        ],
-        "title": "get_auto_recover_statusArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "read"
-      },
-      "served": false
     },
     {
       "name": "get_auto_tuned_settings",
@@ -22193,40 +22089,6 @@
       }
     },
     {
-      "name": "cancel_speed_schedule",
-      "description": "Cancel the active speed schedule (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "speed_control",
-      "parameters": {
-        "properties": {},
-        "title": "cancel_speed_scheduleArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "record"
-      },
-      "served": false
-    },
-    {
-      "name": "get_speed_schedule",
-      "description": "Get the current active speed schedule and status (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "speed_control",
-      "parameters": {
-        "properties": {},
-        "title": "get_speed_scheduleArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "read"
-      },
-      "served": false
-    },
-    {
       "name": "set_speed_percent",
       "description": "Set printer speed to a custom percentage (Pro feature).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -24863,5 +24725,150 @@
         "kind": "record"
       }
     }
-  ]
+  ],
+  "served_public": {
+    "schema_version": 1,
+    "tools": {
+      "add_mesh_chamfer": {
+        "inputs": {
+          "files": {
+            "file_path": "one"
+          },
+          "outputs": {
+            "output_path": "file"
+          }
+        },
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "nozzle"
+            ]
+          }
+        ],
+        "printer_param": "printer_id",
+        "nozzle_params": [
+          "nozzle_mm"
+        ]
+      },
+      "add_mesh_fillet": {
+        "inputs": {
+          "files": {
+            "file_path": "one"
+          },
+          "outputs": {
+            "output_path": "file"
+          }
+        },
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "nozzle"
+            ]
+          }
+        ],
+        "printer_param": "printer_id",
+        "nozzle_params": [
+          "nozzle_mm"
+        ]
+      },
+      "analyze_printability": {
+        "inputs": {
+          "files": {
+            "file_path": "one"
+          }
+        },
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "nozzle"
+            ]
+          }
+        ],
+        "printer_param": "printer_id",
+        "nozzle_params": [
+          "nozzle_diameter"
+        ]
+      },
+      "apply_design_reinforcements": {
+        "inputs": {
+          "files": {
+            "file_path": "one"
+          },
+          "outputs": {
+            "output_path": "file"
+          }
+        },
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "nozzle"
+            ]
+          }
+        ],
+        "printer_param": "printer_id",
+        "nozzle_params": [
+          "nozzle_mm"
+        ]
+      },
+      "check_print_readiness": {
+        "inputs": {
+          "files": {
+            "file_path": "one"
+          },
+          "outputs": {
+            "output_path": "file"
+          }
+        },
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "nozzle"
+            ]
+          }
+        ],
+        "printer_param": "printer_id"
+      },
+      "compile_scad": {
+        "inputs": {
+          "text": {
+            "scad_path": "scad_code"
+          }
+        }
+      },
+      "generate_from_template": {},
+      "import_step_file": {
+        "inputs": {
+          "files": {
+            "file_path": "one"
+          },
+          "outputs": {
+            "output_dir": "folder"
+          }
+        }
+      },
+      "recommend_design_material": {},
+      "recommend_material": {
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "nozzle"
+            ]
+          }
+        ],
+        "printer_param": "printer_id",
+        "stays_here_when": {
+          "on_hand_only": [
+            true
+          ]
+        }
+      },
+      "tax_estimate": {}
+    }
+  }
 }

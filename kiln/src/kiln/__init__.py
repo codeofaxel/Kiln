@@ -16,6 +16,15 @@ except ImportError:  # pragma: no cover - py310+ ships importlib.metadata
 
 _logger = logging.getLogger(__name__)
 
+# Before any store can resolve ~/.kiln: a test of a source checkout, or a run
+# that asked for a sandbox, never writes the real one (kiln.dev_home_guard).
+try:
+    from kiln.dev_home_guard import protect as _protect_real_home
+
+    _protect_real_home()
+except Exception as _exc:  # pragma: no cover - the guard must never break an import
+    _logger.debug("dev home guard skipped: %s", _exc)
+
 
 def _resolve_version() -> str:
     """Resolve the installed package version with a source-tree fallback."""

@@ -35,6 +35,7 @@ Two deliberate properties of the copy:
 from __future__ import annotations
 
 import re
+import threading
 
 #: The full guidance block, as carried in the MCP server instructions.
 TIERS_AND_TERMS = (
@@ -437,13 +438,32 @@ def account_required_message(
 UPGRADE_NUDGE_SCHEMA_VERSION = 1
 
 
-#: Content keys already spoken in this process.  A server process IS a
-#: session, so module-level is the whole mechanism — no store, no clock.
+#: ``(whose session, content key)`` pairs already spoken in this process.
+#: On an install the process IS the session.  Kiln's servers answer every
+#: account from one process, so there the session is the caller the server
+#: names for the request (:func:`_whose_session`), and one account hearing a
+#: line never uses up another's.  A caller the server names nobody shares
+#: the process, as before.
 #:
 #: One set, shared by every surface that rations a line, because "once per
 #: session" said by two independent counters is twice per session. The
 #: fastener advice had the first copy of this; it now claims through here.
-_SPOKEN: set[str] = set()
+_SPOKEN: set[tuple[str, str]] = set()
+_SPOKEN_LOCK = threading.Lock()
+
+
+def _whose_session() -> str:
+    """The caller the request is for, as the server names it (with
+    kiln-pro, ``kiln.licensing.get_caller_tenant_id``), else ``""``: this
+    process."""
+    try:
+        from kiln.licensing import get_caller_tenant_id
+    except ImportError:
+        return ""
+    try:
+        return str(get_caller_tenant_id() or "").strip()
+    except Exception:  # noqa: BLE001 -- an unreadable caller is this process
+        return ""
 
 
 def claim_once(content_key: str) -> bool:
@@ -454,15 +474,18 @@ def claim_once(content_key: str) -> bool:
     an hour should meet the same suggestion once, not ten times: the tenth
     showing does not persuade anyone, it teaches them to skip the field.
     """
-    if content_key in _SPOKEN:
-        return False
-    _SPOKEN.add(content_key)
+    spoken_key = (_whose_session(), content_key)
+    with _SPOKEN_LOCK:
+        if spoken_key in _SPOKEN:
+            return False
+        _SPOKEN.add(spoken_key)
     return True
 
 
 def reset_spoken_keys() -> None:
     """Forget every claimed key.  For tests and long-lived hosts."""
-    _SPOKEN.clear()
+    with _SPOKEN_LOCK:
+        _SPOKEN.clear()
 
 
 def upgrade_nudge_block(

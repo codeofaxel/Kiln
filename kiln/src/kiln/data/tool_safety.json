@@ -436,6 +436,10 @@
       "level": "confirm",
       "physical_effect": true
     },
+    "ams_filament_drying": {
+      "level": "confirm",
+      "physical_effect": true
+    },
     "home_axes": {
       "level": "confirm",
       "physical_effect": true

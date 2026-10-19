@@ -69,6 +69,7 @@ from pathlib import Path
 from types import MethodType
 from typing import Any
 
+from kiln import callers_printers
 from kiln import tool_context as _tool_context
 from kiln.mcp_compat import (
     FastMCP,
@@ -1357,6 +1358,43 @@ def _invalid_arguments_result(
         return None
 
 
+async def _served_or_here(
+    tool_mgr: Any,
+    call_here: Any,
+    name: str,
+    arguments: dict[str, Any],
+    context: Any,
+    convert_result: bool,
+) -> Any:
+    """Run *name* on Kiln's servers when the bundled manifest says a
+    signed-in install does (:mod:`kiln.served_public`), else here.
+
+    A call the servers did not answer runs here, and the first such answer
+    per cause says why.  A call whose arguments this tool would refuse runs
+    here too, so the refusal is the one it always was.
+    """
+    from kiln import served_public
+
+    entry = served_public.plan(name, arguments)
+    tool = (getattr(tool_mgr, "_tools", None) or {}).get(name) if entry is not None else None
+    if tool is None or not _arguments_validate(tool, arguments):
+        return await call_here(name, arguments, context=context, convert_result=convert_result)
+    answer, miss = await asyncio.to_thread(served_public.ask, name, arguments, entry)
+    if answer is None:
+        answer = await call_here(name, arguments, context=context, convert_result=False)
+        answer = served_public.say_once(name, answer, miss)
+    return tool.fn_metadata.convert_result(answer) if convert_result else answer
+
+
+def _arguments_validate(tool: Any, arguments: dict[str, Any]) -> bool:
+    """Whether *arguments* pass *tool*'s own argument model."""
+    try:
+        tool.fn_metadata.arg_model.model_validate(arguments)
+    except Exception:  # noqa: BLE001 -- the call runs here and says why
+        return False
+    return True
+
+
 def _install_mcp_request_context_capture() -> None:
     """Capture current MCP request context so auth can read per-request metadata."""
     tool_mgr = mcp._tool_manager
@@ -1408,11 +1446,8 @@ def _install_mcp_request_context_capture() -> None:
             # kiln.tool_args.  Everything else pydantic still judges.
             arguments = _coerce_arguments(self, name, arguments or {})
             try:
-                result = await original_call_tool(
-                    name,
-                    arguments,
-                    context=context,
-                    convert_result=convert_result,
+                result = await _served_or_here(
+                    self, original_call_tool, name, arguments, context, convert_result,
                 )
             except Exception as exc:
                 # A tool that RAISES was invisible to every counter here:
@@ -1799,6 +1834,33 @@ def _coverage_for(
     except Exception as exc:  # noqa: BLE001 — a missing courtesy line is not a failure
         logger.debug("coverage unavailable for %r: %s", printer_name, exc)
         return None, None
+
+
+def _fault_reading_note(faults: Any) -> tuple[str, dict[str, str]] | None:
+    """The one line about why a fault on the status door reads as its family
+    line alone, and its machine-readable why, or ``None``.
+
+    Asks the fault bridge what it already knows (never a request) for each
+    code the status shows, and claims the line once per session per cause,
+    so a polled status says it the first time and stays quiet after.
+    """
+    if not isinstance(faults, list):
+        return None
+    from kiln import _pro_fault_bridge
+    from kiln.tiers_and_terms import claim_once
+
+    for entry in faults:
+        if not isinstance(entry, dict) or not entry.get("code"):
+            continue
+        code, kind = str(entry["code"]), str(entry.get("kind") or "print_error")
+        note = _pro_fault_bridge.note_for(code, kind=kind)
+        if not note:
+            continue
+        why = _pro_fault_bridge.miss_for(code, kind=kind)
+        if claim_once(f"fault_reading.note.{why.get('why') or 'plan'}"):
+            return note, why
+        return None
+    return None
 
 
 def _coverage_line_for(printer_name: str | None) -> str | None:
@@ -6566,6 +6628,14 @@ def printer_status(
         fault_note = response["printer"].get("fault_note")
         if isinstance(fault_note, str) and fault_note:
             response["fault_warning"] = fault_note
+            # Why that reading is the family line alone -- this install could
+            # not ask Kiln's servers, or the code's reading is in a plan this
+            # account does not have -- said once per session, never per poll.
+            said = _fault_reading_note(response["printer"].get("faults"))
+            if said is not None:
+                response["fault_reading_note"], why = said
+                if why:
+                    response["fault_reading_why"] = why
         # A printer holding a job it already finished, which is also what
         # greys out Load and Unload on its own screen.  Named with its
         # remedy, because no amount of retrying from here clears it.
@@ -10107,7 +10177,9 @@ def pause_print(keep_temps: bool = True, printer_name: str | None = None) -> dic
 
 @mcp.tool()
 @requires_tier(LicenseTier.PRO)
-def skip_print_objects(object_ids: list[str], plate_number: int = 1) -> dict:
+def skip_print_objects(
+    object_ids: list[str], plate_number: int = 1, printer_name: str | None = None,
+) -> dict:
     """Abandon one or more failed objects on a multi-object plate, mid-print.
 
     When one part on a full plate fails — spaghetti, a knocked-loose object, a
@@ -10145,6 +10217,8 @@ def skip_print_objects(object_ids: list[str], plate_number: int = 1) -> dict:
         object_ids: Backend-specific object identifiers to abandon (see above).
         plate_number: Which plate the ids came from (1-based, default 1).
             Recorded for context; the ids are what the printer acts on.
+        printer_name: Which printer is printing the plate.  Omit for the
+            default printer.
 
     Returns:
         Dict with the skipped objects and a confirmation message, or an error
@@ -10161,7 +10235,10 @@ def skip_print_objects(object_ids: list[str], plate_number: int = 1) -> dict:
             code="NO_OBJECTS",
         )
     try:
-        adapter = _get_adapter()
+        try:
+            adapter, target_name = _resolve_control_target(printer_name)
+        except PrinterNotFoundError:
+            return _unknown_printer_error(printer_name, "skip objects on")
         skip = getattr(adapter, "skip_objects", None)
         if not callable(skip):
             return _error_dict(
@@ -10192,6 +10269,7 @@ def skip_print_objects(object_ids: list[str], plate_number: int = 1) -> dict:
         )
         return {
             "success": verdict.ok,
+            "printer_name": target_name,
             "skipped_objects": list(object_ids),
             "plate_number": plate_number,
             **verdict.to_dict(),
@@ -11597,6 +11675,13 @@ def preflight_check(
                         reading=status_block(_switch),
                         file=_facts,
                     )
+                    if _judged is None:
+                        # Kiln could not ask for the curated judgement: the
+                        # catalogue's facts above stand, and the entry says
+                        # why the rest is missing rather than going quiet.
+                        _clump_gap = _pro_nozzle_bridge.clumping_unchecked(_pf_model)
+                        if _clump_gap is not None:
+                            _entry["detail_unchecked"] = _clump_gap
                     if isinstance(_judged, dict):
                         _entry["detail"] = _judged
                         # The curated judgement adds what it knows beyond the
@@ -18022,6 +18107,9 @@ def troubleshoot_printer(
         named_codes = extract_codes(f"{hms_code} {symptom}")
         fault_readings: list[dict[str, Any]] = []
         private_reading_attached = False
+        # Why a code's reading is the family line alone (this install could
+        # not ask Kiln's servers), said once; the first such code speaks.
+        reading_note: tuple[str, dict[str, str]] | None = None
         for bare in named_codes:
             grouped = _normalize_hms_code(bare)
             _link, kind, fault = _hms_reference(grouped)
@@ -18032,7 +18120,18 @@ def troubleshoot_printer(
             }
             if fault.remedy:
                 entry["remedy"] = fault.remedy
+            if fault.safety_alert:
+                entry["safety"] = fault.safety_alert["means"]
             private_reading_attached = private_reading_attached or fault.private
+            if fault.note and reading_note is None:
+                from kiln import _pro_fault_bridge
+
+                why = _pro_fault_bridge.miss_for(grouped, kind=kind)
+                # The plan line is this door's own nudge's job (upgrade_hint
+                # below), so only a reading the install could not ASK for is
+                # said here: a paywall is said once.
+                if why:
+                    reading_note = (fault.note, why)
             fault_readings.append(entry)
         # Said ONCE per session, and only when there is something to say.
         # A user debugging a stuck load calls this repeatedly, and the tenth
@@ -18094,6 +18193,9 @@ def troubleshoot_printer(
         }
         if fault_readings:
             result["fault_readings"] = fault_readings
+        if reading_note is not None and claim_once(f"fault_reading.note.{reading_note[1].get('why')}"):
+            result["fault_reading_note"] = reading_note[0]
+            result["fault_reading_why"] = reading_note[1]
         # A named code the playbook does not carry is said out loud.  The
         # matcher keeps its word matches -- they are labelled matched_on:
         # "text" -- but until 2026-09-19 nothing said the codes had gone
@@ -18124,6 +18226,10 @@ def troubleshoot_printer(
                 result["hms_wiki_url"] = link
             if fault.decoded:
                 result["hms_decoded"] = dict(fault.decoded)
+            # The protective action the code carries, before anything about
+            # tiers: the same block the hosted boundary attaches.
+            if fault.safety_alert:
+                result["hms_safety_alert"] = dict(fault.safety_alert)
             # One sentence when the code maps to a maker's guide: the door
             # is repair_guide, which serves the maker's steps one at a time.
             # The mapping lives in kiln-pro beside the code's reading; a
@@ -18814,7 +18920,11 @@ def _with_local_log_tail(kwargs: dict) -> dict:
         tail = read_log_tail()
         if not tail:
             return kwargs
-        return {**kwargs, "context": {**context, "log_tail": tail}}
+        # Redacted again at the door, whatever the reader did: the tail is
+        # read off this computer and leaves it (kiln.outbound_guard).
+        from kiln.outbound_guard import redact_text
+
+        return {**kwargs, "context": {**context, "log_tail": redact_text(tail)}}
     except Exception:  # noqa: BLE001 — the report matters more than its attachment
         return kwargs
 
@@ -18860,7 +18970,7 @@ def _anonymous_api_call(tool_name: str, **kwargs) -> dict:
     ).strip() or _HOSTED_KILN_API_URL
     route = _ANONYMOUS_TOOL_ROUTES[tool_name]
 
-    payload = _with_local_log_tail(dict(kwargs))
+    payload = _guarded_for_the_wire(_with_local_log_tail(dict(kwargs)), asked_by_user=True)
     context = payload.get("context")
     context = dict(context) if isinstance(context, dict) else {}
     context.setdefault("app_version", _current_version())
@@ -18959,10 +19069,56 @@ def _served_wait_seconds(tool_name: str) -> float:
     return _SERVED_MAKE_WAIT_S if kind == "made" else _SERVED_WAIT_S
 
 
+#: Call arguments this install adds from what it read itself, beside what
+#: the person asked: a served step's facts and answers, a printer's own
+#: nozzle reading, its recent fault codes.  (A bug report's log tail is
+#: redacted where it is attached, :func:`_with_local_log_tail`.)
+_MACHINE_READ_ARGS = frozenset({"step_results", "printer_reading", "recent_faults"})
+
+
+def _guarded_for_the_wire(kwargs: dict[str, Any], *, asked_by_user: bool) -> dict[str, Any]:
+    """*kwargs* with every machine-read value passed through
+    :func:`kiln.outbound_guard.scrub`: all of them for an ask the person
+    never made (a bridge fetching something on its own), and the arguments
+    this install added from its own reads on one they did.  The person's
+    own words and files go as they gave them."""
+    from kiln.outbound_guard import scrub
+
+    if not asked_by_user:
+        return scrub(kwargs)
+    return {key: scrub(value) if key in _MACHINE_READ_ARGS else value for key, value in kwargs.items()}
+
+
+def _served_bearer() -> tuple[str, str | None]:
+    """``(bearer, None)`` for the served door, ``("", None)`` when this
+    install was never signed in, or ``("", sentence)`` when a session exists
+    but can no longer be renewed (the sign-in state's own words)."""
+    try:
+        from kiln.auth_session import resolve_api_bearer
+
+        resolved = resolve_api_bearer()
+    except Exception:
+        resolved = None
+    if resolved is None:
+        # Resolver unreachable (broken install).  Fall back to the raw
+        # stored token rather than claiming an unpaired account at a
+        # machine that plainly has a session on disk.
+        return (
+            os.environ.get("KILN_LICENSE_KEY", "").strip() or _raw_paired_access_token(),
+            None,
+        )
+    if resolved.token:
+        return resolved.token, None
+    if resolved.state == "needs_signin":
+        return "", str(resolved.detail or "")
+    return "", None
+
+
 def _pro_api_call(
     tool_name: str,
     _timeout: float | None = None,
     _asked_by_user: bool = True,
+    _http: dict | None = None,
     **kwargs,
 ) -> dict:
     """Call a hosted kiln-pro tool through the public REST API.
@@ -18976,6 +19132,10 @@ def _pro_api_call(
     pre-flight.  Without a sign-in it gets the same answer, but it is not
     counted as someone reaching for the feature: that counter
     (:func:`kiln.daily_stats.record_account_wall`) means a person asked.
+
+    ``_http``, when given, is filled with ``status``: the HTTP status the
+    answer came with, so a caller can tell a tool's own answer (200) from
+    the servers turning the call away.  Left empty when no HTTP answer came.
 
     Bearer-token resolution order:
       1. ``KILN_LICENSE_KEY`` env var (operator-supplied license)
@@ -18995,23 +19155,8 @@ def _pro_api_call(
     of its own comes back untouched.
     """
     api_url = (os.environ.get("KILN_API_URL") or "").strip() or _HOSTED_KILN_API_URL
-    try:
-        from kiln.auth_session import resolve_api_bearer
-
-        resolved = resolve_api_bearer()
-    except Exception:
-        resolved = None
-    if resolved is None:
-        # Resolver unreachable (broken install).  Fall back to the raw
-        # stored token rather than claiming an unpaired account at a
-        # machine that plainly has a session on disk.
-        bearer = (
-            os.environ.get("KILN_LICENSE_KEY", "").strip()
-            or _raw_paired_access_token()
-        )
-    elif resolved.token:
-        bearer = resolved.token
-    elif resolved.state == "needs_signin":
+    bearer, expired = _served_bearer()
+    if expired is not None:
         # A session exists but its refresh token was rejected —
         # distinct from never having paired, and the fix is one
         # command.  Without this branch the stale bearer used to
@@ -19019,14 +19164,12 @@ def _pro_api_call(
         # or a silent free-tier downgrade.
         return {
             "status": "error",
-            "error": resolved.detail,
+            "error": expired,
             "code": "KILN_SESSION_EXPIRED",
             "tool": tool_name,
             "why": "signed_out",
             **signin_hint_fields(),
         }
-    else:
-        bearer = ""
     if not bearer and tool_name in _ANONYMOUS_OK_TOOLS:
         # Telling us Kiln is broken must not require an account.  Everything
         # else here can wait for a sign-in; a bug report cannot, because the
@@ -19106,6 +19249,7 @@ def _pro_api_call(
     # reads no log), before the payload is serialized.
     if tool_name == "report_issue":
         kwargs = _with_local_log_tail(kwargs)
+    kwargs = _guarded_for_the_wire(kwargs, asked_by_user=_asked_by_user)
 
     import json
     import urllib.error
@@ -19148,11 +19292,16 @@ def _pro_api_call(
             try:
                 with urllib.request.urlopen(req, timeout=wait_s) as resp:
                     answer = json.loads(resp.read())
-                    accepted = getattr(resp, "status", 200) == 202
+                    status = getattr(resp, "status", 200)
+                    accepted = status == 202
                 if accepted and isinstance(answer, dict) and answer.get("job_id"):
-                    return _await_served_job(tool_name, api_url, headers, answer)
+                    return _await_served_job(tool_name, api_url, headers, answer, _http=_http)
+                if _http is not None:
+                    _http["status"] = status
                 return answer
             except urllib.error.HTTPError as exc:
+                if _http is not None:
+                    _http["status"] = exc.code
                 # Preserve the server's own error body when present — it
                 # usually carries a structured ``code`` + ``error`` the agent
                 # can act on (e.g. tier-gate denials, quota-exhaustion
@@ -19196,17 +19345,26 @@ _SERVED_FILES_HEADER = "X-Kiln-Result-Files"
 _SERVED_STEPS_HEADER = "X-Kiln-Local-Steps"
 #: How long a job is waited for: the servers stop one at fifteen minutes.
 _SERVED_JOB_WAIT_S = 15 * 60 + 30
+#: How often a job is asked about: soon after it is accepted (many finish
+#: in under a second), then less often, up to every few seconds.
+_SERVED_JOB_FIRST_POLL_S = 0.5
 _SERVED_JOB_POLL_S = 3.0
 
 
 def _await_served_job(
-    tool_name: str, api_url: str, headers: dict[str, str], accepted: dict
+    tool_name: str,
+    api_url: str,
+    headers: dict[str, str],
+    accepted: dict,
+    *,
+    _http: dict | None = None,
 ) -> dict:
     """Wait for a job the servers accepted, and return the tool's answer.
 
     The job lives on the one machine that took it, so each poll names that
     machine.  The answer is the tool's own, exactly as a direct call would
     have returned it; a miss is worded the way every served miss is.
+    ``_http`` is filled as :func:`_pro_api_call` fills it.
     """
     import json
     import time
@@ -19230,8 +19388,10 @@ def _await_served_job(
             "waiting. Nothing was charged."
         ),
     }
+    pause = min(_SERVED_JOB_FIRST_POLL_S, _SERVED_JOB_POLL_S)
     while time.monotonic() <= deadline:
-        time.sleep(_SERVED_JOB_POLL_S)
+        time.sleep(pause)
+        pause = min(pause * 2, _SERVED_JOB_POLL_S)
         # A job outlives a sign-in token (they last an hour and are renewed
         # near their end), so each poll carries the current one.
         try:
@@ -19248,6 +19408,7 @@ def _await_served_job(
         try:
             with urllib.request.urlopen(req, timeout=_SERVED_WAIT_S) as resp:
                 answer = json.loads(resp.read())
+                status = getattr(resp, "status", 200)
         except urllib.error.HTTPError as exc:
             try:
                 body = json.loads(exc.read().decode("utf-8"))
@@ -19256,20 +19417,26 @@ def _await_served_job(
             if exc.code >= 500 and not (isinstance(body, dict) and body.get("code")):
                 # The machine is busy with the job itself; ask again.
                 continue
+            if _http is not None:
+                _http["status"] = exc.code
             return envelope_for_http(tool_name, exc.code, body, kind=kind)
         except Exception:
             # One poll that got no answer says nothing about the job: the
             # machine running a heavy make can be slow to answer anything.
             continue
         if not (isinstance(answer, dict) and answer.get("status") == "running"):
+            if _http is not None:
+                _http["status"] = status
             return answer
     # The whole wait passed with no answer.  Whatever the last poll did, what
     # the person needs to hear is that the make ran out of time, not that a
     # minute's wait will fix it.
+    if _http is not None:
+        _http["status"] = 504
     return envelope_for_http(tool_name, 504, too_long, kind=kind)
 
 
-_UNNAMED_PRINTER = frozenset({"", "default", "active"})
+_UNNAMED_PRINTER = callers_printers.UNNAMED
 
 
 def _with_local_printer(kwargs: dict, inputs: dict | None) -> dict:
@@ -19340,6 +19507,11 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
     except Exception as exc:
         logger.warning("Failed to load pro tool manifest: %s", exc)
         return
+
+    # Public tools a signed-in install runs on Kiln's servers.
+    from kiln import served_public
+
+    served_public.load(manifest.get("served_public"))
 
     tools = manifest.get("tools", [])
     if not tools:
@@ -19496,8 +19668,13 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                     if not_read is not None:
                         return not_read
                 # The printer a file is being made for is one only this
-                # computer can name.
-                kwargs = _with_local_printer(kwargs, _inputs)
+                # computer can name.  A tool that was just sent this
+                # install's printers (each with its model) is told which one
+                # by the person's own name for it: a model in its place
+                # matches two printers of that model, and an unknown model
+                # sends the connection type, which matches none.
+                if served_steps.PRINTER_FACTS not in pre_read:
+                    kwargs = _with_local_printer(kwargs, _inputs)
                 # Every file the call names on this computer goes up first,
                 # and a make still on the servers is named by its token.
                 trip: dict = {}
@@ -20517,42 +20694,37 @@ def find_material_substitute(
 
         subs = find_substitutes(material, "fdm", reason=reason_enum, min_score=min_score)
         sub_dicts = [s.to_dict() for s in subs]
-        # Food-safety preservation (kiln-pro feature; free-tier silently
-        # skips): if the source material is food_safe=yes, mark any
-        # substitute that ISN'T food_safe=yes as a safety regression so
-        # callers don't silently swap a pet bowl's PETG for ABS.
-        try:
-            from kiln_pro.material_safety import assess_food_safety  # noqa: WPS433
-        except ImportError:
-            assess_food_safety = None  # type: ignore[assignment]
+        # Food-safety preservation: if the source material is rated food
+        # safe, mark any substitute that is NOT as a safety regression so
+        # callers don't silently swap a pet bowl's PETG for ABS.  Public
+        # Kiln's rating, so every install flags the same swaps.
+        from kiln.material_safety import food_safe_rating
+
         food_safety_check: dict | None = None
-        if assess_food_safety is not None:
-            source_verdict = assess_food_safety(material)
-            if source_verdict["food_safe"] == "yes":
-                regressions: list[str] = []
-                for d in sub_dicts:
-                    sub_name = (
-                        d.get("substitute_material")
-                        or d.get("substitute")
-                        or d.get("material")
-                        or d.get("name")
-                    )
-                    if not sub_name:
-                        continue
-                    sub_verdict = assess_food_safety(str(sub_name))
-                    sub_food_safe = sub_verdict["food_safe"]
-                    d["food_safe"] = sub_food_safe
-                    if sub_food_safe != "yes":
-                        regressions.append(str(sub_name))
-                food_safety_check = {
-                    "source_food_safe": "yes",
-                    "regressions": regressions,
-                    "warning": (
-                        "Source material is food_safe=yes but some substitutes are "
-                        f"NOT: {regressions}. Do not silently swap for food-contact "
-                        "products (pet bowls, kitchen items). Filter or disclose."
-                    ) if regressions else None,
-                }
+        if food_safe_rating(material) == "yes":
+            regressions: list[str] = []
+            for d in sub_dicts:
+                sub_name = (
+                    d.get("substitute_material")
+                    or d.get("substitute")
+                    or d.get("material")
+                    or d.get("name")
+                )
+                if not sub_name:
+                    continue
+                sub_food_safe = food_safe_rating(str(sub_name))
+                d["food_safe"] = sub_food_safe
+                if sub_food_safe != "yes":
+                    regressions.append(str(sub_name))
+            food_safety_check = {
+                "source_food_safe": "yes",
+                "regressions": regressions,
+                "warning": (
+                    "Source material is food_safe=yes but some substitutes are "
+                    f"NOT: {regressions}. Do not silently swap for food-contact "
+                    "products (pet bowls, kitchen items). Filter or disclose."
+                ) if regressions else None,
+            }
         result = {
             "success": True,
             "material": material,
