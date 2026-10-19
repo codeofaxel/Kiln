@@ -421,6 +421,17 @@ def _take_library_deltas(vault: Any, delta: dict[str, Any], sent: dict[str, Any]
     return out
 
 
+def call_account(tool: str, **kwargs: Any) -> dict[str, Any]:
+    """Call a tool that works on the person's Kiln account alone.
+
+    Pull requests live in the account, shared with the design's team, so a
+    review, a listing or a read sends nothing of this computer's history.
+    """
+    from kiln.server import _pro_api_call
+
+    return _pro_api_call(tool, **kwargs)
+
+
 def call_served(tool: str, *, kinds: tuple[str, ...] = ("designs",), **kwargs: Any) -> dict[str, Any]:
     """Call a served history tool with this computer's records, and keep the change.
 

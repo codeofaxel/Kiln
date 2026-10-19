@@ -1,4 +1,4 @@
-"""``kiln branch / merge / release / cloud`` on a computer without kiln-pro.
+"""``kiln branch / merge / release / cloud / pr`` on a computer without kiln-pro.
 
 Each command is a courier: it sends the design's history records from this
 computer (:mod:`kiln.history_vault`) with a call to Kiln's servers, which do
@@ -428,9 +428,112 @@ def release_retire(release_id: str, reason: str, json_mode: bool) -> None:
     _finish(answer, json_mode, lambda a: f"Retired release {release_id}.")
 
 
+# ---------------------------------------------------------------------------
+# kiln pr
+# ---------------------------------------------------------------------------
+
+
+def _account_call(tool: str, **kwargs: Any) -> dict[str, Any]:
+    from kiln.history_courier import call_account
+
+    return call_account(tool, **kwargs)
+
+
+def _pr_line(pr: dict[str, Any]) -> str:
+    return (
+        f"{str(pr.get('pr_id') or '')[:8]} {str(pr.get('status') or ''):18s} "
+        f"{str(pr.get('title') or ''):40s} {pr.get('source_branch_name') or ''}"
+        f" -> {pr.get('target_branch_name') or ''}"
+    )
+
+
+@click.group("pr")
+def pr_group() -> None:
+    """Pull requests: your team reviews a branch before it merges (Kiln Pro)."""
+
+
+@pr_group.command("submit")
+@click.argument("design_id")
+@click.argument("source")
+@click.argument("target")
+@click.option("--title", required=True, help="What the change is.")
+@click.option("--description", default="", help="Why, for the reviewers.")
+@click.option("--author", "author_user_id", default=None,
+              help="Recorded as your signed-in Kiln account; any other name is refused.")
+@click.option("--reviewer", "reviewer_user_id", default=None, help="A teammate to ask first.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def pr_submit(design_id: str, source: str, target: str, title: str, description: str,
+              author_user_id: str | None, reviewer_user_id: str | None, json_mode: bool) -> None:
+    """Open a pull request from branch SOURCE into TARGET of DESIGN_ID.
+
+    The design and both branches must be in your Kiln account (push them
+    with `kiln cloud push`); your team reviews it there.
+    """
+    extra = {"author_user_id": author_user_id} if author_user_id else {}
+    answer = _served(
+        "propose_design_change", design_id=design_id,
+        source_branch_id=_branch_id(design_id, source),
+        target_branch_id=_branch_id(design_id, target),
+        title=title, description=description, reviewer_user_id=reviewer_user_id, **extra,
+    )
+    _finish(answer, json_mode, lambda a: (
+        f"Opened pull request {str((a.get('pull_request') or {}).get('pr_id') or '')[:8]}: "
+        f"{title}. Your team can review it on kiln3d.com or with `kiln pr review`."
+    ))
+
+
+@pr_group.command("review")
+@click.argument("pr_id")
+@click.option("--decision", default="COMMENT", show_default=True,
+              type=click.Choice(["COMMENT", "APPROVE", "REQUEST_CHANGES", "REJECT"]))
+@click.option("--body", default="", help="What you think.")
+@click.option("--user", "user_id", default=None,
+              help="Recorded as your signed-in Kiln account; any other name is refused.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def pr_review(pr_id: str, decision: str, body: str, user_id: str | None, json_mode: bool) -> None:
+    """Comment on, approve, ask for changes on, or reject PR_ID."""
+    extra = {"user_id": user_id} if user_id else {}
+    answer = _account_call("review_design_pull_request", pr_id=pr_id, decision=decision, body=body, **extra)
+    _finish(answer, json_mode, lambda a: (
+        f"Recorded {decision.lower().replace('_', ' ')} on {pr_id[:8]}; it is now "
+        f"{(a.get('pull_request') or {}).get('status') or 'open'}."
+    ))
+
+
+@pr_group.command("list")
+@click.option("--design-id", default=None, help="Only this design's requests.")
+@click.option("--status", default=None, help="open / approved / changes_requested / merged / rejected / closed.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def pr_list(design_id: str | None, status: str | None, json_mode: bool) -> None:
+    """Pull requests you opened or your team's, newest first."""
+    answer = _account_call("list_design_pull_requests", design_id=design_id, status=status)
+    _finish(answer, json_mode, lambda a: (
+        "\n".join(_pr_line(p) for p in a.get("pull_requests") or []) or "(no pull requests)"
+    ))
+
+
+@pr_group.command("show")
+@click.argument("pr_id")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def pr_show(pr_id: str, json_mode: bool) -> None:
+    """One pull request: what it changes and what its reviewers said."""
+    answer = _account_call("get_design_pull_request", pr_id=pr_id)
+
+    def say(a: dict[str, Any]) -> str:
+        pr = a.get("pull_request") or {}
+        lines = [_pr_line(pr)]
+        if pr.get("description"):
+            lines.append(str(pr["description"]))
+        for c in pr.get("review_comments") or []:
+            lines.append(f"  {c.get('decision') or 'COMMENT'}: {c.get('body') or ''}")
+        return "\n".join(lines)
+
+    _finish(answer, json_mode, say)
+
+
 def register_history_cli(cli_group: click.Group) -> None:
     """Attach the design-history couriers.  Only for an install without kiln-pro."""
-    for group in (branch_group, merge_group, release_group, cloud_group):
+    for group in (branch_group, merge_group, release_group, cloud_group, pr_group):
         if group.name not in cli_group.commands:
             cli_group.add_command(group)
 
