@@ -1608,6 +1608,7 @@ class _DesignToolsPlugin:
             timeout: int = 300,
             fastener: str = "",
             brief_id: str = "",
+            color: str = "",
         ) -> dict:
             """Compile OpenSCAD code into an STL file.
 
@@ -1618,12 +1619,23 @@ class _DesignToolsPlugin:
             For surface() heightmap operations (photo emboss, lithophane),
             increase timeout to 600+ seconds.
 
-            Kiln checks the compiled part is joined up: a piece that touches
-            the rest without overlapping it, or floats with nothing under
-            it, is named in the result's ``warnings`` (and in ``message``
-            when something floats).  Read them before showing the part;
-            separate parts sitting on the bed are a plate and draw no
-            warning.
+            Kiln checks the compiled part is joined up.  A piece that floats
+            with nothing under it is joined to nothing and prints as a loose
+            part on supports, or not at all, so the make is REFUSED
+            (``code: "FLOATING_PIECES"``; ``error`` names the pieces, how
+            far they are from the nearest surface, and the fix): correct
+            the geometry and compile again.  Separate parts that all sit on
+            the bed are a plate and pass; a piece held inside the part (a
+            ball in a cage, a pin in its knuckles) passes with a warning; a
+            piece that touches the rest without overlapping it is named in
+            ``warnings``.
+
+            Colour: pass ``color`` (a name such as ``"teal"`` or a hex) when
+            the user asked for one, and the preview and the 3D stage show
+            the part in it.  Left out, a single ``color("...")`` in the
+            source is used.  It is how the part is SHOWN; it prints in
+            whatever filament is loaded, and the result's ``color`` block
+            says so.
 
             Round shapes: leave ``$fn`` out and Kiln cuts each curve by its
             size, writing that rule into the file it compiles.  Set ``$fn``
@@ -1649,6 +1661,8 @@ class _DesignToolsPlugin:
                     only if they actually said one.  Kiln does NOT read your
                     OpenSCAD looking for screw holes; guessing intent out of
                     geometry would be wrong often. No argument, no advisory.
+                color: The colour the user asked for, shown on the preview and
+                    the stage (a name or ``#rrggbb``).  Not a print setting.
             """
             import kiln.server as _srv
             if err := _srv._check_auth("generate"):
@@ -1736,7 +1750,14 @@ class _DesignToolsPlugin:
                 # (print-in-place joints) are wider and stay silent.
                 from kiln.fusion_check import attach_fusion_report
 
-                response = attach_fusion_report(response, stl_path)
+                response = attach_fusion_report(response, stl_path, refuse_floating=True)
+                # The colour the part is SHOWN in: the caller's word first,
+                # else the one colour the source itself names.  Recorded on
+                # the result in either case, so a stage with no renderer of
+                # its own can still read it.
+                from kiln.declared_color import attach_declared_color
+
+                shown = attach_declared_color(response, color, scad_code=code)
                 from kiln.front_door import join_goal
 
                 join_goal(brief_id, response, stl_path)
@@ -1745,7 +1766,9 @@ class _DesignToolsPlugin:
                         attach_inspect_bundle,
                     )
 
-                    return attach_inspect_bundle(response, level="quick")
+                    return attach_inspect_bundle(
+                        response, level="quick", body_color=shown,
+                    )
                 except ImportError:
                     return response
             except ValueError as exc:
@@ -1761,12 +1784,18 @@ class _DesignToolsPlugin:
             new_value: float,
             material: str | None = None,
             brief_id: str = "",
+            color: str = "",
         ) -> dict:
             """Update a parameter in OpenSCAD code and recompile to STL.
 
             The complete parametric tweaking workflow: changes a dimension
             variable, validates against material limits, and compiles a new
             STL — all in one step. Perfect for "make it 5mm wider" requests.
+
+            A tweak that leaves a piece floating with nothing under it is
+            refused like a compile is (``code: "FLOATING_PIECES"``, the fix
+            in ``error``).  ``color`` shows the part in the colour the user
+            asked for, as on ``compile_scad``.
 
             Args:
                 brief_id: The saved goal's id from ``design_session``; pass it so
@@ -1776,6 +1805,8 @@ class _DesignToolsPlugin:
                 parameter_name: Variable name to update (e.g. "wall_thickness").
                 new_value: New numeric value.
                 material: Optional material for limit validation (e.g. "pla").
+                color: The colour the user asked for, shown on the preview and
+                    the stage (a name or ``#rrggbb``).  Not a print setting.
             """
             import kiln.server as _srv
             if err := _srv._check_auth("generate"):
@@ -1796,22 +1827,31 @@ class _DesignToolsPlugin:
                         f"Updated {parameter_name}={new_value}, compiled to STL{suffix}."
                     ),
                 }
-                from kiln.front_door import join_goal
-
-                join_goal(brief_id, response, response.get("stl_path"))
-                # Same flush-attachment door as compile_scad: a tweak can
-                # slide a part to exact tangency; flag unfused contact.
+                # Same door as compile_scad: a tweak can slide a part to
+                # exact tangency or lift a feature clear of its host.  Judged
+                # BEFORE the goal join, so a refused tweak is not recorded as
+                # the part's next version.
                 from kiln.fusion_check import attach_fusion_report
 
                 response = attach_fusion_report(
-                    response, response.get("stl_path"),
+                    response, response.get("stl_path"), refuse_floating=True,
                 )
+                from kiln.declared_color import attach_declared_color
+
+                shown = attach_declared_color(
+                    response, color, scad_code=response.get("updated_code") or scad_code,
+                )
+                from kiln.front_door import join_goal
+
+                join_goal(brief_id, response, response.get("stl_path"))
                 try:
                     from kiln_pro.plugins.git_render_tools import (
                         attach_inspect_bundle,
                     )
 
-                    return attach_inspect_bundle(response, level="quick")
+                    return attach_inspect_bundle(
+                        response, level="quick", body_color=shown,
+                    )
                 except ImportError:
                     return response
             except ValueError as exc:

@@ -91,7 +91,10 @@ class _DesignRebuildPlugin:
             # re-derived mesh gets the compile door's own check.
             from kiln.fusion_check import attach_fusion_report
 
-            attach_fusion_report(result, result.get("compiled_stl") or result.get("stl_path"))
+            attach_fusion_report(
+                result, result.get("compiled_stl") or result.get("stl_path"),
+                refuse_floating=True,
+            )
             from kiln.front_door import join_goal
 
             join_goal(brief_id, result, result.get("compiled_stl") or result.get("stl_path"))

@@ -16706,7 +16706,7 @@ def generate_from_template(
             # compile door runs, so a piece left in the air is said here too.
             from kiln.fusion_check import attach_fusion_report
 
-            attach_fusion_report(result_dict, dl.local_path)
+            attach_fusion_report(result_dict, dl.local_path, refuse_floating=True)
             from kiln.front_door import join_goal
 
             join_goal(brief_id, result_dict, dl.local_path)
@@ -17340,7 +17340,7 @@ def design_to_gcode_pipeline(
             # worth saying before the G-code exists.
             from kiln.fusion_check import attach_fusion_report
 
-            attach_fusion_report(result_dict, result.stl_file)
+            attach_fusion_report(result_dict, result.stl_file, refuse_floating=True)
             from kiln.front_door import join_goal
 
             join_goal(brief_id, result_dict, result.stl_file)
