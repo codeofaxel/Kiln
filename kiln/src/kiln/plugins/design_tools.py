@@ -640,18 +640,12 @@ class _DesignToolsPlugin:
                         "error": f"Unknown load table material: {material}. "
                         f"Available: {', '.join(load_table_materials())}.",
                     }
-                result = {**estimate, "success": True}
-                if result.get("limit_mode") == "deflection":
-                    # An elastomer's answer is a serviceability limit, said in
-                    # its own words; it carries no strength nudge.
-                    return result
-                # estimate_structural_load is definitionally a load-bearing
-                # question — always surface the heuristic-grade upgrade nudge.
-                from kiln.load_bearing_detector import attach_load_bearing_nudge
-
-                return attach_load_bearing_nudge(
-                    result, force=True, material=material,
-                )
+                # The caller holds Kiln Pro, so the answer is the figure and
+                # its cautions, and no upgrade pitch: until 2026-10-18 the
+                # Pro-tier nudge rode on every Pro answer too, and a pitch
+                # for a plan the person already has reads as a broken
+                # product.  The free answer above keeps it.
+                return {**estimate, "success": True}
             except Exception as exc:
                 _logger.error("Load estimation failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}

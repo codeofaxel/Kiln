@@ -144,11 +144,13 @@ class TestAttachLoadBearingNudge:
 
 class TestEstimateStructuralLoadWiring:
     @pytest.mark.parametrize("paid", [False, True])
-    def test_always_nudges_even_for_pla(self, monkeypatch, paid):
-        """Free (the load not checked) and Pro (the figure, from Kiln's
-        servers stood in) both carry the nudge.  The plan is set here: the
-        caller's plan is read through ``kiln.licensing``, and a machine's own
-        sign-in must not decide what this test exercises."""
+    def test_free_is_nudged_and_pro_is_not(self, monkeypatch, paid):
+        """Free (the load not checked) carries the nudge; Pro (the figure,
+        from Kiln's servers stood in) does not.  Inverted on 2026-10-18 from
+        "both carry the nudge": a pitch for the plan the caller already holds
+        is a defect, and a green test asserting it is how it survived.  The
+        plan is set here: the caller's plan is read through ``kiln.licensing``,
+        and a machine's own sign-in must not decide what this test exercises."""
         import kiln.licensing as licensing
         import kiln.server as srv
         from kiln import _pro_load_bridge
@@ -164,8 +166,10 @@ class TestEstimateStructuralLoadWiring:
             material="PLA", cross_section_mm2=20.0, cantilever_length_mm=30.0
         )
         assert res["success"] is True
-        assert "upgrade_recommendation" in res
-        assert res["upgrade_recommendation"]["engineering_grade"] == "heuristic"
+        if paid:
+            assert "upgrade_recommendation" not in res and "load_bearing_note" not in res
+        else:
+            assert res["upgrade_recommendation"]["engineering_grade"] == "heuristic"
 
 
 # ---------------------------------------------------------------------------

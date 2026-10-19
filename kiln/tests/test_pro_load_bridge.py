@@ -151,7 +151,9 @@ class TestTheProAnswer:
         out = _tool()("petg", 24.0, 100.0, load_across_layers=False)
         assert out["success"] is True and "load_checked" not in out
         assert {k: out[k] for k in _STRENGTH} == _STRENGTH
-        assert out["upgrade_recommendation"]["code"] == "LOAD_BEARING_DETECTED"
+        # No pitch for the plan the caller already holds (2026-10-18; this
+        # line used to assert the Pro nudge WAS attached).
+        assert "upgrade_recommendation" not in out and "load_bearing_note" not in out
         assert servers.asks == [(
             "estimate_load_figure",
             {"material": "petg", "cross_section_mm2": 24.0, "cantilever_length_mm": 100.0, "load_across_layers": False},
