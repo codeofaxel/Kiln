@@ -221,6 +221,20 @@ def cloud_group() -> None:
     """Push a design's history to your Kiln account, or bring it here."""
 
 
+def _with_recipes(said: str, answer: dict[str, Any], *, sent: bool) -> str:
+    """*said*, and what became of the design's proven recipes."""
+    recipes = answer.get("proven_recipes")
+    if not isinstance(recipes, dict):
+        return said
+    if recipes.get("error"):
+        return f"{said}\n{_shown(recipes.get('note', ''))} ({_shown(recipes['error'])})"
+    count = recipes.get("sent") if sent else recipes.get("in_account")
+    if not count:
+        return said
+    noun = "proven recipe" if count == 1 else "proven recipes"
+    return f"{said}\n{'Sent' if sent else 'Brought'} {count} {noun} with it."
+
+
 @cloud_group.command("push")
 @click.argument("design_id")
 @click.argument("branch_id", required=False)
@@ -236,7 +250,7 @@ def cloud_push(design_id: str, branch_id: str | None, replace: bool, json_mode: 
         click.echo(answer.get("error", ""), err=True)
         click.echo("Run again with --replace to replace it.", err=True)
         sys.exit(1)
-    _finish(answer, json_mode, lambda a: f"Pushed {design_id} to your Kiln account.")
+    _finish(answer, json_mode, lambda a: _with_recipes(f"Pushed {design_id} to your Kiln account.", a, sent=True))
 
 
 @cloud_group.command("pull")
@@ -248,7 +262,7 @@ def cloud_pull(design_id: str, branch_name: str | None, json_mode: bool) -> None
     from kiln.history_courier import pull
 
     answer = pull("cloud_pull_branch", design_id, branch_name=branch_name)
-    _finish(answer, json_mode, lambda a: f"Pulled {design_id} from your Kiln account.")
+    _finish(answer, json_mode, lambda a: _with_recipes(f"Pulled {design_id} from your Kiln account.", a, sent=False))
 
 
 @cloud_group.command("clone")
@@ -259,7 +273,7 @@ def cloud_clone(design_id: str, json_mode: bool) -> None:
     from kiln.history_courier import clone
 
     answer = clone("cloud_clone_design", design_id)
-    _finish(answer, json_mode, lambda a: f"Cloned {design_id} from your Kiln account.")
+    _finish(answer, json_mode, lambda a: _with_recipes(f"Cloned {design_id} from your Kiln account.", a, sent=False))
 
 
 @cloud_group.command("list-branches")

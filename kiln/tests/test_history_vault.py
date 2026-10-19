@@ -852,3 +852,195 @@ class TestProvenRecipesKeptBesideTheirDesigns:
         assert answer["history_kept"]["proven_recipes"] == 1
         assert json.loads((folder / ".kiln_proven_recipe.json").read_text()) == {"product_type": "mug"}
         assert not (home / ".kiln" / "outside").exists() and not (home / "evil.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# Proven recipes travel with their design
+# ---------------------------------------------------------------------------
+
+P1S = {"printer_model": "bambu_p1s", "material": "pla", "filament_line": None,
+       "nozzle_diameter_mm": 0.4, "nozzle_material": None}
+
+
+def _recipe(**over):
+    return {"decoration_type": "logo_deboss", "product_type": "coaster", "parameters": {"deboss_depth": 0.6},
+            "setup": P1S, "success": True, "notes": "crisp", "proven_at": "2026-10-01T00:00:00+00:00",
+            "source_design": "mug", "recorded_by": "person", "confirmed": True, **over}
+
+
+def _keep_recipes(folder: Path, name: str, recipes: list) -> None:
+    (folder / name).write_text(json.dumps({"recipes": recipes}), encoding="utf-8")
+
+
+def _held(folder: Path, name: str) -> list:
+    return json.loads((folder / name).read_text(encoding="utf-8"))["recipes"]
+
+
+class _Routes:
+    """Kiln's cloud routes as a push or pull sees them: one answer per path."""
+
+    def __init__(self, answers):
+        self.answers, self.calls = answers, []
+
+    def __call__(self, tool, method, path, body=None):
+        self.calls.append((method, path, body))
+        return self.answers.get(path.rsplit("/", 1)[-1], {})
+
+
+class TestProvenRecipesTravelWithTheDesign:
+    def test_a_push_sends_the_designs_recipes_naming_their_version(self, home, monkeypatch):
+        folder = _library(home, "mug", [MESH_V1])
+        _keep_recipes(folder, ".kiln_proven_recipe.v1.json",
+                      [_recipe(parameters={"deboss_depth": 0.6, "logo_source": str(home / "logo.svg")})])
+        other = _library(home, "bowl", [MESH_V1])
+        _keep_recipes(other, ".kiln_proven_recipe.json", [_recipe(product_type="bowl")])
+        routes = _Routes({"push": {"pushed_versions": 1, "kept": 1}})
+        monkeypatch.setattr(courier, "_request", routes)
+
+        answer = courier.push("cloud_push_branch", "mug")
+
+        assert answer["status"] == "success", answer
+        (method, path, body) = routes.calls[-1]
+        assert (method, path) == ("POST", "/api/cloud/designs/mug/proven/push")
+        (row,) = body["recipes"]
+        assert row["version_ref"] == "1" and row["product_type"] == "coaster"
+        assert row["setup"] == P1S and row["confirmed"] is True
+        assert str(home) not in json.dumps(body)   # no file on this computer goes with it
+        assert answer["proven_recipes"] == {"sent": 1, "kept": 1}
+
+    def test_a_recipe_file_from_before_setups_is_sent_as_the_latests(self, home, monkeypatch):
+        folder = _library(home, "mug", [MESH_V1])
+        (folder / ".kiln_proven_recipe.json").write_text(
+            json.dumps({"decoration_type": "logo_deboss", "product_type": "coaster", "parameters": {}}),
+            encoding="utf-8")
+        routes = _Routes({})
+        monkeypatch.setattr(courier, "_request", routes)
+
+        courier.push("cloud_push_branch", "mug")
+
+        (row,) = routes.calls[-1][2]["recipes"]
+        assert row["version_ref"] == "" and row["decoration_type"] == "logo_deboss"
+
+    def test_a_design_with_no_recipes_sends_only_its_branch(self, home, monkeypatch):
+        _library(home, "mug", [MESH_V1])
+        routes = _Routes({})
+        monkeypatch.setattr(courier, "_request", routes)
+
+        answer = courier.push("cloud_push_branch", "mug")
+
+        assert [c[1] for c in routes.calls] == ["/api/cloud/designs/mug/branches/push"]
+        assert "proven_recipes" not in answer
+
+    def test_recipes_the_account_refused_leave_the_branch_pushed_and_say_so(self, home, monkeypatch):
+        folder = _library(home, "mug", [MESH_V1])
+        _keep_recipes(folder, ".kiln_proven_recipe.v1.json", [_recipe()])
+        routes = _Routes({"push": {"pushed_versions": 1}})
+
+        def answer_for(tool, method, path, body=None):
+            if path.endswith("/proven/push"):
+                return {"status": "error", "error": "try again in a moment", "code": "PROVEN_UNAVAILABLE"}
+            return routes(tool, method, path, body)
+
+        monkeypatch.setattr(courier, "_request", answer_for)
+
+        answer = courier.push("cloud_push_branch", "mug")
+
+        assert answer["status"] == "success"
+        assert answer["proven_recipes"]["code"] == "PROVEN_UNAVAILABLE"
+        assert answer["proven_recipes"]["sent"] == 0
+        assert "not" in answer["proven_recipes"]["note"]
+
+    def test_a_pull_keeps_the_accounts_recipes_beside_the_design(self, home, monkeypatch):
+        folder = _library(home, "mug", [MESH_V1])
+        routes = _Routes({"proven": {"recipes": [{"design_id": "mug", "version_ref": "1", **_recipe()}]}})
+        monkeypatch.setattr(courier, "_request", routes)
+
+        answer = courier.pull("cloud_pull_branch", "mug")
+
+        assert answer["status"] == "success", answer
+        assert ("GET", "/api/cloud/designs/mug/proven", None) in routes.calls
+        (kept,) = _held(folder, ".kiln_proven_recipe.v1.json")
+        assert kept["notes"] == "crisp" and kept["setup"] == P1S
+        assert answer["proven_recipes"] == {"in_account": 1, "files_changed": 1}
+
+    def test_a_clone_brings_them_too(self, home, monkeypatch):
+        folder = _library(home, "mug", [MESH_V1])
+        routes = _Routes({"proven": {"recipes": [{"design_id": "mug", "version_ref": "", **_recipe()}]}})
+        monkeypatch.setattr(courier, "_request", routes)
+
+        courier.clone("cloud_clone_design", "mug")
+
+        assert [r["product_type"] for r in _held(folder, ".kiln_proven_recipe.json")] == ["coaster"]
+
+    def test_an_automatic_recording_never_replaces_one_confirmed_here(self, home, monkeypatch):
+        folder = _library(home, "mug", [MESH_V1])
+        _keep_recipes(folder, ".kiln_proven_recipe.v1.json", [_recipe(notes="mine")])
+        newer_auto = _recipe(notes="auto", recorded_by="auto", confirmed=False, proven_at="2026-10-09T00:00:00+00:00")
+        monkeypatch.setattr(courier, "_request", _Routes({"proven": {"recipes": [
+            {"design_id": "mug", "version_ref": "1", **newer_auto}]}}))
+
+        courier.pull("cloud_pull_branch", "mug")
+
+        (kept,) = _held(folder, ".kiln_proven_recipe.v1.json")
+        assert kept["notes"] == "mine" and kept["confirmed"] is True
+
+    def test_a_newer_confirmed_recipe_replaces_an_older_one_and_another_setup_joins(self, home, monkeypatch):
+        folder = _library(home, "mug", [MESH_V1])
+        _keep_recipes(folder, ".kiln_proven_recipe.v1.json", [_recipe(notes="old")])
+        newer = _recipe(notes="new", proven_at="2026-10-09T00:00:00+00:00")
+        petg = _recipe(notes="petg", setup={**P1S, "material": "petg"})
+        monkeypatch.setattr(courier, "_request", _Routes({"proven": {"recipes": [
+            {"design_id": "mug", "version_ref": "1", **newer}, {"design_id": "mug", "version_ref": "1", **petg}]}}))
+
+        courier.pull("cloud_pull_branch", "mug")
+
+        assert sorted(r["notes"] for r in _held(folder, ".kiln_proven_recipe.v1.json")) == ["new", "petg"]
+
+    def test_a_version_that_names_a_path_writes_nothing(self, home, monkeypatch):
+        folder = _library(home, "mug", [MESH_V1])
+        before = sorted(p.name for p in folder.iterdir())
+        monkeypatch.setattr(courier, "_request", _Routes({"proven": {"recipes": [
+            {"design_id": "mug", "version_ref": "../../escape", **_recipe()},
+            {"design_id": "bowl", "version_ref": "1", **_recipe()}]}}))
+
+        answer = courier.pull("cloud_pull_branch", "mug")
+
+        assert answer["proven_recipes"]["files_changed"] == 0
+        assert sorted(p.name for p in folder.iterdir()) == before
+        assert not (home / ".kiln" / "designs" / "bowl").exists()
+
+    def test_recipes_the_account_could_not_send_leave_the_pull_done_and_say_so(self, home, monkeypatch):
+        _library(home, "mug", [MESH_V1])
+
+        def answer_for(tool, method, path, body=None):
+            if path.endswith("/proven"):
+                return {"status": "error", "error": "not found", "code": "NOT_FOUND"}
+            return {}
+
+        monkeypatch.setattr(courier, "_request", answer_for)
+
+        answer = courier.pull("cloud_pull_branch", "mug")
+
+        assert answer["status"] == "success"
+        assert answer["proven_recipes"]["code"] == "NOT_FOUND"
+
+
+class TestTheCommandSaysWhatBecameOfTheRecipes:
+    def test_push_says_how_many_went_and_pull_says_when_they_did_not(self, home, monkeypatch):
+        from click.testing import CliRunner
+
+        import kiln.history_courier as hc
+        from kiln.cli.history_commands import cloud_group
+
+        monkeypatch.setattr(hc, "push", lambda *a, **k: {
+            "status": "success", "proven_recipes": {"sent": 2, "kept": 2}})
+        monkeypatch.setattr(hc, "pull", lambda *a, **k: {
+            "status": "success", "proven_recipes": {
+                "error": "busy \x1b[2Jnow", "note": "The design is here; its proven recipes are not."}})
+        runner = CliRunner()
+
+        pushed = runner.invoke(cloud_group, ["push", "mug"])
+        pulled = runner.invoke(cloud_group, ["pull", "mug"])
+
+        assert "Sent 2 proven recipes with it." in pushed.output, pushed.output
+        assert "its proven recipes are not" in pulled.output and "\x1b" not in pulled.output

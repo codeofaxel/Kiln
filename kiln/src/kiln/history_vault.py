@@ -120,6 +120,76 @@ _PROVEN_NAME = re.compile(r"^\.kiln_proven_recipe(?:\.v\d{1,6})?\.json$")
 _MAX_PROVEN = 500
 _MAX_PROVEN_BYTES = 64 * 1024
 
+#: What one proven recipe says, as a file holds it and the account keeps it
+#: (the push route's body names the same words).
+_RECIPE_FIELDS = (
+    "decoration_type", "product_type", "parameters", "setup", "success",
+    "notes", "proven_at", "source_design", "recorded_by", "confirmed",
+)
+
+
+def _proven_files(folder: Path | None) -> list[tuple[str, dict[str, Any]]]:
+    """The proven-recipe files in one design's folder, as ``(name, record)``."""
+    out: list[tuple[str, dict[str, Any]]] = []
+    if folder is None or not folder.is_dir() or folder.is_symlink():
+        return out
+    for path in sorted(folder.iterdir()):
+        if not _PROVEN_NAME.match(path.name) or path.is_symlink():
+            continue
+        try:
+            if path.stat().st_size > _MAX_PROVEN_BYTES:
+                continue
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(record, dict):
+            out.append((path.name, record))
+    return out
+
+
+def _file_recipes(record: Any) -> list[dict[str, Any]]:
+    """The recipes one file holds: ``{"recipes": [...]}``, or a single recipe
+    written before a file held one per setup."""
+    if isinstance(record, dict) and isinstance(record.get("recipes"), list):
+        return [r for r in record["recipes"] if isinstance(r, dict)]
+    if isinstance(record, dict) and record.get("decoration_type"):
+        return [record]
+    return []
+
+
+def _proven_ref(name: str) -> str:
+    """``"3"`` for ``.kiln_proven_recipe.v3.json``, ``""`` for the latest's file."""
+    match = re.match(r"^\.kiln_proven_recipe\.v(\d+)\.json$", name)
+    return match.group(1) if match else ""
+
+
+def _proven_name(version_ref: Any) -> str | None:
+    """The file a recipe for *version_ref* lives in, or ``None`` when the
+    reference is not a version number."""
+    ref = "" if version_ref is None else str(version_ref).strip()
+    name = f".kiln_proven_recipe.v{ref}.json" if ref else ".kiln_proven_recipe.json"
+    return name if _PROVEN_NAME.match(name) else None
+
+
+def _recipe_key(recipe: dict[str, Any]) -> tuple[Any, ...]:
+    """A recipe's place in its file: its decoration, product and setup (an
+    unknown setup fact and an absent one are the same)."""
+    setup = recipe.get("setup") if isinstance(recipe.get("setup"), dict) else {}
+    return (
+        str(recipe.get("decoration_type") or ""),
+        str(recipe.get("product_type") or ""),
+        tuple(sorted((str(k), str(v)) for k, v in setup.items() if v is not None)),
+    )
+
+
+def _standing(recipe: dict[str, Any]) -> tuple[bool, str]:
+    """Confirmed by a person first, then the newer."""
+    return (bool(recipe.get("confirmed", recipe.get("recorded_by") != "auto")), str(recipe.get("proven_at") or ""))
+
+
+def _names_a_file(value: Any) -> bool:
+    return isinstance(value, str) and (os.path.isabs(value) or value.startswith("~"))
+
 
 #: What a log entry or a bisect session is about.
 _ARTIFACT_TYPES = ("design", "preset", "feature")
@@ -924,18 +994,58 @@ class HistoryVault:
         if not root.is_dir():
             return out
         for folder in sorted(p for p in root.iterdir() if p.is_dir() and not p.is_symlink()):
-            for path in sorted(folder.iterdir()):
-                if len(out) >= _MAX_PROVEN or not _PROVEN_NAME.match(path.name) or path.is_symlink():
-                    continue
-                try:
-                    if path.stat().st_size > _MAX_PROVEN_BYTES:
-                        continue
-                    record = json.loads(path.read_text(encoding="utf-8"))
-                except (OSError, ValueError):
-                    continue
-                if isinstance(record, dict):
-                    out.append({"design_id": folder.name, "name": path.name, "record": record})
+            for name, record in _proven_files(folder):
+                if len(out) >= _MAX_PROVEN:
+                    return out
+                out.append({"design_id": folder.name, "name": name, "record": record})
         return out
+
+    def proven_rows(self, design_id: str) -> list[dict[str, Any]]:
+        """*design_id*'s proven recipes as the Kiln account keeps them: one row
+        per recipe, naming the version it was proven on (``version_ref``, empty
+        for the design's latest) and no file on this computer."""
+        rows: list[dict[str, Any]] = []
+        for name, record in _proven_files(_design_folder(design_id)):
+            for recipe in _file_recipes(record):
+                row = {k: recipe[k] for k in _RECIPE_FIELDS if k in recipe}
+                if isinstance(row.get("parameters"), dict):
+                    row["parameters"] = {k: v for k, v in row["parameters"].items() if not _names_a_file(v)}
+                rows.append({"version_ref": _proven_ref(name), **_no_paths(row)})
+        return rows
+
+    def merge_proven_rows(self, design_id: str, rows: Any) -> int:
+        """Keep the account's proven recipes for *design_id* beside it here;
+        how many files changed.
+
+        A version's file holds one recipe per decoration, product and setup.
+        A recipe a person confirmed is never replaced by one recorded
+        automatically, and of two with the same standing the newer stays.
+        """
+        folder = _design_folder(design_id)
+        if folder is None:
+            return 0
+        held = dict(_proven_files(folder))
+        changed: dict[str, list[dict[str, Any]]] = {}
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict) or row.get("design_id") not in (None, design_id):
+                continue
+            name = _proven_name(row.get("version_ref"))
+            incoming = {k: row[k] for k in _RECIPE_FIELDS if k in row}
+            if name is None or not incoming.get("decoration_type") or not incoming.get("product_type"):
+                continue
+            recipes = changed.get(name) or _file_recipes(held.get(name))
+            at = next((i for i, r in enumerate(recipes) if _recipe_key(r) == _recipe_key(incoming)), None)
+            if at is None:
+                recipes = [*recipes, incoming]
+            elif recipes[at] != incoming and _standing(incoming) >= _standing(recipes[at]):
+                recipes = [*recipes[:at], incoming, *recipes[at + 1:]]
+            else:
+                continue
+            changed[name] = recipes
+        return self.keep_proven_recipes([
+            {"design_id": design_id, "name": name, "record": {"recipes": recipes}}
+            for name, recipes in changed.items()
+        ])
 
     def keep_proven_recipes(self, rows: Any) -> int:
         """File each proven recipe a served call recorded beside its design; how many."""

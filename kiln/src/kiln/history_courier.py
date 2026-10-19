@@ -508,13 +508,49 @@ def _refused(tool: str, code: str, error: str) -> dict[str, Any]:
     return {"status": "error", "success": False, "code": code, "error": error, "tool": tool}
 
 
+#: The most proven recipes one push sends (Kiln's servers keep no more per push).
+_MAX_RECIPES_SENT = 500
+
+
+def _send_recipes(tool: str, design_id: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Send *design_id*'s proven recipes to the account; what became of them."""
+    sent = rows[:_MAX_RECIPES_SENT]
+    answer = _request(tool, "POST", f"/api/cloud/designs/{_quote(design_id)}/proven/push", {"recipes": sent})
+    if answer.get("status") == "error":
+        return {
+            "sent": 0,
+            "error": answer.get("error") or "Kiln's servers did not keep them.",
+            "code": answer.get("code"),
+            "note": "The branch is in your Kiln account; its proven recipes are not, so run the push again later.",
+        }
+    out: dict[str, Any] = {"sent": len(sent), "kept": answer.get("kept", 0)}
+    if len(rows) > len(sent):
+        out["left_out"] = len(rows) - len(sent)
+    return out
+
+
+def _bring_recipes(tool: str, design_id: str, vault: Any) -> dict[str, Any]:
+    """Bring the account's proven recipes for *design_id* beside it here."""
+    answer = _request(tool, "GET", f"/api/cloud/designs/{_quote(design_id)}/proven")
+    if answer.get("status") == "error":
+        return {
+            "error": answer.get("error") or "Kiln's servers did not answer.",
+            "code": answer.get("code"),
+            "note": "The design is here; its proven recipes are not, so pull again later.",
+        }
+    rows = answer.get("recipes") if isinstance(answer.get("recipes"), list) else []
+    return {"in_account": len(rows), "files_changed": vault.merge_proven_rows(design_id, rows)}
+
+
 def push(tool: str, design_id: str, branch_id: str | None = None, *, replace_confirmed: bool = False, vault: Any = None) -> dict[str, Any]:
-    """Send one branch of this computer's history to the person's Kiln account."""
+    """Send one branch of this computer's history, and the design's proven
+    recipes, to the person's Kiln account."""
     from kiln.history_vault import HistoryVault
 
     own = vault is None
     vault = vault or HistoryVault()
     try:
+        recipes = vault.proven_rows(design_id)
         vault.sync_from_library(design_id)
         branch = vault.branch(branch_id) if branch_id else vault.branch_named(design_id, "main")
         if branch is None or branch.get("design_id") != design_id:
@@ -552,7 +588,10 @@ def push(tool: str, design_id: str, branch_id: str | None = None, *, replace_con
     answer = _request(tool, "POST", f"/api/cloud/designs/{_quote(design_id)}/branches/push", body)
     if answer.get("status") == "error":
         return answer
-    return {"status": "success", "push": answer, "design_id": design_id, "branch_id": branch["branch_id"]}
+    out = {"status": "success", "push": answer, "design_id": design_id, "branch_id": branch["branch_id"]}
+    if recipes:
+        out["proven_recipes"] = _send_recipes(tool, design_id, recipes)
+    return out
 
 
 def pull(
@@ -564,40 +603,38 @@ def pull(
     *,
     vault: Any = None,
 ) -> dict[str, Any]:
-    """Bring one branch of the person's Kiln account onto this computer."""
+    """Bring one branch of the person's Kiln account, and the design's proven
+    recipes, onto this computer."""
     if not branch_id and not branch_name:
         branch_name = "main"
     body = {"branch_id": branch_id, "branch_name": branch_name, "since_version_id": since_version_id}
     answer = _request(tool, "POST", f"/api/cloud/designs/{_quote(design_id)}/branches/pull", body)
     if answer.get("status") == "error":
         return answer
-    from kiln.history_vault import HistoryVault
-
-    own = vault is None
-    vault = vault or HistoryVault()
-    try:
-        applied = vault.apply_remote({**answer, "design_id": design_id})
-    finally:
-        if own:
-            vault.close()
-    return {"status": "success", "applied": applied, "design_id": design_id}
+    return _keep_here(tool, design_id, answer, vault)
 
 
 def clone(tool: str, design_id: str, *, vault: Any = None) -> dict[str, Any]:
-    """Bring a whole design from the person's Kiln account onto this computer."""
+    """Bring a whole design, and its proven recipes, from the person's Kiln
+    account onto this computer."""
     answer = _request(tool, "POST", f"/api/cloud/designs/{_quote(design_id)}/clone", {})
     if answer.get("status") == "error":
         return answer
+    return _keep_here(tool, design_id, answer, vault)
+
+
+def _keep_here(tool: str, design_id: str, answer: dict[str, Any], vault: Any) -> dict[str, Any]:
     from kiln.history_vault import HistoryVault
 
     own = vault is None
     vault = vault or HistoryVault()
     try:
         applied = vault.apply_remote({**answer, "design_id": design_id})
+        recipes = _bring_recipes(tool, design_id, vault)
     finally:
         if own:
             vault.close()
-    return {"status": "success", "applied": applied, "design_id": design_id}
+    return {"status": "success", "applied": applied, "design_id": design_id, "proven_recipes": recipes}
 
 
 def remote_branches(tool: str, design_id: str) -> dict[str, Any]:
