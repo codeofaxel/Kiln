@@ -1143,20 +1143,22 @@ def _otsu_threshold(hist: list[int]) -> int:
 def _load_flattened_grayscale(image_path: str, max_dim: int):
     """Open → EXIF-orient → resolve transparency → grayscale → bound size.
 
-    Transparency goes through the one shared resolver
-    (:func:`kiln.image_to_surface._flatten_alpha_on_white`) so the trace
-    door and the heightmap door cannot drift apart: both composite onto
-    white, and both fall back to alpha-as-ink when a white or near-white
-    mark on a transparent surround would otherwise vanish entirely.  This
-    module used to carry its own inline copy of the composite, which is
-    exactly how the two doors diverge.
+    Opened through THE one door every reader of a grayscale image uses
+    (:func:`kiln.image_to_surface._open_grayscale`), so the trace door
+    and the heightmap door cannot drift apart.  This module used to carry
+    its own inline copy of the alpha composite, and that was unified; then
+    it kept its own ``Image.open`` beside the shared alpha resolver, and
+    drifted again the day the shared door learned two more things -- that
+    a logo's COLOURS can be the ink where its brightness is not (a red
+    mark on an equal-brightness green carved as noise here, 2026-10-18),
+    and that an image's size is read from its header before it is decoded.
+    A second ``open`` is a second door, however much of the rest is shared.
     """
-    from PIL import Image, ImageOps
+    from PIL import Image
 
-    from kiln.image_to_surface import _flatten_alpha_on_white
+    from kiln.image_to_surface import _open_grayscale
 
-    img = ImageOps.exif_transpose(Image.open(image_path))
-    img = _flatten_alpha_on_white(img).convert("L")
+    img = _open_grayscale(image_path, exif_transpose=True)
     if max(img.size) > max_dim:
         img.thumbnail((max_dim, max_dim), Image.LANCZOS)
     return img
