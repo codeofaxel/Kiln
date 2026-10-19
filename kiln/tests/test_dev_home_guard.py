@@ -98,3 +98,36 @@ class TestARealChildProcess:
     def test_the_escape_keeps_it_on_purpose(self):
         said = _child(**{guard.SANDBOX_ENV: "1", guard.ALLOW_REAL_HOME_ENV: "1"})
         assert said["home"] == REAL and said["moved"] is None
+
+
+def _guard_alone(source_checkout: bool, home: str) -> dict:
+    """Load the guard by its file in a fresh interpreter (no ``import kiln``,
+    so Kiln's own call never runs) with ``home`` standing in for the
+    account's real home, and ask it once with the given answer."""
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("PYTEST_CURRENT_TEST", guard.SANDBOX_ENV, guard.ALLOW_REAL_HOME_ENV,
+                        guard.MOVED_ENV, "KILN_HOME")}
+    env.update(HOME=home, PYTEST_CURRENT_TEST="tests/test_x.py::test_y (call)")
+    code = (
+        "import importlib.util, json, os, pwd, sys\n"
+        "class _E: pw_dir = os.environ['HOME']\n"
+        "pwd.getpwuid = lambda uid: _E\n"
+        f"spec = importlib.util.spec_from_file_location('g', {guard.__file__!r})\n"
+        "g = importlib.util.module_from_spec(spec); spec.loader.exec_module(g)\n"
+        f"moved = g.protect(source_checkout={source_checkout!r})\n"
+        "print(json.dumps({'home': os.environ['HOME'], 'moved': moved}))\n"
+    )
+    out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr[-2000:]
+    return json.loads(out.stdout.strip().splitlines()[-1])
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the stand-in home needs pwd")
+class TestAPackageThatImportsKilnAnswersForItself:
+    def test_its_own_source_tree_moves_a_test(self, tmp_path):
+        said = _guard_alone(True, str(tmp_path))
+        assert said["moved"] and said["home"] == said["moved"] != str(tmp_path)
+
+    def test_an_installed_copy_does_not(self, tmp_path):
+        said = _guard_alone(False, str(tmp_path))
+        assert said["moved"] is None and said["home"] == str(tmp_path)

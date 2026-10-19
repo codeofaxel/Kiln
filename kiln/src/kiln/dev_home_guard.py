@@ -116,19 +116,24 @@ def decide(
     return None
 
 
-def protect() -> str | None:
+def protect(*, source_checkout: bool | None = None) -> str | None:
     """Move this process's home to a scratch folder when :func:`decide` says
     it must not use the real one.  Returns the new home, or ``None`` when
     nothing moved.  Never raises: a failure here leaves the process as it was
-    and says so in the log."""
+    and says so in the log.
+
+    ``source_checkout`` lets a package that imports Kiln say whether IT runs
+    from a developer's tree; unset, Kiln's own location answers."""
     try:
+        if source_checkout is None:
+            source_checkout = is_source_checkout()
         reason = decide(
             home=os.environ.get("HOME", ""),
             real_home=account_home(),
             kiln_home=os.environ.get("KILN_HOME") or None,
             pytest_running=_pytest_running(),
             sandbox_requested=_flag(SANDBOX_ENV),
-            source_checkout=is_source_checkout(),
+            source_checkout=source_checkout,
             allow_real_home=_flag(ALLOW_REAL_HOME_ENV),
         )
         if reason is None:
