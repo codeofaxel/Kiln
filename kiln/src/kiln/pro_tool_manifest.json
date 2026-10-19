@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-19T00:20:07.458789+00:00",
+  "generated": "2026-10-19T00:23:31.038436+00:00",
   "tool_count": 415,
   "categories": {
     "product_generators": {
@@ -4380,6 +4380,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       },
       "inputs": {
         "mesh": "host_mesh_path",
