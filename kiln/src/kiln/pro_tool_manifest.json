@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-18T22:33:41.989815+00:00",
+  "generated": "2026-10-19T00:20:07.458789+00:00",
   "tool_count": 415,
   "categories": {
     "product_generators": {
@@ -8408,6 +8408,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -8529,6 +8536,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -9235,6 +9249,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -9584,6 +9605,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
