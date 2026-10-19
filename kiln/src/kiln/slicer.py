@@ -47,7 +47,7 @@ from kiln.slicer_orca import (
     ini_to_settings,
     write_orca_presets,
 )
-from kiln.slicer_supports import SliceSupports, ensure_profile_supports
+from kiln.slicer_supports import SliceSupports, ensure_profile_supports, witnessed
 
 logger = logging.getLogger(__name__)
 
@@ -1166,7 +1166,7 @@ def slice_file(
         )
         result.filament = filament
         result.nozzle = nozzle
-        result.supports = supports
+        result.supports = witnessed(supports, result.output_path)
         result.stage_mesh_path = drawn
         if multicolor_switched:
             result.message += (
@@ -1244,7 +1244,7 @@ def slice_file(
         stderr=(result.stderr or "").strip(),
         filament=filament,
         nozzle=nozzle,
-        supports=supports,
+        supports=witnessed(supports, out_file),
         stage_mesh_path=drawn,
     )
 

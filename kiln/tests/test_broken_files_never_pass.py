@@ -476,6 +476,7 @@ VERDICT_ENGINES = frozenset({
     "validate_mesh",
     "design_scorecard",
     "analyze_printability",
+    "judge_supports",
 })
 
 #: Every call to a verdict engine in Kiln, and what makes it safe.  A new

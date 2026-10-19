@@ -91,18 +91,21 @@ class TestTheRule:
         )
 
     def test_a_part_that_needs_none_gets_none(self, part: str):
-        with patch("kiln.printability.analyze_printability", return_value=_report()):
+        with patch("kiln.printability.judge_supports", return_value=_report()):
             decision = decide_supports(part, material="PLA")
         assert decision == SliceSupports(False, DECIDED_ANALYSIS, "no overhang or bridge needs them")
         assert decision.note == "no supports: no overhang or bridge needs them"
 
     def test_a_part_that_needs_them_gets_kilns_minimal_supports(self, part: str):
-        with patch("kiln.printability.analyze_printability", return_value=_report(needs=True, overhang_pct=2.7)):
+        with patch("kiln.printability.judge_supports", return_value=_report(needs=True, overhang_pct=2.7)):
             decision = decide_supports(part, material="PLA")
         assert decision.enabled and decision.decided_by == DECIDED_ANALYSIS
         assert decision.settings == support_settings(45.0)
+        # The complement: the slicers take the slope from horizontal.
         assert decision.settings["support_material_threshold"] == "45"
-        assert decision.note == "supports on, build-plate only: overhangs=2.7%"
+        assert decision.settings["support_material_buildplate_only"] == "0"
+        assert decision.settings["dont_support_bridges"] == "0"
+        assert decision.note == "supports on: overhangs=2.7%"
 
     def test_the_slicers_threshold_is_the_verdicts_angle(self, part: str):
         """A Pro per-material angle reaches the slice the same way: the
@@ -110,13 +113,13 @@ class TestTheRule:
         that."""
         tuned = _report(needs=True, overhang_pct=2.7)
         tuned.overhang_threshold_deg = 35.0
-        with patch("kiln.printability.analyze_printability", return_value=tuned):
+        with patch("kiln.printability.judge_supports", return_value=tuned):
             decision = decide_supports(part, material="TPU")
         assert decision.settings["support_material_threshold"] == "55"
 
     def test_a_part_the_engine_cannot_read_is_said_not_checked(self, part: str):
         """Never read as a part that needs none: the answer names the miss."""
-        with patch("kiln.printability.analyze_printability", side_effect=ValueError("no  triangles\nhere")):
+        with patch("kiln.printability.judge_supports", side_effect=ValueError("no  triangles\nhere")):
             decision = decide_supports(part, material="PLA")
         assert not decision.enabled and decision.decided_by == DECIDED_NOT_CHECKED
         assert decision.reason == "not checked: no triangles here"
@@ -125,22 +128,21 @@ class TestTheRule:
     def test_the_engine_is_told_the_material_and_the_nozzle(self, part: str):
         """PLA bridges farther than TPU, and a 0.6 mm nozzle bridges farther
         than a 0.4: the check judges the part the slice is for."""
-        with patch("kiln.printability.analyze_printability", return_value=_report()) as engine:
+        with patch("kiln.printability.judge_supports", return_value=_report()) as engine:
             decide_supports(part, material="TPU", nozzle_diameter=0.6)
         assert engine.call_args.kwargs["material"] == "tpu"
         assert engine.call_args.kwargs["nozzle_diameter"] == 0.6
-        assert engine.call_args.kwargs["include_hole_detection"] is False
 
     def test_the_same_bytes_are_decided_once(self, part: str):
         """The plate gate slices a file twice when a skirt runs past the
         bed; the decision on the same bytes is the same decision."""
-        with patch("kiln.printability.analyze_printability", return_value=_report()) as engine:
+        with patch("kiln.printability.judge_supports", return_value=_report()) as engine:
             decide_supports(part, material="PLA")
             decide_supports(part, material="PLA")
         assert engine.call_count == 1
 
     def test_a_rewritten_file_is_read_again(self, part: str):
-        with patch("kiln.printability.analyze_printability", return_value=_report()) as engine:
+        with patch("kiln.printability.judge_supports", return_value=_report()) as engine:
             decide_supports(part, material="PLA")
             Path(part).write_bytes(b"\0" * 84 + b"\0" * 50)
             decide_supports(part, material="PLA")
@@ -156,7 +158,7 @@ class TestWhoseDecision:
     def test_an_unstated_profile_is_decided_and_the_keys_written(self, part: str):
         profile = resolve_slicer_profile("bambu_a1")
         assert ini_to_settings(profile).get(SUPPORT_KEY) != "1"
-        with patch("kiln.printability.analyze_printability", return_value=_report(needs=True, overhang_pct=2.7)):
+        with patch("kiln.printability.judge_supports", return_value=_report(needs=True, overhang_pct=2.7)):
             derived, decision = ensure_profile_supports(profile, part, material="PLA")
         assert derived != profile
         written = ini_to_settings(derived)
@@ -173,7 +175,7 @@ class TestWhoseDecision:
         default, which is how every unknown printer sliced without them."""
         profile = resolve_slicer_profile("default")
         assert ini_to_settings(profile)[SUPPORT_KEY] == "0"
-        with patch("kiln.printability.analyze_printability", return_value=_report(needs=True, overhang_pct=2.7)):
+        with patch("kiln.printability.judge_supports", return_value=_report(needs=True, overhang_pct=2.7)):
             derived, decision = ensure_profile_supports(profile, part, material="PLA")
         assert ini_to_settings(derived)[SUPPORT_KEY] == "1"
         assert decision.decided_by == DECIDED_ANALYSIS
@@ -181,7 +183,7 @@ class TestWhoseDecision:
     def test_a_stated_key_is_the_callers(self, part: str):
         """``reslice_with_overrides`` or ``--support-mode off`` said no."""
         profile = resolve_slicer_profile("bambu_a1", overrides={SUPPORT_KEY: "0"})
-        with patch("kiln.printability.analyze_printability") as engine:
+        with patch("kiln.printability.judge_supports") as engine:
             derived, decision = ensure_profile_supports(profile, part, material="PLA")
         engine.assert_not_called()
         assert derived == profile
@@ -196,7 +198,7 @@ class TestWhoseDecision:
     def test_the_callers_own_profile_is_theirs(self, part: str, tmp_path: Path):
         own = tmp_path / "mine.ini"
         own.write_text("layer_height = 0.2\nsupport_material = 1\n")
-        with patch("kiln.printability.analyze_printability") as engine:
+        with patch("kiln.printability.judge_supports") as engine:
             derived, decision = ensure_profile_supports(str(own), part, material="PLA")
         engine.assert_not_called()
         assert derived == str(own)
@@ -209,13 +211,13 @@ class TestWhoseDecision:
         assert not decision.enabled and decision.decided_by == DECIDED_STATED
 
     def test_no_profile_becomes_an_overrides_only_one(self, part: str):
-        with patch("kiln.printability.analyze_printability", return_value=_report(needs=True, overhang_pct=2.7)):
+        with patch("kiln.printability.judge_supports", return_value=_report(needs=True, overhang_pct=2.7)):
             derived, _decision = ensure_profile_supports(None, part, material="PLA")
         assert derived and ini_to_settings(derived)[SUPPORT_KEY] == "1"
 
     def test_a_part_that_needs_none_leaves_the_profile_alone(self, part: str):
         profile = resolve_slicer_profile("bambu_a1")
-        with patch("kiln.printability.analyze_printability", return_value=_report()):
+        with patch("kiln.printability.judge_supports", return_value=_report()):
             derived, decision = ensure_profile_supports(profile, part, material="PLA")
         assert derived == profile and not decision.settings
 
@@ -228,19 +230,87 @@ class TestWhoseDecision:
         """The multi-copy slice decides once and hands each copy a stated
         profile, so the copies are not read one by one."""
         profile = resolve_slicer_profile("bambu_a1")
-        with patch("kiln.printability.analyze_printability", return_value=_report(needs=True, overhang_pct=2.7)):
+        with patch("kiln.printability.judge_supports", return_value=_report(needs=True, overhang_pct=2.7)):
             derived, _ = ensure_profile_supports(profile, part, material="PLA", stated=True)
         assert set(MINIMAL_SUPPORTS) <= profile_origin(derived).stated
-        with patch("kiln.printability.analyze_printability") as engine:
+        with patch("kiln.printability.judge_supports") as engine:
             _, decision = ensure_profile_supports(derived, part, material="PLA")
         engine.assert_not_called()
         assert decision.enabled and decision.decided_by == DECIDED_STATED
 
+    def test_a_key_the_caller_stated_beside_the_decision_is_kept(self, part: str):
+        """``reslice_with_overrides(overrides={"support_material_threshold": "30"})``
+        said nothing about whether, only where: the engine decides whether
+        and leaves their angle alone."""
+        profile = resolve_slicer_profile("bambu_a1", overrides={"support_material_threshold": "30"})
+        with patch("kiln.printability.judge_supports", return_value=_report(needs=True, overhang_pct=2.7)):
+            derived, decision = ensure_profile_supports(profile, part, material="PLA")
+        written = ini_to_settings(derived)
+        assert decision.enabled and written[SUPPORT_KEY] == "1"
+        assert written["support_material_threshold"] == "30"
+        assert "support_material_threshold" in profile_origin(derived).stated
+
     def test_the_nozzle_the_profile_was_written_for_is_handed_to_the_check(self, part: str):
         profile = resolve_slicer_profile("bambu_a1", overrides={"nozzle_diameter": "0.6"})
-        with patch("kiln.printability.analyze_printability", return_value=_report()) as engine:
+        with patch("kiln.printability.judge_supports", return_value=_report()) as engine:
             ensure_profile_supports(profile, part, material="PLA")
         assert engine.call_args.kwargs["nozzle_diameter"] == 0.6
+
+
+# ---------------------------------------------------------------------------
+# The file is the witness
+# ---------------------------------------------------------------------------
+
+
+class TestTheFileIsTheWitness:
+    """A decision says what Kiln asked for; the gcode says what it got."""
+
+    def _gcode(self, tmp_path: Path, *lines: str) -> str:
+        path = tmp_path / "out.gcode"
+        path.write_text("\n".join(lines) + "\n")
+        return str(path)
+
+    def test_support_lines_are_counted_in_both_spellings(self, tmp_path: Path):
+        from kiln.slicer_supports import gcode_support_lines
+
+        prusa = self._gcode(tmp_path, ";TYPE:Perimeter", ";TYPE:Support material", "G1 X1 E1", ";TYPE:Support material interface")
+        assert gcode_support_lines(prusa) == 2
+        orca = self._gcode(tmp_path, ";TYPE:Inner wall", ";TYPE:Support", ";TYPE:Support interface", ";TYPE:Supported wall")
+        assert gcode_support_lines(orca) == 1
+        assert gcode_support_lines(str(tmp_path / "missing.gcode")) == 0
+
+    def test_a_slice_that_asked_for_supports_and_got_none_says_so(self, tmp_path: Path):
+        from kiln.slicer_supports import witnessed
+
+        asked = SliceSupports(True, DECIDED_ANALYSIS, "overhangs=11.1%", support_settings(45.0))
+        empty = self._gcode(tmp_path, ";TYPE:Perimeter", "G1 X1 E1")
+        got = witnessed(asked, empty)
+        assert not got.enabled and got.decided_by == DECIDED_ANALYSIS
+        assert got.reason == "overhangs=11.1%; the slicer placed none"
+        assert got.note == "the part needs supports but the slicer placed none: overhangs=11.1%"
+        assert got.settings == asked.settings
+
+    def test_a_slice_whose_file_carries_them_keeps_its_answer(self, tmp_path: Path):
+        from kiln.slicer_supports import witnessed
+
+        asked = SliceSupports(True, DECIDED_ANALYSIS, "overhangs=11.1%", support_settings(45.0))
+        full = self._gcode(tmp_path, ";TYPE:Support material", "G1 X1 E1")
+        assert witnessed(asked, full) is asked
+
+    def test_a_stated_on_the_slicer_ignored_is_said_in_the_callers_words(self, tmp_path: Path):
+        from kiln.slicer_supports import witnessed
+
+        stated = SliceSupports(True, DECIDED_STATED, "the caller stated support_material")
+        got = witnessed(stated, self._gcode(tmp_path, ";TYPE:Perimeter"))
+        assert not got.enabled
+        assert got.note == "supports asked for, but the slicer placed none (the caller stated support_material)"
+
+    def test_off_and_not_checked_are_never_second_guessed(self, tmp_path: Path):
+        from kiln.slicer_supports import witnessed
+
+        off = SliceSupports(False, DECIDED_STATED, "the caller stated support_material")
+        assert witnessed(off, self._gcode(tmp_path, ";TYPE:Support material")) is off
+        assert witnessed(off, None) is off
 
 
 # ---------------------------------------------------------------------------
@@ -256,7 +326,7 @@ class TestTheResultSaysIt:
         d = SliceResult(success=True, output_path="/x.gcode", supports=decision).to_dict()
         assert d["supports"]["enabled"] is True
         assert d["supports"]["decided_by"] == "analysis"
-        assert d["supports"]["note"] == "supports on, build-plate only: overhangs=2.7%"
+        assert d["supports"]["note"] == "supports on: overhangs=2.7%"
         assert "supports" not in SliceResult(success=True).to_dict()
 
     def test_a_pipeline_step_carries_it(self):
@@ -282,7 +352,7 @@ class TestTheResultSaysIt:
 
         def fake_run(cmd, **_kwargs):
             out = cmd[cmd.index("--output") + 1]
-            Path(out).write_text("; generated by fake\nG1 X0 Y0 Z0.2 E1\n")
+            Path(out).write_text("; generated by fake\n;TYPE:Support material\nG1 X0 Y0 Z0.2 E1\n")
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
         monkeypatch.setattr(slicer_mod, "ensure_profile_supports", fake_ensure)
@@ -308,8 +378,9 @@ class TestOrcaGetsTheSameDecision:
     def test_all_three_keys_cross(self):
         process = settings_to_orca_presets(support_settings(45.0)).process
         assert process["enable_support"] == "1"
-        assert process["support_on_build_plate_only"] == "1"
-        assert process["support_threshold_angle"] == "45"
+        assert process["support_on_build_plate_only"] == "0"
+        assert process["support_threshold_angle"] == support_settings(45.0)["support_material_threshold"]
+        assert process["bridge_no_support"] == "0"
 
     def test_prusaslicers_detect_the_angle_leaves_orcas_own(self):
         """PrusaSlicer's threshold 0 means "detect it"; Orca has no such
@@ -349,10 +420,10 @@ class TestTheCliMode:
         from kiln.cli.main import _support_statement
 
         assert _support_statement("off") == {SUPPORT_KEY: "0"}
-        assert _support_statement("minimal", "PLA") == MINIMAL_SUPPORTS
-        assert _support_statement("aggressive", "PLA") == {
-            **MINIMAL_SUPPORTS, "support_material_buildplate_only": "0",
+        assert _support_statement("minimal", "PLA") == {
+            **MINIMAL_SUPPORTS, "support_material_buildplate_only": "1",
         }
+        assert _support_statement("aggressive", "PLA") == MINIMAL_SUPPORTS
         assert _support_statement("auto") is None
         assert _support_statement(None) is None
 
@@ -394,4 +465,6 @@ class TestTheCliMode:
         )
         written = ini_to_settings(plan["profile_path"])
         assert written["layer_height"] == "0.2"
-        assert {key: written[key] for key in MINIMAL_SUPPORTS} == MINIMAL_SUPPORTS
+        assert {key: written[key] for key in MINIMAL_SUPPORTS} == {
+            **MINIMAL_SUPPORTS, "support_material_buildplate_only": "1",
+        }

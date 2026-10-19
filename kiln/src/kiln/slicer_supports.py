@@ -22,9 +22,11 @@ The rule, in order:
   minimal`` / ``off``) is theirs too;
 * otherwise the printability engine reads the part and gives the one
   verdict every door gives (:func:`kiln.printability.support_verdict`);
-  when it says the part needs supports the slice gets them, build-plate
-  only, under exactly the faces that verdict counted as overhangs -- the
-  slicer's threshold is written from the same angle;
+  when it says the part needs supports the slice gets them, under exactly
+  the faces that verdict counted as overhangs -- the slicer's threshold is
+  written from the same angle -- standing on the plate or the model, and
+  under bridges too; and the file the slicer wrote is read back, so a
+  slice that asked for supports and got none says so;
 * a part the engine cannot read is sliced as it was, and the answer says
   the check was not made rather than reading like a part that needs none.
 
@@ -48,6 +50,9 @@ logger = logging.getLogger(__name__)
 #: carries it, and the two :func:`support_settings` writes beside it, into
 #: the Orca dialect.
 SUPPORT_KEY = "support_material"
+
+#: The suffix a witnessed decision's reason carries when the file has none.
+_PLACED_NONE = "; the slicer placed none"
 
 #: Who decided the answer.
 DECIDED_STATED = "stated"        # the caller's own key, left alone
@@ -77,13 +82,19 @@ class SliceSupports:
     @property
     def note(self) -> str:
         """One sentence for a reply or a terminal."""
+        placed_none = self.reason.endswith(_PLACED_NONE)
+        asked_for = self.reason[: -len(_PLACED_NONE)] if placed_none else self.reason
         if self.decided_by == DECIDED_STATED:
+            if placed_none:
+                return f"supports asked for, but the slicer placed none ({asked_for})"
             state = "on" if self.enabled else "off"
             return f"supports {state}, as stated ({self.reason})"
         if self.decided_by == DECIDED_NOT_CHECKED:
             return f"no supports; whether the part needs them was {self.reason}"
+        if placed_none:
+            return f"the part needs supports but the slicer placed none: {asked_for}"
         if self.enabled:
-            return f"supports on, build-plate only: {self.reason}"
+            return f"supports on: {self.reason}"
         return f"no supports: {self.reason}"
 
     def to_dict(self) -> dict[str, Any]:
@@ -92,22 +103,66 @@ class SliceSupports:
         return d
 
 
-def support_settings(overhang_threshold_deg: float, *, build_plate_only: bool = True) -> dict[str, str]:
-    """The slicer keys that support the faces Kiln counts as overhangs.
+def support_settings(overhang_threshold_deg: float, *, build_plate_only: bool = False) -> dict[str, str]:
+    """The slicer keys that support every face Kiln counts as an overhang.
 
     *overhang_threshold_deg* is Kiln's angle, from vertical
     (:func:`kiln.printability.overhang_threshold_deg`); both slicers take
-    the slope from horizontal, so the threshold written is its complement
-    -- measured 2026-10-19 on PrusaSlicer 2.9.4 and OrcaSlicer: a 50 degree
-    underside is supported at 60 and left alone at 40.  Build-plate-only
-    supports are the least plastic that still hold a flagged overhang.
+    the slope from horizontal, so the threshold written is its complement.
+    Measured 2026-10-19 on PrusaSlicer 2.9.4 and OrcaSlicer, 0.2 mm layers:
+    a 50 degree underside is supported at 60 and left alone at 40, and a
+    40 x 20 mm underside at exactly the written angle is supported.  A
+    small face near the angle can still come back with nothing under it
+    (a 20 x 6 mm end face at 40 degrees got none below 50); the file is
+    read back after the slice (:func:`witnessed`), so that is said rather
+    than reported as supported.
+
+    Supports stand on the model as well as the plate, and bridges are
+    supported too: a cap over its own base gets nothing from plate-only
+    supports, and PrusaSlicer's default leaves a bridge the verdict called
+    too long unsupported (both measured, both zero support lines).
+    *build_plate_only* is the caller's explicit choice (``kiln slice
+    --support-mode minimal``), never the engine's.
     """
     slope = max(1.0, min(89.0, 90.0 - float(overhang_threshold_deg)))
     return {
         SUPPORT_KEY: "1",
         "support_material_buildplate_only": "1" if build_plate_only else "0",
         "support_material_threshold": f"{slope:g}",
+        "dont_support_bridges": "0",
     }
+
+
+def gcode_support_lines(gcode_path: str) -> int:
+    """Support extrusions the file carries, in either slicer's spelling."""
+    try:
+        with open(gcode_path, encoding="utf-8", errors="replace") as fh:
+            return sum(
+                1 for line in fh
+                if line.startswith(";TYPE:Support material") or line.rstrip("\r\n") == ";TYPE:Support"
+            )
+    except OSError:
+        return 0
+
+
+def witnessed(decision: SliceSupports, gcode_path: str | None) -> SliceSupports:
+    """*decision* checked against the file the slicer wrote.
+
+    A decision says what Kiln asked for; the file says what it got.  A
+    slice that asked for supports and carries none is said -- a cap over
+    its own base under plate-only supports, a bridge the slicer chose not
+    to support -- rather than reported as supported because the key was
+    set.  Measured 2026-10-19: both shapes came back "supports on" with
+    zero support lines before this check existed.
+    """
+    if not decision.enabled or not gcode_path:
+        return decision
+    if gcode_support_lines(gcode_path) > 0:
+        return decision
+    return SliceSupports(
+        enabled=False, decided_by=decision.decided_by,
+        reason=decision.reason + _PLACED_NONE, settings=decision.settings,
+    )
 
 
 def _file_identity(path: str) -> tuple[Any, ...]:
@@ -143,14 +198,11 @@ def decide_supports(
     if cached is not None:
         return cached
 
-    from kiln.printability import analyze_printability, support_verdict
+    from kiln.printability import judge_supports, support_verdict
 
     try:
-        report = analyze_printability(
-            input_path,
-            material=(material or "pla").lower(),
-            nozzle_diameter=nozzle_diameter,
-            include_hole_detection=False,
+        judged = judge_supports(
+            input_path, material=(material or "pla").lower(), nozzle_diameter=nozzle_diameter,
         )
     except Exception as exc:  # noqa: BLE001 -- the slice stands without supports, and says so
         logger.debug("Support check could not read %s: %s", input_path, exc)
@@ -158,11 +210,11 @@ def decide_supports(
             enabled=False, decided_by=DECIDED_NOT_CHECKED,
             reason=f"not checked: {' '.join(str(exc).split())}",
         ))
-    reason = support_verdict(report)
+    reason = support_verdict(judged)
     if reason:
         return _remember(key, SliceSupports(
             enabled=True, decided_by=DECIDED_ANALYSIS, reason=reason,
-            settings=support_settings(report.overhang_threshold_deg),
+            settings=support_settings(judged.overhang_threshold_deg),
         ))
     return _remember(key, SliceSupports(
         enabled=False, decided_by=DECIDED_ANALYSIS, reason="no overhang or bridge needs them",
@@ -225,13 +277,16 @@ def ensure_profile_supports(
 
     nozzle = _first_number(settings.get("nozzle_diameter"))
     decision = decide_supports(input_path, material=material, nozzle_diameter=nozzle)
-    if not decision.settings:
+    # A key the caller stated beside support_material (their own threshold,
+    # plate-only) is theirs and stays; the engine writes the rest.
+    to_write = {key: value for key, value in decision.settings.items() if key not in origin.stated}
+    if not to_write:
         return profile, decision
 
     # Named for the printer profile it derives from, as the material layer
     # names its file, so the slice is still counted against that printer.
     prefix = f"{Path(profile).stem}_" if profile else None
-    return profile_with_overrides(profile, decision.settings, prefix=prefix, stated=stated), decision
+    return profile_with_overrides(profile, to_write, prefix=prefix, stated=stated), decision
 
 
 def _first_number(value: str | None) -> float | None:

@@ -39,7 +39,6 @@ from unittest.mock import patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Numeric parsers (stdlib only)
 # ---------------------------------------------------------------------------
@@ -103,7 +102,7 @@ def _no_auth(_scope: str) -> None:
 
 def _slicer_available() -> bool:
     try:
-        from kiln.slicer import SlicerNotFoundError, find_slicer
+        from kiln.slicer import find_slicer
 
         find_slicer()
         return True
@@ -299,7 +298,7 @@ class TestWrapGcodeFidelity:
         assert "Metadata/model_settings.config" in names
         assert "Metadata/Slic3r_PE_model.config" in names
         # Disjoint 10 mm boxes at 0 and 25: a 35 mm union, not 10.
-        assert 25.0 + 10.0 == pytest.approx(35.0)
+        assert pytest.approx(35.0) == 25.0 + 10.0
 
     def test_compose_tool_refuses_coincident_distinct_parts(self, tmp_path: Path):
         """Two DIFFERENT parts at the same position is the stacking class —
@@ -834,7 +833,6 @@ class TestOverridesReachTheSlicer:
         settings.
         """
         import kiln.slicer as _slicer
-
         from kiln.plugins.slicer_tools import _SlicerToolsPlugin
 
         tools = _register_plugin(_SlicerToolsPlugin)
@@ -939,7 +937,10 @@ def _box_facets(x0: float, y0: float, z0: float, x: float, y: float, z: float) -
 def _make_t_stl() -> str:
     """A 10 mm post with a 50 mm arm across its top: 20 mm of true 90-degree
     overhang on each side, the shape of every bracket, hook and stand."""
-    facets = _box_facets(20.0, 0.0, 0.0, 10.0, 10.0, 30.0) + _box_facets(0.0, 0.0, 30.0, 50.0, 10.0, 4.0)
+    return _write_facets(_box_facets(20.0, 0.0, 0.0, 10.0, 10.0, 30.0) + _box_facets(0.0, 0.0, 30.0, 50.0, 10.0, 4.0))
+
+
+def _write_facets(facets: list[tuple]) -> str:
     fd, path = tempfile.mkstemp(suffix=".stl", prefix="kiln_fidelity_t_")
     with os.fdopen(fd, "wb") as fh:
         fh.write(b"\0" * 80)
@@ -1002,6 +1003,41 @@ class TestSupportsWhenNeeded:
 
                 without = _parse_gcode_estimates(off["output_path"])["estimated_time_seconds"]
             assert with_supports > without, (with_supports, without)
+        finally:
+            os.unlink(stl)
+
+    def test_a_cap_over_its_own_base_is_supported_from_the_model(self):
+        """Every overhang sits above the part: plate-only supports placed
+        nothing here (measured: "supports on", zero support lines)."""
+        facets = (
+            _box_facets(0.0, 0.0, 0.0, 60.0, 60.0, 4.0)
+            + _box_facets(25.0, 25.0, 4.0, 10.0, 10.0, 30.0)
+            + _box_facets(10.0, 10.0, 34.0, 40.0, 40.0, 4.0)
+        )
+        stl = _write_facets(facets)
+        try:
+            r = _call_slice_model(input_path=stl)
+            assert r.get("success") is True, r.get("error")
+            assert _support_lines(r.get("raw_gcode_path") or r["output_path"]) > 0
+            assert r["supports"]["enabled"] is True, r["supports"]
+        finally:
+            os.unlink(stl)
+
+    def test_a_bridge_too_long_for_the_material_is_supported(self):
+        """PrusaSlicer's default is not to support bridges; a 50 mm span
+        the verdict called too long got zero support lines under it."""
+        facets = (
+            _box_facets(0.0, 0.0, 0.0, 5.0, 10.0, 20.0)
+            + _box_facets(55.0, 0.0, 0.0, 5.0, 10.0, 20.0)
+            + _box_facets(0.0, 0.0, 20.0, 60.0, 10.0, 4.0)
+        )
+        stl = _write_facets(facets)
+        try:
+            r = _call_slice_model(input_path=stl)
+            assert r.get("success") is True, r.get("error")
+            assert r["supports"]["reason"].find("bridges=") >= 0, r["supports"]
+            assert _support_lines(r.get("raw_gcode_path") or r["output_path"]) > 0
+            assert r["supports"]["enabled"] is True, r["supports"]
         finally:
             os.unlink(stl)
 

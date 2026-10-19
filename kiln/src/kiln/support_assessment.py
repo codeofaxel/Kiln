@@ -215,7 +215,7 @@ def _shared_verdict(
     import os
     import tempfile
 
-    from kiln.printability import analyze_printability, support_verdict
+    from kiln.printability import judge_supports, support_verdict
 
     path = stl_path
     scratch: str | None = None
@@ -227,12 +227,11 @@ def _shared_verdict(
         _write_binary_stl(tris, scratch)
         path = scratch
     try:
-        report = analyze_printability(
+        judged = judge_supports(
             path,
             material=material.lower(),
             nozzle_diameter=nozzle_diameter_mm,
             layer_height=layer_height_mm,
-            include_hole_detection=False,
         )
     except ValueError as exc:
         return False, f"Whether supports are needed was not judged: {exc}"
@@ -240,7 +239,7 @@ def _shared_verdict(
         if scratch is not None:
             with contextlib.suppress(OSError):
                 os.unlink(scratch)
-    return support_verdict(report) is not None, None
+    return support_verdict(judged) is not None, None
 
 
 # ---------------------------------------------------------------------------

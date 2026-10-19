@@ -204,6 +204,7 @@ _PROCESS_SCALAR: dict[str, str] = {
     "travel_speed": "travel_speed",
     "support_material": "enable_support",
     "support_material_buildplate_only": "support_on_build_plate_only",
+    "dont_support_bridges": "bridge_no_support",
     "brim_width": "brim_width",
     "skirts": "skirt_loops",
     "skirt_distance": "skirt_distance",
