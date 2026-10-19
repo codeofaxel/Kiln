@@ -102,6 +102,15 @@ def _make_steep_overhang() -> list[_Tri]:
     return slab + footing
 
 
+def _make_box_triangles(x0: float, y0: float, z0: float, x: float, y: float, z: float) -> list[_Tri]:
+    """A closed box with one corner at (x0, y0, z0), outward normals."""
+    v = [(x0, y0, z0), (x0 + x, y0, z0), (x0 + x, y0 + y, z0), (x0, y0 + y, z0),
+         (x0, y0, z0 + z), (x0 + x, y0, z0 + z), (x0 + x, y0 + y, z0 + z), (x0, y0 + y, z0 + z)]
+    f = [(0, 3, 2), (0, 2, 1), (4, 5, 6), (4, 6, 7), (0, 1, 5), (0, 5, 4),
+         (1, 2, 6), (1, 6, 5), (2, 3, 7), (2, 7, 6), (3, 0, 4), (3, 4, 7)]
+    return [tuple(v[i] for i in face) for face in f]
+
+
 def _make_cube_triangles(size: float = 20.0) -> list[_Tri]:
     """12 triangles forming a cube sitting on the XY plane.
 
@@ -291,9 +300,14 @@ class TestBridgeDetection:
             assert br.support_height_mm == pytest.approx(0.0, abs=1.0)
 
     def test_horizontal_bridge_detected(self) -> None:
-        # Create a wide horizontal face at height 20mm
-        tris = _make_flat_quad_triangles(z=0.0)  # bed face
-        tris += _make_downward_face_triangles(z=20.0, size=30.0)  # wide bridge
+        """A 40 mm deck between two posts: too long for PLA to bridge.  A
+        closed solid, because the verdict is the printability engine's
+        and it judges parts, not loose faces."""
+        tris = (
+            _make_box_triangles(0.0, 0.0, 0.0, 5.0, 10.0, 20.0)
+            + _make_box_triangles(45.0, 0.0, 0.0, 5.0, 10.0, 20.0)
+            + _make_box_triangles(0.0, 0.0, 20.0, 50.0, 10.0, 4.0)
+        )
 
         result = assess_support_feasibility(triangles=tris, material="PLA")
 

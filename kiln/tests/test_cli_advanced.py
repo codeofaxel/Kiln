@@ -447,7 +447,36 @@ class TestSlice:
         assert "--bed-temperature" not in (mock_slice.call_args.kwargs.get("extra_args") or [])
         assert mock_slice.call_args.kwargs["loaded_material"] == "PETG"
 
-    def test_slice_auto_supports_enable_minimal_args(self, runner, tmp_path):
+    def test_slice_auto_leaves_supports_to_the_slice_and_reports_its_answer(self, runner, tmp_path):
+        """``--support-mode auto`` states nothing: the slice reads the part
+        at the chokepoint every door shares (kiln.slicer_supports) and the
+        command reports what it decided."""
+        from kiln.slicer_profiles import profile_origin
+        from kiln.slicer_supports import SliceSupports
+
+        stl = tmp_path / "supports.stl"
+        stl.write_text("solid\nendsolid\n")
+        mock_result = MagicMock()
+        mock_result.message = "Sliced"
+        mock_result.output_path = str(tmp_path / "supports.gcode")
+        mock_result.supports = SliceSupports(True, "analysis", "overhangs=12.0%")
+        mock_result.to_dict.return_value = {"output_path": mock_result.output_path}
+
+        with patch("kiln.cli.main._autodetect_printer_profile_id", return_value="bambu_a1"), \
+             patch("kiln.slicer.slice_file", return_value=mock_result) as mock_slice:
+            result = runner.invoke(cli, ["slice", str(stl), "--support-mode", "auto", "--json"])
+
+        assert result.exit_code == 0, result.output
+        assert not mock_slice.call_args.kwargs.get("extra_args")
+        assert "support_material" not in profile_origin(mock_slice.call_args.kwargs["profile"]).stated
+        data = json.loads(result.output)["data"]
+        assert data["support_style"] == "minimal"
+        assert data["support_reason"] == "overhangs=12.0%"
+
+    def test_slice_support_mode_off_is_stated_for_the_slice(self, runner, tmp_path):
+        from kiln.slicer_orca import ini_to_settings
+        from kiln.slicer_profiles import profile_origin
+
         stl = tmp_path / "supports.stl"
         stl.write_text("solid\nendsolid\n")
         mock_result = MagicMock()
@@ -455,19 +484,15 @@ class TestSlice:
         mock_result.output_path = str(tmp_path / "supports.gcode")
         mock_result.to_dict.return_value = {"output_path": mock_result.output_path}
 
-        report = SimpleNamespace(
-            overhangs=SimpleNamespace(needs_supports=True, overhang_percentage=12.0),
-            bridging=SimpleNamespace(needs_supports_for_bridges=False, max_bridge_length_mm=0.0),
-        )
-        with patch("kiln.cli.main._autodetect_printer_profile_id", return_value=None), \
-             patch("kiln.printability.analyze_printability", return_value=report), \
+        with patch("kiln.cli.main._autodetect_printer_profile_id", return_value="bambu_a1"), \
              patch("kiln.slicer.slice_file", return_value=mock_result) as mock_slice:
-            result = runner.invoke(cli, ["slice", str(stl), "--support-mode", "auto", "--json"])
+            result = runner.invoke(cli, ["slice", str(stl), "--support-mode", "off", "--json"])
 
-        assert result.exit_code == 0
-        args = mock_slice.call_args.kwargs["extra_args"]
-        assert "--support-material" in args
-        assert "--support-material-buildplate-only" in args
+        assert result.exit_code == 0, result.output
+        profile = mock_slice.call_args.kwargs["profile"]
+        assert "support_material" in profile_origin(profile).stated
+        assert ini_to_settings(profile)["support_material"] == "0"
+        assert json.loads(result.output)["data"]["support_style"] == "off"
 
 
 # ---------------------------------------------------------------------------

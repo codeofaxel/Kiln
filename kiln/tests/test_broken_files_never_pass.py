@@ -476,6 +476,7 @@ VERDICT_ENGINES = frozenset({
     "validate_mesh",
     "design_scorecard",
     "analyze_printability",
+    "judge_supports",
 })
 
 #: Every call to a verdict engine in Kiln, and what makes it safe.  A new
@@ -508,7 +509,10 @@ CALLERS = {
     "plugins/_validation_pipeline_internals.py::_step_watertight_check": "engine: a step of the shared check",
     "plugins/_validation_pipeline_internals.py::_step_repair": "engine: a step of the shared check",
     # Callers that read an engine for information and decide nothing.
-    "cli/main.py::_auto_support_style": "reads: picks a support style for the slice",
+    "slicer_supports.py::decide_supports": "reads: decides a slice's supports; prints nothing",
+    "support_assessment.py::_shared_verdict": "reads: the one support verdict, for the assessment",
+    "generation/validation.py::estimate_support_volume": "reads: the one support verdict, beside a volume",
+    "auto_orient.py::estimate_supports": "reads: the report's support numbers and verdict",
     "cli/main.py::generate": "reads: reports the generated mesh; prints nothing",
     "cli/main.py::generate_download": "reads: reports the downloaded mesh; prints nothing",
     "cli/main.py::generate_and_print_cmd": "reads: the triangle count it echoes; the verdict is _cli_print_gate's",

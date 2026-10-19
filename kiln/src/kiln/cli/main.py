@@ -170,65 +170,51 @@ def _resolve_material_for_slice_with_source(
     return inferred, False, source, determined_by
 
 
-def _support_profile_overrides(style: str) -> dict[str, str]:
-    """Support overrides optimized for minimal waste on common PLA prints."""
-    if style == "minimal":
-        return {
-            "support_material": "1",
-            "support_material_buildplate_only": "1",
-            "support_material_threshold": "55",
-        }
-    if style == "aggressive":
-        return {
-            "support_material": "1",
-            "support_material_buildplate_only": "0",
-        }
-    return {}
+def _support_statement(support_mode: str | None, material: str | None = None) -> dict[str, str] | None:
+    """The support keys a ``--support-mode`` STATES for the slice.
 
-
-def _support_extra_args(style: str) -> list[str]:
-    """CLI support args used when slicing without a bundled profile."""
-    if style == "minimal":
-        return ["--support-material", "--support-material-buildplate-only"]
-    if style == "aggressive":
-        return ["--support-material"]
-    return []
-
-
-def _auto_support_style(input_file: str) -> tuple[str | None, str | None]:
-    """Infer whether the model needs supports based on printability analysis.
-
-    Every format the engine reads, a STEP as Kiln's mesh of it.  A model it
-    cannot read gets no supports and the reason says the check was not made,
-    rather than reading like a model that needs none.
+    ``off``, ``minimal`` (build-plate only) and ``aggressive`` (everywhere)
+    are the caller speaking, written into the profile as stated keys so
+    the slice keeps them; both support the faces Kiln's own verdict counts
+    as overhangs for *material* (``kiln.printability.overhang_threshold_deg``).
+    ``auto`` (the default) states nothing: the slice reads the part and
+    decides at the one place every slicing door shares
+    (:mod:`kiln.slicer_supports`), and the result says what it did.
     """
-    from kiln.printability import analyze_printability
+    from kiln.printability import overhang_threshold_deg
+    from kiln.slicer_supports import SUPPORT_KEY, support_settings
 
-    try:
-        report = analyze_printability(input_file)
-    except Exception as exc:  # noqa: BLE001 -- the slice stands without supports, and says so
-        logger.debug("Auto-support analysis failed for %s: %s", input_file, exc)
-        return None, f"not checked: {' '.join(str(exc).split())}"
-    reasons: list[str] = []
-    if report.overhangs.needs_supports and report.overhangs.overhang_percentage >= 1.0:
-        reasons.append(f"overhangs={report.overhangs.overhang_percentage:.1f}%")
-    if report.bridging.needs_supports_for_bridges:
-        reasons.append(f"bridges={report.bridging.max_bridge_length_mm:.1f}mm")
-    if reasons:
-        return "minimal", ", ".join(reasons)
-    return None, None
-
-
-def _resolve_support_style(support_mode: str, input_file: str) -> tuple[str | None, str | None]:
-    """Resolve support style from CLI mode and model analysis."""
-    mode = (support_mode or "off").strip().lower()
+    mode = (support_mode or "auto").strip().lower()
     if mode == "off":
+        return {SUPPORT_KEY: "0"}
+    if mode == "minimal":
+        return support_settings(overhang_threshold_deg(material), build_plate_only=True)
+    if mode == "aggressive":
+        return support_settings(overhang_threshold_deg(material), build_plate_only=False)
+    return None
+
+
+def _supports_said(plan: dict[str, Any], result: Any) -> tuple[str | None, str | None]:
+    """``(support_style, support_reason)`` for a slice's report: the mode
+    the caller stated, else what the slice decided (``result.supports``)."""
+    from kiln.slicer_supports import SliceSupports
+
+    if plan.get("support_style"):
+        return plan["support_style"], plan.get("support_reason")
+    supports = getattr(result, "supports", None)
+    if not isinstance(supports, SliceSupports):
         return None, None
-    if mode in {"minimal", "aggressive"}:
-        return mode, "explicit"
-    if mode == "auto":
-        return _auto_support_style(input_file)
-    return None, None
+    return ("minimal" if supports.enabled else None), supports.reason
+
+
+def _echo_supports(plan: dict[str, Any], result: Any) -> None:
+    """One line on supports: the stated mode, or what the slice decided."""
+    support_style, support_reason = _supports_said(plan, result)
+    if support_style:
+        note = f" ({support_reason})" if support_reason else ""
+        click.echo(f"Supports: {support_style}{note}")
+    elif support_reason:
+        click.echo(f"Supports: none ({support_reason})")
 
 
 def _echo_conversion(conversion: dict[str, Any] | None) -> None:
@@ -304,7 +290,7 @@ def _resolve_slice_plan(
     (
         material_key, material_is_explicit, material_source, loaded_determined_by,
     ) = _resolve_material_for_slice_with_source(ctx, material)
-    support_style, support_reason = _resolve_support_style(support_mode, input_file)
+    statement = _support_statement(support_mode, material_key)
 
     # The material's temperatures, melt rate and cooling are not set here:
     # the slice writes them from the material it is told (below), the same
@@ -314,16 +300,17 @@ def _resolve_slice_plan(
     # and through the tools -- and set no melt rate at all.
     if effective_profile is None and effective_printer_id:
         try:
-            effective_profile = resolve_slicer_profile(
-                effective_printer_id,
-                overrides=_support_profile_overrides(support_style) if support_style else None,
-            )
+            effective_profile = resolve_slicer_profile(effective_printer_id, overrides=statement)
         except Exception as exc:
             logger.debug("Profile resolution failed for %s: %s", effective_printer_id, exc)
+    elif statement:
+        # The caller's own profile, or no printer at all: their support mode
+        # is written as theirs, over whatever the file says.  This used to
+        # be a slicer flag that only PrusaSlicer read, and only without a
+        # profile -- with one, the mode was dropped on the floor.
+        from kiln.slicer_profiles import profile_with_overrides
 
-    # Fallback to direct CLI overrides when no bundled profile is active.
-    if support_style and effective_profile is None:
-        extra_args.extend(_support_extra_args(support_style))
+        effective_profile = profile_with_overrides(effective_profile, statement, stated=True)
 
     # What the slicer is told to weigh the print with (kiln.slicer_filament):
     # ``--material`` or an environment default is a declaration; the spool
@@ -345,8 +332,10 @@ def _resolve_slice_plan(
         "printer_id": effective_printer_id,
         "profile_path": effective_profile,
         "extra_args": extra_args,
-        "support_style": support_style,
-        "support_reason": support_reason,
+        # A stated mode is reported as given; ``auto`` is reported from the
+        # slice's own answer (_supports_said), which is not known yet.
+        "support_style": (support_mode or "auto").strip().lower() if statement else None,
+        "support_reason": "explicit" if statement else None,
     }
 
 
@@ -4396,7 +4385,10 @@ def remove(name: str) -> None:
     default="auto",
     show_default=True,
     type=click.Choice(_SUPPORT_MODE_CHOICES),
-    help="Support strategy: off, auto, minimal (buildplate-only), or aggressive.",
+    help=(
+        "Supports: auto (the slice reads the part and adds build-plate-only supports "
+        "when it needs them), off, minimal (build-plate only), or aggressive."
+    ),
 )
 @click.option("--print-after", is_flag=True, help="Upload and start printing after slicing.")
 @click.option(
@@ -4594,10 +4586,11 @@ def slice(
 
                 _attach_placement(payload, placement_info)
                 payload["support_mode"] = support_mode
-                if plan["support_style"]:
-                    payload["support_style"] = plan["support_style"]
-                if plan["support_reason"]:
-                    payload["support_reason"] = plan["support_reason"]
+                support_style, support_reason = _supports_said(plan, result)
+                if support_style:
+                    payload["support_style"] = support_style
+                if support_reason:
+                    payload["support_reason"] = support_reason
                 if copies > 1:
                     payload["copies"] = copies
                     payload["spacing_mm"] = spacing
@@ -4617,11 +4610,7 @@ def slice(
                     click.echo(f"Copies: {copies} (strategy: {copy_strategy}, spacing: {spacing}mm)")
                 if plan["printer_id"]:
                     click.echo(f"Profile: {plan['printer_id']}")
-                if plan["support_style"]:
-                    note = f" ({plan['support_reason']})" if plan["support_reason"] else ""
-                    click.echo(f"Supports: {plan['support_style']}{note}")
-                elif plan["support_reason"]:
-                    click.echo(f"Supports: none ({plan['support_reason']})")
+                _echo_supports(plan, result)
             return
 
         # --print-after: wrap for Bambu if needed, upload, and start
@@ -10120,7 +10109,10 @@ def generate_download(
     default="auto",
     show_default=True,
     type=click.Choice(_SUPPORT_MODE_CHOICES),
-    help="Support strategy: off, auto, minimal (buildplate-only), or aggressive.",
+    help=(
+        "Supports: auto (the slice reads the part and adds build-plate-only supports "
+        "when it needs them), off, minimal (build-plate only), or aggressive."
+    ),
 )
 @click.option("--timeout", "-t", default=600, type=int, help="Max generation wait time in seconds (default 600).")
 @click.option(
@@ -10277,11 +10269,8 @@ def generate_and_print_cmd(
                 click.echo(f"Weighed as: {slice_result.filament.note}")
             if getattr(slice_result, "nozzle", None):
                 click.echo(f"Nozzle: {slice_result.nozzle['note']}")
-            if plan["support_style"]:
-                note = f" ({plan['support_reason']})" if plan["support_reason"] else ""
-                click.echo(f"Supports: {plan['support_style']}{note}")
-            elif plan["support_reason"]:
-                click.echo(f"Supports: none ({plan['support_reason']})")
+            _echo_supports(plan, slice_result)
+        support_style, support_reason = _supports_said(plan, slice_result)
 
         # --- Step 4: Upload ---
         adapter = _get_adapter_from_ctx(ctx)
@@ -10344,8 +10333,8 @@ def generate_and_print_cmd(
                             "slice": slice_result.to_dict(),
                             "material": plan["material"],
                             "support_mode": support_mode,
-                            "support_style": plan["support_style"],
-                            "support_reason": plan["support_reason"],
+                            "support_style": support_style,
+                            "support_reason": support_reason,
                             "upload": upload_result.to_dict(),
                             "printing": auto_print,
                             **({"standing_window": window} if auto_print and window else {}),
