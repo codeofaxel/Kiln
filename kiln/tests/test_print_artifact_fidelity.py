@@ -920,3 +920,107 @@ class TestCalibrationSurvivesAdhesion:
             )
         finally:
             os.unlink(stl)
+
+
+# ---------------------------------------------------------------------------
+# Supports: a part the report says needs them gets them, in the bytes
+# ---------------------------------------------------------------------------
+
+
+def _box_facets(x0: float, y0: float, z0: float, x: float, y: float, z: float) -> list[tuple]:
+    """The 12 triangles of a box with one corner at (x0, y0, z0)."""
+    v = [(x0, y0, z0), (x0 + x, y0, z0), (x0 + x, y0 + y, z0), (x0, y0 + y, z0),
+         (x0, y0, z0 + z), (x0 + x, y0, z0 + z), (x0 + x, y0 + y, z0 + z), (x0, y0 + y, z0 + z)]
+    f = [(0, 3, 2), (0, 2, 1), (4, 5, 6), (4, 6, 7), (0, 1, 5), (0, 5, 4),
+         (1, 2, 6), (1, 6, 5), (2, 3, 7), (2, 7, 6), (3, 0, 4), (3, 4, 7)]
+    return [tuple(v[i] for i in face) for face in f]
+
+
+def _make_t_stl() -> str:
+    """A 10 mm post with a 50 mm arm across its top: 20 mm of true 90-degree
+    overhang on each side, the shape of every bracket, hook and stand."""
+    facets = _box_facets(20.0, 0.0, 0.0, 10.0, 10.0, 30.0) + _box_facets(0.0, 0.0, 30.0, 50.0, 10.0, 4.0)
+    fd, path = tempfile.mkstemp(suffix=".stl", prefix="kiln_fidelity_t_")
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(b"\0" * 80)
+        fh.write(struct.pack("<I", len(facets)))
+        for tri in facets:
+            fh.write(struct.pack("<3f", 0, 0, 0))
+            for vertex in tri:
+                fh.write(struct.pack("<3f", *vertex))
+            fh.write(struct.pack("<H", 0))
+    return path
+
+
+def _support_lines(gcode_path: str) -> int:
+    """Support extrusions the file carries, in either slicer's spelling."""
+    text = Path(gcode_path).read_text(encoding="utf-8", errors="replace")
+    return text.count(";TYPE:Support material") + text.count(";TYPE:Support\n")
+
+
+@pytest.mark.skipif(not _slicer_available(), reason="no PrusaSlicer/OrcaSlicer installed")
+class TestSupportsWhenNeeded:
+    """2026-10-19: a desk stand's estimate said ``needs_supports=True`` and
+    "Enable supports" beside G-code with ``support_material = 0`` and no
+    support lines -- every tool door sliced without them, and the time it
+    reported was of that file.  The decision now lives in ``slice_file``
+    (:mod:`kiln.slicer_supports`), so this is judged at the bytes: the
+    supports are in the emitted file, the estimate is of that file, a
+    stated ``support_material = 0`` is kept, and a part needing none gets
+    none."""
+
+    def test_the_estimate_is_of_a_file_that_carries_the_supports(self):
+        from kiln.plugins.estimate_tools import _EstimateToolsPlugin
+        from kiln.plugins.slicer_tools import _SlicerToolsPlugin
+
+        estimate_tools = _register_plugin(_EstimateToolsPlugin)
+        slice_tools = _register_plugin(_SlicerToolsPlugin)
+        stl = _make_t_stl()
+        try:
+            with patch("kiln.server._check_auth", side_effect=_no_auth):
+                r = estimate_tools["slice_and_estimate"](input_path=stl, material="PLA")
+                assert r.get("success") is True, r.get("error")
+                assert r["printability"]["overhangs"]["needs_supports"] is True
+                # The report's verdict and the FILE agree: judged at the bytes
+                # first, so the pre-fix shape (a report saying "needs supports"
+                # over an unsupported file) fails here, on the gcode.
+                supported = _support_lines(r["slice"]["output_path"])
+                assert supported > 0, "the report says needs_supports, the emitted gcode has no support lines"
+                supports = r["slice"]["supports"]
+                assert supports["enabled"] is True and supports["decided_by"] == "analysis", supports
+                assert supports["reason"].startswith("overhangs="), supports
+                with_supports = r["estimate"]["estimated_time_seconds"]
+
+                # The same part with supports stated off: the caller's word
+                # is kept, and the estimate above was longer because the
+                # supports are in it.
+                off = slice_tools["reslice_with_overrides"](input_path=stl, overrides={"support_material": "0"})
+                assert off.get("success") is True, off.get("error")
+                assert off["supports"]["enabled"] is False and off["supports"]["decided_by"] == "stated", off
+                assert _support_lines(off["output_path"]) == 0
+                from kiln.slicer import _parse_gcode_estimates
+
+                without = _parse_gcode_estimates(off["output_path"])["estimated_time_seconds"]
+            assert with_supports > without, (with_supports, without)
+        finally:
+            os.unlink(stl)
+
+    def test_slice_model_carries_them_too(self):
+        stl = _make_t_stl()
+        try:
+            r = _call_slice_model(input_path=stl)
+            assert r.get("success") is True, r.get("error")
+            assert _support_lines(r.get("raw_gcode_path") or r["output_path"]) > 0
+            assert r["supports"]["enabled"] is True, r["supports"]
+        finally:
+            os.unlink(stl)
+
+    def test_a_part_that_needs_none_gets_none(self):
+        stl = _make_box_stl(20.0, 20.0, 10.0)
+        try:
+            r = _call_slice_model(input_path=stl)
+            assert r.get("success") is True, r.get("error")
+            assert r["supports"]["enabled"] is False and r["supports"]["decided_by"] == "analysis", r["supports"]
+            assert _support_lines(r.get("raw_gcode_path") or r["output_path"]) == 0
+        finally:
+            os.unlink(stl)

@@ -508,7 +508,7 @@ CALLERS = {
     "plugins/_validation_pipeline_internals.py::_step_watertight_check": "engine: a step of the shared check",
     "plugins/_validation_pipeline_internals.py::_step_repair": "engine: a step of the shared check",
     # Callers that read an engine for information and decide nothing.
-    "cli/main.py::_auto_support_style": "reads: picks a support style for the slice",
+    "slicer_supports.py::decide_supports": "reads: decides a slice's supports; prints nothing",
     "cli/main.py::generate": "reads: reports the generated mesh; prints nothing",
     "cli/main.py::generate_download": "reads: reports the downloaded mesh; prints nothing",
     "cli/main.py::generate_and_print_cmd": "reads: the triangle count it echoes; the verdict is _cli_print_gate's",

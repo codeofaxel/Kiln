@@ -47,6 +47,7 @@ from kiln.slicer_orca import (
     ini_to_settings,
     write_orca_presets,
 )
+from kiln.slicer_supports import SliceSupports, ensure_profile_supports
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +184,10 @@ class SliceResult:
     #: from (:func:`kiln.slicer_profiles.nozzle_fit_of`); ``None`` for a
     #: profile Kiln did not write.
     nozzle: dict[str, Any] | None = None
+    #: Whether the file carries supports and who decided it
+    #: (:mod:`kiln.slicer_supports`); ``None`` only for a result no slice
+    #: made.
+    supports: SliceSupports | None = None
     #: The mesh the slicer was handed, absolute — or for a STEP file, Kiln's
     #: mesh of it (:func:`_drawn_mesh_for`) — the file Kiln's 3D stage
     #: shows for this slice, dressed in the slice's own additions.  Every
@@ -204,6 +209,8 @@ class SliceResult:
             d["filament"] = self.filament.to_dict()
         if self.nozzle is not None:
             d["nozzle"] = self.nozzle
+        if self.supports is not None:
+            d["supports"] = self.supports.to_dict()
         if self.stderr:
             d["stderr"] = self.stderr[:500]
         return d
@@ -1077,11 +1084,11 @@ def slice_file(
     # "No profile" cannot mean "no preset" on the Orca dialect the way it
     # does for PrusaSlicer (see _slice_with_orca); Kiln's own generic
     # profile is the answer, resolved here so the identity below is written
-    # onto it rather than onto nothing.
-    if not profile and slicer_cli_family(slicer) == _CLI_BAMBU:
-        from kiln.slicer_profiles import resolve_slicer_profile
-
-        profile = resolve_slicer_profile("default")
+    # onto it rather than onto nothing.  An overrides-only Kiln file is the
+    # same case with a few keys on top: Orca given only those has no bed
+    # and refuses ("no object is fully inside the print volume").
+    if slicer_cli_family(slicer) == _CLI_BAMBU:
+        profile = _whole_profile_for_orca(profile)
 
     # The filament identity, applied HERE -- the one place every slicing
     # door funnels through -- so a slice cannot leave without a density
@@ -1097,6 +1104,13 @@ def slice_file(
         )
     except MaterialRefused as exc:
         raise MaterialNotPrintableError(str(exc), code=exc.code, verdict=exc.verdict) from exc
+    # Supports, decided at the same place for the same reason: a part the
+    # printability engine says needs them was sliced without them by every
+    # tool door, and the estimate was of that file.  A caller's statement
+    # (a stated support_material, or their own profile) is read and kept.
+    slicer_profile, supports = ensure_profile_supports(
+        slicer_profile, input_abs, material=filament.material,
+    )
     # Which nozzle the profile was written for, read from the profile itself
     # so every door's reply says it whichever door resolved the profile.
     from kiln.slicer_profiles import nozzle_fit_of
@@ -1152,6 +1166,7 @@ def slice_file(
         )
         result.filament = filament
         result.nozzle = nozzle
+        result.supports = supports
         result.stage_mesh_path = drawn
         if multicolor_switched:
             result.message += (
@@ -1229,8 +1244,37 @@ def slice_file(
         stderr=(result.stderr or "").strip(),
         filament=filament,
         nozzle=nozzle,
+        supports=supports,
         stage_mesh_path=drawn,
     )
+
+
+def _whole_profile_for_orca(profile: str | None) -> str | None:
+    """The profile the Orca dialect is handed: never nothing, never a few keys.
+
+    No profile is Kiln's generic one.  A Kiln-written overrides-only file
+    (no printer behind it: the CLI's stated support mode with no printer,
+    ``reslice_with_overrides`` with none) is laid over the generic profile,
+    its stated keys still stated, so Orca gets a bed and the caller keeps
+    every key they chose.  A profile with a printer behind it, or the
+    caller's own, is returned as given.
+    """
+    from kiln.slicer_profiles import profile_origin, profile_with_overrides, resolve_slicer_profile
+
+    if not profile:
+        return resolve_slicer_profile("default")
+    origin = profile_origin(profile)
+    if not origin.kiln or origin.printer_id or not os.path.isfile(profile):
+        return profile
+    layered = ini_to_settings(profile)
+    stated = {key: value for key, value in layered.items() if key in origin.stated}
+    own = {key: value for key, value in layered.items() if key not in origin.stated}
+    whole = resolve_slicer_profile("default")
+    if own:
+        whole = profile_with_overrides(whole, own, prefix="default_", stated=False)
+    if stated:
+        whole = profile_with_overrides(whole, stated, prefix="default_", stated=True)
+    return whole
 
 
 def derive_filament_weight(estimates: dict[str, Any], material: str | None) -> None:
@@ -1543,6 +1587,13 @@ def slice_multicolor_copies(
     start_x = (bed_width_mm - grid_width) / 2.0 + model_width / 2.0
     start_y = (bed_depth_mm - grid_depth) / 2.0 + model_depth / 2.0
 
+    # Supports are decided ONCE, on the part, and stated for every copy:
+    # the copies are the same part moved, and each copy's slice would
+    # otherwise read it again.
+    profile, supports = ensure_profile_supports(
+        profile, input_path, material=material or loaded_material, stated=True,
+    )
+
     # Create positioned STL copies and slice each
     work_dir = _tempfile.mkdtemp(prefix="kiln_multicolor_")
     gcode_bodies: list[str] = []
@@ -1611,6 +1662,7 @@ def slice_multicolor_copies(
         slicer=slicer_name,
         message=f"Sliced {count} multi-color copies of {Path(input_path).name}",
         filament=filament,
+        supports=supports,
     )
 
 

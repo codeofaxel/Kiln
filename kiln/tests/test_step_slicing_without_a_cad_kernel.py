@@ -390,31 +390,30 @@ class TestTheRetrysDiagnosis:
         assert result["printability_note"].startswith("The diagnosis was made without the model's geometry")
 
 
-class TestTheCliSupportCheck:
-    def _slice(self, path: str) -> tuple[dict, list[str]]:
-        import json
-        from unittest.mock import MagicMock
+class TestTheSupportCheckOnAStep:
+    """The slice reads a STEP as Kiln's mesh of it when deciding supports,
+    at the chokepoint every door shares; a STEP nothing can read is said
+    not checked rather than reading like a part that needs none."""
 
-        from click.testing import CliRunner
+    def _decide(self, path: str):
+        from kiln import slicer_supports
+        from kiln.slicer_orca import ini_to_settings
+        from kiln.slicer_profiles import resolve_slicer_profile
 
-        from kiln.cli.main import cli
-
-        sliced = MagicMock(message="Sliced", output_path=path + ".gcode")
-        sliced.to_dict.return_value = {"output_path": sliced.output_path}
-        with patch("kiln.cli.main._autodetect_printer_profile_id", return_value=None), \
-                patch("kiln.slicer.slice_file", return_value=sliced) as slicer:
-            out = CliRunner().invoke(cli, ["slice", path, "--support-mode", "auto", "--json"])
-        assert out.exit_code == 0, out.output
-        return json.loads(out.output)["data"], slicer.call_args.kwargs.get("extra_args") or []
+        slicer_supports._decisions.clear()
+        derived, decision = slicer_supports.ensure_profile_supports(
+            resolve_slicer_profile("prusa_mk4"), path, material="PLA",
+        )
+        return ini_to_settings(derived), decision
 
     def test_a_step_that_needs_supports_gets_them(self, tmp_path: Path) -> None:
         with _overhanging_kernel():
-            data, args = self._slice(_step_named(tmp_path))
-        assert "--support-material" in args
-        assert data["support_style"] == "minimal" and "overhangs=" in data["support_reason"]
+            settings, decision = self._decide(_step_named(tmp_path))
+        assert settings["support_material"] == "1"
+        assert decision.enabled and "overhangs=" in decision.reason
 
     def test_a_model_the_check_cannot_read_says_it_was_not_checked(self, tmp_path: Path) -> None:
         with patch("kiln.step_import.ensure_mesh_path", side_effect=step_import.NoBackendError()):
-            data, args = self._slice(_step_named(tmp_path))
-        assert "--support-material" not in args
-        assert data["support_reason"].startswith("not checked: ")
+            settings, decision = self._decide(_step_named(tmp_path))
+        assert settings.get("support_material") != "1"
+        assert not decision.enabled and decision.reason.startswith("not checked: ")
