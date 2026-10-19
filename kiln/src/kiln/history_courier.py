@@ -607,6 +607,19 @@ def _shell(value: str) -> str:
 LOCKED_CODE = "DESIGN_LOCKED"
 
 
+def _design_name(design_id: Any) -> str | None:
+    """The name of the design folder *design_id* resolves to, or ``None``.
+
+    A push sends *design_id* to the account as the design's name, so it must
+    BE that name: ``./mug`` reaches the folder ``mug`` and would be a second
+    design there, and the lock judges the folder, not the spelling.
+    """
+    from kiln.history_vault import _design_folder
+
+    folder = _design_folder(design_id)
+    return None if folder is None else folder.name
+
+
 def lock_refusal(
     tool: str, design_ids: Any, *, vault: Any = None, doing: str = "save it to your Kiln account",
 ) -> dict[str, Any] | None:
@@ -725,6 +738,11 @@ def push(tool: str, design_id: str, branch_id: str | None = None, *, replace_con
     own = vault is None
     vault = vault or HistoryVault()
     try:
+        if _design_name(design_id) != design_id:
+            return _refused(
+                tool, "INVALID_INPUT",
+                f"design_id must be the design's own name, as `kiln design` lists it: {design_id!r}",
+            )
         locked = lock_refusal(tool, [design_id], vault=vault)
         if locked is not None:
             return locked

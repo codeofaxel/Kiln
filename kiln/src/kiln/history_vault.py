@@ -302,6 +302,19 @@ def _short_host_name() -> str:
     return name if _COMPUTER_NAME.match(name) else "computer"
 
 
+def _lock_key(design_id: Any) -> str | None:
+    """The one key a design's lock is kept and looked up under, or ``None``.
+
+    The name of the folder *design_id* resolves to in the design library,
+    folded to one case.  Every spelling that reaches the same folder (``./mug``,
+    ``mug/``, ``Mug`` on a disk that ignores case) is the same design to the
+    pushes, so it must be the same design to the lock; folding case can only
+    make two designs share a lock, never let a locked one through.
+    """
+    folder = _design_folder(design_id)
+    return None if folder is None else folder.name.casefold()
+
+
 def design_locked(design_id: str) -> bool:
     """Whether *design_id* is locked to this computer.
 
@@ -527,22 +540,33 @@ class HistoryVault:
     # -- locks, and this computer's own settings ------------------------------
 
     def is_locked(self, design_id: str) -> bool:
-        """Whether *design_id* is locked to this computer."""
+        """Whether *design_id* is locked to this computer.
+
+        Judged by the design's folder, not the spelling: ``./mug``, ``mug/``
+        and, on a disk that ignores case, ``Mug`` all name the folder ``mug``
+        does, so they are all the locked design (:func:`_lock_key`).
+        """
+        key = _lock_key(design_id)
+        if key is None:
+            return False
         row = self._conn.execute(
-            "SELECT 1 FROM design_locks WHERE design_id = ?", (design_id,)
+            "SELECT 1 FROM design_locks WHERE design_id = ?", (key,)
         ).fetchone()
         return row is not None
 
     def set_locked(self, design_id: str, locked: bool) -> bool:
         """Lock *design_id* to this computer, or unlock it; the state it is now in."""
+        key = _lock_key(design_id)
+        if key is None:
+            raise ValueError(f"design_id must name a design folder, not a path: {design_id!r}")
         with self._lock:
             if locked:
                 self._conn.execute(
                     "INSERT OR IGNORE INTO design_locks (design_id, locked_at) VALUES (?, ?)",
-                    (design_id, time.time()),
+                    (key, time.time()),
                 )
             else:
-                self._conn.execute("DELETE FROM design_locks WHERE design_id = ?", (design_id,))
+                self._conn.execute("DELETE FROM design_locks WHERE design_id = ?", (key,))
             self._conn.commit()
         return self.is_locked(design_id)
 

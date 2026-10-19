@@ -1161,6 +1161,22 @@ class TestALockedDesignStaysHere:
         assert "kiln design unlock mug" in said
         assert answer["unlock"]["arguments"] == {"design_id": "mug", "locked": False}
 
+    def test_another_spelling_of_a_locked_design_is_the_same_locked_design(self, home, monkeypatch):
+        """The lock judged the spelling while a push resolves the folder, so
+        ``./mug`` (and ``Mug`` on a disk that ignores case) reached the locked
+        ``mug`` folder and was sent.  Found by a security review of the commit
+        that added the lock, 2026-10-18; it fails at 23c84153."""
+        from kiln.history_vault import design_locked
+
+        _library(home, "mug", [MESH_V1])
+        _lock("mug")
+        monkeypatch.setattr(courier, "_request", lambda *a, **k: pytest.fail("nothing should be sent"))
+
+        assert design_locked("./mug") is True and design_locked("mug/") is True
+        assert design_locked("MUG") is True       # folded: two designs may share a lock, a locked one never slips
+        answer = courier.push("cloud_push_branch", "./mug")
+        assert answer["success"] is False and answer["code"] in ("INVALID_INPUT", "DESIGN_LOCKED")
+
     def test_the_mcp_push_door_is_refused_too(self, home, monkeypatch):
         _library(home, "mug", [MESH_V1])
         _lock("mug")
