@@ -30,8 +30,10 @@ and a kiln-pro resolver with house values for a few names falls back to it.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
+import os
 import re
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -54,6 +56,8 @@ NOTE_SUFFIX = ".color.json"
 SCHEMA_VERSION = 1
 
 _HEX6_RE = re.compile(r"^#?([0-9a-fA-F]{6})$")
+#: What a colour word may look like once it is read back from a note.
+_SHOWN_RE = re.compile(r"^[A-Za-z0-9# -]+$")
 _HEX3_RE = re.compile(r"^#?([0-9a-fA-F]{3})$")
 
 #: The CSS/SVG named colours (CSS Color Module Level 4), lower-case name to
@@ -279,9 +283,22 @@ def record(file_path: str, colour: ShownColour) -> str | None:
         if identity is None:
             return None
         note = note_path_for(file_path)
+        # Never follow a symlink planted where the note goes, and land the
+        # note in one move: a temp file beside it (O_EXCL | O_NOFOLLOW),
+        # then os.replace.
+        if os.path.islink(note):
+            return None
         body = {"schema": SCHEMA_VERSION, "file": identity, "colour": colour.to_dict()}
-        with open(note, "w", encoding="utf-8") as fh:
-            json.dump(body, fh, indent=2)
+        tmp = f"{note}.{os.getpid()}.tmp"
+        flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(tmp, flags, 0o644)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(body, fh, indent=2)
+            os.replace(tmp, note)
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
         return note
     except Exception:  # noqa: BLE001 -- never costs the make
         logger.debug("colour note not written for %s", file_path, exc_info=True)
@@ -304,10 +321,17 @@ def read(file_path: str | None) -> ShownColour | None:
         hex6 = hex_for(values.get("hex6"))
         if not hex6:
             return None
+        # The note is a file anyone could edit, and ``shown`` is repeated in
+        # sentences an agent reads: keep it only when it is a colour word or
+        # hex that means this very colour, else say the hex.
+        shown = str(values.get("shown") or "").strip()
+        if not (0 < len(shown) <= 32 and _SHOWN_RE.fullmatch(shown) and hex_for(shown) == hex6):
+            shown = hex6
+        source = str(values.get("source") or "caller")
         return ShownColour(
-            shown=str(values.get("shown") or hex6),
+            shown=shown,
             hex6=hex6,
-            source=str(values.get("source") or "caller"),
+            source=source if source in ("caller", "scad") else "caller",
         )
     except (OSError, ValueError, TypeError):
         return None
@@ -327,12 +351,8 @@ def forget(file_path: str | None) -> None:
     """Drop the note beside *file_path* (the person said: any colour)."""
     if not file_path:
         return
-    try:
-        import os
-
+    with contextlib.suppress(OSError):
         os.remove(note_path_for(file_path))
-    except OSError:
-        pass
 
 
 def attach_declared_color(
