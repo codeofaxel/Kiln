@@ -494,19 +494,23 @@ class TestSupportProfileLoading:
 
     def test_unknown_material_returns_default(self) -> None:
         profile = _get_profile("unobtanium")
-        assert "overhang_safe_deg" in profile
-        assert "overhang_max_deg" in profile
-        assert profile["overhang_safe_deg"] == 50  # default value
+        assert profile["removal_difficulty"] == 3  # the conservative default
+        assert "Unknown material" in profile["support_notes"]
 
     def test_material_alias_nylon(self) -> None:
         profile = _get_profile("nylon")
-        assert profile["overhang_safe_deg"] == 35  # PA profile
+        assert profile["self_support_fuse_risk"] == "high"  # PA profile
 
     def test_pla_profile_values(self) -> None:
         profile = _get_profile("PLA")
-        assert profile["overhang_safe_deg"] == 55
-        assert profile["overhang_max_deg"] == 65
+        assert profile["removal_difficulty"] == 2
         assert profile["soluble_pairing"] == "PVA"
+
+    def test_the_table_carries_no_angle_or_bridge_limit(self) -> None:
+        """Those are the verdict's (kiln.printability); a copy here once
+        said PLA bridges 50 mm while the engine refused 30."""
+        for name, profile in _load_profiles().items():
+            assert not {"overhang_safe_deg", "overhang_max_deg", "bridge_safe_mm", "bridge_max_mm"} & set(profile), name
 
 
 # ---------------------------------------------------------------------------
