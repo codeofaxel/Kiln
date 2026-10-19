@@ -30,17 +30,16 @@ from __future__ import annotations
 
 import pytest
 
-from .conftest import _ENGINEERING_OVERLAY_PRESENT
-
 from kiln.design_intelligence import (
     MaterialProfile,
     MaterialRecommendation,
+    _get_kb,
     _recommend_from_safety_floor,
     _reset_knowledge_base,
-    _get_kb,
     recommend_material_for_design,
 )
 
+from .conftest import _ENGINEERING_OVERLAY_PRESENT
 
 # These tests are the inverse of ``requires_engineering_overlay`` —
 # they verify free-tier behavior, so we skip when the overlay IS
