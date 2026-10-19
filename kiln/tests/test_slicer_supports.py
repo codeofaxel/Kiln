@@ -48,13 +48,6 @@ def _report(*, overhang_pct: float = 0.0, needs: bool = False, bridge_mm: float 
     )
 
 
-@pytest.fixture(autouse=True)
-def _fresh_decisions():
-    slicer_supports._decisions.clear()
-    yield
-    slicer_supports._decisions.clear()
-
-
 @pytest.fixture
 def part(tmp_path: Path) -> str:
     path = tmp_path / "part.stl"
@@ -133,20 +126,15 @@ class TestTheRule:
         assert engine.call_args.kwargs["material"] == "tpu"
         assert engine.call_args.kwargs["nozzle_diameter"] == 0.6
 
-    def test_the_same_bytes_are_decided_once(self, part: str):
-        """The plate gate slices a file twice when a skirt runs past the
-        bed; the decision on the same bytes is the same decision."""
+    def test_nothing_is_kept_between_calls(self, part: str):
+        """One process serves every customer on the hosted server, so the
+        reading is made fresh each time, never kept in a module store."""
         with patch("kiln.printability.judge_supports", return_value=_report()) as engine:
             decide_supports(part, material="PLA")
-            decide_supports(part, material="PLA")
-        assert engine.call_count == 1
-
-    def test_a_rewritten_file_is_read_again(self, part: str):
-        with patch("kiln.printability.judge_supports", return_value=_report()) as engine:
-            decide_supports(part, material="PLA")
-            Path(part).write_bytes(b"\0" * 84 + b"\0" * 50)
             decide_supports(part, material="PLA")
         assert engine.call_count == 2
+        assert not [name for name, value in vars(slicer_supports).items()
+                    if not name.startswith("__") and isinstance(value, (dict, list, set))]
 
 
 # ---------------------------------------------------------------------------

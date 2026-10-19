@@ -400,7 +400,6 @@ class TestTheSupportCheckOnAStep:
         from kiln.slicer_orca import ini_to_settings
         from kiln.slicer_profiles import resolve_slicer_profile
 
-        slicer_supports._decisions.clear()
         derived, decision = slicer_supports.ensure_profile_supports(
             resolve_slicer_profile("prusa_mk4"), path, material="PLA",
         )

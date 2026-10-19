@@ -39,7 +39,6 @@ from __future__ import annotations
 
 import logging
 import os
-from collections import OrderedDict
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -58,13 +57,6 @@ _PLACED_NONE = "; the slicer placed none"
 DECIDED_STATED = "stated"        # the caller's own key, left alone
 DECIDED_ANALYSIS = "analysis"    # the printability engine read the part
 DECIDED_NOT_CHECKED = "not_checked"  # the engine could not read it
-
-#: Decisions already made this process, by file identity: the plate gate
-#: slices a file twice when a skirt runs past the bed, and a decision on
-#: the same bytes is the same decision.
-_CACHE_SIZE = 32
-_decisions: OrderedDict[tuple[Any, ...], SliceSupports] = OrderedDict()
-
 
 @dataclass(frozen=True)
 class SliceSupports:
@@ -165,21 +157,6 @@ def witnessed(decision: SliceSupports, gcode_path: str | None) -> SliceSupports:
     )
 
 
-def _file_identity(path: str) -> tuple[Any, ...]:
-    try:
-        st = os.stat(path)
-    except OSError:
-        return (os.path.abspath(path), None, None)
-    return (os.path.abspath(path), st.st_size, st.st_mtime_ns)
-
-
-def _remember(key: tuple[Any, ...], decision: SliceSupports) -> SliceSupports:
-    _decisions[key] = decision
-    while len(_decisions) > _CACHE_SIZE:
-        _decisions.popitem(last=False)
-    return decision
-
-
 def decide_supports(
     input_path: str,
     *,
@@ -192,12 +169,10 @@ def decide_supports(
     farther than TPU); *nozzle_diameter* is the size the slice is for, so
     the check and the slice judge the same part the same way.  Never
     raises: a part the engine cannot read is ``not_checked``, said.
-    """
-    key = (*_file_identity(input_path), (material or "").upper(), nozzle_diameter)
-    cached = _decisions.get(key)
-    if cached is not None:
-        return cached
 
+    Nothing is kept between calls: one process serves every customer on
+    the hosted server, and a reading takes 0.1 s on an ordinary part.
+    """
     from kiln.printability import judge_supports, support_verdict
 
     try:
@@ -206,19 +181,19 @@ def decide_supports(
         )
     except Exception as exc:  # noqa: BLE001 -- the slice stands without supports, and says so
         logger.debug("Support check could not read %s: %s", input_path, exc)
-        return _remember(key, SliceSupports(
+        return SliceSupports(
             enabled=False, decided_by=DECIDED_NOT_CHECKED,
             reason=f"not checked: {' '.join(str(exc).split())}",
-        ))
+        )
     reason = support_verdict(judged)
     if reason:
-        return _remember(key, SliceSupports(
+        return SliceSupports(
             enabled=True, decided_by=DECIDED_ANALYSIS, reason=reason,
             settings=support_settings(judged.overhang_threshold_deg),
-        ))
-    return _remember(key, SliceSupports(
+        )
+    return SliceSupports(
         enabled=False, decided_by=DECIDED_ANALYSIS, reason="no overhang or bridge needs them",
-    ))
+    )
 
 
 def ensure_profile_supports(

@@ -82,13 +82,6 @@ CASES: list[tuple[str, list[_Tri], bool]] = [
 ]
 
 
-@pytest.fixture(autouse=True)
-def _fresh_decisions():
-    slicer_supports._decisions.clear()
-    yield
-    slicer_supports._decisions.clear()
-
-
 def _every_door(path: str, faces: list[_Tri]) -> dict[str, bool]:
     """The answer each door gives for the same part."""
     from kiln.auto_orient import estimate_supports
