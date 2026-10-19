@@ -614,6 +614,13 @@ class BridgeClient:
                             )
                     if state in ("needs_signin", "signed_out"):
                         signed_out = True
+                        # Said on disk too, so ``kiln bridge status`` can
+                        # name the reason without reaching the server.
+                        write_bridge_state(
+                            connected=False,
+                            refusal=REFUSAL_SESSION_EXPIRED,
+                            refusal_detail=str(getattr(session, "detail", "") or ""),
+                        )
                         if not said_signin:
                             said_signin = True
                             logger.warning(
@@ -654,11 +661,26 @@ def read_bridge_state() -> dict[str, Any]:
         return {}
 
 
-def write_bridge_state(*, connected: bool) -> None:
+#: Written to the state file when the relay is refusing this bridge over
+#: its sign-in — the one disconnect a restart cannot fix.  Same vocabulary
+#: the relay records on the account's registration, so every reader on
+#: either side says the same thing.
+REFUSAL_SESSION_EXPIRED = "session_expired"
+
+
+def write_bridge_state(
+    *, connected: bool, refusal: str | None = None, refusal_detail: str = "",
+) -> None:
     """Advertise THIS process as the running bridge (best-effort, never raises).
 
     ``since`` is preserved across a reconnect flap so status can honestly say
     "connected for 2h" rather than resetting on every dropped frame.
+
+    ``refusal`` names why the relay is turning this bridge away when the
+    loop has established that (today: the session behind it lapsed), with
+    ``refusal_detail`` as the resolver's own sentence; both are cleared by
+    the next connect.  A local reader (``kiln bridge status``) can then say
+    "signed out" even when it cannot reach the server to ask.
 
     ``version`` is the version this process is RUNNING, and it is the only
     place that fact is recorded on the machine.  A daemon started by launchd
@@ -676,13 +698,17 @@ def write_bridge_state(*, connected: bool) -> None:
         path = _state_path()
         os.makedirs(os.path.dirname(path), exist_ok=True)
         tmp = f"{path}.{os.getpid()}.tmp"
+        state: dict[str, Any] = {
+            "pid": os.getpid(), "connected": bool(connected),
+            "since": since, "updated": now,
+            "version": _running_version(),
+        }
+        if refusal and not connected:
+            state["refusal"] = refusal
+            if refusal_detail:
+                state["refusal_detail"] = refusal_detail
         with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(
-                {"pid": os.getpid(), "connected": bool(connected),
-                 "since": since, "updated": now,
-                 "version": _running_version()},
-                fh,
-            )
+            json.dump(state, fh)
         os.replace(tmp, path)
     except OSError:
         pass
