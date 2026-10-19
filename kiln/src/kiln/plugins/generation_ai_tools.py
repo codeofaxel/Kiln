@@ -553,6 +553,11 @@ class _GenerationAIToolsPlugin:
                 # A model made FROM a picture is meant to look like it: compared
                 # with it here, before the goal's own pictures (join_goal).
                 compare_with_picture(response, result.source_image, result.local_path)
+                # A provider's mesh can arrive in pieces; a piece with air
+                # under it is said here, where the file first lands.
+                from kiln.fusion_check import attach_fusion_report
+
+                attach_fusion_report(response, result.local_path)
                 join_goal(brief_id, response, result.local_path)
                 try:
                     from kiln_pro.plugins.git_render_tools import (
@@ -1105,7 +1110,9 @@ class _GenerationAIToolsPlugin:
                     )
 
                 from kiln.front_door import join_goal
+                from kiln.fusion_check import attach_fusion_report
 
+                attach_fusion_report(resp, result.local_path)
                 join_goal(brief_id, resp, result.local_path)
                 try:
                     from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
