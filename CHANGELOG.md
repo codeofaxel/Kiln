@@ -689,8 +689,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Security
 
-- **Big or odd files can't tie up Kiln's servers.** Oversized uploads, images and print files are refused before they're read.
-
 - **Stronger protection against harmful 3MF files.**
 - **Kiln only saves files where it should.** A misled AI agent can no longer make Kiln overwrite your settings or startup files. Thanks to Filip Kulig ([@KulFilip](https://github.com/KulFilip)) for reporting this privately.
 
