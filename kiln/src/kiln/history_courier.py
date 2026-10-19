@@ -15,14 +15,31 @@ The server keeps none of it.  Which tools take part, and how, is the
 ``served`` for the tools above, or the name of a cloud door this module
 runs itself (``push``, ``pull``, ``clone``, ``remote_branches``), against
 Kiln's cloud routes with the person's own sign-in.  Pushing is how history
-leaves this computer, and only when the person asks.
+leaves this computer: when the person asks, or after each save when they
+turned automatic saving on in their Kiln account (Kiln Pro).
+
+**A design locked to this computer is never saved to the account.**  Every
+door that would save one there (a push, an automatic push, a release push,
+a pull request) asks :func:`lock_refusal` first and is refused in plain
+words.  The served history calls still run: the design passes through Kiln's
+servers for the length of the call and is not kept there.
+
+**Two computers, one branch.**  When the account's branch moved on another
+computer, a push keeps this computer's versions in the account as a branch
+of their own, ``<branch>@<computer>``, and says how to merge it.  Nothing is
+ever merged automatically.
 """
 
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import logging
+import shlex
+import time
+import uuid
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -167,6 +184,11 @@ def records_for_call(
             out[f"named_{kind}"] = items
         if "reflog" in kinds or "bisect" in kinds:
             _add_log_rows(vault, out, arguments, tool)
+            if tool in _LOG_SAVES:
+                out["reflog"] = [
+                    e for e in out["reflog"]
+                    if not (e.get("artifact_type") == "design" and vault.is_locked(str(e.get("artifact_id") or "")))
+                ]
         if "files" in kinds and file_param:
             out["files"] = files_for_call(tool, arguments.get(file_param))
         if "proven" in kinds:
@@ -338,6 +360,11 @@ def take_delta(
     returned) are written: an answer naming any other design changes nothing
     here.  A branch made by *tool* ``create_design_branch`` is checked out, so
     the next version saved here continues it.
+
+    Each branch the answer moved or made is then saved to the person's Kiln
+    account when they turned automatic saving on (:func:`_after_change`),
+    through the same :func:`push` as ``kiln cloud push``; the answer says
+    what became of it under ``auto_push``.
     """
     if isinstance(answer, dict) and isinstance((sent or {}).get("files"), dict):
         answer = _own_paths(answer, sent["files"])
@@ -356,7 +383,11 @@ def take_delta(
     ]
     own = vault is None
     vault = vault or HistoryVault()
+    after: dict[str, Any] = {}
     try:
+        heads_before = {
+            str(d["design_id"]): _heads(vault, str(d["design_id"])) for d in deltas if d.get("design_id")
+        }
         summaries = [vault.apply_delta(d) for d in deltas]
         library = _take_library_deltas(vault, delta, sent)
         log = vault.apply_log_delta(delta)
@@ -377,6 +408,11 @@ def take_delta(
         if tool in _CHECKS_OUT and made.get("branch_id") and summaries:
             branch = vault.check_out(str(made.get("design_id") or summaries[0]["design_id"]), made["branch_id"])
             continues = branch.get("name") if branch else None
+        changed, made_one = _changed_branches(vault, heads_before)
+        try:
+            after = _after_change(changed, offer_due=made_one, vault=vault)
+        except Exception:  # noqa: BLE001 -- saving to the account never undoes what was kept here
+            logger.warning("history: the automatic push after %s failed", tool or "a call", exc_info=True)
     finally:
         if own:
             vault.close()
@@ -402,7 +438,28 @@ def take_delta(
         if continues:
             kept["saves_continue"] = continues
         answer["history_kept"] = kept
+    answer.update(after)
     return answer
+
+
+def _heads(vault: Any, design_id: str) -> dict[str, Any]:
+    return {b["branch_id"]: b.get("head_version_id") for b in vault.branches(design_id)}
+
+
+def _changed_branches(vault: Any, heads_before: dict[str, dict[str, Any]]) -> tuple[dict[str, list[str]], bool]:
+    """Each design's branches whose head moved since *heads_before*, and
+    whether one of them is new."""
+    changed: dict[str, list[str]] = {}
+    made = False
+    for design_id, before in heads_before.items():
+        for b in vault.branches(design_id):
+            if b.get("status") == "retired" or not b.get("head_version_id"):
+                continue
+            new = b["branch_id"] not in before
+            made = made or new
+            if new or before[b["branch_id"]] != b["head_version_id"]:
+                changed.setdefault(design_id, []).append(b["branch_id"])
+    return changed, made
 
 
 def _take_library_deltas(vault: Any, delta: dict[str, Any], sent: dict[str, Any]) -> list[dict[str, Any]]:
@@ -450,6 +507,9 @@ def call_served(tool: str, *, kinds: tuple[str, ...] = ("designs",), **kwargs: A
     from kiln.server import _pro_api_call
 
     records = records_for_call(kwargs, kinds=kinds, tool=tool)
+    refused = served_refusal(tool, records)
+    if refused is not None:
+        return refused
     return take_delta(_pro_api_call(tool, **kwargs, history_records=records), records, tool=tool)
 
 
@@ -458,7 +518,9 @@ def call_served(tool: str, *, kinds: tuple[str, ...] = ("designs",), **kwargs: A
 # ---------------------------------------------------------------------------
 
 
-def _request(tool: str, method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+def _request(
+    tool: str, method: str, path: str, body: dict[str, Any] | None = None, *, timeout: float | None = None,
+) -> dict[str, Any]:
     import httpx
 
     from kiln.auth_session import _api_base, resolve_api_bearer
@@ -485,7 +547,9 @@ def _request(tool: str, method: str, path: str, body: dict[str, Any] | None = No
         version = ""
     headers = {"Authorization": f"Bearer {bearer}", "X-Kiln-Client-Version": version}
     try:
-        resp = httpx.request(method, f"{_api_base()}{path}", json=body, headers=headers, timeout=_WAIT_S)
+        resp = httpx.request(
+            method, f"{_api_base()}{path}", json=body, headers=headers, timeout=timeout or _WAIT_S,
+        )
     except Exception as exc:  # noqa: BLE001
         return envelope_for_transport(tool, exc, host=_api_base(), kind="sync")
     try:
@@ -515,6 +579,102 @@ def _quote(value: str) -> str:
 
 def _refused(tool: str, code: str, error: str) -> dict[str, Any]:
     return {"status": "error", "success": False, "code": code, "error": error, "tool": tool}
+
+
+@contextlib.contextmanager
+def _opened(vault: Any = None) -> Iterator[Any]:
+    """*vault*, or this computer's records opened for the block and closed after."""
+    if vault is not None:
+        yield vault
+        return
+    from kiln.history_vault import HistoryVault
+
+    own = HistoryVault()
+    try:
+        yield own
+    finally:
+        own.close()
+
+
+def _shell(value: str) -> str:
+    return shlex.quote(str(value))
+
+
+# ---------------------------------------------------------------------------
+# A design locked to this computer
+# ---------------------------------------------------------------------------
+
+LOCKED_CODE = "DESIGN_LOCKED"
+
+
+def lock_refusal(
+    tool: str, design_ids: Any, *, vault: Any = None, doing: str = "save it to your Kiln account",
+) -> dict[str, Any] | None:
+    """The refusal for saving any of *design_ids* to the person's Kiln account
+    when one is locked to this computer, or ``None``.
+
+    The one check every door that saves a design to the account makes.
+    """
+    ids = [d for d in dict.fromkeys(_ids(design_ids)) if d]
+    with _opened(vault) as v:
+        locked = [d for d in ids if v.is_locked(d)]
+    if not locked:
+        return None
+    design_id = locked[0]
+    return {
+        **_refused(
+            tool, LOCKED_CODE,
+            f"{design_id} is locked to this computer, so Kiln did not {doing}. It is kept on "
+            f"this computer; to change that, unlock it first with `kiln design unlock {_shell(design_id)}`.",
+        ),
+        "design_id": design_id,
+        "locked_designs": locked,
+        "unlock": {
+            "command": f"kiln design unlock {_shell(design_id)}",
+            "tool": "lock_design",
+            "arguments": {"design_id": design_id, "locked": False},
+        },
+    }
+
+
+#: Served tools whose call keeps something of a design in the person's Kiln
+#: account, and what the refusal says Kiln did not do.
+_KEEPS_IN_ACCOUNT = {"propose_design_change": "open a pull request for it in your Kiln account"}
+#: Served tools that save this computer's history log to the account: a
+#: locked design's entries stay here.
+_LOG_SAVES = frozenset({"push_reflog_to_cloud"})
+
+
+def served_refusal(tool: str, sent: dict[str, Any] | None, *, vault: Any = None) -> dict[str, Any] | None:
+    """The refusal for a served call that would keep a locked design in the account."""
+    if tool not in _KEEPS_IN_ACCOUNT:
+        return None
+    return lock_refusal(tool, (sent or {}).get("named") or [], vault=vault, doing=_KEEPS_IN_ACCOUNT[tool])
+
+
+def set_lock(design_id: str, locked: bool = True, *, vault: Any = None) -> dict[str, Any]:
+    """Lock *design_id* to this computer, or unlock it, and say what that means."""
+    from kiln.history_vault import _design_folder
+
+    tool = "lock_design"
+    if _design_folder(design_id) is None:
+        return _refused(tool, "INVALID_INPUT", f"design_id must be a simple name, not a path: {design_id!r}")
+    with _opened(vault) as v:
+        now = v.set_locked(design_id, bool(locked))
+    if now:
+        said = (
+            f"{design_id} is locked to this computer: Kiln will not save it to your Kiln account "
+            "(no push, automatic save, release push or pull request) until you unlock it. "
+            "Branching, merging and the history views still work; when Kiln's servers run one of "
+            "those, the design passes through them for that call only and is not kept there. "
+            "Anything of it already in your Kiln account stays there."
+        )
+    else:
+        said = (
+            f"{design_id} is unlocked: Kiln saves it to your Kiln account when you push it, "
+            "or after each save when automatic saving is on."
+        )
+    return {"status": "success", "ok": True, "design_id": design_id, "locked": now, "said": said}
 
 
 #: The most proven recipes one push sends (Kiln's servers keep no more per push).
@@ -553,12 +713,21 @@ def _bring_recipes(tool: str, design_id: str, vault: Any) -> dict[str, Any]:
 
 def push(tool: str, design_id: str, branch_id: str | None = None, *, replace_confirmed: bool = False, vault: Any = None) -> dict[str, Any]:
     """Send one branch of this computer's history, and the design's proven
-    recipes, to the person's Kiln account."""
+    recipes, to the person's Kiln account.
+
+    Refused here, sending nothing, when the design is locked to this
+    computer.  When the account's branch moved on another computer, this
+    computer's versions are kept there as a branch of their own instead
+    (:func:`_keep_as_this_computers`).
+    """
     from kiln.history_vault import HistoryVault
 
     own = vault is None
     vault = vault or HistoryVault()
     try:
+        locked = lock_refusal(tool, [design_id], vault=vault)
+        if locked is not None:
+            return locked
         recipes = vault.proven_rows(design_id)
         vault.sync_from_library(design_id)
         branch = vault.branch(branch_id) if branch_id else vault.branch_named(design_id, "main")
@@ -595,12 +764,102 @@ def push(tool: str, design_id: str, branch_id: str | None = None, *, replace_con
     if replace_confirmed:
         body["replace_confirmed"] = True
     answer = _request(tool, "POST", f"/api/cloud/designs/{_quote(design_id)}/branches/push", body)
-    if answer.get("status") == "error":
+    if _diverged(answer):
+        out = _keep_as_this_computers(tool, design_id, branch, body, answer, vault=None if own else vault)
+        if out.get("status") == "error":
+            return out
+    elif answer.get("status") == "error":
         return answer
-    out = {"status": "success", "push": answer, "design_id": design_id, "branch_id": branch["branch_id"]}
+    else:
+        out = {"status": "success", "push": answer, "design_id": design_id, "branch_id": branch["branch_id"]}
     if recipes:
         out["proven_recipes"] = _send_recipes(tool, design_id, recipes)
     return out
+
+
+def _diverged(answer: dict[str, Any]) -> bool:
+    """Whether a push was refused because the account's branch moved on."""
+    if answer.get("status") != "error":
+        return False
+    return answer.get("code") == "BRANCH_DIVERGED" or (
+        answer.get("http_status") == 409 and answer.get("error") == "branch diverged"
+    )
+
+
+def _plan_refusal(answer: dict[str, Any]) -> bool:
+    """Whether a refusal is the person's plan not including what was asked."""
+    code = str(answer.get("code") or "")
+    return (
+        answer.get("http_status") == 402 or code == "PRO_REQUIRED" or code.startswith("FREE_")
+        or bool(answer.get("required_tier"))
+    )
+
+
+def _own_branch_id(branch_id: str, computer: str) -> str:
+    """The id of this computer's own copy of *branch_id*: the same every push."""
+    return uuid.uuid5(uuid.NAMESPACE_URL, f"kiln-history-computer:{branch_id}:{computer}").hex
+
+
+def _keep_as_this_computers(
+    tool: str, design_id: str, branch: dict[str, Any], body: dict[str, Any], refused: dict[str, Any],
+    *, vault: Any = None,
+) -> dict[str, Any]:
+    """Keep this computer's versions of a branch the account moved on, as
+    ``<branch>@<computer>``: a branch of their own, the moved one untouched.
+
+    The free plan cannot push a branch other than ``main``, so a refusal of
+    the plan's leaves the server's own answer (*refused*) as it was; nothing
+    is recorded here unless the account kept the branch.  Never merges.
+    """
+    with _opened(vault) as v:
+        computer = v.computer_name()
+        name = str(branch.get("name") or "main")
+        if name.endswith(f"@{computer}"):
+            return refused
+        own_id = _own_branch_id(branch["branch_id"], computer)
+        own_name = f"{name}@{computer}"
+        before = v.branch(own_id) or {}
+    own = {
+        **branch,
+        "branch_id": own_id,
+        "name": own_name,
+        "parent_branch_id": branch["branch_id"],
+        "created_at": before.get("created_at") or time.time(),
+        "status": "active",
+    }
+    members = [{**m, "branch_id": own_id} for m in body.get("memberships") or []]
+    sent = {k: val for k, val in body.items() if k != "replace_confirmed"}
+    answer = _request(
+        tool, "POST", f"/api/cloud/designs/{_quote(design_id)}/branches/push",
+        {**sent, "branch": own, "memberships": members},
+    )
+    if answer.get("status") == "error":
+        if _plan_refusal(answer):
+            return refused
+        return {**refused, "kept_as_refused": {"code": answer.get("code"), "error": answer.get("error")}}
+    with _opened(vault) as v:
+        v.keep_branch_copy(own, members)
+    pull_cmd = f"kiln cloud pull {_shell(design_id)}" + ("" if name == "main" else f" --branch {_shell(name)}")
+    check = f"kiln merge check {_shell(design_id)} {_shell(own_name)} {_shell(name)}"
+    run = f"kiln merge run {_shell(design_id)} {_shell(own_name)} {_shell(name)}"
+    return {
+        "status": "success",
+        "push": answer,
+        "design_id": design_id,
+        "branch_id": own_id,
+        "kept_as": own_name,
+        "diverged": {
+            "branch": name,
+            "branch_id": branch["branch_id"],
+            "account_head": refused.get("remote_head"),
+        },
+        "merge": {"pull": pull_cmd, "check": check, "run": run},
+        "said": (
+            f"The {name} branch of {design_id} in your Kiln account moved on another computer, so "
+            f"Kiln kept this computer's work there as {own_name} and replaced nothing. Nothing was "
+            f"merged. To bring them together, run `{pull_cmd}`, then `{check}` and `{run}`."
+        ),
+    }
 
 
 def pull(
@@ -672,11 +931,16 @@ def push_release(tool: str, release_id: str, *, vault: Any = None) -> dict[str, 
         row = vault._conn.execute(
             "SELECT design_id, record FROM releases WHERE release_id = ?", (release_id,)
         ).fetchone()
+        locked = None if row is None else lock_refusal(
+            tool, [str(row["design_id"])], vault=vault, doing="save its release to your Kiln account",
+        )
     finally:
         if own:
             vault.close()
     if row is None:
         return _refused(tool, "RELEASE_NOT_FOUND", f"No release {release_id} on this computer.")
+    if locked is not None:
+        return locked
     import json
 
     record = json.loads(row["record"])
@@ -695,6 +959,196 @@ def remote_releases(tool: str, design_id: str) -> dict[str, Any]:
         return answer
     releases = answer.get("items") if "items" in answer else answer.get("releases", [])
     return {"status": "success", "design_id": design_id, "releases": releases or []}
+
+
+# ---------------------------------------------------------------------------
+# Automatic saving to the account (Kiln Pro, off until the person turns it on)
+# ---------------------------------------------------------------------------
+
+#: The account's switch, where it lives and how long a reading of it stands.
+_PREFS_PATH = "/api/cloud/user/prefs"
+_PREFS_TOOL = "cloud_auto_push"
+_PREFS_KEY = "account_prefs"
+_PREFS_FRESH_S = 60.0
+#: A save waits this long at most for the switch to be read.
+_PREFS_WAIT_S = 10.0
+#: Kept here once the person has been told automatic saving exists.
+_OFFER_KEY = "auto_push_offered"
+#: The saved version of a design at which the offer is made.
+_OFFER_AT_VERSIONS = 3
+#: What an automatic push is, to the push it runs.
+_AUTO_PUSH_TOOL = "cloud_push_branch"
+_TURN_ON = "kiln cloud auto-push on"
+
+
+def _read_prefs(vault: Any, *, fresh: bool = False) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """The account's automatic-saving switch, as ``(prefs, miss)``.
+
+    Read at most once a minute and kept in this computer's records between
+    readings.  When it cannot be read, *prefs* is ``None`` and *miss* is why,
+    with the last reading under ``last``: a push waits for a reading it can
+    trust rather than act on an old one.  ``can_auto_backup`` is what the
+    account allows; an answer that does not say counts as not allowed.
+    """
+    kept = vault.setting(_PREFS_KEY)
+    kept = kept if isinstance(kept, dict) else None
+    if not fresh and kept is not None:
+        age = time.time() - float(kept.get("read_at") or 0.0)
+        if 0.0 <= age < _PREFS_FRESH_S:
+            return kept, None
+    answer = _request(_PREFS_TOOL, "GET", _PREFS_PATH, timeout=_PREFS_WAIT_S)
+    if answer.get("status") == "error":
+        return None, {**answer, "last": kept}
+    prefs = {
+        "auto_backup": answer.get("auto_backup") is True,
+        "is_set": answer.get("is_set") is True,
+        "can_auto_backup": answer.get("can_auto_backup") if isinstance(answer.get("can_auto_backup"), bool) else None,
+        "read_at": time.time(),
+    }
+    vault.set_setting(_PREFS_KEY, prefs)
+    return prefs, None
+
+
+def _pushes(prefs: dict[str, Any] | None) -> bool:
+    return bool(prefs and prefs.get("auto_backup") is True and prefs.get("can_auto_backup") is True)
+
+
+def _after_change(changed: dict[str, list[str]], *, offer_due: bool, vault: Any) -> dict[str, Any]:
+    """What a change kept on this computer adds to its answer.
+
+    ``auto_push``: each branch in *changed* (design id to branch ids) pushed
+    to the account when automatic saving is on, through :func:`push`, so a
+    lock and everything else a push honours apply.  ``auto_push_offer``: the
+    one-time word that automatic saving exists, when *offer_due*, the
+    account allows it and the person has never set it.  Neither is added
+    when there is nothing to say.
+    """
+    offer_due = offer_due and not vault.setting(_OFFER_KEY)
+    if not changed and not offer_due:
+        return {}
+    prefs, miss = _read_prefs(vault)
+    out: dict[str, Any] = {}
+    if changed and prefs is None and _pushes((miss or {}).get("last")):
+        out["auto_push"] = {
+            "pushed": False,
+            "code": (miss or {}).get("code"),
+            "said": (
+                "Kiln could not check your automatic-saving setting just now, so nothing was "
+                "saved to your Kiln account. It is kept on this computer; `kiln cloud push` sends it."
+            ),
+            "branches": [],
+        }
+    elif changed and _pushes(prefs):
+        out["auto_push"] = _auto_push(changed, vault)
+    if offer_due and prefs is not None and not prefs.get("is_set") and prefs.get("can_auto_backup") is True:
+        out["auto_push_offer"] = {
+            "said": (
+                "Kiln can save each design's history to your Kiln account after every save on "
+                "this computer; it stays off until you turn it on."
+            ),
+            "turn_on": _TURN_ON,
+        }
+        vault.set_setting(_OFFER_KEY, {"offered_at": time.time()})
+    return out
+
+
+def _auto_push(changed: dict[str, list[str]], vault: Any) -> dict[str, Any]:
+    """Push each changed branch; one line per branch on what became of it."""
+    rows: list[dict[str, Any]] = []
+    for design_id, branch_ids in changed.items():
+        for branch_id in branch_ids:
+            name = (vault.branch(branch_id) or {}).get("name") or branch_id
+            answer = push(_AUTO_PUSH_TOOL, design_id, branch_id, vault=vault)
+            row: dict[str, Any] = {
+                "design_id": design_id, "branch_id": branch_id, "branch": name,
+                "pushed": answer.get("status") == "success",
+            }
+            if answer.get("kept_as"):
+                row["kept_as"] = answer["kept_as"]
+                row["said"] = answer["said"]
+            elif row["pushed"]:
+                row["said"] = f"Saved {name} of {design_id} to your Kiln account."
+            elif answer.get("code") == LOCKED_CODE:
+                row["code"] = LOCKED_CODE
+                row["said"] = answer["error"]
+            else:
+                row["code"] = answer.get("code")
+                why = str(answer.get("error") or "Kiln's servers did not keep it.").rstrip(".")
+                if _diverged(answer):
+                    why = "the branch in your Kiln account moved on another computer"
+                row["said"] = (
+                    f"Kiln did not save {name} of {design_id} to your Kiln account automatically "
+                    f"({why}). It is kept on this computer; `kiln cloud push {_shell(design_id)}` sends it."
+                )
+            rows.append(row)
+    return {"pushed": all(r["pushed"] for r in rows), "said": " ".join(r["said"] for r in rows), "branches": rows}
+
+
+def after_local_save(design_id: str, *, vault: Any = None) -> dict[str, Any]:
+    """What a version saved on this computer adds to the save's answer.
+
+    For an install without kiln-pro (kiln-pro saves its own): the version
+    is recorded on the design's checked-out branch, that branch is pushed
+    to the account when automatic saving is on, and the one-time offer is
+    made when the design reaches its third saved version.  Best effort: a
+    push that fails or is refused never fails the save, and says so.
+    """
+    try:
+        with _opened(vault) as v:
+            if not v.sync_from_library(design_id):
+                return {}
+            branch = v.checked_out(design_id)
+            changed = {design_id: [branch["branch_id"]]} if branch else {}
+            offer_due = v.version_count(design_id) >= _OFFER_AT_VERSIONS
+            return _after_change(changed, offer_due=offer_due, vault=v)
+    except Exception:  # noqa: BLE001 -- the version is saved; this is the extra
+        logger.warning("history: the step after saving %s failed", design_id, exc_info=True)
+        return {}
+
+
+def auto_push_setting(state: str, *, vault: Any = None) -> dict[str, Any]:
+    """Turn automatic saving to the account ``on`` or ``off``, or read its ``status``.
+
+    The switch lives in the person's Kiln account; Kiln's servers decide
+    whether their plan includes it and refuse in their own words when not.
+    """
+    if state not in ("on", "off", "status"):
+        return _refused(_PREFS_TOOL, "INVALID_INPUT", "Say on, off or status.")
+    if state != "status":
+        answer = _request(_PREFS_TOOL, "PUT", _PREFS_PATH, {"auto_backup": state == "on"}, timeout=_PREFS_WAIT_S)
+        if answer.get("status") == "error":
+            return answer
+    with _opened(vault) as v:
+        prefs, miss = _read_prefs(v, fresh=True)
+    if prefs is None:
+        if state == "status":
+            return {k: val for k, val in (miss or {}).items() if k != "last"}
+        prefs = {"auto_backup": state == "on", "is_set": True, "can_auto_backup": None}
+    on, allowed = prefs.get("auto_backup") is True, prefs.get("can_auto_backup")
+    if on and allowed is True:
+        said = (
+            "Automatic saving is on: after each save on this computer, Kiln saves the design's "
+            "history to your Kiln account. Designs locked to this computer are never saved there."
+        )
+    elif on and allowed is False:
+        said = (
+            "Automatic saving is on in your Kiln account, but your plan does not include it, "
+            "so nothing is saved automatically."
+        )
+    elif on:
+        said = (
+            "Automatic saving is on in your Kiln account, but Kiln's servers did not confirm "
+            "your plan includes it, so nothing is saved automatically yet."
+        )
+    else:
+        said = "Automatic saving is off: a design is saved to your Kiln account only when you push it."
+    return {
+        "status": "success",
+        "auto_push": "on" if on else "off",
+        "is_set": prefs.get("is_set") is True,
+        "can_auto_backup": allowed is True,
+        "said": said,
+    }
 
 
 #: The cloud routes of each library kind, and the CLI's word for it.
@@ -840,6 +1294,12 @@ def run_local(tool: str, mode: str, kwargs: dict[str, Any]) -> dict[str, Any]:
 
 
 __all__ = [
+    "LOCKED_CODE",
+    "after_local_save",
+    "auto_push_setting",
+    "lock_refusal",
+    "served_refusal",
+    "set_lock",
     "clone_library",
     "library_items_for_call",
     "pull_library",

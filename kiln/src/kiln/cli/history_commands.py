@@ -43,6 +43,17 @@ def _finish(answer: dict[str, Any], json_mode: bool, say: Callable[[dict[str, An
         sys.exit(1)
     if not json_mode:
         click.echo(say(answer))
+        _say_after(answer)
+
+
+def _say_after(answer: dict[str, Any]) -> None:
+    """What happened after the change was kept here: an automatic push, the offer."""
+    auto = answer.get("auto_push")
+    if isinstance(auto, dict) and auto.get("said"):
+        click.echo(_shown(auto["said"]))
+    offer = answer.get("auto_push_offer")
+    if isinstance(offer, dict) and offer.get("said"):
+        click.echo(f"{_shown(offer['said'])} Turn it on: {_shown(offer.get('turn_on', ''))}")
 
 
 def _branch_id(design_id: str, name_or_id: str) -> str:
@@ -250,7 +261,24 @@ def cloud_push(design_id: str, branch_id: str | None, replace: bool, json_mode: 
         click.echo(_shown(answer.get("error", ""), lines=True), err=True)
         click.echo("Run again with --replace to replace it.", err=True)
         sys.exit(1)
-    _finish(answer, json_mode, lambda a: _with_recipes(f"Pushed {design_id} to your Kiln account.", a, sent=True))
+    _finish(answer, json_mode, lambda a: _with_recipes(
+        _shown(a["said"]) if a.get("kept_as") else f"Pushed {design_id} to your Kiln account.", a, sent=True,
+    ))
+
+
+@cloud_group.command("auto-push")
+@click.argument("state", type=click.Choice(["on", "off", "status"]), default="status")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def cloud_auto_push(state: str, json_mode: bool) -> None:
+    """Save each design to your Kiln account after every save here (Kiln Pro).
+
+    Off until you turn it on.  Designs locked to this computer
+    (`kiln design lock`) are never saved there.
+    """
+    from kiln.history_courier import auto_push_setting
+
+    answer = auto_push_setting(state)
+    _finish(answer, json_mode, lambda a: _shown(a.get("said", "")))
 
 
 @cloud_group.command("pull")
@@ -560,6 +588,53 @@ def pr_show(pr_id: str, json_mode: bool) -> None:
     _finish(answer, json_mode, say)
 
 
+# ---------------------------------------------------------------------------
+# kiln design lock / unlock
+# ---------------------------------------------------------------------------
+
+
+def _set_lock(design_id: str, locked: bool, json_mode: bool) -> None:
+    from kiln.history_courier import set_lock
+
+    answer = set_lock(design_id, locked)
+    _finish(answer, json_mode, lambda a: _shown(a.get("said", "")))
+
+
+@click.command("lock")
+@click.argument("design_id")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def design_lock(design_id: str, json_mode: bool) -> None:
+    """Keep DESIGN_ID on this computer: never saved to your Kiln account."""
+    _set_lock(design_id, True, json_mode)
+
+
+@click.command("unlock")
+@click.argument("design_id")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def design_unlock(design_id: str, json_mode: bool) -> None:
+    """Let DESIGN_ID be saved to your Kiln account again."""
+    _set_lock(design_id, False, json_mode)
+
+
+@click.group("design")
+def design_group() -> None:
+    """Designs saved on this computer."""
+
+
+def register_design_lock_cli(cli_group: click.Group) -> None:
+    """Attach ``kiln design lock`` / ``unlock``: onto the ``design`` group the
+    CLI already has (kiln-pro's), else onto a group of their own."""
+    group = cli_group.commands.get("design")
+    if group is None:
+        group = design_group
+        cli_group.add_command(group)
+    if not isinstance(group, click.Group):
+        return
+    for command in (design_lock, design_unlock):
+        if command.name not in group.commands:
+            group.add_command(command)
+
+
 def register_history_cli(cli_group: click.Group) -> None:
     """Attach the design-history couriers.  Only for an install without kiln-pro."""
     for group in (branch_group, merge_group, release_group, cloud_group, pr_group):
@@ -567,4 +642,4 @@ def register_history_cli(cli_group: click.Group) -> None:
             cli_group.add_command(group)
 
 
-__all__ = ["register_history_cli"]
+__all__ = ["register_design_lock_cli", "register_history_cli"]

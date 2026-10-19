@@ -124,3 +124,22 @@ def test_a_teammates_text_cannot_drive_this_terminal(server):
     assert out.exit_code == 0, out.output
     assert "\x1b" not in out.output and "\x07" not in out.output
     assert "line one\nline two" in out.output
+
+
+def test_a_design_locked_to_this_computer_opens_no_pull_request(server):
+    """A pull request lives in the person's Kiln account; a design locked to
+    this computer is never kept there, so nothing is sent."""
+    from kiln.history_vault import HistoryVault
+
+    calls, _answers = server
+    vault = HistoryVault()
+    try:
+        vault.set_locked("mug", True)
+    finally:
+        vault.close()
+
+    out = _run("submit", "mug", "tweak", "main", "--title", "Thicker wall")
+
+    assert out.exit_code == 1 and calls == []
+    assert "mug is locked to this computer" in out.output
+    assert "kiln design unlock mug" in out.output
