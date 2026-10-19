@@ -520,6 +520,7 @@ HOSTED_DOORS: dict[str, tuple[str, str]] = {
     "kiln._pro_material_bridge": ("served_answer", "one material's catalogue record (a family's brand figures) the first time a door asks, kept on this computer; a miss is the record last kept, else the family's own range for a brand, each door saying why"),
     "kiln._pro_fleet_materials_bridge": ("served_answer", "a material answer across several machines (Kiln Business), from the rows the install sends and kept nowhere; a miss gives no cross-machine answer and says why, and one machine's own answer is never asked for"),
     "kiln._pro_material_pick_bridge": ("served_answer", "Kiln Pro's material pick for one part, asked only when the signed-in plan includes it and kept nowhere; a miss answers with the safety floor and its warnings"),
+    "kiln._pro_orientation_bridge": ("served_answer", "Kiln Pro's order of one part's print poses, asked once per part only when the signed-in plan includes it and kept nowhere; a miss ranks by bed contact"),
     "kiln._pro_load_bridge": ("served_answer", "what one part can carry, asked per part and kept nowhere; a miss gives no figure and the door says the part is unchecked, never that it holds"),
     "kiln.history_courier": ("served_answer", "design history pushed to, pulled from and cloned out of the person's account; a miss moves nothing and the history on this computer is untouched"),
     "kiln.stage_link": ("served_answer", "browser stage links; the four served causes word through here, the local stage is the floor"),
