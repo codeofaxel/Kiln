@@ -44,7 +44,7 @@ def _scrub(text: str) -> str:
     Deliberately secrets-only: the log file stays on the user's own
     machine, so local IPs and file paths remain readable for local
     debugging.  Text that LEAVES the machine goes through
-    :func:`kiln.redaction.redact_for_report` instead (see
+    :func:`kiln.redaction.redact_machine_text` instead (see
     :func:`read_log_tail`).
     """
     return redaction.redact_secrets(text, marker="***REDACTED***")
@@ -69,7 +69,8 @@ def read_log_tail(max_bytes: int = 16 * 1024, log_dir: str | None = None) -> str
     """Return the redacted tail of the rotating log, for bug reports.
 
     Reads the last *max_bytes* of ``kiln.log`` and runs the FULL boundary
-    redaction (secrets + private IPs + home-directory usernames) so the
+    redaction for machine-written text (secrets, home-directory usernames
+    and every place: :func:`kiln.redaction.redact_machine_text`) so the
     result is safe to attach to a report that leaves the machine.
     Returns ``None`` when there is no log or it can't be read — a report
     must never fail because its attachment did.
@@ -98,7 +99,9 @@ def read_log_tail(max_bytes: int = 16 * 1024, log_dir: str | None = None) -> str
     # A mid-file start leaves a partial first line; drop it.
     if size > max_bytes and "\n" in text:
         text = text.split("\n", 1)[1]
-    return redaction.redact_for_report(text)
+    # The log is what Kiln and the printers wrote, not the person's words:
+    # it leaves with every place cut, like a printer reading.
+    return redaction.redact_machine_text(text)
 
 
 def configure_logging(

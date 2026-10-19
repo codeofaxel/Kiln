@@ -18,7 +18,6 @@ from kiln.auto_orient import (
     SupportEstimate,
     _apply_rotation,
     _build_rotation_matrix,
-    _kiln_pro_score,
     _parse_3mf_transform,
     _rotate_triangles,
     _rotation_matrix_x,
@@ -862,8 +861,38 @@ _SCORER_MODULE = "kiln_pro.orientation_scoring"
 
 
 def _hide_scorer(monkeypatch) -> None:
-    """Make the kiln-pro scorer unimportable, as on a plain install."""
+    """Make the kiln-pro scorer unimportable, as on a plain install on the
+    free plan; Kiln's servers fail the test if asked."""
+    import kiln.licensing as licensing
+    import kiln.server as srv
+    from kiln import _pro_orientation_bridge as bridge
+
     monkeypatch.setitem(sys.modules, _SCORER_MODULE, None)
+    monkeypatch.setattr(licensing, "check_tier", lambda *a, **k: (False, "needs Kiln Pro"))
+    monkeypatch.setattr(bridge, "_service_down_until", 0.0)
+    monkeypatch.setattr(srv, "_pro_api_call", lambda *a, **k: pytest.fail("asked the servers"))
+
+
+def _served_ranking(monkeypatch, reply) -> list[dict]:
+    """A plain install (no kiln-pro) on a Kiln Pro plan, with Kiln's servers
+    stood in by *reply* (a dict, or a function of what was sent); returns
+    what was sent."""
+    import kiln.licensing as licensing
+    import kiln.server as srv
+    from kiln import _pro_orientation_bridge as bridge
+
+    monkeypatch.setitem(sys.modules, _SCORER_MODULE, None)
+    monkeypatch.setattr(licensing, "check_tier", lambda *a, **k: (True, None))
+    monkeypatch.setattr(bridge, "_service_down_until", 0.0)
+    sent: list[dict] = []
+
+    def wire(tool_name, /, _timeout=None, _asked_by_user=True, **kwargs):
+        assert tool_name == bridge.WIRE_TOOL
+        sent.append(kwargs)
+        return reply(kwargs) if callable(reply) else reply
+
+    monkeypatch.setattr(srv, "_pro_api_call", wire)
+    return sent
 
 
 def _stand_in_scorer(monkeypatch, score_fn) -> list[dict]:
@@ -896,7 +925,9 @@ class TestOrientationScoringSeam:
         """With the scorer unimportable, a short and a tall prism on the same
         base score the same: height, support and overhang do not enter."""
         _hide_scorer(monkeypatch)
-        assert _kiln_pro_score({"bed_contact_pct": 42.0}) is None
+        from kiln import _pro_orientation_bridge
+
+        assert _pro_orientation_bridge.rank([{"bed_contact_pct": 42.0}]) is None
 
         short = find_optimal_orientation(_make_flat_cube_stl(tmp_path, 20, 20, 5), candidates=1)
         tall = find_optimal_orientation(_make_flat_cube_stl(tmp_path, 20, 20, 60), candidates=1)
@@ -1054,3 +1085,71 @@ class TestTheRankingNote:
         _hide_scorer(monkeypatch)
         out = _auto_orient_tool()(file_path=_make_flat_cube_stl(tmp_path, 10, 10, 80))
         assert out["success"] is True and "upgrade_hint" not in out
+
+
+class TestKilnProRankingOnAPlainInstall:
+    """A plain ``pip install kiln3d`` has no kiln-pro.  Until 2026-10-18 it
+    ranked every caller's poses by bed contact, paying or not: Kiln's own
+    ranking was reached only by importing kiln-pro.  Now a Kiln Pro plan asks
+    Kiln's servers ONCE per part for the poses' order, best first -- never a
+    score (``kiln._pro_orientation_bridge``); a free plan never waits on the
+    network; any miss is the floor."""
+
+    def test_a_pro_plan_gets_the_served_order_in_one_ask(self, tmp_path, monkeypatch):
+        """The servers' order decides the best pose; the scores shown stay
+        the floor's.  Here the servers prefer the LAST candidate."""
+        stl = _make_flat_cube_stl(tmp_path, 20, 20, 5)
+        _hide_scorer(monkeypatch)
+        floor = find_optimal_orientation(stl, candidates=6)
+
+        sent = _served_ranking(
+            monkeypatch,
+            lambda kw: {"success": True, "status": "ok", "known": True,
+                        "order": list(reversed(range(len(kw["candidates"]))))},
+        )
+        pro = find_optimal_orientation(stl, candidates=6)
+        assert len(sent) == 1, "one ask per part, never one per pose"
+        poses = sent[0]["candidates"]
+        assert len(poses) == 7  # the original pose and the six candidates
+        assert all(set(p) == {"bed_contact_pct", "support_pct", "print_height_mm", "overhang_pct"} for p in poses)
+        # Candidates are generated X-major over 0, 45, ... degrees, so the
+        # sixth (the last one sent) is X=0, Y=225; the floor would not pick it.
+        assert (pro.best.rotation_x, pro.best.rotation_y) == (0.0, 225.0)
+        assert (floor.best.rotation_x, floor.best.rotation_y) != (0.0, 225.0)
+        # No score crosses the wire: every score shown is the floor's own.
+        assert pro.original_score == floor.original_score
+        assert pro.best.score <= floor.best.score
+
+    def test_a_free_plan_never_asks(self, tmp_path, monkeypatch):
+        stl = _make_flat_cube_stl(tmp_path, 20, 20, 5)
+        _hide_scorer(monkeypatch)  # fails the test if the servers are asked
+        assert find_optimal_orientation(stl).best.score > 0
+
+    @pytest.mark.parametrize(
+        "reply",
+        [
+            {"success": False, "status": "error", "code": "TIER_REQUIRED", "error": "needs Kiln Pro"},
+            {"success": True, "status": "ok", "known": False, "order": None},
+            {"success": True, "status": "ok", "known": True, "order": [0, 0, 1]},
+            {"success": True, "status": "ok", "known": True, "order": "best first"},
+            "not a dict",
+        ],
+    )
+    def test_any_miss_is_the_floor(self, tmp_path, monkeypatch, reply):
+        stl = _make_flat_cube_stl(tmp_path, 20, 20, 5)
+        _hide_scorer(monkeypatch)
+        floor = find_optimal_orientation(stl, candidates=6)
+        _served_ranking(monkeypatch, reply)
+        assert find_optimal_orientation(stl, candidates=6).to_dict() == floor.to_dict()
+
+    def test_servers_that_do_not_answer_are_left_alone_for_a_while(self, tmp_path, monkeypatch):
+        stl = _make_flat_cube_stl(tmp_path, 20, 20, 5)
+
+        def offline(kwargs):
+            raise ConnectionError("no route to host")
+
+        sent = _served_ranking(monkeypatch, offline)
+        for _ in range(3):
+            find_optimal_orientation(stl, candidates=4)
+        assert len(sent) == 1
+

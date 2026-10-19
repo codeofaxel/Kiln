@@ -28,12 +28,19 @@ servers for the length of the call and is not kept there.
 computer, a push keeps this computer's versions in the account as a branch
 of their own, ``<branch>@<computer>``, and says how to merge it.  Nothing is
 ever merged automatically.
+
+A push sends each model once: it asks the account which models it already
+keeps (``POST /api/cloud/meshes/stored``), sends the missing ones as their
+own bytes, one a request (``PUT /api/cloud/meshes/<sha256>``), and pushes
+the history naming each version's model by ``mesh_sha256``.  A server that
+does not know the question gets the models inside the push instead.
 """
 
 from __future__ import annotations
 
 import base64
 import contextlib
+import hashlib
 import json
 import logging
 import shlex
@@ -53,6 +60,11 @@ _MAX_DESIGNS = 4
 #: history call.
 _MESH_BUDGET = 16 * 1024 * 1024
 _WAIT_S = 120.0
+#: The most fingerprints one "which models do you keep?" request names,
+#: matching what the server takes.
+_MAX_FINGERPRINTS_ASKED = 1000
+#: How much of a model file is read at a time while it is fingerprinted.
+_HASH_CHUNK = 1024 * 1024
 
 _DESIGN_KEYS = ("design_id",)
 _ARTIFACT_KEY = "artifact_id"
@@ -519,8 +531,14 @@ def call_served(tool: str, *, kinds: tuple[str, ...] = ("designs",), **kwargs: A
 
 
 def _request(
-    tool: str, method: str, path: str, body: dict[str, Any] | None = None, *, timeout: float | None = None,
+    tool: str, method: str, path: str, body: dict[str, Any] | None = None, *,
+    timeout: float | None = None, content: bytes | None = None,
 ) -> dict[str, Any]:
+    """Call one of Kiln's cloud routes as the signed-in person.
+
+    *body* goes as JSON; *content*, when given, goes instead as the file's
+    own bytes (``application/octet-stream``).
+    """
     import httpx
 
     from kiln.auth_session import _api_base, resolve_api_bearer
@@ -546,9 +564,13 @@ def _request(
     except Exception:  # noqa: BLE001 — a header is never worth failing over
         version = ""
     headers = {"Authorization": f"Bearer {bearer}", "X-Kiln-Client-Version": version}
+    sent: dict[str, Any] = {"json": body}
+    if content is not None:
+        sent = {"content": content}
+        headers["Content-Type"] = "application/octet-stream"
     try:
         resp = httpx.request(
-            method, f"{_api_base()}{path}", json=body, headers=headers, timeout=timeout or _WAIT_S,
+            method, f"{_api_base()}{path}", headers=headers, timeout=timeout or _WAIT_S, **sent,
         )
     except Exception as exc:  # noqa: BLE001
         return envelope_for_transport(tool, exc, host=_api_base(), kind="sync")
@@ -753,6 +775,7 @@ def push(tool: str, design_id: str, branch_id: str | None = None, *, replace_con
             return _refused(tool, "BRANCH_NOT_FOUND", f"No branch {branch_id or 'main'} of {design_id} on this computer.")
         members = vault.memberships(branch["branch_id"])
         versions, sidecars = [], []
+        meshes: dict[str, Path] = {}
         for m in members:
             v = vault.version(m["version_id"])
             if v is None:
@@ -760,7 +783,7 @@ def push(tool: str, design_id: str, branch_id: str | None = None, *, replace_con
             recipe = dict(v["recipe"])
             mesh = vault.mesh_path(v.get("mesh_sha256"))
             if mesh is not None:
-                recipe["mesh_bytes_b64"] = base64.b64encode(mesh.read_bytes()).decode("ascii")
+                meshes[v["version_id"]] = mesh
                 recipe["stl_path"] = mesh.name
             versions.append({
                 "version_id": v["version_id"],
@@ -781,6 +804,9 @@ def push(tool: str, design_id: str, branch_id: str | None = None, *, replace_con
     }
     if replace_confirmed:
         body["replace_confirmed"] = True
+    refused = _send_models(tool, body, meshes)
+    if refused is not None:
+        return refused
     answer = _request(tool, "POST", f"/api/cloud/designs/{_quote(design_id)}/branches/push", body)
     if _diverged(answer):
         out = _keep_as_this_computers(tool, design_id, branch, body, answer, vault=None if own else vault)
@@ -878,6 +904,77 @@ def _keep_as_this_computers(
             f"merged. To bring them together, run `{pull_cmd}`, then `{check}` and `{run}`."
         ),
     }
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(_HASH_CHUNK), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _carry_models(body: dict[str, Any], meshes: dict[str, Path]) -> None:
+    """Put each model inside the push, for a server that predates sending them once."""
+    for sidecar in body["provenance_sidecars"]:
+        mesh = meshes.get(sidecar["version_id"])
+        if mesh is not None:
+            sidecar["recipe_dict"]["mesh_bytes_b64"] = base64.b64encode(mesh.read_bytes()).decode("ascii")
+
+
+def _send_models(tool: str, body: dict[str, Any], meshes: dict[str, Path]) -> dict[str, Any] | None:
+    """Put each model a push uses in the person's account once, by fingerprint.
+
+    Asks which of them the account keeps, sends only the missing ones, one a
+    request, and names each version's model by ``mesh_sha256`` in *body*;
+    Kiln's server refuses a push naming a model the account does not keep.
+    A server that does not know the question gets the models inside *body*
+    instead, as pushes always carried them.  Returns ``None`` when the push
+    may go, or the refusal to answer with when a model was not kept: nothing
+    is pushed then.
+    """
+    shas: dict[str, str] = {}
+    for version_id, mesh in meshes.items():
+        try:
+            shas[version_id] = _file_sha256(mesh)
+        except OSError as exc:
+            return _refused(
+                tool, "MODEL_UNREADABLE",
+                f"Kiln could not read the model of version {version_id} on this computer "
+                f"({exc}), so nothing was pushed.",
+            )
+    wanted = sorted(set(shas.values()))
+    kept: set[str] = set()
+    for start in range(0, len(wanted), _MAX_FINGERPRINTS_ASKED):
+        answer = _request(
+            tool, "POST", "/api/cloud/meshes/stored",
+            {"sha256s": wanted[start:start + _MAX_FINGERPRINTS_ASKED]},
+        )
+        if answer.get("status") == "error" and answer.get("http_status") not in (404, 405):
+            return answer
+        stored = answer.get("stored")
+        if not isinstance(stored, list):
+            _carry_models(body, meshes)
+            return None
+        kept |= {s for s in stored if isinstance(s, str)}
+    for version_id, sha in shas.items():
+        if sha in kept:
+            continue
+        answer = _request(tool, "PUT", f"/api/cloud/meshes/{sha}", content=meshes[version_id].read_bytes())
+        if answer.get("status") == "error":
+            return {
+                **answer,
+                "version_id": version_id,
+                "error": (
+                    f"The model of version {version_id} was not kept in your Kiln account, so "
+                    f"nothing was pushed: {answer.get('error') or 'Kiln did not say why.'}"
+                ),
+            }
+        kept.add(sha)
+    for version in body["versions"]:
+        if version["version_id"] in shas:
+            version["mesh_sha256"] = shas[version["version_id"]]
+    return None
 
 
 def pull(

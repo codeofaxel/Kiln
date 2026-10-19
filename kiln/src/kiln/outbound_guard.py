@@ -103,11 +103,12 @@ def machine_code(value: Any) -> str | None:
 
 
 def redact_text(text: str) -> str:
-    """*text* as it may leave for Kiln's servers: the one boundary rule
-    (:func:`kiln.redaction.redact_for_report`), shared with bug reports."""
-    from kiln.redaction import redact_for_report
+    """*text* read off a machine, as it may leave for Kiln's servers
+    (:func:`kiln.redaction.redact_machine_text`).  A report keeps the links
+    the person wrote; nothing a printer says keeps one."""
+    from kiln.redaction import redact_machine_text
 
-    return redact_for_report(text)
+    return redact_machine_text(text)
 
 
 def scrub(value: Any, _depth: int = 0) -> Any:
@@ -171,6 +172,11 @@ SENDERS: dict[str, tuple[str, str]] = {
         "relayed to that session",
     ),
     "kiln/monitor_twin.py": ("person's_own", "the sliced file of the print the person is watching on the web"),
+    "kiln/history_courier.py": (
+        "person's_own",
+        "the person's own design history (records and models) with each history call they "
+        "make, and what they push, pull or clone with their own account",
+    ),
     "kiln/account_plan.py": ("own_schema", "asks which plan the signed-in account holds; sends only the sign-in"),
     "kiln/plugins/spend_cap_tools.py": (
         "person's_own", "the spending limits the person reads, sets or approves on their own account",

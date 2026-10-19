@@ -11,12 +11,16 @@ touched home directories):
 * the agent loop (``kiln.agent_loop._redact_sensitive_data``) — text sent
   to an external LLM drops secrets and private IPs, but keeps real file
   paths because the model must echo them back into tool calls;
-* the boundary with Kiln's servers (:func:`redact_for_report`) — text that
-  leaves the machine for Kiln's servers drops everything: secrets, network
-  and hardware addresses, web addresses, local host names, device paths,
-  email addresses, and home-directory names (a ``/Users/<name>`` component
-  is the user's real name).  A bug report's log tail and every machine-read
-  value sent to Kiln's servers (:mod:`kiln.outbound_guard`) use it.
+* the bug-report boundary (:func:`redact_for_report`) — a report's text
+  and its log tail leave the machine for Kiln's servers without secrets,
+  private IPs or home-directory names (a ``/Users/<name>`` component is the
+  user's real name).  A link the person wrote stays: a working URL form is
+  often what a report is for;
+* text a machine wrote (:func:`redact_machine_text`): what Kiln reads off a
+  printer (:mod:`kiln.outbound_guard`) and a report's log tail
+  (:func:`kiln.log_config.read_log_tail`) — the report rules plus every
+  place (:func:`redact_places`): web, network and hardware addresses, local
+  host names, device paths and email addresses.
 
 The surfaces intentionally differ in WHAT they redact; this module makes
 them share HOW, so a pattern added here reaches all of them and the sets
@@ -142,11 +146,21 @@ def redact_home_paths(text: str) -> str:
     return text
 
 
+def redact_machine_text(text: str) -> str:
+    """Text a machine wrote, as it may leave for Kiln's servers: a report's
+    rules (:func:`redact_for_report`) and every place besides
+    (:func:`redact_places`).  Nobody chose to send a link in a log line or a
+    printer's reading, so none survives."""
+    return redact_places(redact_for_report(text))
+
+
 def redact_for_report(text: str) -> str:
     """Full boundary redaction for text leaving the user's machine.
 
-    Secrets + addresses of every kind (:func:`redact_places`) +
-    home-directory usernames.  UNCONDITIONAL —
+    Secrets + private IPs + home-directory usernames.  Links stay: a
+    report is the person's own words, and the URL form that worked is often
+    its whole point (text a machine wrote goes through
+    :func:`redact_machine_text` instead).  UNCONDITIONAL —
     deliberately not gated by ``KILN_LLM_PRIVACY_MODE``, which controls
     LLM traffic only.  Turning that switch off must never quietly turn
     off bug-report redaction (they are unrelated privacy surfaces).
@@ -155,5 +169,4 @@ def redact_for_report(text: str) -> str:
         return text
     text = redact_secrets(text)
     text = redact_private_ips(text)
-    text = redact_places(text)
     return redact_home_paths(text)

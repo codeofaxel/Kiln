@@ -420,6 +420,95 @@ class TestPushCarriesTheBranch:
         assert answer["code"] == "BRANCH_NOT_FOUND"
 
 
+def _sha(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _account(stored: object, put_answer: dict | None = None):
+    """A stand-in for Kiln's cloud routes; every call it receives is kept."""
+    calls: list[tuple[str, str, object, bytes | None]] = []
+
+    def answer(tool, method, path, body=None, *, content=None):
+        calls.append((method, path, body, content))
+        if path == "/api/cloud/meshes/stored":
+            return stored if isinstance(stored, dict) else {"stored": list(stored)}
+        if method == "PUT":
+            return put_answer or {"sha256": path.rsplit("/", 1)[1], "stored": True}
+        return {"pushed_versions": ["v1", "v2"]}
+
+    return answer, calls
+
+
+class TestAPushSendsEachModelOnce:
+    def test_only_the_models_the_account_lacks_go_up_and_the_push_names_them(self, home, monkeypatch):
+        _library(home, "mug", [MESH_V1, MESH_V2])
+        answer, calls = _account([_sha(MESH_V1)])
+        monkeypatch.setattr(courier, "_request", answer)
+        assert courier.push("cloud_push_branch", "mug")["status"] == "success"
+        assert calls[0][:3] == (
+            "POST", "/api/cloud/meshes/stored", {"sha256s": sorted([_sha(MESH_V1), _sha(MESH_V2)])},
+        )
+        assert [(m, p, c) for m, p, _, c in calls if m == "PUT"] == [
+            ("PUT", f"/api/cloud/meshes/{_sha(MESH_V2)}", MESH_V2),
+        ]
+        method, path, body, _ = calls[-1]
+        assert (method, path) == ("POST", "/api/cloud/designs/mug/branches/push")
+        assert [v["mesh_sha256"] for v in body["versions"]] == [_sha(MESH_V1), _sha(MESH_V2)]
+        assert all("mesh_bytes_b64" not in s["recipe_dict"] for s in body["provenance_sidecars"])
+        assert str(home) not in json.dumps(body)
+
+    def test_a_server_that_does_not_know_the_question_gets_the_models_inside_the_push(self, home, monkeypatch):
+        _library(home, "mug", [MESH_V1, MESH_V2])
+        answer, calls = _account({
+            "status": "error", "success": False, "code": "KILN_API_HTTP_ERROR", "http_status": 404,
+        })
+        monkeypatch.setattr(courier, "_request", answer)
+        assert courier.push("cloud_push_branch", "mug")["status"] == "success"
+        assert [m for m, *_ in calls] == ["POST", "POST"]
+        body = calls[-1][2]
+        assert all("mesh_sha256" not in v for v in body["versions"])
+        meshes = [base64.b64decode(s["recipe_dict"]["mesh_bytes_b64"]) for s in body["provenance_sidecars"]]
+        assert meshes == [MESH_V1, MESH_V2]
+
+    def test_a_model_the_account_will_not_keep_stops_the_push_by_name(self, home, monkeypatch):
+        _library(home, "mug", [MESH_V1, MESH_V2])
+        answer, calls = _account([], put_answer={
+            "status": "error", "success": False, "code": "MESH_TOO_LARGE", "http_status": 413,
+            "error": "Kiln keeps models of up to 64 MB in your account.",
+        })
+        monkeypatch.setattr(courier, "_request", answer)
+        out = courier.push("cloud_push_branch", "mug")
+        assert out["status"] == "error" and out["code"] == "MESH_TOO_LARGE"
+        assert out["version_id"] in out["error"]
+        assert not [p for _, p, *_ in calls if p.endswith("/branches/push")]
+
+    def test_a_refused_question_is_said_and_nothing_is_pushed(self, home, monkeypatch):
+        _library(home, "mug", [MESH_V1])
+        answer, calls = _account({
+            "status": "error", "success": False, "code": "KILN_AUTH_REJECTED", "http_status": 401,
+            "error": "Sign in again.",
+        })
+        monkeypatch.setattr(courier, "_request", answer)
+        out = courier.push("cloud_push_branch", "mug")
+        assert out["code"] == "KILN_AUTH_REJECTED"
+        assert [p for _, p, *_ in calls] == ["/api/cloud/meshes/stored"]
+
+    def test_a_model_goes_as_its_own_bytes(self, home, monkeypatch):
+        import httpx
+
+        monkeypatch.setenv("KILN_LICENSE_KEY", "kiln-test-key")
+        sent = {}
+
+        def fake(method, url, **kw):
+            sent.update(method=method, url=url, **kw)
+            return httpx.Response(200, json={"stored": True})
+
+        monkeypatch.setattr(httpx, "request", fake)
+        courier._request("cloud_push_branch", "PUT", "/api/cloud/meshes/" + _sha(MESH_V1), content=MESH_V1)
+        assert sent["content"] == MESH_V1 and "json" not in sent
+        assert sent["headers"]["Content-Type"] == "application/octet-stream"
+
+
 def test_one_call_carries_at_most_one_mesh_budget_across_designs(home, monkeypatch):
     for design in ("mug", "bowl"):
         _library(home, design, [MESH_V1])
@@ -953,7 +1042,10 @@ class TestProvenRecipesTravelWithTheDesign:
 
         answer = courier.push("cloud_push_branch", "mug")
 
-        assert [c[1] for c in routes.calls] == ["/api/cloud/designs/mug/branches/push"]
+        # The models' question, then the branch: no recipes call.
+        assert [c[1] for c in routes.calls] == [
+            "/api/cloud/meshes/stored", "/api/cloud/designs/mug/branches/push",
+        ]
         assert "proven_recipes" not in answer
 
     def test_recipes_the_account_refused_leave_the_branch_pushed_and_say_so(self, home, monkeypatch):
