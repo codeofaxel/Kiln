@@ -730,9 +730,11 @@ def _print_history(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | No
 _STEPS: dict[str, Callable[[str, dict[str, Any]], tuple[str | None, dict[str, Any] | None]]] = {
     "slice": _slice,
 }
+#: The reading that sends this install's printers: each one's name and model.
+PRINTER_FACTS = "printer_facts"
 #: ...and steps that READ facts (sent with the next call as they are).
 _READS: dict[str, Callable[[str, dict[str, Any]], tuple[dict[str, Any] | None, dict[str, Any] | None]]] = {
-    "printer_facts": _printer_facts,
+    PRINTER_FACTS: _printer_facts,
     "print_history": _print_history,
 }
 #: ...and the one kind that ACTS: a step names one of this install's own

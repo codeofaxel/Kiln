@@ -19640,8 +19640,13 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                     if not_read is not None:
                         return not_read
                 # The printer a file is being made for is one only this
-                # computer can name.
-                kwargs = _with_local_printer(kwargs, _inputs)
+                # computer can name.  A tool that was just sent this
+                # install's printers (each with its model) is told which one
+                # by the person's own name for it: a model in its place
+                # matches two printers of that model, and an unknown model
+                # sends the connection type, which matches none.
+                if served_steps.PRINTER_FACTS not in pre_read:
+                    kwargs = _with_local_printer(kwargs, _inputs)
                 # Every file the call names on this computer goes up first,
                 # and a make still on the servers is named by its token.
                 trip: dict = {}

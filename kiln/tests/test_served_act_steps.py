@@ -714,7 +714,11 @@ class TestThroughTheStub:
         facts = first["step_results"]["printer_facts"]["data"]
         assert facts["printers"][0]["job"]["current_layer"] == 9
         assert facts["printers"][0]["type"] == "bambu"
-        assert first["printer_name"] == "bambu_a1"  # the stub's own naming of an unnamed printer
+        # The printers went with the call, the default one marked, so an
+        # unnamed printer stays unnamed: its model in the name's place used
+        # to lose it (two of one model, or one whose model is unknown).
+        assert "printer_name" not in first
+        assert facts["printers"][0]["is_default"] is True
         assert "run_actions" not in first
 
     def test_an_action_is_shown_first_and_nothing_runs(self, stub, doors, handed_file, monkeypatch, tmp_path):
