@@ -335,6 +335,7 @@ class TestKilnProSeam:
         import sys
 
         monkeypatch.setitem(sys.modules, _RECOMMENDER_MODULE, None)
+        _free_plan_and_no_servers(monkeypatch)
         _overlay_merged()
         for text, printer in (
             ("strong functional part", {}),
@@ -380,6 +381,114 @@ class TestKilnProSeam:
         rec = recommend_material_for_design("flexible gasket", printer_has_direct_drive=False)
         assert rec.to_dict() == _floor("flexible gasket", printer_has_direct_drive=False)
         assert any("direct drive" in w for w in rec.warnings)
+
+
+def _free_plan_and_no_servers(monkeypatch) -> list:
+    """A plain install on the free plan, with Kiln's servers stood in by a
+    recorder that fails the test if asked."""
+    import kiln.licensing as licensing
+    import kiln.server as srv
+    from kiln import _pro_material_pick_bridge as bridge
+
+    monkeypatch.setattr(licensing, "check_tier", lambda *a, **k: (False, "needs Kiln Pro"))
+    monkeypatch.setattr(bridge, "_service_down_until", 0.0)
+    asked: list = []
+    monkeypatch.setattr(srv, "_pro_api_call", lambda *a, **k: asked.append((a, k)) or pytest.fail("asked the servers"))
+    return asked
+
+
+def _served(monkeypatch, reply) -> list[dict]:
+    """A plain install (no kiln-pro) on a Kiln Pro plan, with Kiln's servers
+    stood in by *reply*; returns what was sent."""
+    import sys
+
+    import kiln.licensing as licensing
+    import kiln.server as srv
+    from kiln import _pro_material_pick_bridge as bridge
+
+    monkeypatch.setitem(sys.modules, _RECOMMENDER_MODULE, None)
+    monkeypatch.setattr(licensing, "check_tier", lambda *a, **k: (True, None))
+    monkeypatch.setattr(bridge, "_service_down_until", 0.0)
+    sent: list[dict] = []
+
+    def wire(tool_name, /, _timeout=None, _asked_by_user=True, **kwargs):
+        assert tool_name == bridge.WIRE_TOOL
+        sent.append(kwargs)
+        return reply(kwargs) if callable(reply) else reply
+
+    monkeypatch.setattr(srv, "_pro_api_call", wire)
+    return sent
+
+
+_PICK = {
+    "material_id": "petg",
+    "score": 81.0,
+    "reasons": ["picked on Kiln's servers"],
+    "warnings": ["Requires direct drive extruder — bowden setups cannot reliably print TPU."],
+    "alternatives": [{"material_id": "asa", "display_name": "ASA", "score": 70.0, "reasons": [], "warnings": []}],
+    "recommended_brands": [{"profile_id": "x_petg", "brand": "X"}],
+}
+
+
+class TestKilnProPickOnAPlainInstall:
+    """A plain ``pip install kiln3d`` has no kiln-pro.  Until 2026-10-18 it
+    answered every caller, paying or not, with the safety floor: the pick
+    was reached only by importing kiln-pro.  Now a Kiln Pro plan asks Kiln's
+    servers for the pick (``kiln._pro_material_pick_bridge``); a free plan
+    never waits on the network; any miss is the floor with its warnings."""
+
+    def test_a_pro_plan_gets_the_served_pick(self, monkeypatch):
+        sent = _served(monkeypatch, {"success": True, "status": "ok", "known": True, "pick": dict(_PICK)})
+        rec = recommend_material_for_design(
+            "strong bracket", printer_has_enclosure=True, printer_has_direct_drive=False,
+            max_hotend_temp_c=260, supported_materials=["petg", "asa"],
+        )
+        assert rec.material.material_id == "petg" and rec.score == 81.0
+        assert rec.reasons == ["picked on Kiln's servers"]
+        assert any("direct drive" in w for w in rec.warnings)
+        assert rec.alternatives[0]["material_id"] == "asa" and rec.recommended_brands[0]["brand"] == "X"
+        assert sent == [{
+            "requirements_text": "strong bracket", "printer_has_enclosure": True,
+            "printer_has_direct_drive": False, "max_hotend_temp_c": 260,
+            "supported_materials": ["petg", "asa"],
+        }]
+
+    def test_a_free_plan_never_asks_and_gets_the_floor(self, monkeypatch):
+        import sys
+
+        monkeypatch.setitem(sys.modules, _RECOMMENDER_MODULE, None)
+        asked = _free_plan_and_no_servers(monkeypatch)
+        rec = recommend_material_for_design("flexible gasket", printer_has_direct_drive=False)
+        assert rec.to_dict() == _floor("flexible gasket", printer_has_direct_drive=False)
+        assert any("direct drive" in w for w in rec.warnings)
+        assert asked == []
+
+    @pytest.mark.parametrize(
+        "reply",
+        [
+            {"success": False, "status": "error", "code": "TIER_REQUIRED", "error": "needs Kiln Pro"},
+            {"success": True, "status": "ok", "known": False, "pick": None},
+            {"success": True, "status": "ok", "known": True, "pick": {"material_id": "unobtanium", "score": 1}},
+            {"success": True, "status": "ok", "known": True, "pick": {"material_id": "petg", "score": "high"}},
+            "not a dict",
+        ],
+    )
+    def test_any_miss_is_the_floor_with_its_warnings(self, monkeypatch, reply):
+        _served(monkeypatch, reply)
+        rec = recommend_material_for_design("flexible gasket", printer_has_direct_drive=False)
+        assert rec.to_dict() == _floor("flexible gasket", printer_has_direct_drive=False)
+        assert any("direct drive" in w for w in rec.warnings)
+
+    def test_servers_that_do_not_answer_are_left_alone_for_a_while(self, monkeypatch):
+        """A make asks for the pick on its way; a dead network must not cost
+        every make the full wait."""
+        def offline(kwargs):
+            raise ConnectionError("no route to host")
+
+        sent = _served(monkeypatch, offline)
+        for _ in range(3):
+            assert recommend_material_for_design("strong bracket").to_dict() == _floor("strong bracket")
+        assert len(sent) == 1
 
 
 # ---------------------------------------------------------------------------
