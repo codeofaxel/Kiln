@@ -22,6 +22,14 @@ keeps (``POST /api/cloud/meshes/stored``), sends the missing ones as their
 own bytes, one a request (``PUT /api/cloud/meshes/<sha256>``), and pushes
 the history naming each version's model by ``mesh_sha256``.  A server that
 does not know the question gets the models inside the push instead.
+
+A pull or a clone brings each model once the same way: it asks for an
+answer naming each version's model, fetches each one this computer does not
+keep, one a request (``GET /api/cloud/meshes/<sha256>``), checks each against
+the fingerprint it asked for, and only then records the history.  A server
+that answers with the models inside (one that predates this) is read as
+before, and so is the answer asked for again when a model cannot come on
+its own.
 """
 
 from __future__ import annotations
@@ -48,6 +56,15 @@ _WAIT_S = 120.0
 _MAX_FINGERPRINTS_ASKED = 1000
 #: How much of a model file is read at a time while it is fingerprinted.
 _HASH_CHUNK = 1024 * 1024
+#: The field a pull or clone asks with to have its models named rather than
+#: carried, and the value; Kiln's answer carries the same pair when it did.
+_MESH_TRANSPORT = "mesh_transport"
+_BY_FINGERPRINT = "by_sha256"
+#: The longest wait on the API's request rate one model's fetch sits out
+#: (seconds), and how many times it waits for the same model.  A longer wait
+#: is an allowance for the day: said, never sat out.
+_RATE_WAIT_MAX_S = 120
+_RATE_WAITS_PER_MODEL = 5
 
 _DESIGN_KEYS = ("design_id",)
 _ARTIFACT_KEY = "artifact_id"
@@ -472,11 +489,13 @@ def call_served(tool: str, *, kinds: tuple[str, ...] = ("designs",), **kwargs: A
 
 def _request(
     tool: str, method: str, path: str, body: dict[str, Any] | None = None, *, content: bytes | None = None,
+    raw: bool = False,
 ) -> dict[str, Any]:
     """Call one of Kiln's cloud routes as the signed-in person.
 
     *body* goes as JSON; *content*, when given, goes instead as the file's
-    own bytes (``application/octet-stream``).
+    own bytes (``application/octet-stream``).  With *raw*, a success comes
+    back as ``{"content": <the answer's own bytes>}``.
     """
     import httpx
 
@@ -511,6 +530,8 @@ def _request(
         resp = httpx.request(method, f"{_api_base()}{path}", headers=headers, timeout=_WAIT_S, **sent)
     except Exception as exc:  # noqa: BLE001
         return envelope_for_transport(tool, exc, host=_api_base(), kind="sync")
+    if raw and resp.status_code < 400:
+        return {"content": resp.content}
     try:
         data = resp.json()
     except Exception:  # noqa: BLE001
@@ -524,6 +545,8 @@ def _request(
         answer.setdefault("code", "NOT_FOUND" if resp.status_code == 404 else "KILN_API_HTTP_ERROR")
         answer.setdefault("tool", tool)
         answer.setdefault("http_status", resp.status_code)
+        if resp.status_code == 429 and str(resp.headers.get("Retry-After") or "").isdigit():
+            answer.setdefault("retry_after", int(resp.headers["Retry-After"]))
         return answer
     if isinstance(data, list):
         return {"items": data}
@@ -715,33 +738,159 @@ def pull(
     if not branch_id and not branch_name:
         branch_name = "main"
     body = {"branch_id": branch_id, "branch_name": branch_name, "since_version_id": since_version_id}
-    answer = _request(tool, "POST", f"/api/cloud/designs/{_quote(design_id)}/branches/pull", body)
-    if answer.get("status") == "error":
-        return answer
-    return _keep_here(tool, design_id, answer, vault)
+    path = f"/api/cloud/designs/{_quote(design_id)}/branches/pull"
+    return _bring_here(tool, design_id, lambda named: _request(tool, "POST", path, _asking(body, named)), vault)
 
 
 def clone(tool: str, design_id: str, *, vault: Any = None) -> dict[str, Any]:
     """Bring a whole design, and its proven recipes, from the person's Kiln
     account onto this computer."""
-    answer = _request(tool, "POST", f"/api/cloud/designs/{_quote(design_id)}/clone", {})
-    if answer.get("status") == "error":
-        return answer
-    return _keep_here(tool, design_id, answer, vault)
+    path = f"/api/cloud/designs/{_quote(design_id)}/clone"
+    return _bring_here(tool, design_id, lambda named: _request(tool, "POST", path, _asking({}, named)), vault)
 
 
-def _keep_here(tool: str, design_id: str, answer: dict[str, Any], vault: Any) -> dict[str, Any]:
+def _asking(body: dict[str, Any], models_named: bool) -> dict[str, Any]:
+    """*body*, asking for an answer that names its models when *models_named*."""
+    return {**body, _MESH_TRANSPORT: _BY_FINGERPRINT} if models_named else body
+
+
+def _bring_here(tool: str, design_id: str, ask: Any, vault: Any) -> dict[str, Any]:
+    """Ask for a pull or clone answer naming its models, fetch the ones this
+    computer lacks, and keep the history here.
+
+    *ask(models_named)* sends the request.  An answer carrying its models (a
+    server that predates naming them) is kept as it came; when a model
+    cannot come on its own the request is sent again for an answer carrying
+    them.  A model whose bytes are not the fingerprint asked for, or one
+    that could not be fetched, stops the pull before anything is recorded.
+    """
     from kiln.history_vault import HistoryVault
 
+    answer = ask(True)
+    if answer.get("status") == "error":
+        return answer
     own = vault is None
     vault = vault or HistoryVault()
     try:
-        applied = vault.apply_remote({**answer, "design_id": design_id})
+        kept: dict[str, str] = {}
+        models: dict[str, Any] | None = None
+        if answer.get(_MESH_TRANSPORT) == _BY_FINGERPRINT:
+            fetched = _fetch_models(tool, answer, vault)
+            if fetched is None:
+                answer = ask(False)
+                if answer.get("status") == "error":
+                    return answer
+            elif fetched.get("status") == "error":
+                return fetched
+            else:
+                kept, models = fetched["kept"], fetched["models"]
+        applied = vault.apply_remote({**answer, "design_id": design_id}, kept_models=kept)
         recipes = _bring_recipes(tool, design_id, vault)
     finally:
         if own:
             vault.close()
-    return {"status": "success", "applied": applied, "design_id": design_id, "proven_recipes": recipes}
+    out = {"status": "success", "applied": applied, "design_id": design_id, "proven_recipes": recipes}
+    if models is not None:
+        out["models"] = models
+    return out
+
+
+def _fetch_models(tool: str, answer: dict[str, Any], vault: Any) -> dict[str, Any] | None:
+    """Keep here, once each, the models an answer names and this computer lacks.
+
+    Returns ``{"kept": {version_id: sha256}, "models": <what happened>}``;
+    ``None`` when a model cannot come on its own (a server without the
+    route, or a model larger than one fetch hands back), so the caller asks
+    for the models inside the answer; or the refusal to answer with, when a
+    model's bytes are not the fingerprint asked for or it could not be
+    fetched.  Models fetched before a refusal stay kept here, each under its
+    own fingerprint, and are not fetched again.
+    """
+    recipes = {
+        r["version_id"]: r.get("recipe_dict") if isinstance(r.get("recipe_dict"), dict) else {}
+        for r in answer.get("provenance_sidecars") or []
+        if isinstance(r, dict) and isinstance(r.get("version_id"), str)
+    }
+    kept: dict[str, str] = {}
+    missing: dict[str, str] = {}
+    fetched: set[str] = set()
+    already_here: set[str] = set()
+    for version in answer.get("versions") or []:
+        if not isinstance(version, dict):
+            continue
+        version_id, sha = version.get("version_id"), version.get("mesh_sha256")
+        if not isinstance(version_id, str) or not _is_fingerprint(sha):
+            continue
+        if sha in missing:
+            continue
+        if sha in fetched or vault.mesh_path(sha) is not None:
+            kept[version_id] = sha
+            if sha not in fetched:
+                already_here.add(sha)
+            continue
+        got = _fetch_model(tool, sha)
+        if got.get("status") == "error":
+            status, code = got.get("http_status"), got.get("code")
+            if status == 404 and code == "MESH_NOT_FOUND":
+                # Kiln keeps no bytes for it: the version is recorded without
+                # its model, as an answer carrying the models would have had it.
+                missing[sha] = version_id
+                continue
+            if status in (404, 405) or code == "MESH_TOO_LARGE":
+                return None
+            return {
+                **got,
+                "version_id": version_id,
+                "error": (
+                    f"The model of version {version_id} could not be brought from your Kiln "
+                    f"account, so nothing was pulled: {got.get('error') or 'Kiln did not say why.'}"
+                ),
+            }
+        data = got["content"]
+        read = hashlib.sha256(data).hexdigest()
+        if read != sha:
+            return {
+                **_refused(
+                    tool, "MESH_FINGERPRINT_MISMATCH",
+                    f"The model Kiln's servers sent for version {version_id} is not {sha[:12]} "
+                    f"(its bytes are {read[:12]}), so nothing was pulled.",
+                ),
+                "version_id": version_id,
+            }
+        vault.keep_mesh(data, recipes.get(version_id) or {})
+        kept[version_id] = sha
+        fetched.add(sha)
+    return {
+        "kept": kept,
+        "models": {
+            "by_fingerprint": True,
+            "fetched": len(fetched),
+            "already_here": len(already_here),
+            "missing": [{"version_id": v, "mesh_sha256": s} for s, v in missing.items()],
+        },
+    }
+
+
+def _is_fingerprint(value: Any) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(c in "0123456789abcdef" for c in value)
+
+
+def _fetch_model(tool: str, sha: str) -> dict[str, Any]:
+    """One model by its fingerprint, sitting out the API's request rate."""
+    waits = 0
+    while True:
+        got = _request(tool, "GET", f"/api/cloud/meshes/{sha}", raw=True)
+        wait = got.get("retry_after") if got.get("http_status") == 429 else None
+        if not isinstance(wait, int) or waits >= _RATE_WAITS_PER_MODEL or not 0 < wait <= _RATE_WAIT_MAX_S:
+            return got
+        waits += 1
+        _sleep(wait)
+
+
+def _sleep(seconds: float) -> None:
+    import time
+
+    time.sleep(seconds)
 
 
 def remote_branches(tool: str, design_id: str) -> dict[str, Any]:

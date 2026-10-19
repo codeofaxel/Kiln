@@ -541,10 +541,20 @@ class HistoryVault:
             os.replace(tmp, target)
         return sha
 
+    def keep_mesh(self, data: bytes, recipe: dict[str, Any]) -> str:
+        """Keep a version's model here by its SHA-256, filed as *recipe*
+        names it (the same file an answer carrying it would have kept)."""
+        return self._put_mesh(data, Path(str(recipe.get("stl_path") or "")).suffix.lower())
+
     def _put_version(
-        self, design_id: str, version: dict[str, Any], recipe: dict[str, Any]
+        self, design_id: str, version: dict[str, Any], recipe: dict[str, Any],
+        kept_sha: str | None = None,
     ) -> str | None:
-        """Record one version; returns the mesh SHA it now points at."""
+        """Record one version; returns the mesh SHA it now points at.
+
+        *kept_sha* is a model already kept here for this version, fetched on
+        its own rather than carried in *recipe*.
+        """
         recipe = dict(recipe)
         mesh_b64 = recipe.pop(_MESH_KEY, None)
         sha = _sha(recipe.get("mesh_sha256"))
@@ -556,6 +566,8 @@ class HistoryVault:
             if data:
                 suffix = Path(str(recipe.get("stl_path") or "")).suffix.lower()
                 sha = self._put_mesh(data, suffix)
+        elif _sha(kept_sha) and self.mesh_path(kept_sha) is not None:
+            sha = kept_sha
         recipe.setdefault("version_id", version["version_id"])
         self._conn.execute(
             "INSERT OR REPLACE INTO versions "
@@ -649,8 +661,16 @@ class HistoryVault:
             "library_files": library,
         }
 
-    def apply_remote(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Record a pull or clone answer: the remote's branches as they are there."""
+    def apply_remote(
+        self, payload: dict[str, Any], *, kept_models: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Record a pull or clone answer: the remote's branches as they are there.
+
+        *kept_models* maps a version to the model already kept here for it
+        (:meth:`keep_mesh`), for an answer that named its models rather than
+        carrying them.
+        """
+        kept_models = kept_models or {}
         bundle_like = {
             "design_id": payload.get("design_id") or (payload.get("branch") or {}).get("design_id"),
             "branches": payload.get("branches") or ([payload["branch"]] if payload.get("branch") else []),
@@ -674,7 +694,10 @@ class HistoryVault:
             for v in _rows(bundle_like["versions"], "version_id"):
                 if not self._is_designs("versions", v["version_id"], design_id):
                     continue
-                self._put_version(design_id, v, dict(recipes.get(v["version_id"]) or {}))
+                self._put_version(
+                    design_id, v, dict(recipes.get(v["version_id"]) or {}),
+                    kept_sha=kept_models.get(v["version_id"]),
+                )
                 written.append(self.version(v["version_id"]) or {})
             for b in branches:
                 self._put_branch({**b, "design_id": design_id})
