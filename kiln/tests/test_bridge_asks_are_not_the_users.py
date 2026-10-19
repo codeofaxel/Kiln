@@ -62,6 +62,17 @@ _PERSONS_OWN_ASK = {
 }
 
 
+#: Bridges whose one served call serves BOTH kinds of ask, and so forward the
+#: flag the caller settled instead of stating one: the decoration bridge
+#: carries a person's iterate / rollback / history (True, from the library's
+#: tools) and the print-outcome record made on the way to something else
+#: (False, from the learning tools).  The flag is the caller's parameter by
+#: name, never a default, so the AST check below still sees who said it.
+_CALLER_DECIDES = {
+    "_pro_decoration_bridge": "asked_by_user",
+}
+
+
 def test_every_served_bridge_on_disk_is_seen():
     assert {path.stem for path in _SERVED} >= {
         "_pro_cost_bridge",
@@ -78,6 +89,11 @@ def test_a_bridge_never_counts_its_ask_as_a_persons(path):
         flags = [kw.value for kw in call.keywords if kw.arg == "_asked_by_user"]
         assert len(flags) == 1, f"{path.name}:{call.lineno} does not say who asked"
         flag = flags[0]
+        if path.stem in _CALLER_DECIDES:
+            assert isinstance(flag, ast.Name) and flag.id == _CALLER_DECIDES[path.stem], (
+                f"{path.name}:{call.lineno} must forward the caller's {_CALLER_DECIDES[path.stem]!r}"
+            )
+            continue
         expected = path.stem in _PERSONS_OWN_ASK
         assert isinstance(flag, ast.Constant) and flag.value is expected, (
             f"{path.name}:{call.lineno} must pass _asked_by_user={expected}"
@@ -86,6 +102,8 @@ def test_a_bridge_never_counts_its_ask_as_a_persons(path):
 
 def test_every_named_own_ask_is_a_served_bridge():
     assert set(_PERSONS_OWN_ASK) <= {path.stem for path in _SERVED}
+    assert set(_CALLER_DECIDES) <= {path.stem for path in _SERVED}
+    assert not set(_CALLER_DECIDES) & set(_PERSONS_OWN_ASK)
 
 
 class TestTheFlag:
