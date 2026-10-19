@@ -97,6 +97,14 @@ class TestReportBoundary:
         assert "abc" not in out
         assert "192.168.0.2" not in out
 
+    def test_a_link_the_person_wrote_survives(self):
+        """A report is the person's own words, and a working URL form is
+        often its whole point (a field note: "ftp://cache/<name> started the
+        print instantly").  Places are dropped from what Kiln reads off a
+        printer (kiln.outbound_guard), never from a report."""
+        note = "ftp://cache/part.3mf started the print instantly; see https://wiki.bambulab.com/en/a1"
+        assert redaction.redact_for_report(note) == note
+
 
 class TestSurfacesShareTheEngine:
     def test_log_scrub_gained_union_patterns(self):

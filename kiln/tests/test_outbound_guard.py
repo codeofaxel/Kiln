@@ -40,6 +40,10 @@ def _leaks(text: str) -> list[str]:
 
 
 class TestTheRule:
+    def test_a_web_address_read_off_a_printer_is_dropped(self):
+        out = guard.redact_text("webhook https://shop.duckdns.org/hook?id=7 failed at voron.local")
+        assert "duckdns" not in out and "voron.local" not in out, out
+
     def test_secrets_and_places_go_identities_become_codes_words_stay(self):
         out = guard.scrub({
             "serial": "01P00A000000001", "access_code": "s3cr3t-access", "host": "10.0.0.5",
