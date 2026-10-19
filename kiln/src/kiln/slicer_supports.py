@@ -1,6 +1,6 @@
 """Supports a slice decides for itself, at the chokepoint every door shares.
 
-A part whose printability report says ``needs_supports=True`` was sliced
+A part whose printability report said ``needs_supports=True`` was sliced
 without them by every tool door, and the estimate those doors returned was
 of the unsupported file: on a desk stand with a 70 mm cantilevered arm the
 report recommended "Enable supports" while the G-code beside it carried
@@ -20,10 +20,11 @@ The rule, in order:
 * a Kiln-written profile whose caller STATED ``support_material`` (a
   ``reslice_with_overrides`` override, ``kiln slice --support-mode
   minimal`` / ``off``) is theirs too;
-* otherwise the printability engine reads the part, and when it says the
-  part needs supports the slice gets Kiln's minimal supports -- build-plate
-  only, 55 degree threshold, the settings ``kiln slice --support-mode
-  auto`` has always written -- unless it says the part needs none;
+* otherwise the printability engine reads the part and gives the one
+  verdict every door gives (:func:`kiln.printability.support_verdict`);
+  when it says the part needs supports the slice gets them, build-plate
+  only, under exactly the faces that verdict counted as overhangs -- the
+  slicer's threshold is written from the same angle;
 * a part the engine cannot read is sliced as it was, and the answer says
   the check was not made rather than reading like a part that needs none.
 
@@ -44,22 +45,9 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 #: The PrusaSlicer key that turns supports on; :mod:`kiln.slicer_orca`
-#: carries it, and the two below, into the Orca dialect.
+#: carries it, and the two :func:`support_settings` writes beside it, into
+#: the Orca dialect.
 SUPPORT_KEY = "support_material"
-
-#: Kiln's minimal supports: build-plate only at a 55 degree threshold, the
-#: least plastic that still holds an overhang the engine flagged.  The same
-#: three keys ``kiln slice --support-mode minimal`` states.
-MINIMAL_SUPPORTS: dict[str, str] = {
-    SUPPORT_KEY: "1",
-    "support_material_buildplate_only": "1",
-    "support_material_threshold": "55",
-}
-
-#: The share of a part's triangles that must overhang before the engine's
-#: ``needs_supports`` is acted on: one stray face is noise, a percent is a
-#: feature.  Bridges the engine calls too long are acted on at any count.
-OVERHANG_PERCENT_FLOOR = 1.0
 
 #: Who decided the answer.
 DECIDED_STATED = "stated"        # the caller's own key, left alone
@@ -104,17 +92,22 @@ class SliceSupports:
         return d
 
 
-def supports_needed(report: Any) -> str | None:
-    """Why *report* (a :class:`kiln.printability.PrintabilityReport`) says the
-    part needs supports, or ``None`` when it says the part needs none."""
-    reasons: list[str] = []
-    overhangs = report.overhangs
-    if overhangs.needs_supports and overhangs.overhang_percentage >= OVERHANG_PERCENT_FLOOR:
-        reasons.append(f"overhangs={overhangs.overhang_percentage:.1f}%")
-    bridging = report.bridging
-    if bridging.needs_supports_for_bridges:
-        reasons.append(f"bridges={bridging.max_bridge_length_mm:.1f}mm")
-    return ", ".join(reasons) if reasons else None
+def support_settings(overhang_threshold_deg: float, *, build_plate_only: bool = True) -> dict[str, str]:
+    """The slicer keys that support the faces Kiln counts as overhangs.
+
+    *overhang_threshold_deg* is Kiln's angle, from vertical
+    (:func:`kiln.printability.overhang_threshold_deg`); both slicers take
+    the slope from horizontal, so the threshold written is its complement
+    -- measured 2026-10-19 on PrusaSlicer 2.9.4 and OrcaSlicer: a 50 degree
+    underside is supported at 60 and left alone at 40.  Build-plate-only
+    supports are the least plastic that still hold a flagged overhang.
+    """
+    slope = max(1.0, min(89.0, 90.0 - float(overhang_threshold_deg)))
+    return {
+        SUPPORT_KEY: "1",
+        "support_material_buildplate_only": "1" if build_plate_only else "0",
+        "support_material_threshold": f"{slope:g}",
+    }
 
 
 def _file_identity(path: str) -> tuple[Any, ...]:
@@ -150,7 +143,7 @@ def decide_supports(
     if cached is not None:
         return cached
 
-    from kiln.printability import analyze_printability
+    from kiln.printability import analyze_printability, support_verdict
 
     try:
         report = analyze_printability(
@@ -165,10 +158,11 @@ def decide_supports(
             enabled=False, decided_by=DECIDED_NOT_CHECKED,
             reason=f"not checked: {' '.join(str(exc).split())}",
         ))
-    reason = supports_needed(report)
+    reason = support_verdict(report)
     if reason:
         return _remember(key, SliceSupports(
-            enabled=True, decided_by=DECIDED_ANALYSIS, reason=reason, settings=dict(MINIMAL_SUPPORTS),
+            enabled=True, decided_by=DECIDED_ANALYSIS, reason=reason,
+            settings=support_settings(report.overhang_threshold_deg),
         ))
     return _remember(key, SliceSupports(
         enabled=False, decided_by=DECIDED_ANALYSIS, reason="no overhang or bridge needs them",

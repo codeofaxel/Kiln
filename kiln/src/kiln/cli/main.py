@@ -170,24 +170,27 @@ def _resolve_material_for_slice_with_source(
     return inferred, False, source, determined_by
 
 
-def _support_statement(support_mode: str | None) -> dict[str, str] | None:
+def _support_statement(support_mode: str | None, material: str | None = None) -> dict[str, str] | None:
     """The support keys a ``--support-mode`` STATES for the slice.
 
-    ``off``, ``minimal`` and ``aggressive`` are the caller speaking, written
-    into the profile as stated keys so the slice keeps them.  ``auto`` (the
-    default) states nothing: the slice reads the part and decides at the
-    one place every slicing door shares (:mod:`kiln.slicer_supports`), and
-    the result says what it did.
+    ``off``, ``minimal`` (build-plate only) and ``aggressive`` (everywhere)
+    are the caller speaking, written into the profile as stated keys so
+    the slice keeps them; both support the faces Kiln's own verdict counts
+    as overhangs for *material* (``kiln.printability.overhang_threshold_deg``).
+    ``auto`` (the default) states nothing: the slice reads the part and
+    decides at the one place every slicing door shares
+    (:mod:`kiln.slicer_supports`), and the result says what it did.
     """
-    from kiln.slicer_supports import MINIMAL_SUPPORTS, SUPPORT_KEY
+    from kiln.printability import overhang_threshold_deg
+    from kiln.slicer_supports import SUPPORT_KEY, support_settings
 
     mode = (support_mode or "auto").strip().lower()
     if mode == "off":
         return {SUPPORT_KEY: "0"}
     if mode == "minimal":
-        return dict(MINIMAL_SUPPORTS)
+        return support_settings(overhang_threshold_deg(material), build_plate_only=True)
     if mode == "aggressive":
-        return {SUPPORT_KEY: "1", "support_material_buildplate_only": "0"}
+        return support_settings(overhang_threshold_deg(material), build_plate_only=False)
     return None
 
 
@@ -287,7 +290,7 @@ def _resolve_slice_plan(
     (
         material_key, material_is_explicit, material_source, loaded_determined_by,
     ) = _resolve_material_for_slice_with_source(ctx, material)
-    statement = _support_statement(support_mode)
+    statement = _support_statement(support_mode, material_key)
 
     # The material's temperatures, melt rate and cooling are not set here:
     # the slice writes them from the material it is told (below), the same

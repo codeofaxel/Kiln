@@ -19,6 +19,7 @@ Usage::
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import math
@@ -190,6 +191,56 @@ class SupportAssessment:
             "warnings": self.warnings,
             "recommendations": self.recommendations,
         }
+
+
+def _shared_verdict(
+    tris: list[_Triangle],
+    stl_path: str | None,
+    *,
+    material: str,
+    nozzle_diameter_mm: float,
+    layer_height_mm: float,
+) -> tuple[bool, str | None]:
+    """Whether the part needs supports, read off the printability engine --
+    the same verdict every other door gives (:func:`kiln.printability.support_verdict`)
+    -- and, for faces that are not a solid (flat, degenerate, nothing to
+    print), ``False`` with the engine's own sentence to put in the warnings.
+
+    Until 2026-10-19 this module answered from its own rule (more than 5 %
+    of the surface area overhanging), which called a desk stand's 70 mm
+    cantilevered arm "no supports" while the report beside it said the
+    opposite.  Triangles handed in without a file are written to one for
+    the engine, and the file is removed after.
+    """
+    import os
+    import tempfile
+
+    from kiln.printability import analyze_printability, support_verdict
+
+    path = stl_path
+    scratch: str | None = None
+    if path is None:
+        from kiln.auto_orient import _write_binary_stl
+
+        fd, scratch = tempfile.mkstemp(suffix=".stl", prefix="kiln_support_")
+        os.close(fd)
+        _write_binary_stl(tris, scratch)
+        path = scratch
+    try:
+        report = analyze_printability(
+            path,
+            material=material.lower(),
+            nozzle_diameter=nozzle_diameter_mm,
+            layer_height=layer_height_mm,
+            include_hole_detection=False,
+        )
+    except ValueError as exc:
+        return False, f"Whether supports are needed was not judged: {exc}"
+    finally:
+        if scratch is not None:
+            with contextlib.suppress(OSError):
+                os.unlink(scratch)
+    return support_verdict(report) is not None, None
 
 
 # ---------------------------------------------------------------------------
@@ -639,6 +690,7 @@ def assess_support_feasibility(
     layer_height_mm: float = 0.2,
     nozzle_diameter_mm: float = 0.4,
     has_dual_extrusion: bool = False,
+    needs_supports: bool | None = None,
 ) -> SupportAssessment:
     """Assess support feasibility for a 3D model.
 
@@ -652,6 +704,12 @@ def assess_support_feasibility(
     :param layer_height_mm: Layer height for Z-gap calculation.
     :param nozzle_diameter_mm: Nozzle diameter for bridge threshold scaling.
     :param has_dual_extrusion: Whether printer has AMS/MMU for cross-material supports.
+    :param needs_supports: The verdict already made from the part's
+        printability report (:func:`kiln.printability.support_verdict`),
+        when the caller has one; read off that same engine here otherwise.
+        This module measures the overhang AREA and what removing supports
+        would take; whether the part needs them is one answer Kiln gives
+        everywhere, never a second threshold here.
     :returns: Complete support assessment report.
     """
     profile = _get_profile(material)
@@ -867,7 +925,13 @@ def assess_support_feasibility(
 
     # Build recommendations
     recommendations: list[str] = []
-    needs_supports = total_overhang_area > 0 and overhang_pct > 5.0
+    if needs_supports is None:
+        needs_supports, not_judged = _shared_verdict(
+            tris, stl_path, material=material,
+            nozzle_diameter_mm=nozzle_diameter_mm, layer_height_mm=layer_height_mm,
+        )
+        if not_judged:
+            warnings.append(not_judged)
 
     if needs_supports:
         recommendations.append(

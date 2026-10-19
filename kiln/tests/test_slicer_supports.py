@@ -21,25 +21,30 @@ from unittest.mock import patch
 import pytest
 
 from kiln import slicer_supports
+from kiln.printability import overhang_threshold_deg, support_verdict
 from kiln.slicer_orca import ini_to_settings, settings_to_orca_presets
 from kiln.slicer_profiles import profile_origin, profile_with_overrides, resolve_slicer_profile
 from kiln.slicer_supports import (
     DECIDED_ANALYSIS,
     DECIDED_NOT_CHECKED,
     DECIDED_STATED,
-    MINIMAL_SUPPORTS,
     SUPPORT_KEY,
     SliceSupports,
     decide_supports,
     ensure_profile_supports,
-    supports_needed,
+    support_settings,
 )
+
+#: What the engine writes for PLA here: the public 45 degree floor, or the
+#: per-material angle when the kiln-pro overlay is present on this machine.
+MINIMAL_SUPPORTS = support_settings(overhang_threshold_deg("PLA"))
 
 
 def _report(*, overhang_pct: float = 0.0, needs: bool = False, bridge_mm: float = 0.0, bridges: bool = False):
     return SimpleNamespace(
         overhangs=SimpleNamespace(needs_supports=needs, overhang_percentage=overhang_pct),
         bridging=SimpleNamespace(needs_supports_for_bridges=bridges, max_bridge_length_mm=bridge_mm),
+        overhang_threshold_deg=45.0,
     )
 
 
@@ -63,18 +68,25 @@ def part(tmp_path: Path) -> str:
 
 
 class TestTheRule:
-    def test_an_overhang_the_engine_flags_needs_them(self):
-        assert supports_needed(_report(needs=True, overhang_pct=2.7)) == "overhangs=2.7%"
+    """The verdict is the printability report's own -- one answer, read by
+    every door (tests/test_support_verdict.py walks the doors)."""
 
-    def test_a_stray_face_does_not(self):
-        """One flagged triangle in a thousand is noise, not a feature."""
-        assert supports_needed(_report(needs=True, overhang_pct=0.4)) is None
+    def test_an_overhang_the_engine_flags_needs_them(self):
+        assert support_verdict(_report(needs=True, overhang_pct=2.7)) == "overhangs=2.7%"
+
+    def test_there_is_no_size_floor(self):
+        """A 10 mm cantilever on a large, finely meshed part is a tenth of
+        a percent of its faces and a real overhang; the old 1 % floor read
+        it as none.  What a slicer bridges is already excluded by the
+        report itself, not by a floor here."""
+        assert support_verdict(_report(needs=True, overhang_pct=0.1)) == "overhangs=0.1%"
+        assert support_verdict(_report(needs=False, overhang_pct=12.5)) is None
 
     def test_a_bridge_too_long_for_the_material_does_at_any_count(self):
-        assert supports_needed(_report(bridges=True, bridge_mm=52.6)) == "bridges=52.6mm"
+        assert support_verdict(_report(bridges=True, bridge_mm=52.6)) == "bridges=52.6mm"
 
     def test_both_are_said(self):
-        assert supports_needed(_report(needs=True, overhang_pct=2.7, bridges=True, bridge_mm=52.6)) == (
+        assert support_verdict(_report(needs=True, overhang_pct=2.7, bridges=True, bridge_mm=52.6)) == (
             "overhangs=2.7%, bridges=52.6mm"
         )
 
@@ -88,8 +100,19 @@ class TestTheRule:
         with patch("kiln.printability.analyze_printability", return_value=_report(needs=True, overhang_pct=2.7)):
             decision = decide_supports(part, material="PLA")
         assert decision.enabled and decision.decided_by == DECIDED_ANALYSIS
-        assert decision.settings == MINIMAL_SUPPORTS
+        assert decision.settings == support_settings(45.0)
+        assert decision.settings["support_material_threshold"] == "45"
         assert decision.note == "supports on, build-plate only: overhangs=2.7%"
+
+    def test_the_slicers_threshold_is_the_verdicts_angle(self, part: str):
+        """A Pro per-material angle reaches the slice the same way: the
+        report says what it counted against, the slice supports exactly
+        that."""
+        tuned = _report(needs=True, overhang_pct=2.7)
+        tuned.overhang_threshold_deg = 35.0
+        with patch("kiln.printability.analyze_printability", return_value=tuned):
+            decision = decide_supports(part, material="TPU")
+        assert decision.settings["support_material_threshold"] == "55"
 
     def test_a_part_the_engine_cannot_read_is_said_not_checked(self, part: str):
         """Never read as a part that needs none: the answer names the miss."""
@@ -137,7 +160,9 @@ class TestWhoseDecision:
             derived, decision = ensure_profile_supports(profile, part, material="PLA")
         assert derived != profile
         written = ini_to_settings(derived)
-        assert {key: written[key] for key in MINIMAL_SUPPORTS} == MINIMAL_SUPPORTS
+        # The mocked report counted overhangs against 45 degrees, so the
+        # slice supports from 45 -- whatever the overlay here says for PLA.
+        assert {key: written[key] for key in MINIMAL_SUPPORTS} == support_settings(45.0)
         # Kiln's own layer, not the caller's: the next part is decided afresh.
         assert SUPPORT_KEY not in profile_origin(derived).stated
         assert profile_origin(derived).printer_id == "bambu_a1"
@@ -281,10 +306,10 @@ class TestTheResultSaysIt:
 
 class TestOrcaGetsTheSameDecision:
     def test_all_three_keys_cross(self):
-        process = settings_to_orca_presets(dict(MINIMAL_SUPPORTS)).process
+        process = settings_to_orca_presets(support_settings(45.0)).process
         assert process["enable_support"] == "1"
         assert process["support_on_build_plate_only"] == "1"
-        assert process["support_threshold_angle"] == "55"
+        assert process["support_threshold_angle"] == "45"
 
     def test_prusaslicers_detect_the_angle_leaves_orcas_own(self):
         """PrusaSlicer's threshold 0 means "detect it"; Orca has no such
@@ -324,8 +349,10 @@ class TestTheCliMode:
         from kiln.cli.main import _support_statement
 
         assert _support_statement("off") == {SUPPORT_KEY: "0"}
-        assert _support_statement("minimal") == MINIMAL_SUPPORTS
-        assert _support_statement("aggressive") == {SUPPORT_KEY: "1", "support_material_buildplate_only": "0"}
+        assert _support_statement("minimal", "PLA") == MINIMAL_SUPPORTS
+        assert _support_statement("aggressive", "PLA") == {
+            **MINIMAL_SUPPORTS, "support_material_buildplate_only": "0",
+        }
         assert _support_statement("auto") is None
         assert _support_statement(None) is None
 

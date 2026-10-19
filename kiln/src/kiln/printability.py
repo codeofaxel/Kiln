@@ -440,6 +440,11 @@ class PrintabilityReport:
     # for clients that construct PrintabilityReport directly without
     # going through ``analyze_printability``.
     triangle_count: int = 0
+    # The overhang angle, from vertical, past which a face was counted as
+    # an overhang: what ``overhangs`` and :func:`support_verdict` were
+    # read against, and what a slice's support threshold is written from
+    # (:mod:`kiln.slicer_supports`).  0.0 for a report built by hand.
+    overhang_threshold_deg: float = 0.0
     # Number of disjoint connected components in the mesh (triangle
     # islands joined by shared-vertex adjacency).  A single closed body
     # is 1; a multi-body mesh is N.  Exposed for the kiln-pro overlay.
@@ -845,6 +850,37 @@ def _resolve_overhang_threshold(
             if key.strip().lower().replace("-", "_").replace(" ", "_") == normalized_target:
                 return float(val)
     return float(default_limit)
+
+
+def overhang_threshold_deg(material: str | None = None) -> float:
+    """The overhang angle, from vertical, past which a face of *material*
+    counts as an overhang here -- the angle :func:`analyze_printability`
+    reads its verdict against, and the one a slice's support threshold is
+    written from.  Per-material values reach it through the kiln-pro
+    overlay; without one, the 45 degree floor."""
+    from kiln.design_intelligence import load_pro_overlay_or_empty
+
+    return _resolve_overhang_threshold(None, material, load_pro_overlay_or_empty("printability_judgment"))
+
+
+def support_verdict(report: PrintabilityReport) -> str | None:
+    """Why *report* says the part needs supports, or ``None`` when it needs none.
+
+    The one answer every door gives -- the printability report, the
+    pre-print check, the support assessment, the volume estimate and the
+    slice itself (:mod:`kiln.slicer_supports`) -- so a report cannot say
+    "needs supports" over a file sliced without them.  It is the report's
+    own overhang verdict, which already excludes the undersides a slicer
+    bridges or reaches sideways, plus a bridge too long for the material;
+    there is no size floor, because a 10 mm cantilever on a large, finely
+    meshed part is a real overhang at a tenth of a percent of its faces.
+    """
+    reasons: list[str] = []
+    if report.overhangs.needs_supports:
+        reasons.append(f"overhangs={report.overhangs.overhang_percentage:.1f}%")
+    if report.bridging.needs_supports_for_bridges:
+        reasons.append(f"bridges={report.bridging.max_bridge_length_mm:.1f}mm")
+    return ", ".join(reasons) if reasons else None
 
 
 def _check_rule_op(op: str, value: Any, threshold: Any) -> bool:
@@ -4898,6 +4934,7 @@ def _analyze_printability_here(
             "height_mm": round(bbox["z_max"] - bbox["z_min"], 3),
         },
         model_height_mm=round(model_height, 2),
+        overhang_threshold_deg=_resolved_threshold,
         recommendations=recommendations,
         estimated_print_time_modifier=round(time_mod, 2),
         holes=holes,
