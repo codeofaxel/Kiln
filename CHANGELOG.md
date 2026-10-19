@@ -27,7 +27,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Round or bevel the edges of a CAD part.** Kiln edits the CAD itself and tells you any edge it left sharp.
 
-- **Kiln picks the right finish for each edge (Pro+).** See https://kiln3d.com/pricing.
+- **Kiln can choose each edge's finish for you (Pro+).** It bevels the edges a rounded corner would let sag, and gives screw holes the entry their screw needs. See https://kiln3d.com/pricing.
 
 - **Check that a hinge opens before you print it.**
 
@@ -180,15 +180,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   now moves to a spot proven clear of what's on the plate instead of sitting
   over it — and stays put if it can't prove one.
 
-- **Your printer's own start-up routine, run automatically.** If your
-  Klipper printer (Voron, Creality K1/K2, QIDI, Sovol, and friends) has a
-  `PRINT_START` or `START_PRINT` routine set up — the one that heats the
-  chamber, levels the bed, and wipes the nozzle — Kiln now finds it by
-  asking the printer itself and uses it when slicing, with your exact
-  temperatures filled in. Requires kiln-pro; without it (or whenever the
-  routine can't be verified safe) Kiln keeps its built-in safe warm-up.
-  The result says which one was used.
-
 - **When Kiln changes your file's format, it says so.** If what comes back
   isn't the format you handed over, the result names what changed, what the
   new format can't hold, and where your untouched original still is.
@@ -340,6 +331,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   wrong place.
 
 ### Fixed
+
+- **A coloured logo on a coloured background carves cleanly.**
 
 - **Food-safe picks on every install.** When something will hold food or touch a mouth, Kiln never suggests a plastic that isn't food safe, on any plan, signed in or not.
 - **Your plan counts in the terminal too.** Kiln on your own computer now reads your Pro or Business plan, so paid limits like assembly part counts lift when you're signed in.
@@ -695,6 +688,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   new tags or a better prompt; it now takes the new ones.
 
 ### Security
+
+- **Big or odd files can't tie up Kiln's servers.** Oversized uploads, images and print files are refused before they're read.
 
 - **Stronger protection against harmful 3MF files.**
 - **Kiln only saves files where it should.** A misled AI agent can no longer make Kiln overwrite your settings or startup files. Thanks to Filip Kulig ([@KulFilip](https://github.com/KulFilip)) for reporting this privately.
