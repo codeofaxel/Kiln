@@ -806,25 +806,49 @@ def _kept_answer(
 # ---------------------------------------------------------------------------
 
 
-def _refusal(tool: str, code: str, message: str) -> dict[str, Any]:
+def _refusal(tool: str, code: str, message: str, why: str = "refused") -> dict[str, Any]:
     return {
         "success": False,
         "status": "error",
         "code": code,
         "tool": tool,
         "error": message,
-        "why": "refused",
+        "why": why,
     }
 
 
-def _upload(route: str, path: Path, field_data: dict | None, token_key: str) -> tuple[str | None, str]:
-    """POST one file; ``(token, "")`` or ``(None, sentence)``."""
+def _upload_miss(on_miss: Any, *, exc: BaseException | None = None, status: int = 0) -> None:
+    """Tell *on_miss* why an upload got no token: one of
+    :data:`kiln.served_answer.CAUSES`, decided the way the served door
+    decides it.  Nothing happens without a listener."""
+    if on_miss is None:
+        return
+    from kiln.served_answer import Miss, classify_transport_error
+
+    if exc is not None:
+        on_miss(classify_transport_error(exc, host=_api_base()))
+    elif status == 401:
+        on_miss(Miss("signed_out", "KILN_AUTH_REJECTED"))
+    elif status >= 500:
+        on_miss(Miss("unanswered", "KILN_API_HTTP_ERROR"))
+    else:
+        on_miss(Miss("refused", "KILN_API_HTTP_ERROR"))
+
+
+def _upload(
+    route: str, path: Path, field_data: dict | None, token_key: str, *, on_miss: Any = None,
+) -> tuple[str | None, str]:
+    """POST one file; ``(token, "")`` or ``(None, sentence)``.  *on_miss*,
+    when given, is called with why there is no token (:func:`_upload_miss`)."""
     import httpx
 
     bearer = _bearer()
     if not bearer:
+        from kiln.served_answer import Miss
         from kiln.tiers_and_terms import signed_out_message
 
+        if on_miss is not None:
+            on_miss(Miss("signed_out", "KILN_ACCOUNT_NOT_PAIRED"))
         return None, signed_out_message()
     try:
         with path.open("rb") as fh:
@@ -835,8 +859,9 @@ def _upload(route: str, path: Path, field_data: dict | None, token_key: str) -> 
                 data=field_data or None,
                 timeout=_UPLOAD_TIMEOUT_S,
             )
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         logger.debug("served makes: upload failed", exc_info=True)
+        _upload_miss(on_miss, exc=exc)
         return None, "Kiln's servers could not be reached to receive the file."
     try:
         body = resp.json()
@@ -845,6 +870,7 @@ def _upload(route: str, path: Path, field_data: dict | None, token_key: str) -> 
     token = str((body or {}).get(token_key) or "")
     if resp.status_code == 200 and token:
         return token, ""
+    _upload_miss(on_miss, status=resp.status_code)
     said = str((body or {}).get("error") or "").strip()
     return None, said or f"Kiln's servers did not accept the file (HTTP {resp.status_code})."
 
@@ -861,18 +887,22 @@ def _as_local_file(value: Any, suffixes: frozenset[str]) -> Path | None:
     return None
 
 
-def _upload_file(local: Path) -> tuple[str | None, str]:
+def _upload_file(local: Path, *, on_miss: Any = None) -> tuple[str | None, str]:
     """Send one file a tool reads; ``(token, "")`` or ``(None, sentence)``.
 
     A G-code goes compressed: it is text, and a long print's is tens of
     megabytes.  The servers decide what the file is from its content.
+    *on_miss*, when given, is called with why there is no token.
     """
     import httpx
 
     bearer = _bearer()
     if not bearer:
+        from kiln.served_answer import Miss
         from kiln.tiers_and_terms import signed_out_message
 
+        if on_miss is not None:
+            on_miss(Miss("signed_out", "KILN_ACCOUNT_NOT_PAIRED"))
         return None, signed_out_message()
     try:
         size = local.stat().st_size
@@ -899,8 +929,9 @@ def _upload_file(local: Path) -> tuple[str | None, str]:
                 files={"file": (local.name, body, "application/octet-stream")},
                 timeout=_FILE_UPLOAD_TIMEOUT_S,
             )
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         logger.debug("served makes: file upload failed", exc_info=True)
+        _upload_miss(on_miss, exc=exc)
         return None, "Kiln's servers could not be reached to receive the file."
     try:
         answer = resp.json()
@@ -909,6 +940,7 @@ def _upload_file(local: Path) -> tuple[str | None, str]:
     token = str((answer or {}).get("file_token") or "")
     if resp.status_code == 200 and token:
         return token, ""
+    _upload_miss(on_miss, status=resp.status_code)
     said = str((answer or {}).get("error") or "").strip()
     return None, said or f"Kiln's servers did not accept the file (HTTP {resp.status_code})."
 
@@ -968,6 +1000,11 @@ class _Sending:
     def __init__(self, tool: str) -> None:
         self.tool = tool
         self.tokens: dict[str, str] = {}
+        #: Why the last upload got no token (a ``kiln.served_answer.Miss``).
+        self.miss: Any = None
+
+    def _missed(self, miss: Any) -> None:
+        self.miss = miss
 
     def entry(self, local: Path) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
         """``({"token", "name"}, None)`` for *local*, or ``(None, refusal)``."""
@@ -980,12 +1017,14 @@ class _Sending:
                     f"{self.tool} was handed more than {MAX_FILES_PER_CALL} files, "
                     "more than one call to Kiln's servers carries.",
                 )
-            token, said = _upload_file(local)
+            self.miss = None
+            token, said = _upload_file(local, on_miss=self._missed)
             if token is None:
                 return None, _refusal(
                     self.tool, "FILE_NOT_SENT",
                     f"{self.tool} runs on Kiln's servers and needs {local.name} "
                     f"sent there first, which did not work: {said}",
+                    why=getattr(self.miss, "cause", "refused"),
                 )
             self.tokens[key] = token
         return {"token": token, "name": local.name}, None
@@ -1103,6 +1142,47 @@ def _set_outputs_aside(
         kwargs["output_names"] = names
 
 
+def _send_text(
+    tool: str, kwargs: dict[str, Any], text: dict[str, Any],
+) -> dict[str, Any] | None:
+    """For each ``{path parameter: text parameter}`` the manifest names (an
+    OpenSCAD file the servers never receive as a file), read the named file
+    here and send its text in the text parameter.  A call that already
+    gives the text keeps it, as the tool itself prefers it.  ``None`` to go
+    ahead, or a refusal when the file is not on this computer."""
+    for path_param, text_param in text.items():
+        value = kwargs.get(path_param)
+        if not isinstance(path_param, str) or not isinstance(text_param, str):
+            continue
+        if not isinstance(value, str) or not value.strip():
+            continue
+        kwargs.pop(path_param, None)
+        if isinstance(kwargs.get(text_param), str) and kwargs[text_param].strip():
+            continue
+        local = Path(value.strip()).expanduser()
+        try:
+            if not local.is_file():
+                return _refusal(
+                    tool, "FILE_NOT_FOUND",
+                    f"{tool} runs on Kiln's servers and needs the file "
+                    f"{value.strip()!r} read here first, and no such file is on this computer.",
+                )
+            if local.stat().st_size > MAX_UPLOAD_BYTES:
+                return _refusal(
+                    tool, "UPLOAD_TOO_LARGE",
+                    f"{local.name} is over {MAX_UPLOAD_BYTES // (1024 * 1024)} MB, "
+                    "more than Kiln's servers take.",
+                )
+            kwargs[text_param] = local.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            return _refusal(
+                tool, "FILE_NOT_READ",
+                f"{tool} runs on Kiln's servers and needs {local.name} read here first, "
+                f"which did not work: {exc.strerror or exc}.",
+            )
+    return None
+
+
 def send_inputs(
     tool: str,
     kwargs: dict[str, Any],
@@ -1116,8 +1196,10 @@ def send_inputs(
     make on the servers (its ``artifact_token``), the kept copy of one, or
     any model on this computer; the image parameter, an image on this
     computer; each ``files`` parameter, a file (or a list of them) on this
-    computer or a make's token.  Anything else is left for the servers to
-    answer.
+    computer or a make's token; each ``text`` parameter, a file whose text
+    is sent instead (:func:`_send_text`).  Anything else is left for the
+    servers to answer.  A refusal's ``why`` says which of the four served
+    causes it was (:mod:`kiln.served_answer`).
 
     *trip*, when given, is filled with what :func:`arrive` needs on the way
     back: where the call asked for its outputs, and how many files it sent.
@@ -1125,6 +1207,13 @@ def send_inputs(
     if not inputs:
         return kwargs, None
     kwargs = dict(kwargs)
+    missed: list[Any] = []
+
+    text = inputs.get("text")
+    if isinstance(text, dict) and text:
+        refusal = _send_text(tool, kwargs, text)
+        if refusal is not None:
+            return kwargs, refusal
 
     mesh_param = inputs.get("mesh")
     value = kwargs.get(mesh_param) if mesh_param else None
@@ -1145,13 +1234,15 @@ def send_inputs(
                             "more than Kiln's servers take. Simplify it first.",
                         )
                     token, said = _upload(
-                        "/api/view/mesh", local, {"source": "1"}, "artifact_token"
+                        "/api/view/mesh", local, {"source": "1"}, "artifact_token",
+                        on_miss=missed.append,
                     )
                     if token is None:
                         return kwargs, _refusal(
                             tool, "MODEL_NOT_SENT",
                             f"{tool} runs on Kiln's servers and needs {local.name} "
                             f"sent there first, which did not work: {said}",
+                            why=getattr(missed[-1] if missed else None, "cause", "refused"),
                         )
         if token:
             kwargs.pop(mesh_param, None)
@@ -1168,12 +1259,15 @@ def send_inputs(
                 f"{local.name} is over {MAX_IMAGE_BYTES // (1024 * 1024)} MB, "
                 "more than Kiln's servers take for an image.",
             )
-        token, said = _upload("/api/images/upload", local, None, "image_token")
+        token, said = _upload(
+            "/api/images/upload", local, None, "image_token", on_miss=missed.append,
+        )
         if token is None:
             return kwargs, _refusal(
                 tool, "IMAGE_NOT_SENT",
                 f"{tool} runs on Kiln's servers and needs {local.name} sent "
                 f"there first, which did not work: {said}",
+                why=getattr(missed[-1] if missed else None, "cause", "refused"),
             )
         kwargs.pop(image_param, None)
         kwargs["image_token"] = token

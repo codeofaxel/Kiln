@@ -11,10 +11,12 @@ touched home directories):
 * the agent loop (``kiln.agent_loop._redact_sensitive_data``) — text sent
   to an external LLM drops secrets and private IPs, but keeps real file
   paths because the model must echo them back into tool calls;
-* the bug-report boundary (:func:`redact_for_report`) — text that leaves
-  the machine for Kiln's servers drops everything: secrets, private IPs,
-  and home-directory names (a ``/Users/<name>`` component is the user's
-  real name).
+* the boundary with Kiln's servers (:func:`redact_for_report`) — text that
+  leaves the machine for Kiln's servers drops everything: secrets, network
+  and hardware addresses, web addresses, local host names, device paths,
+  email addresses, and home-directory names (a ``/Users/<name>`` component
+  is the user's real name).  A bug report's log tail and every machine-read
+  value sent to Kiln's servers (:mod:`kiln.outbound_guard`) use it.
 
 The surfaces intentionally differ in WHAT they redact; this module makes
 them share HOW, so a pattern added here reaches all of them and the sets
@@ -85,6 +87,32 @@ _WINDOWS_HOME_RE = re.compile(
 )
 
 
+# What locates a machine or a person, for text leaving for Kiln's servers.
+# Web addresses first, so a host inside one is taken with it.
+_URL_RE = re.compile(r"\b[a-z][a-z0-9+.-]*://[^\s\"\x27<>]+", re.IGNORECASE)
+_EMAIL_RE = re.compile(r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b")
+_ANY_IPV4_RE = re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?![\w.])")
+_IPV6_RE = re.compile(r"(?<![\w:])(?:[0-9a-f]{1,4}:){3,7}[0-9a-f]{1,4}(?![\w:])", re.IGNORECASE)
+_MAC_RE = re.compile(r"(?<![\w:-])(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}(?![\w:-])", re.IGNORECASE)
+_LOCAL_HOST_RE = re.compile(
+    r"\b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.(?:local|lan|home|internal|localdomain)\b", re.IGNORECASE,
+)
+_DEVICE_PATH_RE = re.compile(r"/dev/[\w./-]+")
+
+
+def redact_places(text: str) -> str:
+    """Replace what locates a machine or a person in *text*: web addresses,
+    email addresses, network and hardware addresses, local host names and
+    device paths, each by a word saying what was there."""
+    text = _URL_RE.sub("[a web address]", text)
+    text = _EMAIL_RE.sub("[an email address]", text)
+    text = _MAC_RE.sub("[a hardware address]", text)
+    text = _ANY_IPV4_RE.sub("[a network address]", text)
+    text = _IPV6_RE.sub("[a network address]", text)
+    text = _LOCAL_HOST_RE.sub("[a network address]", text)
+    return _DEVICE_PATH_RE.sub("[a device]", text)
+
+
 def redact_secrets(text: str, marker: str = DEFAULT_MARKER) -> str:
     """Redact API keys, tokens, passwords, and auth headers from *text*."""
     text = _SECRET_KV_RE.sub(r"\1" + marker, text)
@@ -117,7 +145,8 @@ def redact_home_paths(text: str) -> str:
 def redact_for_report(text: str) -> str:
     """Full boundary redaction for text leaving the user's machine.
 
-    Secrets + private IPs + home-directory usernames.  UNCONDITIONAL —
+    Secrets + addresses of every kind (:func:`redact_places`) +
+    home-directory usernames.  UNCONDITIONAL —
     deliberately not gated by ``KILN_LLM_PRIVACY_MODE``, which controls
     LLM traffic only.  Turning that switch off must never quietly turn
     off bug-report redaction (they are unrelated privacy surfaces).
@@ -126,4 +155,5 @@ def redact_for_report(text: str) -> str:
         return text
     text = redact_secrets(text)
     text = redact_private_ips(text)
+    text = redact_places(text)
     return redact_home_paths(text)

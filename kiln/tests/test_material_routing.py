@@ -629,7 +629,6 @@ class TestAbrasiveFilamentFloor:
             lambda **kwargs: {
                 "severity": "red",
                 "escalated": True,
-                "escalation_reason": "abrasive_brass",
                 "filament_class": "abrasive",
                 "nozzle_material": "brass",
                 "user_warning": "Brass nozzle with an abrasive filament.",

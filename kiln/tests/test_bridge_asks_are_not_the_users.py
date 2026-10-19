@@ -54,6 +54,11 @@ _PERSONS_OWN_ASK = {
         "runs only when the person asks estimate_structural_load for a part at "
         "Kiln Pro; the part's load figure is the feature they reached for"
     ),
+    "_pro_ams_bridge": (
+        "runs only when the person asks ams_filament_drying to START the dryer, and "
+        "the start is refused without the check, so a signed-out refusal is the "
+        "person meeting the sign-in wall"
+    ),
 }
 
 

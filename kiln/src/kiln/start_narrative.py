@@ -18,9 +18,13 @@ early-stage reading the monitor report carries while the start sequence is
 still running.  The per-model, stage-by-stage account -- which move comes
 when on which machine, read from the vendor's own start file -- is curated
 knowledge and lives in kiln-pro (https://kiln3d.com), served free to any
-signed-in user.  Without it, every Bambu gets the one honest generic line
-below, which is enough to stop a power cut: it names the three moves that
-read as crashes and says they are not.
+signed-in user: read in-process where kiln-pro is installed, and asked of
+Kiln's servers one model at a time everywhere else (kept for the session).
+Without it, every Bambu gets the one honest generic line below, which is
+enough to stop a power cut: it names the three moves that read as crashes
+and says they are not.  When the reading could not be asked for, the line
+says why in the shared voice (:mod:`kiln.served_answer`) instead of
+pointing at a sign-in the person already has.
 
 Non-Bambu printers get nothing from this module, on purpose.  The lines are
 about Bambu's start block and nothing else; a Klipper or Prusa owner shown
@@ -30,9 +34,26 @@ about Bambu's start block and nothing else; a Klipper or Prusa owner shown
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+#: The hosted door, asked when kiln-pro is not installed here.
+WIRE_TOOL = "start_stages"
+#: A print start must not wait long on the network for a courtesy line.
+_CONSULT_TIMEOUT_S: float = 4.0
+#: After the servers fail to answer, how long they are left alone.
+SERVICE_BACKOFF_S: float = 300.0
+_service_down_until: float = 0.0
+_service_down_miss: Any = None
+#: The servers' answer per model (``None`` held = no reading for it), and
+#: the stage line per (model, nozzle target), for the session: a model's
+#: start sequence does not change while the process runs.
+_served_blocks: dict[str, dict[str, Any] | None] = {}
+_served_lines: dict[tuple[str, int], str | None] = {}
+#: Why the last ask for a model had no answer (a :class:`kiln.served_answer.Miss`).
+_last_miss: dict[str, Any] = {}
 
 __all__ = [
     "BAMBU_BACKEND",
@@ -77,6 +98,11 @@ GENERIC_BAMBU_START_STAGE_LINE = (
     "model is free with a Kiln sign-in."
 )
 
+#: The generic lines' last sentence, which points at a sign-in.  Right for
+#: an install that has none; replaced by why when it does and still could
+#: not ask.
+_SIGN_IN_TAIL = " Kiln's stage-by-stage reading for this model is free with a Kiln sign-in."
+
 
 def _is_bambu(adapter: Any) -> bool:
     """Whether *adapter* drives a Bambu -- the backend family, never the model."""
@@ -116,7 +142,7 @@ def _pro_block(model: str) -> dict[str, Any] | None:
     try:
         from kiln_pro.bridge import pro_features
     except ImportError:
-        return None
+        return _served_block(model)
     try:
         if not pro_features.is_available("device_intelligence"):
             return None
@@ -127,6 +153,77 @@ def _pro_block(model: str) -> dict[str, Any] | None:
     if not isinstance(block, dict) or not block.get("known"):
         return None
     return block
+
+
+def _ask(model: str, **extra: Any) -> dict[str, Any] | None:
+    """One ask of the hosted door; the answer, or ``None`` with why kept."""
+    global _service_down_until, _service_down_miss
+    from kiln.served_answer import Miss, classify_answer, classify_transport_error
+
+    if time.monotonic() < _service_down_until:
+        if _service_down_miss is not None:
+            _last_miss[model] = _service_down_miss
+        return None
+    try:
+        import kiln.server as _srv
+
+        answer = _srv._pro_api_call(
+            WIRE_TOOL, _timeout=_CONSULT_TIMEOUT_S, _asked_by_user=False, printer_model=model, **extra,
+        )
+    except Exception as exc:  # noqa: BLE001 -- a courtesy line never breaks a start
+        logger.debug("%s request failed", WIRE_TOOL, exc_info=True)
+        miss = classify_transport_error(exc)
+        _service_down_until, _service_down_miss = time.monotonic() + SERVICE_BACKOFF_S, miss
+        _last_miss[model] = miss
+        return None
+    if isinstance(answer, dict) and answer.get("success") is True and "known" in answer:
+        _last_miss.pop(model, None)
+        return answer
+    miss = classify_answer(answer) or Miss("unanswered", detail="no reading in the answer")
+    if isinstance(answer, dict) and answer.get("code") == "SERVER_UNREACHABLE":
+        _service_down_until, _service_down_miss = time.monotonic() + SERVICE_BACKOFF_S, miss
+    _last_miss[model] = miss
+    return None
+
+
+def _served_block(model: str) -> dict[str, Any] | None:
+    """The servers' reading for *model*, asked once per session."""
+    if model in _served_blocks:
+        return _served_blocks[model]
+    answer = _ask(model)
+    if answer is None:
+        return None  # not remembered: the next start asks again
+    block = (
+        {"known": True, "stages": list(answer.get("stages") or []), "cancel": answer.get("cancel")}
+        if answer.get("known") else None
+    )
+    _served_blocks[model] = block
+    return block
+
+
+def _served_stage_line(model: str, nozzle_target_c: float) -> str | None:
+    key = (model, int(round(float(nozzle_target_c))))
+    if key in _served_lines:
+        return _served_lines[key]
+    answer = _ask(model, nozzle_target_c=float(nozzle_target_c))
+    if answer is None:
+        return None
+    line = answer.get("stage_reading")
+    line = line.strip() if isinstance(line, str) and line.strip() else None
+    _served_lines[key] = line
+    return line
+
+
+def _generic(line: str, model: str) -> str:
+    """*line* as it stands, or with its sign-in pointer replaced by why the
+    reading could not be asked for when the install is signed in."""
+    miss = _last_miss.get(model) if model else None
+    if miss is None or miss.cause == "signed_out" or not line.endswith(_SIGN_IN_TAIL):
+        return line
+    from kiln.served_answer import clause
+
+    why = clause(miss, feature="servers", cannot="get this model's stage-by-stage reading")
+    return f"{line[: -len(_SIGN_IN_TAIL)]} {why}."
 
 
 def start_narrative(adapter: Any) -> list[str] | None:
@@ -140,12 +237,13 @@ def start_narrative(adapter: Any) -> list[str] | None:
     """
     if not _is_bambu(adapter):
         return None
-    block = _pro_block(_declared_model(adapter))
+    model = _declared_model(adapter)
+    block = _pro_block(model)
     if block:
         stages = [str(s) for s in (block.get("stages") or []) if str(s).strip()]
         if stages:
             return stages
-    return [GENERIC_BAMBU_START]
+    return [_generic(GENERIC_BAMBU_START, model)]
 
 
 def cancel_narrative(adapter: Any) -> list[str] | None:
@@ -217,7 +315,9 @@ def start_stage_line(
                 if isinstance(reading, str) and reading.strip():
                     return reading.strip()
         except ImportError:
-            pass
+            served = _served_stage_line(model, float(nozzle_target_c))
+            if served:
+                return served
         except Exception as exc:  # noqa: BLE001 -- a missing courtesy line is not a failure
             logger.debug("start-stage line unavailable for %r: %s", model, exc)
-    return GENERIC_BAMBU_START_STAGE_LINE
+    return _generic(GENERIC_BAMBU_START_STAGE_LINE, model)

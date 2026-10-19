@@ -678,3 +678,29 @@ def test_every_rationed_line_counts_against_one_session_claim():
         assert claim_once("shared-key") is True
     finally:
         reset_spoken_keys()
+
+
+def test_each_account_on_a_shared_server_has_its_own_session(monkeypatch):
+    # Kiln's servers answer every account from one process.  A line one
+    # account has heard is not one another account has heard: the claim
+    # belongs to the caller the server names for each request, and a caller
+    # it names nobody (a local install) keeps the process as its session.
+    import kiln.licensing
+    from kiln.tiers_and_terms import claim_once, reset_spoken_keys
+
+    caller = {"id": "account-a"}
+    monkeypatch.setattr(
+        kiln.licensing, "get_caller_tenant_id", lambda: caller["id"], raising=False,
+    )
+    reset_spoken_keys()
+    try:
+        assert claim_once("shared-key") is True
+        assert claim_once("shared-key") is False
+        caller["id"] = "account-b"
+        assert claim_once("shared-key") is True
+        assert claim_once("shared-key") is False
+        caller["id"] = None
+        assert claim_once("shared-key") is True
+        assert claim_once("shared-key") is False
+    finally:
+        reset_spoken_keys()

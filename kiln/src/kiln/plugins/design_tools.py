@@ -416,22 +416,17 @@ class _DesignToolsPlugin:
                     result.get("material") or result.get("recommended_material")
                 )
 
-                # Food-safety overlay (kiln-pro feature; free-tier silently skips):
-                # when the requirements imply food / pet / mouth contact,
-                # warn or override if the top pick isn't food_safe and limit
-                # the alternatives list to food-safe options.
-                try:
-                    from kiln_pro.material_safety import (  # noqa: WPS433
-                        assess_food_safety,
-                        filter_materials_by_food_safety,
-                        use_case_implies_food_contact,
-                    )
-                except ImportError:
-                    use_case_implies_food_contact = None  # type: ignore[assignment]
-                if (
-                    use_case_implies_food_contact is not None
-                    and use_case_implies_food_contact(requirements)
-                ):
+                # Food-safety floor: when the requirements imply food, drink,
+                # mouth or pet contact, override a top pick rated not food
+                # safe and keep only alternatives the rating allows.  Public
+                # Kiln's rating and detector, so every install says the same.
+                from kiln.material_safety import (
+                    assess_food_safety,
+                    filter_food_safe_materials,
+                    use_case_implies_food_contact,
+                )
+
+                if use_case_implies_food_contact(requirements):
                     result["food_contact_use_case_detected"] = True
                     if primary_slug:
                         verdict = assess_food_safety(primary_slug)
@@ -458,7 +453,7 @@ class _DesignToolsPlugin:
                     if raw_alts and isinstance(raw_alts, list):
                         slugs = [_slug(a) for a in raw_alts]
                         safe_set = set(
-                            filter_materials_by_food_safety(
+                            filter_food_safe_materials(
                                 [s for s in slugs if s], require="yes_or_conditional"
                             )
                         )

@@ -95,7 +95,7 @@ def bridge_answers(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
     namespaces, and records every question it was asked."""
     asked: list[tuple[str, str]] = []
 
-    def _decode(code: str, *, kind: str = "print_error") -> dict[str, Any] | None:
+    def _decode(code: str, *, kind: str = "print_error", wait: bool = True) -> dict[str, Any] | None:
         asked.append((code, kind))
         digits = "".join(c for c in code.split()[0].upper() if c in "0123456789ABCDEF")
         if kind == "hms" and digits == "0300180000010003":

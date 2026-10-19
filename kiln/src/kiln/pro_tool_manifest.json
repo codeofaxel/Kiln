@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-18T17:38:57.771644+00:00",
-  "tool_count": 403,
+  "generated": "2026-10-19T04:24:17.594765+00:00",
+  "tool_count": 409,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -131,101 +131,6 @@
     }
   },
   "tools": [
-    {
-      "name": "ams_filament_drying",
-      "description": "Start or stop an AMS 2 Pro / AMS HT active dry cycle.",
-      "tier": "free",
-      "access": "free",
-      "category": "ams_control",
-      "parameters": {
-        "properties": {
-          "ams_id": {
-            "title": "Ams Id",
-            "type": "integer"
-          },
-          "mode": {
-            "title": "Mode",
-            "type": "integer"
-          },
-          "duration_min": {
-            "default": 0,
-            "title": "Duration Min",
-            "type": "integer"
-          },
-          "temp_c": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Temp C"
-          },
-          "cooling_temp_c": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Cooling Temp C"
-          },
-          "humidity": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Humidity"
-          },
-          "rotate_tray": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Rotate Tray"
-          },
-          "printer_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Printer Name"
-          }
-        },
-        "required": [
-          "ams_id",
-          "mode"
-        ],
-        "title": "ams_filament_dryingArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "action"
-      },
-      "served": false
-    },
     {
       "name": "auto_generate_manual_for_print",
       "description": "Fire the automatic manual trigger for a multi-part print (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
@@ -1049,6 +954,54 @@
       }
     },
     {
+      "name": "load_assembly_manual",
+      "description": "Load a previously generated manual's spec back into a dict (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "assembly_manuals",
+      "parameters": {
+        "properties": {
+          "pdf_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Pdf Path"
+          },
+          "spec_json_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Spec Json Path"
+          }
+        },
+        "title": "load_assembly_manualArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
+      },
+      "served": false,
+      "inputs": {
+        "files": {
+          "pdf_path": "one",
+          "spec_json_path": "one"
+        }
+      }
+    },
+    {
       "name": "record_build_outcome",
       "description": "Record what actually happened building a unit from a factory work instruction (Enterprise) \u2014 the write side of the closed loop.\n\nEnterprise adds SSO, RBAC, and audit export.\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "enterprise",
@@ -1187,6 +1140,145 @@
         "schema_version": 1,
         "kind": "record"
       }
+    },
+    {
+      "name": "billing_alerts",
+      "description": "Check billing system health and active alerts.",
+      "tier": "free",
+      "access": "free",
+      "category": "billing",
+      "parameters": {
+        "properties": {},
+        "title": "billing_alertsArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
+      },
+      "served": false
+    },
+    {
+      "name": "billing_check_setup",
+      "description": "Check if billing setup is complete after user visited the setup URL.",
+      "tier": "free",
+      "access": "free",
+      "category": "billing",
+      "parameters": {
+        "properties": {},
+        "title": "billing_check_setupArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
+      },
+      "served": false
+    },
+    {
+      "name": "billing_history",
+      "description": "Get recent billing charge history with payment outcomes.",
+      "tier": "free",
+      "access": "free",
+      "category": "billing",
+      "parameters": {
+        "properties": {
+          "limit": {
+            "default": 20,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "billing_historyArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
+      },
+      "served": false
+    },
+    {
+      "name": "billing_setup_url",
+      "description": "Get a URL to link a payment method for Kiln orchestration fees.",
+      "tier": "free",
+      "access": "free",
+      "category": "billing",
+      "parameters": {
+        "properties": {
+          "rail": {
+            "default": "stripe",
+            "title": "Rail",
+            "type": "string"
+          }
+        },
+        "title": "billing_setup_urlArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
+      },
+      "served": false
+    },
+    {
+      "name": "billing_status",
+      "description": "Get enriched billing status including payment method info.",
+      "tier": "free",
+      "access": "free",
+      "category": "billing",
+      "parameters": {
+        "properties": {},
+        "title": "billing_statusArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
+      },
+      "served": false
+    },
+    {
+      "name": "billing_summary",
+      "description": "Get a summary of Kiln orchestration fees for the current month.",
+      "tier": "free",
+      "access": "free",
+      "category": "billing",
+      "parameters": {
+        "properties": {},
+        "title": "billing_summaryArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
+      },
+      "served": false
+    },
+    {
+      "name": "check_payment_status",
+      "description": "Check the current status of a pending payment by ID.",
+      "tier": "free",
+      "access": "free",
+      "category": "billing",
+      "parameters": {
+        "properties": {
+          "payment_id": {
+            "title": "Payment Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "payment_id"
+        ],
+        "title": "check_payment_statusArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
+      },
+      "served": false
     },
     {
       "name": "license_status_live",
@@ -1469,6 +1561,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "clone"
       }
     },
     {
@@ -1498,6 +1594,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "feature_clone"
       }
     },
     {
@@ -1527,6 +1627,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "preset_clone"
       }
     },
     {
@@ -1639,6 +1743,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "remote_branches"
       }
     },
     {
@@ -1668,6 +1776,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "remote_releases"
       }
     },
     {
@@ -1733,6 +1845,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "pull"
       }
     },
     {
@@ -1786,6 +1902,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "feature_pull"
       }
     },
     {
@@ -1839,6 +1959,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "preset_pull"
       }
     },
     {
@@ -1882,6 +2006,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "push"
       }
     },
     {
@@ -1928,6 +2056,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "feature_push"
       }
     },
     {
@@ -1957,6 +2089,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "feature_release_push"
       }
     },
     {
@@ -2003,6 +2139,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "preset_push"
       }
     },
     {
@@ -2032,6 +2172,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "preset_release_push"
       }
     },
     {
@@ -2062,7 +2206,11 @@
         "schema_version": 1,
         "kind": "sync"
       },
-      "served": false
+      "served": false,
+      "history": {
+        "schema_version": 1,
+        "mode": "release_push"
+      }
     },
     {
       "name": "cloud_remote_add",
@@ -2143,8 +2291,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
-      },
-      "served": false
+      }
     },
     {
       "name": "cloud_remote_remove",
@@ -2993,6 +3140,166 @@
       }
     },
     {
+      "name": "decoration_history",
+      "description": "Get the full version history of a decoration (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "access": "pro",
+      "category": "decoration_learning",
+      "parameters": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "decoration_historyArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
+      },
+      "served": false
+    },
+    {
+      "name": "iterate_decoration",
+      "description": "Create a new version of a decoration, archiving the current settings (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "access": "pro",
+      "category": "decoration_learning",
+      "parameters": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "content_path": {
+            "default": "",
+            "title": "Content Path",
+            "type": "string"
+          },
+          "depth_mm": {
+            "default": 0.0,
+            "title": "Depth Mm",
+            "type": "number"
+          },
+          "mode": {
+            "default": "",
+            "title": "Mode",
+            "type": "string"
+          },
+          "image_style": {
+            "default": "",
+            "title": "Image Style",
+            "type": "string"
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "iterate_decorationArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
+      },
+      "served": false,
+      "inputs": {
+        "files": {
+          "content_path": "one"
+        }
+      }
+    },
+    {
+      "name": "record_decoration_success",
+      "description": "Record a successful print, updating proven settings for a decoration (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "access": "pro",
+      "category": "decoration_learning",
+      "parameters": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "material": {
+            "title": "Material",
+            "type": "string"
+          },
+          "depth_mm": {
+            "title": "Depth Mm",
+            "type": "number"
+          },
+          "mode": {
+            "default": "emboss",
+            "title": "Mode",
+            "type": "string"
+          },
+          "image_style": {
+            "default": "auto",
+            "title": "Image Style",
+            "type": "string"
+          },
+          "source_job_id": {
+            "default": "",
+            "title": "Source Job Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "material",
+          "depth_mm"
+        ],
+        "title": "record_decoration_successArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
+      },
+      "served": false
+    },
+    {
+      "name": "rollback_decoration",
+      "description": "Restore a previous version of a decoration (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "access": "pro",
+      "category": "decoration_learning",
+      "parameters": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "version"
+        ],
+        "title": "rollback_decorationArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
+      },
+      "served": false
+    },
+    {
       "name": "inspect_design",
       "description": "Render and analyze a 3D mesh \u2014 shaded previews, cross-section slices, raw measurements (volume, watertightness, dimensions), and a print-readiness verdict (Pro+). Channels are opt-in, results land in a manifest.json bundle.\n\nFree tier: 3 inspections/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
@@ -3598,6 +3905,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -3627,6 +3941,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -3656,6 +3974,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -3798,6 +4123,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -3846,6 +4178,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -3947,6 +4286,13 @@
         "schema_version": 1,
         "kind": "made"
       },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
+      },
       "inputs": {
         "mesh": "host_mesh_path",
         "outputs": {
@@ -4034,6 +4380,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "bisect"
+        ]
       }
     },
     {
@@ -4058,6 +4411,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "bisect"
+        ]
       }
     },
     {
@@ -4082,6 +4442,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "bisect"
+        ]
       }
     },
     {
@@ -4118,6 +4485,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "bisect"
+        ]
       }
     },
     {
@@ -4154,6 +4528,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "bisect"
+        ]
       }
     },
     {
@@ -4217,6 +4598,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "bisect"
+        ]
       }
     },
     {
@@ -4295,6 +4683,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -4346,6 +4741,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -4397,6 +4799,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -4445,6 +4851,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -4662,6 +5072,13 @@
         "schema_version": 1,
         "kind": "record"
       },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
+      },
       "inputs": {
         "files": {
           "image_asset_path": "one"
@@ -4736,6 +5153,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -4858,6 +5282,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -4928,6 +5356,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -5085,6 +5520,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -5119,6 +5561,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -5235,6 +5684,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -5295,6 +5748,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -5369,6 +5829,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -5432,11 +5899,13 @@
         "schema_version": 1,
         "kind": "read"
       },
-      "served": false,
-      "inputs": {
-        "files": {
-          "recipe_path": "one"
-        }
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "files"
+        ],
+        "file_param": "recipe_path"
       }
     },
     {
@@ -5503,6 +5972,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -5527,6 +6003,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -5552,7 +6032,13 @@
         "schema_version": 1,
         "kind": "read"
       },
-      "served": false
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "reflog"
+        ]
+      }
     },
     {
       "name": "get_regression_alerts",
@@ -5679,7 +6165,13 @@
         "schema_version": 1,
         "kind": "made"
       },
-      "served": false,
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
+      },
       "inputs": {
         "files": {
           "asset_path": "one"
@@ -5830,7 +6322,13 @@
         "schema_version": 1,
         "kind": "read"
       },
-      "served": false
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "bisect"
+        ]
+      }
     },
     {
       "name": "list_cherry_pick_candidates",
@@ -5859,6 +6357,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -5888,6 +6390,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -5917,6 +6426,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -5951,6 +6467,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -5975,6 +6498,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -6023,6 +6553,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -6066,6 +6603,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -6145,6 +6686,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -6206,6 +6751,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -6235,6 +6787,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -6285,6 +6844,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -6309,6 +6875,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -6357,6 +6930,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -6452,6 +7032,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -6556,6 +7143,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -6629,6 +7220,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -6768,6 +7366,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -6870,6 +7472,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "sync"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "reflog"
+        ]
       }
     },
     {
@@ -6895,9 +7504,13 @@
         "schema_version": 1,
         "kind": "read"
       },
-      "served": false,
-      "inputs": {
-        "mesh": "stl_path"
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "files"
+        ],
+        "file_param": "stl_path"
       }
     },
     {
@@ -6948,6 +7561,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -7414,6 +8031,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -7633,7 +8254,13 @@
         "schema_version": 1,
         "kind": "made"
       },
-      "served": false
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "reflog"
+        ]
+      }
     },
     {
       "name": "retire_decoration_preset_branch",
@@ -7657,6 +8284,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -7686,6 +8320,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -7710,6 +8351,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -7739,6 +8384,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -7763,6 +8412,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -7792,6 +8448,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -7997,6 +8660,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -8073,6 +8743,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -8116,6 +8790,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -8175,7 +8853,13 @@
         "schema_version": 1,
         "kind": "read"
       },
-      "served": false
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "reflog"
+        ]
+      }
     },
     {
       "name": "sign_decoration_preset_release",
@@ -8216,6 +8900,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -8408,6 +9099,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -8466,6 +9161,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -8539,6 +9241,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -8587,6 +9296,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -8629,7 +9345,13 @@
         "schema_version": 1,
         "kind": "made"
       },
-      "served": false
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "reflog"
+        ]
+      }
     },
     {
       "name": "verify_decoration_preset_release",
@@ -8658,6 +9380,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       }
     },
     {
@@ -8726,6 +9455,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -8784,6 +9517,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -8892,6 +9632,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -9835,7 +10579,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      }
+      },
+      "served": false
     },
     {
       "name": "get_calibration_freshness",
@@ -10016,6 +10761,7 @@
         "schema_version": 1,
         "kind": "made"
       },
+      "served": false,
       "inputs": {
         "files": {
           "config_path": "one"
@@ -13441,7 +14187,19 @@
         "schema_version": 1,
         "kind": "verdict"
       },
-      "served": false
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "every_job",
+              "every_klipper_config"
+            ]
+          }
+        ],
+        "acts": false
+      }
     },
     {
       "name": "decorate_during_print_fleet",
@@ -13620,7 +14378,18 @@
         "schema_version": 1,
         "kind": "action"
       },
-      "served": false
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "every_job"
+            ]
+          }
+        ],
+        "acts": true
+      }
     },
     {
       "name": "fleet_colour_match",
@@ -13675,7 +14444,21 @@
         "schema_version": 1,
         "kind": "read"
       },
-      "served": false
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "every_job",
+              "every_loaded_spools"
+            ],
+            "colours_from": "colours",
+            "material_from": "material"
+          }
+        ],
+        "acts": false
+      }
     },
     {
       "name": "fleet_hardware_stops",
@@ -13751,9 +14534,21 @@
       },
       "offline": {
         "schema_version": 1,
-        "kind": "action"
+        "kind": "read"
       },
-      "served": false
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "every_job",
+              "every_nozzle"
+            ]
+          }
+        ],
+        "acts": false
+      }
     },
     {
       "name": "fleet_pause",
@@ -13876,7 +14671,18 @@
         "schema_version": 1,
         "kind": "action"
       },
-      "served": false
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "every_job"
+            ]
+          }
+        ],
+        "acts": true
+      }
     },
     {
       "name": "fleet_skip_objects",
@@ -13905,7 +14711,18 @@
         "schema_version": 1,
         "kind": "action"
       },
-      "served": false
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "every_job"
+            ]
+          }
+        ],
+        "acts": true
+      }
     },
     {
       "name": "fleet_thermal_posture",
@@ -14598,7 +15415,13 @@
         "schema_version": 1,
         "kind": "record"
       },
-      "served": false
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
+      }
     },
     {
       "name": "delete_design",
@@ -14666,6 +15489,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
@@ -15650,36 +16480,6 @@
       }
     },
     {
-      "name": "cancel_auto_recover",
-      "description": "Stop an active recovery run.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "auto_recover_id": {
-            "title": "Auto Recover Id",
-            "type": "string"
-          },
-          "reason": {
-            "default": "",
-            "title": "Reason",
-            "type": "string"
-          }
-        },
-        "required": [
-          "auto_recover_id"
-        ],
-        "title": "cancel_auto_recoverArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "record"
-      },
-      "served": false
-    },
-    {
       "name": "check_assembly_stands",
       "description": "Judge how an object LIVES and whether it STANDS \u2014 from geometry and the words, with every assumption said out loud.",
       "tier": "free",
@@ -15954,31 +16754,6 @@
         },
         "printer": "printer_name"
       }
-    },
-    {
-      "name": "confirm_auto_recover",
-      "description": "Approve a recovery run that is waiting for operator confirmation.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "auto_recover_id": {
-            "title": "Auto Recover Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "auto_recover_id"
-        ],
-        "title": "confirm_auto_recoverArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "record"
-      },
-      "served": false
     },
     {
       "name": "cutter_wear_status",
@@ -16439,31 +17214,6 @@
           "output_dir": "folder"
         }
       }
-    },
-    {
-      "name": "get_auto_recover_status",
-      "description": "Check the current state and outcome of a recovery run.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "auto_recover_id": {
-            "title": "Auto Recover Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "auto_recover_id"
-        ],
-        "title": "get_auto_recover_statusArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "read"
-      },
-      "served": false
     },
     {
       "name": "get_auto_tuned_settings",
@@ -21110,6 +21860,54 @@
           "product_type": {
             "title": "Product Type",
             "type": "string"
+          },
+          "printer_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Name"
+          },
+          "material": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Material"
+          },
+          "filament_line": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Filament Line"
+          },
+          "nozzle_diameter_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Nozzle Diameter Mm"
           }
         },
         "required": [
@@ -21137,6 +21935,18 @@
             "default": 50,
             "title": "Limit",
             "type": "integer"
+          },
+          "design_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Design Id"
           }
         },
         "title": "list_proven_recipesArguments",
@@ -21146,7 +21956,13 @@
         "schema_version": 1,
         "kind": "read"
       },
-      "served": false
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "proven"
+        ]
+      }
     },
     {
       "name": "record_proven_recipe",
@@ -21202,6 +22018,54 @@
             ],
             "default": null,
             "title": "Version"
+          },
+          "printer_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Name"
+          },
+          "material": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Material"
+          },
+          "filament_line": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Filament Line"
+          },
+          "nozzle_diameter_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Nozzle Diameter Mm"
           }
         },
         "required": [
@@ -21216,41 +22080,13 @@
         "schema_version": 1,
         "kind": "record"
       },
-      "served": false
-    },
-    {
-      "name": "cancel_speed_schedule",
-      "description": "Cancel the active speed schedule (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "speed_control",
-      "parameters": {
-        "properties": {},
-        "title": "cancel_speed_scheduleArguments",
-        "type": "object"
-      },
-      "offline": {
+      "history": {
         "schema_version": 1,
-        "kind": "record"
-      },
-      "served": false
-    },
-    {
-      "name": "get_speed_schedule",
-      "description": "Get the current active speed schedule and status (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "speed_control",
-      "parameters": {
-        "properties": {},
-        "title": "get_speed_scheduleArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "read"
-      },
-      "served": false
+        "mode": "served",
+        "kinds": [
+          "designs"
+        ]
+      }
     },
     {
       "name": "set_speed_percent",
@@ -23889,5 +24725,150 @@
         "kind": "record"
       }
     }
-  ]
+  ],
+  "served_public": {
+    "schema_version": 1,
+    "tools": {
+      "add_mesh_chamfer": {
+        "inputs": {
+          "files": {
+            "file_path": "one"
+          },
+          "outputs": {
+            "output_path": "file"
+          }
+        },
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "nozzle"
+            ]
+          }
+        ],
+        "printer_param": "printer_id",
+        "nozzle_params": [
+          "nozzle_mm"
+        ]
+      },
+      "add_mesh_fillet": {
+        "inputs": {
+          "files": {
+            "file_path": "one"
+          },
+          "outputs": {
+            "output_path": "file"
+          }
+        },
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "nozzle"
+            ]
+          }
+        ],
+        "printer_param": "printer_id",
+        "nozzle_params": [
+          "nozzle_mm"
+        ]
+      },
+      "analyze_printability": {
+        "inputs": {
+          "files": {
+            "file_path": "one"
+          }
+        },
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "nozzle"
+            ]
+          }
+        ],
+        "printer_param": "printer_id",
+        "nozzle_params": [
+          "nozzle_diameter"
+        ]
+      },
+      "apply_design_reinforcements": {
+        "inputs": {
+          "files": {
+            "file_path": "one"
+          },
+          "outputs": {
+            "output_path": "file"
+          }
+        },
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "nozzle"
+            ]
+          }
+        ],
+        "printer_param": "printer_id",
+        "nozzle_params": [
+          "nozzle_mm"
+        ]
+      },
+      "check_print_readiness": {
+        "inputs": {
+          "files": {
+            "file_path": "one"
+          },
+          "outputs": {
+            "output_path": "file"
+          }
+        },
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "nozzle"
+            ]
+          }
+        ],
+        "printer_param": "printer_id"
+      },
+      "compile_scad": {
+        "inputs": {
+          "text": {
+            "scad_path": "scad_code"
+          }
+        }
+      },
+      "generate_from_template": {},
+      "import_step_file": {
+        "inputs": {
+          "files": {
+            "file_path": "one"
+          },
+          "outputs": {
+            "output_dir": "folder"
+          }
+        }
+      },
+      "recommend_design_material": {},
+      "recommend_material": {
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "nozzle"
+            ]
+          }
+        ],
+        "printer_param": "printer_id",
+        "stays_here_when": {
+          "on_hand_only": [
+            true
+          ]
+        }
+      },
+      "tax_estimate": {}
+    }
+  }
 }

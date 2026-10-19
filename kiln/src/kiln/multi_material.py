@@ -183,6 +183,68 @@ class MultiMaterialStatus:
         }
 
 
+def status_from_dict(data: Any) -> MultiMaterialStatus | None:
+    """A reading back from :meth:`MultiMaterialStatus.to_dict`, or ``None``
+    for anything that is not one -- the one inverse of that shape, for a
+    reading taken on another computer (a served fleet sweep)."""
+    if not isinstance(data, dict) or not isinstance(data.get("kind"), str):
+        return None
+    slots: list[Tray] = []
+    for raw in data.get("loaded_slots") or []:
+        if not isinstance(raw, dict) or isinstance(raw.get("slot"), bool) or not isinstance(raw.get("slot"), int):
+            return None
+        unit = raw.get("unit", 0)
+        slots.append(Tray(
+            slot=raw["slot"],
+            material=str(raw.get("material") or UNREAD_MATERIAL),
+            hex6=normalize_hex(raw.get("color")),
+            unit=unit if isinstance(unit, int) and not isinstance(unit, bool) else 0,
+            name=str(raw["name"]) if isinstance(raw.get("name"), str) else None,
+        ))
+
+    def _ints(value: Any, n: int | None = None) -> tuple[int, ...] | None:
+        if not isinstance(value, list) or (n is not None and len(value) != n):
+            return None
+        if not all(isinstance(v, int) and not isinstance(v, bool) for v in value):
+            return None
+        return tuple(value)
+
+    num = data.get("num_slots")
+    return MultiMaterialStatus(
+        kind=data["kind"],
+        driven_by_kiln=data.get("driven_by_kiln") is True,
+        source=str(data.get("source") or "reported"),
+        slots=tuple(slots),
+        num_slots=num if isinstance(num, int) and not isinstance(num, bool) else None,
+        tool_map=_ints(data.get("tool_map")),
+        unit_name=str(data["unit_name"]) if isinstance(data.get("unit_name"), str) else None,
+        version=str(data["version"]) if isinstance(data.get("version"), str) else None,
+        warnings=[str(w) for w in data.get("warnings") or [] if isinstance(w, str)],
+        feeding=_ints(data.get("feeding"), 2),  # type: ignore[arg-type]
+        external_spool=data.get("external_spool") is True,
+    )
+
+
+class ReadOnce:
+    """A printer that answers its multi-material read with one already taken.
+
+    So everything judged about a machine in one pass -- what is loaded, and
+    which of a person's colours that covers -- reads the same spools; a
+    second read could catch a spool mid-swap and disagree with the first.
+    Everything else is the machine's own.
+    """
+
+    def __init__(self, adapter: Any, reading: MultiMaterialStatus) -> None:
+        self._adapter = adapter
+        self._reading = reading
+
+    def get_multi_material_status(self) -> MultiMaterialStatus:
+        return self._reading
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._adapter, name)
+
+
 def none_status(source: str = "no_probe") -> MultiMaterialStatus:
     return MultiMaterialStatus(kind=KIND_NONE, driven_by_kiln=False, source=source)
 

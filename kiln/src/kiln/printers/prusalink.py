@@ -818,25 +818,11 @@ class PrusaLinkAdapter(PrinterAdapter):
             return
 
         event_type, severity = classification
-        try:
-            from kiln_pro.nozzle_intelligence.sensor_signal import (
-                record_extrusion_event_for_printer,
-            )
+        # The one door every adapter reports through: local with
+        # kiln-pro, else to Kiln's servers off this thread.
+        from kiln._pro_nozzle_bridge import report_flow_anomaly
 
-            record_extrusion_event_for_printer(
-                printer_id=self.name,
-                event_type=event_type,
-                severity=severity,
-            )
-        except ImportError:
-            # Free tier — kiln-pro nozzle module not installed.  Drop
-            # the signal silently.
-            pass
-        except Exception as exc:  # pragma: no cover
-            logger.debug(
-                "Flow-anomaly cross-check raised (non-fatal): %s",
-                exc,
-            )
+        report_flow_anomaly(self.name, event_type, severity)
 
     def get_job(self) -> JobProgress:
         """Retrieve progress info for the active print job.

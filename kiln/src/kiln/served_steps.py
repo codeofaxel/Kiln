@@ -18,9 +18,15 @@ makes the toolpath; the servers then judge the result.
 
 ``printer_facts``: say which printers this install has -- each one's name,
 connection kind and model, and when asked, a Klipper printer's own
-configuration, what a printer is doing, or the named printer's current
-reading (its state, temperatures and progress, as numbers and words) --
-with the time they were read.  Never an address, a serial number or a
+configuration (one printer's, or every Klipper printer's for a fleet
+triage; only the probe and bed settings a power-loss check reads, never its
+serial port, CAN id or macros), what a printer is doing, the named printer's current reading (its
+state, temperatures and progress, as numbers and words), the nozzle size the
+named printer reports for itself, the nozzle each printer holds as its own
+setting, or the spools each printer reports loaded
+and, for the colours the call asked about, whether each is loaded there, a
+spool the person recorded owning, or neither (only the matching spools, as
+recorded: brand, colour, material) -- with the time they were read.  Never an address, a serial number or a
 credential: a served tool needs to know WHAT the printer is and what it
 reads, and nothing here tells it where the printer is or how to reach it.
 
@@ -61,6 +67,8 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+from kiln import callers_printers
 
 logger = logging.getLogger(__name__)
 
@@ -182,15 +190,83 @@ def _slice(tool: str, step: dict[str, Any]) -> tuple[str | None, dict[str, Any] 
 #: for each printer asked about (``hardware``: what :mod:`kiln.hardware_stops`
 #: answers for it -- a stop ahead, close, reached or passed, or ``None`` for
 #: an ordinary print -- for a served board of every machine waiting for
-#: hands).  A job is its state and how far along it is -- never the file's
-#: name, for the same reason the print-history step sends none.  A reading
-#: is numbers and words (:func:`_telemetry_fact`).
-_FACTS_EXTRAS = frozenset({"klipper_config", "job", "every_job", "telemetry", "hardware"})
+#: hands); the nozzle size the named printer reports for itself (``nozzle``,
+#: for a served design check judged for that nozzle).  A job is its state
+#: and how far along it is -- never the file's name, for the same reason the
+#: print-history step sends none.  A reading is numbers and words
+#: (:func:`_telemetry_fact`).
+#: For a fleet sweep, every Klipper printer's own configuration
+#: (``every_klipper_config``) and the nozzle every printer holds as its own
+#: setting (``every_nozzle``: size, material and when it was said, never a
+#: serial or fingerprint).
+_FACTS_EXTRAS = frozenset({
+    "klipper_config", "job", "every_job", "telemetry", "hardware",
+    "every_klipper_config", "every_nozzle", "every_loaded_spools", "nozzle",
+})
+#: Text that can locate a printer: an address, a URL, a host name.
+_NAMES_A_PLACE = re.compile(r"://|\bhost\b|\d{1,3}(?:\.\d{1,3}){3}|[a-z0-9-]+\.(?:local|lan|home)\b", re.IGNORECASE)
+#: How many colours a spool read may be asked about, and how long one may be.
+_MAX_SPOOL_COLOURS = 16
+_COLOUR_TEXT_LIMIT = 40
+#: What of a Klipper printer's configuration ever leaves this computer: the
+#: sections and settings the served power-loss check reads (whether the
+#: probe can re-find Z on a bare spot, and the bed's size), and nothing
+#: else.  A printer.cfg also holds the controller's serial port and CAN id,
+#: macro bodies that may run shell commands or carry tokens, and include
+#: paths; none of it is sent.  A probe or homing section is sent as present
+#: even when none of its settings here are set.
+KLIPPER_CONFIG_FACTS: dict[str, tuple[str, ...]] = {
+    "force_move": ("enable_force_move",),
+    "probe": ("z_offset",),
+    "bltouch": ("z_offset",),
+    "probe_eddy_current": ("z_offset",),
+    "smart_effector": ("z_offset",),
+    "beacon": ("z_offset",),
+    "cartographer": ("z_offset",),
+    "scanner": ("z_offset",),
+    "stepper_x": ("position_max",),
+    "stepper_y": ("position_max",),
+    "stepper_z": ("endstop_pin", "position_max"),
+    "safe_z_home": (),
+}
+_CONFIG_VALUE_LIMIT = 64
+
+
+def klipper_config_fact(config: Any) -> dict[str, Any] | None:
+    """*config* (Moonraker's ``configfile.config``) cut to :data:`KLIPPER_CONFIG_FACTS`.
+
+    ``None`` for anything that is not a configuration.  Values are kept as
+    the short strings Klipper reports; a longer one is not a setting this
+    check reads, and is dropped rather than cut.
+    """
+    if not isinstance(config, dict):
+        return None
+    out: dict[str, Any] = {}
+    for section, keys in KLIPPER_CONFIG_FACTS.items():
+        body = config.get(section)
+        if not isinstance(body, dict):
+            continue
+        kept: dict[str, Any] = {}
+        for key in keys:
+            value = body.get(key)
+            if isinstance(value, bool) or (isinstance(value, (int, float)) and value == value):
+                kept[key] = value
+            elif isinstance(value, str) and len(value) <= _CONFIG_VALUE_LIMIT:
+                kept[key] = value
+        out[section] = kept
+    return out
+
+
+#: What of a printer's own nozzle report a fleet sweep is sent.
+_NOZZLE_FACT_KEYS = (
+    "material", "nozzle_diameter_mm", "read_from", "firmware_version",
+    "state_age_seconds", "stale_after_seconds", "read_at", "value_kind",
+)
 #: How long a printer is given to answer for its configuration or its job.
 _FACTS_DEADLINE_S = 8.0
 #: How many printers are asked at once for a fleet-wide read.
 _FACTS_WORKERS = 8
-_UNNAMED = frozenset({"", "default", "active"})
+_UNNAMED = callers_printers.UNNAMED
 
 
 def _facts_target(asked: str, entries: dict[str, Any], default: str) -> str:
@@ -326,6 +402,12 @@ def _printer_facts(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | No
     try:
         entries = server._read_config_printers() or {}
         default = server._resolve_effective_printer_name(None)
+        if default not in entries:
+            # The registry holds the active printer under "default" as well
+            # as its own name; these facts name printers as config.yaml does.
+            from kiln.printer_model_resolver import resolve_active_printer_name
+
+            default = resolve_active_printer_name() or default
     except Exception:  # noqa: BLE001
         entries, default = {}, ""
     target = _facts_target(asked, entries, default)
@@ -340,13 +422,20 @@ def _printer_facts(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | No
             "model": str(entry.get("printer_model") or ""),
             "is_default": str(name) == default,
         }
+        if "nozzle" in want and str(name) == target:
+            # The printer's own setting, read the way the nozzle check here
+            # reads it (fresh only, one printer at a time); a size, nothing
+            # that identifies the machine.
+            from kiln.assumed_nozzle import _printer_setting_mm
+
+            fact["nozzle_setting_mm"] = _printer_setting_mm(str(name))[0]
         if "klipper_config" in want and kind == "moonraker" and str(name) == target:
             pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
             try:
                 adapter = server._get_registry().get(str(name))
-                fact["klipper_config"] = pool.submit(adapter.get_printer_config).result(
+                fact["klipper_config"] = klipper_config_fact(pool.submit(adapter.get_printer_config).result(
                     timeout=_FACTS_DEADLINE_S,
-                )
+                ))
             except Exception as exc:  # noqa: BLE001 — said, never guessed
                 fact["klipper_config"] = None
                 fact["klipper_config_error"] = _did_not_answer(exc)
@@ -363,10 +452,126 @@ def _printer_facts(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | No
             server, asked_of, jobs=jobs, hardware=hardware,
             telemetry_of=target if "telemetry" in want else None,
         )
+    if "every_klipper_config" in want or "every_nozzle" in want or "every_loaded_spools" in want:
+        _read_fleet(
+            server, printers,
+            configs="every_klipper_config" in want, nozzles="every_nozzle" in want,
+            spools=_spool_question(step) if "every_loaded_spools" in want else None,
+        )
     return {
         "read_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "printers": printers,
     }, None
+
+
+def _nozzle_fact(name: str) -> dict[str, Any] | None:
+    """What *name* holds as its nozzle, cut to the facts a sweep needs."""
+    from kiln.printer_nozzle_reading import observe_printer_nozzle
+
+    seen = observe_printer_nozzle(name)
+    if not isinstance(seen, dict):
+        return None
+    return {key: seen.get(key) for key in _NOZZLE_FACT_KEYS}
+
+
+def _spool_question(step: dict[str, Any]) -> tuple[list[str], str | None]:
+    """The colours (and the print's material) a spool read is asked about,
+    as the call gave them, cut to what a colour can be; ``([], None)`` for
+    none, and the read then says only what is loaded."""
+    raw = step.get("colours")
+    if isinstance(raw, str):
+        raw = raw.replace(";", ",").split(",")
+    colours: list[str] = []
+    for value in raw if isinstance(raw, list) else []:
+        if isinstance(value, str) and value.strip() and len(value.strip()) <= _COLOUR_TEXT_LIMIT:
+            colours.append(value.strip())
+        if len(colours) >= _MAX_SPOOL_COLOURS:
+            break
+    material = step.get("material")
+    material = material.strip() if isinstance(material, str) and 0 < len(material.strip()) <= _COLOUR_TEXT_LIMIT else None
+    return colours, material
+
+
+def _spools_fact(server: Any, name: str, question: tuple[list[str], str | None]) -> dict[str, Any]:
+    """*name*'s loaded spools, read once, and -- for the colours asked --
+    whether each is loaded there, owned, or neither, on that same reading."""
+    from kiln.colour_availability import colour_availability
+    from kiln.multi_material import ReadOnce, multi_material_status
+
+    from kiln.printers.base import PrinterEngagementError
+
+    adapter = server._resolve_adapter(name)
+    try:
+        reading = multi_material_status(adapter)
+    except PrinterEngagementError as exc:
+        # The one-printer rule's own words: which machine Kiln is driving.
+        return {"loaded_spools": None, "loaded_spools_error": str(exc)[:_ACT_TEXT_LIMIT]}
+    except Exception:  # noqa: BLE001 -- said, never guessed
+        return {"loaded_spools": None, "loaded_spools_error": "the printer could not be asked"}
+    seen = reading.to_dict()
+    # A failed read's reason is an exception's text, which can name the
+    # printer's address; it is said as a failed read and nothing more.
+    seen["warnings"] = (
+        ["the printer could not be read"] if reading.kind == "unknown"
+        else [w for w in seen.get("warnings") or [] if not _NAMES_A_PLACE.search(str(w))]
+    )
+    seen.pop("summary", None)
+    out: dict[str, Any] = {"loaded_spools": seen}
+    colours, material = question
+    if colours:
+        out["colour_availability"] = colour_availability(
+            colours, printer_name=name, adapter=ReadOnce(adapter, reading), material=material,
+        )
+    return out
+
+
+def _read_fleet(
+    server: Any,
+    facts: list[dict[str, Any]],
+    *,
+    configs: bool,
+    nozzles: bool,
+    spools: tuple[list[str], str | None] | None = None,
+) -> None:
+    """Fill ``klipper_config`` on every Klipper printer (when *configs*),
+    ``nozzle_reading`` on every printer (when *nozzles*) and
+    ``loaded_spools`` (with ``colour_availability`` for the colours asked)
+    on every printer (when *spools*): every printer asked at once, each
+    given the deadline.  A printer that does not answer, or cannot say, is
+    said to, never guessed."""
+    import concurrent.futures
+
+    def config_of(name: str) -> Any:
+        return klipper_config_fact(server._get_registry().get(name).get_printer_config())
+
+    asks: dict[tuple[str, str], Any] = {}
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=_FACTS_WORKERS)
+    try:
+        for fact in facts:
+            if configs and fact["type"] == "moonraker":
+                asks[(fact["name"], "klipper_config")] = pool.submit(config_of, fact["name"])
+            if nozzles:
+                asks[(fact["name"], "nozzle_reading")] = pool.submit(_nozzle_fact, fact["name"])
+            if spools is not None and not fact.get("same_machine_as"):
+                asks[(fact["name"], "loaded_spools")] = pool.submit(_spools_fact, server, fact["name"], spools)
+        concurrent.futures.wait(asks.values(), timeout=_FACTS_DEADLINE_S)
+        by_name = {f["name"]: f for f in facts}
+        for (name, key), future in asks.items():
+            fact = by_name[name]
+            try:
+                if not future.done():
+                    raise concurrent.futures.TimeoutError()
+                if key == "loaded_spools":
+                    fact.update(future.result())
+                    continue
+                fact[key] = future.result()
+                if fact[key] is None and key == "nozzle_reading":
+                    fact["nozzle_reading_error"] = "it did not say what nozzle it holds"
+            except Exception as exc:  # noqa: BLE001 -- said, never guessed
+                fact[key] = None
+                fact[f"{key}_error"] = _did_not_answer(exc)
+    finally:
+        pool.shutdown(wait=False)
 
 
 def _read_jobs(
@@ -525,9 +730,11 @@ def _print_history(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | No
 _STEPS: dict[str, Callable[[str, dict[str, Any]], tuple[str | None, dict[str, Any] | None]]] = {
     "slice": _slice,
 }
+#: The reading that sends this install's printers: each one's name and model.
+PRINTER_FACTS = "printer_facts"
 #: ...and steps that READ facts (sent with the next call as they are).
 _READS: dict[str, Callable[[str, dict[str, Any]], tuple[dict[str, Any] | None, dict[str, Any] | None]]] = {
-    "printer_facts": _printer_facts,
+    PRINTER_FACTS: _printer_facts,
     "print_history": _print_history,
 }
 #: ...and the one kind that ACTS: a step names one of this install's own
@@ -542,12 +749,20 @@ ACT_KIND = "act"
 #: characters, no path separators -- a file on the printer is named, never
 #: located.
 _PLAIN_NAME = re.compile(r"[^\x00-\x1f/\\]{1,160}")
+#: An object a skip names: a Bambu label id, an M486 index or a Klipper
+#: object label.  No spaces, ``=`` or ``;``, so an id can never carry a second
+#: argument or a second command into the line the printer is sent.
+_OBJECT_ID = re.compile(r"[A-Za-z0-9_.:+\-]{1,80}")
+_MAX_OBJECT_IDS = 32
 #: The arguments of each tool a served tool may ask this computer to run,
 #: and the shape each value must have.  A tool or an argument not here is
 #: refused, so the list is the fence: nothing commands firmware, sends
 #: G-code, sets a temperature, names a file the servers did not hand over,
 #: or speaks for the person (``hardware_confirmed`` is a person's word and
-#: is never a server's to give).
+#: is never a server's to give).  A cancel and a skip are on it since
+#: 2026-10-17 (Adam): an action runs only once the person's agent has shown
+#: the exact list and they approved it, and each goes through this install's
+#: own door with every check that door makes.
 ACT_TOOLS: dict[str, dict[str, Any]] = {
     "upload_file": {"file_path": "handed_file", "printer_name": "name"},
     "start_print": {
@@ -562,6 +777,8 @@ ACT_TOOLS: dict[str, dict[str, Any]] = {
         "plate_number": "small_int",
     },
     "pause_print": {"printer_name": "name", "keep_temps": bool},
+    "cancel_print": {"printer_name": "name", "preserve_temperatures": bool},
+    "skip_print_objects": {"object_ids": "object_ids", "printer_name": "name", "plate_number": "small_int"},
     "resume_print": {"printer_name": "name", "force": bool},
     "set_speed_profile": {
         "profile": ("silent", "standard", "sport", "ludicrous"),
@@ -645,6 +862,12 @@ def _checked_act_args(shape: dict[str, Any], args: Any) -> dict[str, Any] | None
             if (
                 not isinstance(value, list) or len(value) > 16
                 or any(isinstance(v, bool) or not isinstance(v, int) or not -1 <= v <= 255 for v in value)
+            ):
+                return None
+        elif want == "object_ids":
+            if (
+                not isinstance(value, list) or not 1 <= len(value) <= _MAX_OBJECT_IDS
+                or any(not isinstance(v, str) or not _OBJECT_ID.fullmatch(v) for v in value)
             ):
                 return None
         elif want == "percent":
@@ -929,6 +1152,11 @@ def read_first(
             "printer_name": printer_name,
             "want": _wanted_for(read, call),
         }
+        # The colours a spool read is about are the call's own arguments,
+        # named by the listing; checked again where they are read.
+        for field, named in (("colours", read.get("colours_from")), ("material", read.get("material_from"))):
+            if isinstance(named, str) and isinstance(call, dict) and call.get(named) is not None:
+                step[field] = call.get(named)
         facts, refusal = do(tool, step)
         if refusal is not None or facts is None:
             return {}, refusal

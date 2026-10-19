@@ -3809,9 +3809,14 @@ def _resolve_placement_volume(
         return build_volume
     if printer_id:
         try:
+            from kiln.printer_model_resolver import resolve_printer_model_for
             from kiln.printers.bed_fit import get_build_volume
 
-            volume = get_build_volume(printer_id)
+            # A model id, else a printer by the name its owner gave it:
+            # that printer's model is the bed.
+            volume = get_build_volume(printer_id) or get_build_volume(
+                resolve_printer_model_for(printer_id)
+            )
         except Exception:  # pragma: no cover - catalogue unavailable
             volume = None
         if volume is not None:

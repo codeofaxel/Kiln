@@ -519,11 +519,13 @@ def _sharing() -> bool:
 
 
 def _has_pro() -> bool:
+    """True when the caller's plan is Pro or above (see ``kiln.licensing``)."""
     try:
-        from kiln_pro.pro_gate import check_pro  # type: ignore[import-not-found]
+        from kiln.licensing import LicenseTier, check_tier
 
-        return check_pro("") is None
-    except Exception:  # noqa: BLE001
+        allowed, _ = check_tier(LicenseTier.PRO)
+        return bool(allowed)
+    except Exception:  # noqa: BLE001 -- an unreadable plan is Free
         return False
 
 
