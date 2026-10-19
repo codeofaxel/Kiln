@@ -567,12 +567,13 @@ class _DesignToolsPlugin:
             """Estimate safe structural load for a cantilevered section.
 
             The figure is Kiln Pro's (https://kiln3d.com/pricing), worked
-            out for this one part; below Pro the answer says the load was not
-            checked.  A part with a longer arm or a thinner section than
-            Kiln's load figures cover gets no figure at any tier:
-            ``load_checked`` is false and ``message`` says why.  When the
-            figure cannot be had (offline, signed out, no answer) the answer
-            says why and that the part is unchecked.
+            out for this one part -- strength, sag and the arm's own weight,
+            for any length of arm and size of section; below Pro the answer
+            says the load was not checked.  A part whose arm cannot hold its
+            own weight gets no figure: ``load_checked`` is false and
+            ``message`` says why.  When the figure cannot be had (offline,
+            signed out, no answer) the answer says why and that the part is
+            unchecked.
 
             Args:
                 material: Material ID (e.g. "petg", "nylon", "polycarbonate").
