@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import math
 import os
 import re
 import struct
@@ -107,6 +108,13 @@ def _read_png_pixels(file_path: str) -> tuple[list[list[int]], int, int]:
         _lum(palette[i], palette[i + 1], palette[i + 2])
         for i in range(0, len(palette) - 2, 3)
     ]
+    palette_rgb: list[RGB] = [
+        (palette[i], palette[i + 1], palette[i + 2]) for i in range(0, len(palette) - 2, 3)
+    ]
+    # The colours themselves, kept for the colour rule below -- for the two
+    # colour types with no alpha of their own, where brightness is the only
+    # other witness and the one that loses a red mark on a green field.
+    rgb_rows: list[list[RGB]] = []
     palette_alpha = [trns[i] if i < len(trns) else 255 for i in range(len(palette_gray))]
     trns_gray = struct.unpack(">H", trns[:2])[0] & 0xFF if color_type == 0 and len(trns) >= 2 else None
     trns_rgb = (
@@ -161,18 +169,24 @@ def _read_png_pixels(file_path: str) -> tuple[list[list[int]], int, int]:
                 alpha_rows.append([0 if v == trns_gray else 255 for v in gray_row])
         elif color_type == 2:  # RGB
             alpha_row_rgb: list[int] = []
+            rgb_row: list[RGB] = []
             for x in range(width):
                 off = x * 3
                 r, g, b_val = raw_row[off], raw_row[off + 1], raw_row[off + 2]
                 gray_row.append(_lum(r, g, b_val))
+                rgb_row.append((r, g, b_val))
                 if trns_rgb is not None:
                     alpha_row_rgb.append(0 if (r, g, b_val) == trns_rgb else 255)
+            rgb_rows.append(rgb_row)
             if trns_rgb is not None:
                 alpha_rows.append(alpha_row_rgb)
         elif color_type == 3:  # Palette
             if not palette_gray:
                 raise ValueError("Palette PNG without a PLTE chunk")
             gray_row = [palette_gray[i] if i < len(palette_gray) else 0 for i in raw_row]
+            rgb_rows.append([
+                palette_rgb[i] if i < len(palette_rgb) else (0, 0, 0) for i in raw_row
+            ])
             if trns:
                 alpha_rows.append(
                     [palette_alpha[i] if i < len(palette_alpha) else 255 for i in raw_row]
@@ -204,6 +218,14 @@ def _read_png_pixels(file_path: str) -> tuple[list[list[int]], int, int]:
         # The same alpha rule the Pillow door applies — decided once, over
         # the whole image, never per pixel.
         rows = _resolve_alpha_rows(rows, alpha_rows)
+    elif rgb_rows:
+        # No alpha to say where the mark is; the colours may.  The same
+        # rule, on the same plain data, as the Pillow door asks -- so a
+        # machine without Pillow carves a coloured logo exactly as one
+        # with it (see _colour_rule).
+        decided = _colour_ink_rows(rgb_rows)
+        if decided is not None:
+            rows = decided[0]
 
     return rows, width, height
 
@@ -297,6 +319,188 @@ def _alpha_is_the_ink(opaque_lum_hist: list[int]) -> bool:
         if covered / opaque >= _ALPHA_FLAT_ART_COVERAGE:
             return True
     return False
+
+
+#: Colour clusters a flat piece of artwork may have.  Read from the alpha
+#: rule's own constant: it is the same question -- "is this a mark in a few
+#: brand colours, or a photograph?" -- asked of colour instead of tone.
+_COLOUR_FLAT_ART_MAX_CLUSTERS = _ALPHA_FLAT_ART_MAX_TONES
+
+#: Palette entries asked of the quantiser.  More than the clusters a mark
+#: may have, so anti-aliased edge pixels get entries of their own instead
+#: of pulling a real colour off its centre; the coverage test then decides
+#: whether the few big entries are the whole picture.
+_COLOUR_PALETTE = 8
+
+#: How far apart, in RGB (0-441), the mark and the ground must be to count
+#: as different colours.  Below this they are two shades of one colour,
+#: and a carve could not honestly tell them apart either -- that bound is
+#: stated, not hidden.  Sixty is about the distance between a colour and
+#: a clearly lighter or darker version of itself.
+_COLOUR_MIN_DISTANCE = 60.0
+
+
+#: Long edge of the sample the colour DECISION is made on.  Which colours a
+#: logo has, and which one is its background, is settled by a thumbnail;
+#: applying the answer to every pixel is the only full-size pass.
+_COLOUR_SAMPLE_EDGE = 128
+
+#: Bits dropped from each channel when counting colours, so a flat colour
+#: and its anti-aliased near-neighbours land in one bin without a
+#: clustering library: 32 levels a channel.
+_COLOUR_BIN_SHIFT = 3
+
+RGB = tuple[int, int, int]
+
+
+def _rgb_distance(a: RGB, b: RGB) -> float:
+    return math.sqrt(sum((x - y) ** 2 for x, y in zip(a, b)))
+
+
+def _nearest_centre(centres: list[RGB], rgb: RGB) -> int:
+    return min(range(len(centres)), key=lambda i: _rgb_distance(centres[i], rgb))
+
+
+def _colour_rule(sample: list[RGB], width: int, height: int) -> tuple[list[RGB], int] | None:
+    """The colour rule, on plain data, so every decoder can ask it.
+
+    *sample* is a row-major list of *width* x *height* RGB pixels -- a
+    thumbnail of the image, taken without blending (nearest pixels, never
+    averaged, or the resize would invent colours between the real ones).
+    Returns ``(centres, ground)``: the few colours the artwork is made of
+    and the index of its background; or ``None`` when colour has nothing
+    to add -- a photograph, a blank, or two shades of one colour.
+
+    Flat artwork is recognised the way the alpha rule recognises it: a few
+    clusters hold nearly all the pixels (the same coverage number).  The
+    GROUND is the cluster touching the border most (a logo sits on its
+    background, and the background reaches the edges), ties to the larger
+    area.  Everything else is the mark.
+    """
+    if width < 4 or height < 4 or len(sample) != width * height:
+        return None
+    counts: dict[tuple[int, int, int], int] = {}
+    sums: dict[tuple[int, int, int], list[int]] = {}
+    for r, g, b in sample:
+        key = (r >> _COLOUR_BIN_SHIFT, g >> _COLOUR_BIN_SHIFT, b >> _COLOUR_BIN_SHIFT)
+        counts[key] = counts.get(key, 0) + 1
+        acc = sums.setdefault(key, [0, 0, 0])
+        acc[0] += r
+        acc[1] += g
+        acc[2] += b
+    biggest = sorted(counts, key=counts.__getitem__, reverse=True)[:_COLOUR_FLAT_ART_MAX_CLUSTERS]
+    total = len(sample)
+    if sum(counts[k] for k in biggest) / total < _ALPHA_FLAT_ART_COVERAGE:
+        return None  # a photograph: its tones are the relief
+    centres: list[RGB] = [
+        (sums[k][0] // counts[k], sums[k][1] // counts[k], sums[k][2] // counts[k])
+        for k in biggest
+    ]
+    border = [0] * len(centres)
+    for y in range(height):
+        step = 1 if y in (0, height - 1) else width - 1
+        for x in range(0, width, step):
+            border[_nearest_centre(centres, sample[y * width + x])] += 1
+    area = [counts[k] for k in biggest]
+    ground = max(range(len(centres)), key=lambda i: (border[i], area[i]))
+    farthest = max(
+        (_rgb_distance(centres[ground], c) for i, c in enumerate(centres) if i != ground),
+        default=0.0,
+    )
+    if farthest < _COLOUR_MIN_DISTANCE:
+        return None  # two shades of one colour: not told apart, and said so
+    return centres, ground
+
+
+def _colour_said(centres: list[RGB]) -> str:
+    return (
+        f"read as a {len(centres)}-colour mark: carving the shapes, leaving the "
+        "background as the surface"
+    )
+
+
+def _colour_ink_rows(rgb_rows: list[list[RGB]]) -> tuple[list[list[int]], str] | None:
+    """The colour rule over plain RGB rows (the pure-Python decoder's
+    data): ink rows (0 = mark, 255 = field) and what was read, or ``None``.
+    Same rule, same answer as the Pillow door, so the two decoders cannot
+    disagree about what a coloured logo means."""
+    height = len(rgb_rows)
+    width = len(rgb_rows[0]) if height else 0
+    if not width:
+        return None
+    stride = max(1, math.ceil(max(width, height) / _COLOUR_SAMPLE_EDGE))
+    ys = range(0, height, stride)
+    xs = range(0, width, stride)
+    sample = [rgb_rows[y][x] for y in ys for x in xs]
+    decided = _colour_rule(sample, len(xs), len(ys))
+    if decided is None:
+        return None
+    centres, ground = decided
+    ink = [
+        [255 if _nearest_centre(centres, px) == ground else 0 for px in row]
+        for row in rgb_rows
+    ]
+    return ink, _colour_said(centres)
+
+
+def _colour_decision(rgb) -> tuple[Any, str] | None:
+    """The colour rule over a Pillow image: ``(ink_image, said)``, or
+    ``None`` when colour has nothing to add.
+
+    The alpha rule says: a logo's colours are brand colours, not depths --
+    a white stroke and an orange stroke are the same mark and want the
+    same cut, so the COVERAGE is the ink.  This is the same rule for a logo
+    with no alpha channel.  Read by brightness alone, a red mark on a green
+    field of the same brightness vanishes (measured 2026-10-18: 76 against
+    73 of 255 -- the engine refused the file as blank, or carved noise).
+    The colours say where the mark is, so the colour becomes the ink.
+
+    The decision is :func:`_colour_rule`, on plain data from a thumbnail,
+    the same function the pure-Python decoder asks -- so the two doors
+    cannot disagree about what a coloured logo means.  Applying it is the
+    only full-size pass: every pixel snaps to its nearest colour, so an
+    anti-aliased edge is ink or field and never a mid-depth ridge.
+
+    Bounds, stated: two shades of one colour closer than
+    :data:`_COLOUR_MIN_DISTANCE` are not told apart; a photograph never
+    fits in this few colours and is left to the brightness path that is
+    right for it.
+    """
+    from PIL import Image
+
+    try:
+        full = rgb.convert("RGB")
+    except Exception:  # noqa: BLE001 — a mode Pillow cannot take to RGB is not artwork
+        return None
+    width, height = full.size
+    scale = max(width, height) / _COLOUR_SAMPLE_EDGE
+    size = (max(4, round(width / scale)), max(4, round(height / scale))) if scale > 1 else (width, height)
+    # NEAREST: a thumbnail that keeps the image's own colours rather than
+    # inventing ones between them.
+    thumb = full.resize(size, Image.NEAREST)
+    decided = _colour_rule(list(thumb.getdata()), *thumb.size)
+    if decided is None:
+        return None
+    centres, ground = decided
+    # Snap every pixel to its nearest colour with Pillow's own palette
+    # quantiser -- the apply, not the rule.
+    palette = Image.new("P", (1, 1))
+    flat = [c for centre in centres for c in centre]
+    palette.putpalette(flat + [0] * (768 - len(flat)))
+    snapped = full.quantize(palette=palette, dither=Image.Dither.NONE)
+    ink = snapped.point(lambda index: 255 if index == ground else 0, mode="L")
+    return ink, _colour_said(centres)
+
+
+def _colour_verdict(image_path: str) -> str | None:
+    """What the colour rule decided for this file: a sentence when the
+    colours are the ink, else ``None``.  Read once by
+    :func:`prepare_image_for_emboss`, beside the alpha verdict."""
+    try:
+        decided = _colour_decision(_open_reduced(image_path))
+    except Exception:  # noqa: BLE001 — the loader reports unreadable images itself
+        return None
+    return decided[1] if decided else None
 
 
 def _alpha_ink_level(alpha: int) -> int:
@@ -585,7 +789,15 @@ def _open_grayscale(image_path: str, *, exif_transpose: bool = False):
         from PIL import ImageOps
 
         img = ImageOps.exif_transpose(img)
-    return _flatten_alpha_on_white(img).convert("L")
+    flat = _flatten_alpha_on_white(img)
+    if flat.mode != "L":
+        # No alpha said where the mark is; the colours may.  Decided here,
+        # at the one door, so every style that opens an image as grayscale
+        # gets the mark a brightness read would have lost.
+        decided = _colour_decision(flat)
+        if decided is not None:
+            return decided[0]
+    return flat.convert("L")
 
 
 def _load_image_as_grayscale(image_path: str) -> tuple[list[list[int]], int, int]:
@@ -1005,7 +1217,14 @@ def prepare_image_for_emboss(
     # circle, and running it over a logo carved the whole disc away and
     # left the mask's edge printed on the part as a ring.  Callers pass a
     # style as a hint; the image itself is the authority.
+    _read_as = None
     _mark_mode = _alpha_verdict(image_path) == "ink"
+    if not _mark_mode:
+        # The colour rule, beside the alpha rule: a logo in brand colours
+        # whose brightness says nothing.  Decided on the SOURCE, before the
+        # flat-tone check below can call a visible logo blank.
+        _read_as = _colour_verdict(image_path)
+        _mark_mode = _read_as is not None
     if not _mark_mode:
         _probe = None
         try:
@@ -1460,6 +1679,10 @@ def prepare_image_for_emboss(
         # field the mark wins, and the caller can report that honestly
         # instead of echoing the style it asked for.
         "treatment": "mark" if _mark_mode else "relief",
+        # What the image was READ as, in words, when a rule other than
+        # brightness decided it -- so a person (or a shop running a batch)
+        # can see the decision rather than infer it from the part.
+        "read_as": _read_as,
         "style_applied": style,
     }
 
