@@ -107,3 +107,20 @@ def test_the_group_joins_a_cli_that_has_no_pr_command():
     register_history_cli(cli)
 
     assert "pr" in cli.commands
+
+
+def test_a_teammates_text_cannot_drive_this_terminal(server):
+    """Titles and comments are other people's words: no control characters
+    reach the terminal, so an escape sequence prints as text."""
+    calls, answers = server
+    answers["get_design_pull_request"] = {"status": "success", "pull_request": {
+        "pr_id": "abcd1234", "status": "open", "title": "fine\x1b]0;owned\x07",
+        "description": "line one\nline two\x1b[2J",
+        "review_comments": [{"decision": "APPROVE", "body": "ok\x1b[31mred"}],
+    }}
+
+    out = _run("show", "abcd1234")
+
+    assert out.exit_code == 0, out.output
+    assert "\x1b" not in out.output and "\x07" not in out.output
+    assert "line one\nline two" in out.output

@@ -39,7 +39,7 @@ def _finish(answer: dict[str, Any], json_mode: bool, say: Callable[[dict[str, An
     failed = not isinstance(answer, dict) or answer.get("status") == "error" or answer.get("success") is False
     if failed:
         if not json_mode:
-            click.echo(f"ERROR: {answer.get('error') or 'Kiln could not do that.'}", err=True)
+            click.echo(f"ERROR: {_shown(answer.get('error') or 'Kiln could not do that.', lines=True)}", err=True)
         sys.exit(1)
     if not json_mode:
         click.echo(say(answer))
@@ -439,11 +439,26 @@ def _account_call(tool: str, **kwargs: Any) -> dict[str, Any]:
     return call_account(tool, **kwargs)
 
 
+def _shown(value: Any, *, lines: bool = False) -> str:
+    """*value* as text safe to print: no control characters.
+
+    Pull request titles, descriptions and comments are written by other
+    people on the team; printed raw, an escape sequence in one could rewrite
+    what this terminal shows.  Newlines and tabs survive only where the text
+    is shown as lines of its own.
+    """
+    keep = "\n\t" if lines else ""
+    return "".join(
+        ch if ch in keep or not (ord(ch) < 32 or 127 <= ord(ch) < 160) else "?"
+        for ch in str(value if value is not None else "")
+    )
+
+
 def _pr_line(pr: dict[str, Any]) -> str:
     return (
-        f"{str(pr.get('pr_id') or '')[:8]} {str(pr.get('status') or ''):18s} "
-        f"{str(pr.get('title') or ''):40s} {pr.get('source_branch_name') or ''}"
-        f" -> {pr.get('target_branch_name') or ''}"
+        f"{_shown(pr.get('pr_id'))[:8]} {_shown(pr.get('status')):18s} "
+        f"{_shown(pr.get('title')):40s} {_shown(pr.get('source_branch_name'))}"
+        f" -> {_shown(pr.get('target_branch_name'))}"
     )
 
 
@@ -495,8 +510,8 @@ def pr_review(pr_id: str, decision: str, body: str, user_id: str | None, json_mo
     extra = {"user_id": user_id} if user_id else {}
     answer = _account_call("review_design_pull_request", pr_id=pr_id, decision=decision, body=body, **extra)
     _finish(answer, json_mode, lambda a: (
-        f"Recorded {decision.lower().replace('_', ' ')} on {pr_id[:8]}; it is now "
-        f"{(a.get('pull_request') or {}).get('status') or 'open'}."
+        f"Recorded {decision.lower().replace('_', ' ')} on {_shown(pr_id)[:8]}; it is now "
+        f"{_shown((a.get('pull_request') or {}).get('status') or 'open')}."
     ))
 
 
@@ -523,9 +538,9 @@ def pr_show(pr_id: str, json_mode: bool) -> None:
         pr = a.get("pull_request") or {}
         lines = [_pr_line(pr)]
         if pr.get("description"):
-            lines.append(str(pr["description"]))
+            lines.append(_shown(pr["description"], lines=True))
         for c in pr.get("review_comments") or []:
-            lines.append(f"  {c.get('decision') or 'COMMENT'}: {c.get('body') or ''}")
+            lines.append(f"  {_shown(c.get('decision') or 'COMMENT')}: {_shown(c.get('body'), lines=True)}")
         return "\n".join(lines)
 
     _finish(answer, json_mode, say)
