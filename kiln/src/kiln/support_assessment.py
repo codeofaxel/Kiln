@@ -235,6 +235,10 @@ def _shared_verdict(
         )
     except ValueError as exc:
         return False, f"Whether supports are needed was not judged: {exc}"
+    except MemoryError:
+        # The analysis runner's cap: more memory than this machine gives a
+        # single analysis.  Not judged, said -- never a quiet "no".
+        return False, "Whether supports are needed was not judged: the part is too large for this machine's analysis"
     finally:
         if scratch is not None:
             with contextlib.suppress(OSError):

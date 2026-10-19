@@ -878,8 +878,30 @@ def judge_supports(
     judgement as :func:`analyze_printability` -- one engine -- without the
     thin-wall, cavity, warping, thermal and cost analyses a slice never
     reads (on a 200,000-face part those are fifteen seconds).  Raises
-    ``ValueError`` as the full analysis does for a file that is not a solid.
+    ``ValueError`` as the full analysis does for a file that is not a solid,
+    and runs where that analysis runs: through kiln-pro's memory-capped
+    runner when there is one (a ``MemoryError`` is the cap), else here.
     """
+    kwargs = dict(
+        nozzle_diameter=nozzle_diameter, layer_height=layer_height,
+        max_overhang_angle=max_overhang_angle, material=material, printer_id=printer_id,
+    )
+    runner = _analysis_runner()
+    if runner is None:
+        return _judge_supports_here(file_path, **kwargs)
+    return runner(_judge_supports_here, file_path, **kwargs)
+
+
+def _judge_supports_here(
+    file_path: str,
+    *,
+    nozzle_diameter: float | None = None,
+    layer_height: float = 0.2,
+    max_overhang_angle: float | None = None,
+    material: str = "pla",
+    printer_id: str | None = None,
+) -> SupportJudgement:
+    """:func:`judge_supports`'s work, wherever it is run."""
     from kiln.assumed_nozzle import assumed_nozzle
     from kiln.design_intelligence import load_pro_overlay_or_empty
 

@@ -191,3 +191,41 @@ def test_the_slices_own_reading_is_the_reports(tmp_path: Path, name: str, faces:
     for name in ("needs_supports", "overhang_percentage", "max_overhang_angle", "overhang_triangle_count"):
         assert getattr(judged.overhangs, name) == getattr(report.overhangs, name), name
     assert judged.bridging.max_bridge_length_mm == report.bridging.max_bridge_length_mm
+
+
+def test_the_slices_reading_runs_through_the_same_capped_runner(tmp_path: Path, monkeypatch) -> None:
+    """With kiln-pro's memory-capped runner present, ``judge_supports``
+    goes through it exactly as ``analyze_printability`` does, and its
+    answer survives the trip (it is pickled across a process)."""
+    import pickle
+
+    from kiln import printability
+
+    path = _write_stl(tmp_path / "t.stl", CASES[1][1])
+    seen: dict[str, object] = {}
+
+    def runner(fn, file_path, **kwargs):
+        seen["fn"] = fn.__name__
+        return pickle.loads(pickle.dumps(fn(file_path, **kwargs)))
+
+    monkeypatch.setattr(printability, "_analysis_runner", lambda: runner)
+    judged = printability.judge_supports(path, material="pla")
+    assert seen["fn"] == "_judge_supports_here"
+    assert printability.support_verdict(judged).startswith("overhangs=")
+
+
+def test_a_memory_cap_is_said_not_read_as_no(tmp_path: Path, monkeypatch) -> None:
+    from kiln import printability
+    from kiln.support_assessment import assess_support_feasibility
+
+    path = _write_stl(tmp_path / "t.stl", CASES[1][1])
+
+    def capped(fn, file_path, **kwargs):
+        raise MemoryError("the cap")
+
+    monkeypatch.setattr(printability, "_analysis_runner", lambda: capped)
+    result = assess_support_feasibility(stl_path=path, material="PLA")
+    assert result.needs_supports is False
+    assert any("not judged" in w and "too large" in w for w in result.warnings), result.warnings
+    decision = slicer_supports.decide_supports(path, material="PLA")
+    assert decision.decided_by == "not_checked" and "not checked" in decision.reason
