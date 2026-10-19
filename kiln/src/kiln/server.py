@@ -19700,11 +19700,16 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                 if _history == "served":
                     # The design history this call is about lives here; it
                     # rides with the call and what changed comes back.
-                    from kiln.history_courier import records_for_call
+                    from kiln.history_courier import records_for_call, served_refusal
 
                     history_sent = records_for_call(
                         call, kinds=_kinds, tool=_name, file_param=_file_param,
                     )
+                    # A call that would keep a design locked to this
+                    # computer in the person's account is refused here.
+                    locked = served_refusal(_name, history_sent)
+                    if locked is not None:
+                        return locked
                     call = {**call, "history_records": history_sent}
                     if _file_param:
                         # The file is in the records; a path of this computer

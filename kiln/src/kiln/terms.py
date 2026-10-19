@@ -15,10 +15,10 @@ import os
 import time
 
 # The header of the document at kiln3d.com/terms carries its own page
-# version (3.2 as of 2026-10-12), which moves on every published edit.  THIS
+# version (3.3 as of 2026-10-17), which moves on every published edit.  THIS
 # constant moves only for a change material enough to ask every user to
 # accept again (Terms §22.1): bumping it re-prompts every install and account.
-_CURRENT_TERMS_VERSION = "3.0"
+_CURRENT_TERMS_VERSION = "3.3"
 
 _SETTINGS_KEY_VERSION = "terms_accepted_version"
 _SETTINGS_KEY_TIMESTAMP = "terms_accepted_at"
@@ -61,7 +61,7 @@ _TERMS_SUMMARY = """\
 # first-run gate -- updated whatever materially changed, then set this to match.
 # It makes "did we refresh every place the user accepts the terms?" a conscious
 # step on every change instead of something we remember to do by luck.
-_SUMMARY_REVIEWED_FOR_VERSION = "3.0"
+_SUMMARY_REVIEWED_FOR_VERSION = "3.3"
 
 
 # --- Account-scoped acceptance (honored across the user's devices) ----------

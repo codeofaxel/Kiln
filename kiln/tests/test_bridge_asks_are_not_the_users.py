@@ -50,6 +50,14 @@ _PERSONS_OWN_ASK = {
         "runs only when the person asks a material inventory door about several "
         "machines on Kiln Business; the cross-machine answer is what they reached for"
     ),
+    "_pro_material_pick_bridge": (
+        "runs only when the person asks what material a part should be, on a "
+        "plan that includes Kiln Pro; the pick is the feature they reached for"
+    ),
+    "_pro_orientation_bridge": (
+        "runs only when the person asks how to lay a part on the bed, on a plan "
+        "that includes Kiln Pro; the ranking is the feature they reached for"
+    ),
     "_pro_load_bridge": (
         "runs only when the person asks estimate_structural_load for a part at "
         "Kiln Pro; the part's load figure is the feature they reached for"

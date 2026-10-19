@@ -39,6 +39,11 @@ continues it.  Each recorded library file gets its ``version_id`` written into
 it, so a file is never mistaken for another version saved under the same
 number.  A version the server makes is written back into the library too, so
 the version tools see it.
+
+**A design can be locked to this computer** (:meth:`HistoryVault.set_locked`,
+read anywhere with :func:`design_locked`).  A locked design is never saved to
+the person's Kiln account: every door that would save it there asks first and
+refuses.  The lock lives here, beside the history it keeps here.
 """
 
 from __future__ import annotations
@@ -279,6 +284,65 @@ def _main_branch_id(design_id: str) -> str:
     return uuid.uuid5(uuid.NAMESPACE_URL, f"kiln-history-main:{design_id}").hex
 
 
+#: Where this computer's short name is kept, and what one looks like.
+_COMPUTER_KEY = "computer_name"
+_COMPUTER_NAME = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$")
+
+
+def _short_host_name() -> str:
+    """The host name's first label, lower case, letters, digits and dashes only."""
+    import socket
+
+    try:
+        raw = socket.gethostname() or ""
+    except OSError:
+        raw = ""
+    label = raw.split(".", 1)[0].lower()
+    name = re.sub(r"[^a-z0-9]+", "-", label).strip("-")[:32].strip("-")
+    return name if _COMPUTER_NAME.match(name) else "computer"
+
+
+def _lock_key(design_id: Any) -> str | None:
+    """The one key a design's lock is kept and looked up under, or ``None``.
+
+    The name of the folder *design_id* resolves to in the design library,
+    folded to one case.  Every spelling that reaches the same folder (``./mug``,
+    ``mug/``, ``Mug`` on a disk that ignores case) is the same design to the
+    pushes, so it must be the same design to the lock; folding case can only
+    make two designs share a lock, never let a locked one through.
+    """
+    folder = _design_folder(design_id)
+    return None if folder is None else folder.name.casefold()
+
+
+def design_locked(design_id: str) -> bool:
+    """Whether *design_id* is locked to this computer.
+
+    A locked design is never saved to the person's Kiln account; every door
+    that would save one there asks this first (this package's pushes, and
+    kiln-pro's, which imports it).  ``False`` when this computer keeps no
+    history records at all.  ``True`` when it keeps them but they cannot be
+    read: a push waits rather than send a design the person may have kept
+    here.
+    """
+    if not isinstance(design_id, str) or not design_id.strip():
+        return False
+    if not (_kiln_home() / "history_vault.db").is_file():
+        return False
+    try:
+        vault = HistoryVault()
+    except sqlite3.Error:
+        logger.warning("history: this computer's records could not be read; %s is treated as locked", design_id)
+        return True
+    try:
+        return vault.is_locked(design_id)
+    except sqlite3.Error:
+        logger.warning("history: this computer's records could not be read; %s is treated as locked", design_id)
+        return True
+    finally:
+        vault.close()
+
+
 class HistoryVault:
     """SQLite records of this computer's design history.  Thread-safe."""
 
@@ -350,6 +414,14 @@ class HistoryVault:
                 artifact_id TEXT NOT NULL,
                 status TEXT NOT NULL,
                 record TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS design_locks (
+                design_id TEXT PRIMARY KEY,
+                locked_at REAL NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
             );
             """
         )
@@ -457,6 +529,102 @@ class HistoryVault:
             if path.is_file():
                 return path
         return None
+
+    def version_count(self, design_id: str) -> int:
+        """How many versions of *design_id* this computer keeps."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS n FROM versions WHERE design_id = ?", (design_id,)
+        ).fetchone()
+        return int(row["n"]) if row else 0
+
+    # -- locks, and this computer's own settings ------------------------------
+
+    def is_locked(self, design_id: str) -> bool:
+        """Whether *design_id* is locked to this computer.
+
+        Judged by the design's folder, not the spelling: ``./mug``, ``mug/``
+        and, on a disk that ignores case, ``Mug`` all name the folder ``mug``
+        does, so they are all the locked design (:func:`_lock_key`).
+        """
+        key = _lock_key(design_id)
+        if key is None:
+            return False
+        row = self._conn.execute(
+            "SELECT 1 FROM design_locks WHERE design_id = ?", (key,)
+        ).fetchone()
+        return row is not None
+
+    def set_locked(self, design_id: str, locked: bool) -> bool:
+        """Lock *design_id* to this computer, or unlock it; the state it is now in."""
+        key = _lock_key(design_id)
+        if key is None:
+            raise ValueError(f"design_id must name a design folder, not a path: {design_id!r}")
+        with self._lock:
+            if locked:
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO design_locks (design_id, locked_at) VALUES (?, ?)",
+                    (key, time.time()),
+                )
+            else:
+                self._conn.execute("DELETE FROM design_locks WHERE design_id = ?", (key,))
+            self._conn.commit()
+        return self.is_locked(design_id)
+
+    def locked_designs(self) -> list[str]:
+        rows = self._conn.execute("SELECT design_id FROM design_locks ORDER BY design_id").fetchall()
+        return [r["design_id"] for r in rows]
+
+    def setting(self, key: str) -> Any:
+        """A value this computer keeps for itself (``None`` when unset)."""
+        row = self._conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        if row is None:
+            return None
+        try:
+            return json.loads(row["value"])
+        except ValueError:
+            return None
+
+    def set_setting(self, key: str, value: Any) -> None:
+        """Keep *value* under *key*; ``None`` forgets it."""
+        with self._lock:
+            if value is None:
+                self._conn.execute("DELETE FROM settings WHERE key = ?", (key,))
+            else:
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, _canonical(value)),
+                )
+            self._conn.commit()
+
+    def computer_name(self) -> str:
+        """This computer's short name, the same every time it is asked.
+
+        Read from the host name the first time (``Adams-MacBook.local`` is
+        ``adams-macbook``) and kept, so a later rename of the computer never
+        renames the branches it already named.
+        """
+        kept = self.setting(_COMPUTER_KEY)
+        if isinstance(kept, str) and _COMPUTER_NAME.match(kept):
+            return kept
+        name = _short_host_name()
+        self.set_setting(_COMPUTER_KEY, name)
+        return name
+
+    def keep_branch_copy(self, branch: dict[str, Any], members: list[dict[str, Any]]) -> None:
+        """Record *branch* with *members* as its versions, in their order.
+
+        For a branch this computer made from another (its work kept under a
+        name of its own): the versions are already here, so only the branch
+        and which versions are on it are written.
+        """
+        with self._lock:
+            self._put_branch(branch)
+            self._conn.execute("DELETE FROM memberships WHERE branch_id = ?", (branch["branch_id"],))
+            for position, m in enumerate(members):
+                self._put_membership({
+                    "branch_id": branch["branch_id"], "version_id": m["version_id"],
+                    "position": position, "added_at": m.get("added_at") or time.time(),
+                })
+            self._conn.commit()
 
     # -- what a call sends ---------------------------------------------------
 
@@ -1290,4 +1458,4 @@ def _created_at(recipe: dict[str, Any], path: Path) -> float:
         return time.time()
 
 
-__all__ = ["LIBRARY_KINDS", "SCHEMA_VERSION", "HistoryVault"]
+__all__ = ["LIBRARY_KINDS", "SCHEMA_VERSION", "HistoryVault", "design_locked"]

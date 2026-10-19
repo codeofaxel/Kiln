@@ -2048,17 +2048,18 @@ def _kiln_pro_recommendation(
 ) -> MaterialRecommendation | None:
     """Kiln Pro's pick, or ``None`` for the safety floor.
 
-    ``None`` means kiln-pro is not installed, it had no pick to give for this
-    call, or it failed.  The safety floor always answers.
+    Asked through :mod:`kiln._pro_material_pick_bridge`: kiln-pro on this
+    computer when it is here, else Kiln's servers when the signed-in plan
+    includes Kiln Pro (https://kiln3d.com/pricing).  ``None`` means the plan
+    does not include it, there was no pick for this call, or nothing
+    answered.  The safety floor always answers.
     """
     try:
-        from kiln_pro.material_recommendation import recommend_material  # type: ignore[import-not-found]
-    except ImportError:
-        return None
-    try:
-        rec = recommend_material(requirements_text, **printer)
+        from kiln import _pro_material_pick_bridge as _bridge
+
+        rec = _bridge.recommend(requirements_text, printer)
     except Exception as exc:  # noqa: BLE001 -- the safety floor still answers
-        logger.warning("kiln-pro material recommender failed, answering with the safety floor: %s", exc)
+        logger.warning("Kiln Pro material pick unavailable, answering with the safety floor: %s", exc)
         return None
     return rec if isinstance(rec, MaterialRecommendation) else None
 

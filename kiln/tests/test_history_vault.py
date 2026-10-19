@@ -1161,3 +1161,639 @@ class TestTheCommandSaysWhatBecameOfTheRecipes:
 
         assert "Sent 2 proven recipes with it." in pushed.output, pushed.output
         assert "its proven recipes are not" in pulled.output and "\x1b" not in pulled.output
+
+
+# ---------------------------------------------------------------------------
+# A design locked to this computer
+# ---------------------------------------------------------------------------
+
+PREFS = "/api/cloud/user/prefs"
+
+
+class _Account:
+    """The person's Kiln account as this computer sees it: the automatic-saving
+    switch, and the branch pushes.  Every call recorded; a push answers from
+    *pushes* in order, then with an empty success."""
+
+    def __init__(self, *, auto_backup=False, is_set=False, can=True, pushes=None, put=None):
+        self.prefs = {"auto_backup": auto_backup, "is_set": is_set}
+        if can is not None:
+            self.prefs["can_auto_backup"] = can
+        self.push_answers = list(pushes or [])
+        self.put_answer = put
+        self.calls = []
+
+    def __call__(self, tool, method, path, body=None, **_kw):
+        self.calls.append((method, path, body))
+        if path == PREFS and method == "PUT":
+            if self.put_answer is not None:
+                return self.put_answer
+            self.prefs.update(auto_backup=body["auto_backup"], is_set=True)
+            return {"status": "success", "auto_backup": body["auto_backup"], "is_set": True}
+        if path == PREFS:
+            return {"status": "success", **self.prefs}
+        if path.endswith("/branches/push"):
+            return self.push_answers.pop(0) if self.push_answers else {"pushed_versions": []}
+        return {}
+
+    def pushes(self):
+        return [body for method, path, body in self.calls if path.endswith("/branches/push")]
+
+    def reads(self):
+        return [c for c in self.calls if c[0] == "GET" and c[1] == PREFS]
+
+
+def _diverged(tool="cloud_push_branch"):
+    """A 409 from the push route, as ``_request`` hands it back."""
+    return {
+        "error": "branch diverged", "remote_head": "r" * 32, "local_parent": "p" * 32,
+        "suggestion": "pull + rebase + push again", "status": "error", "success": False,
+        "code": "KILN_API_HTTP_ERROR", "tool": tool, "http_status": 409,
+    }
+
+
+@pytest.fixture
+def plain_install(monkeypatch):
+    """No kiln-pro: any ``import kiln_pro...`` raises ImportError."""
+    import sys
+
+    for name in [n for n in sys.modules if n == "kiln_pro" or n.startswith("kiln_pro.")]:
+        monkeypatch.delitem(sys.modules, name)
+    monkeypatch.setitem(sys.modules, "kiln_pro", None)
+
+
+def _lock(design_id: str, locked: bool = True) -> None:
+    vault = HistoryVault()
+    try:
+        vault.set_locked(design_id, locked)
+    finally:
+        vault.close()
+
+
+class TestALockedDesignStaysHere:
+    def test_the_lock_is_kept_across_a_restart_and_read_from_anywhere(self, home):
+        from kiln.history_vault import design_locked
+
+        assert design_locked("mug") is False          # no records on this computer at all
+        _lock("mug")
+        assert design_locked("mug") is True and design_locked("bowl") is False
+        _lock("mug", False)
+        assert design_locked("mug") is False
+
+    def test_a_push_of_a_locked_design_is_refused_and_sends_nothing(self, home, monkeypatch):
+        _library(home, "mug", [MESH_V1])
+        _lock("mug")
+        monkeypatch.setattr(courier, "_request", lambda *a, **k: pytest.fail("nothing should be sent"))
+
+        answer = courier.push("cloud_push_branch", "mug")
+
+        assert answer["code"] == "DESIGN_LOCKED" and answer["success"] is False
+        said = answer["error"]
+        assert "mug is locked to this computer" in said and "kept on this computer" in said
+        assert "kiln design unlock mug" in said
+        assert answer["unlock"]["arguments"] == {"design_id": "mug", "locked": False}
+
+    def test_another_spelling_of_a_locked_design_is_the_same_locked_design(self, home, monkeypatch):
+        """The lock judged the spelling while a push resolves the folder, so
+        ``./mug`` (and ``Mug`` on a disk that ignores case) reached the locked
+        ``mug`` folder and was sent.  Found by a security review of the commit
+        that added the lock, 2026-10-18; it fails at 23c84153."""
+        from kiln.history_vault import design_locked
+
+        _library(home, "mug", [MESH_V1])
+        _lock("mug")
+        monkeypatch.setattr(courier, "_request", lambda *a, **k: pytest.fail("nothing should be sent"))
+
+        assert design_locked("./mug") is True and design_locked("mug/") is True
+        assert design_locked("MUG") is True       # folded: two designs may share a lock, a locked one never slips
+        answer = courier.push("cloud_push_branch", "./mug")
+        assert answer["success"] is False and answer["code"] in ("INVALID_INPUT", "DESIGN_LOCKED")
+
+    def test_the_mcp_push_door_is_refused_too(self, home, monkeypatch):
+        _library(home, "mug", [MESH_V1])
+        _lock("mug")
+        monkeypatch.setattr(courier, "_request", lambda *a, **k: pytest.fail("nothing should be sent"))
+        answer = courier.run_local("cloud_push_branch", "push", {"design_id": "mug"})
+        assert answer["code"] == "DESIGN_LOCKED"
+
+    def test_a_locked_designs_release_is_not_pushed(self, home, monkeypatch):
+        _library(home, "mug", [MESH_V1])
+        vault = _vault(home)
+        vault._put_release({"release_id": "r1", "design_id": "mug", "name": "1.0.0"})
+        vault._conn.commit()
+        vault.set_locked("mug", True)
+        vault.close()
+        monkeypatch.setattr(courier, "_request", lambda *a, **k: pytest.fail("nothing should be sent"))
+
+        answer = courier.run_local("cloud_push_release", "release_push", {"release_id": "r1"})
+
+        assert answer["code"] == "DESIGN_LOCKED"
+        assert "did not save its release to your Kiln account" in answer["error"]
+
+    def test_the_history_log_push_leaves_a_locked_designs_entries_here(self, home):
+        vault = _vault(home)
+        vault.apply_log_delta({"reflog": [
+            _log_entry("b-mug", None, "v1", design_id="mug", when=1.0),
+            _log_entry("b-bowl", None, "w1", design_id="bowl", when=2.0),
+        ]})
+        vault.set_locked("mug", True)
+        sent = courier.records_for_call({}, vault, kinds=("reflog",), tool="push_reflog_to_cloud")
+        assert [e["artifact_id"] for e in sent["reflog"]] == ["bowl"]
+        shown = courier.records_for_call({}, vault, kinds=("reflog",), tool="show_reflog")
+        assert sorted(e["artifact_id"] for e in shown["reflog"]) == ["bowl", "mug"]
+
+
+def _register_stubs(monkeypatch, tmp_path, tools: list[dict], fake_call) -> dict:
+    """The paid-tool stubs for *tools*, as a plain install registers them."""
+    from kiln import server
+
+    pkg = tmp_path / "pkg"
+    pkg.mkdir(exist_ok=True)
+    (pkg / "pro_tool_manifest.json").write_text(json.dumps({"tools": tools}), encoding="utf-8")
+    monkeypatch.setattr(server, "Path", lambda _p: pkg / "kiln")
+    monkeypatch.setattr(server, "_PRO_TOOL_NUDGES", {})
+    monkeypatch.setattr(server, "_PRO_TOOL_TIERS", {})
+    monkeypatch.setattr(server, "_PRO_TOOL_QUOTA", {})
+    monkeypatch.setattr(server, "_pro_api_call", fake_call)
+    registered = {}
+
+    class _MCP:
+        def tool(self, **_kwargs):
+            def deco(fn):
+                registered[fn.__name__] = fn
+                return fn
+            return deco
+
+    server._register_pro_tool_stubs(_MCP())
+    return registered
+
+
+def _served_tool(name: str, params: dict) -> dict:
+    return {
+        "name": name, "description": "d", "tier": "pro",
+        "history": {"schema_version": 1, "mode": "served"},
+        "parameters": {"type": "object", "properties": {k: {"type": "string"} for k in params},
+                       "required": list(params)},
+    }
+
+
+class TestServedCallsOfALockedDesign:
+    def test_a_pull_request_is_refused_before_anything_is_sent(self, home, tmp_path, monkeypatch):
+        _library(home, "mug", [MESH_V1])
+        _lock("mug")
+        calls = []
+        stubs = _register_stubs(
+            monkeypatch, tmp_path,
+            [_served_tool("propose_design_change", {"design_id": 1, "source_branch_id": 1, "target_branch_id": 1})],
+            lambda tool, **kw: calls.append(tool) or {"status": "success"},
+        )
+
+        answer = stubs["propose_design_change"](design_id="mug", source_branch_id="x", target_branch_id="y")
+
+        assert answer["code"] == "DESIGN_LOCKED" and calls == []
+        assert "did not open a pull request for it in your Kiln account" in answer["error"]
+
+    def test_a_branch_of_a_locked_design_is_still_made_and_kept_here(self, home, tmp_path, monkeypatch):
+        _library(home, "mug", [MESH_V1])
+        _lock("mug")
+
+        def fake_call(_tool, **kw):
+            vault = HistoryVault()
+            try:
+                delta = _new_version_delta(vault, "mug")
+            finally:
+                vault.close()
+            return {"status": "success", "branch": delta["branches"][0], "history_delta": {"designs": [delta]}}
+
+        stubs = _register_stubs(
+            monkeypatch, tmp_path, [_served_tool("create_design_branch", {"design_id": 1, "name": 1})], fake_call,
+        )
+        answer = stubs["create_design_branch"](design_id="mug", name="holes-in")
+
+        assert answer["history_kept"]["designs"] == ["mug"]
+        vault = HistoryVault()
+        try:
+            assert vault.branch_named("mug", "holes-in") is not None
+        finally:
+            vault.close()
+
+
+def _version_tools() -> dict:
+    from kiln.plugins import version_tools
+
+    tools = {}
+
+    class _MCP:
+        def tool(self, *_a, **_k):
+            def deco(fn):
+                tools[fn.__name__] = fn
+                return fn
+            return deco
+
+    version_tools.plugin.register(_MCP())
+    return tools
+
+
+class TestTheLockTool:
+    def test_lock_and_unlock_say_what_they_mean(self, home):
+        from kiln.history_vault import design_locked
+
+        lock_design = _version_tools()["lock_design"]
+        locked = lock_design(design_id="mug")
+        assert locked["ok"] is True and locked["locked"] is True and design_locked("mug")
+        assert "will not save it to your Kiln account" in locked["said"]
+        assert "passes through them for that call only and is not kept there" in locked["said"]
+
+        unlocked = lock_design(design_id="mug", locked=False)
+        assert unlocked["locked"] is False and not design_locked("mug")
+
+    def test_a_design_id_that_is_a_path_locks_nothing(self, home):
+        from kiln.history_vault import design_locked
+
+        answer = _version_tools()["lock_design"](design_id="../outside")
+        assert answer["ok"] is False and not design_locked("../outside")
+
+
+class TestTheLockCommands:
+    def test_design_lock_and_unlock_on_a_cli_without_a_design_group(self, home):
+        import click
+        from click.testing import CliRunner
+
+        from kiln.cli.history_commands import register_design_lock_cli
+        from kiln.history_vault import design_locked
+
+        root = click.Group("kiln")
+        register_design_lock_cli(root)
+        runner = CliRunner()
+        out = runner.invoke(root, ["design", "lock", "mug"])
+        assert out.exit_code == 0, out.output
+        assert "mug is locked to this computer" in out.output and design_locked("mug")
+        out = runner.invoke(root, ["design", "unlock", "mug"])
+        assert out.exit_code == 0 and "mug is unlocked" in out.output and not design_locked("mug")
+
+    def test_the_commands_join_a_design_group_the_cli_already_has(self):
+        import click
+
+        from kiln.cli.history_commands import register_design_lock_cli
+
+        existing = click.Group("design", commands={"archive": click.Command("archive")})
+        root = click.Group("kiln", commands={"design": existing})
+        register_design_lock_cli(root)
+        assert root.commands["design"] is existing
+        assert {"archive", "lock", "unlock"} <= set(existing.commands)
+
+
+# ---------------------------------------------------------------------------
+# Automatic saving to the account (Kiln Pro, off until turned on)
+# ---------------------------------------------------------------------------
+
+
+class TestASaveIsPushedWhenAutoPushIsOn:
+    def test_the_saved_version_goes_up_on_its_branch(self, home, monkeypatch, plain_install):
+        account = _Account(auto_backup=True, is_set=True)
+        monkeypatch.setattr(courier, "_request", account)
+
+        out = _save_answer("mug", "cube(1);")
+
+        assert out["ok"] is True
+        assert out["auto_push"]["pushed"] is True, out["auto_push"]
+        (body,) = account.pushes()
+        assert body["branch"]["name"] == "main"
+        assert "cube(1)" in body["provenance_sidecars"][-1]["recipe_dict"]["source_scad"]
+        assert "Saved main of mug to your Kiln account." in out["auto_push"]["said"]
+
+    def test_nothing_goes_up_while_it_is_off(self, home, monkeypatch, plain_install):
+        account = _Account(auto_backup=False, is_set=True)
+        monkeypatch.setattr(courier, "_request", account)
+
+        out = _save_answer("mug", "cube(1);")
+
+        assert out["ok"] is True and "auto_push" not in out
+        assert account.pushes() == []
+
+    def test_an_account_that_does_not_say_it_may_is_not_pushed_for(self, home, monkeypatch, plain_install):
+        account = _Account(auto_backup=True, is_set=True, can=None)
+        monkeypatch.setattr(courier, "_request", account)
+
+        out = _save_answer("mug", "cube(1);")
+
+        assert "auto_push" not in out and account.pushes() == []
+
+    def test_a_refused_push_never_fails_the_save_and_says_so(self, home, monkeypatch, plain_install):
+        account = _Account(auto_backup=True, is_set=True, pushes=[
+            {"status": "error", "success": False, "code": "STORE_UNAVAILABLE", "error": "try again shortly"}])
+        monkeypatch.setattr(courier, "_request", account)
+
+        out = _save_answer("mug", "cube(1);")
+
+        assert out["ok"] is True and out["version"]["version"] == 1
+        auto = out["auto_push"]
+        assert auto["pushed"] is False and auto["branches"][0]["code"] == "STORE_UNAVAILABLE"
+        assert "kept on this computer" in auto["said"] and "kiln cloud push mug" in auto["said"]
+
+    def test_a_locked_design_is_not_pushed_automatically(self, home, monkeypatch, plain_install):
+        _lock("mug")
+        account = _Account(auto_backup=True, is_set=True)
+        monkeypatch.setattr(courier, "_request", account)
+
+        out = _save_answer("mug", "cube(1);")
+
+        assert account.pushes() == []
+        assert out["auto_push"]["branches"][0]["code"] == "DESIGN_LOCKED"
+        assert "mug is locked to this computer" in out["auto_push"]["said"]
+
+    def test_the_switch_is_read_at_most_once_a_minute(self, home, monkeypatch, plain_install):
+        account = _Account(auto_backup=True, is_set=True)
+        monkeypatch.setattr(courier, "_request", account)
+
+        _save_answer("mug", "cube(1);")
+        _save_answer("mug", "cube(2);")
+        assert len(account.reads()) == 1 and len(account.pushes()) == 2
+
+        vault = HistoryVault()
+        try:
+            kept = vault.setting("account_prefs")
+            vault.set_setting("account_prefs", {**kept, "read_at": kept["read_at"] - 61})
+        finally:
+            vault.close()
+        _save_answer("mug", "cube(3);")
+        assert len(account.reads()) == 2
+
+    def test_a_switch_that_cannot_be_read_pushes_nothing_and_says_so(self, home, monkeypatch, plain_install):
+        account = _Account(auto_backup=True, is_set=True)
+        monkeypatch.setattr(courier, "_request", account)
+        _save_answer("mug", "cube(1);")
+        vault = HistoryVault()
+        try:
+            kept = vault.setting("account_prefs")
+            vault.set_setting("account_prefs", {**kept, "read_at": kept["read_at"] - 61})
+        finally:
+            vault.close()
+        offline = {"status": "error", "success": False, "code": "SERVER_UNREACHABLE", "error": "no answer"}
+        monkeypatch.setattr(courier, "_request", lambda *a, **k: offline)
+
+        out = _save_answer("mug", "cube(2);")
+
+        assert out["ok"] is True
+        assert out["auto_push"]["pushed"] is False and out["auto_push"]["code"] == "SERVER_UNREACHABLE"
+
+    def test_a_branch_a_served_call_moved_is_pushed(self, home, monkeypatch):
+        _library(home, "mug", [MESH_V1, MESH_V2])
+        vault = _vault(home)
+        vault.sync_from_library("mug")
+        account = _Account(auto_backup=True, is_set=True)
+        monkeypatch.setattr(courier, "_request", account)
+        delta = _new_version_delta(vault, "mug")
+
+        answer = courier.take_delta(
+            {"status": "success", "branch": delta["branches"][0], "history_delta": {"designs": [delta]}},
+            {"named": ["mug"]}, vault=vault, tool="create_design_branch",
+        )
+
+        (body,) = account.pushes()
+        assert body["branch"]["branch_id"] == "b" * 32 and body["branch"]["name"] == "holes-in"
+        assert answer["auto_push"]["pushed"] is True
+        assert answer["history_kept"]["saves_continue"] == "holes-in"
+
+    def test_a_served_call_that_moved_nothing_pushes_nothing(self, home, monkeypatch):
+        _library(home, "mug", [MESH_V1])
+        vault = _vault(home)
+        vault.sync_from_library("mug")
+        account = _Account(auto_backup=True, is_set=True)
+        monkeypatch.setattr(courier, "_request", account)
+        main = vault.branch_named("mug", "main")
+        delta = {"design_id": "mug", "branches": [main], "versions": [], "memberships": [],
+                 "provenance_sidecars": [], "releases": []}
+
+        answer = courier.take_delta({"history_delta": {"designs": [delta]}}, {"named": ["mug"]}, vault=vault)
+
+        assert account.calls == [] and "auto_push" not in answer
+
+
+    def test_a_rollback_is_a_save_and_goes_up_too(self, home, monkeypatch, plain_install):
+        monkeypatch.setattr(courier, "_request", _Account(auto_backup=False, is_set=True))
+        _save_answer("mug", "cube(1);")
+        _save_answer("mug", "cube(2);")
+        account = _Account(auto_backup=True, is_set=True)
+        monkeypatch.setattr(courier, "_request", account)
+        vault = HistoryVault()
+        try:
+            vault.set_setting("account_prefs", None)
+        finally:
+            vault.close()
+
+        out = _version_tools()["rollback_design_version"](design_id="mug", to_version_id="1")
+
+        assert out["ok"] is True and out["auto_push"]["pushed"] is True
+        (body,) = account.pushes()
+        assert "cube(1)" in body["provenance_sidecars"][-1]["recipe_dict"]["source_scad"]
+
+    def test_with_kiln_pro_installed_the_save_leaves_it_to_kiln_pro(self, home, monkeypatch):
+        """kiln-pro records and pushes its own versions: an ImportError inside
+        its own path never sends anything from here."""
+        import sys
+        import types
+
+        for name in [n for n in sys.modules if n == "kiln_pro" or n.startswith("kiln_pro.")]:
+            monkeypatch.delitem(sys.modules, name)
+        monkeypatch.setitem(sys.modules, "kiln_pro", types.ModuleType("kiln_pro"))
+        account = _Account(auto_backup=True, is_set=True)
+        monkeypatch.setattr(courier, "_request", account)
+
+        out = _save_answer("mug", "cube(1);")
+
+        assert out["ok"] is True and "auto_push" not in out and account.calls == []
+
+def _save_answer(design_id: str, scad: str) -> dict:
+    from kiln.plugins import version_tools
+
+    tools = {}
+
+    class _MCP:
+        def tool(self, *_a, **_k):
+            def deco(fn):
+                tools[fn.__name__] = fn
+                return fn
+            return deco
+
+    version_tools.plugin.register(_MCP())
+    return tools["save_design_version"](design_id=design_id, scad_source=scad)
+
+
+class TestTheOneTimeOffer:
+    def test_made_once_when_a_design_reaches_its_third_version(self, home, monkeypatch, plain_install):
+        account = _Account(auto_backup=False, is_set=False)
+        monkeypatch.setattr(courier, "_request", account)
+
+        firsts = [_save_answer("mug", f"cube({n});") for n in (1, 2)]
+        third = _save_answer("mug", "cube(3);")
+        fourth = _save_answer("mug", "cube(4);")
+
+        assert all("auto_push_offer" not in a for a in firsts)
+        offer = third["auto_push_offer"]
+        assert offer["turn_on"] == "kiln cloud auto-push on"
+        assert "stays off until you turn it on" in offer["said"]
+        assert "auto_push_offer" not in fourth and "auto_push" not in third
+        assert account.pushes() == []
+
+    def test_made_when_a_branch_is_first_made_here(self, home, monkeypatch):
+        _library(home, "mug", [MESH_V1])
+        vault = _vault(home)
+        vault.sync_from_library("mug")
+        monkeypatch.setattr(courier, "_request", _Account(auto_backup=False, is_set=False))
+        delta = _new_version_delta(vault, "mug")
+
+        answer = courier.take_delta(
+            {"status": "success", "branch": delta["branches"][0], "history_delta": {"designs": [delta]}},
+            {"named": ["mug"]}, vault=vault, tool="create_design_branch",
+        )
+
+        assert answer["auto_push_offer"]["turn_on"] == "kiln cloud auto-push on"
+        assert vault.setting("auto_push_offered")
+
+    def test_never_made_when_the_plan_does_not_include_it_or_the_switch_was_set(self, home, monkeypatch, plain_install):
+        monkeypatch.setattr(courier, "_request", _Account(auto_backup=False, is_set=False, can=False))
+        free = [_save_answer("mug", f"cube({n});") for n in (1, 2, 3)]
+        assert all("auto_push_offer" not in a for a in free)
+
+        monkeypatch.setattr(courier, "_request", _Account(auto_backup=False, is_set=True, can=True))
+        vault = HistoryVault()
+        try:
+            vault.set_setting("account_prefs", None)
+        finally:
+            vault.close()
+        assert "auto_push_offer" not in _save_answer("mug", "cube(4);")
+
+
+class TestTheAutoPushCommand:
+    def test_on_sets_the_accounts_switch_and_says_what_it_does(self, home, monkeypatch):
+        from click.testing import CliRunner
+
+        from kiln.cli.history_commands import cloud_group
+
+        account = _Account(auto_backup=False, is_set=False)
+        monkeypatch.setattr(courier, "_request", account)
+
+        out = CliRunner().invoke(cloud_group, ["auto-push", "on"])
+
+        assert out.exit_code == 0, out.output
+        assert ("PUT", PREFS, {"auto_backup": True}) in account.calls
+        assert "Automatic saving is on" in out.output
+        status = CliRunner().invoke(cloud_group, ["auto-push", "status"])
+        assert "Automatic saving is on" in status.output
+
+    def test_a_plan_without_it_hears_the_servers_own_words(self, home, monkeypatch):
+        from click.testing import CliRunner
+
+        from kiln.cli.history_commands import cloud_group
+
+        monkeypatch.setattr(courier, "_request", _Account(put={
+            "status": "error", "success": False, "code": "PRO_REQUIRED",
+            "error": "Automatic saving is part of Kiln Pro.", "http_status": 402}))
+
+        out = CliRunner().invoke(cloud_group, ["auto-push", "on"])
+
+        assert out.exit_code == 1 and "Automatic saving is part of Kiln Pro." in out.output
+
+
+# ---------------------------------------------------------------------------
+# Two computers, one branch
+# ---------------------------------------------------------------------------
+
+
+class TestABranchThatMovedOnAnotherComputer:
+    def test_this_computers_work_is_kept_as_its_own_branch_and_nothing_is_merged(self, home, monkeypatch):
+        import socket
+
+        monkeypatch.setattr(socket, "gethostname", lambda: "Adams-MacBook.local")
+        _library(home, "mug", [MESH_V1, MESH_V2])
+        account = _Account(pushes=[_diverged()])
+        monkeypatch.setattr(courier, "_request", account)
+
+        answer = courier.push("cloud_push_branch", "mug")
+
+        assert answer["status"] == "success", answer
+        first, second = account.pushes()
+        main = first["branch"]
+        own = second["branch"]
+        assert own["name"] == "main@adams-macbook"
+        assert own["parent_branch_id"] == main["branch_id"] and own["branch_id"] != main["branch_id"]
+        assert {m["branch_id"] for m in second["memberships"]} == {own["branch_id"]}
+        assert [m["version_id"] for m in second["memberships"]] == [m["version_id"] for m in first["memberships"]]
+        assert answer["kept_as"] == "main@adams-macbook"
+        said = answer["said"]
+        assert "moved on another computer" in said and "main@adams-macbook" in said and "Nothing was merged" in said
+        assert "kiln merge check mug main@adams-macbook main" in said
+        assert "kiln merge run mug main@adams-macbook main" in said
+        assert not any("merge" in path for _m, path, _b in account.calls)
+        vault = _vault(home)
+        kept = vault.branch_named("mug", "main@adams-macbook")
+        assert kept["head_version_id"] == main["head_version_id"]
+        assert vault.branch(main["branch_id"])["head_version_id"] == main["head_version_id"]
+
+    def test_the_branch_is_the_same_one_every_push_and_the_name_is_kept(self, home, monkeypatch):
+        import socket
+
+        monkeypatch.setattr(socket, "gethostname", lambda: "Shop-PC")
+        _library(home, "mug", [MESH_V1])
+        account = _Account(pushes=[_diverged(), {}, _diverged(), {}])
+        monkeypatch.setattr(courier, "_request", account)
+
+        courier.push("cloud_push_branch", "mug")
+        monkeypatch.setattr(socket, "gethostname", lambda: "renamed-later")
+        courier.push("cloud_push_branch", "mug")
+
+        ids = [b["branch"]["branch_id"] for b in account.pushes()]
+        names = [b["branch"]["name"] for b in account.pushes()]
+        assert ids[1] == ids[3] and names[1] == names[3] == "main@shop-pc"
+
+    def test_a_free_caller_keeps_the_servers_own_answer(self, home, monkeypatch):
+        _library(home, "mug", [MESH_V1])
+        plan = {"status": "error", "success": False, "code": "PRO_REQUIRED", "http_status": 402,
+                "error": "Branching is a Kiln Pro feature.", "required_tier": "pro"}
+        account = _Account(pushes=[_diverged(), plan])
+        monkeypatch.setattr(courier, "_request", account)
+
+        answer = courier.push("cloud_push_branch", "mug")
+
+        assert answer == _diverged()
+        vault = _vault(home)
+        assert [b["name"] for b in vault.branches("mug")] == ["main"]
+
+    def test_an_automatic_push_keeps_its_own_branch_too(self, home, monkeypatch, plain_install):
+        import socket
+
+        monkeypatch.setattr(socket, "gethostname", lambda: "laptop")
+        account = _Account(auto_backup=True, is_set=True, pushes=[_diverged()])
+        monkeypatch.setattr(courier, "_request", account)
+
+        out = _save_answer("mug", "cube(1);")
+
+        assert out["ok"] is True
+        (row,) = out["auto_push"]["branches"]
+        assert row["pushed"] is True and row["kept_as"] == "main@laptop"
+        assert "moved on another computer" in out["auto_push"]["said"]
+
+    def test_the_accounts_409_is_read_as_a_branch_that_moved(self, home, monkeypatch):
+        import httpx
+
+        monkeypatch.setenv("KILN_LICENSE_KEY", "kiln-test-key")
+        monkeypatch.setattr(httpx, "request", lambda *a, **k: httpx.Response(409, json={
+            "error": "branch diverged", "remote_head": "r", "local_parent": "p",
+            "suggestion": "pull + rebase + push again"}))
+        answer = courier._request("cloud_push_branch", "POST", "/api/cloud/designs/mug/branches/push", {})
+        assert courier._diverged(answer)
+
+    def test_the_command_says_where_the_work_went(self, home, monkeypatch):
+        from click.testing import CliRunner
+
+        import kiln.history_courier as hc
+        from kiln.cli.history_commands import cloud_group
+
+        monkeypatch.setattr(hc, "push", lambda *a, **k: {
+            "status": "success", "kept_as": "main@laptop",
+            "said": "The main branch of mug in your Kiln account moved on another computer."})
+
+        out = CliRunner().invoke(cloud_group, ["push", "mug"])
+
+        assert out.exit_code == 0 and "moved on another computer" in out.output
