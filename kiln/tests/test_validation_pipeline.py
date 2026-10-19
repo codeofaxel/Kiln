@@ -219,8 +219,6 @@ class TestPassScenario:
         mock_printability = _make_mock_printability()
 
         # Structural load mock
-        mock_estimate = MagicMock()
-        mock_estimate.to_dict.return_value = {"safe_load_n": 25.0}
 
         with (
             patch(
@@ -235,14 +233,10 @@ class TestPassScenario:
                 "kiln.printability.analyze_printability",
                 return_value=mock_printability,
             ),
-            patch(
-                "kiln.design_intelligence.estimate_load_capacity",
-                return_value=mock_estimate,
-            ),
         ):
             result = _invoke_tool(stl)
 
-        # With estimate_load_capacity available, structural passes (info) → status pass
+        # A compact part: the structural step passes (info) → status pass
         assert result["status"] in ("pass", "pass_with_warnings")
         assert result["ready_to_print"] is True
         assert result["repaired"] is False
@@ -280,7 +274,6 @@ class TestFailScenario:
                 return_value={},
             ),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
         ):
             result = _invoke_tool(stl)
 
@@ -316,10 +309,6 @@ class TestPassWithWarnings:
             patch(
                 "kiln.printability.analyze_printability",
                 return_value=_make_mock_printability(),
-            ),
-            patch(
-                "kiln.design_intelligence.estimate_load_capacity",
-                side_effect=ImportError("no module"),
             ),
         ):
             result = _invoke_tool(stl)
@@ -358,7 +347,6 @@ class TestRepairAttempted:
             ),
             patch("kiln.generation.validation.repair_stl", mock_repair),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
         ):
             result = _invoke_tool(stl)
 
@@ -378,7 +366,6 @@ class TestRepairAttempted:
             patch("kiln.generation.validation.validate_mesh", return_value=mock_validation),
             patch("kiln.generation.validation.repair_stl", mock_repair),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
         ):
             result = _invoke_tool(stl)
 
@@ -406,7 +393,6 @@ class TestBedFitCheck:
             patch("kiln.generation.validation.analyze_mesh", return_value=mock_analysis),
             patch("kiln.generation.validation.validate_mesh", return_value=mock_validation),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
             patch("kiln.safety_profiles.get_profile", return_value=mock_profile),
         ):
             result = _invoke_tool(stl, printer_id=_PRINTER_256)
@@ -434,7 +420,6 @@ class TestBedFitCheck:
             patch("kiln.generation.validation.analyze_mesh", return_value=analysis),
             patch("kiln.generation.validation.validate_mesh", return_value=mock_validation),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
             patch("kiln.safety_profiles.get_profile", return_value=mock_profile),
         ):
             result = _invoke_tool(stl, printer_id=_PRINTER_256)
@@ -453,7 +438,6 @@ class TestBedFitCheck:
             patch("kiln.generation.validation.analyze_mesh", return_value=mock_analysis),
             patch("kiln.generation.validation.validate_mesh", return_value=mock_validation),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
         ):
             result = _invoke_tool(stl)
 
@@ -484,10 +468,6 @@ class TestResilience:
             patch(
                 "kiln.printability.analyze_printability",
                 side_effect=RuntimeError("kaboom"),
-            ),
-            patch(
-                "kiln.design_intelligence.estimate_load_capacity",
-                side_effect=RuntimeError("pow"),
             ),
         ):
             result = _invoke_tool(stl)
@@ -521,10 +501,6 @@ class TestResilience:
             ),
             patch(
                 "kiln.printability.analyze_printability",
-                side_effect=ImportError,
-            ),
-            patch(
-                "kiln.design_intelligence.estimate_load_capacity",
                 side_effect=ImportError,
             ),
         ):
@@ -668,7 +644,6 @@ class TestRealBinaryStlPipeline:
                 side_effect=ImportError("not available"),
             ),
             patch("kiln.printability.analyze_printability", return_value=_make_mock_printability()),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
         ):
             result = _invoke_tool(stl)
 
@@ -715,7 +690,6 @@ class TestRecommendations:
                 side_effect=ImportError("not available"),
             ),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
             patch("kiln.safety_profiles.get_profile", return_value=mock_profile),
         ):
             result = _invoke_tool(stl, printer_id="test_printer")
@@ -747,7 +721,6 @@ class TestRecommendations:
             ),
             patch("kiln.generation.validation.repair_stl", return_value={}),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
         ):
             result = _invoke_tool(stl)
 
@@ -785,7 +758,6 @@ class TestBedFitFailWithInlineParser:
                 side_effect=ImportError("not available"),
             ),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
             patch("kiln.safety_profiles.get_profile", return_value=mock_profile),
         ):
             result = _invoke_tool(stl, printer_id="small_printer")
@@ -828,7 +800,6 @@ class TestAllCheckNamesPresent:
             ),
             patch("kiln.generation.validation.repair_stl", return_value={}),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
             patch("kiln.safety_profiles.get_profile", return_value=mock_profile),
         ):
             result = _invoke_tool(stl, printer_id=_PRINTER_256)
@@ -873,7 +844,6 @@ class TestReadyToPrint:
                 ),
                 patch("kiln.generation.validation.repair_stl", return_value={}),
                 patch("kiln.printability.analyze_printability", return_value=_make_mock_printability()),
-                patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
                 patch("kiln.safety_profiles.get_profile", return_value=mock_profile),
             ):
                 return _invoke_tool(stl, printer_id="test_printer")
@@ -890,7 +860,6 @@ class TestReadyToPrint:
                     side_effect=ImportError,
                 ),
                 patch("kiln.printability.analyze_printability", return_value=_make_mock_printability()),
-                patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
             ):
                 return _invoke_tool(stl)
 
@@ -903,7 +872,6 @@ class TestReadyToPrint:
                 patch("kiln.generation.validation.analyze_mesh", return_value=mock_analysis),
                 patch("kiln.generation.validation.validate_mesh", return_value=mock_validation),
                 patch("kiln.printability.analyze_printability", return_value=mock_printability),
-                patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
             ):
                 return _invoke_tool(stl)
 
@@ -938,14 +906,11 @@ class TestPrintabilityScore:
         mock_validation = _make_mock_validation()
         mock_printability = _make_mock_printability()
 
-        mock_estimate = MagicMock()
-        mock_estimate.to_dict.return_value = {"safe_load_n": 25.0}
 
         with (
             patch("kiln.generation.validation.analyze_mesh", return_value=mock_analysis),
             patch("kiln.generation.validation.validate_mesh", return_value=mock_validation),
             patch("kiln.printability.analyze_printability", return_value=mock_printability),
-            patch("kiln.design_intelligence.estimate_load_capacity", return_value=mock_estimate),
         ):
             result = _invoke_tool(stl)
 
@@ -960,7 +925,6 @@ class TestPrintabilityScore:
             patch("kiln.generation.validation.analyze_mesh", side_effect=ImportError),
             patch("kiln.generation.validation.validate_mesh", side_effect=ImportError),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
         ):
             result = _invoke_tool(stl)
 
@@ -1036,7 +1000,6 @@ class TestMaterialCheck:
             patch("kiln.generation.validation.analyze_mesh", return_value=analysis),
             patch("kiln.generation.validation.validate_mesh", return_value=mock_validation),
             patch("kiln.printability.analyze_printability", return_value=_make_mock_printability()),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
         ):
             return _invoke_tool(stl, material=material)
 
@@ -1050,7 +1013,6 @@ class TestMaterialCheck:
             patch("kiln.generation.validation.analyze_mesh", return_value=mock_analysis),
             patch("kiln.generation.validation.validate_mesh", return_value=mock_validation),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
         ):
             result = _invoke_tool(stl, material="")
 
@@ -1163,7 +1125,6 @@ class TestSummaryField:
             patch("kiln.generation.validation.analyze_mesh", return_value=mock_analysis),
             patch("kiln.generation.validation.validate_mesh", return_value=mock_validation),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
         ):
             result = _invoke_tool(stl)
 
@@ -1177,14 +1138,11 @@ class TestSummaryField:
         mock_validation = _make_mock_validation()
         mock_printability = _make_mock_printability()
 
-        mock_estimate = MagicMock()
-        mock_estimate.to_dict.return_value = {"safe_load_n": 25.0}
 
         with (
             patch("kiln.generation.validation.analyze_mesh", return_value=mock_analysis),
             patch("kiln.generation.validation.validate_mesh", return_value=mock_validation),
             patch("kiln.printability.analyze_printability", return_value=mock_printability),
-            patch("kiln.design_intelligence.estimate_load_capacity", return_value=mock_estimate),
         ):
             result = _invoke_tool(stl)
 
@@ -1213,7 +1171,6 @@ class TestValidatedPath:
             patch("kiln.generation.validation.analyze_mesh", return_value=mock_analysis),
             patch("kiln.generation.validation.validate_mesh", return_value=mock_validation),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
         ):
             result = _invoke_tool(stl)
 
@@ -1255,14 +1212,11 @@ class TestNextAction:
         mock_validation = _make_mock_validation()
         mock_printability = _make_mock_printability()
 
-        mock_estimate = MagicMock()
-        mock_estimate.to_dict.return_value = {"safe_load_n": 25.0}
 
         with (
             patch("kiln.generation.validation.analyze_mesh", return_value=mock_analysis),
             patch("kiln.generation.validation.validate_mesh", return_value=mock_validation),
             patch("kiln.printability.analyze_printability", return_value=mock_printability),
-            patch("kiln.design_intelligence.estimate_load_capacity", return_value=mock_estimate),
         ):
             result = _invoke_tool(stl)
 
@@ -1321,7 +1275,7 @@ class TestNextAction:
 
 
 class TestStructuralAssessment:
-    """Structural assessment uses real geometric risk factors or estimate_load_capacity."""
+    """Structural assessment uses real geometric risk factors from the bounding box."""
 
     def test_structural_uses_geometric_risk_factors_when_no_module(self, tmp_path: Path) -> None:
         """Without design_intelligence, reports real aspect ratio / cross-section / SA:V."""
@@ -1333,7 +1287,6 @@ class TestStructuralAssessment:
             patch("kiln.generation.validation.analyze_mesh", return_value=mock_analysis),
             patch("kiln.generation.validation.validate_mesh", return_value=mock_validation),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
         ):
             result = _invoke_tool(stl)
 
@@ -1364,7 +1317,6 @@ class TestStructuralAssessment:
             patch("kiln.generation.validation.analyze_mesh", return_value=analysis),
             patch("kiln.generation.validation.validate_mesh", return_value=mock_validation),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
         ):
             result = _invoke_tool(stl)
 
@@ -1373,30 +1325,6 @@ class TestStructuralAssessment:
         assert structural[0]["passed"] is False
         assert structural[0].get("severity") == "warning"
         assert "tall/narrow" in structural[0]["details"]
-
-    def test_structural_uses_estimate_load_capacity_when_available(self, tmp_path: Path) -> None:
-        """When design_intelligence is available, uses estimate_load_capacity."""
-        stl = _make_binary_stl(tmp_path, triangles=100)
-        mock_analysis = _make_mock_analysis()
-        mock_validation = _make_mock_validation()
-        mock_printability = _make_mock_printability()
-
-        mock_estimate = MagicMock()
-        mock_estimate.to_dict.return_value = {"safe_load_n": 25.0}
-
-        with (
-            patch("kiln.generation.validation.analyze_mesh", return_value=mock_analysis),
-            patch("kiln.generation.validation.validate_mesh", return_value=mock_validation),
-            patch("kiln.printability.analyze_printability", return_value=mock_printability),
-            patch("kiln.design_intelligence.estimate_load_capacity", return_value=mock_estimate),
-        ):
-            result = _invoke_tool(stl)
-
-        structural = [c for c in result["checks"] if c["name"] == "structural"]
-        assert len(structural) == 1
-        assert structural[0]["passed"] is True
-        assert "25.0 N" in structural[0]["details"]
-        assert result["model_info"]["structural_estimate"] == {"safe_load_n": 25.0}
 
 
 # ---------------------------------------------------------------------------
@@ -1484,14 +1412,11 @@ class TestSummaryContent:
         mock_validation = _make_mock_validation()
         mock_printability = _make_mock_printability()
 
-        mock_estimate = MagicMock()
-        mock_estimate.to_dict.return_value = {"safe_load_n": 25.0}
 
         with (
             patch("kiln.generation.validation.analyze_mesh", return_value=mock_analysis),
             patch("kiln.generation.validation.validate_mesh", return_value=mock_validation),
             patch("kiln.printability.analyze_printability", return_value=mock_printability),
-            patch("kiln.design_intelligence.estimate_load_capacity", return_value=mock_estimate),
         ):
             result = _invoke_tool(stl)
 
@@ -1512,7 +1437,6 @@ class TestSummaryContent:
             patch("kiln.generation.validation.analyze_mesh", side_effect=ImportError),
             patch("kiln.generation.validation.validate_mesh", side_effect=ImportError),
             patch("kiln.printability.analyze_printability", return_value=_make_mock_printability()),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
         ):
             result = _invoke_tool(stl)
 
@@ -1588,7 +1512,6 @@ class TestPrintTimeEstimateWithRealModule:
             patch("kiln.generation.validation.analyze_mesh", return_value=mock_analysis),
             patch("kiln.generation.validation.validate_mesh", return_value=mock_validation),
             patch("kiln.printability.analyze_printability", return_value=_make_mock_printability()),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
             patch("kiln.generation.validation.estimate_print_time_from_mesh", fake_estimate, create=True),
         ):
             result = _invoke_tool(stl)
@@ -1637,7 +1560,6 @@ class TestPrintTimeEstimateFallback:
             patch("kiln.generation.validation.validate_mesh", side_effect=ImportError),
             patch("kiln.generation.validation.estimate_print_time_from_mesh", side_effect=AttributeError("forced")),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
         ):
             result = _invoke_tool(stl)
 
@@ -1959,7 +1881,6 @@ class TestPrepareAiModelAutoScale:
             patch("kiln.generation.validation.analyze_mesh", side_effect=ImportError),
             patch("kiln.generation.validation.validate_mesh", side_effect=ImportError),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
         ):
             result = _invoke_ai_tool(stl)
 
@@ -1974,7 +1895,6 @@ class TestPrepareAiModelAutoScale:
             patch("kiln.generation.validation.analyze_mesh", side_effect=ImportError),
             patch("kiln.generation.validation.validate_mesh", side_effect=ImportError),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
         ):
             result = _invoke_ai_tool(stl, target_height_mm=120.0)
 
@@ -2065,7 +1985,6 @@ class TestPrepareAiModelHollowRecommendation:
             patch("kiln.generation.validation.analyze_mesh", side_effect=_analyze_side_effect),
             patch("kiln.generation.validation.validate_mesh", side_effect=ImportError),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
         ):
             result = _invoke_ai_tool(stl)
 
@@ -2097,7 +2016,6 @@ class TestPrepareAiModelHollowRecommendation:
             patch("kiln.generation.validation.analyze_mesh", side_effect=_analyze_side_effect),
             patch("kiln.generation.validation.validate_mesh", side_effect=ImportError),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
         ):
             result = _invoke_ai_tool(stl)
 
@@ -2128,7 +2046,6 @@ class TestPrepareAiModelHollowRecommendation:
             patch("kiln.generation.validation.analyze_mesh", side_effect=_analyze_side_effect),
             patch("kiln.generation.validation.validate_mesh", side_effect=ImportError),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
         ):
             result = _invoke_ai_tool(stl)
 
@@ -2157,7 +2074,6 @@ class TestPrepareAiModelSimplifyRecommendation:
             patch("kiln.generation.validation.analyze_mesh", return_value=mock_analysis),
             patch("kiln.generation.validation.validate_mesh", return_value=mock_validation),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
         ):
             result = _invoke_ai_tool(stl)
 
@@ -2181,7 +2097,6 @@ class TestPrepareAiModelSimplifyRecommendation:
             patch("kiln.generation.validation.analyze_mesh", return_value=mock_analysis),
             patch("kiln.generation.validation.validate_mesh", return_value=mock_validation),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
         ):
             result = _invoke_ai_tool(stl)
 
@@ -2200,7 +2115,6 @@ class TestPrepareAiModelReturnFormat:
             patch("kiln.generation.validation.analyze_mesh", side_effect=ImportError),
             patch("kiln.generation.validation.validate_mesh", side_effect=ImportError),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
         ):
             result = _invoke_ai_tool(stl)
 
@@ -2388,7 +2302,6 @@ class TestScaleCheckFires:
             patch("kiln.generation.validation.analyze_mesh", side_effect=ImportError),
             patch("kiln.generation.validation.validate_mesh", side_effect=ImportError),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
         ):
             result = _invoke_tool(stl)
 
@@ -2519,7 +2432,6 @@ class TestUnitsAreJudgedOnTheMeasuredSize:
             patch("kiln.generation.validation.analyze_mesh", side_effect=ImportError),
             patch("kiln.generation.validation.validate_mesh", side_effect=ImportError),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
         ):
             result = _invoke_tool(stl)
 
@@ -2583,7 +2495,6 @@ class TestPrepareAiModelTargetHeightNormalSize:
             patch("kiln.generation.validation.analyze_mesh", side_effect=ImportError),
             patch("kiln.generation.validation.validate_mesh", side_effect=ImportError),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
         ):
             result = _invoke_ai_tool(stl, target_height_mm=100.0)
 
@@ -2618,7 +2529,6 @@ class TestSeverityAlwaysPresent:
             patch("kiln.generation.validation.analyze_mesh", return_value=mock_analysis),
             patch("kiln.generation.validation.validate_mesh", return_value=mock_validation),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
         ):
             result = _invoke_tool(stl)
 
@@ -2633,7 +2543,6 @@ class TestSeverityAlwaysPresent:
             patch("kiln.generation.validation.analyze_mesh", side_effect=ImportError),
             patch("kiln.generation.validation.validate_mesh", side_effect=ImportError),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
-            patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
         ):
             result = _invoke_tool(stl)
 

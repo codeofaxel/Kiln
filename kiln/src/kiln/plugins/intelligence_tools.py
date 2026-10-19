@@ -752,32 +752,30 @@ class _IntelligenceToolsPlugin:
                 on_hand: list[dict[str, Any]] | None = None
                 if on_hand_only:
                     from kiln.material_inventory import (
-                        fleet_scope_verdict,
                         get_on_hand_materials,
+                        inventory_answer,
                     )
                     from kiln.persistence import get_db
 
                     # Scoped to one machine, this is single-machine
                     # awareness and free on every tier.  Unscoped, it
-                    # sweeps the whole fleet — the same cross-machine
-                    # answer the fleet inventory tools sell, so it goes
-                    # through the same shared gate.
-                    if not printer_id and (
-                        blocked := fleet_scope_verdict(
-                            "Recommending across every machine you own"
+                    # sweeps every machine — the same cross-machine
+                    # answer the material inventory tools sell, so it goes
+                    # through the same one router.
+                    if printer_id:
+                        on_hand = [m.to_dict() for m in get_on_hand_materials(get_db(), printer_name=printer_id)]
+                    else:
+                        on_hand, refused = inventory_answer(
+                            "on_hand", get_db(), feature="Recommending across every machine you own",
                         )
-                    ):
-                        blocked["upgrade_hint"] = (
-                            "Pass printer_id to answer for one machine on "
-                            "your current plan, or see "
-                            "https://kiln3d.com/pricing for fleet-wide answers."
-                        )
-                        return blocked
-
-                    inventory = get_on_hand_materials(
-                        get_db(), printer_name=printer_id or None
-                    )
-                    on_hand = [m.to_dict() for m in inventory]
+                        if refused is not None:
+                            if refused.get("code") == "TIER_FLEET_SCOPE":
+                                refused["upgrade_hint"] = (
+                                    "Pass printer_id to answer for one machine on "
+                                    "your current plan, or see "
+                                    "https://kiln3d.com/pricing for fleet-wide answers."
+                                )
+                            return refused
 
                 rec = _recommend(
                     intent,

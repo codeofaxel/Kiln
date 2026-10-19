@@ -162,7 +162,6 @@ def _bed_fit_details(tmp_path: Path, dims_mm: dict[str, float], profile: Any) ->
         patch("kiln.generation.validation.analyze_mesh", return_value=analysis),
         patch("kiln.generation.validation.validate_mesh", return_value=_make_mock_validation()),
         patch("kiln.printability.analyze_printability", side_effect=ImportError),
-        patch("kiln.design_intelligence.estimate_load_capacity", side_effect=ImportError),
         # Force the safety-profile branch: this is the only source that
         # can carry an owner's number.
         patch("kiln.printers.bed_fit.get_build_volume", return_value=None),

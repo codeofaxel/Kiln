@@ -192,12 +192,37 @@ class TestWireB_DecorationAutoSuccess:
         )
         _write_manifest(slug, dec.to_dict())
 
-    def test_success_outcome_increments_success_count(self, tmp_kiln_env):
+    # Decoration memory is Kiln Pro since 2026-10-17: the count is worked out
+    # on Kiln's servers (kiln._pro_decoration_bridge) and written back here.
+    # The servers are stood in for; what is pinned is that the outcome asks
+    # them, in the background, with the print's own settings and job id, and
+    # writes the plan they send -- and that no answer changes nothing.
+
+    @staticmethod
+    def _servers(monkeypatch, answer):
+        import kiln.server as ks
+
+        calls: list = []
+
+        def door(tool_name, /, _timeout=None, _asked_by_user=True, **kwargs):
+            calls.append({"tool": tool_name, "asked_by_user": _asked_by_user, **kwargs})
+            return answer
+
+        monkeypatch.setattr(ks, "_pro_api_call", door)
+        return calls
+
+    def test_success_outcome_asks_the_servers_and_writes_their_count(self, tmp_kiln_env, monkeypatch):
         from kiln.decoration_library import get_decoration
         from kiln.plugins.learning_tools import record_print_outcome
 
         self._seed_decoration()
-
+        calls = self._servers(monkeypatch, {
+            "success": True, "status": "ok", "op": "record",
+            "plan": {"base": "manifest.json", "set": {
+                "proven_settings": {"PLA": {"depth_mm": 0.6, "mode": "deboss", "success_count": 1}},
+                "print_count": 1, "counted_jobs": ["job-abc:PLA"],
+            }},
+        })
         with patch("kiln.server._check_auth", return_value=None):
             result = record_print_outcome(
                 job_id="job-abc",
@@ -207,21 +232,21 @@ class TestWireB_DecorationAutoSuccess:
                 decoration_settings={"depth_mm": 0.6, "mode": "deboss"},
             )
         assert result.get("success") is True
-
+        (call,) = calls
+        assert call["tool"] == "decoration_memory" and call["asked_by_user"] is False
+        assert (call["op"], call["outcome"], call["material"], call["source_job_id"]) == (
+            "record", "success", "PLA", "job-abc",
+        )
+        assert (call["depth_mm"], call["mode"]) == (0.6, "deboss")
         dec = get_decoration("mountain-logo")
-        assert dec is not None
-        assert "PLA" in dec.proven_settings
         assert dec.proven_settings["PLA"].success_count == 1
-        assert dec.proven_settings["PLA"].failure_count == 0
 
-    def test_failed_outcome_increments_failure_count_and_records_mode(
-        self, tmp_kiln_env
-    ):
-        from kiln.decoration_library import get_decoration
+    def test_failed_outcome_sends_the_failure_mode(self, tmp_kiln_env, monkeypatch):
         from kiln.plugins.learning_tools import record_print_outcome
 
         self._seed_decoration()
-
+        calls = self._servers(monkeypatch, {"success": True, "status": "ok", "op": "record",
+                                            "plan": {"base": "manifest.json", "set": {}}})
         with patch("kiln.server._check_auth", return_value=None):
             record_print_outcome(
                 job_id="job-fail",
@@ -231,14 +256,26 @@ class TestWireB_DecorationAutoSuccess:
                 decoration_slug="mountain-logo",
                 decoration_settings={"depth_mm": 0.5, "mode": "emboss"},
             )
+        (call,) = calls
+        assert (call["outcome"], call["failure_mode"], call["material"]) == ("failed", "warping", "PETG")
 
-        dec = get_decoration("mountain-logo")
-        assert dec is not None
-        ps = dec.proven_settings.get("PETG")
-        assert ps is not None
-        assert ps.failure_count == 1
-        assert ps.success_count == 0
-        assert ps.last_failure_mode == "warping"
+    def test_no_answer_records_the_outcome_and_leaves_the_decoration(self, tmp_kiln_env, monkeypatch):
+        from kiln.decoration_library import get_library_dir
+        from kiln.plugins.learning_tools import record_print_outcome
+
+        self._seed_decoration()
+        manifest = get_library_dir() / "mountain-logo" / "manifest.json"
+        before = manifest.read_bytes()
+        self._servers(monkeypatch, {"status": "error", "code": "TIER_REQUIRED",
+                                    "error": "Decoration memory needs Kiln Pro."})
+        with patch("kiln.server._check_auth", return_value=None):
+            result = record_print_outcome(
+                job_id="job-free", outcome="success", material_type="PLA",
+                decoration_slug="mountain-logo",
+                decoration_settings={"depth_mm": 0.6, "mode": "deboss"},
+            )
+        assert result.get("success") is True
+        assert manifest.read_bytes() == before
 
 
 # ---------------------------------------------------------------------------

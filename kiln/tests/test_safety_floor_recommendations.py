@@ -285,42 +285,101 @@ class TestDispatchToSafetyFloor:
             "recommended for:" in first or "recommended" in first
         ), f"Safety-floor rationale fingerprint missing: {rec.reasons[0]!r}"
 
-    def test_overlay_present_routes_to_curated_path(self, monkeypatch):
-        """Simulate overlay presence by injecting a ``mechanical``
-        field into the in-memory materials dict, and verify the
-        function takes the curated path rather than the safety floor.
 
-        We detect the curated path by the absence of the safety-floor
-        rationale prefix ('Recommended for:' or '... recommended —').
-        The curated path's rationale uses different phrasing
-        ("Required by functional constraints.", "Preferred for these
-        requirements.").
-        """
-        kb = _get_kb()
-        # Pre-populate the cache so we can mutate it.
-        _ = kb.materials  # triggers _load
-        # Inject a tiny mechanical record into PLA so the overlay
-        # probe in recommend_material_for_design returns truthy.
-        # The rest of the curated path will work off the constraint
-        # rules in functional_requirements.json — it doesn't strictly
-        # need use_case_ratings to function (just downgrades quality).
-        for mid in kb.materials:
-            kb.materials[mid].setdefault(
-                "mechanical", {"_synthetic_for_test": True}
-            )
 
-        rec = recommend_material_for_design("strong functional part")
-        # The curated path doesn't emit our safety-floor rationale
-        # prefix; it builds rationale from the use_case_rating loop
-        # which emits strings like "Required by functional constraints."
-        # or empty if no constraints fired.  We assert the absence
-        # of our distinctive prefix.
-        assert isinstance(rec, MaterialRecommendation)
-        rationale_joined = " ".join(rec.reasons).lower()
-        assert "recommended for:" not in rationale_joined, (
-            "Overlay-present mode should not use the safety-floor "
-            "fallback rationale prefix."
+# ---------------------------------------------------------------------------
+# The kiln-pro seam: Kiln Pro's pick, or the safety floor
+# ---------------------------------------------------------------------------
+
+_RECOMMENDER_MODULE = "kiln_pro.material_recommendation"
+
+
+def _overlay_merged() -> None:
+    """Make the knowledge base look as it does once the curated materials
+    have merged: a ``mechanical`` block on every material.  Until 2026-10-18
+    that alone put public Kiln on a curated scoring path of its own."""
+    kb = _get_kb()
+    for record in kb.materials.values():
+        record.setdefault("mechanical", {"_synthetic_for_test": True})
+
+
+def _floor(text: str, **printer) -> dict:
+    return _recommend_from_safety_floor(text, _get_kb().materials, **printer).to_dict()
+
+
+def _stand_in(monkeypatch, answer) -> list[tuple[str, dict]]:
+    """Install a stand-in kiln-pro recommender; returns what it was asked."""
+    import sys
+    import types
+
+    asked: list[tuple[str, dict]] = []
+
+    def recommend_material(requirements_text, **printer):
+        asked.append((requirements_text, printer))
+        return answer(requirements_text, **printer)
+
+    module = types.ModuleType(_RECOMMENDER_MODULE)
+    module.recommend_material = recommend_material
+    monkeypatch.setitem(sys.modules, _RECOMMENDER_MODULE, module)
+    return asked
+
+
+class TestKilnProSeam:
+    """Kiln Pro's pick is kiln-pro's; public Kiln keeps the safety floor and
+    asks for the pick through a guarded import.  Each case merges a
+    synthetic curated block first, which is what used to put public Kiln on
+    its own curated scoring: the floor answering here proves that scoring is
+    gone.  How Kiln Pro picks is judged in kiln-pro's own suite."""
+
+    def test_plain_install_answers_with_the_floor(self, monkeypatch):
+        import sys
+
+        monkeypatch.setitem(sys.modules, _RECOMMENDER_MODULE, None)
+        _overlay_merged()
+        for text, printer in (
+            ("strong functional part", {}),
+            ("flexible gasket", {"printer_has_direct_drive": False}),
+            ("outdoor sign", {"printer_has_enclosure": False}),
+        ):
+            rec = recommend_material_for_design(text, **printer).to_dict()
+            assert rec == _floor(text, **printer), text
+
+    def test_kiln_pro_s_pick_is_the_answer(self, monkeypatch):
+        """Kiln Pro's pick comes back as it was given, and kiln-pro is handed
+        the requirements and every printer fact."""
+        sentinel = _recommend_from_safety_floor("simple prototype", _get_kb().materials)
+        sentinel.reasons = ["picked by the stand-in"]
+        asked = _stand_in(monkeypatch, lambda text, **printer: sentinel)
+        _overlay_merged()
+        rec = recommend_material_for_design(
+            "hinge that flexes", printer_has_enclosure=True, printer_has_direct_drive=False,
+            max_hotend_temp_c=260, supported_materials=["petg"],
         )
+        assert rec is sentinel
+        assert asked == [("hinge that flexes", {
+            "printer_has_enclosure": True, "printer_has_direct_drive": False,
+            "max_hotend_temp_c": 260, "supported_materials": ["petg"],
+        })]
+
+    @pytest.mark.parametrize("answer", [None, {"material": "pla"}])
+    def test_kiln_pro_with_no_pick_is_the_floor(self, monkeypatch, answer):
+        """No pick, or an answer that is not a recommendation: the floor."""
+        _stand_in(monkeypatch, lambda text, **printer: answer)
+        _overlay_merged()
+        assert recommend_material_for_design("strong functional part").to_dict() == _floor("strong functional part")
+
+    def test_a_failing_kiln_pro_falls_back_to_the_floor(self, monkeypatch):
+        """A broken recommender never takes the answer down, and the floor's
+        warnings are said: TPU on a bowden extruder."""
+
+        def boom(text, **printer):
+            raise RuntimeError("recommender broke")
+
+        _stand_in(monkeypatch, boom)
+        _overlay_merged()
+        rec = recommend_material_for_design("flexible gasket", printer_has_direct_drive=False)
+        assert rec.to_dict() == _floor("flexible gasket", printer_has_direct_drive=False)
+        assert any("direct drive" in w for w in rec.warnings)
 
 
 # ---------------------------------------------------------------------------

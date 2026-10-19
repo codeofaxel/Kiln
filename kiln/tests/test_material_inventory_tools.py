@@ -277,6 +277,41 @@ def fleet_of(monkeypatch):
     return _install
 
 
+@pytest.fixture()
+def servers(monkeypatch):
+    """Kiln's servers, stood in for: the cross-machine answer is worked out
+    from the rows sent, with public Kiln's own row readers (what kiln-pro's
+    wire does for the reads; its planners are pinned in kiln-pro).  Every
+    ask is recorded.  kiln-pro on this computer is hidden."""
+    import sys
+
+    import kiln.material_inventory as mi
+    import kiln.server as srv
+
+    asks: list[dict] = []
+
+    def answer(name, /, _timeout=None, _asked_by_user=True, question=None, params=None, **rows):
+        asks.append({"tool": name, "question": question, "params": params, "rows": rows})
+        loaded, spools = rows.get("loaded", []), rows.get("spools", [])
+        params = params or {}
+        if question in ("find", "alternatives"):
+            value = mi.holding(loaded, material_type=params["material_type"], color=params.get("color"),
+                               min_grams=params.get("min_grams", 0.0))
+        elif question == "summary":
+            value = [x.to_dict() for x in mi.summarize(spools, loaded)]
+        elif question == "on_hand":
+            value = [x.to_dict() for x in mi.on_hand(spools, loaded)]
+        elif question == "forecast":
+            value = {"stood_in": True}
+        else:
+            value = []
+        return {"success": True, "status": "ok", "question": question, "answer": value}
+
+    monkeypatch.setattr(srv, "_pro_api_call", answer)
+    monkeypatch.setitem(sys.modules, "kiln_pro.fleet_materials", None)
+    return asks
+
+
 # Every door whose answer spans machines, and a minimal call for each.
 _FLEET_DOORS = [
     ("get_fleet_material_summary", {}),
@@ -317,13 +352,15 @@ class TestFleetScopeGate:
 
     @pytest.mark.parametrize("tool_name,kwargs", _FLEET_DOORS)
     def test_business_cap_allows_the_fleet_answer(
-        self, registered_tools, fleet_of, tool_name, kwargs
+        self, registered_tools, fleet_of, servers, tool_name, kwargs
     ) -> None:
+        """On the plan, the cross-machine answer comes from Kiln's servers."""
         fleet_of(machines=4, cap=50)
         assert registered_tools[tool_name](**kwargs)["success"] is True
+        assert [a["tool"] for a in servers] == ["plan_fleet_materials"]
 
     def test_enterprise_uncapped_allows_everything(
-        self, registered_tools, fleet_of
+        self, registered_tools, fleet_of, servers
     ) -> None:
         fleet_of(machines=200, cap=None)
         assert registered_tools["get_fleet_material_summary"]()["success"] is True
@@ -378,7 +415,7 @@ class TestSufficiencyStaysSingleMachine:
         assert not any("Printer " in s for s in check["suggestions"])
 
     def test_business_sees_the_alternative_machine(
-        self, registered_tools, fleet_of, db
+        self, registered_tools, fleet_of, db, servers
     ) -> None:
         db.save_material("a1-left", 0, "PLA", color="white", remaining_grams=10.0)
         db.save_material("a1-right", 0, "PLA", color="white", remaining_grams=900.0)

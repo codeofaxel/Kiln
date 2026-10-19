@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from kiln.load_bearing_detector import (
     _LOW_LOAD_THRESHOLD_N,
     attach_load_bearing_nudge,
@@ -141,14 +143,33 @@ class TestAttachLoadBearingNudge:
 
 
 class TestEstimateStructuralLoadWiring:
-    def test_always_nudges_even_for_pla(self):
+    @pytest.mark.parametrize("paid", [False, True])
+    def test_free_is_nudged_and_pro_is_not(self, monkeypatch, paid):
+        """Free (the load not checked) carries the nudge; Pro (the figure,
+        from Kiln's servers stood in) does not.  Inverted on 2026-10-18 from
+        "both carry the nudge": a pitch for the plan the caller already holds
+        is a defect, and a green test asserting it is how it survived.  The
+        plan is set here: the caller's plan is read through ``kiln.licensing``,
+        and a machine's own sign-in must not decide what this test exercises."""
+        import kiln.licensing as licensing
+        import kiln.server as srv
+        from kiln import _pro_load_bridge
+
+        monkeypatch.setattr(licensing, "check_tier", lambda *a, **k: (paid, None if paid else "needs Kiln Pro"))
+        monkeypatch.setattr(_pro_load_bridge, "_local_available", lambda: False)
+        estimate = {"material": "pla", "max_load_n": 1.0, "safety_factor": 3.0, "derating_applied": 0.5,
+                    "reasoning": [], "caution": "", "safety_basis": "x"}
+        monkeypatch.setattr(srv, "_pro_api_call", lambda *a, **k: {
+            "success": True, "status": "ok", "known": True, "estimate": dict(estimate)})
         tools = _capture_tools("kiln.plugins.design_tools")
         res = tools["estimate_structural_load"](
             material="PLA", cross_section_mm2=20.0, cantilever_length_mm=30.0
         )
         assert res["success"] is True
-        assert "upgrade_recommendation" in res
-        assert res["upgrade_recommendation"]["engineering_grade"] == "heuristic"
+        if paid:
+            assert "upgrade_recommendation" not in res and "load_bearing_note" not in res
+        else:
+            assert res["upgrade_recommendation"]["engineering_grade"] == "heuristic"
 
 
 # ---------------------------------------------------------------------------

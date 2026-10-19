@@ -6264,7 +6264,7 @@ def _billing_hook(event: Event) -> None:
         logger.error(
             "Failed to record billing for job %s — "
             "this job may not appear in billing history. "
-            "Check billing_history for accuracy.",
+            "Check the billing ledger for this job.",
             event.data.get("job_id"),
             exc_info=True,
         )
@@ -18944,7 +18944,7 @@ _ANONYMOUS_OK_TOOLS = frozenset({"report_issue"})
 _ANONYMOUS_TOOL_ROUTES = {"report_issue": "/api/public/report"}
 
 
-def _anonymous_api_call(tool_name: str, **kwargs) -> dict:
+def _anonymous_api_call(tool_name: str, /, **kwargs) -> dict:
     """Forward an ``_ANONYMOUS_OK_TOOLS`` call with no Authorization header.
 
     Mirrors :func:`_pro_api_call`'s transport and error handling, minus every
@@ -19116,6 +19116,7 @@ def _served_bearer() -> tuple[str, str | None]:
 
 def _pro_api_call(
     tool_name: str,
+    /,
     _timeout: float | None = None,
     _asked_by_user: bool = True,
     _http: dict | None = None,
@@ -19132,6 +19133,10 @@ def _pro_api_call(
     pre-flight.  Without a sign-in it gets the same answer, but it is not
     counted as someone reaching for the feature: that counter
     (:func:`kiln.daily_stats.record_account_wall`) means a person asked.
+
+    The served tool's name is positional-only, so a tool with an argument
+    of its own called ``tool_name`` (the calibration tools name the slicer
+    by it) sends that argument in ``kwargs`` like any other.
 
     ``_http``, when given, is filled with ``status``: the HTTP status the
     answer came with, so a caller can tell a tool's own answer (200) from

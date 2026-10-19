@@ -12,7 +12,6 @@ Public API:
     get_material_profile      — full property sheet for a material
     list_material_profiles    — all materials in a domain
     recommend_material        — best material for functional requirements
-    estimate_load_capacity    — safe load estimate for cantilever geometry
     check_environment_compatibility — survivability check by environment
     get_printer_design_profile — capability profile for a printer
     list_printer_profiles     — all known printer capability profiles
@@ -27,7 +26,6 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
-import math
 import re
 from dataclasses import asdict, dataclass, field
 from functools import lru_cache
@@ -662,28 +660,6 @@ class MaterialRecommendation:
         data = asdict(self)
         data["material"] = self.material.to_dict()
         return data
-
-
-@dataclass
-class LoadEstimate:
-    """Estimated safe load capacity for a specific cantilever geometry.
-
-    ``caution`` is set when this material's own caveats could not be read
-    (the public load table carries ``notes`` for only a few materials; the
-    rest live in the kiln-pro overlay).  Empty means the caveats are either
-    present in ``reasoning`` or genuinely absent — never that the number
-    needs no caveat.  See :func:`unestablished_caution`.
-    """
-
-    material: str
-    max_load_n: float
-    safety_factor: float
-    derating_applied: float
-    reasoning: list[str]
-    caution: str = ""
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
 
 
 @dataclass
@@ -1454,14 +1430,12 @@ def list_public_material_profiles() -> list[_PublicMaterialProfile]:
 # properties, design_limits beyond process floor, use_case_ratings,
 # agent_guidance paragraphs) ships in kiln-pro's overlay.
 #
-# When the overlay isn't loaded, the curated
-# ``recommend_material_for_design`` path is missing the
-# use_case_ratings + mechanical signals it relies on for fine-grained
-# scoring.  This fallback uses ONLY the safety-floor fields plus a
-# small set of public-domain DIY heuristics (UV, food, heat, load,
-# outgassing, flexibility) to produce a useful recommendation —
-# never as good as the engineering-overlay path, but honest about
-# what it can and can't see.
+# When Kiln Pro has no pick to give (a plain install, a caller below Pro
+# on Kiln's servers), ``recommend_material_for_design`` answers with this
+# fallback.  It uses ONLY the safety-floor fields plus a small set of
+# public-domain DIY heuristics (UV, food, heat, load, outgassing,
+# flexibility) to produce a useful recommendation, honest about what it
+# can and can't see.
 #
 # Inputs are public-domain trigger keywords + material datasheet
 # common knowledge.  No curated data ships in this function.
@@ -1538,10 +1512,12 @@ def _is_tpu_family(material_id: str) -> bool:
 
 def _load_judgement_is_paid() -> bool:
     """True for a caller below Kiln Pro: the recommender's load judgement
-    is Pro's (2026-10-16), and free is told so in words.  A tier that
-    cannot be read is treated as free, the direction that promises less."""
+    is Pro's (2026-10-16), and free is told so in words.  The CALLER's plan
+    (``kiln.licensing``: on Kiln's servers the person asking, never the
+    server's own sign-in).  A tier that cannot be read is treated as free,
+    the direction that promises less."""
     try:
-        from kiln.account_plan import LicenseTier, check_tier
+        from kiln.licensing import LicenseTier, check_tier
 
         tier_ok, _msg = check_tier(LicenseTier.PRO)
         return not tier_ok
@@ -1623,8 +1599,8 @@ def _recommend_from_safety_floor(
 ) -> MaterialRecommendation:
     """Recommend a material using ONLY safety-floor fields.
 
-    Fallback for ``recommend_material_for_design`` when the kiln-pro
-    engineering overlay isn't loaded.  Scores materials against
+    Fallback for ``recommend_material_for_design`` when Kiln Pro has no
+    pick to give.  Scores materials against
     thermal limits, chemical safety (UV/food/outgassing), and a
     small set of public-domain DIY heuristics (heat / outdoor /
     food / flexibility / sustained-load / cosmetic).
@@ -2036,11 +2012,13 @@ def _recommend_material_for_design(
     max_hotend_temp_c: int = 300,
     supported_materials: list[str] | None = None,
 ) -> MaterialRecommendation:
-    """Recommend the best material for a set of functional requirements.
+    """Recommend a material for a set of functional requirements.
 
-    Matches requirement text against known functional requirement
-    profiles, then scores each material based on constraint compatibility,
-    use-case ratings, and printer capability filtering.
+    Where kiln-pro is present, as on Kiln's hosted service, Kiln Pro's own
+    recommender picks (https://kiln3d.com/pricing).  On a plain install, and
+    whenever kiln-pro has no pick for this call or fails, the safety-floor
+    recommender answers (:func:`_recommend_from_safety_floor`), with its
+    warnings.
 
     :param requirements_text: Natural language description of what the
         object needs to do (e.g. ``"hold 5 kg of books outdoors"``).
@@ -2053,199 +2031,36 @@ def _recommend_material_for_design(
     :param supported_materials: Optional allowlist from the target printer
         profile. Materials outside this set are heavily penalized.
     """
-    kb = _get_kb()
+    printer = {
+        "printer_has_enclosure": printer_has_enclosure,
+        "printer_has_direct_drive": printer_has_direct_drive,
+        "max_hotend_temp_c": max_hotend_temp_c,
+        "supported_materials": supported_materials,
+    }
+    curated = _kiln_pro_recommendation(requirements_text, printer)
+    if curated is not None:
+        return curated
+    return _recommend_from_safety_floor(requirements_text, _get_kb().materials, **printer)
 
-    # No-overlay dispatch: when the kiln-pro engineering overlay
-    # isn't loaded, ``mechanical`` and ``use_case_ratings`` are empty
-    # across all materials.  The curated path below relies on those
-    # fields for fine-grained scoring; without them it produces
-    # degraded answers (e.g. recommends PLA for load-bearing because
-    # it can't see structural_load_bearing="poor").  Route those
-    # callers to the safety-floor fallback, which uses ONLY thermal
-    # / chemical / process-floor design_limits + a small set of
-    # public-domain DIY heuristics.  Probe a representative material
-    # (PLA — always present) for the overlay marker.
-    sample = kb.materials.get("pla") or next(iter(kb.materials.values()), None)
-    if sample is None or not sample.get("mechanical"):
-        return _recommend_from_safety_floor(
-            requirements_text,
-            kb.materials,
-            printer_has_enclosure=printer_has_enclosure,
-            printer_has_direct_drive=printer_has_direct_drive,
-            max_hotend_temp_c=max_hotend_temp_c,
-            supported_materials=supported_materials,
-        )
 
-    matched = match_requirements(requirements_text)
-    supported = {m.lower() for m in supported_materials} if supported_materials else None
+def _kiln_pro_recommendation(
+    requirements_text: str, printer: dict[str, Any],
+) -> MaterialRecommendation | None:
+    """Kiln Pro's pick, or ``None`` for the safety floor.
 
-    # Collect material constraints from all matched requirements
-    preferred: set[str] = set()
-    required: set[str] = set()
-    excluded: set[str] = set()
-
-    for cs in matched:
-        rules = cs.constraint_rules
-        if "material_prefer" in rules:
-            preferred.update(rules["material_prefer"])
-        if "material_require" in rules:
-            required.update(rules["material_require"])
-        if "material_exclude" in rules:
-            excluded.update(rules["material_exclude"])
-
-    # Score each material
-    scores: list[tuple[float, str, list[str], list[str]]] = []
-    over_ceiling: list[tuple[str, int]] = []  # (material, its minimum temp)
-    for mid, mdata in kb.materials.items():
-        score = 50.0  # baseline
-        reasons: list[str] = []
-        warnings: list[str] = []
-
-        thermal = mdata.get("thermal", {}) or {}
-        min_print_temp = (thermal.get("print_temp_range_c") or [0, 0])[0]
-
-        # --- Hard exclusions (skip the material entirely) -----------
-        if mid in excluded:
-            continue
-
-        # Hotend ceiling: the printer cannot melt this filament, so it is not
-        # a candidate to be scored against the others.  Same rule, same place
-        # in the loop, as the safety-floor path.
-        if min_print_temp and min_print_temp > max_hotend_temp_c:
-            over_ceiling.append((mdata.get("display_name") or mid, min_print_temp))
-            continue
-
-        if supported is not None and mid not in supported:
-            warnings.append("Not in the target printer's supported material set.")
-            score -= 60
-
-        # Requirement match bonuses
-        if mid in required:
-            score += 30
-            reasons.append("Required by functional constraints.")
-        elif mid in preferred:
-            score += 20
-            reasons.append("Preferred for these requirements.")
-
-        # Use-case rating scoring
-        for cs in matched:
-            req_id = cs.requirement_id
-            rating_key = _requirement_to_rating_key(req_id)
-            if rating_key and rating_key in mdata.get("use_case_ratings", {}):
-                rating = mdata["use_case_ratings"][rating_key]
-                rating_score = _RATING_ORDER.get(rating, 2)
-                score += rating_score * 3
-                if rating_score <= 1:
-                    warnings.append(
-                        f"{mdata['display_name']} rated '{rating}' for {cs.display_name}."
-                    )
-
-        # Printer capability filtering (the hotend ceiling is a hard exclusion
-        # handled at the top of the loop).
-        needs_enclosure = thermal.get("warping_tendency", "low") in (
-            "high",
-            "very_high",
-        )
-
-        if needs_enclosure and not printer_has_enclosure:
-            warnings.append("Requires enclosure — printer does not have one.")
-            score -= 30
-
-        if mid == "tpu" and not printer_has_direct_drive:
-            warnings.append("Requires direct drive extruder.")
-            score -= 40
-
-        # Ease of print bonus (mild — prefer easier materials all else equal)
-        ease = mdata.get("mechanical", {}).get("layer_adhesion", "")
-        if ease == "excellent":
-            score += 3
-        elif ease == "good":
-            score += 2
-
-        scores.append((score, mid, reasons, warnings))
-
-    scores.sort(key=lambda x: x[0], reverse=True)
-
-    if not scores:
-        # Absolute fallback
-        pla = get_material_profile("pla")
-        if pla is None:
-            raise RuntimeError("PLA material profile not found in knowledge base")
-        # The warning has to SAY the constraints went unmet, in the same words
-        # the safety-floor path uses.  "PLA may not meet your requirements" is
-        # a hedge, and a caller reading it for a real miss cannot tell this
-        # apart from an ordinary recommendation — so a fallback here used to
-        # surface as an answer.
-        if over_ceiling:
-            unmet = _hotend_ceiling_warning(over_ceiling, max_hotend_temp_c)
-        else:
-            unmet = (
-                "No material in the catalogue satisfied your constraints — "
-                "falling back to PLA, which may not meet your requirements."
-            )
-        return MaterialRecommendation(
-            material=pla,
-            score=50.0,
-            reasons=["Fallback — all materials filtered out."],
-            warnings=[unmet],
-            design_limits_summary=pla.design_limits,
-            alternatives=[],
-        )
-
-    top_score, top_mid, top_reasons, top_warnings = scores[0]
-    top_profile = get_material_profile(top_mid)
-    if top_profile is None:
-        raise RuntimeError(f"Material profile {top_mid!r} not found in knowledge base")
-
-    # Build alternatives
-    alternatives: list[dict[str, Any]] = []
-    for alt_score, alt_mid, alt_reasons, alt_warnings in scores[1:4]:
-        alt_profile = get_material_profile(alt_mid)
-        if alt_profile:
-            alternatives.append(
-                {
-                    "material_id": alt_mid,
-                    "display_name": alt_profile.display_name,
-                    "score": round(alt_score, 1),
-                    "reasons": alt_reasons,
-                    "warnings": alt_warnings,
-                }
-            )
-
-    # Build brand recommendations for the top material
-    recommended_brands: list[dict[str, Any]] = []
+    ``None`` means kiln-pro is not installed, it had no pick to give for this
+    call, or it failed.  The safety floor always answers.
+    """
     try:
-        brand_profiles = list_brand_filament_profiles(parent_material=top_mid)
-        for bp in brand_profiles:
-            brand_entry: dict[str, Any] = {
-                "profile_id": bp.profile_id,
-                "brand": bp.brand,
-                "product_name": bp.product_name,
-                "nozzle_temp_optimal_c": bp.nozzle_temp_optimal_c,
-                "bed_temp_optimal_c": bp.bed_temp_optimal_c,
-                "density_g_cm3": bp.density_g_cm3,
-            }
-            if bp.needs_hardened_nozzle():
-                brand_entry["hardened_nozzle_required"] = True
-            if bp.needs_enclosure():
-                brand_entry["enclosure_required"] = True
-            if bp.ams_compatible is not None:
-                brand_entry["ams_compatible"] = bp.ams_compatible
-            if bp.drying_temp_c:
-                brand_entry["drying"] = f"{bp.drying_temp_c}°C / {bp.drying_time_hours}h"
-            recommended_brands.append(brand_entry)
-    except Exception:
-        pass  # Brand profiles not available — continue without
-
-    return MaterialRecommendation(
-        material=top_profile,
-        score=round(top_score, 1),
-        reasons=top_reasons,
-        warnings=top_warnings,
-        design_limits_summary=top_profile.design_limits,
-        alternatives=alternatives,
-        recommended_brands=recommended_brands,
-    )
+        from kiln_pro.material_recommendation import recommend_material  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    try:
+        rec = recommend_material(requirements_text, **printer)
+    except Exception as exc:  # noqa: BLE001 -- the safety floor still answers
+        logger.warning("kiln-pro material recommender failed, answering with the safety floor: %s", exc)
+        return None
+    return rec if isinstance(rec, MaterialRecommendation) else None
 
 
 # ---------------------------------------------------------------------------
@@ -2254,9 +2069,9 @@ def _recommend_material_for_design(
 
 
 def _material_record(material_id: str) -> dict[str, Any] | None:
-    """ONE material's catalogue record -- its brand figures and load figures
-    -- through :mod:`kiln._pro_material_bridge`, or ``None`` (no row, or a
-    miss the bridge words).  Never raises."""
+    """ONE material's catalogue record -- its brand figures -- through
+    :mod:`kiln._pro_material_bridge`, or ``None`` (no row, or a miss the
+    bridge words).  Never raises."""
     try:
         from kiln import _pro_material_bridge as _bridge
 
@@ -2623,206 +2438,6 @@ def load_table_materials() -> list[str]:
     table carried thirty-five.
     """
     return sorted(k for k in _get_kb().load_tables if not k.startswith("_"))
-
-
-def estimate_deflection_limited_load(
-    material_id: str,
-    cross_section_mm2: float,
-    cantilever_length_mm: float,
-) -> dict[str, Any] | None:
-    """Serviceability answer for an elastomer, or ``None`` if not one.
-
-    An elastomer does not fail in bending at these loads — it deflects out of
-    the way. This returns the load at which the section bends L/10, which is
-    the limit that actually governs, clearly labelled so it can never be read
-    as a strength value.
-    """
-    key = (material_id or "").lower()
-    rec = _get_kb().load_tables.get(key)
-    if not isinstance(rec, dict) or rec.get("limit_mode") != "deflection":
-        return None
-    rec = {**rec, **_load_figures(key)}
-    rows = sorted(
-        rec.get("cross_section_vs_deflection_load", []),
-        key=lambda r: float(r.get("cantilever_length_mm", 0.0)),
-    )
-    if not rows or cross_section_mm2 <= 0 or cantilever_length_mm <= 0:
-        return None
-    e_mpa = float(rec.get("youngs_modulus_mpa", 0.0))
-    ratio = float(rec.get("deflection_limit_ratio", 10.0))
-    if e_mpa <= 0:
-        return None
-    # Same closed form the generator uses: F = E * A^2 / (4 * ratio * L^2)
-    load = e_mpa * (cross_section_mm2 ** 2) / (4.0 * ratio * (cantilever_length_mm ** 2))
-    return {
-        "material": (material_id or "").lower(),
-        "limit_mode": "deflection",
-        "load_at_deflection_limit_n": math.floor(load * 10000.0) / 10000.0,
-        "allowable_deflection_mm": round(cantilever_length_mm / ratio, 2),
-        "youngs_modulus_mpa": e_mpa,
-        "reasoning": list(rec.get("notes", [])),
-    }
-
-
-def _load_figures(material_key: str) -> dict[str, Any]:
-    """The material's load figures from its catalogue record (the tensile
-    capacity, the cross-section vs load grid, the orientation derating), or
-    ``{}`` when they could not be had -- :func:`load_figures_unanswered`
-    says why."""
-    record = _material_record(material_key)
-    load = record.get("load") if isinstance(record, dict) else None
-    return dict(load) if isinstance(load, dict) else {}
-
-
-def load_figures_unanswered(material_id: str) -> str | None:
-    """Why *material_id*'s load figures could not be had, as a clause, or
-    ``None`` when they were (or the roster has no such material)."""
-    kb = _get_kb()
-    key = resolve_material_key(material_id, kb.load_tables) or (material_id or "").lower()
-    return _figures_unanswered(key)
-
-
-def estimate_load_capacity(
-    material_id: str,
-    cross_section_mm2: float,
-    cantilever_length_mm: float,
-    *,
-    load_across_layers: bool = True,
-) -> LoadEstimate | None:
-    """Estimate max safe load for a given cantilever geometry.
-
-    The roster (``load_tables.json``) says the material is one the lookup
-    answers for; its figures are the catalogue record, served one material
-    at a time.  ``None`` is an unknown material, an elastomer (see
-    :func:`estimate_deflection_limited_load`) or figures not in hand --
-    :func:`load_figures_unanswered` tells the last apart.
-
-    Orientation convention (fixed 2026-07-16 — the pair was previously
-    inverted): ``load_across_layers=True`` means the load pulls the
-    layer interfaces apart (load along the build/Z direction) — the
-    WEAK direction for FDM, so the table capacity is derated (0.4, the
-    worst per-material interlayer ratio, so one conservative pair
-    covers every material).  ``False`` means the load acts within the
-    layer planes — the strong direction (full table value).  ``True``
-    is the conservative default.
-
-    The grid itself is DERIVED data (square-section bending math, generated
-    and pinned in kiln-pro beside the catalogue record) — wide or flat
-    sections are weaker than the square basis, and the reasoning says so.
-    """
-    kb = _get_kb()
-    material_key = resolve_material_key(material_id, kb.load_tables) or material_id.lower()
-    material_data = kb.load_tables.get(material_key)
-    if material_data is None:
-        return None
-    material_data = {**material_data, **_load_figures(material_key)}
-
-    reasoning: list[str] = []
-
-    if cross_section_mm2 <= 0:
-        reasoning.append("Cross-section must be positive. Returning zero safe load.")
-        return LoadEstimate(
-            material=material_key,
-            max_load_n=0.0,
-            safety_factor=3.0,
-            derating_applied=0.0,
-            reasoning=reasoning,
-        )
-
-    length_tables = sorted(
-        material_data.get("cross_section_vs_load", []),
-        key=lambda row: float(row.get("cantilever_length_mm", 0.0)),
-    )
-    if not length_tables:
-        return None
-
-    lower_row, upper_row = _select_length_rows(length_tables, cantilever_length_mm)
-    lower_length = float(lower_row.get("cantilever_length_mm", 0.0))
-    upper_length = float(upper_row.get("cantilever_length_mm", 0.0))
-
-    lower_load = _interpolate_cross_section_load(
-        lower_row.get("entries", []),
-        cross_section_mm2,
-    )
-    upper_load = _interpolate_cross_section_load(
-        upper_row.get("entries", []),
-        cross_section_mm2,
-    )
-
-    if lower_length == upper_length:
-        base_load = lower_load
-        reasoning.append(f"Used lookup row at {lower_length:.0f} mm cantilever.")
-    else:
-        ratio = (cantilever_length_mm - lower_length) / (upper_length - lower_length)
-        base_load = lower_load + (upper_load - lower_load) * ratio
-        reasoning.append(
-            f"Interpolated between {lower_length:.0f} mm and "
-            f"{upper_length:.0f} mm cantilever tables."
-        )
-
-    if cantilever_length_mm < lower_length:
-        reasoning.append(
-            f"Requested cantilever ({cantilever_length_mm:.1f} mm) is shorter than table "
-            f"minimum ({lower_length:.0f} mm); estimate uses conservative minimum row."
-        )
-    elif cantilever_length_mm > upper_length:
-        reasoning.append(
-            f"Requested cantilever ({cantilever_length_mm:.1f} mm) exceeds table maximum "
-            f"({upper_length:.0f} mm); estimate uses conservative maximum row."
-        )
-
-    orientation_derating = material_data.get("layer_orientation_derating", {})
-    orientation_key = "across_layers" if load_across_layers else "along_layers"
-    derating = float(orientation_derating.get(orientation_key, 1.0))
-    max_load_n = max(0.0, base_load * derating)
-
-    tensile_capacity = material_data.get("tensile_capacity_n_per_mm2")
-    if tensile_capacity is not None:
-        reasoning.append(
-            f"Base material tension capacity: {tensile_capacity} N/mm^2 "
-            "(already includes safety factor)."
-        )
-    reasoning.append(
-        f"Applied layer-orientation derating ({orientation_key}) = {derating:.2f}."
-    )
-    reasoning.append(
-        "Assumes a compact (square) cross-section — wide or flat sections "
-        "are weaker. For shape-aware sizing, factor of safety by "
-        "application class, and fatigue/creep checks, use Kiln Pro's "
-        "design_for_load."
-    )
-    notes = material_data.get("notes", [])
-    reasoning.extend(notes)
-
-    return LoadEstimate(
-        material=material_key,
-        # Floor, not round: a safe-load figure must never round toward
-        # MORE capacity (banker's rounding could add up to 5 mN above
-        # the derived limit).
-        max_load_n=int(max_load_n * 100) / 100.0,
-        safety_factor=3.0,
-        derating_applied=derating,
-        reasoning=reasoning,
-        # The number is the catalogue's (Kiln Pro's); the material's own
-        # caveats are the floor's.  When they could not be read, say so rather than hand
-        # back a bare figure that reads as a clearance.
-        caution=(
-            ""
-            if notes
-            else unestablished_caution(
-                "load_tables",
-                "This is the geometry calculation only. What most often "
-                "breaks a real part — a load left sitting on it for weeks, "
-                "repeated bending, or filament that has soaked up moisture — "
-                "is not in this number, and no caution specific to "
-                f"{material_key} was established here. Treat it as unchecked "
-                "for this material and test the part before you rely on it.",
-                curated_entry_exists=curated_entry_exists(
-                    "load_tables", material_key
-                ),
-            )
-        ),
-    )
 
 
 def check_environment_compatibility(
@@ -4301,65 +3916,6 @@ def get_print_diagnostic(
 # ---------------------------------------------------------------------------
 
 
-def _select_length_rows(
-    rows: list[dict[str, Any]],
-    cantilever_length_mm: float,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Return the two rows that bound a requested cantilever length."""
-    if not rows:
-        return {}, {}
-
-    if cantilever_length_mm <= float(rows[0].get("cantilever_length_mm", 0.0)):
-        return rows[0], rows[0]
-
-    if cantilever_length_mm >= float(rows[-1].get("cantilever_length_mm", 0.0)):
-        return rows[-1], rows[-1]
-
-    for idx in range(len(rows) - 1):
-        current_len = float(rows[idx].get("cantilever_length_mm", 0.0))
-        next_len = float(rows[idx + 1].get("cantilever_length_mm", 0.0))
-        if current_len <= cantilever_length_mm <= next_len:
-            return rows[idx], rows[idx + 1]
-
-    return rows[-1], rows[-1]
-
-
-def _interpolate_cross_section_load(
-    entries: list[dict[str, Any]],
-    cross_section_mm2: float,
-) -> float:
-    """Interpolate or extrapolate max load from section-area lookup points."""
-    if not entries:
-        return 0.0
-
-    points = sorted(
-        (
-            float(row.get("cross_section_mm2", 0.0)),
-            float(row.get("max_load_n", 0.0)),
-        )
-        for row in entries
-    )
-    points = [(x, y) for x, y in points if x > 0]
-    if not points or cross_section_mm2 <= 0:
-        return 0.0
-
-    first_x, first_y = points[0]
-    if cross_section_mm2 <= first_x:
-        return first_y * (cross_section_mm2 / first_x)
-
-    for idx in range(len(points) - 1):
-        x0, y0 = points[idx]
-        x1, y1 = points[idx + 1]
-        if x0 <= cross_section_mm2 <= x1:
-            if x1 == x0:
-                return y0
-            t = (cross_section_mm2 - x0) / (x1 - x0)
-            return y0 + t * (y1 - y0)
-
-    last_x, last_y = points[-1]
-    return last_y * (cross_section_mm2 / last_x)
-
-
 def _extract_temperatures_c(text: str) -> list[float]:
     """Extract explicit Celsius temperatures from text."""
     matches = re.findall(r"(-?\d+(?:\.\d+)?)\s*(?:°\s*)?c\b", text.lower())
@@ -4407,22 +3963,6 @@ def _find_templates_from_text(text: str) -> list[DesignTemplate]:
                 seen.add(tid)
 
     return results
-
-
-def _requirement_to_rating_key(requirement_id: str) -> str | None:
-    """Map a requirement ID to the corresponding use_case_ratings key."""
-    mapping = {
-        "load_bearing": "structural_load_bearing",
-        "watertight": "water_tight",
-        "outdoor_use": "outdoor_use",
-        "food_contact": "food_contact",
-        "heat_exposure": "high_temp_environment",
-        "flexibility_required": "repeated_flexing",
-        "impact_resistant": "impact_resistance",
-        "precision_fit": "dimensional_accuracy",
-        "aesthetic_decorative": "cosmetic_finish",
-    }
-    return mapping.get(requirement_id)
 
 
 # ---------------------------------------------------------------------------

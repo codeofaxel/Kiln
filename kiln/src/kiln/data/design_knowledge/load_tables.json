@@ -2,8 +2,7 @@
   "_meta": {
     "version": "3.0.0",
     "domain": "fdm",
-    "description": "A roster of the materials the safe-load lookup answers for, and which limit governs each (strength, or deflection for an elastomer). The figures -- the tensile capacity, the derived cross-section vs load grid and the layer-orientation derating -- are Kiln's catalogue record for the material, served one material at a time through kiln._pro_material_bridge; estimate_load_capacity merges them onto this row.",
-    "_orientation_convention": "layer_orientation_derating keys: 'across_layers' = the load pulls the layer interfaces apart (build/Z direction — the WEAK case for FDM; factor 0.4, the worst per-material interlayer ratio so one conservative pair covers every material). 'along_layers' = the load acts within the layer planes (the STRONG case; factor 1.0). Per-material anisotropy depth lives in Kiln Pro."
+    "description": "A roster of the materials the load check answers for, and which limit governs each (strength, or deflection for an elastomer). The load figure for a part is Kiln Pro's, worked out for that one part and served one answer at a time (kiln._pro_load_bridge)."
   },
   "pla": {
     "limit_mode": "strength"

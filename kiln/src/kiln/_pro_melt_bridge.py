@@ -27,7 +27,7 @@ import logging
 import time
 from typing import Any
 
-from kiln.served_answer import Miss, classify_answer, classify_transport_error, clause
+from kiln.served_answer import LOCAL_FAULT_CODE, Miss, classify_answer, classify_transport_error, clause, local_fault
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ _answers: dict[tuple[str, str, str], tuple[float | None, str]] = {}
 #: (printer, nozzle) -> why the last ask for it had no answer; cleared by an answer.
 _last_miss: dict[tuple[str, str], Miss] = {}
 #: A miss with nothing asked of Kiln's servers: kiln-pro on this computer failed.
-_NOT_ASKED = "NOT_ASKED"
+_NOT_ASKED = LOCAL_FAULT_CODE
 
 
 def available() -> bool:
@@ -102,8 +102,7 @@ def _local(printer_id: str, nozzle_mm: float, material_id: str) -> tuple[tuple[f
 
         return _cell(melt_rate(printer_id, material_id, nozzle_mm)), None
     except Exception as exc:  # noqa: BLE001 -- a slice never fails for want of it
-        logger.debug("melt rates on this computer failed", exc_info=True)
-        return (None, ""), Miss("unanswered", _NOT_ASKED, f"kiln-pro on this computer stopped: {exc}"[:400])
+        return (None, ""), local_fault(exc)
 
 
 def _served(printer_id: str, nozzle_mm: float, material_id: str) -> tuple[tuple[float | None, str], Miss | None]:

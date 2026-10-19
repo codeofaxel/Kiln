@@ -210,8 +210,7 @@ def ask(request: dict[str, Any]) -> tuple[dict[str, Any] | None, served_answer.M
                 logger.debug("kiln_pro.placement.bridge.build_verdict raised; asking the service", exc_info=True)
         return _served(request)
     except Exception as exc:  # noqa: BLE001 -- the bridge never raises into a slice door
-        logger.debug("placement bridge failed", exc_info=True)
-        return None, served_answer.Miss(UNANSWERED, detail=str(exc)[:200])
+        return None, served_answer.local_fault(exc, where="the placement check on this computer", code="")
 
 
 def _call_local(build_verdict: Any, request: dict[str, Any]) -> Any:

@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-19T04:24:17.594765+00:00",
-  "tool_count": 409,
+  "generated": "2026-10-19T05:11:16.562096+00:00",
+  "tool_count": 397,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -954,54 +954,6 @@
       }
     },
     {
-      "name": "load_assembly_manual",
-      "description": "Load a previously generated manual's spec back into a dict (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
-      "category": "assembly_manuals",
-      "parameters": {
-        "properties": {
-          "pdf_path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Pdf Path"
-          },
-          "spec_json_path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Spec Json Path"
-          }
-        },
-        "title": "load_assembly_manualArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "action"
-      },
-      "served": false,
-      "inputs": {
-        "files": {
-          "pdf_path": "one",
-          "spec_json_path": "one"
-        }
-      }
-    },
-    {
       "name": "record_build_outcome",
       "description": "Record what actually happened building a unit from a factory work instruction (Enterprise) \u2014 the write side of the closed loop.\n\nEnterprise adds SSO, RBAC, and audit export.\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "enterprise",
@@ -1140,145 +1092,6 @@
         "schema_version": 1,
         "kind": "record"
       }
-    },
-    {
-      "name": "billing_alerts",
-      "description": "Check billing system health and active alerts.",
-      "tier": "free",
-      "access": "free",
-      "category": "billing",
-      "parameters": {
-        "properties": {},
-        "title": "billing_alertsArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "read"
-      },
-      "served": false
-    },
-    {
-      "name": "billing_check_setup",
-      "description": "Check if billing setup is complete after user visited the setup URL.",
-      "tier": "free",
-      "access": "free",
-      "category": "billing",
-      "parameters": {
-        "properties": {},
-        "title": "billing_check_setupArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "read"
-      },
-      "served": false
-    },
-    {
-      "name": "billing_history",
-      "description": "Get recent billing charge history with payment outcomes.",
-      "tier": "free",
-      "access": "free",
-      "category": "billing",
-      "parameters": {
-        "properties": {
-          "limit": {
-            "default": 20,
-            "title": "Limit",
-            "type": "integer"
-          }
-        },
-        "title": "billing_historyArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "read"
-      },
-      "served": false
-    },
-    {
-      "name": "billing_setup_url",
-      "description": "Get a URL to link a payment method for Kiln orchestration fees.",
-      "tier": "free",
-      "access": "free",
-      "category": "billing",
-      "parameters": {
-        "properties": {
-          "rail": {
-            "default": "stripe",
-            "title": "Rail",
-            "type": "string"
-          }
-        },
-        "title": "billing_setup_urlArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "read"
-      },
-      "served": false
-    },
-    {
-      "name": "billing_status",
-      "description": "Get enriched billing status including payment method info.",
-      "tier": "free",
-      "access": "free",
-      "category": "billing",
-      "parameters": {
-        "properties": {},
-        "title": "billing_statusArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "read"
-      },
-      "served": false
-    },
-    {
-      "name": "billing_summary",
-      "description": "Get a summary of Kiln orchestration fees for the current month.",
-      "tier": "free",
-      "access": "free",
-      "category": "billing",
-      "parameters": {
-        "properties": {},
-        "title": "billing_summaryArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "read"
-      },
-      "served": false
-    },
-    {
-      "name": "check_payment_status",
-      "description": "Check the current status of a pending payment by ID.",
-      "tier": "free",
-      "access": "free",
-      "category": "billing",
-      "parameters": {
-        "properties": {
-          "payment_id": {
-            "title": "Payment Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "payment_id"
-        ],
-        "title": "check_payment_statusArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "verdict"
-      },
-      "served": false
     },
     {
       "name": "license_status_live",
@@ -3138,166 +2951,6 @@
         "mesh": "model_path",
         "image": "content"
       }
-    },
-    {
-      "name": "decoration_history",
-      "description": "Get the full version history of a decoration (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "decoration_learning",
-      "parameters": {
-        "properties": {
-          "name": {
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "title": "decoration_historyArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "read"
-      },
-      "served": false
-    },
-    {
-      "name": "iterate_decoration",
-      "description": "Create a new version of a decoration, archiving the current settings (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "decoration_learning",
-      "parameters": {
-        "properties": {
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "content_path": {
-            "default": "",
-            "title": "Content Path",
-            "type": "string"
-          },
-          "depth_mm": {
-            "default": 0.0,
-            "title": "Depth Mm",
-            "type": "number"
-          },
-          "mode": {
-            "default": "",
-            "title": "Mode",
-            "type": "string"
-          },
-          "image_style": {
-            "default": "",
-            "title": "Image Style",
-            "type": "string"
-          },
-          "notes": {
-            "default": "",
-            "title": "Notes",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "title": "iterate_decorationArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "made"
-      },
-      "served": false,
-      "inputs": {
-        "files": {
-          "content_path": "one"
-        }
-      }
-    },
-    {
-      "name": "record_decoration_success",
-      "description": "Record a successful print, updating proven settings for a decoration (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "decoration_learning",
-      "parameters": {
-        "properties": {
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "material": {
-            "title": "Material",
-            "type": "string"
-          },
-          "depth_mm": {
-            "title": "Depth Mm",
-            "type": "number"
-          },
-          "mode": {
-            "default": "emboss",
-            "title": "Mode",
-            "type": "string"
-          },
-          "image_style": {
-            "default": "auto",
-            "title": "Image Style",
-            "type": "string"
-          },
-          "source_job_id": {
-            "default": "",
-            "title": "Source Job Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "material",
-          "depth_mm"
-        ],
-        "title": "record_decoration_successArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "record"
-      },
-      "served": false
-    },
-    {
-      "name": "rollback_decoration",
-      "description": "Restore a previous version of a decoration (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "decoration_learning",
-      "parameters": {
-        "properties": {
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "version": {
-            "title": "Version",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "name",
-          "version"
-        ],
-        "title": "rollback_decorationArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "made"
-      },
-      "served": false
     },
     {
       "name": "inspect_design",
@@ -10579,8 +10232,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      },
-      "served": false
+      }
     },
     {
       "name": "get_calibration_freshness",
@@ -10761,7 +10413,6 @@
         "schema_version": 1,
         "kind": "made"
       },
-      "served": false,
       "inputs": {
         "files": {
           "config_path": "one"
