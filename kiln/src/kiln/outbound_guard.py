@@ -173,6 +173,11 @@ SENDERS: dict[str, tuple[str, str]] = {
         "relayed to that session",
     ),
     "kiln/monitor_twin.py": ("person's_own", "the sliced file of the print the person is watching on the web"),
+    "kiln/history_courier.py": (
+        "person's_own",
+        "the person's own design history (records and models) with each history call they "
+        "make, and what they push, pull or clone with their own account",
+    ),
     "kiln/account_plan.py": ("own_schema", "asks which plan the signed-in account holds; sends only the sign-in"),
     "kiln/plugins/spend_cap_tools.py": (
         "person's_own", "the spending limits the person reads, sets or approves on their own account",
