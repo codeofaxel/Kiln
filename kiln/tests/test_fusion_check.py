@@ -38,9 +38,41 @@ def _box_and_cylinder_stl(path, *, gap_mm: float):
     """
     box = trimesh.creation.box(extents=(10.0, 10.0, 10.0))
     cyl = trimesh.creation.cylinder(radius=3.0, height=6.0, sections=64)
-    cyl.apply_translation((8.0 + gap_mm, 0.0, 0.0))
+    # Seated on the box's own floor (z=-5), so the two parts share a bed:
+    # the separated case below is then a plate of parts, not a piece in
+    # the air, and only the GAP is under test.
+    cyl.apply_translation((8.0 + gap_mm, 0.0, -2.0))
     combined = trimesh.util.concatenate([box, cyl])
     combined.export(path)
+    return path
+
+
+def _stand_with_floating_cells_stl(path, *, lift_mm: float = 6.0, cells: int = 3):
+    """A base on the bed plus hexagonal cells hanging in the air above it.
+
+    The 2026-10-19 honeycomb phone stand in miniature: an agent's OpenSCAD
+    placed every honeycomb cell on a tilted plane that never met the base,
+    so 61 prisms floated 6-28 mm up and the compile said nothing.  Nothing
+    joins a cell to the base, no cell sits on the bed.
+    """
+    base = trimesh.creation.box(extents=(40.0, 30.0, 4.0))
+    base.apply_translation((0.0, 0.0, 2.0))  # z 0..4, on the bed
+    parts = [base]
+    for i in range(cells):
+        cell = trimesh.creation.cylinder(radius=3.0, height=3.0, sections=6)
+        cell.apply_translation((-12.0 + 12.0 * i, 0.0, lift_mm + 1.5))
+        parts.append(cell)
+    trimesh.util.concatenate(parts).export(path)
+    return path
+
+
+def _plate_of_parts_stl(path):
+    """Two separate parts, both sitting on the bed: a deliberate plate."""
+    a = trimesh.creation.box(extents=(10.0, 10.0, 10.0))
+    a.apply_translation((0.0, 0.0, 5.0))
+    b = trimesh.creation.box(extents=(8.0, 8.0, 4.0))
+    b.apply_translation((25.0, 0.0, 2.0))
+    trimesh.util.concatenate([a, b]).export(path)
     return path
 
 
@@ -319,3 +351,192 @@ class TestPrintInPlaceIsNotMisdiagnosed:
         response = attach_fusion_report({"success": True}, str(p))
         message = response["fusion"]["findings"][0]["message"]
         assert "designed clearance" in message
+
+
+# ---------------------------------------------------------------------------
+# Floating pieces: separate AND in the air is never a plate (2026-10-19)
+# ---------------------------------------------------------------------------
+
+class TestFloatingPieces:
+    """A separated body was skipped as "maybe a plate of parts".  A plate
+    sits on the bed; a piece with air under it prints as a loose part on
+    supports, or not at all — the honeycomb stand's 61 cells did exactly
+    that and every door stayed quiet."""
+
+    def test_pieces_in_the_air_are_flagged_even_when_multibody_is_allowed(
+        self, tmp_path
+    ) -> None:
+        p = _stand_with_floating_cells_stl(tmp_path / "stand.stl", lift_mm=6.0)
+        report = check_fusion(str(p), expect_single_body=None)
+        assert report["body_count"] == 4
+        assert report["grounded_bodies"] == 1
+        assert report["floating_bodies"] == 3
+        floating = [f for f in report["findings"] if f["relation"] == "floating"]
+        assert len(floating) == 1, report["findings"]
+        finding = floating[0]
+        assert len(finding["bodies"]) == 3
+        assert finding["lift_mm"]["min"] == pytest.approx(6.0, abs=0.1)
+        assert finding["lift_mm"]["max"] == pytest.approx(6.0, abs=0.1)
+        assert "float" in finding["message"]
+        assert "loose" in finding["message"]
+
+    def test_parts_sitting_on_the_bed_are_a_plate_not_a_finding(self, tmp_path) -> None:
+        p = _plate_of_parts_stl(tmp_path / "plate.stl")
+        report = check_fusion(str(p), expect_single_body=None)
+        assert report["body_count"] == 2
+        assert report["floating_bodies"] == 0
+        assert report["grounded_bodies"] == 2
+        assert report["findings"] == []
+
+    def test_a_piece_touching_its_host_is_said_once(self, tmp_path) -> None:
+        # A tangent cylinder whose bottom is 2 mm above the host's floor:
+        # the contact finding already names it, so it is not also "floating".
+        box = trimesh.creation.box(extents=(10.0, 10.0, 10.0))
+        cyl = trimesh.creation.cylinder(radius=3.0, height=6.0, sections=64)
+        cyl.apply_translation((8.0, 0.0, 0.0))
+        p = tmp_path / "raised_tangent.stl"
+        trimesh.util.concatenate([box, cyl]).export(p)
+        report = check_fusion(str(p))
+        assert [f["relation"] for f in report["findings"]] == ["touching"]
+        assert report["floating_bodies"] == 0
+
+    def test_lift_is_measured_from_the_lowest_body(self, tmp_path) -> None:
+        # The whole part is raised off z=0: the bed is wherever the part's
+        # lowest point is, so a model exported at z=50 is not "all floating".
+        base = trimesh.creation.box(extents=(20.0, 20.0, 4.0))
+        base.apply_translation((0.0, 0.0, 52.0))
+        cell = trimesh.creation.box(extents=(4.0, 4.0, 4.0))
+        cell.apply_translation((0.0, 0.0, 62.0))  # 8 mm above the base's top
+        p = tmp_path / "raised.stl"
+        trimesh.util.concatenate([base, cell]).export(p)
+        report = check_fusion(str(p))
+        assert report["grounded_bodies"] == 1
+        assert report["floating_bodies"] == 1
+        floating = [f for f in report["findings"] if f["relation"] == "floating"]
+        assert floating[0]["lift_mm"]["min"] == pytest.approx(10.0, abs=0.1)
+
+
+class TestAttachFusionReportFloating:
+    def test_warning_and_message_both_say_it(self, tmp_path) -> None:
+        p = _stand_with_floating_cells_stl(tmp_path / "stand.stl")
+        response = attach_fusion_report(
+            {"success": True, "message": "Compiled to stand.stl"}, str(p)
+        )
+        assert response["fusion"]["floating_bodies"] == 3
+        assert any("float" in w for w in response["warnings"])
+        # The one line a terse agent repeats to the user carries it too.
+        assert response["message"].startswith("Compiled to stand.stl")
+        assert "float" in response["message"]
+
+    def test_plate_leaves_the_message_alone(self, tmp_path) -> None:
+        p = _plate_of_parts_stl(tmp_path / "plate.stl")
+        response = attach_fusion_report(
+            {"success": True, "message": "Compiled to plate.stl"}, str(p)
+        )
+        assert response["message"] == "Compiled to plate.stl"
+        assert "warnings" not in response
+
+
+class TestMakeDoorsSayFloating:
+    """Every make door that can birth a piece in the air says so, through
+    the one shared helper — the compile the incident came through first."""
+
+    def _bundle_patch(self):
+        try:
+            p = patch(
+                "kiln_pro.plugins.git_render_tools.attach_inspect_bundle",
+                side_effect=_identity_bundle,
+            )
+            p.start()
+            return p
+        except (ImportError, ModuleNotFoundError):
+            return None
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_compile_scad(self, _auth, design_tools, tmp_path) -> None:
+        stl = _stand_with_floating_cells_stl(tmp_path / "stand.stl")
+        bp = self._bundle_patch()
+        try:
+            with patch("kiln.parametric.compile_scad_code", return_value=str(stl)):
+                result = design_tools["compile_scad"](scad_code="cube(1);")
+        finally:
+            if bp is not None:
+                bp.stop()
+        assert result["success"] is True
+        assert result["fusion"]["floating_bodies"] == 3
+        assert any("float" in w for w in result["warnings"])
+        assert "float" in result["message"]
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_tweak_and_compile_scad(self, _auth, design_tools, tmp_path) -> None:
+        stl = _stand_with_floating_cells_stl(tmp_path / "stand.stl")
+        bp = self._bundle_patch()
+        try:
+            with patch(
+                "kiln.parametric.tweak_and_compile",
+                return_value={"updated_code": "cube(2);", "stl_path": str(stl), "warnings": []},
+            ):
+                result = design_tools["tweak_and_compile_scad"](
+                    scad_code="cube(1);", parameter_name="size", new_value=2.0,
+                )
+        finally:
+            if bp is not None:
+                bp.stop()
+        assert result["success"] is True
+        assert result["fusion"]["floating_bodies"] == 3
+        assert any(isinstance(w, str) and "float" in w for w in result["warnings"])
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_generate_from_template(self, _auth, tmp_path, monkeypatch) -> None:
+        import os
+
+        from kiln import server as _server
+        from kiln.generation.base import GenerationJob, GenerationResult, GenerationStatus
+
+        stl = _stand_with_floating_cells_stl(tmp_path / "stand.stl")
+
+        class _Stub:
+            name = "openscad"
+
+            def generate(self, prompt, *, format="stl", **kwargs):
+                return GenerationJob(
+                    id="job-1", provider="openscad", prompt=prompt,
+                    status=GenerationStatus.SUCCEEDED, progress=100,
+                    created_at=0.0, format=format,
+                )
+
+            def download_result(self, job_id, output_dir=None):
+                return GenerationResult(
+                    job_id=job_id, provider="openscad", local_path=str(stl),
+                    format="stl", file_size_bytes=os.path.getsize(stl), prompt="",
+                )
+
+        monkeypatch.setattr(_server, "_generation_providers", {"openscad": _Stub()})
+        bp = self._bundle_patch()
+        try:
+            result = _server.generate_from_template(
+                "phone_stand", {"phone_width": 80.0, "base_depth": 60.0, "thickness": 5.0},
+            )
+        finally:
+            if bp is not None:
+                bp.stop()
+        assert result["success"] is True, result
+        assert result["fusion"]["floating_bodies"] == 3
+        assert any("float" in w for w in result["warnings"])
+
+    @patch("kiln.server._check_auth", return_value=None)
+    @patch("kiln.design_reasoning.design_to_gcode")
+    def test_design_to_gcode_pipeline(self, mock_d2g, _auth, tmp_path) -> None:
+        from kiln.design_reasoning import DesignToGCodeResult
+        from kiln.server import design_to_gcode_pipeline
+
+        stl = _stand_with_floating_cells_stl(tmp_path / "stand.stl")
+        mock_d2g.return_value = DesignToGCodeResult(
+            description="honeycomb stand", template_id="phone_stand",
+            stl_file=str(stl), steps_completed=["template_search", "stl_rendering"],
+            success=True,
+        )
+        result = design_to_gcode_pipeline("honeycomb stand")
+        assert result["success"] is True
+        assert result["fusion"]["floating_bodies"] == 3
+        assert any("float" in w for w in result["warnings"])

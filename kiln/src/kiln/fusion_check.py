@@ -17,7 +17,13 @@ where multi-body output is often deliberate).
 Vocabulary matches the pairwise contact relations used elsewhere in the
 stack: ``touching`` (gap at or under ``TOUCH_GAP_MM``), ``near`` (under
 ``NEAR_GAP_MM`` — an accidental near-miss or a designed clearance),
-``separated``.
+``separated``.  One relation is about the bed rather than a pair:
+``floating`` — a separate body with air under it.  A plate of parts has
+every part on the bed; a piece that starts above it is joined to nothing
+and prints as a loose part on supports, or not at all, so it is a finding
+even where multi-body output is allowed.  (2026-10-19: an agent's
+honeycomb phone stand put 61 cells on a tilted plane that never met the
+base; every one was "separated", so every make door stayed quiet.)
 """
 
 from __future__ import annotations
@@ -35,6 +41,10 @@ TOUCH_GAP_MM = 0.05
 NEAR_GAP_MM = 0.8
 # Minimum overlap that makes a weld real: about two extrusion widths.
 EMBEDMENT_FLOOR_MM = 0.4
+# A body whose lowest point is within this of the part's lowest point sits
+# on the bed (one first layer, with slack for a coarse export).  Higher,
+# and there is air under it.
+BED_LIFT_MM = 0.3
 # Surface points sampled per body for the gap measurement.
 _GAP_SAMPLES = 1500
 # Bound the pairwise gap work on pathological many-body meshes.
@@ -148,10 +158,14 @@ def check_fusion(
         ``touching``/``near`` pairs are findings: parts that all but
         touch were almost certainly meant to be one.
     :param max_pairs: Cap on pairwise gap measurements.
-    :returns: ``{"checked", "body_count", "fused", "findings":
-        [{"bodies", "gap_mm", "relation", "message"}, ...]}`` —
-        ``checked: False`` (with ``reason``) when the measurement could
-        not run; never a fake pass, never an exception.
+    :returns: ``{"checked", "body_count", "fused", "grounded_bodies",
+        "floating_bodies", "findings": [{"bodies", "gap_mm", "relation",
+        "message"}, ...]}`` — ``checked: False`` (with ``reason``) when the
+        measurement could not run; never a fake pass, never an exception.
+        Pieces with air under them that no contact finding already names
+        are gathered into ONE ``floating`` finding (``lift_mm`` min/max,
+        ``largest_mm``), in either mode: a plate of parts sits on the bed,
+        so a separate body above it is never a deliberate plate.
     """
     try:
         from kiln.mesh_frame import load_mesh
@@ -165,10 +179,17 @@ def check_fusion(
     except Exception as exc:  # noqa: BLE001
         return {"checked": False, "reason": f"mesh could not be loaded: {exc}"}
 
+    # The bed is wherever the part's lowest point is, not z=0: a model
+    # exported at z=50 is not "all floating".
+    floor_z = min(float(b.bounds[0][2]) for b in bodies)
+    lifts = [float(b.bounds[0][2]) - floor_z for b in bodies]
+    airborne = [i for i, lift in enumerate(lifts) if lift > BED_LIFT_MM]
     result: dict[str, Any] = {
         "checked": True,
         "body_count": len(bodies),
         "fused": len(bodies) <= 1,
+        "grounded_bodies": len(bodies) - len(airborne),
+        "floating_bodies": 0,
         "findings": [],
     }
     if len(bodies) <= 1:
@@ -223,7 +244,71 @@ def check_fusion(
                 "message": message,
             }
         )
+
+    # Pieces in the air.  A body a contact finding already names is said
+    # once, there; the rest are joined to nothing and stand on nothing.
+    named = {
+        i
+        for f in result["findings"]
+        if f["relation"] in ("touching", "near")
+        for i in f["bodies"]
+    }
+    floating = [i for i in airborne if i + 1 not in named]
+    if floating:
+        result["floating_bodies"] = len(floating)
+        result["findings"].append(_floating_finding(bodies, lifts, floating))
     return result
+
+
+def _floating_finding(bodies: Any, lifts: list[float], floating: list[int]) -> dict[str, Any]:
+    """The one finding for every piece with air under it."""
+    low = min(lifts[i] for i in floating)
+    high = max(lifts[i] for i in floating)
+    biggest = max(floating, key=lambda i: float(bodies[i].volume) if bodies[i].is_volume else 0.0)
+    ext = bodies[biggest].bounds[1] - bodies[biggest].bounds[0]
+    n = len(floating)
+    height = f"{low:.1f} mm" if high - low < 0.05 else f"{low:.1f} to {high:.1f} mm"
+    floor = embedment_floor_mm()
+    if n == 1:
+        message = (
+            f"1 piece floats with nothing under it, {height} above the bed: "
+            "nothing joins it to the rest, so it would print as a loose part "
+            "on supports, or not at all. If it belongs to the part, extend it "
+            f"until it overlaps by at least {floor} mm; if it is a separate "
+            "part, set it on the bed."
+        )
+    else:
+        message = (
+            f"{n} pieces float with nothing under them, {height} above the "
+            "bed: nothing joins them to the rest, so they would print as "
+            "loose parts on supports, or not at all. If they belong to the "
+            f"part, extend them until they overlap it by at least {floor} mm; "
+            "if they are separate parts, set them on the bed."
+        )
+    return {
+        "bodies": [i + 1 for i in floating],
+        "relation": "floating",
+        "lift_mm": {"min": round(low, 2), "max": round(high, 2)},
+        "largest_mm": [round(float(v), 2) for v in ext],
+        "message": message,
+    }
+
+
+def floating_summary(report: dict[str, Any]) -> str:
+    """One short sentence for a response's ``message`` line, or ``""``.
+
+    The agents that relay a make to the user most tersely repeat that one
+    line and nothing else (2026-10-19, measured on the hosted connector),
+    so a piece in the air has to be in it.
+    """
+    n = int(report.get("floating_bodies") or 0)
+    if n <= 0:
+        return ""
+    return (
+        f"Warning: {n} piece{'s' if n != 1 else ''} float"
+        f"{'' if n != 1 else 's'} above the bed with nothing under "
+        f"{'them' if n != 1 else 'it'} — see warnings."
+    )
 
 
 def attach_fusion_report(
@@ -249,14 +334,21 @@ def attach_fusion_report(
         if report["findings"] or (expect_single_body and not report["fused"]):
             response["fusion"] = report
             for finding in report["findings"]:
+                label = (
+                    "floating pieces" if finding["relation"] == "floating"
+                    else "unfused geometry"
+                )
                 response.setdefault("warnings", []).append(
-                    f"unfused geometry: {finding['message']}"
+                    f"{label}: {finding['message']}"
                 )
             if expect_single_body and not report["fused"] and not report["findings"]:
                 response.setdefault("warnings", []).append(
                     f"unfused geometry: output is {report['body_count']} "
                     "disconnected bodies where one part was expected."
                 )
+            summary = floating_summary(report)
+            if summary and isinstance(response.get("message"), str):
+                response["message"] = f"{response['message'].rstrip()} {summary}"
     except Exception as exc:  # noqa: BLE001 — annotation must never break a compose
         _logger.debug("fusion report skipped: %s", exc)
     return response

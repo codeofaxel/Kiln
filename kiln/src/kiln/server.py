@@ -16701,6 +16701,12 @@ def generate_from_template(
             except Exception:  # noqa: BLE001
                 pass
 
+            # A template is print-verified at its defaults, not at every
+            # parameter a caller can pass: the same one-line check the
+            # compile door runs, so a piece left in the air is said here too.
+            from kiln.fusion_check import attach_fusion_report
+
+            attach_fusion_report(result_dict, dl.local_path)
             from kiln.front_door import join_goal
 
             join_goal(brief_id, result_dict, dl.local_path)
@@ -17330,6 +17336,11 @@ def design_to_gcode_pipeline(
         )
         result_dict = {"success": result.success, **result.to_dict()}
         if result.success:
+            # The STL goes on to be sliced here, so a piece in the air is
+            # worth saying before the G-code exists.
+            from kiln.fusion_check import attach_fusion_report
+
+            attach_fusion_report(result_dict, result.stl_file)
             from kiln.front_door import join_goal
 
             join_goal(brief_id, result_dict, result.stl_file)

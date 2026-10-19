@@ -1618,6 +1618,13 @@ class _DesignToolsPlugin:
             For surface() heightmap operations (photo emboss, lithophane),
             increase timeout to 600+ seconds.
 
+            Kiln checks the compiled part is joined up: a piece that touches
+            the rest without overlapping it, or floats with nothing under
+            it, is named in the result's ``warnings`` (and in ``message``
+            when something floats).  Read them before showing the part;
+            separate parts sitting on the bed are a plate and draw no
+            warning.
+
             Round shapes: leave ``$fn`` out and Kiln cuts each curve by its
             size, writing that rule into the file it compiles.  Set ``$fn``
             only for a deliberate polygon (``$fn = 6`` for a hexagon).  A
