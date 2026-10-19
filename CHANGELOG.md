@@ -27,7 +27,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Round or bevel the edges of a CAD part.** Kiln edits the CAD itself and tells you any edge it left sharp.
 
-- **Kiln picks the right finish for each edge (Pro+).** See https://kiln3d.com/pricing.
+- **Kiln can choose each edge's finish for you (Pro+).** It bevels the edges a rounded corner would let sag, and gives screw holes the entry their screw needs. See https://kiln3d.com/pricing.
 
 - **Check that a hinge opens before you print it.**
 
@@ -179,15 +179,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Kiln parks clear of your print.** When a recovery stops a job, the nozzle
   now moves to a spot proven clear of what's on the plate instead of sitting
   over it — and stays put if it can't prove one.
-
-- **Your printer's own start-up routine, run automatically.** If your
-  Klipper printer (Voron, Creality K1/K2, QIDI, Sovol, and friends) has a
-  `PRINT_START` or `START_PRINT` routine set up — the one that heats the
-  chamber, levels the bed, and wipes the nozzle — Kiln now finds it by
-  asking the printer itself and uses it when slicing, with your exact
-  temperatures filled in. Requires kiln-pro; without it (or whenever the
-  routine can't be verified safe) Kiln keeps its built-in safe warm-up.
-  The result says which one was used.
 
 - **When Kiln changes your file's format, it says so.** If what comes back
   isn't the format you handed over, the result names what changed, what the
