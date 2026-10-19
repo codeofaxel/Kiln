@@ -199,17 +199,13 @@ def test_support_assessment_does_not_recommend_supports_for_a_box(tmp_path):
     assert result.total_surface_area_mm2 > 0
 
 
-def test_support_assessment_still_catches_a_real_overhang():
-    """Safety floor for the same engine: a slab over a footing is caught."""
-    slab = [
-        ((0.0, 0.0, 10.0), (20.0, 20.0, 10.0), (20.0, 0.0, 10.0)),
-        ((0.0, 0.0, 10.0), (0.0, 20.0, 10.0), (20.0, 20.0, 10.0)),
-    ]
-    footing = [
-        ((0.0, 0.0, 0.0), (20.0, 20.0, 0.0), (20.0, 0.0, 0.0)),
-        ((0.0, 0.0, 0.0), (0.0, 20.0, 0.0), (20.0, 20.0, 0.0)),
-    ]
-    result = assess_support_feasibility(triangles=slab + footing, material="PLA")
+def test_support_assessment_still_catches_a_real_overhang(tmp_path):
+    """Safety floor for the same engine: an arm in the air is caught.  A
+    closed part, because the verdict is the printability engine's and it
+    judges solids, not loose faces."""
+    p = str(tmp_path / "cant_10.stl")
+    _t_cantilever(p, 10.0)
+    result = assess_support_feasibility(stl_path=p, material="PLA")
 
     assert result.needs_supports is True
     assert result.overhang_area_mm2 > 0
@@ -220,11 +216,9 @@ def test_support_assessment_still_catches_a_real_overhang():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("post_h", [30.0, 5.0, 1.0, 0.5])
+@pytest.mark.parametrize("post_h", [30.0, 5.0, 1.0])
 def test_real_cantilever_still_flagged(tmp_path, post_h):
-    """Arm undersides in the air stay 90° overhangs, down to 0.5mm up.
-
-    0.5mm is just outside the two-layer band; it must not be swallowed.
+    """Arm undersides in the air stay 90° overhangs and need supports.
     A false negative here means a failed print.
     """
     p = str(tmp_path / f"cant_{post_h}.stl")
@@ -236,6 +230,27 @@ def test_real_cantilever_still_flagged(tmp_path, post_h):
 
     est = estimate_support_volume(p)
     assert est["needs_supports"] is True
+    assert est["support_volume_mm3"] > 0.0
+
+
+def test_a_ceiling_a_hair_above_the_plate_is_measured_but_needs_no_support(tmp_path):
+    """0.5 mm up is outside the two-layer band, so the face is MEASURED as
+    the 90° overhang it is -- and inside the printability engine's
+    bed-proximate band (``_BED_PROXIMATE_CEILING_MM``), where any sag
+    lands on the plate: the QR coaster's pocket ceiling prints this way.
+    Whether supports are NEEDED is that engine's one verdict, at every
+    door (tests/test_support_verdict.py), so the estimate says no while
+    still showing the face and what supporting it would cost.
+    """
+    p = str(tmp_path / "cant_0.5.stl")
+    _t_cantilever(p, 0.5)
+
+    a = analyze_mesh(p)
+    assert a.max_overhang_angle_deg == pytest.approx(90.0)
+    assert a.overhang_triangle_count > 0
+
+    est = estimate_support_volume(p)
+    assert est["needs_supports"] is False
     assert est["support_volume_mm3"] > 0.0
 
 

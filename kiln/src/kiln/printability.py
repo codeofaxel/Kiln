@@ -440,6 +440,11 @@ class PrintabilityReport:
     # for clients that construct PrintabilityReport directly without
     # going through ``analyze_printability``.
     triangle_count: int = 0
+    # The overhang angle, from vertical, past which a face was counted as
+    # an overhang: what ``overhangs`` and :func:`support_verdict` were
+    # read against, and what a slice's support threshold is written from
+    # (:mod:`kiln.slicer_supports`).  0.0 for a report built by hand.
+    overhang_threshold_deg: float = 0.0
     # Number of disjoint connected components in the mesh (triangle
     # islands joined by shared-vertex adjacency).  A single closed body
     # is 1; a multi-body mesh is N.  Exposed for the kiln-pro overlay.
@@ -845,6 +850,99 @@ def _resolve_overhang_threshold(
             if key.strip().lower().replace("-", "_").replace(" ", "_") == normalized_target:
                 return float(val)
     return float(default_limit)
+
+
+def overhang_threshold_deg(material: str | None = None) -> float:
+    """The overhang angle, from vertical, past which a face of *material*
+    counts as an overhang here -- the angle :func:`analyze_printability`
+    reads its verdict against, and the one a slice's support threshold is
+    written from.  Per-material values reach it through the kiln-pro
+    overlay; without one, the 45 degree floor."""
+    from kiln.design_intelligence import load_pro_overlay_or_empty
+
+    return _resolve_overhang_threshold(None, material, load_pro_overlay_or_empty("printability_judgment"))
+
+
+def judge_supports(
+    file_path: str,
+    *,
+    nozzle_diameter: float | None = None,
+    layer_height: float = 0.2,
+    max_overhang_angle: float | None = None,
+    material: str = "pla",
+    printer_id: str | None = None,
+) -> SupportJudgement:
+    """The support verdict's inputs for *file_path*, and nothing else.
+
+    The same mesh loading, the same threshold resolution and the same
+    judgement as :func:`analyze_printability` -- one engine -- without the
+    thin-wall, cavity, warping, thermal and cost analyses a slice never
+    reads (on a 200,000-face part those are fifteen seconds).  Raises
+    ``ValueError`` as the full analysis does for a file that is not a solid,
+    and runs where that analysis runs: through kiln-pro's memory-capped
+    runner when there is one (a ``MemoryError`` is the cap), else here.
+    """
+    kwargs = dict(
+        nozzle_diameter=nozzle_diameter, layer_height=layer_height,
+        max_overhang_angle=max_overhang_angle, material=material, printer_id=printer_id,
+    )
+    runner = _analysis_runner()
+    if runner is None:
+        return _judge_supports_here(file_path, **kwargs)
+    return runner(_judge_supports_here, file_path, **kwargs)
+
+
+def _judge_supports_here(
+    file_path: str,
+    *,
+    nozzle_diameter: float | None = None,
+    layer_height: float = 0.2,
+    max_overhang_angle: float | None = None,
+    material: str = "pla",
+    printer_id: str | None = None,
+) -> SupportJudgement:
+    """:func:`judge_supports`'s work, wherever it is run."""
+    from kiln.assumed_nozzle import assumed_nozzle
+    from kiln.design_intelligence import load_pro_overlay_or_empty
+
+    nozzle = assumed_nozzle(printer_id, stated=nozzle_diameter)
+    mesh_path = _mesh_path_for_analysis(file_path)
+    triangles, _vertices, bbox, z_min = _load_mesh_for_analysis(mesh_path)
+    overlay = load_pro_overlay_or_empty("printability_judgment")
+    threshold = _resolve_overhang_threshold(max_overhang_angle, material, overlay)
+    judged = _judge_supports(
+        triangles, z_min, bbox,
+        resolved_threshold=threshold, layer_height=layer_height,
+        material=material, overlay=overlay,
+    )
+    judged.nozzle = nozzle.to_dict()
+    return judged
+
+
+def support_verdict(report: PrintabilityReport | SupportJudgement) -> str | None:
+    """Why *report* says the part needs supports, or ``None`` when it needs none.
+
+    The one answer every door gives -- the printability report, the
+    pre-print check, the support assessment, the volume estimate and the
+    slice itself (:mod:`kiln.slicer_supports`) -- so a report cannot say
+    "needs supports" over a file sliced without them.  It is the report's
+    own overhang verdict, which already excludes the undersides a slicer
+    bridges or reaches sideways, plus a bridge too long for the material;
+    there is no size floor, because a 10 mm cantilever on a large, finely
+    meshed part is a real overhang at a tenth of a percent of its faces.
+    """
+    reasons: list[str] = []
+    if report.overhangs.needs_supports:
+        pct = report.overhangs.overhang_percentage
+        # A share that rounds to nothing is said as a count: four faces on
+        # a 200,000-face part are "0.0%" and still an arm in the air.
+        reasons.append(
+            f"overhangs={pct:.1f}%" if pct >= 0.1
+            else f"overhangs={report.overhangs.overhang_triangle_count} face(s)"
+        )
+    if report.bridging.needs_supports_for_bridges:
+        reasons.append(f"bridges={report.bridging.max_bridge_length_mm:.1f}mm")
+    return ", ".join(reasons) if reasons else None
 
 
 def _check_rule_op(op: str, value: Any, threshold: Any) -> bool:
@@ -4370,185 +4468,56 @@ def _analysis_runner() -> Callable[..., Any] | None:
     return getattr(pro_features, "run_mesh_analysis", None)
 
 
-def _analyze_printability_here(
-    file_path: str,
+@dataclass
+class SupportJudgement:
+    """Everything the support verdict is read from, for one part.
+
+    The overhangs (after the bridge and self-supporting exemptions), the
+    bridges, the support volume, and the angle they were judged against.
+    :func:`analyze_printability` builds its report on one of these;
+    :func:`judge_supports` returns one on its own, for a door that needs
+    the verdict and nothing else (the slice).
+    """
+
+    overhangs: OverhangAnalysis
+    bridging: BridgingAnalysis
+    supports: SupportAnalysis
+    #: The overhang angle, from vertical, the verdict was read against.
+    overhang_threshold_deg: float
+    #: The nozzle the part was judged for, where it came from.
+    nozzle: dict[str, Any] = field(default_factory=dict)
+    triangle_count: int = 0
+    # The report's own bookkeeping, for its score and recommendations.
+    downward_regions: list[_DownwardRegion] = field(default_factory=list)
+    overhang_scoring_pct: float | None = None
+    self_supporting_overhang_count: int = 0
+    bridge_substituted_overhang_pct: float | None = None
+
+
+def _judge_supports(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    z_min: float,
+    bbox: dict[str, float],
     *,
-    nozzle_diameter: float | None = None,
-    layer_height: float = 0.2,
-    max_overhang_angle: float | None = None,
-    build_volume: tuple[float, float, float] | None = None,
-    material: str = "pla",
-    infill_percent: float = 20.0,
-    include_hole_detection: bool = True,
-    printer_id: str | None = None,
-    slicer_style: Literal["grid", "snug", "organic", "tree"] = "grid",
-) -> PrintabilityReport:
-    """:func:`analyze_printability`'s work, wherever it is run."""
-    from kiln.assumed_nozzle import assumed_nozzle
-    from kiln.design_intelligence import load_pro_overlay_or_empty
-
-    # One size for every check below, and the report says where it came from.
-    nozzle = assumed_nozzle(printer_id, stated=nozzle_diameter)
-    nozzle_diameter = nozzle.diameter_mm
-
-    # A CAD file is analysed as Kiln's mesh of it, through the shared door
-    # (cached by content; anything already a mesh passes straight through).
-    # Here rather than in each caller: until 2026-09-30 a STEP was refused
-    # below as an unsupported type, so every door that sliced one either
-    # skipped this analysis without a word or grew its own conversion.
-    # A failed conversion keeps this function's one error type, so every
-    # caller that already handles an unreadable mesh handles this too.
-    # A path that is not a file is left for the parser below, which says so
-    # in the same words whatever the extension.
-    if step_import.is_step_file(file_path) and Path(file_path).is_file():
-        try:
-            file_path, _conversion_note = step_import.ensure_mesh_path(file_path)
-        except step_import.NoBackendError as exc:
-            raise ValueError(str(exc)) from exc
-        except step_import.StepImportError as exc:
-            raise ValueError(f"Could not read that CAD file: {exc}") from exc
-
-    # Holes first, before this function holds the mesh itself: on a machine
-    # that gives the hole check an allowance (kiln.hole_check) the check runs
-    # in a process of its own, and the two are then never held at once.
-    # A hole-detection failure must never break the wider printability
-    # path; an empty list is the documented degraded output.  A check the
-    # machine stopped is a different thing from no holes, and is said.
-    holes: list[dict[str, Any]] = []
-    hole_diagnostics: dict[str, int] = {}
-    holes_not_checked: str | None = None
-    if include_hole_detection:
-        from kiln.hole_check import HoleCheckStopped, find_holes
-
-        try:
-            holes = find_holes(file_path, diagnostics=hole_diagnostics)
-        except (ValueError, OSError) as exc:
-            # A path that cannot be read is the parser's to refuse, just below.
-            logger.debug("detect_holes failed silently on %s: %s", file_path, exc)
-        except HoleCheckStopped as exc:
-            holes_not_checked = str(exc)
-            logger.warning("hole check stopped on %s: %s", Path(file_path).name, exc)
-            _tell_whoever_runs_this_machine(file_path, exc)
-
-    triangles, vertices = _parse_mesh(file_path)
-    # Membranes must go BEFORE winding normalization: a zero-thickness
-    # pair has no meaningful outward orientation to normalize.
-    triangles = _drop_membrane_pairs(triangles)
-    triangles = _normalize_triangle_winding(triangles)
-
-    # Bounding box.
-    xs = [v[0] for v in vertices]
-    ys = [v[1] for v in vertices]
-    zs = [v[2] for v in vertices]
-    bbox = {
-        "x_min": min(xs),
-        "x_max": max(xs),
-        "y_min": min(ys),
-        "y_max": max(ys),
-        "z_min": min(zs),
-        "z_max": max(zs),
-    }
-    # The plate the model rests on comes from geometry, not from the
-    # parsed vertex list, which may carry vertices no face references.
-    z_min = _mesh_bed_z(triangles)
-
-    # Soft tier seam: load the printability_judgment overlay once and
-    # pass it to each material-derived sub-analysis. Empty overlay ->
-    # free-tier safe defaults; populated -> curated thresholds + tuned
-    # recommendation templates from Pro+.
-    judgment_overlay = load_pro_overlay_or_empty("printability_judgment")
-
-    # Resolve the effective overhang threshold ONCE so both
-    # ``_analyze_overhangs`` and ``_analyze_supports`` see the same
-    # value.  Without this, the support-volume estimator runs at the
-    # universal 45° rule while the overhang detector uses the
-    # per-material threshold — producing the contradictory report
-    # "TPU at 38° needs_supports=True, but supports.estimated_support_volume_mm3=0"
-    # because 38° is below the supports estimator's 45° floor.  Pin
-    # them together so the verdict and the volume estimate agree.
-    _resolved_threshold = _resolve_overhang_threshold(
-        max_overhang_angle, material, judgment_overlay,
-    )
+    resolved_threshold: float,
+    layer_height: float,
+    material: str,
+    overlay: dict[str, Any] | None,
+) -> SupportJudgement:
+    """The support half of :func:`analyze_printability`, on a loaded mesh:
+    the overhangs, the bridges, the support volume, and the exemptions
+    that turn a flagged underside a slicer prints anyway back into "no
+    supports".  One body for the report and for :func:`judge_supports`,
+    so the two cannot drift."""
     overhangs = _analyze_overhangs(
         triangles,
-        max_overhang_angle=_resolved_threshold,
+        max_overhang_angle=resolved_threshold,
         z_min=z_min,
         layer_height=layer_height,
         normalize_winding=False,
         material=material,
-        overlay=judgment_overlay,
+        overlay=overlay,
     )
-    # Connected-component count: one closed body = 1; a multi-body mesh
-    # = N components.  Exposed for the kiln-pro overlay.
-    #
-    # ``component_size_uniformity`` is a 0–1 scalar describing how
-    # similar the components are in volume — 1.0 = all components have
-    # identical bbox volume; near 0.0 = one big component plus tiny
-    # ones.  Exposed for the kiln-pro overlay.
-    component_count = 0
-    component_size_uniformity = 0.0
-    mesh_genus = 0
-    # Numpy view of triangles, kept around so the kiln-pro enrichment
-    # call can pass it through to the Pro+ rod-feature analyzer
-    # (computed there, not here — the algorithm is a Pro-tier wedge).
-    tris_arr_for_pro: np.ndarray | None = None
-    if len(triangles) > 0:
-        try:
-            tris_arr = np.asarray(triangles, dtype=np.float64)
-            comp_ids = _label_mesh_components(tris_arr)
-            component_count = int(comp_ids.max() + 1)
-            mesh_genus = _compute_mesh_genus(tris_arr, component_count)
-            tris_arr_for_pro = tris_arr
-            if component_count >= 2:
-                # Per-component bbox volume: max-min along each axis.
-                # Coefficient of variation (std / mean) measures spread;
-                # uniformity = 1 - clamp(cv, 0, 1) maps to 0–1 with 1 =
-                # all components identical.
-                tri_min = tris_arr.min(axis=1)  # (T, 3) per-tri min
-                tri_max = tris_arr.max(axis=1)  # (T, 3) per-tri max
-                comp_bbox_volumes = np.zeros(component_count)
-                for cid in range(component_count):
-                    mask = comp_ids == cid
-                    if not mask.any():
-                        continue
-                    lo = tri_min[mask].min(axis=0)
-                    hi = tri_max[mask].max(axis=0)
-                    extents = np.maximum(hi - lo, 1e-12)
-                    comp_bbox_volumes[cid] = float(extents.prod())
-                mean_vol = float(comp_bbox_volumes.mean())
-                if mean_vol > 0:
-                    std_vol = float(comp_bbox_volumes.std())
-                    cv = std_vol / mean_vol
-                    component_size_uniformity = float(
-                        max(0.0, min(1.0, 1.0 - cv))
-                    )
-            else:
-                # Single-component mesh: uniformity is trivially 1.0
-                # (one component, no spread).  The secondary signal
-                # is only meaningful when n_components >= 2.
-                component_size_uniformity = 1.0
-        except (ValueError, IndexError):
-            component_count = 0
-            component_size_uniformity = 0.0
-            mesh_genus = 0
-            tris_arr_for_pro = None
-    # Walls are measured once, against the floor they will be judged by:
-    # the material's minimum wall when kiln-pro supplies one, the nozzle
-    # otherwise.  The topology is part of the question; the answer can
-    # depend on it.
-    wall_floor = _material_wall_floor(
-        material,
-        printer_id=printer_id,
-        nozzle_diameter=nozzle_diameter,
-        connected_components=component_count,
-        component_size_uniformity=round(component_size_uniformity, 3),
-        genus=mesh_genus,
-    )
-    thin_walls, sub_nozzle_wall_pct = _measure_thin_walls(
-        triangles, vertices,
-        nozzle_diameter=nozzle_diameter, thin_below_mm=wall_floor,
-    )
-    cavities = _analyze_cavity_widths(triangles, vertices, nozzle_diameter=nozzle_diameter)
     downward_regions = _analyze_downward_regions(
         triangles, z_min, layer_height=layer_height,
     )
@@ -4559,11 +4528,10 @@ def _analyze_printability_here(
         normalize_winding=False,
         precomputed_regions=downward_regions,
     )
-    bed_adhesion = _analyze_bed_adhesion(triangles, z_min, bbox, layer_height=layer_height)
     supports = _analyze_supports(
         triangles,
         z_min,
-        max_overhang_angle=_resolved_threshold,
+        max_overhang_angle=resolved_threshold,
         layer_height=layer_height,
         normalize_winding=False,
         bbox=bbox,
@@ -4643,7 +4611,7 @@ def _analyze_printability_here(
                 math.acos(max(-1.0, min(1.0, -nn[2])))
             )
             overhang_angle = max(0.0, 90.0 - angle_from_down)
-            if overhang_angle + 1e-9 < _resolved_threshold:
+            if overhang_angle + 1e-9 < resolved_threshold:
                 continue
             _self_supporting_overhang_count += 1
         if _self_supporting_overhang_count > 0:
@@ -4691,6 +4659,219 @@ def _analyze_printability_here(
     overhangs = _dc_replace(
         overhangs, max_free_air_overhang_deg=round(_free_air_max_deg, 1),
     )
+    return SupportJudgement(
+        overhangs=overhangs,
+        bridging=bridging,
+        supports=supports,
+        overhang_threshold_deg=resolved_threshold,
+        triangle_count=len(triangles),
+        downward_regions=downward_regions,
+        overhang_scoring_pct=_overhang_scoring_pct,
+        self_supporting_overhang_count=_self_supporting_overhang_count,
+        bridge_substituted_overhang_pct=_bridge_substituted_overhang_pct,
+    )
+
+
+def _mesh_path_for_analysis(file_path: str) -> str:
+    """A CAD file is analysed as Kiln's mesh of it, through the shared door
+    (cached by content; anything already a mesh passes straight through).
+    A failed conversion keeps the analysis's one error type, so every
+    caller that handles an unreadable mesh handles this too; a path that
+    is not a file is left for the parser, which says so in the same words
+    whatever the extension."""
+    if step_import.is_step_file(file_path) and Path(file_path).is_file():
+        try:
+            file_path, _conversion_note = step_import.ensure_mesh_path(file_path)
+        except step_import.NoBackendError as exc:
+            raise ValueError(str(exc)) from exc
+        except step_import.StepImportError as exc:
+            raise ValueError(f"Could not read that CAD file: {exc}") from exc
+    return file_path
+
+
+def _load_mesh_for_analysis(
+    file_path: str,
+) -> tuple[list[tuple[tuple[float, ...], ...]], list[tuple[float, ...]], dict[str, float], float]:
+    """The mesh as every analysis here reads it: parsed, membranes dropped,
+    winding normalised, with its bounding box and the plate it rests on."""
+    triangles, vertices = _parse_mesh(file_path)
+    # Membranes must go BEFORE winding normalization: a zero-thickness
+    # pair has no meaningful outward orientation to normalize.
+    triangles = _drop_membrane_pairs(triangles)
+    triangles = _normalize_triangle_winding(triangles)
+
+    # Bounding box.
+    xs = [v[0] for v in vertices]
+    ys = [v[1] for v in vertices]
+    zs = [v[2] for v in vertices]
+    bbox = {
+        "x_min": min(xs),
+        "x_max": max(xs),
+        "y_min": min(ys),
+        "y_max": max(ys),
+        "z_min": min(zs),
+        "z_max": max(zs),
+    }
+    # The plate the model rests on comes from geometry, not from the
+    # parsed vertex list, which may carry vertices no face references.
+    z_min = _mesh_bed_z(triangles)
+    return triangles, vertices, bbox, z_min
+
+
+def _analyze_printability_here(
+    file_path: str,
+    *,
+    nozzle_diameter: float | None = None,
+    layer_height: float = 0.2,
+    max_overhang_angle: float | None = None,
+    build_volume: tuple[float, float, float] | None = None,
+    material: str = "pla",
+    infill_percent: float = 20.0,
+    include_hole_detection: bool = True,
+    printer_id: str | None = None,
+    slicer_style: Literal["grid", "snug", "organic", "tree"] = "grid",
+) -> PrintabilityReport:
+    """:func:`analyze_printability`'s work, wherever it is run."""
+    from kiln.assumed_nozzle import assumed_nozzle
+    from kiln.design_intelligence import load_pro_overlay_or_empty
+
+    # One size for every check below, and the report says where it came from.
+    nozzle = assumed_nozzle(printer_id, stated=nozzle_diameter)
+    nozzle_diameter = nozzle.diameter_mm
+
+    # A CAD file is analysed as Kiln's mesh of it, through the shared door
+    # (cached by content; anything already a mesh passes straight through).
+    # Here rather than in each caller: until 2026-09-30 a STEP was refused
+    # below as an unsupported type, so every door that sliced one either
+    # skipped this analysis without a word or grew its own conversion.
+    # A failed conversion keeps this function's one error type, so every
+    # caller that already handles an unreadable mesh handles this too.
+    # A path that is not a file is left for the parser below, which says so
+    # in the same words whatever the extension.
+    file_path = _mesh_path_for_analysis(file_path)
+
+    # Holes first, before this function holds the mesh itself: on a machine
+    # that gives the hole check an allowance (kiln.hole_check) the check runs
+    # in a process of its own, and the two are then never held at once.
+    # A hole-detection failure must never break the wider printability
+    # path; an empty list is the documented degraded output.  A check the
+    # machine stopped is a different thing from no holes, and is said.
+    holes: list[dict[str, Any]] = []
+    hole_diagnostics: dict[str, int] = {}
+    holes_not_checked: str | None = None
+    if include_hole_detection:
+        from kiln.hole_check import HoleCheckStopped, find_holes
+
+        try:
+            holes = find_holes(file_path, diagnostics=hole_diagnostics)
+        except (ValueError, OSError) as exc:
+            # A path that cannot be read is the parser's to refuse, just below.
+            logger.debug("detect_holes failed silently on %s: %s", file_path, exc)
+        except HoleCheckStopped as exc:
+            holes_not_checked = str(exc)
+            logger.warning("hole check stopped on %s: %s", Path(file_path).name, exc)
+            _tell_whoever_runs_this_machine(file_path, exc)
+
+    triangles, vertices, bbox, z_min = _load_mesh_for_analysis(file_path)
+
+    # Soft tier seam: load the printability_judgment overlay once and
+    # pass it to each material-derived sub-analysis. Empty overlay ->
+    # free-tier safe defaults; populated -> curated thresholds + tuned
+    # recommendation templates from Pro+.
+    judgment_overlay = load_pro_overlay_or_empty("printability_judgment")
+
+    # Resolve the effective overhang threshold ONCE so both
+    # ``_analyze_overhangs`` and ``_analyze_supports`` see the same
+    # value.  Without this, the support-volume estimator runs at the
+    # universal 45° rule while the overhang detector uses the
+    # per-material threshold — producing the contradictory report
+    # "TPU at 38° needs_supports=True, but supports.estimated_support_volume_mm3=0"
+    # because 38° is below the supports estimator's 45° floor.  Pin
+    # them together so the verdict and the volume estimate agree.
+    _resolved_threshold = _resolve_overhang_threshold(
+        max_overhang_angle, material, judgment_overlay,
+    )
+    # Connected-component count: one closed body = 1; a multi-body mesh
+    # = N components.  Exposed for the kiln-pro overlay.
+    #
+    # ``component_size_uniformity`` is a 0–1 scalar describing how
+    # similar the components are in volume — 1.0 = all components have
+    # identical bbox volume; near 0.0 = one big component plus tiny
+    # ones.  Exposed for the kiln-pro overlay.
+    component_count = 0
+    component_size_uniformity = 0.0
+    mesh_genus = 0
+    # Numpy view of triangles, kept around so the kiln-pro enrichment
+    # call can pass it through to the Pro+ rod-feature analyzer
+    # (computed there, not here — the algorithm is a Pro-tier wedge).
+    tris_arr_for_pro: np.ndarray | None = None
+    if len(triangles) > 0:
+        try:
+            tris_arr = np.asarray(triangles, dtype=np.float64)
+            comp_ids = _label_mesh_components(tris_arr)
+            component_count = int(comp_ids.max() + 1)
+            mesh_genus = _compute_mesh_genus(tris_arr, component_count)
+            tris_arr_for_pro = tris_arr
+            if component_count >= 2:
+                # Per-component bbox volume: max-min along each axis.
+                # Coefficient of variation (std / mean) measures spread;
+                # uniformity = 1 - clamp(cv, 0, 1) maps to 0–1 with 1 =
+                # all components identical.
+                tri_min = tris_arr.min(axis=1)  # (T, 3) per-tri min
+                tri_max = tris_arr.max(axis=1)  # (T, 3) per-tri max
+                comp_bbox_volumes = np.zeros(component_count)
+                for cid in range(component_count):
+                    mask = comp_ids == cid
+                    if not mask.any():
+                        continue
+                    lo = tri_min[mask].min(axis=0)
+                    hi = tri_max[mask].max(axis=0)
+                    extents = np.maximum(hi - lo, 1e-12)
+                    comp_bbox_volumes[cid] = float(extents.prod())
+                mean_vol = float(comp_bbox_volumes.mean())
+                if mean_vol > 0:
+                    std_vol = float(comp_bbox_volumes.std())
+                    cv = std_vol / mean_vol
+                    component_size_uniformity = float(
+                        max(0.0, min(1.0, 1.0 - cv))
+                    )
+            else:
+                # Single-component mesh: uniformity is trivially 1.0
+                # (one component, no spread).  The secondary signal
+                # is only meaningful when n_components >= 2.
+                component_size_uniformity = 1.0
+        except (ValueError, IndexError):
+            component_count = 0
+            component_size_uniformity = 0.0
+            mesh_genus = 0
+            tris_arr_for_pro = None
+    # Walls are measured once, against the floor they will be judged by:
+    # the material's minimum wall when kiln-pro supplies one, the nozzle
+    # otherwise.  The topology is part of the question; the answer can
+    # depend on it.
+    wall_floor = _material_wall_floor(
+        material,
+        printer_id=printer_id,
+        nozzle_diameter=nozzle_diameter,
+        connected_components=component_count,
+        component_size_uniformity=round(component_size_uniformity, 3),
+        genus=mesh_genus,
+    )
+    thin_walls, sub_nozzle_wall_pct = _measure_thin_walls(
+        triangles, vertices,
+        nozzle_diameter=nozzle_diameter, thin_below_mm=wall_floor,
+    )
+    cavities = _analyze_cavity_widths(triangles, vertices, nozzle_diameter=nozzle_diameter)
+    bed_adhesion = _analyze_bed_adhesion(triangles, z_min, bbox, layer_height=layer_height)
+    judged = _judge_supports(
+        triangles, z_min, bbox,
+        resolved_threshold=_resolved_threshold, layer_height=layer_height,
+        material=material, overlay=judgment_overlay,
+    )
+    overhangs, bridging, supports = judged.overhangs, judged.bridging, judged.supports
+    _overhang_scoring_pct = judged.overhang_scoring_pct
+    _self_supporting_overhang_count = judged.self_supporting_overhang_count
+    _bridge_substituted_overhang_pct = judged.bridge_substituted_overhang_pct
 
     warping = _analyze_warping(
         triangles, vertices, bbox, material=material, overlay=judgment_overlay,
@@ -4903,6 +5084,7 @@ def _analyze_printability_here(
             "height_mm": round(bbox["z_max"] - bbox["z_min"], 3),
         },
         model_height_mm=round(model_height, 2),
+        overhang_threshold_deg=_resolved_threshold,
         recommendations=recommendations,
         estimated_print_time_modifier=round(time_mod, 2),
         holes=holes,

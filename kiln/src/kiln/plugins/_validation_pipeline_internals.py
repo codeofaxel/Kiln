@@ -1052,11 +1052,14 @@ def _step_printability(
 ) -> None:
     """Step 5: printability analysis, for the pipeline's material and printer."""
     try:
-        from kiln.printability import analyze_printability
+        from kiln.printability import analyze_printability, support_verdict
 
         pa_report = analyze_printability(
             working_path, material=material, printer_id=printer_id,
         )
+        # The one support verdict, kept for the support step below so the
+        # two checks cannot answer differently about the same part.
+        report.model_info["support_verdict"] = support_verdict(pa_report)
         score = pa_report.score
         grade = pa_report.grade
         report.printability_score = score
@@ -1177,6 +1180,11 @@ def _step_structural(report: _PipelineReport) -> None:
         ))
 
 
+#: ``model_info`` holds no support verdict when the printability step did
+#: not run (or failed), which is different from a verdict of ``None``.
+_NOT_DECIDED = object()
+
+
 def _step_support_assessment(
     report: _PipelineReport,
     working_path: str,
@@ -1197,11 +1205,15 @@ def _step_support_assessment(
         from kiln.support_assessment import assess_support_feasibility
 
         ctx = printer_ctx or {}
+        decided = report.model_info.get("support_verdict", _NOT_DECIDED)
         assessment = assess_support_feasibility(
             stl_path=working_path,
             material=material,
             nozzle_diameter_mm=float(ctx.get("nozzle_diameter_mm", 0.4)),
             layer_height_mm=layer_height_mm if layer_height_mm > 0 else 0.2,
+            # The printability step's verdict, when it ran; else the
+            # assessment reads the same engine itself.
+            needs_supports=None if decided is _NOT_DECIDED else decided is not None,
         )
 
         report.model_info["support_assessment"] = assessment.to_dict()

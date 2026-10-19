@@ -442,7 +442,8 @@ def _loaded_material(adapter: Any, material: str | None) -> str | None:
 
 def _slice_step_data(result: Any) -> dict[str, Any]:
     """What a slice step records: the file, the slicer, the filament it was
-    weighed with and the nozzle it was sliced for."""
+    weighed with, the nozzle it was sliced for and whether it carries
+    supports."""
     data: dict[str, Any] = {"output_path": result.output_path, "slicer": result.slicer}
     staged = getattr(result, "stage_mesh_path", None)
     if staged:
@@ -453,6 +454,9 @@ def _slice_step_data(result: Any) -> dict[str, Any]:
     nozzle = getattr(result, "nozzle", None)
     if nozzle:
         data["nozzle"] = nozzle
+    supports = getattr(result, "supports", None)
+    if supports is not None:
+        data["supports"] = supports.to_dict()
     return data
 
 

@@ -483,21 +483,20 @@ def estimate_supports(
     :returns: A :class:`SupportEstimate`.
     :raises ValueError: If the file cannot be parsed.
     """
-    triangles, vertices = _parse_mesh(file_path)
+    # The report's own numbers and its verdict -- the one every door gives
+    # (kiln.printability.support_verdict) -- rather than a second pass over
+    # the raw faces that counted a bridged underside as needing supports.
+    from kiln.printability import analyze_printability, support_verdict
 
-    z_min = min(v[2] for v in vertices)
-
-    overhangs = _analyze_overhangs(
-        triangles, z_min=z_min, max_overhang_angle=max_overhang_angle
+    report = analyze_printability(
+        file_path, max_overhang_angle=max_overhang_angle, include_hole_detection=False,
     )
-    supports = _analyze_supports(triangles, z_min, max_overhang_angle=max_overhang_angle)
-
     return SupportEstimate(
-        estimated_support_volume_mm3=supports.estimated_support_volume_mm3,
-        support_percentage=supports.support_percentage,
-        overhang_triangle_count=overhangs.overhang_triangle_count,
-        overhang_percentage=overhangs.overhang_percentage,
-        needs_supports=overhangs.needs_supports,
+        estimated_support_volume_mm3=report.supports.estimated_support_volume_mm3,
+        support_percentage=report.supports.support_percentage,
+        overhang_triangle_count=report.overhangs.overhang_triangle_count,
+        overhang_percentage=report.overhangs.overhang_percentage,
+        needs_supports=support_verdict(report) is not None,
     )
 
 

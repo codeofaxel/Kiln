@@ -2334,6 +2334,16 @@ def estimate_support_volume(file_path: str) -> dict[str, Any]:
     support_volume_cm3 = support_volume / 1000.0
     support_weight_g = support_volume_cm3 * BUILTIN_MATERIALS[DEFAULT_MATERIAL].density_g_per_cm3
 
+    # Whether the part needs them is the one verdict every door gives
+    # (kiln.printability.support_verdict), never this estimate's own
+    # count of downward faces: a face a slicer bridges is counted above
+    # and needs nothing.
+    from kiln.printability import analyze_printability, support_verdict
+
+    needs_supports = support_verdict(
+        analyze_printability(str(path), include_hole_detection=False)
+    ) is not None
+
     return {
         "support_volume_mm3": round(support_volume, 1),
         "support_volume_cm3": round(support_volume_cm3, 2),
@@ -2342,7 +2352,7 @@ def estimate_support_volume(file_path: str) -> dict[str, Any]:
         "overhang_triangle_count": overhang_count,
         "total_triangles": total_count,
         "overhang_percentage": round(overhang_count / total_count * 100, 1) if total_count else 0.0,
-        "needs_supports": overhang_count > 0,
+        "needs_supports": needs_supports,
     }
 
 
@@ -4097,16 +4107,14 @@ def can_print_now(
     # supports, so a part whose only overhangs are short ceilings a slicer
     # bridges came back "printable_with_supports" while analyze_printability
     # said it needed none.
-    from kiln.printability import analyze_printability
+    from kiln.printability import analyze_printability, support_verdict
 
     report = analyze_printability(working_path, material=material, printer_id=printer_id)
-    if report.overhangs.needs_supports:
+    support_reason = support_verdict(report)
+    if support_reason:
         issues.append({
             "type": "needs_supports",
-            "detail": (
-                f"{report.overhangs.overhang_percentage:.0f}% of the surface "
-                "overhangs further than prints without support"
-            ),
+            "detail": f"Needs supports: {support_reason}",
             "fix": "Use optimize_print_orientation() or enable supports in slicer",
         })
 

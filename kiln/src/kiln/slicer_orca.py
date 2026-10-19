@@ -203,6 +203,8 @@ _PROCESS_SCALAR: dict[str, str] = {
     "first_layer_speed": "initial_layer_speed",
     "travel_speed": "travel_speed",
     "support_material": "enable_support",
+    "support_material_buildplate_only": "support_on_build_plate_only",
+    "dont_support_bridges": "bridge_no_support",
     "brim_width": "brim_width",
     "skirts": "skirt_loops",
     "skirt_distance": "skirt_distance",
@@ -525,6 +527,11 @@ def settings_to_orca_presets(
     for src, dst in _PROCESS_SCALAR.items():
         if src in settings:
             process[dst] = str(settings[src])
+    # PrusaSlicer's threshold 0 means "detect the angle"; Orca has no such
+    # setting, so only a stated angle crosses and 0 leaves Orca's own.
+    threshold = _positive(str(settings.get("support_material_threshold", "")))
+    if threshold:
+        process["support_threshold_angle"] = f"{threshold:g}"
     for src, dst in _PROCESS_SPEED.items():
         raw = str(settings.get(src, "")).strip()
         if raw.endswith("%"):
