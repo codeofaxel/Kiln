@@ -1111,6 +1111,13 @@ class _DesignReasoningToolsPlugin:
                 "brief_id": brief_id or None,
                 **best_result,
             }
+            # The best round is still a make: a piece left in the air is
+            # said on it like on every other make door.
+            from kiln.fusion_check import attach_fusion_report
+
+            attach_fusion_report(
+                response, best_result.get("result", {}).get("local_path"),
+            )
             try:
                 from kiln_pro.plugins.git_render_tools import (
                     attach_inspect_bundle,

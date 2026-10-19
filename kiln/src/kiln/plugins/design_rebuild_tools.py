@@ -87,6 +87,14 @@ class _DesignRebuildPlugin:
 
             apply_brief_to_recipe(recipe_path, brief_id)
             result = rebuild_design_from_recipe(recipe_path)
+            # A parameter change can lift a feature off its host; the
+            # re-derived mesh gets the compile door's own check.
+            from kiln.fusion_check import attach_fusion_report
+
+            attach_fusion_report(
+                result, result.get("compiled_stl") or result.get("stl_path"),
+                refuse_floating=True,
+            )
             from kiln.front_door import join_goal
 
             join_goal(brief_id, result, result.get("compiled_stl") or result.get("stl_path"))

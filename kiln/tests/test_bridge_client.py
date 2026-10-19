@@ -206,6 +206,34 @@ class TestHandshake403NamesTheFix:
         text, sleeps = self._drive(monkeypatch, caplog, client, iterations)
         return text, sleeps, len(asked_server)
 
+    def test_a_dead_session_is_written_to_the_state_file_for_local_readers(
+        self, monkeypatch, caplog, tmp_path
+    ):
+        """The log said `kiln signin`; the state file said only
+        ``connected: false``, so ``kiln bridge status`` could not tell this
+        from a dropped network (2026-10-19)."""
+        import kiln.bridge_client as bc
+
+        monkeypatch.setattr(bc, "_STATE_FILE", str(tmp_path / "bridge.state"))
+        self._run(
+            monkeypatch, caplog, plain="needs_signin", verified="needs_signin", iterations=1
+        )
+        st = bc.read_bridge_state()
+        assert st["connected"] is False
+        assert st["refusal"] == bc.REFUSAL_SESSION_EXPIRED
+        assert st["refusal_detail"] == "Your Kiln session has expired."
+
+    def test_a_refusal_that_is_not_the_session_writes_no_reason(
+        self, monkeypatch, caplog, tmp_path
+    ):
+        import kiln.bridge_client as bc
+
+        monkeypatch.setattr(bc, "_STATE_FILE", str(tmp_path / "bridge.state"))
+        self._run(
+            monkeypatch, caplog, plain="live", verified="refreshed", iterations=4
+        )
+        assert "refusal" not in bc.read_bridge_state()
+
     def test_needs_signin_is_said_in_plain_words(self, monkeypatch, caplog):
         text, sleeps, asked = self._run(
             monkeypatch, caplog, plain="needs_signin", verified="needs_signin", iterations=1

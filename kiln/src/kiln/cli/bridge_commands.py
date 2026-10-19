@@ -936,14 +936,18 @@ def status() -> None:
         installed=_installed_version(),
         latest=_latest_published_version(),
     )
+    # The running bridge's own finding: the relay refused it over its
+    # sign-in.  Read off the state file, so the answer holds even when the
+    # resolver's check could not reach the server just now (``degraded``).
+    refused = str(st.get("refusal") or "") if running and not connected else ""
     headline, lines = _describe_status(
-        signed_in=bool(bearer.token),
+        signed_in=bool(bearer.token) and not refused,
         enabled=enabled,
         running=running,
         connected=connected,
         since=st.get("since"),
         now=time.time(),
-        signin_detail=bearer.detail,
+        signin_detail=bearer.detail or str(st.get("refusal_detail") or ""),
         supervised=_running_supervisor_pid() is not None,
         restarts=int(sup.get("restarts") or 0),
         last_exit_at=last_exit.get("at"),

@@ -508,3 +508,22 @@ def test_the_report_names_the_agents_own_door_where_the_panel_says_turn_on() -> 
         line = server._coverage_line_for(None)
     assert line == ("Your Acme Meridian 3 can't watch for spaghetti or a bad first layer. "
                     "Kiln can watch the camera for spaghetti — start a background watch (watch_print).")
+
+
+def test_the_wire_carries_why_the_relay_refused_the_bridge_only_when_given() -> None:
+    """A bridge running on an expired sign-in used to reach every reader as
+    plain "offline" (2026-10-19).  The status route's refusal rides the wire
+    as sent, and an answer without one adds nothing a reader must learn."""
+    offline = {"online": False, "paired": True, "lastSeenAt": "t"}
+    plain = compose_monitor_payload(offline, None, None, None, None, None)
+    assert "refusal" not in plain["bridge"]
+
+    refused = compose_monitor_payload(
+        {**offline, "refusal": {"reason": "session_expired", "at": "u"}},
+        None, None, None, None, None,
+    )
+    assert refused["bridge"]["refusal"] == {"reason": "session_expired", "at": "u"}
+
+    # A refusal with no reason is not a refusal.
+    empty = compose_monitor_payload({**offline, "refusal": {"at": "u"}}, None, None, None, None, None)
+    assert "refusal" not in empty["bridge"]

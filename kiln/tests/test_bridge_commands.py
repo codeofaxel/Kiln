@@ -51,6 +51,59 @@ def test_state_roundtrip_and_streak(tmp_path, monkeypatch):
     assert bc.read_bridge_state() == {}
 
 
+def test_state_carries_why_the_relay_refused_until_the_next_connect(tmp_path, monkeypatch):
+    """2026-10-19: a bridge ran 19 hours on an expired session, refused every
+    five minutes, and its state file said only ``connected: false`` — the
+    same thing it says for a bridge the network dropped."""
+    monkeypatch.setattr(bc, "_STATE_FILE", str(tmp_path / "bridge.state"))
+
+    bc.write_bridge_state(
+        connected=False, refusal=bc.REFUSAL_SESSION_EXPIRED,
+        refusal_detail="Your Kiln session for a@b.c has expired.",
+    )
+    st = bc.read_bridge_state()
+    assert st["refusal"] == "session_expired"
+    assert st["refusal_detail"].startswith("Your Kiln session")
+
+    # A plain drop carries no reason; a connect clears it.
+    bc.write_bridge_state(connected=False)
+    assert "refusal" not in bc.read_bridge_state()
+    bc.write_bridge_state(connected=False, refusal=bc.REFUSAL_SESSION_EXPIRED)
+    bc.write_bridge_state(connected=True, refusal=bc.REFUSAL_SESSION_EXPIRED)
+    assert "refusal" not in bc.read_bridge_state(), "connected and refused cannot both be true"
+
+
+def test_status_names_the_sign_in_from_the_state_file_when_the_server_cannot_be_asked(monkeypatch):
+    """The running bridge already found out why the relay refuses it; status
+    reads that off disk, so the answer holds even when the resolver's own
+    check cannot reach the server (``degraded`` keeps the stale token and
+    would otherwise read as "on, connecting…")."""
+    from kiln.auth_session import ApiBearer
+
+    monkeypatch.setattr(bcmd, "_read_license", lambda: "stale-token")
+    monkeypatch.setattr(bcmd, "_service_installed", lambda: True)
+    monkeypatch.setattr(bcmd, "_running_pid", lambda: 4242)
+    monkeypatch.setattr(bcmd, "_running_supervisor_pid", lambda: None)
+    monkeypatch.setattr(bcmd, "read_supervisor_state", lambda: {})
+    monkeypatch.setattr(bcmd, "_installed_version", lambda: None)
+    monkeypatch.setattr(bcmd, "_latest_published_version", lambda: None)
+    monkeypatch.setattr(
+        bcmd, "_resolve_bearer",
+        lambda **k: ApiBearer(token="stale-token", state="degraded", detail=""),
+    )
+    monkeypatch.setattr(bcmd, "read_bridge_state", lambda: {
+        "pid": 4242, "connected": False, "since": None,
+        "refusal": "session_expired",
+        "refusal_detail": "Your Kiln session for a@b.c has expired and couldn't be renewed.",
+    })
+    out = CliRunner().invoke(bridge, ["status"])
+    assert out.exit_code == 0, out.output
+    assert "signed out" in out.output
+    assert "kiln signin" in out.output
+    assert "has expired" in out.output
+    assert "connecting" not in out.output
+
+
 def test_read_state_survives_corrupt_file(tmp_path, monkeypatch):
     path = tmp_path / "bridge.state"
     path.write_text("not json{")

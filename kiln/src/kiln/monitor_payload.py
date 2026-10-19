@@ -106,6 +106,16 @@ def compose_monitor_payload(
         # needed" — the panel ignores unknown fields, the agent should not.
         if bridge.get("transport"):
             payload["bridge"]["transport"] = bridge["transport"]
+        # Why the relay last refused this bridge (its sign-in lapsed), as the
+        # status route sends it.  The panel's and the web's resolvers read it
+        # on the offline branch; a reader that does not know it sees plain
+        # offline, which is what it would have seen before.
+        refusal = bridge.get("refusal")
+        if isinstance(refusal, dict) and refusal.get("reason"):
+            payload["bridge"]["refusal"] = {
+                "reason": str(refusal["reason"]),
+                "at": refusal.get("at"),
+            }
     if bridge_error:
         payload["bridge_error"] = bridge_error
     if status is not None:
