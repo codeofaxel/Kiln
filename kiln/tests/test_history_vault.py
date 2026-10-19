@@ -727,6 +727,16 @@ class TestTheHistoryLogIsKeptHere:
         listed = courier.records_for_call({}, vault, kinds=("bisect",), tool="list_bisect_sessions")
         assert [s["session_id"] for s in listed["bisect"]] == ["s1"]
 
+    def test_a_search_kept_for_one_artifact_is_never_rewritten_for_another(self, home):
+        vault = _vault(home)
+        session = {"session_id": "s1", "artifact_type": "design", "artifact_id": "mug",
+                   "chain": ["v1", "v2"], "good_set": [], "bad_set": [], "skip_set": [],
+                   "candidate": "v1", "status": "active", "notes": {}}
+        vault.apply_log_delta({"bisect": [session]})
+        kept = vault.apply_log_delta({"bisect": [{**session, "artifact_id": "bowl", "candidate": "v2"}]})
+        assert kept["bisect_sessions"] == 0
+        assert vault.bisect_session("s1") == session
+
     def test_rows_that_are_not_log_entries_are_skipped(self, home):
         vault = _vault(home)
         kept = vault.apply_log_delta({
@@ -844,14 +854,29 @@ class TestProvenRecipesKeptBesideTheirDesigns:
 
     def test_a_recorded_recipe_is_filed_beside_its_design_and_nowhere_else(self, home):
         folder = _library(home, "mug", [MESH_V1])
+        bowl = _library(home, "bowl", [MESH_V1])
+        (bowl / ".kiln_proven_recipe.json").write_text(json.dumps({"product_type": "bowl"}))
         answer = courier.take_delta({"status": "success", "history_delta": {"designs": [], "proven": [
             {"design_id": "mug", "name": ".kiln_proven_recipe.json", "record": {"product_type": "mug"}},
             {"design_id": "../outside", "name": ".kiln_proven_recipe.json", "record": {"x": 1}},
             {"design_id": "mug", "name": "../../evil.json", "record": {"x": 1}},
-        ]}}, {}, vault=_vault(home))
+            # a design the call was not about: its recipe file is not this answer's to write
+            {"design_id": "bowl", "name": ".kiln_proven_recipe.json", "record": {"product_type": "hijacked"}},
+        ]}}, {"named": ["mug"]}, vault=_vault(home))
         assert answer["history_kept"]["proven_recipes"] == 1
         assert json.loads((folder / ".kiln_proven_recipe.json").read_text()) == {"product_type": "mug"}
+        assert json.loads((bowl / ".kiln_proven_recipe.json").read_text()) == {"product_type": "bowl"}
         assert not (home / ".kiln" / "outside").exists() and not (home / "evil.json").exists()
+
+    def test_a_listing_may_file_a_recipe_for_any_design_whose_recipes_it_sent(self, home):
+        folder = _library(home, "mug", [MESH_V1])
+        (folder / ".kiln_proven_recipe.json").write_text(json.dumps({"product_type": "mug"}))
+        vault = _vault(home)
+        sent = courier.records_for_call({}, vault, kinds=("proven",), tool="list_proven_recipes")
+        answer = courier.take_delta({"status": "success", "history_delta": {"designs": [], "proven": [
+            {"design_id": "mug", "name": ".kiln_proven_recipe.v1.json", "record": {"product_type": "mug", "v": 1}},
+        ]}}, sent, vault=vault)
+        assert answer["history_kept"]["proven_recipes"] == 1
 
 
 # ---------------------------------------------------------------------------

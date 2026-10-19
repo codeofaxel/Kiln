@@ -360,7 +360,16 @@ def take_delta(
         summaries = [vault.apply_delta(d) for d in deltas]
         library = _take_library_deltas(vault, delta, sent)
         log = vault.apply_log_delta(delta)
-        proven = vault.keep_proven_recipes(delta.get("proven"))
+        # A recipe is filed only beside a design this call was about: one it
+        # named, or one whose recipes it sent.  An answer naming any other
+        # design's recipe file changes nothing here.
+        recipes_of = about | {
+            r.get("design_id") for r in sent.get("proven") or [] if isinstance(r, dict)
+        }
+        proven = vault.keep_proven_recipes([
+            r for r in delta.get("proven") or []
+            if isinstance(r, dict) and r.get("design_id") in recipes_of
+        ])
         if proven:
             log = {**log, "proven_recipes": proven}
         continues = None

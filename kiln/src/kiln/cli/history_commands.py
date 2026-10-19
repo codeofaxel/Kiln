@@ -247,7 +247,7 @@ def cloud_push(design_id: str, branch_id: str | None, replace: bool, json_mode: 
     branch = _branch_id(design_id, branch_id) if branch_id else None
     answer = push("cloud_push_branch", design_id, branch, replace_confirmed=replace)
     if answer.get("code") == "FREE_SLOT_IN_USE" and not json_mode:
-        click.echo(answer.get("error", ""), err=True)
+        click.echo(_shown(answer.get("error", ""), lines=True), err=True)
         click.echo("Run again with --replace to replace it.", err=True)
         sys.exit(1)
     _finish(answer, json_mode, lambda a: _with_recipes(f"Pushed {design_id} to your Kiln account.", a, sent=True))

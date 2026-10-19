@@ -971,6 +971,16 @@ class HistoryVault:
                 if not (isinstance(b, dict) and b.get("artifact_type") in _ARTIFACT_TYPES
                         and all(isinstance(b.get(k), str) and b.get(k) for k in ("session_id", "artifact_id"))):
                     continue
+                # A session is its own search: an answer about one artifact
+                # never rewrites a session kept here for another.
+                held = self._conn.execute(
+                    "SELECT artifact_type, artifact_id FROM bisect_sessions WHERE session_id = ?",
+                    (b["session_id"],),
+                ).fetchone()
+                if held is not None and (held["artifact_type"], held["artifact_id"]) != (
+                    b["artifact_type"], b["artifact_id"]
+                ):
+                    continue
                 self._conn.execute(
                     "INSERT OR REPLACE INTO bisect_sessions "
                     "(session_id, artifact_type, artifact_id, status, record) VALUES (?, ?, ?, ?, ?)",
