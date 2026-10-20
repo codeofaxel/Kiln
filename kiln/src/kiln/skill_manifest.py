@@ -141,6 +141,7 @@ class SkillManifest:
             "Use ams_status() to check loaded AMS filaments before multi-color prints.",
             "During a print, poll printer_status(detail=\"lite\") to follow it (monitor_print for the full report); ams_status carries no fault line. A fault the printer stops for rides EVERY tool result as `printer_fault` while Kiln's watchdog sees it standing — the moment you see one, stop and tell the user; polling will not clear it.",
             "After Kiln's code, plugins, or config change, call restart_server() to apply it — never tell the user to quit and reopen their client app.",
+            "After a print starts, WATCH IT by default: the start result carries a `watch` plan. Say its say_once sentence once, then keep calling the plan's wait tool (await_print_completion, with timeout = watch.wait_s) until the print ends; look at the camera (monitor_print) at each checkpoint and judge it; speak only at a checkpoint, on a change or fault, and at the end. \"stop watching\" ends it; a cadence the user gives replaces the plan's.",
         ]
     )
 

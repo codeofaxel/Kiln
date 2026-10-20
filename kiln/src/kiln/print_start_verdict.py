@@ -58,9 +58,12 @@ caller to look.
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "ACCEPTED",
@@ -104,6 +107,11 @@ class PrintStartVerdict:
     #: ``None`` -- and absent from the envelope -- for every other printer and
     #: for a start the printer refused.  See :mod:`kiln.start_narrative`.
     what_you_will_see: tuple[str, ...] | None = None
+    #: What the agent does next -- when to look, how to wait between looks,
+    #: when to speak, how the person turns it off.  Attached to every start
+    #: the printer took or may have taken, on every door; absent from a
+    #: refusal, which leaves nothing to watch.  See :mod:`kiln.watch_plan`.
+    watch: dict[str, Any] | None = None
 
     @property
     def ok(self) -> bool:
@@ -134,6 +142,8 @@ class PrintStartVerdict:
         # describe carries no field at all rather than an empty one.
         if self.what_you_will_see is not None:
             out["what_you_will_see"] = list(self.what_you_will_see)
+        if self.watch is not None:
+            out["watch"] = dict(self.watch)
         return out
 
 
@@ -203,6 +213,37 @@ def _what_you_will_see(adapter: Any) -> tuple[str, ...] | None:
     return tuple(lines) if lines else None
 
 
+def _watch_plan(adapter: Any, file_name: str) -> dict[str, Any] | None:
+    """The watch plan this start carries, or ``None`` if none could be built.
+
+    The floor comes from :mod:`kiln.watch_plan`.  Kiln Pro may replace it:
+    ``pro_features.watch_plan(adapter=..., file_name=..., floor=...)`` is the
+    one door, answering a plan dict or ``None`` to keep the floor.  Read the
+    way the start narrative reads its per-model block -- optional, never a
+    reason for a start to fail, because the print is already running.
+    """
+    try:
+        from kiln.watch_plan import build_watch_plan
+
+        floor = build_watch_plan()
+    except Exception:  # noqa: BLE001 -- a plan nobody could build is no plan
+        logger.debug("watch plan unavailable", exc_info=True)
+        return None
+    try:
+        from kiln_pro.bridge import pro_features  # type: ignore[import-not-found]
+
+        door = getattr(pro_features, "watch_plan", None)
+        if callable(door):
+            pro = door(adapter=adapter, file_name=file_name, floor=floor)
+            if isinstance(pro, dict) and pro:
+                return pro
+    except ImportError:
+        pass
+    except Exception:  # noqa: BLE001 -- a Pro plan that failed is the floor
+        logger.debug("pro watch plan unavailable; using the floor", exc_info=True)
+    return floor
+
+
 def resolve_print_start(
     adapter: Any,
     result: Any,
@@ -266,6 +307,7 @@ def resolve_print_start(
             # next -- the moment to say what that looks like.  Nothing is
             # attached to a refusal below: no start, nothing to watch.
             what_you_will_see=_what_you_will_see(adapter) if vendor_start_block else None,
+            watch=_watch_plan(adapter, name),
         )
 
     if status in _REFUTES_START:
@@ -300,4 +342,5 @@ def resolve_print_start(
         # is running now and the reader is watching it -- exactly when the
         # list earns its place.
         what_you_will_see=_what_you_will_see(adapter) if vendor_start_block else None,
+        watch=_watch_plan(adapter, name),
     )
