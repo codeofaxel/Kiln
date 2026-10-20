@@ -148,7 +148,7 @@ The full searchable list of **70 tuned printer profiles across 15 brands** is at
 - **Cross-printer learning** — fleet-wide outcome learning, predictive settings, closed-loop AI generation feedback where failed prints auto-improve future generations (patent pending)
 - **AMS auto-routing** — automatic Bambu AMS tray detection, color/type identification, and slot routing when starting prints
 - **Community print registry** — opt-in crowd-sourced settings and success rates
-- **Fulfillment services** — outsource to Craftcloud through the hosted proxy, or use direct mode with your own provider credentials
+- **Fulfillment services** — outsource to Craftcloud's network of print services, quoted and ordered through Kiln
 - **Safety first** — pre-flight checks, G-code validation, temperature limits, optional auth
 - **Webhooks** — HMAC-signed event notifications for job lifecycle
 - **OTA firmware updates** — check, update, and rollback printer firmware

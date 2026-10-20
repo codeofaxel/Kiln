@@ -252,7 +252,7 @@ Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&ut
 ## Why Kiln?
 
 - **One control plane, any printer** — compatible with OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, Serial. Manage a mixed fleet from one place.
-- **No printer? No problem** — Outsource jobs to Craftcloud's 150+ manufacturing services through the hosted proxy, or use direct mode with your own provider credentials.
+- **No printer? No problem** — Outsource jobs to Craftcloud's 150+ manufacturing services, quoted and ordered through Kiln.
 - **AI-native** — <!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 902 MCP capabilities and <!-- KILN_CLI_COUNT:OLD --> 246 CLI commands built for AI agents. Not a web UI with an API bolted on.
 - **Describe it, print it** — Natural-language to physical object pipeline: text or sketch → AI generation → validation → slice → print.
 - **Decorate anything** — QR codes, photos, logos, text, SVGs, and procedural textures (tiger stripe, marble, camo, wood grain, honeycomb) embossed or debossed onto any model with one command.
@@ -479,7 +479,7 @@ Beyond this slice, the catalog covers fleet orchestration, print-failure predict
 
 **Slicing.** Wraps PrusaSlicer, OrcaSlicer, and BambuStudio for headless slicing; auto-detects installed slicers on PATH, macOS app bundles, or via `KILN_SLICER_PATH`. Supports STL, 3MF, STEP, OBJ, AMF with material-aware temps and smart supports.
 
-**Fulfillment (no printer required).** Print through Craftcloud's network — quote, validate address, confirm, order, track — or run alongside your own printers for overflow and specialty materials. Normal users go through the hosted proxy (credentials stay server-side, spend limits enforced); operators can use direct mode with `KILN_FULFILLMENT_PROVIDER=craftcloud` + `KILN_CRAFTCLOUD_API_KEY`.
+**Fulfillment (no printer required).** Print through Craftcloud's network — quote, validate address, confirm, order, track — or run alongside your own printers for overflow and specialty materials. Orders go through Kiln's hosted service, which keeps provider credentials server-side and enforces your spend limits.
 
 **Decoration &amp; textures.** Emboss or deboss QR codes, photos, logos, text, and SVGs onto any model face, or apply procedural textures (tiger stripe, marble, camo, wood grain, honeycomb) with a single tool call.
 

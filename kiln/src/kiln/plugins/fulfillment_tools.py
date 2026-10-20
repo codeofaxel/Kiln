@@ -217,11 +217,6 @@ class _FulfillmentToolsPlugin:
                     ``"FDM"``, ``"SLA"``, ``"MJF"``, ``"DMLS"``.  Matches
                     against both the technology field and the material name.
                 limit: Maximum number of materials to return (default 50).
-
-            Direct Craftcloud mode requires the operator's own
-            ``KILN_CRAFTCLOUD_API_KEY``. Normal users should use the hosted
-            kiln-pro proxy so Craftcloud access stays server-side and quota
-            enforcement applies.
             """
             import re
 
