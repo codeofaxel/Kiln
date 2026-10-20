@@ -480,45 +480,50 @@ class TestProLicenseCheckSemantics:
     license, so a process-level check — asking whether THIS PROCESS is
     licensed — would wave every caller, free included, past the part
     limit.  The check must route through check_pro, which consults the
-    per-request tier override first.
+    per-request tier override first.  That check is
+    ``kiln.licensing.check_tier``; the suite's autouse fixture stubs it to
+    "allowed", so each case states the caller's answer itself.
     """
-
-    @staticmethod
-    def _install_fake_pro_gate(monkeypatch, check_pro):
-        import sys
-        import types
-
-        pro_gate = types.ModuleType("kiln_pro.pro_gate")
-        pro_gate.check_pro = check_pro
-        kiln_pro_pkg = types.ModuleType("kiln_pro")
-        kiln_pro_pkg.pro_gate = pro_gate
-        monkeypatch.setitem(sys.modules, "kiln_pro", kiln_pro_pkg)
-        monkeypatch.setitem(sys.modules, "kiln_pro.pro_gate", pro_gate)
 
     def test_free_caller_is_capped_even_with_process_license(
         self, monkeypatch
     ):
         from kiln import assembly as assembly_mod
 
-        self._install_fake_pro_gate(
-            monkeypatch,
-            lambda name="": {"code": "TIER_REQUIRED"},  # free caller
+        monkeypatch.setattr(
+            "kiln.licensing.check_tier",
+            lambda _tier: (False, "This feature needs Kiln Pro."),  # free caller
         )
         assert assembly_mod._has_pro_license() is False
 
     def test_pro_caller_passes(self, monkeypatch):
         from kiln import assembly as assembly_mod
 
-        self._install_fake_pro_gate(monkeypatch, lambda name="": None)
+        monkeypatch.setattr("kiln.licensing.check_tier", lambda _tier: (True, None))
         assert assembly_mod._has_pro_license() is True
 
-    def test_no_kiln_pro_means_free(self, monkeypatch):
-        import sys
-
+    def test_an_unreadable_plan_means_free(self, monkeypatch):
         from kiln import assembly as assembly_mod
 
+        def _unreadable(_tier):
+            raise RuntimeError("licence store unreadable")
+
+        monkeypatch.setattr("kiln.licensing.check_tier", _unreadable)
+        assert assembly_mod._has_pro_license() is False
+
+    def test_no_kiln_pro_and_no_sign_in_means_free(self, monkeypatch, tmp_path):
+        """A plain install nobody signed in on reads Free through the real gate."""
+        import sys
+
+        import kiln.licensing as licensing
+        from kiln import assembly as assembly_mod
+
+        monkeypatch.undo()  # drop the autouse "allowed" stub: the real gate answers
         monkeypatch.setitem(sys.modules, "kiln_pro", None)
-        monkeypatch.setitem(sys.modules, "kiln_pro.pro_gate", None)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path / "auth"))
+        monkeypatch.delenv("KILN_LICENSE_KEY", raising=False)
+        monkeypatch.setattr(licensing, "_manager", None, raising=False)
         assert assembly_mod._has_pro_license() is False
 
 
