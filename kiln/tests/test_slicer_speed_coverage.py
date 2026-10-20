@@ -687,6 +687,19 @@ def prusa_slices(tmp_path_factory: pytest.TempPathFactory) -> dict[str, tuple[di
         return dict(pool.map(run, inis))
 
 
+@pytest.fixture(scope="module")
+def slice_ceilings(prusa_slices) -> dict[str, float | None]:
+    """Each sliced printer's hotend ceiling, read in the same posture the
+    slices were made in.  A module fixture resolves before this file's
+    signed-out autouse fixture, so a ceiling read in the test body would come
+    from the generic floor while the G-code came from the printer's own
+    record (2026-10-20: every printer judged against the floor's 11 mm³/s
+    wherever kiln-pro's catalogue is on the machine)."""
+    from kiln.safety_profiles import get_profile
+
+    return {pid: get_profile(pid).max_volumetric_flow for pid in prusa_slices}
+
+
 @pytest.mark.skipif(_PRUSA is None, reason="PrusaSlicer not installed")
 class TestTheGcodeKeepsThePace:
     def test_no_routine_feature_prints_below_the_profiles_pace(self, prusa_slices) -> None:
@@ -701,15 +714,13 @@ class TestTheGcodeKeepsThePace:
                 failures.append(f"{pid}: {share:.0%} of routine extrusion under {floor:g} mm/s ({worst})")
         assert not failures, "\n".join(failures)
 
-    def test_no_line_asks_the_hotend_for_more_than_its_ceiling(self, prusa_slices) -> None:
+    def test_no_line_asks_the_hotend_for_more_than_its_ceiling(self, prusa_slices, slice_ceilings) -> None:
         """Faster features must stay inside the flow the printer is rated
         for.  Before the ceiling was stated, ``aon_m2_plus`` asked 36.6 mm³/s
         of a hotend rated at 30 (its own 200 mm/s sparse infill)."""
-        from kiln.safety_profiles import get_profile
-
         over: list[str] = []
         for pid, (settings, gcode) in sorted(prusa_slices.items()):
-            ceiling = get_profile(pid).max_volumetric_flow
+            ceiling = slice_ceilings[pid]
             if not ceiling:
                 continue
             diameter = float(str(settings.get("filament_diameter", "1.75")).split(",")[0])
