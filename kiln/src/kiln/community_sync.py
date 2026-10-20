@@ -46,7 +46,9 @@ _SUPABASE_URL = "https://nomzokpscfshjjzezplr.supabase.co"
 # module: reads go to the Kiln API (see ``_INSIGHT_ROUTE``), which holds the
 # credentials the corpus actually answers to.  Pinned by
 # ``tests/test_community_sync.py::test_publishable_key_is_contribution_only``.
-_SUPABASE_ANON_KEY = "sb_publishable_ZCJyEL0qeveSwgqv7dry3A_YI26Yw6S"  # PLACEHOLDER: RLS-gated publishable key, insert-only
+# The real production publishable key, public by design: it signs in as the
+# anon role, whose only power on the corpus is adding a contribution.
+_SUPABASE_ANON_KEY = "sb_publishable_ZCJyEL0qeveSwgqv7dry3A_YI26Yw6S"
 
 # Read side — the Kiln API computes the aggregate; we never see rows.
 _HOSTED_API_URL = "https://api.kiln3d.com"
