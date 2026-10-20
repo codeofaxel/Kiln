@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-19T23:39:14.468494+00:00",
-  "tool_count": 398,
+  "generated": "2026-10-20T06:35:15.435401+00:00",
+  "tool_count": 399,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -22008,7 +22008,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
-      }
+      },
+      "served": false
     },
     {
       "name": "add_team_member",
@@ -22185,7 +22186,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "backfill_artifact_into_org",
@@ -22267,7 +22269,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "create_team",
@@ -22363,6 +22366,52 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      }
+    },
+    {
+      "name": "evaluate_pr_approval",
+      "description": "Dry-run the approval gate on *pr_id* \u2014 returns ``allowed`` + a detailed reason (\"needs_1_more_approval\", \"blocked_by_change_requests\", \"gate_satisfied\", or \"no_gate_configured\").\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "pr_id": {
+            "title": "Pr Id",
+            "type": "string"
+          },
+          "target_branch_name": {
+            "title": "Target Branch Name",
+            "type": "string"
+          },
+          "artifact_type": {
+            "default": "design",
+            "title": "Artifact Type",
+            "type": "string"
+          },
+          "org_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Org Id"
+          }
+        },
+        "required": [
+          "pr_id",
+          "target_branch_name"
+        ],
+        "title": "evaluate_pr_approvalArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
       }
     },
     {
@@ -22875,7 +22924,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "remove_team_member",
@@ -23191,7 +23241,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "transfer_artifact_between_orgs",
@@ -23268,7 +23319,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      }
+      },
+      "served": false
     },
     {
       "name": "generate_technical_drawing",
