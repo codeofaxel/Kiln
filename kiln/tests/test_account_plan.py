@@ -273,7 +273,15 @@ class TestEveryGateReadsIt:
         # A plain install: kiln-pro cannot be imported.
         monkeypatch.setitem(sys.modules, "kiln_pro", None)
         monkeypatch.setitem(sys.modules, "kiln_pro.enterprise", None)
+        # Both halves of "what kiln.licensing is" go back at teardown, as in
+        # TestWithKilnPro: the registry AND the package's own attribute.  The
+        # fresh import below rebinds ``kiln.licensing``, and left that way the
+        # next test that patches ``kiln.licensing.<name>`` patches a module the
+        # code no longer reads (public CI, three jobs, 2026-10-20).
+        import kiln
+
         monkeypatch.delitem(sys.modules, "kiln.licensing", raising=False)
+        monkeypatch.setattr(kiln, "licensing", getattr(kiln, "licensing", None), raising=False)
         import importlib
 
         module = importlib.import_module("kiln.licensing")
