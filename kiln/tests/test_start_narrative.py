@@ -85,8 +85,18 @@ def _fake_pro(*, block: dict | None = _A1_BLOCK, reading: str | None = None, ava
 
 @pytest.fixture
 def no_pro(monkeypatch):
-    """The bridge is not installed: the generic line is the whole answer."""
+    """The bridge is not installed: the generic line is the whole answer.
+
+    ``start_stage_line`` imports the bridge itself rather than going through
+    ``_pro_block``, so the bridge is hidden too (and the served door, which a
+    plain install would ask, answers nothing); otherwise a machine with
+    kiln-pro on its path reads the real stage line here.
+    """
+    import sys
+
     monkeypatch.setattr(start_narrative, "_pro_block", lambda model: None)
+    monkeypatch.setitem(sys.modules, "kiln_pro.bridge", None)
+    monkeypatch.setattr(start_narrative, "_served_stage_line", lambda model, target: None)
 
 
 def _verdict_dict(adapter: _Adapter, **kw) -> dict:
