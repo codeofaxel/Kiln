@@ -256,6 +256,30 @@ def _rejected_verdict(stored: dict) -> SessionBearer | None:
     return None
 
 
+def lapsed_session_token(stored: dict | None = None) -> str:
+    """The access token of a session the server has refused for good, or ``""``.
+
+    Never a credential: the server refuses it on every use.  It exists for
+    one reader, the bridge's relay handshake, which would otherwise dial in
+    with no bearer at all once the session lapses.  An empty bearer names
+    nobody, so the relay could only call the bridge "offline" and send the
+    person to restart a program that was running fine (2026-10-20: a
+    bridge refused for 39 hours, every door saying offline).  The dead
+    token still names its account, and the relay believes that name only
+    after Supabase has checked the signature, so it can record "this
+    sign-in lapsed" on the right registration and every door can say
+    ``kiln signin`` instead.
+
+    Empty unless the persisted ``needs_signin`` verdict is on file: a
+    session that can still refresh is handed out by
+    :func:`resolve_session_bearer`, and ``kiln signout`` removes the file.
+    """
+    stored = _read_tokens() if stored is None else stored
+    if _rejected_verdict(stored) is None:
+        return ""
+    return str(stored.get("access_token") or "").strip()
+
+
 def session_rejected(stored: dict | None = None) -> bool:
     """True when the server has refused this machine's sign-in for good.
 
