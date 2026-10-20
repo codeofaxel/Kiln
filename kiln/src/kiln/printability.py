@@ -3773,16 +3773,28 @@ def _score_terms(
         # ``needs_supports_for_bridges`` — the same > 10 mm span test the
         # "Long bridges detected" recommendation already uses below — so the
         # score and the advice finally agree.
+        # How MUCH it charges goes by the longest span, in millimetres,
+        # not by how many flat triangles the mesh happens to have: the
+        # same 30 mm arch scored 71, 65 and 63 at three mesh resolutions
+        # (2026-10-20).  5 points at the self-support limit, 10 at twice
+        # it, 15 at three times or more.
         "bridging": (
-            -min(15, 5 + bridging.bridge_count)
+            -min(15, 5 + max(0, int(round(
+                5.0 * (bridging.max_bridge_length_mm / _MAX_SELF_SUPPORTING_BRIDGE_MM - 1.0)
+            ))))
             if bridging.bridge_count > 0 and bridging.needs_supports_for_bridges
             else 0
         ),
         # Bed adhesion (max -15)
         "bed_adhesion": {"high": -15, "medium": -7}.get(bed_adhesion.adhesion_risk, 0),
-        # Support volume (max -15)
+        # Support volume (max -15), charged only when the part needs
+        # supports at all (the same two verdicts support_verdict() reads).
+        # The volume estimate is naive and clamps to 100% on arches the
+        # report itself calls self-supporting, so a part judged to need no
+        # supports was losing 15 points for supports nobody would add.
         "supports": (
-            -15 if supports.support_percentage > 50
+            0 if not (overhangs.needs_supports or bridging.needs_supports_for_bridges)
+            else -15 if supports.support_percentage > 50
             else -10 if supports.support_percentage > 20
             else -5 if supports.support_percentage > 5
             else 0

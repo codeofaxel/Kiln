@@ -124,7 +124,18 @@ class _PrintabilityToolsPlugin:
                 # refusal, and a part that cannot print says why.
                 from kiln.printability import verdict as _verdict
 
-                verdict_key, verdict_text = _verdict(report)
+                # The verdict is a reading of the report, never a reason
+                # to lose it: anything it cannot read falls back to the
+                # report's own printable flag.
+                try:
+                    verdict_key, verdict_text = _verdict(report)
+                except Exception:  # noqa: BLE001
+                    _logger.debug("printability verdict unavailable", exc_info=True)
+                    verdict_key = "ready" if report.printable else "check"
+                    verdict_text = (
+                        "Ready to print." if report.printable
+                        else "Check before printing: see the report."
+                    )
                 resp: dict[str, Any] = {
                     "success": True,
                     "verdict": verdict_key,

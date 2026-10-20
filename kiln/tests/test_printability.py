@@ -1359,12 +1359,17 @@ class TestScoring:
         assert (
             _compute_score(overhangs, thin_walls, texture, adhesion, supports) == 100
         )
-        # The SAME count as genuine >10 mm bridges that need support → the
-        # full -15 still fires, so real bridging problems stay caught.
+        # A genuine 25 mm bridge that needs support is still charged, by its
+        # span (2.5x the 10 mm limit: 5 + 8 = 13), not by its triangle count
+        # (2026-10-20: the count made the same arch score differently at
+        # each mesh resolution) -- so real bridging problems stay caught.
         real = BridgingAnalysis(25.0, 1070, True)
         assert (
-            _compute_score(overhangs, thin_walls, real, adhesion, supports) == 85
+            _compute_score(overhangs, thin_walls, real, adhesion, supports) == 87
         )
+        assert _compute_score(
+            overhangs, thin_walls, BridgingAnalysis(25.0, 3, True), adhesion, supports
+        ) == 87
 
 
 # ---------------------------------------------------------------------------

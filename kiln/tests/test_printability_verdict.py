@@ -111,3 +111,50 @@ def test_the_tool_message_leads_with_the_verdict(tmp_path):
     assert out["verdict"] == "prints_with_supports"
     assert out["message"].startswith("Prints with supports")
     assert "Not recommended for printing" not in out["message"]
+
+
+def _arch(tmp_path, span_mm, subdivisions):
+    """Two 5 mm posts joined by a 5 mm deck: a flat bridge of ``span_mm``."""
+    left = trimesh.creation.box(extents=(5.0, 10.0, 20.0))
+    left.apply_translation([-(span_mm + 5.0) / 2, 0, 10.0])
+    right = left.copy()
+    right.apply_translation([span_mm + 5.0, 0, 0])
+    deck = trimesh.creation.box(extents=(span_mm + 10.0, 10.0, 5.0))
+    deck.apply_translation([0, 0, 22.5])
+    arch = trimesh.util.concatenate([left, right, deck])
+    for _ in range(subdivisions):
+        arch = arch.subdivide()
+    arch.apply_translation([0, 0, -arch.bounds[0][2]])
+    return _save(tmp_path, f"arch_{span_mm}_{subdivisions}", arch)
+
+
+def test_a_bridge_scores_the_same_at_any_mesh_resolution(tmp_path):
+    # 2026-10-20: the same 30 mm arch scored 71, 65 and 63 as its mesh was
+    # subdivided, because bridging charged per flat triangle.
+    scores = {
+        sub: analyze_printability(_arch(tmp_path, 30.0, sub), nozzle_diameter=0.4, material="pla")
+        for sub in (0, 1, 2)
+    }
+    assert scores[0].bridging.needs_supports_for_bridges
+    assert len({r.bridging.score_deduction for r in scores.values()}) == 1, {
+        s: (r.bridging.bridge_count, r.bridging.score_deduction) for s, r in scores.items()
+    }
+
+
+def _block_with_a_horizontal_hole(tmp_path):
+    block = trimesh.creation.box(extents=(30.0, 30.0, 30.0))
+    hole = trimesh.creation.cylinder(radius=5.0, height=40.0, sections=48)
+    hole.apply_transform(trimesh.transformations.rotation_matrix(1.5707963267948966, [1, 0, 0]))
+    part = block.difference(hole)
+    part.apply_translation([0, 0, -part.bounds[0][2]])
+    return _save(tmp_path, "block_hole", part)
+
+
+def test_a_part_that_needs_no_supports_is_not_charged_for_support_volume(tmp_path):
+    # Every slicer bridges a 10 mm hole's crown; the report says no supports
+    # are needed, yet the naive volume estimate (about 19%) took 5 points.
+    report = analyze_printability(_block_with_a_horizontal_hole(tmp_path), nozzle_diameter=0.4, material="pla")
+    assert report.supports.support_percentage > 5
+    assert report.overhangs.needs_supports is False
+    assert report.bridging.needs_supports_for_bridges is False
+    assert report.supports.score_deduction == 0
