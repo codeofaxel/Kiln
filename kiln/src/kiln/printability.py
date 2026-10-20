@@ -3823,16 +3823,15 @@ def _compute_score(
     ))
 
 
+#: Lowest score for each letter above F, best first.  Below the last one is F.
+_GRADE_FLOORS: tuple[tuple[str, int], ...] = (("A", 90), ("B", 80), ("C", 70), ("D", 60))
+
+
 def _score_to_grade(score: int) -> str:
     """Convert a 0-100 score to a letter grade."""
-    if score >= 90:
-        return "A"
-    if score >= 80:
-        return "B"
-    if score >= 70:
-        return "C"
-    if score >= 60:
-        return "D"
+    for letter, floor in _GRADE_FLOORS:
+        if score >= floor:
+            return letter
     return "F"
 
 
@@ -3873,8 +3872,12 @@ _PLACEMENT_PENALTY = 50
 #: printability grade is noise.
 _PLACEMENT_Z_TOLERANCE_MM = 0.04
 
-#: Minimum score for a report to call itself printable.
-_PRINTABLE_SCORE_MIN = 50
+#: Minimum score for a report to call itself printable: the lowest score that
+#: grades above F, read off the same ladder as the letter.  It was a separate
+#: 50 until 2026-10-19, so a 50-59 part read "grade F. Printable." and agents
+#: were told ``prints: true`` beside an F.  Neither number was measured
+#: against real prints; this only makes the two agree.
+_PRINTABLE_SCORE_MIN = _GRADE_FLOORS[-1][1]
 
 
 def _bbox_span(bbox: dict[str, float] | None) -> tuple[float, float, float] | None:
