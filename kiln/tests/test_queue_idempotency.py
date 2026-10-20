@@ -180,6 +180,10 @@ class _Bus:
     def publish(self, event) -> None:
         self.events.append(event)
 
+    def subscribe(self, *_args, **_kwargs) -> None:
+        """The server wires its own handlers on first use of the bus; a test
+        that runs before anything else in its process meets that wiring."""
+
 
 @pytest.fixture
 def tool_env(monkeypatch):

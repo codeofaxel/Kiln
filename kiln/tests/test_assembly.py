@@ -485,13 +485,22 @@ class TestProLicenseCheckSemantics:
     "allowed", so each case states the caller's answer itself.
     """
 
+    @staticmethod
+    def _licensing():
+        """The module ``_has_pro_license`` imports from: ``sys.modules``'
+        entry, not the ``kiln.licensing`` attribute a reload elsewhere in the
+        worker can leave pointing at an older copy."""
+        import importlib
+
+        return importlib.import_module("kiln.licensing")
+
     def test_free_caller_is_capped_even_with_process_license(
         self, monkeypatch
     ):
         from kiln import assembly as assembly_mod
 
         monkeypatch.setattr(
-            "kiln.licensing.check_tier",
+            self._licensing(), "check_tier",
             lambda _tier: (False, "This feature needs Kiln Pro."),  # free caller
         )
         assert assembly_mod._has_pro_license() is False
@@ -499,7 +508,7 @@ class TestProLicenseCheckSemantics:
     def test_pro_caller_passes(self, monkeypatch):
         from kiln import assembly as assembly_mod
 
-        monkeypatch.setattr("kiln.licensing.check_tier", lambda _tier: (True, None))
+        monkeypatch.setattr(self._licensing(), "check_tier", lambda _tier: (True, None))
         assert assembly_mod._has_pro_license() is True
 
     def test_an_unreadable_plan_means_free(self, monkeypatch):
@@ -508,15 +517,16 @@ class TestProLicenseCheckSemantics:
         def _unreadable(_tier):
             raise RuntimeError("licence store unreadable")
 
-        monkeypatch.setattr("kiln.licensing.check_tier", _unreadable)
+        monkeypatch.setattr(self._licensing(), "check_tier", _unreadable)
         assert assembly_mod._has_pro_license() is False
 
     def test_no_kiln_pro_and_no_sign_in_means_free(self, monkeypatch, tmp_path):
         """A plain install nobody signed in on reads Free through the real gate."""
         import sys
 
-        import kiln.licensing as licensing
         from kiln import assembly as assembly_mod
+
+        licensing = self._licensing()
 
         monkeypatch.undo()  # drop the autouse "allowed" stub: the real gate answers
         monkeypatch.setitem(sys.modules, "kiln_pro", None)
