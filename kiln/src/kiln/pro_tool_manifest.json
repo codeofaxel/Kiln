@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-19T05:11:16.562096+00:00",
-  "tool_count": 397,
+  "generated": "2026-10-19T23:39:14.468494+00:00",
+  "tool_count": 398,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -18039,6 +18039,79 @@
       "offline": {
         "schema_version": 1,
         "kind": "action"
+      }
+    },
+    {
+      "name": "plan_supports",
+      "description": "Plan the supports for one part: what the slicer should do under each overhang, and why.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "access": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "input_path": {
+            "title": "Input Path",
+            "type": "string"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          },
+          "printer_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Id"
+          },
+          "nozzle_diameter": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Nozzle Diameter"
+          },
+          "layer_height": {
+            "default": 0.2,
+            "title": "Layer Height",
+            "type": "number"
+          },
+          "second_material": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Second Material"
+          }
+        },
+        "required": [
+          "input_path"
+        ],
+        "title": "plan_supportsArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
+      },
+      "inputs": {
+        "mesh": "input_path"
       }
     },
     {
