@@ -16,7 +16,7 @@
 
 **The open-source MCP server for 3D printing.**
 
-Kiln lets AI agents (Claude Desktop, Claude Code, Codex, Gemini, Grok, or any custom MCP client) drive real 3D printers end to end — Bambu Lab, Creality, Prusa, Elegoo, Voron, Sovol, AnkerMake, Artillery, FlashForge, QIDI, RatRig, and SparkX. It is compatible with OctoPrint, Moonraker/Klipper, PrusaLink, and Direct USB.
+Kiln lets AI agents (ChatGPT, Claude Desktop, Claude Code, Codex, Gemini, Grok, or any custom MCP client) drive real 3D printers end to end — Bambu Lab, Creality, Prusa, Elegoo, Voron, Sovol, AnkerMake, Artillery, FlashForge, QIDI, RatRig, and SparkX. It is compatible with OctoPrint, Moonraker/Klipper, PrusaLink, and Direct USB.
 
 In a single conversation, an agent can design a part, slice it, queue it on the right printer, monitor the camera, recover from failures, and ship the result. No human in the middle.
 
