@@ -1,6 +1,6 @@
 # Kiln Terms of Use
 
-*Last updated: 2026-10-17 · Version 3.3*
+*Last updated: 2026-10-20 · Version 3.3*
 
 > **Plain-English summary** — These terms govern your use of Kiln,
 > operated by Hadron Labs Inc. Kiln has two sides:
@@ -414,7 +414,10 @@ infrastructure:
 - **Orchestration fee**: 5% of the manufacturing provider's quoted price
 - **Minimum fee**: $0.25 per order
 - **Maximum fee**: $200.00 per order
-- **Free monthly allowance (all tiers)**: your first 3 fulfillment orders each calendar month are fee-free
+- **Fee-free allowance, by plan**:
+  - **Pro**: your first 3 fulfillment orders each calendar month are fee-free
+  - **Business and Enterprise**: no orchestration fee on any order
+  - **Free**: the fee applies to every order from **19 November 2026**; until then, your first 3 fulfillment orders each calendar month are fee-free (this change was announced with these Terms on 20 October 2026, 30 days ahead, as §5.1 provides)
 
 Fees are charged at the time the order is placed with the
 manufacturing provider. **Local printing — on your own printers,
@@ -422,12 +425,12 @@ using your own materials — is and will remain free.** We never
 charge for file management, slicing, status monitoring, or any
 other operation that doesn't involve an external manufacturer.
 
-**Free fulfillment allowance is for personal, non-commercial use.**
-The 3 fee-free fulfillment orders each account receives per
+**Fee-free orders are for personal, non-commercial use.**
+The fee-free fulfillment orders a Free or Pro account receives per
 calendar month are provided for **personal, non-commercial use
 only**. Producing items for sale, fulfilling client or custom
 orders, or otherwise operating a commercial print business requires
-a **Business** subscription or higher, **regardless of the free
+a **Business** subscription or higher, **regardless of the
 allowance** — the fee-free orders do not grant a commercial-use
 right that §4.2 reserves to the Business and Enterprise tiers.
 

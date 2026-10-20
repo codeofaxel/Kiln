@@ -485,7 +485,7 @@ Beyond this slice, the catalog covers fleet orchestration, print-failure predict
 
 ## Pricing
 
-All local printing is **free forever** — status, file management, slicing, fleet control, and printing to your own printers cost nothing. Kiln charges a **5% orchestration fee** on orders placed through external manufacturing services (first 3 orders each calendar month free, on every tier; $0.25 min / $200 max per order), shown transparently in every quote. Outsourced order volume is not capped on any tier.
+All local printing is **free forever** — status, file management, slicing, fleet control, and printing to your own printers cost nothing. Kiln charges a **5% orchestration fee** on orders placed through external manufacturing services ($0.25 min / $200 max per order; a Pro account's first 3 orders each calendar month free; no fee on Business and Enterprise), shown transparently in every quote. Outsourced order volume is not capped on any tier.
 
 | Tier | Price | Headline |
 |------|-------|----------|
