@@ -426,9 +426,12 @@ def account_required_message(
             "needs to know who you are to count them, and signing in takes a "
             "few seconds."
         )
+    # No allowance means nothing is counted, so "to count it" would be a
+    # reason that is not true.  The account is needed because the tool
+    # answers from Kiln's servers.
     return (
-        f"{subject} is free to use — Kiln just needs to know who you are to "
-        "count it. Signing in takes a few seconds."
+        f"{subject} is free to use. It runs on Kiln's servers, which need to "
+        "know who is asking, and signing in takes a few seconds."
     )
 
 
