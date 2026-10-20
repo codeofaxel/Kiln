@@ -1,7 +1,7 @@
 # kiln3d (npm launcher)
 
 **Kiln is the open-source MCP server for 3D printing** — it lets AI agents
-(ChatGPT, Claude, Codex, Gemini, Grok, or any MCP client) design, slice, print, monitor, and recover
+(ChatGPT, Claude, Codex, Cursor, Gemini, Grok, or any MCP client) design, slice, print, monitor, and recover
 real 3D prints. It is compatible with Bambu Lab, Creality, Prusa, Elegoo,
 Klipper/Moonraker, OctoPrint, and more.
 

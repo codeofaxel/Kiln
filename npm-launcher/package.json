@@ -1,7 +1,7 @@
 {
   "name": "kiln3d",
   "version": "1.2.0",
-  "description": "Launcher for Kiln — the open-source MCP server for 3D printing. Lets AI agents (ChatGPT, Claude, Codex, Gemini, Grok, or any MCP client) design, slice, print, monitor, and recover real 3D prints. Runs the Python package `kiln3d` via uv/pipx.",
+  "description": "Launcher for Kiln — the open-source MCP server for 3D printing. Lets AI agents (ChatGPT, Claude, Codex, Cursor, Gemini, Grok, or any MCP client) design, slice, print, monitor, and recover real 3D prints. Runs the Python package `kiln3d` via uv/pipx.",
   "bin": {
     "kiln3d": "bin/kiln3d.js"
   },
