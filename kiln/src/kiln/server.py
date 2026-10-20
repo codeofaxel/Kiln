@@ -19971,7 +19971,7 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
             logger.debug("Failed to register stub %s: %s", name, exc)
 
     _register_keep_design(mcp_instance)
-    logger.info(
+    logger.debug(
         "Registered %d pro tool stubs from manifest (%d categories)",
         registered,
         len(manifest.get("categories", {})),

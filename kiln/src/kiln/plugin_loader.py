@@ -167,7 +167,10 @@ def register_all_plugins(
         try:
             p.register(mcp)
             registered += 1
-            _logger.info(
+            # DEBUG, not INFO: the CLI loads every plugin to answer even
+            # ``kiln --help``, and fifty lines of this before the help text
+            # is the first thing a new install showed.
+            _logger.debug(
                 "Registered tool plugin: %s (%s)",
                 p.name,
                 p.description,
@@ -180,7 +183,7 @@ def register_all_plugins(
             )
 
     if registered:
-        _logger.info(
+        _logger.debug(
             "Loaded %d/%d tool plugin(s) from %s",
             registered,
             len(plugins),
