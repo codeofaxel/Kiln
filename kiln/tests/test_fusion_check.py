@@ -677,7 +677,11 @@ class TestDeclaredColor:
 
         response: dict = {}
         assert attach_declared_color(response, "teal", scad_code='color("red") cube(1);') == "teal"
-        assert response["color"] == {"shown": "teal", "source": "caller", "note": SHOWN_NOTE}
+        assert response["color"]["shown"] == "teal"
+        assert response["color"]["source"] == "caller"
+        assert response["color"]["note"] == SHOWN_NOTE
+        # A name Kiln knows resolves to the hex the stage and the AMS use.
+        assert response["color"]["hex"] == "#008080"
 
     def test_a_single_colour_in_the_source_is_read(self) -> None:
         from kiln.declared_color import attach_declared_color, single_scad_color
@@ -687,6 +691,19 @@ class TestDeclaredColor:
         response: dict = {}
         assert attach_declared_color(response, "", scad_code='color("orange") cube(1);') == "orange"
         assert response["color"]["source"] == "scad"
+
+    def test_a_word_no_stage_can_paint_says_so_instead_of_claiming_a_picture(self) -> None:
+        """Cursor asked for "slate" (2026-10-20): not a CSS name, no hex, and
+        the block said ``shown: slate`` beside a part every stage drew grey."""
+        from kiln.declared_color import SHOWN_NOTE, attach_declared_color
+
+        response: dict = {}
+        assert attach_declared_color(response, "slate") == "slate"
+        assert response["color"]["shown"] == "slate", "what was asked is still said"
+        assert "hex" not in response["color"]
+        note = response["color"]["note"]
+        assert note != SHOWN_NOTE
+        assert "'slate'" in note and "grey" in note and "#708090" in note
 
     def test_two_colours_or_a_vector_pick_nothing(self) -> None:
         from kiln.declared_color import attach_declared_color, single_scad_color

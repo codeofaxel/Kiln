@@ -227,6 +227,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **A part with pieces floating in mid-air is no longer made.** If the code for a part leaves a piece hanging above the bed, Kiln refuses it and says how far that piece is from the rest, so a broken design never reaches the preview or the printer. Separate parts sitting on the bed, and a piece held inside the part, are still made.
+
 - **Everything your AI makes stays tied to what you asked for.** Kiln Pro also checks the design against it.
 
 - **A saved printer's name is never written over by a different printer.**

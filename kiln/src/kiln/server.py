@@ -8098,6 +8098,70 @@ def _unsuppliable_colour_words(
     return words or "Load the missing colour."
 
 
+
+def _asked_colour(file_path: str | None) -> Any:
+    """The colour the file was asked to be printed in (``kiln.declared_color``
+    note beside it), or ``None``.  Never raises."""
+    if not file_path:
+        return None
+    try:
+        from kiln.declared_color import read as _read_colour
+
+        return _read_colour(file_path)
+    except Exception:  # noqa: BLE001 -- a note never decides a print on its own
+        return None
+
+
+def _single_feed_decision(file_path: str | None) -> dict[str, Any]:
+    """The external-spool decision, saying so when a colour was asked for."""
+    decision: dict[str, Any] = {"use_ams": False, "ams_mapping": None, "warnings": []}
+    asked = _asked_colour(file_path)
+    if asked is not None:
+        decision["colour"] = _asked_colour_block(asked, "no_unit", None, [])
+        decision["warnings"].append(decision["colour"]["message"])
+    return decision
+
+
+def _asked_colour_block(asked: Any, outcome: str, plan: Any, trays: list[Any]) -> dict[str, Any]:
+    """What happened to the colour the part was asked for, in one block and
+    one sentence: ``loaded`` (a spool of it is used), ``held`` (none loaded;
+    the nearest is named and the print waits), ``no_unit`` / ``unread`` (it
+    prints in whatever is loaded; the colour was how the part was shown)."""
+    from kiln.ams_routing import advise_colours
+
+    block: dict[str, Any] = {"asked": asked.name, "hex": asked.hex6, "outcome": outcome}
+    if outcome == "loaded" and plan is not None and plan.matches:
+        match = plan.matches[0]
+        block["slot"] = match.get("slot")
+        block["slot_name"] = match.get("name")
+        block["message"] = (
+            f"Printing in {asked.name}: a spool of it is loaded in "
+            f"{match.get('name') or 'the AMS'}."
+        )
+        return block
+    if outcome == "held":
+        advice = advise_colours([asked.hex6], list(trays))
+        nearest = ""
+        if advice is not None and advice.missing:
+            miss = advice.missing[0]
+            if miss.get("nearest"):
+                nearest = f" The nearest loaded is {miss['nearest']}."
+                block["nearest"] = miss.get("nearest")
+                block["nearest_hex"] = miss.get("nearest_color")
+                block["nearest_delta_e"] = miss.get("delta_e")
+        block["message"] = (
+            f"No {asked.name} spool is loaded, so this print is waiting.{nearest} "
+            f"To print it in that colour, call again with color=\"<that colour>\"; "
+            f"to print it in {asked.name}, load a {asked.name} spool and call again; "
+            f"color=\"any\" prints in whatever is loaded."
+        )
+        return block
+    block["message"] = (
+        f"{asked.name} was how the part was shown; this printer prints in "
+        "whatever filament is loaded."
+    )
+    return block
+
 def _undriven_multi_material_decision(
     mm: Any,
     ams_mapping: list[int] | None,
@@ -8336,10 +8400,19 @@ def _resolve_use_ams(
         # twice.  Everything else is decided here, from the one record.
         from kiln.multi_material import multi_material_status
 
-        return _undriven_multi_material_decision(
+        decision = _undriven_multi_material_decision(
             multi_material_status(adapter), ams_mapping,
             file_path=file_path, wanted=wanted, adapter=adapter,
         )
+        # A single-feed printer, or one whose unit Kiln cannot read: the
+        # asked colour cannot be checked, so the result says what the stage
+        # colour was -- a picture, not a promise -- rather than nothing.
+        if "plan" not in decision:
+            asked_here = _asked_colour(file_path)
+            if asked_here is not None:
+                decision["colour"] = _asked_colour_block(asked_here, "unread", None, [])
+                decision.setdefault("warnings", []).append(decision["colour"]["message"])
+        return decision
 
     try:
         ams_info = adapter.get_ams_status()
@@ -8423,7 +8496,7 @@ def _resolve_use_ams(
         # No AMS hardware bits set either — genuinely no AMS on this
         # printer.  External spool is correct.
         logger.info("AMS auto-detect: no AMS hardware — external spool.")
-        return {"use_ams": False, "ams_mapping": None, "warnings": []}
+        return _single_feed_decision(file_path)
 
     # Collect loaded trays through the one reader every AMS door uses, so a
     # spool on a second unit (or an AMS HT) is routed by the printer's own
@@ -8461,6 +8534,16 @@ def _resolve_use_ams(
     # legacy single-tray pick below is the N=1 case with no colour to go on.
     if wanted is None and file_path:
         wanted = read_file_filaments(file_path).filaments
+    # The colour the part was ASKED for (kiln.declared_color, the note the
+    # make left and the slicer carried).  A one-filament file then wants that
+    # colour -- not the slicer's default white -- and a miss is a HOLD, not a
+    # fall-through to whatever is loaded: the person decides before the print.
+    asked = _asked_colour(file_path)
+    if asked is not None and len(wanted or []) <= 1:
+        from kiln.ams_routing import Filament as _Filament
+
+        kept_material = wanted[0].material if wanted else None
+        wanted = [_Filament(hex6=asked.hex6.lstrip("#"), material=kept_material or (material or None))]
     if wanted and any(getattr(f, "hex6", None) for f in wanted):
         plan = plan_ams_mapping(list(wanted), trays)
         if plan.ok:
@@ -8475,12 +8558,31 @@ def _resolve_use_ams(
             first = resolved[0]
             first_type = next((t.material for t in trays if t.tray_id == first), "")
             logger.info("AMS colour routing: %s", plan.summary)
-            return {
+            decision = {
                 "use_ams": True,
                 "ams_mapping": None if ams_mapping is not None else resolved,
                 "warnings": warnings_out,
                 "selection": _ams_selection_record(first, first_type, ams_info),
                 "plan": plan.to_dict(),
+            }
+            if asked is not None:
+                decision["colour"] = _asked_colour_block(asked, "loaded", plan, trays)
+            return decision
+        if asked is not None and len(wanted) == 1:
+            # None of the loaded spools is the colour the part was asked for.
+            # Held, with the nearest spool named: the person says "print it
+            # in that" (color="<that colour>") or loads the one they wanted.
+            block = _asked_colour_block(asked, "held", plan, trays)
+            logger.warning("colour hold: %s", block["message"])
+            return {
+                "use_ams": True,
+                "ams_mapping": None,
+                "warnings": [block["message"]] + plan.warnings,
+                "selection": None,
+                "plan": plan.to_dict(),
+                "blocked": True,
+                "code": "COLOR_NOT_LOADED",
+                "colour": block,
             }
         if len(wanted) >= 2:
             # A partial mapping is a wrong print.  Say which colour is
