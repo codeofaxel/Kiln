@@ -5345,7 +5345,83 @@ def _analyze_printability_here(
             if fault not in report.recommendations:
                 report.recommendations.insert(0, fault)
 
+    # Two more floors of the same kind: physics, not tuning, so they get
+    # the last word on every tier and no overlay can raise them.  Measured
+    # 2026-10-20 against PrusaSlicer on 51 parts: a cone on its tip
+    # (0 mm2 of bed contact; the slicer refuses it, "no extrusions in the
+    # first layer") and a box with 0.2 mm walls on a 0.4 mm nozzle (the
+    # slicer lays down almost nothing) both came back "printable" at C,
+    # because the thin-wall and adhesion deductions are capped and the
+    # score alone cannot reach the floor.
+    for stop in reversed(_hard_stops(report, nozzle_diameter)):
+        report.printable = False
+        if stop not in report.recommendations:
+            report.recommendations.insert(0, stop)
+
     return report
+
+
+def _hard_stops(report: PrintabilityReport, nozzle_diameter: float) -> list[str]:
+    """What makes *report*'s part unprintable as it is, beyond placement.
+
+    Read off fields the analysis already measured, so :func:`verdict` can
+    re-derive the same answer from a finished report.  A stop is a
+    physical fact a slicer cannot work around: nothing touches the bed,
+    or a wall is thinner than the nozzle can extrude.  Cones and
+    pyramids measure a zero-thickness apex without listing a thin REGION,
+    so the wall rule reads the regions, not the minimum.
+    """
+    stops: list[str] = []
+    bed = report.bed_adhesion
+    # Less than one nozzle-width square touching the bed is a point or an
+    # edge: the first layer has nowhere to go.
+    if bed is not None and bed.contact_area_mm2 < nozzle_diameter * nozzle_diameter:
+        stops.append(
+            f"Almost nothing touches the bed ({bed.contact_area_mm2:.2f} mm2): the "
+            "part rests on a point or an edge, so the first layer has nowhere to "
+            "go. Lay it on a flat face, or add a base."
+        )
+    walls = report.thin_walls
+    thin = [
+        r for r in (walls.problematic_regions if walls is not None else [])
+        if float(r.get("thickness_mm", nozzle_diameter)) < nozzle_diameter
+    ]
+    if thin:
+        thinnest = min(float(r["thickness_mm"]) for r in thin)
+        stops.append(
+            f"A wall measures {thinnest:.2f} mm, thinner than the {nozzle_diameter:g} mm "
+            f"nozzle can lay down; a slicer drops it, so that part of the model will "
+            f"be missing. Thicken it to at least {2 * nozzle_diameter:g} mm."
+        )
+    return stops
+
+
+def verdict(report: PrintabilityReport) -> tuple[str, str]:
+    """The one thing the check says about a part, as ``(key, sentence)``.
+
+    Three answers, never a number first: ``ready`` ("Ready to print."),
+    ``prints_with_supports`` (the part is fine with supports, which is a
+    normal print, not a warning), ``wont_print`` (a placement fault or a
+    hard stop, named), and ``check`` for a score under the printable
+    line with no single cause to point at.  The score stays on the
+    report for comparing versions; it is not the headline.
+    """
+    faults = [f.message for f in report.placement.faults] if report.placement else []
+    # The nozzle the analysis ran for.  Pro may set the thin-wall
+    # threshold to a material minimum, which is tuning, not this floor.
+    nozzle = float((report.nozzle or {}).get("diameter_mm") or 0.0)
+    if nozzle <= 0.0 and report.thin_walls is not None and report.thin_walls.threshold_basis == "nozzle":
+        nozzle = float(report.thin_walls.threshold_mm or 0.0)
+    stops = faults + _hard_stops(report, nozzle or 0.4)
+    if stops:
+        return "wont_print", f"Won't print as it is: {stops[0]}"
+    reason = support_verdict(report)
+    if reason:
+        return "prints_with_supports", f"Prints with supports ({reason})."
+    if report.printable:
+        return "ready", "Ready to print."
+    first = report.recommendations[0] if report.recommendations else "see the report"
+    return "check", f"Check before printing: {first}"
 
 
 # ---------------------------------------------------------------------------

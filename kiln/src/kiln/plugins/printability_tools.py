@@ -119,12 +119,19 @@ class _PrintabilityToolsPlugin:
                 if getattr(report, "nozzle", None) is not None:
                     report.nozzle = nozzle.to_dict()
                 nozzle_note = nozzle.sentence()
+                # The verdict leads; the score follows for comparing
+                # versions.  "Needs supports" is a normal print, not a
+                # refusal, and a part that cannot print says why.
+                from kiln.printability import verdict as _verdict
+
+                verdict_key, verdict_text = _verdict(report)
                 resp: dict[str, Any] = {
                     "success": True,
+                    "verdict": verdict_key,
                     "report": report.to_dict(),
                     "message": (
-                        f"Printability score: {report.score}/100 (grade {report.grade}).  "
-                        f"{'Printable' if report.printable else 'Not recommended for printing'}."
+                        f"{verdict_text}  "
+                        f"Printability score {report.score}/100 (grade {report.grade})."
                         + (f"  {nozzle_note}" if nozzle_note else "")
                     ),
                 }
