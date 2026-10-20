@@ -9,12 +9,9 @@ corpus — and until now it stopped at the local row, because
 fields and silently drops everything else.  A code added to the contribution
 payload alone would have sat in the outbox forever, looking wired.
 
-The corpus does NOT have this column yet (zero hits for ``print_error``
-across kiln-pro's SQL as of 2026-08-13).  That is survivable by design
-rather than by luck: PostgREST rejects the WHOLE insert over one unknown
-column, so the send drops the fields a server names and retries, and the
-outcome lands with or without its code.  When the cloud column ships,
-codes start accumulating with no further client change.
+The corpus has the column (migration 137).  Since contributions go through
+the Kiln API, the SERVER writes the columns it has, so a client no longer
+carries a rescue for a corpus that lags behind it.
 
 What is deliberately NOT here: cancelled prints still contribute nothing.
 ``translate_outcome`` refuses them because they carry no verdict on the
@@ -68,7 +65,7 @@ def _sender(*, fail_first_with: str | None = None):
     bodies: list[dict[str, Any]] = []
 
     def fake_urlopen(req, *a, **k):
-        bodies.append(json.loads(req.data.decode()))
+        bodies.append(json.loads(req.data.decode())["record"])
         if fail_first_with is not None and len(bodies) == 1:
             raise _http_error(fail_first_with)
         return _FakeResp()
@@ -127,68 +124,8 @@ def test_a_print_with_no_code_ships_no_column():
 
 
 # ---------------------------------------------------------------------------
-# A corpus that does not have the column yet
+# A refusal is about the row
 # ---------------------------------------------------------------------------
-
-
-def test_a_server_without_the_column_still_gets_the_print():
-    """Today's reality: the cloud column does not exist.
-
-    PostgREST rejects the whole insert over the one unknown field, so
-    without this the change would not merely fail to add codes — it would
-    LOSE every contribution that had one.
-    """
-    from kiln import community_sync
-
-    bodies, fake = _sender(
-        fail_first_with=(
-            "Column 'print_error' of relation 'community_prints' does not exist"
-        )
-    )
-    with mock.patch("urllib.request.urlopen", fake):
-        assert community_sync.sync_community_print(_record()) is True
-
-    assert len(bodies) == 2, "the row was retried, not abandoned"
-    assert "print_error" not in bodies[1]
-    assert bodies[1]["outcome"] == "failed", "the outcome still landed"
-
-
-def test_the_retry_keeps_the_fields_the_server_did_not_refuse():
-    """The regression this design exists to avoid.
-
-    A retry that dropped every optional field would cost the v2 signature on
-    every contribution for as long as the corpus lagged on ``print_error`` —
-    trading a column we are adding against one already in use.  PostgREST
-    names the column it could not find, so only that one goes.
-    """
-    from kiln import community_sync
-
-    bodies, fake = _sender(
-        fail_first_with=(
-            "Column 'print_error' of relation 'community_prints' does not exist"
-        )
-    )
-    with mock.patch("urllib.request.urlopen", fake):
-        community_sync.sync_community_print(_record())
-
-    assert bodies[1]["geometric_signature_v2"] == "v2:1234567890abcdef"
-
-
-def test_an_unreadable_rejection_drops_every_optional_field():
-    """When the server names nothing we know, the row still matters more.
-
-    Losing an optional column is always the better trade than losing the
-    print, so an unrecognised 400 falls back to the widest retry.
-    """
-    from kiln import community_sync
-
-    bodies, fake = _sender(fail_first_with="something went wrong")
-    with mock.patch("urllib.request.urlopen", fake):
-        assert community_sync.sync_community_print(_record()) is True
-
-    assert "print_error" not in bodies[1]
-    assert "geometric_signature_v2" not in bodies[1]
-    assert bodies[1]["outcome"] == "failed"
 
 
 def test_a_rejection_with_a_real_cause_is_not_retried_forever():

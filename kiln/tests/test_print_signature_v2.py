@@ -17,11 +17,9 @@ pin the properties the design promises:
 
 from __future__ import annotations
 
-import io
 import json
 import math
 import struct
-import urllib.error
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -611,7 +609,7 @@ class TestSyncWire:
         bodies: list[dict] = []
 
         def fake_urlopen(req: Any, timeout: float = 0) -> _FakeResponse:
-            bodies.append(json.loads(req.data.decode()))
+            bodies.append(json.loads(req.data.decode())["record"])
             return _FakeResponse()
 
         monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
@@ -633,7 +631,7 @@ class TestSyncWire:
         bodies: list[dict] = []
 
         def fake_urlopen(req: Any, timeout: float = 0) -> _FakeResponse:
-            bodies.append(json.loads(req.data.decode()))
+            bodies.append(json.loads(req.data.decode())["record"])
             return _FakeResponse()
 
         monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
@@ -646,37 +644,3 @@ class TestSyncWire:
             }
         )
         assert "geometric_signature_v2" not in bodies[0]
-
-    def test_schema_lagged_server_degrades_to_v1_body(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A cloud table without the v2 column rejects the whole insert;
-        the sender must retry without the optional field rather than lose
-        the outcome."""
-        from kiln import community_sync
-
-        bodies: list[dict] = []
-
-        def fake_urlopen(req: Any, timeout: float = 0) -> _FakeResponse:
-            body = json.loads(req.data.decode())
-            bodies.append(body)
-            if "geometric_signature_v2" in body:
-                raise urllib.error.HTTPError(
-                    "url", 400, "Bad Request", None, io.BytesIO(b"{}")
-                )
-            return _FakeResponse()
-
-        monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-        ok = community_sync.sync_community_print(
-            {
-                "geometric_signature": "v1sig",
-                "geometric_signature_v2": "v2:aaaa",
-                "printer_model": "bambu_a1",
-                "material": "PLA",
-                "outcome": "success",
-            }
-        )
-        assert ok is True
-        assert len(bodies) == 2
-        assert "geometric_signature_v2" not in bodies[1]
-        assert bodies[1]["geometric_signature"] == "v1sig"

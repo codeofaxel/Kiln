@@ -2,18 +2,17 @@
 
 Two halves, deliberately asymmetric:
 
-* **Contribution** keeps the publishable key and stays ungated.  The durable
-  outbox passes a random ``send_id`` so a crash-replayed contribution folds
-  into a single server row; with a send_id the request must target the
-  ``send_id`` conflict index with ignore-duplicates, without one it stays a
-  plain insert (the pre-federation-column path).
+* **Contribution** goes to the Kiln API anonymously -- no credential of any
+  kind -- and stays ungated.  The durable outbox passes a random ``send_id``
+  so a crash-replayed contribution folds into a single server row.  The
+  server's answer decides the row's fate: a refusal spends a retry, "later"
+  (busy, unavailable, offline, a server without the route) does not.
 * **Reads** go to the Kiln API with this machine's own bearer and come back as
-  computed aggregates.  The publishable key must not appear on any read path —
-  pinned structurally below, so the leak can't come back by accident.
+  computed aggregates.  No database key exists anywhere in this package --
+  pinned structurally below, so neither leak can come back by accident.
 """
 from __future__ import annotations
 
-import ast
 import json
 import urllib.error
 from pathlib import Path
@@ -96,7 +95,7 @@ class TestWireGuard:
                 {"geometric_signature": "abc", "outcome": "success"}
             )
         assert ok is True
-        assert captured["url"].endswith("/rest/v1/community_prints")
+        assert captured["url"].endswith("/api/community/contribute")
 
     def test_guard_answers_independent_of_db_path(self, monkeypatch, tmp_path):
         """The exact disarm that shipped the leak: a custom KILN_DB_PATH
@@ -109,7 +108,7 @@ class TestWireGuard:
         assert community_sync.network_sends_suppressed() is True
 
 
-def test_plain_insert_when_no_send_id():
+def test_no_send_id_sends_none_and_the_server_mints_one():
     from kiln import community_sync
 
     captured, fake = _capture_request()
@@ -118,12 +117,12 @@ def test_plain_insert_when_no_send_id():
             {"geometric_signature": "abc", "outcome": "success"}
         )
     assert ok is True
-    assert "on_conflict" not in captured["url"]
-    assert "ignore-duplicates" not in captured["headers"].get("prefer", "")
     assert "send_id" not in captured["data"]
+    assert captured["data"]["kind"] == "print"
+    assert captured["data"]["record"]["geometric_signature"] == "abc"
 
 
-def test_upsert_when_send_id_present():
+def test_send_id_travels_with_the_contribution():
     from kiln import community_sync
 
     captured, fake = _capture_request()
@@ -133,46 +132,80 @@ def test_upsert_when_send_id_present():
             send_id="deadbeefcafef00d",
         )
     assert ok is True
-    assert "on_conflict=send_id" in captured["url"]
-    assert "resolution=ignore-duplicates" in captured["headers"].get("prefer", "")
     assert captured["data"]["send_id"] == "deadbeefcafef00d"
+    assert "send_id" not in captured["data"]["record"]
+
+
+def test_a_contribution_carries_no_credential():
+    """Anonymous by construction: nothing on the request names the sender."""
+    from kiln import community_sync
+
+    captured, fake = _capture_request()
+    with mock.patch("kiln.auth_session.resolve_api_bearer") as bearer, \
+         mock.patch("urllib.request.urlopen", side_effect=fake):
+        community_sync.sync_community_print(
+            {"geometric_signature": "abc", "outcome": "success"}
+        )
+    bearer.assert_not_called()
+    assert "authorization" not in captured["headers"]
+    assert "apikey" not in captured["headers"]
+
+
+def _answer(code: int):
+    def _raise(req, timeout=None):
+        raise urllib.error.HTTPError(req.full_url, code, "x", {}, None)
+
+    return _raise
+
+
+@pytest.mark.parametrize("code", [400, 422])
+def test_a_refusal_is_about_the_row(code):
+    from kiln import community_outbox, community_sync
+
+    with mock.patch("urllib.request.urlopen", side_effect=_answer(code)):
+        got = community_sync.sync_community_print({"geometric_signature": "abc"})
+    assert got is False and got is not community_outbox.DEFERRED
+
+
+@pytest.mark.parametrize("code", [404, 429, 500, 502, 503])
+def test_busy_or_unavailable_is_a_wait_not_a_failure(code):
+    """The 2026-07-28 loss shape: a shut door must not spend the row's retries."""
+    from kiln import community_outbox, community_sync
+
+    with mock.patch("urllib.request.urlopen", side_effect=_answer(code)):
+        got = community_sync.sync_community_print({"geometric_signature": "abc"})
+    assert got is community_outbox.DEFERRED
+    assert not got
+
+
+def test_offline_is_a_wait_not_a_failure():
+    from kiln import community_outbox, community_sync
+
+    with mock.patch("urllib.request.urlopen", side_effect=OSError("no route")):
+        got = community_sync.sync_community_print({"geometric_signature": "abc"})
+    assert got is community_outbox.DEFERRED
 
 
 # ---------------------------------------------------------------------------
-# The structural pin: the publishable key is contribution-only.
+# The structural pin: nothing here talks to the database.
 #
-# The corpus tables used to be readable with the key hardcoded in this
-# package, so any install could pull rows.  These two tests are the durable
-# guard — they fail if a read path ever reaches for that key again, whether
-# by a new function here or a new module elsewhere in kiln/src.
+# The corpus tables used to be readable with a key hardcoded in this module,
+# and until this release contributions were written with it.  Both halves now
+# go through the Kiln API; these two tests fail if either path reaches for
+# the database again, here or anywhere else in kiln/src.
 # ---------------------------------------------------------------------------
 
 _SRC = Path(__file__).resolve().parents[1] / "src" / "kiln"
 
 
-def _functions_referencing(module_path: Path, name: str) -> set[str]:
-    """Top-level function names whose body mentions ``name``."""
-    tree = ast.parse(module_path.read_text(encoding="utf-8"))
-    hits: set[str] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        for child in ast.walk(node):
-            if isinstance(child, ast.Name) and child.id == name:
-                hits.add(node.name)
-    return hits
-
-
-def test_publishable_key_is_contribution_only():
-    """Only the insert path may touch the publishable key."""
-    module = _SRC / "community_sync.py"
-    assert _functions_referencing(module, "_SUPABASE_ANON_KEY") == {
-        "sync_community_print"
-    }
+def test_no_database_key_in_the_community_module():
+    text = (_SRC / "community_sync.py").read_text(encoding="utf-8")
+    assert "sb_publishable_" not in text
+    assert "supabase.co" not in text
 
 
 def test_no_community_table_read_anywhere_in_src():
-    """No module under kiln/src reads a community table directly.
+    """No module under kiln/src touches a community table directly.
 
     The corpus is reachable only through the Kiln API, which computes the
     aggregate server-side.  A direct table URL in a GET is the shape of the
@@ -184,9 +217,6 @@ def test_no_community_table_read_anywhere_in_src():
         for table in ("community_prints", "community_recoveries"):
             marker = f"/rest/v1/{table}"
             if marker not in text:
-                continue
-            # The one legitimate use is the contribution POST in this module.
-            if path.name == "community_sync.py" and table == "community_prints":
                 continue
             offenders.append(f"{path.relative_to(_SRC)} -> {marker}")
     assert not offenders, f"direct community-table access: {offenders}"

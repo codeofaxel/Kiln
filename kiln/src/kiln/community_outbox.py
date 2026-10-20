@@ -14,8 +14,8 @@ Kind-aware: each contribution carries a ``kind`` (``community_print``,
 :func:`register_sender`, and the drain dispatches each row to its kind's
 sender — so kiln-pro federation producers reuse this durability without the
 outbox importing them (no import cycle, graceful when kiln-pro is absent).  The
-built-in ``community_print`` sender (push to Supabase ``community_prints``) is
-registered at import.
+built-in ``community_print`` sender (hand it to the Kiln API, which writes
+``community_prints``) is registered at import.
 
 The outbox keeps its own SQLite file (``community_outbox.db``, co-located with
 ``kiln.db``), opened WAL + busy_timeout and routed through
@@ -72,6 +72,28 @@ _DEAD_RETENTION_S = 30 * 24 * 60 * 60          # 30 days
 #: The default contribution kind — anonymous community print outcomes.
 DEFAULT_KIND = "community_print"
 
+
+class _Deferred:
+    """A sender's answer for "the door is busy or shut, not this row".
+
+    Falsy, so a caller that only asks "did it send?" still reads no.  The
+    drain asks the sharper question: a deferred row keeps every retry it
+    has, and the drain stops, because the next row would meet the same door.
+    """
+
+    __slots__ = ()
+
+    def __bool__(self) -> bool:
+        return False
+
+    def __repr__(self) -> str:
+        return "DEFERRED"
+
+
+#: Return this from a sender to keep the row queued without spending one of
+#: its retries (the server said "later", or could not be reached).
+DEFERRED = _Deferred()
+
 _conn: sqlite3.Connection | None = None
 # Guards every access to the SQLite connection.  Held only for short local
 # operations — NEVER across a network send (see drain()).
@@ -97,7 +119,8 @@ def register_sender(
     """Register the sender for a contribution ``kind``.
 
     :param fn: ``fn(payload, send_id) -> bool`` — perform the network send,
-        returning True on success.  ``send_id`` is a random per-contribution
+        returning True on success, or :data:`DEFERRED` when the row should
+        wait for a later drain without spending a retry.  ``send_id`` is a random per-contribution
         idempotency token (pass it to the endpoint's upsert if it supports
         one).  Must not raise for control flow; the drain treats exceptions as
         a failed send and retries later.
@@ -422,12 +445,13 @@ def drain(batch: int = _DRAIN_BATCH, *, max_rows: int = _DRAIN_MAX_ROWS) -> dict
         ensure_senders()
         sent = failed = 0
         while sent + failed < max_rows:
-            passed, missed = _drain_one_batch(batch)
+            passed, missed, deferred = _drain_one_batch(batch)
             sent += passed
             failed += missed
-            if passed == 0:
-                # Nothing moved: either the queue is empty or sends are
-                # failing.  Either way, stop — see the docstring.
+            if passed == 0 or deferred:
+                # Nothing moved (the queue is empty or sends are failing),
+                # or the endpoint asked us to wait.  Either way, stop — see
+                # the docstring.
                 break
         purged = purge_delivered()
         return {
@@ -440,10 +464,12 @@ def drain(batch: int = _DRAIN_BATCH, *, max_rows: int = _DRAIN_MAX_ROWS) -> dict
         _drain_lock.release()
 
 
-def _drain_one_batch(batch: int) -> tuple[int, int]:
-    """Claim and send at most *batch* rows.  Returns ``(sent, failed)``.
+def _drain_one_batch(batch: int) -> tuple[int, int, bool]:
+    """Claim and send at most *batch* rows.  Returns ``(sent, failed, deferred)``.
 
-    Assumes the caller holds ``_drain_lock``.
+    A sender answering :data:`DEFERRED` leaves its row exactly as it was and
+    ends the batch: the endpoint asked to wait, and every row behind it would
+    meet the same answer.  Assumes the caller holds ``_drain_lock``.
     """
     sent = failed = 0
     # 1) Claim a batch under a short lock — no network here.
@@ -475,9 +501,14 @@ def _drain_one_batch(batch: int) -> tuple[int, int]:
             )
         else:
             try:
-                ok = bool(entry[0](json.loads(row["payload"]), row["send_id"]))
+                result = entry[0](json.loads(row["payload"]), row["send_id"])
             except Exception as exc:  # noqa: BLE001 — one bad row must not break the drain
                 logger.debug("community outbox send error id=%s: %s", row["id"], exc)
+                result = False
+            if result is DEFERRED:
+                logger.debug("community outbox: endpoint deferred id=%s; stopping", row["id"])
+                return sent, failed, True
+            ok = bool(result)
 
         with _db_lock:
             conn = _db()
@@ -513,7 +544,7 @@ def _drain_one_batch(batch: int) -> tuple[int, int]:
                     )
             _retry_on_locked(conn.commit)
 
-    return sent, failed
+    return sent, failed, False
 
 def _safe_drain() -> None:
     try:
