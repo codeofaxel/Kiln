@@ -455,7 +455,7 @@ class TestTheCommandLine:
         from kiln.cli.main import cli
 
         result = CliRunner().invoke(cli, ["validate", files["cube.stl"]])
-        assert result.exit_code == 0 and "Printability: PASS" in result.output, result.output
+        assert result.exit_code == 0 and result.output.startswith("Ready to print."), result.output
 
     def test_slice_without_printing_is_left_to_the_slicer(self, files):
         """Making G-code is not a print: the gate is on --print-after only."""

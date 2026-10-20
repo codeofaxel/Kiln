@@ -158,3 +158,14 @@ def test_a_part_that_needs_no_supports_is_not_charged_for_support_volume(tmp_pat
     assert report.overhangs.needs_supports is False
     assert report.bridging.needs_supports_for_bridges is False
     assert report.supports.score_deduction == 0
+
+
+def test_kiln_validate_says_the_verdict_not_pass_or_fail(tmp_path):
+    from click.testing import CliRunner
+
+    from kiln.cli.main import cli
+
+    out = CliRunner().invoke(cli, ["validate", _t_shape(tmp_path)])
+    assert out.exit_code == 0, out.output
+    assert out.output.startswith("Prints with supports")
+    assert "FAIL" not in out.output

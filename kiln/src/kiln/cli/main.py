@@ -13399,13 +13399,23 @@ def validate(file_path: str, json_mode: bool) -> None:
         from kiln.printability import analyze_printability as _analyze
 
         report = _analyze(file_path)
+        # The same three answers the agent tool gives (ready / prints with
+        # supports / won't print); "FAIL" used to cover a part that only
+        # needs supports, and "PASS" an F.
+        from kiln.printability import verdict as _verdict
+
+        verdict_key, verdict_text = _verdict(report)
         if json_mode:
             click.echo(
-                format_response("success", data={"report": report.to_dict()}, json_mode=True)
+                format_response(
+                    "success",
+                    data={"verdict": verdict_key, "report": report.to_dict()},
+                    json_mode=True,
+                )
             )
         else:
-            status = "PASS" if report.printable else "FAIL"
-            click.echo(f"Printability: {status}  Score: {report.score}/100  Grade: {report.grade}")
+            click.echo(verdict_text)
+            click.echo(f"Score: {report.score}/100  Grade: {report.grade}")
             if report.recommendations:
                 click.echo("Issues:")
                 for rec in report.recommendations:
