@@ -17,8 +17,6 @@ import sys
 import time
 from types import SimpleNamespace
 
-import pytest
-
 from kiln import watch_plan as wp
 from kiln.print_start_verdict import resolve_print_start
 from kiln.printers.base import PrinterState, PrinterStatus, PrintResult
@@ -74,43 +72,24 @@ def test_a_start_the_printer_refuted_carries_no_plan():
 
 
 # ---------------------------------------------------------------------------
-# Kiln Pro's door: a plan read from the part replaces the floor
+# No private package is asked in-process
 # ---------------------------------------------------------------------------
 
 
-def _with_pro_door(monkeypatch, door):
+def test_a_private_bridge_in_the_process_is_never_asked(monkeypatch):
+    """A plan read from the part would be served from Kiln's servers; a
+    plain install has no private package, so the start never reaches for one."""
+    asked = []
+
+    def door(**kw):
+        asked.append(kw)
+        return {"mode": "risk_mapped"}
+
     bridge = SimpleNamespace(pro_features=SimpleNamespace(watch_plan=door))
     monkeypatch.setitem(sys.modules, "kiln_pro", SimpleNamespace(bridge=bridge))
     monkeypatch.setitem(sys.modules, "kiln_pro.bridge", bridge)
-
-
-def test_a_pro_plan_replaces_the_floor(monkeypatch):
-    seen = {}
-
-    def door(*, adapter, file_name, floor):
-        seen["file"] = file_name
-        seen["floor_mode"] = floor["mode"]
-        return {**floor, "mode": "risk_mapped", "checkpoints": [{"at_s": 840, "look": "the bridge"}]}
-
-    _with_pro_door(monkeypatch, door)
     out = _verdict(PrintResult(success=True, message="started"), PrinterStatus.PRINTING)
-    assert seen == {"file": "part.3mf", "floor_mode": wp.MODE_EARLY_THEN_HANDOFF}
-    assert out["watch"]["mode"] == "risk_mapped"
-
-
-def test_a_pro_door_that_declines_keeps_the_floor(monkeypatch):
-    _with_pro_door(monkeypatch, lambda **kw: None)
-    out = _verdict(PrintResult(success=True, message="started"), PrinterStatus.PRINTING)
-    assert out["watch"]["mode"] == wp.MODE_EARLY_THEN_HANDOFF
-
-
-def test_a_pro_door_that_raises_never_fails_the_start(monkeypatch):
-    def door(**kw):
-        raise RuntimeError("boom")
-
-    _with_pro_door(monkeypatch, door)
-    out = _verdict(PrintResult(success=True, message="started"), PrinterStatus.PRINTING)
-    assert out["success"] is True
+    assert asked == []
     assert out["watch"]["mode"] == wp.MODE_EARLY_THEN_HANDOFF
 
 

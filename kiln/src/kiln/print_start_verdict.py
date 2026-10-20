@@ -216,32 +216,19 @@ def _what_you_will_see(adapter: Any) -> tuple[str, ...] | None:
 def _watch_plan(adapter: Any, file_name: str) -> dict[str, Any] | None:
     """The watch plan this start carries, or ``None`` if none could be built.
 
-    The floor comes from :mod:`kiln.watch_plan`.  Kiln Pro may replace it:
-    ``pro_features.watch_plan(adapter=..., file_name=..., floor=...)`` is the
-    one door, answering a plan dict or ``None`` to keep the floor.  Read the
-    way the start narrative reads its per-model block -- optional, never a
-    reason for a start to fail, because the print is already running.
+    The plan comes from :mod:`kiln.watch_plan`, on every install.  A plan
+    read from the part itself would be served from Kiln's servers, never
+    imported here, because a plain install has no private package to ask.
+    Optional, never a reason for a start to fail: the print is already
+    running.
     """
     try:
         from kiln.watch_plan import build_watch_plan
 
-        floor = build_watch_plan()
+        return build_watch_plan()
     except Exception:  # noqa: BLE001 -- a plan nobody could build is no plan
         logger.debug("watch plan unavailable", exc_info=True)
         return None
-    try:
-        from kiln_pro.bridge import pro_features  # type: ignore[import-not-found]
-
-        door = getattr(pro_features, "watch_plan", None)
-        if callable(door):
-            pro = door(adapter=adapter, file_name=file_name, floor=floor)
-            if isinstance(pro, dict) and pro:
-                return pro
-    except ImportError:
-        pass
-    except Exception:  # noqa: BLE001 -- a Pro plan that failed is the floor
-        logger.debug("pro watch plan unavailable; using the floor", exc_info=True)
-    return floor
 
 
 def resolve_print_start(
