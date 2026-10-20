@@ -714,6 +714,39 @@ def locked_design_label(design_id: Any, kind: str = "features", *, vault: Any = 
     )
 
 
+def without_locked_designs(
+    design_id: Any, payload: dict[str, Any], kind: str = "features", *, vault: Any = None,
+) -> tuple[Any, dict[str, Any], str | None]:
+    """A feature or preset push with every design locked here taken out of it.
+
+    The label (*design_id*) and the ``design_id`` on the branch and each
+    version record are all names of a design; a locked one stays on this
+    computer.  Returns ``(design_id, payload, said)``: the label or ``None``,
+    the payload with locked names cleared, and the sentence for the answer
+    (``None`` when nothing was locked).
+    """
+    rows = [payload.get("branch")] + list(payload.get("versions") or [])
+    names = [design_id] + [r.get("design_id") for r in rows if isinstance(r, dict)]
+    locked = []
+    for name in dict.fromkeys(n for n in names if isinstance(n, str) and n):
+        if locked_design_label(name, kind, vault=vault):
+            locked.append(name)
+    if not locked:
+        return design_id, payload, None
+
+    def _clear(row: Any) -> Any:
+        if isinstance(row, dict) and row.get("design_id") in locked:
+            return {**row, "design_id": None}
+        return row
+
+    cleared = {
+        **payload,
+        "branch": _clear(payload.get("branch")),
+        "versions": [_clear(v) for v in payload.get("versions") or []],
+    }
+    return (None if design_id in locked else design_id), cleared, locked_design_label(locked[0], kind, vault=vault)
+
+
 #: Served tools whose call keeps something of a design in the person's Kiln
 #: account, and what the refusal says Kiln did not do.
 _KEEPS_IN_ACCOUNT = {"propose_design_change": "open a pull request for it in your Kiln account"}
@@ -1447,13 +1480,13 @@ def push_library(tool: str, kind: str, item_id: str, branch_id: str, *, design_i
     vault = vault or HistoryVault()
     try:
         payload = vault.library_branch_payload(kind, item_id, branch_id)
-        left_out = locked_design_label(design_id, kind, vault=vault)
+        if payload is None:
+            return _refused(tool, "BRANCH_NOT_FOUND", f"No branch {branch_id} of {item_id} on this computer.")
+        design_id, payload, left_out = without_locked_designs(design_id, payload, kind, vault=vault)
     finally:
         if own:
             vault.close()
-    if payload is None:
-        return _refused(tool, "BRANCH_NOT_FOUND", f"No branch {branch_id} of {item_id} on this computer.")
-    body = {**payload, "design_id": None if left_out else design_id}
+    body = {**payload, "design_id": design_id}
     answer = _request(tool, "POST", f"/api/cloud/{_LIBRARY_ROUTE[kind]}/{_quote(item_id)}/branches/push", body)
     if answer.get("status") == "error":
         return answer
