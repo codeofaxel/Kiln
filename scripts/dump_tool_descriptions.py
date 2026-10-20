@@ -3,7 +3,7 @@
 
 Everything an MCP client receives from ``tools/list`` — the tool name, its
 description (the docstring), and every parameter's description — is as
-public as the README: the hosted connector, the desktop app, and any
+public as the README: the hosted connector, every MCP client, and any
 ``pip install kiln3d`` user can read it verbatim.  This script writes the
 whole surface to one file so it can be swept for wording that should not
 be there (internal module paths, private data-file names, thresholds and

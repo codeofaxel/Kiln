@@ -406,7 +406,7 @@ def dialog_schema(*, offer_window: bool = True, offer_fleet: bool = False) -> di
 #   nothing a model can put in ``arguments`` is ever read as an answer —
 #   and a client strips any answer-shaped key it finds there.
 # * A server honours the header only from a person's own session — a
-#   browser, or the desktop app on its own machine — never from an agent
+#   browser, or an app signed in as them on their own machine — never from an agent
 #   session or a bare key; an agent's header is refused, and the refusal
 #   says so.
 
