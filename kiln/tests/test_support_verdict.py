@@ -222,3 +222,31 @@ def test_a_memory_cap_is_said_not_read_as_no(tmp_path: Path, monkeypatch) -> Non
     assert any("not judged" in w and "too large" in w for w in result.warnings), result.warnings
     decision = slicer_supports.decide_supports(path, material="PLA")
     assert decision.decided_by == "not_checked" and "not checked" in decision.reason
+
+
+def test_the_assessment_keeps_no_angle_or_bridge_number_of_its_own(tmp_path: Path) -> None:
+    """support_profiles.json said PLA bridges 50 mm and overhangs from 55
+    degrees while the engine refused 30 mm and judged from 45: two numbers
+    for one noun, and the assessment's sentence could cite the one the
+    verdict never used.  The table now carries handling only; the angle and
+    the bridge limit are the verdict's."""
+    import json
+
+    from kiln import support_assessment
+    from kiln.printability import overhang_threshold_deg
+
+    table = json.loads(support_assessment._DATA_FILE.read_text())
+    for material, row in table.items():
+        if material.startswith("_"):
+            continue
+        assert not {"overhang_safe_deg", "overhang_max_deg", "bridge_safe_mm", "bridge_max_mm"} & set(row), material
+    assert not {"overhang_safe_deg", "bridge_max_mm"} & set(support_assessment._DEFAULT_PROFILE)
+
+    path = _write_stl(tmp_path / "bridge.stl", CASES[5][1])  # the 50 mm span
+    result = support_assessment.assess_support_feasibility(stl_path=path, material="PLA")
+    bridge_lines = [r for r in result.recommendations if r.startswith("Supports required under the bridge:")]
+    assert len(bridge_lines) == 1 and "bridges=" in bridge_lines[0], result.recommendations
+    assert not any("material limit" in r for r in result.recommendations)
+    # The same angle the report judged this material against.
+    assert result.overhang_percentage > 0
+    assert overhang_threshold_deg("pla") == overhang_threshold_deg("PLA")

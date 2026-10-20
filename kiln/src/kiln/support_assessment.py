@@ -48,10 +48,6 @@ _ORIENTATION_IMPROVEMENT_THRESHOLD = 0.30  # 30% improvement required to suggest
 
 # Default profile for unknown materials (PLA-like, conservative)
 _DEFAULT_PROFILE: dict[str, Any] = {
-    "overhang_safe_deg": 50,
-    "overhang_max_deg": 60,
-    "bridge_safe_mm": 30,
-    "bridge_max_mm": 100,
     "z_gap_multiplier": 1.0,
     "removal_difficulty": 3,
     "self_support_fuse_risk": "medium",
@@ -200,11 +196,12 @@ def _shared_verdict(
     material: str,
     nozzle_diameter_mm: float,
     layer_height_mm: float,
-) -> tuple[bool, str | None]:
-    """Whether the part needs supports, read off the printability engine --
-    the same verdict every other door gives (:func:`kiln.printability.support_verdict`)
-    -- and, for faces that are not a solid (flat, degenerate, nothing to
-    print), ``False`` with the engine's own sentence to put in the warnings.
+) -> tuple[bool, str | None, str | None]:
+    """``(needs_supports, reason, not_judged)`` read off the printability
+    engine -- the same verdict every other door gives
+    (:func:`kiln.printability.support_verdict`), with its reason -- and,
+    for faces that are not a solid (flat, degenerate, nothing to print),
+    ``False`` with the engine's own sentence to put in the warnings.
 
     Until 2026-10-19 this module answered from its own rule (more than 5 %
     of the surface area overhanging), which called a desk stand's 70 mm
@@ -234,16 +231,25 @@ def _shared_verdict(
             layer_height=layer_height_mm,
         )
     except ValueError as exc:
-        return False, f"Whether supports are needed was not judged: {exc}"
+        return False, None, f"Whether supports are needed was not judged: {exc}"
     except MemoryError:
         # The analysis runner's cap: more memory than this machine gives a
         # single analysis.  Not judged, said -- never a quiet "no".
-        return False, "Whether supports are needed was not judged: the part is too large for this machine's analysis"
+        return False, None, "Whether supports are needed was not judged: the part is too large for this machine's analysis"
     finally:
         if scratch is not None:
             with contextlib.suppress(OSError):
                 os.unlink(scratch)
-    return support_verdict(judged) is not None, None
+    reason = support_verdict(judged)
+    return reason is not None, reason, None
+
+
+def _bridge_part(reason: str | None) -> str | None:
+    """The bridge clause of a verdict's reason (``"bridges=52.6mm"``), if any."""
+    if not reason:
+        return None
+    parts = [part.strip() for part in reason.split(",") if part.strip().startswith("bridges=")]
+    return parts[0] if parts else None
 
 
 # ---------------------------------------------------------------------------
@@ -717,11 +723,15 @@ def assess_support_feasibility(
     """
     profile = _get_profile(material)
 
-    safe_deg = float(profile["overhang_safe_deg"])
-    max_deg = float(profile["overhang_max_deg"])
+    # The one overhang angle Kiln judges this material against -- the
+    # printability report's, the slice's (:func:`kiln.printability.overhang_threshold_deg`).
+    # This table carried its own copy (PLA 55, PETG 45, ...) beside the
+    # engine's 45 and the overlay's per-material angle, so the area it
+    # reported as overhanging and the verdict it was handed could disagree
+    # about which faces counted.
+    from kiln.printability import overhang_threshold_deg
 
-    # Scale bridge thresholds by nozzle size (wider nozzle = better bridging)
-    nozzle_factor = nozzle_diameter_mm / 0.4 if nozzle_diameter_mm > 0 else 1.0
+    safe_deg = overhang_threshold_deg(material)
 
     # Load triangles
     tris: list[_Triangle] = []
@@ -744,7 +754,6 @@ def assess_support_feasibility(
     # ---------------------------------------------------------------
     total_area = 0.0
     safe_area = 0.0
-    marginal_area = 0.0
     overhang_area = 0.0
 
     # (triangle, angle_deg, area_mm2) for overhangs
@@ -768,14 +777,11 @@ def assess_support_feasibility(
 
         if angle <= safe_deg:
             safe_area += area
-        elif angle <= max_deg:
-            marginal_area += area
-            overhang_tris.append((tri, angle, area))
         else:
             overhang_area += area
             overhang_tris.append((tri, angle, area))
 
-    total_overhang_area = marginal_area + overhang_area
+    total_overhang_area = overhang_area
     overhang_pct = (total_overhang_area / total_area * 100.0) if total_area > 0 else 0.0
 
     # ---------------------------------------------------------------
@@ -928,13 +934,15 @@ def assess_support_feasibility(
 
     # Build recommendations
     recommendations: list[str] = []
+    bridge_reason: str | None = None
     if needs_supports is None:
-        needs_supports, not_judged = _shared_verdict(
+        needs_supports, verdict_reason, not_judged = _shared_verdict(
             tris, stl_path, material=material,
             nozzle_diameter_mm=nozzle_diameter_mm, layer_height_mm=layer_height_mm,
         )
         if not_judged:
             warnings.append(not_judged)
+        bridge_reason = _bridge_part(verdict_reason)
 
     if needs_supports:
         recommendations.append(
@@ -952,15 +960,11 @@ def assess_support_feasibility(
                 f"Use {pairing} soluble supports — enclosed cavities require "
                 f"dissolvable supports"
             )
-        if bridge_regions:
-            max_bridge = max(r.estimated_bridge_mm for r in bridge_regions)
-            bridge_max = profile.get("bridge_max_mm", 100) * nozzle_factor
-            if max_bridge > bridge_max:
-                recommendations.append(
-                    f"Bridge span {max_bridge:.0f}mm exceeds material limit "
-                    f"({bridge_max:.0f}mm @ {nozzle_diameter_mm}mm nozzle) — "
-                    f"supports required under bridge"
-                )
+        if bridge_reason:
+            # The verdict's own bridge limit (kiln.printability), never a
+            # second one kept here: this table said PLA bridges 50 mm while
+            # the engine refused 30.
+            recommendations.append(f"Supports required under the bridge: {bridge_reason}")
         if orientation_suggestions:
             best = orientation_suggestions[0]
             recommendations.append(

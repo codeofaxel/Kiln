@@ -1,13 +1,9 @@
 {
   "_meta": {
-    "description": "Per-material support feasibility thresholds for FDM printing",
-    "version": "1.0.0"
+    "description": "Per-material support handling for FDM printing: removal, Z-gap and support-material pairings. Overhang angles and bridge limits live in kiln.printability, the one place Kiln judges them.",
+    "version": "1.1.0"
   },
   "pla": {
-    "overhang_safe_deg": 55,
-    "overhang_max_deg": 65,
-    "bridge_safe_mm": 50,
-    "bridge_max_mm": 150,
     "z_gap_multiplier": 1.0,
     "removal_difficulty": 2,
     "self_support_fuse_risk": "low",
@@ -16,10 +12,6 @@
     "cross_material_pairing": "PETG"
   },
   "petg": {
-    "overhang_safe_deg": 45,
-    "overhang_max_deg": 55,
-    "bridge_safe_mm": 20,
-    "bridge_max_mm": 60,
     "z_gap_multiplier": 1.5,
     "removal_difficulty": 4,
     "self_support_fuse_risk": "high",
@@ -28,10 +20,6 @@
     "cross_material_pairing": "PLA"
   },
   "abs": {
-    "overhang_safe_deg": 40,
-    "overhang_max_deg": 45,
-    "bridge_safe_mm": 30,
-    "bridge_max_mm": 80,
     "z_gap_multiplier": 1.0,
     "removal_difficulty": 3,
     "self_support_fuse_risk": "medium",
@@ -40,10 +28,6 @@
     "cross_material_pairing": null
   },
   "asa": {
-    "overhang_safe_deg": 40,
-    "overhang_max_deg": 45,
-    "bridge_safe_mm": 25,
-    "bridge_max_mm": 70,
     "z_gap_multiplier": 1.0,
     "removal_difficulty": 3,
     "self_support_fuse_risk": "medium",
@@ -52,10 +36,6 @@
     "cross_material_pairing": null
   },
   "pa": {
-    "overhang_safe_deg": 35,
-    "overhang_max_deg": 45,
-    "bridge_safe_mm": 15,
-    "bridge_max_mm": 50,
     "z_gap_multiplier": 1.25,
     "removal_difficulty": 4,
     "self_support_fuse_risk": "high",
@@ -64,10 +44,6 @@
     "cross_material_pairing": null
   },
   "tpu": {
-    "overhang_safe_deg": 45,
-    "overhang_max_deg": 55,
-    "bridge_safe_mm": 10,
-    "bridge_max_mm": 30,
     "z_gap_multiplier": 1.0,
     "removal_difficulty": 2,
     "self_support_fuse_risk": "low",
@@ -76,10 +52,6 @@
     "cross_material_pairing": null
   },
   "pc": {
-    "overhang_safe_deg": 35,
-    "overhang_max_deg": 40,
-    "bridge_safe_mm": 20,
-    "bridge_max_mm": 60,
     "z_gap_multiplier": 1.0,
     "removal_difficulty": 4,
     "self_support_fuse_risk": "medium",
