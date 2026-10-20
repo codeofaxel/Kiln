@@ -458,6 +458,11 @@ def server(monkeypatch):
     from kiln.plugins import printer_bench_tools as tool
 
     monkeypatch.setattr(tool, "PARK_SETTLE_S", 0.0)
+    # The plan is the caller's, never this machine's: a session runs on Free
+    # unless a test says otherwise.
+    import kiln.licensing as lic
+
+    monkeypatch.setattr(lic, "check_tier", lambda tier: (False, "free"))
     return SimpleNamespace(machine=machine, log=log, tool=tool)
 
 
@@ -682,16 +687,21 @@ class TestTheConversation:
         assert tool._payoff(session).endswith("The numbers stay on this machine.")
 
     def test_pro_is_asked_through_the_standard_gate(self, server, monkeypatch):
-        # The payoff asks kiln-pro's public, caller-aware check_pro -- a route
-        # the tier-seam audit can see -- and anything it cannot ask reads as free.
+        # The payoff asks the caller's plan through kiln.licensing -- the one
+        # route a plain install and kiln-pro share -- and anything it cannot
+        # read reads as free.
+        import kiln.licensing as lic
+
         tool = server.tool
-        gate = SimpleNamespace(check_pro=lambda feature="": None)
-        monkeypatch.setitem(sys.modules, "kiln_pro", SimpleNamespace(pro_gate=gate))
-        monkeypatch.setitem(sys.modules, "kiln_pro.pro_gate", gate)
+        monkeypatch.setattr(lic, "check_tier", lambda tier: (True, None))
         assert tool._has_pro() is True
-        gate.check_pro = lambda feature="": {"success": False, "error": "needs Pro"}
+        monkeypatch.setattr(lic, "check_tier", lambda tier: (False, "needs Pro"))
         assert tool._has_pro() is False
-        monkeypatch.setitem(sys.modules, "kiln_pro.pro_gate", None)
+
+        def unreadable(tier):
+            raise RuntimeError("plan unreadable")
+
+        monkeypatch.setattr(lic, "check_tier", unreadable)
         assert tool._has_pro() is False
 
     def test_nothing_observed_claims_nothing(self, server, monkeypatch):

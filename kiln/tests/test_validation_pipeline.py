@@ -16,6 +16,7 @@ from __future__ import annotations
 import struct
 from pathlib import Path
 from typing import Any
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -86,7 +87,17 @@ def _make_mock_printability(*, score: int = 85, grade: str = "B") -> MagicMock:
     report.score = score
     report.grade = grade
     report.recommendations = ["Consider adding a brim for better adhesion"]
-    report.thin_walls = []
+    # The verdict reads these as measurements, so they are real numbers: a
+    # part sitting flat on the bed with no wall thinner than the nozzle.
+    from kiln.printability import _PRINTABLE_SCORE_MIN
+
+    report.printable = score >= _PRINTABLE_SCORE_MIN
+    report.placement = None
+    report.nozzle = {"diameter_mm": 0.4}
+    report.bed_adhesion = SimpleNamespace(contact_area_mm2=400.0)
+    report.thin_walls = SimpleNamespace(problematic_regions=[], threshold_basis="nozzle", threshold_mm=0.4)
+    report.overhangs = SimpleNamespace(needs_supports=False, overhang_percentage=5.0)
+    report.bridging = SimpleNamespace(needs_supports_for_bridges=False)
     report.overhang_percentage = 5.0
     return report
 
