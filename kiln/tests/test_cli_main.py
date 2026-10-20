@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import os
+import sys
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
@@ -140,6 +142,57 @@ class TestHelp:
                      "printers", "use", "serve"]:
             result = runner.invoke(cli, [cmd, "--help"])
             assert result.exit_code == 0, f"{cmd} --help failed: {result.output}"
+
+
+class TestUtf8Streams:
+    """The banner carries a ``🤖``; a legacy-code-page (cp1252) stream must
+    render it or degrade it, never raise.  Windows consoles and pipes
+    default to cp1252 on US installs, and ``--help`` is answered during
+    argument parsing — before any callback — so the fix has to sit at the
+    group's own door, not only in ``main()``."""
+
+    def test_helper_tolerates_a_stream_without_reconfigure(self, monkeypatch):
+        from kiln.cli.main import _ensure_utf8_streams
+
+        class Bare:
+            encoding = "cp1252"
+
+        monkeypatch.setattr(sys, "stdout", Bare())
+        monkeypatch.setattr(sys, "stderr", io.StringIO())
+        _ensure_utf8_streams()  # nothing to reconfigure; must not raise
+
+    def test_helper_reconfigures_a_legacy_code_page_stream(self, monkeypatch):
+        from kiln.cli.main import _ensure_utf8_streams
+
+        out = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+        err = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="strict")
+        monkeypatch.setattr(sys, "stdout", out)
+        monkeypatch.setattr(sys, "stderr", err)
+        _ensure_utf8_streams()
+        assert out.encoding.lower() == "utf-8"
+        assert out.errors == "replace"
+        # Already UTF-8: left exactly as found.
+        assert err.errors == "strict"
+
+    def test_group_help_survives_a_cp1252_stdout(self, monkeypatch):
+        """Enter the group directly (not through ``main()``) with cp1252
+        streams, as a wrapper or ``python -c`` one-liner does."""
+        monkeypatch.setattr("kiln.skill_manifest.get_tool_count", lambda: 42)
+        raw = io.BytesIO()
+        out = io.TextIOWrapper(raw, encoding="cp1252")
+        monkeypatch.setattr(sys, "stdout", out)
+        monkeypatch.setattr(sys, "stderr", io.TextIOWrapper(io.BytesIO(), encoding="cp1252"))
+
+        code = cli.main(["--help"], prog_name="kiln", standalone_mode=False)
+        out.flush()
+
+        assert code == 0
+        assert "🤖" in raw.getvalue().decode("utf-8")
+
+    def test_help_text_encodes_under_cp1252_with_replace(self, runner):
+        result = runner.invoke(cli, ["--help"])
+        assert result.exit_code == 0
+        result.output.encode("cp1252", errors="replace")  # must not raise
 
 
 # ---------------------------------------------------------------------------
@@ -1503,11 +1556,6 @@ class TestLicenseCommands:
         assert result.exit_code == 0
         assert "Pro" in result.output
         assert "Active" in result.output or "valid" in result.output.lower()
-
-
-# ---------------------------------------------------------------------------
-# Fleet commands (kiln fleet status, kiln fleet register)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.skipif(

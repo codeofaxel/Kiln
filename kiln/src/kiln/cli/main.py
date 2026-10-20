@@ -1509,6 +1509,20 @@ class _DidYouMeanGroup(click.Group):
     asks for help.
     """
 
+    def main(self, *args: Any, **kwargs: Any) -> Any:
+        """Normalize stdout/stderr to UTF-8 before Click parses anything.
+
+        ``kiln.cli.main:main`` already does this for the console script,
+        but the group is also entered directly — ``cli()`` from a wrapper
+        or a ``python -c`` one-liner — and ``--help`` is answered during
+        argument parsing, before any callback runs.  On a cp1252 Windows
+        stream that door raised ``UnicodeEncodeError`` on the banner's
+        ``🤖`` (seen 2026-09-27), so the fix lives at the group's own door
+        and covers every way in.
+        """
+        _ensure_utf8_streams()
+        return super().main(*args, **kwargs)
+
     def format_help_text(
         self, ctx: click.Context, formatter: click.HelpFormatter
     ) -> None:
@@ -1778,6 +1792,12 @@ def _ensure_utf8_streams() -> None:
     Streams that already report UTF-8 — every normal macOS and Linux
     terminal — are left untouched, so this is a no-op outside the
     legacy-code-page case it exists to fix.
+
+    Streams without ``reconfigure`` (a wrapper, a bare ``StringIO``, a
+    replaced ``sys.stdout``) are left alone rather than re-wrapped: this
+    helper must never be the thing that breaks output.  ``errors`` is set
+    to ``replace`` at the same time, so a glyph that still cannot be
+    encoded degrades to ``?`` instead of a traceback.  Never raises.
     """
     for stream in (sys.stdout, sys.stderr):
         encoding = getattr(stream, "encoding", None)
@@ -1786,8 +1806,8 @@ def _ensure_utf8_streams() -> None:
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is None:
             continue
-        with contextlib.suppress(OSError, ValueError):
-            reconfigure(encoding="utf-8")
+        with contextlib.suppress(Exception):
+            reconfigure(encoding="utf-8", errors="replace")
 
 
 # ---------------------------------------------------------------------------

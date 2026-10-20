@@ -145,6 +145,8 @@ class TestRefreshExchange:
         )
         resolve_session_bearer()
         mode = (auth_home / ".kiln" / "auth_tokens.json").stat().st_mode
+        if os.name == "nt":
+            pytest.skip("NTFS has no owner-only mode bits; Windows reports 0o666 for every file")
         assert stat.S_IMODE(mode) == 0o600
 
     def test_near_expiry_token_refreshes_inside_margin(
@@ -283,6 +285,35 @@ class TestNetworkDegradation:
         assert resolve_session_bearer().state == "degraded"
 
 
+class TestStoredSessionState:
+    """The file-only reading a banner uses: the resolver's own two
+    no-network verdicts, and ``stored`` for everything it would hand out
+    or renew — never an exchange."""
+
+    def test_agrees_with_the_resolver_without_touching_the_network(
+        self, auth_home, monkeypatch
+    ):
+        _no_network(monkeypatch)
+
+        assert auth_session.stored_session_state() == "signed_out"
+        assert resolve_session_bearer().state == "signed_out"
+
+        _write_session(auth_home, refresh_token="", refresh_rejected_at="2026-09-27T20:40:00Z")
+        assert auth_session.stored_session_state() == "needs_signin"
+        assert resolve_session_bearer().state == "needs_signin"
+
+        _write_session(auth_home)
+        assert auth_session.stored_session_state() == "stored"
+        assert resolve_session_bearer().state == "live"
+
+    def test_an_expired_token_is_still_a_stored_session(self, auth_home, monkeypatch):
+        """Expiry on the clock is the resolver's business, and costs an
+        exchange — this reading must not pay it."""
+        _no_network(monkeypatch)
+        _write_session(auth_home, access_token=_jwt(time.time() - 10))
+        assert auth_session.stored_session_state() == "stored"
+
+
 class TestRefreshLockIsExclusive:
     """The lock itself — that two holders cannot overlap.
 
@@ -292,7 +323,7 @@ class TestRefreshLockIsExclusive:
     """
 
     def test_second_acquirer_blocks_while_lock_is_held(self, auth_home):
-        import fcntl
+        fcntl = pytest.importorskip("fcntl")
 
         lock_path = auth_session._tokens_path().with_suffix(".lock")
         with auth_session._refresh_lock():
@@ -307,7 +338,7 @@ class TestRefreshLockIsExclusive:
                 os.close(fd)
 
     def test_lock_released_after_exit(self, auth_home):
-        import fcntl
+        fcntl = pytest.importorskip("fcntl")
 
         lock_path = auth_session._tokens_path().with_suffix(".lock")
         with auth_session._refresh_lock():
@@ -318,6 +349,60 @@ class TestRefreshLockIsExclusive:
             fcntl.flock(fd, fcntl.LOCK_UN)
         finally:
             os.close(fd)
+
+    def test_windows_second_acquirer_blocks_while_lock_is_held(self, auth_home):
+        """Windows has no ``fcntl``; until 2026-09-27 the lock there was a
+        silent no-op, and six processes at the margin made six exchanges of
+        one refresh token (the race test below, run on Windows) — the reuse
+        Supabase answers by ending the whole session."""
+        msvcrt = pytest.importorskip("msvcrt")
+
+        lock_path = auth_session._tokens_path().with_suffix(".lock")
+        with auth_session._refresh_lock():
+            fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+            try:
+                with pytest.raises(OSError):
+                    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            finally:
+                os.close(fd)
+
+    def test_windows_lock_released_after_exit(self, auth_home):
+        msvcrt = pytest.importorskip("msvcrt")
+
+        lock_path = auth_session._tokens_path().with_suffix(".lock")
+        with auth_session._refresh_lock():
+            pass
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)  # must not raise
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        finally:
+            os.close(fd)
+
+    def test_without_fcntl_the_lock_is_taken_through_msvcrt(self, auth_home, monkeypatch):
+        """The two tests above only run on Windows.  This one runs anywhere:
+        with ``fcntl`` missing, as on Windows, the lock must be taken (and
+        given back) through ``msvcrt`` rather than silently skipped."""
+        import builtins
+        import sys
+        import types
+
+        calls: list[int] = []
+        fake = types.SimpleNamespace(
+            LK_NBLCK=2, LK_UNLCK=0, locking=lambda fd, mode, n: calls.append(mode)
+        )
+        monkeypatch.setitem(sys.modules, "msvcrt", fake)
+        real_import = builtins.__import__
+
+        def no_fcntl(name, *args, **kwargs):
+            if name == "fcntl":
+                raise ImportError("no fcntl here")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", no_fcntl)
+        with auth_session._refresh_lock():
+            assert calls == [fake.LK_NBLCK]
+        assert calls == [fake.LK_NBLCK, fake.LK_UNLCK]
 
 
 class TestPostLockRecheck:
@@ -470,7 +555,10 @@ class TestVerifyWithTheServer:
         once: the second finds the first's answer on file under the lock
         and makes no exchange of its own."""
         _write_session(auth_home)
-        fresh = _jwt(time.time() + 3600)
+        # A different ``exp`` on purpose: ``time.time()`` ticks at ~15 ms on
+        # Windows, and two tokens minted in the same tick are the SAME
+        # token, which reads as "nobody wrote" and pays the exchange.
+        fresh = _jwt(time.time() + 7200)
         import contextlib as _ctx
 
         @_ctx.contextmanager
@@ -612,3 +700,260 @@ class TestManyProcessesRefreshingAtOnce:
         assert endpoint.post("rt-original")[0] == 401  # two behind: the family ends
         assert endpoint.revoked
         assert endpoint.post("rt-2")[0] == 401  # and the active one with it
+
+
+# ---------------------------------------------------------------------------
+# Machine credentials: what a computer signed in by current Kiln holds
+# ---------------------------------------------------------------------------
+
+
+def _kmt(exp: float) -> str:
+    """A machine access token's shape: ``kmt_`` + header, claims, mac."""
+    seg = lambda d: base64.urlsafe_b64encode(  # noqa: E731
+        json.dumps(d).encode()
+    ).rstrip(b"=").decode()
+    return f"kmt_{seg({'alg': 'HS256', 'typ': 'kiln-machine+jwt'})}.{seg({'exp': exp, 'mid': 'KLN-TEST-0001'})}.mac"
+
+
+def _stored(auth_home) -> dict:
+    return json.loads((auth_home / ".kiln" / "auth_tokens.json").read_text())
+
+
+class _Api:
+    """The machine-credential routes, recorded: ``(path, body, bearer)``."""
+
+    def __init__(self, answers: dict[str, tuple[int, dict]]):
+        self.answers = answers
+        self.calls: list[tuple[str, dict, str]] = []
+
+    def __call__(self, path, body, *, bearer=""):
+        self.calls.append((path, dict(body), bearer))
+        return self.answers.get(path, (0, {}))
+
+
+class TestMachineCredential:
+    def test_the_clock_reads_a_machine_access_token(self):
+        assert abs(auth_session._seconds_to_expiry(_kmt(time.time() + 900)) - 900) < 5
+
+    def test_a_live_machine_token_needs_no_network(self, auth_home, monkeypatch):
+        _no_network(monkeypatch)
+        token = _kmt(time.time() + 900)
+        _write_session(auth_home, access_token=token, refresh_token="kms_KLN-TEST-0001.s1", credential="machine")
+        assert resolve_session_bearer() == SessionBearer(token=token, state="live")
+
+    def test_a_renewal_keeps_what_the_server_says_about_the_credential(self, auth_home, monkeypatch):
+        _write_session(auth_home, access_token=_kmt(time.time() + 30), refresh_token="kms_KLN-TEST-0001.s1",
+                       credential="machine", machine_id="KLN-TEST-0001")
+        fresh = _kmt(time.time() + 900)
+        monkeypatch.setattr(auth_session, "_post_refresh", lambda rt: (200, {
+            "access_token": fresh, "refresh_token": "kms_KLN-TEST-0001.s2",
+            "credential": "machine", "machine_id": "KLN-TEST-0001", "expires_in": 900,
+        }))
+        api = _Api({})
+        monkeypatch.setattr(auth_session, "_post_json", api)
+        result = resolve_session_bearer()
+        assert result == SessionBearer(token=fresh, state="refreshed")
+        stored = _stored(auth_home)
+        assert (stored["credential"], stored["machine_id"]) == ("machine", "KLN-TEST-0001")
+        assert stored["refresh_token"] == "kms_KLN-TEST-0001.s2"
+        assert api.calls == [], "a machine credential is never moved again"
+
+    @pytest.mark.parametrize("reason,words", [
+        ("machine_revoked", "removed from your Kiln account"),
+        ("machine_credential_reused", "used from two places at once"),
+        ("org_access_ended", "seat there has ended"),
+        ("account_disabled", "isn't active"),
+    ])
+    def test_an_ended_credential_says_why_and_keeps_saying_it_offline(self, auth_home, monkeypatch, reason, words):
+        _write_session(auth_home, access_token=_kmt(time.time() + 30), refresh_token="kms_KLN-TEST-0001.s1",
+                       credential="machine")
+        monkeypatch.setattr(auth_session, "_post_refresh", lambda rt: (401, {
+            "error": "invalid_refresh_token", "reason": reason, "message": "server words",
+        }))
+        first = resolve_session_bearer()
+        assert first.state == "needs_signin" and words in first.detail
+        assert _stored(auth_home)["refresh_rejected_reason"] == reason
+        _no_network(monkeypatch)
+        again = resolve_session_bearer()
+        assert again.state == "needs_signin" and words in again.detail
+        assert auth_session.stored_session_state() == "needs_signin"
+
+    def test_an_unknown_reason_reads_as_an_expired_session(self, auth_home, monkeypatch):
+        _write_session(auth_home, access_token=_kmt(time.time() + 30), refresh_token="kms_KLN-TEST-0001.s1",
+                       credential="machine")
+        monkeypatch.setattr(auth_session, "_post_refresh", lambda rt: (401, {"reason": "machine_credential_unknown"}))
+        assert "expired" in resolve_session_bearer().detail
+
+    def test_a_store_outage_is_not_a_verdict(self, auth_home, monkeypatch):
+        token = _kmt(time.time() + 30)
+        _write_session(auth_home, access_token=token, refresh_token="kms_KLN-TEST-0001.s1", credential="machine")
+        monkeypatch.setattr(auth_session, "_post_refresh", lambda rt: (503, {
+            "error": "auth_upstream_unavailable", "reason": "auth_upstream_unavailable", "retryable": True,
+        }))
+        assert resolve_session_bearer() == SessionBearer(token=token, state="degraded")
+        assert _stored(auth_home)["refresh_token"] == "kms_KLN-TEST-0001.s1"
+
+
+class TestMovingAnOlderSession:
+    """A session written by an older Kiln moves onto a machine credential
+    right after its next renewal, and only once both are safely on disk."""
+
+    def _renewing(self, auth_home, monkeypatch):
+        _write_session(auth_home, access_token=_jwt(time.time() + 30))
+        renewed = _jwt(time.time() + 3600)
+        monkeypatch.setattr(auth_session, "_post_refresh", lambda rt: (200, {
+            "access_token": renewed, "refresh_token": "rt-2",
+        }))
+        return renewed
+
+    def test_a_renewed_session_moves_onto_a_machine_credential(self, auth_home, monkeypatch):
+        renewed = self._renewing(auth_home, monkeypatch)
+        machine = _kmt(time.time() + 900)
+        api = _Api({"/api/auth/machine/upgrade": (200, {
+            "success": True, "credential": "machine", "machine_id": "KLN-OLDM-ACH1",
+            "access_token": machine, "refresh_token": "kms_KLN-OLDM-ACH1.s1", "expires_in": 900,
+        })})
+        monkeypatch.setattr(auth_session, "_post_json", api)
+        result = resolve_session_bearer()
+        assert result == SessionBearer(token=machine, state="refreshed")
+        (path, body, bearer), = api.calls
+        assert path == "/api/auth/machine/upgrade"
+        assert bearer == renewed, "the move is asked with the freshly renewed session"
+        assert body["machine_label"]
+        stored = _stored(auth_home)
+        assert (stored["credential"], stored["machine_id"]) == ("machine", "KLN-OLDM-ACH1")
+        assert stored["refresh_token"] == "kms_KLN-OLDM-ACH1.s1"
+        assert stored["email"] == "user@example.com", "the rest of the record stays"
+
+    @pytest.mark.parametrize("status,reason", [
+        (403, "not_a_machine_session"), (403, "reapproval_required"), (409, "already_upgraded"),
+    ])
+    def test_a_final_refusal_stays_on_the_session_and_is_not_asked_again(self, auth_home, monkeypatch, status, reason):
+        renewed = self._renewing(auth_home, monkeypatch)
+        api = _Api({"/api/auth/machine/upgrade": (status, {"reason": reason})})
+        monkeypatch.setattr(auth_session, "_post_json", api)
+        assert resolve_session_bearer() == SessionBearer(token=renewed, state="refreshed")
+        stored = _stored(auth_home)
+        assert stored["machine_upgrade_refused"] == reason
+        assert "credential" not in stored
+        # The next renewal does not ask again.
+        stored["access_token"] = _jwt(time.time() + 30)
+        (auth_home / ".kiln" / "auth_tokens.json").write_text(json.dumps(stored))
+        resolve_session_bearer()
+        assert len(api.calls) == 1
+
+    def test_a_move_that_could_not_be_asked_is_tried_at_the_next_renewal(self, auth_home, monkeypatch):
+        renewed = self._renewing(auth_home, monkeypatch)
+        api = _Api({"/api/auth/machine/upgrade": (503, {"retryable": True})})
+        monkeypatch.setattr(auth_session, "_post_json", api)
+        assert resolve_session_bearer() == SessionBearer(token=renewed, state="refreshed")
+        assert "machine_upgrade_refused" not in _stored(auth_home)
+
+    def test_a_credential_that_cannot_be_written_is_not_used(self, auth_home, monkeypatch):
+        """Its first use would end the session it replaces; if it is not on
+        disk, the next process would find only that ended session."""
+        renewed = self._renewing(auth_home, monkeypatch)
+        api = _Api({"/api/auth/machine/upgrade": (200, {
+            "credential": "machine", "machine_id": "KLN-OLDM-ACH1",
+            "access_token": _kmt(time.time() + 900), "refresh_token": "kms_KLN-OLDM-ACH1.s1",
+        })})
+        monkeypatch.setattr(auth_session, "_post_json", api)
+        real_write = auth_session._write_tokens
+        writes = {"n": 0}
+
+        def second_write_fails(data):
+            writes["n"] += 1
+            if writes["n"] == 2:
+                raise OSError("disk full")
+            real_write(data)
+
+        monkeypatch.setattr(auth_session, "_write_tokens", second_write_fails)
+        assert resolve_session_bearer() == SessionBearer(token=renewed, state="refreshed")
+        assert "credential" not in _stored(auth_home)
+
+
+class TestSigningOut:
+    def test_signing_out_removes_the_computer_with_its_secret(self, auth_home, monkeypatch):
+        _write_session(auth_home, access_token=_kmt(time.time() + 900), refresh_token="kms_KLN-TEST-0001.s1",
+                       credential="machine")
+        api = _Api({"/api/auth/machine/revoke": (200, {"success": True, "revoked": True})})
+        monkeypatch.setattr(auth_session, "_post_json", api)
+        assert auth_session.revoke_machine_credential() is True
+        assert api.calls == [("/api/auth/machine/revoke", {"refresh_token": "kms_KLN-TEST-0001.s1"}, "")]
+
+    def test_a_session_has_nothing_to_remove(self, auth_home, monkeypatch):
+        _write_session(auth_home)
+        api = _Api({})
+        monkeypatch.setattr(auth_session, "_post_json", api)
+        assert auth_session.revoke_machine_credential() is False
+        assert api.calls == []
+
+    def test_an_unreachable_server_says_so(self, auth_home):
+        _write_session(auth_home, access_token=_kmt(time.time() + 900), refresh_token="kms_KLN-TEST-0001.s1",
+                       credential="machine")
+        assert auth_session.revoke_machine_credential() is False  # the suite's stub: unreachable
+
+
+class TestSignInRequest:
+    def test_a_sign_in_door_asks_for_this_computers_own_credential(self):
+        body = auth_session.machine_signin_request("Claude Code", label="shop-pc")
+        assert body == {"credential": "machine", "machine_label": "shop-pc", "client_name": "Claude Code"}
+        assert "client_name" not in auth_session.machine_signin_request("", label="x")
+        assert auth_session.machine_signin_request()["machine_label"]
+
+    def test_only_a_machine_credential_is_recorded_as_one(self):
+        assert auth_session.credential_fields({"credential": "machine", "machine_id": "KLN-A"}) == {
+            "credential": "machine", "machine_id": "KLN-A",
+        }
+        assert auth_session.credential_fields({"access_token": "eyJ..."}) == {}
+
+
+class TestARenewalThatCannotBeSaved:
+    def test_a_machine_credential_is_not_used_until_it_is_on_disk(self, auth_home, monkeypatch):
+        """Used while the old secret is still on disk, the next renewal would
+        present that old secret after the new pair was in use: a copy, to the
+        server, which ends the credential.  Unused, the server hands the same
+        renewed pair back at the next attempt."""
+        old = _kmt(time.time() + 120)
+        _write_session(auth_home, access_token=old, refresh_token="kms_KLN-TEST-0001.s1", credential="machine")
+        monkeypatch.setattr(auth_session, "_post_refresh", lambda rt: (200, {
+            "access_token": _kmt(time.time() + 900), "refresh_token": "kms_KLN-TEST-0001.s2",
+            "credential": "machine", "machine_id": "KLN-TEST-0001",
+        }))
+
+        def disk_full(data):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(auth_session, "_write_tokens", disk_full)
+        result = resolve_session_bearer(refresh_margin_s=300)
+        assert result == SessionBearer(token=old, state="degraded")
+        assert _stored(auth_home)["refresh_token"] == "kms_KLN-TEST-0001.s1"
+
+    def test_the_current_one_is_the_one_on_disk_after_the_lock(self, auth_home, monkeypatch):
+        """A rival process may renew while this one waits on the lock.  When
+        this renewal then cannot be saved, "the current one" is the rival's
+        pair on disk, not the older token this call started from."""
+        import contextlib as _ctx
+
+        old = _kmt(time.time() + 120)
+        rivals = _kmt(time.time() + 200)
+        _write_session(auth_home, access_token=old, refresh_token="kms_KLN-TEST-0001.s1", credential="machine")
+
+        @_ctx.contextmanager
+        def lock_then_rival_renews():
+            _write_session(auth_home, access_token=rivals, refresh_token="kms_KLN-TEST-0001.s2",
+                           credential="machine")
+            yield
+
+        monkeypatch.setattr(auth_session, "_refresh_lock", lock_then_rival_renews)
+        monkeypatch.setattr(auth_session, "_post_refresh", lambda rt: (200, {
+            "access_token": _kmt(time.time() + 900), "refresh_token": "kms_KLN-TEST-0001.s3",
+            "credential": "machine", "machine_id": "KLN-TEST-0001",
+        }))
+
+        def disk_full(data):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(auth_session, "_write_tokens", disk_full)
+        result = resolve_session_bearer(refresh_margin_s=300)
+        assert result == SessionBearer(token=rivals, state="degraded")

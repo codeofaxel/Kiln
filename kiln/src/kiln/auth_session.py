@@ -41,6 +41,18 @@ own reuse-grace window covers cross-machine races.
 Failure backoff: when the refresh endpoint is unreachable we remember
 the failure for ``_REFRESH_RETRY_INTERVAL_S`` and skip re-attempts, so
 an offline machine doesn't pay a network timeout on every tool call.
+
+Machine credentials.  A computer signed in by current Kiln holds a
+credential Kiln issued to it (``"credential": "machine"`` in the token
+file): an access token of about fifteen minutes and a refresh secret,
+renewed through the same route.  Unlike a person's session, nothing done
+in a browser ends it — verifying a code, signing in elsewhere — so the
+computer stays signed in until it is removed at app.kiln3d.com/settings/agent,
+signs itself out (``kiln signout``), or its secret is found in use in two
+places.  When the server ends it, the reason is kept beside the verdict and
+the person is told which of those happened.  A session written by an older
+Kiln moves onto a machine credential right after its next renewal, with
+nothing for the person to do.
 """
 
 from __future__ import annotations
@@ -61,7 +73,16 @@ logger = logging.getLogger(__name__)
 
 _HOSTED_API_URL = "https://api.kiln3d.com"
 _REFRESH_ROUTE = "/api/auth/refresh"
+_MACHINE_UPGRADE_ROUTE = "/api/auth/machine/upgrade"
+_MACHINE_REVOKE_ROUTE = "/api/auth/machine/revoke"
 _HTTP_TIMEOUT_S = 8.0
+
+#: ``credential`` in the token file for a Kiln-issued machine credential.
+MACHINE_CREDENTIAL = "machine"
+#: Refusals of the move onto a machine credential that will not change by
+#: asking again: the session is not a machine's own, the machine must be
+#: signed in again for its plan, or it already holds one elsewhere.
+_UPGRADE_FINAL = frozenset({"not_a_machine_session", "reapproval_required", "already_upgraded"})
 
 # Refresh when the access token has less than this long to live.  Access
 # tokens live ~3600 s; a 300 s margin means one refresh per hour of use
@@ -165,9 +186,13 @@ def _seconds_to_expiry(token: str, now: float | None = None) -> float:
 def _refresh_lock():
     """Serialize the refresh exchange across processes on this machine.
 
-    Advisory ``flock`` on a sibling lockfile.  On platforms/filesystems
-    without flock the lock degrades to a no-op — Supabase's refresh
-    reuse-grace window still absorbs the rare race.
+    Advisory ``flock`` on a sibling lockfile; a byte-range lock through
+    ``msvcrt`` on Windows, where there is no ``fcntl`` and the first draft
+    silently held nothing — every Kiln process at the margin (MCP server,
+    bridge daemon, CLI) exchanged the same refresh token at once, which is
+    the reuse Supabase answers by ending the whole session.  On
+    filesystems where neither can be taken the lock degrades to a no-op —
+    Supabase's refresh reuse-grace window still absorbs the rare race.
     """
     lock_path = _tokens_path().with_suffix(".lock")
     try:
@@ -176,16 +201,55 @@ def _refresh_lock():
     except OSError:
         yield
         return
+    locked_windows = False
     try:
         try:
             import fcntl
 
             fcntl.flock(fd, fcntl.LOCK_EX)
-        except (ImportError, OSError):
+        except ImportError:
+            locked_windows = _lock_windows(fd)
+        except OSError:
             pass
         yield
     finally:
+        if locked_windows:
+            with contextlib.suppress(Exception):
+                import msvcrt
+
+                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
         os.close(fd)
+
+
+# How long a Windows waiter polls for the lock before going ahead without
+# it: comfortably past one refresh exchange (``_HTTP_TIMEOUT_S``) so a
+# waiter normally finds the winner's pair on its re-read, and bounded so
+# a dead holder can never wedge every process on the machine.
+_WINDOWS_LOCK_WAIT_S = 15.0
+
+
+def _lock_windows(fd: int) -> bool:
+    """Take an exclusive byte-range lock on *fd*; ``False`` if it can't be.
+
+    ``msvcrt.locking`` retries a blocking take only once a second and gives
+    up after ten, so this polls the non-blocking form instead: fine-grained
+    enough that a waiter is through within milliseconds of the winner's
+    release.  Locks are per handle on Windows, so separate descriptors —
+    separate processes, or threads holding their own — exclude each other.
+    """
+    try:
+        import msvcrt
+    except ImportError:
+        return False
+    deadline = time.monotonic() + _WINDOWS_LOCK_WAIT_S
+    while True:
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            return True
+        except OSError:
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.02)
 
 
 def _post_refresh(refresh_token: str) -> tuple[int, dict]:
@@ -224,10 +288,126 @@ def _signin_hint(stored: dict) -> str:
     hosted call, so it is read by someone who was in the middle of making
     something.  The command belongs in the agent-addressed field those two
     responses carry alongside it, not here.
-    """
-    from kiln.tiers_and_terms import session_expired_message
 
-    return session_expired_message(str(stored.get("email") or ""))
+    A machine credential the server ended says why — removed from the
+    account, found in use in two places, an organization seat that ended —
+    because "your session expired" would be untrue for all three.
+    """
+    from kiln.tiers_and_terms import machine_signin_ended_message, session_expired_message
+
+    email = str(stored.get("email") or "")
+    reason = str(stored.get("refresh_rejected_reason") or "")
+    if reason:
+        ended = machine_signin_ended_message(reason, email)
+        if ended:
+            return ended
+    return session_expired_message(email)
+
+
+def holds_machine_credential(stored: dict | None = None) -> bool:
+    """Whether this computer signs in with a Kiln-issued machine credential
+    (rather than a session from an older Kiln).  Reads the file; no network."""
+    stored = _read_tokens() if stored is None else stored
+    return str(stored.get("credential") or "") == MACHINE_CREDENTIAL
+
+
+def machine_label() -> str:
+    """How this computer is named on app.kiln3d.com/settings/agent: its host
+    name without a zeroconf suffix.  Never raises."""
+    try:
+        import socket
+
+        name = socket.gethostname()
+        for suffix in (".local", ".lan", ".home"):
+            if name.endswith(suffix):
+                name = name[: -len(suffix)]
+        return name or "this machine"
+    except Exception:  # noqa: BLE001 — a name is furniture
+        return "this machine"
+
+
+def machine_signin_request(client_name: str = "", label: str | None = None) -> dict:
+    """What a sign-in door (``kiln signin``, ``kiln pair``, the in-chat
+    sign-in) asks the server for: a machine credential of this computer's
+    own, under the name /settings/agent will list it by.  A server that
+    predates machine credentials ignores the ask and returns a session."""
+    body = {"credential": MACHINE_CREDENTIAL, "machine_label": label or machine_label()}
+    if client_name:
+        body["client_name"] = client_name
+    return body
+
+
+def credential_fields(response: dict) -> dict:
+    """The token-file fields a sign-in or renewal response says about the
+    credential: ``credential`` and ``machine_id`` for a machine credential,
+    nothing for a session."""
+    if str(response.get("credential") or "") != MACHINE_CREDENTIAL:
+        return {}
+    fields = {"credential": MACHINE_CREDENTIAL}
+    if response.get("machine_id"):
+        fields["machine_id"] = str(response["machine_id"])
+    return fields
+
+
+def _post_json(path: str, body: dict, *, bearer: str = "") -> tuple[int, dict]:
+    """POST to the Kiln API; ``(0, {})`` when it cannot be reached.  Never raises."""
+    try:
+        import requests
+    except ImportError:
+        return 0, {}
+    headers = {"Authorization": f"Bearer {bearer}"} if bearer else None
+    try:
+        resp = requests.post(f"{_api_base()}{path}", json=body, headers=headers, timeout=_HTTP_TIMEOUT_S)
+    except requests.RequestException:
+        return 0, {}
+    try:
+        parsed = resp.json()
+    except ValueError:
+        parsed = {}
+    return resp.status_code, parsed if isinstance(parsed, dict) else {}
+
+
+def _moved_onto_machine_credential(stored: dict) -> dict | None:
+    """Move a session from an older Kiln onto a machine credential, right
+    after it renewed.  The token file to write when the server issued one;
+    ``None`` to stay on the session (nothing lost — the session carries on).
+
+    Only the server can tell a machine's own session from anything else,
+    and it refuses anything else.  A refusal that asking again cannot
+    change is remembered, so an hourly renewal does not ask forever; a
+    network failure is simply tried at the next renewal.  A retry before
+    the credential is first used gets the same one back, so a response lost
+    here costs nothing.
+    """
+    if stored.get("machine_upgrade_refused"):
+        return None
+    status, body = _post_json(
+        _MACHINE_UPGRADE_ROUTE, {"machine_label": machine_label()}, bearer=str(stored.get("access_token") or ""),
+    )
+    if status == 200 and body.get("access_token") and body.get("refresh_token"):
+        moved = dict(stored)
+        moved["access_token"] = str(body["access_token"])
+        moved["refresh_token"] = str(body["refresh_token"])
+        moved.update(credential_fields(body) or {"credential": MACHINE_CREDENTIAL})
+        moved["machine_credential_since"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        return moved
+    reason = str(body.get("reason") or "")
+    if status in (403, 409) and reason in _UPGRADE_FINAL:
+        stored["machine_upgrade_refused"] = reason
+    return None
+
+
+def revoke_machine_credential() -> bool:
+    """End this computer's machine credential on the server — ``kiln
+    signout`` — so it leaves app.kiln3d.com/settings/agent instead of lingering
+    there with nobody holding it.  Possession of the secret is the proof.
+    ``True`` when the server ended a live credential.  Never raises."""
+    stored = _read_tokens()
+    secret = str(stored.get("refresh_token") or "")
+    if not holds_machine_credential(stored) or not secret:
+        return False
+    status, body = _post_json(_MACHINE_REVOKE_ROUTE, {"refresh_token": secret})
+    return status == 200 and bool(body.get("revoked"))
 
 
 def _rejected_verdict(stored: dict) -> SessionBearer | None:
@@ -290,6 +470,26 @@ def session_rejected(stored: dict | None = None) -> bool:
     this, and stops honouring a paid tier cached by a session that ended).
     """
     return _rejected_verdict(_read_tokens() if stored is None else stored) is not None
+
+
+def stored_session_state() -> str:
+    """What the token file alone says about the session — never the network.
+
+    ``signed_out`` and ``needs_signin`` exactly as :func:`resolve_session_bearer`
+    answers them (it decides both from the file before any exchange), and
+    ``stored`` for a session it would hand out or renew on its next call.
+    For a start-up banner or a status line that must say where things stand
+    without paying a refresh to find out: a ``kiln serve`` launched on a
+    day-old token used to read the email off the file and call itself
+    signed in even when the verdict beside that email said the opposite
+    (2026-09-27).  Never raises.
+    """
+    stored = _read_tokens()
+    if not str(stored.get("access_token") or "").strip():
+        return "signed_out"
+    if _rejected_verdict(stored) is not None:
+        return "needs_signin"
+    return "stored"
 
 
 def resolve_session_bearer(
@@ -375,9 +575,24 @@ def resolve_session_bearer(
             merged["refreshed_at"] = time.strftime(
                 "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
             )
+            merged.update(credential_fields(body))
             try:
                 _write_tokens(merged)
             except OSError:
+                if holds_machine_credential(merged):
+                    # Not used until it is on disk.  Unused, the renewed pair
+                    # is simply handed back at the next renewal; used while
+                    # the old secret is still on disk, it would make that
+                    # renewal look like a copy of this computer's sign-in,
+                    # which Kiln ends.
+                    logger.warning(
+                        "auth_session: this computer's renewed sign-in could not be "
+                        "written to %s; still using the current one.", _tokens_path(),
+                    )
+                    _note_network_failure()
+                    # The current one is what is on disk: a rival may have
+                    # renewed while this call waited on the lock.
+                    return SessionBearer(token=current or token, state="degraded")
                 # Unpersistable rotation is worth a loud line: the NEXT
                 # refresh will fail (old token rotated away) and force a
                 # re-signin.  The returned token is still good now.
@@ -386,6 +601,25 @@ def resolve_session_bearer(
                     "to %s — next refresh will require `kiln signin`.",
                     _tokens_path(),
                 )
+                return SessionBearer(token=merged["access_token"], state="refreshed")
+            if not holds_machine_credential(merged):
+                # A session from an older Kiln: now that its renewal is safely
+                # on disk, move it onto a machine credential.  The credential
+                # is used only once IT is on disk too — its first use ends the
+                # session it replaced.
+                moved = _moved_onto_machine_credential(merged)
+                if moved is not None:
+                    try:
+                        _write_tokens(moved)
+                        return SessionBearer(token=moved["access_token"], state="refreshed")
+                    except OSError:
+                        logger.warning(
+                            "auth_session: this computer's machine sign-in could not be "
+                            "written to %s; staying on its session for now.", _tokens_path(),
+                        )
+                elif merged.get("machine_upgrade_refused"):
+                    with contextlib.suppress(OSError):
+                        _write_tokens(merged)
             return SessionBearer(token=merged["access_token"], state="refreshed")
 
         if status in (400, 401):
@@ -406,6 +640,11 @@ def resolve_session_bearer(
             merged["refresh_rejected_at"] = time.strftime(
                 "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
             )
+            # Why, when the server said (a machine credential always does):
+            # the person is told that, not "your session expired".
+            reason = str(body.get("reason") or "").strip()
+            if reason:
+                merged["refresh_rejected_reason"] = reason[:64]
             try:
                 _write_tokens(merged)
             except OSError:
@@ -418,7 +657,7 @@ def resolve_session_bearer(
                     _tokens_path(),
                 )
             return SessionBearer(
-                token="", state="needs_signin", detail=_signin_hint(stored)
+                token="", state="needs_signin", detail=_signin_hint(merged)
             )
 
         # Unreachable / 5xx / rate-limited: keep the stored token in

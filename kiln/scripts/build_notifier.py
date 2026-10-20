@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Build what shows Kiln's print codes as Kiln: ``Kiln.app`` and ``Kiln.png``.
+"""Build what shows Kiln's print codes as Kiln: ``Kiln.app``, ``Kiln.png`` and ``Kiln.ico``.
 
 Writes ``kiln/src/kiln/data/notifier/Kiln.app`` and, for Windows toasts,
-``Kiln.png`` beside it.  The app is the native helper built from
+``Kiln.png`` and ``Kiln.ico`` beside it.  The app is the native helper built from
 ``kiln/native/notifier/main.swift`` for both Mac chip families, its icon, and
 its Info.plist, signed ad hoc.  macOS lets an app post a notification only
 after the person allows it, and only a native app can ask; a banner posted
@@ -39,6 +39,13 @@ SOURCE = PACKAGE / "native" / "notifier" / "main.swift"
 APP = PACKAGE / "src" / "kiln" / "data" / "notifier" / "Kiln.app"
 #: The same mark as a picture, for Windows: the icon its toasts show for Kiln.
 PNG = APP.parent / "Kiln.png"
+#: The same mark as a Windows icon file.  The Action Center draws the small
+#: icon beside "Kiln" only from a real ``.ico`` with small bitmap entries; a
+#: PNG registered there, at any size, falls back to the generic app glyph
+#: (measured 2026-09-27 on Windows 10 22H2).  ``screen_code`` registers this
+#: file and keeps the PNG as the fallback for a package without it.
+ICO = APP.parent / "Kiln.ico"
+ICO_SIZES = (16, 24, 32, 48)
 PNG_SIZE = 256
 EXECUTABLE = "kiln-notifier"
 BUNDLE_ID = "com.kiln3d.notifier"
@@ -216,6 +223,12 @@ def main() -> int:
         APP.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(staged, APP, symlinks=True)
     draw(PNG_SIZE).save(PNG)
+    # Bitmap entries, not PNG-compressed ones: the shell's icon loader read
+    # the bitmap form and showed the placeholder for the PNG form.
+    draw(ICO_SIZES[-1]).save(
+        ICO, format="ICO", sizes=[(s, s) for s in ICO_SIZES], bitmap_format="bmp",
+        append_images=[draw(s) for s in ICO_SIZES[:-1]],
+    )
     for stale in (APP.parent / "Kiln.icns",):
         if stale.exists():
             stale.unlink()
