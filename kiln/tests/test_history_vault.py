@@ -1297,7 +1297,8 @@ class TestALockedDesignStaysHere:
     def test_a_feature_pushed_for_a_locked_design_leaves_the_designs_name_here(self, home, monkeypatch):
         vault = _vault(home)
         vault._lib_put("features", "branch", "fb1", "f1", {"branch_id": "fb1", "feature_id": "f1", "name": "main"})
-        vault._lib_put("features", "version", "fv1", "f1", {"feature_version_id": "fv1", "feature_id": "f1"})
+        vault._lib_put("features", "version", "fv1", "f1",
+                       {"feature_version_id": "fv1", "feature_id": "f1", "design_id": "mug"})
         vault._lib_put("features", "membership", "fb1:fv1", "f1",
                        {"branch_id": "fb1", "feature_version_id": "fv1", "position": 0})
         vault._conn.commit()
@@ -1311,8 +1312,10 @@ class TestALockedDesignStaysHere:
 
         assert locked["status"] == "success"
         assert sent[0]["design_id"] is None and sent[0]["versions"]
+        assert "mug" not in str(sent[0])          # nor on the feature's own records
         assert "mug is locked to this computer" in locked["design_left_out"]
-        assert sent[1]["design_id"] == "bowl" and "design_left_out" not in open_
+        assert sent[1]["design_id"] == "bowl" and "mug" not in str(sent[1])
+        assert "mug is locked" in open_["design_left_out"]   # its own record named mug
 
     def test_the_history_log_push_leaves_a_locked_designs_entries_here(self, home):
         vault = _vault(home)
