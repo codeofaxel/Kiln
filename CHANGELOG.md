@@ -225,6 +225,27 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   Free at home; from anywhere through Kiln is Pro. See
   https://kiln3d.com/pricing.
 
+- **Kiln can walk you through a cold pull.** The temperatures for your exact
+  printer, the moment to stop pulling, and what a clean pull looks like — plus
+  what maintenance is actually due and why a hot end clogs in the first place.
+  *Free covers the steps that keep you safe; Kiln Pro adds the procedures and the
+  intervals.* See https://kiln3d.com/pricing.
+
+- **Find out whether your printer watches for fire.** Which models have flame
+  detection or can drive an extinguisher, what sets it off, and what the printer
+  does about it — the alarm, the fans cut to slow it, the laser parked.
+
+- **Your AMS can answer questions now.** Why filament won't unload after a power
+  cut, how hot a unit can safely dry, and what a critical code means — including
+  the one that says switch the power off. *Free covers the safety answers; Kiln
+  Pro adds the full capacity, LED and code reference.* See
+  https://kiln3d.com/pricing.
+
+- **Find out which failures your printer catches on its own.** Whether your exact
+  model has spaghetti, clumping or air-printing detection — and, where Bambu
+  documents it, the firmware it needs and the print modes that silently switch
+  it off.
+
 ### Changed
 
 - **A part with pieces floating in mid-air is no longer made.** If the code for a part leaves a piece hanging above the bed, Kiln refuses it and says how far that piece is from the rest, so a broken design never reaches the preview or the printer. Separate parts sitting on the bed, and a piece held inside the part, are still made.
@@ -688,6 +709,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Saving a model again updates what you told Kiln about it.** Re-saving a
   file already in your library kept the original notes and quietly ignored
   new tags or a better prompt; it now takes the new ones.
+
+- **A P1 was told it couldn't spot a failed print.** The P1P and P1S both catch
+  spaghetti and purge-chute pile-ups; Kiln said they had neither.
 
 ### Security
 
