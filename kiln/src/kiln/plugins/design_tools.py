@@ -52,6 +52,29 @@ _TEMPLATE_LIBRARY_GUIDANCE = (
 )
 
 
+def _load_figure_miss(material: str, miss: Any) -> dict[str, Any]:
+    """The answer when no load figure came back: the part is unchecked for
+    the weight it will carry, and the reason, never a figure or a yes."""
+    from kiln import served_answer
+
+    text = served_answer.sentence(
+        miss,
+        feature="servers",
+        on_the_line=f"A load figure says how much weight this {material} part can carry",
+        cannot="size this part",
+        wont="gives no load figure: treat the part as unchecked for the weight it will carry, never as able to hold it",
+        then="ask again",
+    )
+    return {
+        "success": False,
+        "load_checked": False,
+        "code": "LOAD_FIGURES_UNAVAILABLE",
+        "error": text,
+        "retryable": miss.cause != "refused",
+        **served_answer.fields(miss),
+    }
+
+
 class _DesignToolsPlugin:
     """Design intelligence tools — knowledge, constraints, recommendations.
 
@@ -393,22 +416,17 @@ class _DesignToolsPlugin:
                     result.get("material") or result.get("recommended_material")
                 )
 
-                # Food-safety overlay (kiln-pro feature; free-tier silently skips):
-                # when the requirements imply food / pet / mouth contact,
-                # warn or override if the top pick isn't food_safe and limit
-                # the alternatives list to food-safe options.
-                try:
-                    from kiln_pro.material_safety import (  # noqa: WPS433
-                        assess_food_safety,
-                        filter_materials_by_food_safety,
-                        use_case_implies_food_contact,
-                    )
-                except ImportError:
-                    use_case_implies_food_contact = None  # type: ignore[assignment]
-                if (
-                    use_case_implies_food_contact is not None
-                    and use_case_implies_food_contact(requirements)
-                ):
+                # Food-safety floor: when the requirements imply food, drink,
+                # mouth or pet contact, override a top pick rated not food
+                # safe and keep only alternatives the rating allows.  Public
+                # Kiln's rating and detector, so every install says the same.
+                from kiln.material_safety import (
+                    assess_food_safety,
+                    filter_food_safe_materials,
+                    use_case_implies_food_contact,
+                )
+
+                if use_case_implies_food_contact(requirements):
                     result["food_contact_use_case_detected"] = True
                     if primary_slug:
                         verdict = assess_food_safety(primary_slug)
@@ -435,7 +453,7 @@ class _DesignToolsPlugin:
                     if raw_alts and isinstance(raw_alts, list):
                         slugs = [_slug(a) for a in raw_alts]
                         safe_set = set(
-                            filter_materials_by_food_safety(
+                            filter_food_safe_materials(
                                 [s for s in slugs if s], require="yes_or_conditional"
                             )
                         )
@@ -543,20 +561,28 @@ class _DesignToolsPlugin:
         ) -> dict:
             """Estimate safe structural load for a cantilevered section.
 
+            The figure is Kiln Pro's (https://kiln3d.com/pricing), worked
+            out for this one part -- strength, sag and the arm's own weight,
+            for any length of arm and size of section; below Pro the answer
+            says the load was not checked.  A part whose arm cannot hold its
+            own weight gets no figure: ``load_checked`` is false and
+            ``message`` says why.  When the figure cannot be had (offline,
+            signed out, no answer) the answer says why and that the part is
+            unchecked.
+
             Args:
                 material: Material ID (e.g. "petg", "nylon", "polycarbonate").
                 cross_section_mm2: Effective load-bearing cross section in mm^2.
                 cantilever_length_mm: Cantilever length in mm.
                 load_across_layers: True when the load pulls the layer
                     interfaces apart (load along the build/Z direction —
-                    the WEAK direction for FDM; capacity is derated).
+                    the WEAK direction for FDM, so the figure is lower).
                     False when the load acts within the layer planes
                     (e.g. a bracket printed lying flat — the strong
-                    direction; full table value). If unsure, leave True:
-                    it is the conservative default.
+                    direction). If unsure, leave True: it is the
+                    conservative default.
             """
-            from kiln.account_plan import LicenseTier, check_tier
-            from kiln.design_intelligence import estimate_load_capacity
+            from kiln.licensing import LicenseTier, check_tier
 
             try:
                 from kiln.design_intelligence import load_table_materials, resolve_material_key
@@ -570,7 +596,9 @@ class _DesignToolsPlugin:
                     }
                 # The figure is Kiln Pro's (tiering decision of 2026-10-16):
                 # free is told, in words, that the load was not checked --
-                # never a number it could read as a clearance.
+                # never a number it could read as a clearance.  The CALLER's
+                # plan, through kiln.licensing: on Kiln's servers that is the
+                # person asking, never the server's own sign-in.
                 tier_ok, _tier_msg = check_tier(LicenseTier.PRO)
                 if not tier_ok:
                     from kiln.design_intelligence import _is_pla_family
@@ -589,64 +617,31 @@ class _DesignToolsPlugin:
                         ),
                     }
                     return attach_load_bearing_nudge(unchecked, force=True, material=material)
-                estimate = estimate_load_capacity(
+                # The figure for THIS part is kiln-pro's, here or on Kiln's
+                # servers (kiln._pro_load_bridge): the one door every caller
+                # of the load figure goes through.
+                from kiln._pro_load_bridge import load_figure
+
+                estimate, miss = load_figure(
                     material,
                     cross_section_mm2,
                     cantilever_length_mm,
                     load_across_layers=load_across_layers,
                 )
+                if miss is not None:
+                    return _load_figure_miss(material, miss)
                 if estimate is None:
-                    # An elastomer is not "unknown" — it is governed by a
-                    # different limit. It deflects out of the way long before
-                    # it breaks, so answer the question that actually applies
-                    # instead of returning nothing.
-                    from kiln.design_intelligence import estimate_deflection_limited_load
-
-                    flex = estimate_deflection_limited_load(
-                        material, cross_section_mm2, cantilever_length_mm
-                    )
-                    if flex is not None:
-                        flex["success"] = True
-                        flex["safety_basis"] = (
-                            "This is a SERVICEABILITY limit, not a strength "
-                            "limit: the load at which the section bends "
-                            f"{flex['allowable_deflection_mm']} mm (L/10). "
-                            "The part will not break here — it will simply "
-                            "bend too far to do its job. If it must hold its "
-                            "shape under load, use a rigid material; an "
-                            "elastomer is made stiffer by changing geometry, "
-                            "not by expecting more of the polymer."
-                        )
-                        return flex
-                    from kiln.design_intelligence import load_figures_unanswered
-
-                    why = load_figures_unanswered(material)
-                    if why:
-                        # The roster knows the material; its figures could not
-                        # be had (offline, signed out, the servers silent).
-                        return {"success": False, "code": "LOAD_FIGURES_UNAVAILABLE", "error": f"Kiln can't size {material} right now: {why}."}
                     return {
                         "success": False,
                         "error": f"Unknown load table material: {material}. "
                         f"Available: {', '.join(load_table_materials())}.",
                     }
-                result = estimate.to_dict()
-                result["success"] = True
-                # Disclose the flat safety margin: the lookup uses a fixed 3x
-                # regardless of use, so it is NOT enough for high-consequence
-                # parts (life-safety/lifting want 5-10x — see design_for_load).
-                result["safety_basis"] = (
-                    "Uses a general 3x safety margin, not tuned to your "
-                    "application. Life-safety and lifting parts need more "
-                    "(typically 5-10x) — size those with an engineer."
-                )
-                # estimate_structural_load is definitionally a load-bearing
-                # question — always surface the heuristic-grade upgrade nudge.
-                from kiln.load_bearing_detector import attach_load_bearing_nudge
-
-                return attach_load_bearing_nudge(
-                    result, force=True, material=material,
-                )
+                # The caller holds Kiln Pro, so the answer is the figure and
+                # its cautions, and no upgrade pitch: until 2026-10-18 the
+                # Pro-tier nudge rode on every Pro answer too, and a pitch
+                # for a plan the person already has reads as a broken
+                # product.  The free answer above keeps it.
+                return {**estimate, "success": True}
             except Exception as exc:
                 _logger.error("Load estimation failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}

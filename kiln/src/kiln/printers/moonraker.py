@@ -700,25 +700,11 @@ class MoonrakerWebSocketMonitor:
         self._last_flow_anomaly_key = key
 
         event_type, severity = classification
-        try:
-            from kiln_pro.nozzle_intelligence.sensor_signal import (
-                record_extrusion_event_for_printer,
-            )
-            record_extrusion_event_for_printer(
-                printer_id=self._printer_name,
-                event_type=event_type,
-                severity=severity,
-            )
-        except ImportError:
-            # Free tier — kiln-pro nozzle module not installed.  Drop
-            # the signal silently so the public adapter stays
-            # free-tier-functional.
-            pass
-        except Exception as exc:  # pragma: no cover
-            logger.debug(
-                "Flow-anomaly cross-check raised (non-fatal): %s",
-                exc,
-            )
+        # The one door every adapter reports through: local with
+        # kiln-pro, else to Kiln's servers off this thread.
+        from kiln._pro_nozzle_bridge import report_flow_anomaly
+
+        report_flow_anomaly(self._printer_name, event_type, severity)
 
     def _on_error(self, ws: Any, error: Any) -> None:
         logger.debug("Moonraker WS error: %s", error)

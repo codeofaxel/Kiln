@@ -114,18 +114,6 @@
     "recent_events": {
       "level": "safe"
     },
-    "billing_summary": {
-      "level": "safe"
-    },
-    "billing_setup_url": {
-      "level": "guarded"
-    },
-    "billing_status": {
-      "level": "safe"
-    },
-    "billing_history": {
-      "level": "safe"
-    },
     "health_check": {
       "level": "safe"
     },
@@ -433,6 +421,10 @@
       "physical_effect": true
     },
     "wipe_nozzle": {
+      "level": "confirm",
+      "physical_effect": true
+    },
+    "ams_filament_drying": {
       "level": "confirm",
       "physical_effect": true
     },

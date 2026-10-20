@@ -972,6 +972,22 @@ def _bypass_terms_gate(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _served_public_tools_stay_here(monkeypatch):
+    """Default every test to "no public tool is sent to Kiln's servers".
+
+    On an install without kiln-pro (public CI is one) the bundled manifest
+    sends some public tools to Kiln's servers, and a signed-out call notes
+    once per process why it ran here instead.  Left on, whichever test first
+    called such a tool through the MCP dispatch would carry that note.  Tests
+    of the served path load the manifest block themselves
+    (``tests/test_served_public.py``).
+    """
+    module = sys.modules.get("kiln.served_public")
+    if module is not None:
+        monkeypatch.setattr(module, "_tools", {})
+
+
+@pytest.fixture(autouse=True)
 def _isolate_decoration_quota(tmp_path_factory, monkeypatch):
     """Give every test its own decoration-quota file and a fresh singleton.
 
@@ -1240,11 +1256,23 @@ def _public_fault_readings_only(monkeypatch):
     So the bridge is silent by default, and a test that wants kiln-pro's
     answer patches ``decode_fault`` itself with the row it is testing
     (``tests/test_fault_reading_doors.py`` does).  A later ``monkeypatch``
-    in the test body overrides this one for that test.
+    in the test body overrides this one for that test.  The AMS safety alert
+    is read beside the reading, from the same private data or the same
+    served answer, so it is silenced the same way, and the bridge forgets
+    what it was told between tests.
     """
     import kiln._pro_fault_bridge as fault_bridge
+    import kiln._pro_guide_bridge as guide_bridge
 
+    fault_bridge.forget()
+    guide_bridge._last_miss.clear()
+    guide_bridge._coverage.clear()
     monkeypatch.setattr(fault_bridge, "decode_fault", lambda *args, **kwargs: None)
+    monkeypatch.setattr(fault_bridge, "safety_alert", lambda *args, **kwargs: None)
+    yield
+    fault_bridge.forget()
+    guide_bridge._last_miss.clear()
+    guide_bridge._coverage.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -1388,11 +1416,24 @@ def _forget_served_misses() -> None:
         ("kiln._pro_material_bridge", "_last_miss"),
         ("kiln._pro_material_bridge", "_answers"),
         ("kiln._pro_material_bridge", "_retry_after"),
+        # The nozzle bridge's served answers and misses beyond the capacity
+        # verdict, and the flow reports' send clock.
+        ("kiln._pro_nozzle_bridge", "_state_memo"),
+        ("kiln._pro_nozzle_bridge", "_last_clumping_miss"),
+        ("kiln._pro_nozzle_bridge", "_last_abrasive_miss"),
+        ("kiln._pro_nozzle_bridge", "_flow_sent"),
+        # The start reading, per model and per nozzle target.
+        ("kiln.start_narrative", "_served_blocks"),
+        ("kiln.start_narrative", "_served_lines"),
+        ("kiln.start_narrative", "_last_miss"),
     ):
         record = getattr(sys.modules.get(module), attr, None)
         if isinstance(record, dict):
             record.clear()
-    for name in ("kiln._pro_melt_bridge", "kiln._pro_catalogue_bridge", "kiln._pro_material_bridge"):
+    for name in (
+        "kiln._pro_melt_bridge", "kiln._pro_catalogue_bridge", "kiln._pro_material_bridge",
+        "kiln._pro_nozzle_bridge", "kiln.start_narrative",
+    ):
         bridge = sys.modules.get(name)
         if bridge is not None:
             bridge._service_down_until, bridge._service_down_miss = 0.0, None
@@ -1793,42 +1834,31 @@ def _forget_fetched_printer_rows(_sp, _pi) -> None:
 
 
 # ---------------------------------------------------------------------------
-# The material catalogue: synthetic figures for every roster material
+# The material catalogue: synthetic brand figures for every roster material
 # ---------------------------------------------------------------------------
 # Since 2026-10-16 ``design_knowledge/materials.json`` carries each family's
-# brand profiles as a ROSTER (names) and ``load_tables.json`` says only which
-# limit governs; a brand's figures and a material's load figures are
-# kiln-pro's catalogue record, served one material at a time through
+# brand profiles as a ROSTER (names); a brand's figures are kiln-pro's
+# catalogue record, served one material at a time through
 # ``kiln._pro_material_bridge``.  Public CI runs without kiln-pro and without
-# a sign-in, so a test that expects a real brand's temperatures or a real
-# material's safe load is a test of data this repo does not hold -- those
-# live in kiln-pro.  Here every roster material is SERVED a synthetic record:
-# figures that belong to no brand, derived from the family's own floor so a
-# brand stays inside its family's range, and a load grid re-derived from the
-# same bending formula with one made-up strength for every material, so a
-# test of CODE -- the resolver, the interpolation, the derating, the caution,
-# the tool envelope -- has numbers to work with.
-
-#: One made-up tensile capacity (N/mm^2, safety factor applied) for every
-#: strength-limited synthetic record, and one modulus for every elastomer.
-_SYNTHETIC_TENSILE_N_PER_MM2 = 10.0
-_SYNTHETIC_YOUNGS_MPA = 80.0
-_SYNTHETIC_SECTIONS_MM2 = (12, 24, 36, 48, 60)
-_SYNTHETIC_LENGTHS_MM = (25, 50, 100, 150, 200)
+# a sign-in, so a test that expects a real brand's temperatures is a test of
+# data this repo does not hold -- those live in kiln-pro.  Here every roster
+# material is SERVED a synthetic record: figures that belong to no brand,
+# derived from the family's own floor so a brand stays inside its family's
+# range, so a test of CODE -- the resolver, the loaders, the tool envelope --
+# has numbers to work with.  A part's load figure is not part of any record
+# (kiln._pro_load_bridge asks for it one part at a time), so none is made up
+# here.
 
 
 def synthetic_material_record(material_id: str) -> dict | None:
-    """A synthetic two-block catalogue record for roster material
-    *material_id*, or ``None`` for a material the roster does not list.
+    """A synthetic catalogue record for roster material *material_id*, or
+    ``None`` for a material the roster does not list.
 
     Every number is made up: a brand's nozzle range is its family's own
     print range (optimum at the midpoint), its bed range the family's bed
-    range; the load grid is the bending formula over one strength shared by
-    every material (``safe_load = capacity x A^1.5 / 6 / L``), derated 0.4
-    across layers; an elastomer gets the deflection grid from one modulus.
+    range.
     """
     import json
-    import math
 
     from kiln import design_intelligence as _di
 
@@ -1852,56 +1882,11 @@ def synthetic_material_record(material_id: str) -> dict | None:
         }
         for pid in (row.get("brand_profiles") or {})
     }
-    load_roster = json.loads(_di._DATA_DIR.joinpath("load_tables.json").read_text(encoding="utf-8")).get(key) or {}
-    if load_roster.get("limit_mode") == "deflection":
-        ratio = 10.0
-        load = {
-            "limit_mode": "deflection",
-            "youngs_modulus_mpa": _SYNTHETIC_YOUNGS_MPA,
-            "deflection_limit_ratio": ratio,
-            "cross_section_vs_deflection_load": [
-                {
-                    "cantilever_length_mm": length,
-                    "allowable_deflection_mm": round(length / ratio, 2),
-                    "entries": [
-                        {
-                            "cross_section_mm2": area,
-                            "load_at_deflection_limit_n": math.floor(
-                                _SYNTHETIC_YOUNGS_MPA * area**2 / (4.0 * ratio * length**2) * 10000.0
-                            ) / 10000.0,
-                        }
-                        for area in _SYNTHETIC_SECTIONS_MM2
-                    ],
-                }
-                for length in _SYNTHETIC_LENGTHS_MM
-            ],
-        }
-    else:
-        load = {
-            "tensile_capacity_n_per_mm2": _SYNTHETIC_TENSILE_N_PER_MM2,
-            "cross_section_vs_load": [
-                {
-                    "cantilever_length_mm": length,
-                    "entries": [
-                        {
-                            "cross_section_mm2": area,
-                            "max_load_n": math.floor(
-                                _SYNTHETIC_TENSILE_N_PER_MM2 * (area**1.5 / 6.0) / length * 100.0
-                            ) / 100.0,
-                        }
-                        for area in _SYNTHETIC_SECTIONS_MM2
-                    ],
-                }
-                for length in _SYNTHETIC_LENGTHS_MM
-            ],
-            "layer_orientation_derating": {"across_layers": 0.4, "along_layers": 1.0},
-        }
     return {
         "material_id": key,
         "matched_by": "exact",
         "display_name": str(row.get("display_name") or key),
         "brands": brands,
-        "load": load,
     }
 
 
@@ -1953,7 +1938,7 @@ def served_material_records(monkeypatch, tmp_path):
 def signed_out_material_install(monkeypatch, tmp_path):
     """The SIGNED-OUT posture, on purpose: no kiln-pro here, nothing kept on
     disk, and the served door answers "signed out" -- every brand profile is
-    names only, every load question is unanswered and says why."""
+    names only and says why."""
     from kiln import _pro_material_bridge as _bridge
     from kiln.served_answer import Miss
 

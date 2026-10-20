@@ -13,6 +13,7 @@ import os
 import ssl
 import subprocess
 import time
+import zipfile
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -4104,9 +4105,18 @@ class TestExternalSpoolMapping:
     def _published(self, adapter: BambuAdapter) -> dict[str, Any]:
         return json.loads(adapter._mqtt_client.publish.call_args[0][1])["print"]
 
-    def test_ams_on_still_gets_slot_zero(self, adapter_with_mqtt: BambuAdapter) -> None:
-        """The AMS path is untouched — this is the regression guard."""
-        adapter_with_mqtt.start_print("model.3mf", use_ams=True)
+    def test_ams_on_still_gets_slot_zero(self, adapter_with_mqtt: BambuAdapter, tmp_path: Any) -> None:
+        """The AMS path is untouched — this is the regression guard.
+
+        Given a one-filament plate record, which is the start [0] is right
+        for.  A plate Kiln cannot read at all is refused with AMS on rather
+        than fed from one tray (2026-10-17; see
+        test_print_gate_judges_the_machine_it_starts).
+        """
+        plate = tmp_path / "model.3mf"
+        with zipfile.ZipFile(plate, "w") as zf:
+            zf.writestr("Metadata/plate_1.json", json.dumps({"filament_colors": ["#FFFFFF"], "filament_ids": [0]}))
+        adapter_with_mqtt.start_print("model.3mf", use_ams=True, local_file_path=str(plate))
         payload = self._published(adapter_with_mqtt)
         assert payload["use_ams"] is True
         assert payload["ams_mapping"] == [0]

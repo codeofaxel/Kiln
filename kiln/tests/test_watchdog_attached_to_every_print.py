@@ -282,7 +282,7 @@ def test_a_start_the_pre_print_gate_blocks_calls_no_hook(monkeypatch):
     monkeypatch.setattr(
         print_gate,
         "run_adapter_gate",
-        lambda adapter, file_name, kwargs: {"blocked": True, "reason": "It cannot fit."},
+        lambda adapter, file_name, kwargs, **_: {"blocked": True, "reason": "It cannot fit."},
     )
     calls = _record_starts()
     printer = _Bench()

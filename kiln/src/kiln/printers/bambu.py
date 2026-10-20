@@ -91,6 +91,7 @@ from kiln.printers.base import (
     diagnosed_state,
     find_ffmpeg,
     format_error_code,
+    is_resume_mode_3mf,
     outcome_printer_name,
 )
 from kiln.printers.command_verdict import CommandVerdict
@@ -814,13 +815,20 @@ class BambuFaultReading:
     kiln-pro's row when kiln-pro supplied the reading -- the same
     allowlisted shape the hosted boundary serves as ``hms_decoded`` -- so a
     door that carries the structured block can carry it without a second
-    lookup.
+    lookup.  ``safety_alert`` is the immediate protective action the code
+    carries, when it carries one (``{"code", "means", "action",
+    "severity"}``: the AMS dryer's thermal-runaway code says to switch the
+    AMS off), at every tier.  ``note`` is why kiln-pro's reading is not
+    here when it is not -- the install could not ask, or the row is beyond
+    the plan -- for the doors a person reads to say once.
     """
 
     reading: str
     remedy: str | None = None
     url: str | None = None
     decoded: dict[str, Any] | None = None
+    safety_alert: dict[str, Any] | None = None
+    note: str | None = None
 
     @property
     def private(self) -> bool:
@@ -828,32 +836,39 @@ class BambuFaultReading:
         return self.decoded is not None
 
 
-def read_bambu_fault(code: str, *, kind: str = "hms") -> BambuFaultReading:
+def read_bambu_fault(code: str, *, kind: str = "hms", wait: bool = True) -> BambuFaultReading:
     """Read a Bambu fault code, once, for every door that shows it.
 
     Asks kiln-pro first (``kiln._pro_fault_bridge``): its catalog holds the
     cause and the fix, and decides per row whether the caller's tier
     unlocks them -- a safety or fix floor is free at every tier, the rest
-    is paid depth.  Without kiln-pro, or for a row it does not unlock, the
-    public tables below answer: the vendor's own page title for an HMS
-    code, a family line for a print_error.
+    is paid depth.  Without kiln-pro installed here the bridge asks Kiln's
+    servers for the one code.  With no reading for this caller, the public
+    tables below answer: the vendor's own page title for an HMS code, a
+    family line for a print_error -- and ``note`` says why.
 
     Every door goes through here -- ``printer_status``'s fault fields, the
     filament-op results, the fault event, ``troubleshoot_printer`` -- which
-    is what keeps them saying the same thing about the same code.
+    is what keeps them saying the same thing about the same code.  *wait*
+    false is for the printer's own message thread, which must never wait
+    on the network: it reads what is already known.
     """
     from kiln import _pro_fault_bridge
 
-    decoded = _pro_fault_bridge.decode_fault(code, kind=kind)
+    decoded = _pro_fault_bridge.decode_fault(code, kind=kind, wait=wait)
+    alert = _pro_fault_bridge.safety_alert(code, kind=kind, wait=wait)
     public_reading, url = describe_bambu_filament_fault_public(code, kind=kind)
     if decoded is None:
-        return BambuFaultReading(reading=public_reading, url=url)
+        return BambuFaultReading(
+            reading=public_reading, url=url, safety_alert=alert,
+            note=_pro_fault_bridge.note_for(code, kind=kind),
+        )
     reading = str(decoded["cause"]).strip()
     fix = decoded.get("fix")
     remedy = fix.strip() if isinstance(fix, str) and fix.strip() else None
     # The vendor's page stays attached to an HMS code whoever wrote the
     # reading; a print_error has none (``url`` is already ``None`` there).
-    return BambuFaultReading(reading=reading, remedy=remedy, url=url, decoded=decoded)
+    return BambuFaultReading(reading=reading, remedy=remedy, url=url, decoded=decoded, safety_alert=alert)
 
 
 def describe_bambu_filament_fault(
@@ -1064,6 +1079,11 @@ def _attach_reading(entry: dict[str, Any]) -> None:
     entry["reading"] = fault.reading
     if fault.remedy:
         entry["remedy"] = fault.remedy
+    # The protective action rides with the code wherever the code is shown:
+    # the AMS dryer's thermal-runaway code must say to switch the AMS off
+    # on the status door, not only when someone asks troubleshoot_printer.
+    if fault.safety_alert:
+        entry["safety"] = fault.safety_alert["means"]
 
 
 # Bambu LED node names.
@@ -2915,30 +2935,16 @@ class BambuAdapter(PrinterAdapter):
             # message that carries the same HMS code re-fires the
             # event.  The kiln-pro recorder de-dupes by (printer, code,
             # time-bucket) so a steady-state error doesn't flood the
-            # event log.  Free-tier installs without kiln-pro silently
-            # skip via try/except ImportError.
+            # event log, and the served report sends one per window.
             if print_error_for_hook:
                 _flow = _classify_flow_anomaly(print_error_for_hook)
                 if _flow is not None:
                     _event_type, _severity = _flow
-                    try:
-                        from kiln_pro.nozzle_intelligence.sensor_signal import (
-                            record_extrusion_event_for_printer,
-                        )
-                        record_extrusion_event_for_printer(
-                            printer_id=self.name,
-                            event_type=_event_type,
-                            severity=_severity,
-                        )
-                    except ImportError:
-                        # Free tier — kiln-pro nozzle module not
-                        # installed.  Drop the signal silently.
-                        pass
-                    except Exception as exc:  # pragma: no cover
-                        logger.debug(
-                            "Flow-anomaly cross-check raised (non-fatal): %s",
-                            exc,
-                        )
+                    # The one door every adapter reports through: local with
+                    # kiln-pro, else to Kiln's servers off this thread.
+                    from kiln._pro_nozzle_bridge import report_flow_anomaly
+
+                    report_flow_anomaly(self.name, _event_type, _severity)
 
             # A fault Kiln can plainly see, on a printer nobody asked it to
             # watch.  The push stream is already open and already parsed --
@@ -3010,7 +3016,9 @@ class BambuAdapter(PrinterAdapter):
         push path that keeps the status cache current.
         """
         pretty = format_error_code(code)
-        fault = read_bambu_fault(pretty or str(code), kind="print_error")
+        # What is already known, never a request: this is paho's thread.
+        # The event published below reads the code again, off it.
+        fault = read_bambu_fault(pretty or str(code), kind="print_error", wait=False)
         reading = fault.reading
         logger.warning(
             "Printer %s reported fault %s: %s",
@@ -3045,6 +3053,13 @@ class BambuAdapter(PrinterAdapter):
             import kiln.server as _srv
             from kiln.events import Event, EventType
 
+            # Read again here, off the network thread, where waiting on the
+            # served reading is allowed: the notice was composed from what
+            # was known on paho's thread, which on a first sighting is the
+            # family line alone.
+            fresh = read_bambu_fault(pretty or str(code), kind="print_error")
+            if fresh.decoded is not None:
+                reading, remedy = fresh.reading, fresh.remedy
             data: dict[str, Any] = {
                 "printer_name": printer_name,
                 "print_error": int(code),
@@ -5162,6 +5177,12 @@ class BambuAdapter(PrinterAdapter):
             # respect, so the plate's own mapping supersedes it; an
             # explicit mapping long enough to address every filament is
             # left exactly as the caller gave it.
+            #
+            # How many filaments the plate uses, read from its own record;
+            # ``None`` when there is no local copy or the record will not
+            # read (see filament_count_3mf), and then nothing below may
+            # assume the plate is single-colour.
+            declared: int | None = None
             if local_path and os.path.isfile(local_path):
                 declared = self.filament_count_3mf(local_path, plate_num)
                 too_short = (
@@ -5268,6 +5289,31 @@ class BambuAdapter(PrinterAdapter):
             # ``list(mapping or [])``).
             if ams_mapping is None or not isinstance(ams_mapping, list):
                 ams_mapping = [0] if use_ams else []
+
+            # The AMS is about to feed this plate from at most one tray, and
+            # Kiln could not read how many filaments the plate uses: a
+            # multi-colour plate would print every colour after the first
+            # from that tray.  Kiln does not guess; it says so and sends
+            # nothing.  A resume continues a print that is already running
+            # and is never stopped here.
+            if (
+                use_ams
+                and declared is None
+                and len(ams_mapping) <= 1
+                and not kwargs.get("resume_from_paused")
+                and not is_resume_mode_3mf(basename)
+            ):
+                return PrintResult(
+                    success=False,
+                    message=(
+                        f"Kiln could not read which filaments {basename} uses (plate {plate_num}'s "
+                        "record could not be read), so it cannot tell which AMS tray should feed "
+                        "each one, and it did not start the print on a guess. Start it from the "
+                        "printer's own screen, where you choose the trays, or slice it again "
+                        "through Kiln and start the new file."
+                    ),
+                    refused_before_send=True,
+                )
 
             # Validate ams_mapping length covers all filament_ids in the 3MF.
             # If the mapping is too short, filament IDs beyond the mapping

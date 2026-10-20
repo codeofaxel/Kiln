@@ -414,12 +414,18 @@ class TestPublicOnly:
         # Public Kiln alone knows the maker's landing page, never which page
         # serves which model -- that curation is kiln-pro's.
         assert out["maker_index_url"] == "https://wiki.bambulab.com/en/home"
-        assert rg.NO_GUIDE_SENTENCE in out["kiln_note"]
         assert out["coverage"] is None
+        # Signed out, so Kiln could not ask whether the maker has a guide:
+        # it says why, and never that the maker publishes none.
+        assert rg.NO_GUIDE_SENTENCE not in out["kiln_note"]
+        assert "Kiln can't get the guide right now because Kiln is signed out" in out["kiln_note"]
+        assert out["kiln_note"].endswith("Bambu Lab's own pages are at maker_index_url.")
+        assert out["why"] == "signed_out"
 
     def test_a_maker_kiln_has_no_index_for_gets_the_sentence_alone(self, without_pro):
         out = rg.repair_guide("some_unknown_make_zz", topic="nozzle")
-        assert out["kiln_note"] == rg.NO_GUIDE_SENTENCE + "."
+        assert rg.NO_GUIDE_SENTENCE not in out["kiln_note"]
+        assert out["kiln_note"].startswith("Kiln steps through the maker's own repair guide")
         assert "maker_index_url" not in out
 
     def test_every_maker_kiln_supports_has_a_landing_page(self, without_pro):
@@ -546,9 +552,11 @@ class TestDoctorDoor:
     def test_the_line_is_honest_without_kiln_pro(self, without_pro):
         detail, warn = rg.coverage_line("bambu_a1_mini")
         assert warn is True
-        assert rg.NO_GUIDE_SENTENCE in detail
         assert "https://wiki.bambulab.com/en/home" in detail
-        assert "Kiln Pro" in detail
+        # Not asked, so no claim either way about the maker's guides, and no
+        # plan named: the guides are not a paid feature.
+        assert rg.NO_GUIDE_SENTENCE not in detail and "Kiln Pro" not in detail
+        assert "Kiln can't check which of the maker's guides it can step through right now (Kiln is signed out)" in detail
 
     def test_the_line_is_honest_for_a_maker_with_nothing(self, with_pro):
         detail, warn = rg.coverage_line("some_unknown_make_zz")

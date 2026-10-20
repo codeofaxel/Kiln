@@ -18,6 +18,7 @@ from typing import Any
 
 from kiln.print_start_verdict import resolve_print_start
 from kiln.tool_annotations import creates
+from kiln.tool_results import unwrap_tool_result
 
 _logger = logging.getLogger(__name__)
 
@@ -989,7 +990,7 @@ class _GenerationAIToolsPlugin:
                         _attach_placement(block, place_info)
                         return block
                     # Mandatory pre-flight safety gate before starting print.
-                    pf = _srv.preflight_check(printer_name=printer_name)
+                    pf = unwrap_tool_result(_srv.preflight_check(printer_name=printer_name))
                     if not pf.get("ready", False):
                         _srv._audit(
                             "generate_and_print",
@@ -1180,8 +1181,9 @@ class _GenerationAIToolsPlugin:
             if err := _srv._check_auth("generate"):
                 return err
             try:
-                # Step 1: Generate from template
-                gen_result = _srv.generate_from_template(template_id, parameters)
+                # Step 1: Generate from template.  With a preview attached
+                # that tool answers [Image, payload]; the payload is read here.
+                gen_result = unwrap_tool_result(_srv.generate_from_template(template_id, parameters))
                 if not gen_result.get("success"):
                     return gen_result  # Pass through error
 

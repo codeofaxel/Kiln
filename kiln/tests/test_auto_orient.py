@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 import struct
+import sys
 import tempfile
+import types
 import xml.etree.ElementTree as ET
 import zipfile
 
@@ -14,7 +16,6 @@ from kiln.auto_orient import (
     OrientationCandidate,
     OrientationResult,
     SupportEstimate,
-    _apply_orientation_scoring,
     _apply_rotation,
     _build_rotation_matrix,
     _parse_3mf_transform,
@@ -853,135 +854,128 @@ class TestDuplicateStlOnPlate:
 
 
 # ---------------------------------------------------------------------------
-# TestOrientationScoringTierSeam — free/overlay seam in _score_orientation
+# TestOrientationScoringSeam -- the bed-contact floor and the kiln-pro seam
 # ---------------------------------------------------------------------------
 
-
-# A stand-in overlay with the same shape as the real one and made-up
-# values.  The tests below only need SOME overlay to be present; the
-# shipped weighting is judged in kiln-pro's suite.
-_STAND_IN_OVERLAY = {
-    "combination_weights": {
-        "bed_contact": 0.4,
-        "support_volume": 0.2,
-        "print_height": 0.2,
-        "overhang": 0.2,
-    },
-    "normalization": {
-        "bed_contact": {"multiplier": 1.5, "cap": 100.0},
-        "support_volume": {"invert_from": 100.0},
-        "print_height": {"reference_mm": 200.0, "cap": 100.0},
-        "overhang": {"invert_from": 100.0},
-    },
-}
+_SCORER_MODULE = "kiln_pro.orientation_scoring"
 
 
-class TestOrientationScoringTierSeam:
-    """Pin the seam in ``_score_orientation``:
+def _hide_scorer(monkeypatch) -> None:
+    """Make the kiln-pro scorer unimportable, as on a plain install on the
+    free plan; Kiln's servers fail the test if asked."""
+    import kiln.licensing as licensing
+    import kiln.server as srv
+    from kiln import _pro_orientation_bridge as bridge
 
-    - Free tier (overlay returns ``{}``): single-factor "largest bed
-      contact" — score = bed_contact_pct directly.  Safe textbook
-      default; never picks a wildly wrong orientation.
-    - Overlay populated: weighted multi-factor combination read from
-      the overlay's own weights and normalisation.
+    monkeypatch.setitem(sys.modules, _SCORER_MODULE, None)
+    monkeypatch.setattr(licensing, "check_tier", lambda *a, **k: (False, "needs Kiln Pro"))
+    monkeypatch.setattr(bridge, "_service_down_until", 0.0)
+    monkeypatch.setattr(srv, "_pro_api_call", lambda *a, **k: pytest.fail("asked the servers"))
 
-    The four returned fact fields (volume, contact area, height,
-    overhang %) are identical across tiers — only the ``score`` differs.
+
+def _served_ranking(monkeypatch, reply) -> list[dict]:
+    """A plain install (no kiln-pro) on a Kiln Pro plan, with Kiln's servers
+    stood in by *reply* (a dict, or a function of what was sent); returns
+    what was sent."""
+    import kiln.licensing as licensing
+    import kiln.server as srv
+    from kiln import _pro_orientation_bridge as bridge
+
+    monkeypatch.setitem(sys.modules, _SCORER_MODULE, None)
+    monkeypatch.setattr(licensing, "check_tier", lambda *a, **k: (True, None))
+    monkeypatch.setattr(bridge, "_service_down_until", 0.0)
+    sent: list[dict] = []
+
+    def wire(tool_name, /, _timeout=None, _asked_by_user=True, **kwargs):
+        assert tool_name == bridge.WIRE_TOOL
+        sent.append(kwargs)
+        return reply(kwargs) if callable(reply) else reply
+
+    monkeypatch.setattr(srv, "_pro_api_call", wire)
+    return sent
+
+
+def _stand_in_scorer(monkeypatch, score_fn) -> list[dict]:
+    """Install a stand-in scorer module; returns the facts it was handed."""
+    seen: list[dict] = []
+
+    def score_orientation(facts):
+        seen.append(dict(facts))
+        return score_fn(facts)
+
+    module = types.ModuleType(_SCORER_MODULE)
+    module.score_orientation = score_orientation
+    monkeypatch.setitem(sys.modules, _SCORER_MODULE, module)
+    return seen
+
+
+class TestOrientationScoringSeam:
+    """Pin the seam in ``_score_orientation``.
+
+    - No kiln-pro scorer (a plain install): the score is the bed-contact
+      percentage, nothing else.
+    - A scorer that answers: its score replaces the floor.
+    - A scorer that answers ``None`` or fails: the floor answers.
+
+    The four geometry facts are identical either way; only ``score`` moves.
+    How Kiln Pro ranks is judged in kiln-pro's own suite.
     """
 
-    def test_free_path_returns_bed_contact_directly(self):
-        """Empty overlay → score is the bed-contact percentage, untouched."""
-        score = _apply_orientation_scoring(
-            overlay={},
-            bed_contact_pct=42.0,
-            support_pct=10.0,
-            print_height_mm=50.0,
-            overhang_pct=5.0,
-        )
-        assert score == 42.0
+    def test_plain_install_scores_by_bed_contact(self, tmp_path, monkeypatch):
+        """With the scorer unimportable, a short and a tall prism on the same
+        base score the same: height, support and overhang do not enter."""
+        _hide_scorer(monkeypatch)
+        from kiln import _pro_orientation_bridge
 
-    def test_free_path_ignores_other_factors(self):
-        """Free path is single-factor: support/height/overhang must
-        not influence the score (they only matter once an overlay
-        supplies the weighted combination)."""
-        base = _apply_orientation_scoring(
-            overlay={},
-            bed_contact_pct=30.0,
-            support_pct=0.0,
-            print_height_mm=0.0,
-            overhang_pct=0.0,
-        )
-        worse_facts = _apply_orientation_scoring(
-            overlay={},
-            bed_contact_pct=30.0,
-            support_pct=99.0,
-            print_height_mm=999.0,
-            overhang_pct=99.0,
-        )
-        assert base == worse_facts == 30.0
+        assert _pro_orientation_bridge.rank([{"bed_contact_pct": 42.0}]) is None
 
-    def test_populated_overlay_applies_its_own_weighting(self):
-        """A populated overlay → weighted blend after normalisation, on
-        the overlay's own numbers.  Stand-in math: bed 42 → 63; sup 10
-        → 90; height 50/200 → 75; overhang 5 → 95.
-        Score = 63*0.4 + 90*0.2 + 75*0.2 + 95*0.2 = 77.2.
-        """
-        score = _apply_orientation_scoring(
-            overlay=_STAND_IN_OVERLAY,
-            bed_contact_pct=42.0,
-            support_pct=10.0,
-            print_height_mm=50.0,
-            overhang_pct=5.0,
-        )
-        assert abs(score - 77.2) < 0.01
+        short = find_optimal_orientation(_make_flat_cube_stl(tmp_path, 20, 20, 5), candidates=1)
+        tall = find_optimal_orientation(_make_flat_cube_stl(tmp_path, 20, 20, 60), candidates=1)
+        assert short.original_score == tall.original_score
+        assert short.original_score > 0
 
-    def test_populated_overlay_bed_contact_caps(self):
-        """The bed-contact multiplier doesn't push past the cap."""
-        score = _apply_orientation_scoring(
-            overlay=_STAND_IN_OVERLAY,
-            bed_contact_pct=80.0,  # would be 120 uncapped
-            support_pct=100.0,
-            print_height_mm=999.0,
-            overhang_pct=100.0,
-        )
-        # bed=100 (capped), sup=0, height=0, over=0 → 40.0
-        assert abs(score - 40.0) < 0.01
+    def test_scorer_score_replaces_the_floor(self, tmp_path, monkeypatch):
+        """A scorer that answers sets ``score``; the facts it is handed are
+        the ones the candidate reports."""
+        seen = _stand_in_scorer(monkeypatch, lambda facts: 12.5)
+        result = find_optimal_orientation(_make_flat_cube_stl(tmp_path, 20, 20, 5), candidates=1)
+        assert result.original_score == 12.5
+        assert result.best.score == 12.5
+        assert seen, "the scorer was never asked"
+        assert {"bed_contact_pct", "support_pct", "print_height_mm", "overhang_pct"} <= set(seen[0])
 
-    def test_partial_overlay_falls_back_to_free(self):
-        """Partial overlay (weights without normalization) is treated
-        as ``{}`` — defensive: never half-apply the weighted formula."""
-        partial = {"combination_weights": _STAND_IN_OVERLAY["combination_weights"]}
-        score = _apply_orientation_scoring(
-            overlay=partial,
-            bed_contact_pct=42.0,
-            support_pct=10.0,
-            print_height_mm=50.0,
-            overhang_pct=5.0,
-        )
-        assert score == 42.0
+    def test_scorer_answering_none_is_the_floor(self, tmp_path, monkeypatch):
+        stl = _make_flat_cube_stl(tmp_path, 20, 20, 5)
+        _hide_scorer(monkeypatch)
+        floor = find_optimal_orientation(stl)
+        _stand_in_scorer(monkeypatch, lambda facts: None)
+        assert find_optimal_orientation(stl).to_dict() == floor.to_dict()
 
-    def test_facts_identical_across_tiers(self, tmp_path, monkeypatch):
-        """Crossing the seam does NOT change geometry facts — only the
-        score.  Callers reading bed_contact_area_mm2 etc. see identical
-        values from both tiers when scoring the same orientation."""
+    def test_failing_scorer_falls_back_to_the_floor(self, tmp_path, monkeypatch):
+        """A broken scorer never takes the tool down: the floor answers."""
+        stl = _make_flat_cube_stl(tmp_path, 20, 20, 5)
+        _hide_scorer(monkeypatch)
+        floor = find_optimal_orientation(stl)
+
+        def boom(facts):
+            raise RuntimeError("scorer broke")
+
+        _stand_in_scorer(monkeypatch, boom)
+        assert find_optimal_orientation(stl).to_dict() == floor.to_dict()
+
+    def test_facts_identical_across_the_seam(self, tmp_path, monkeypatch):
+        """Crossing the seam changes the score, never the geometry facts."""
         stl_path = _make_flat_cube_stl(tmp_path, 20, 20, 5)
 
-        monkeypatch.setattr(
-            "kiln.design_intelligence.load_pro_overlay_or_empty",
-            lambda kind: {},
-        )
+        _hide_scorer(monkeypatch)
         free = find_optimal_orientation(stl_path)
 
-        monkeypatch.setattr(
-            "kiln.design_intelligence.load_pro_overlay_or_empty",
-            lambda kind: _STAND_IN_OVERLAY,
-        )
+        # A stand-in that prefers short parts, so its ranking keeps the flat
+        # pose best while every score differs from the floor's.
+        _stand_in_scorer(monkeypatch, lambda facts: 100.0 - facts["print_height_mm"])
         pro = find_optimal_orientation(stl_path)
 
-        # A 20x20x5 flat cube — lying flat is the right answer under both
-        # tier scorings (low height + low overhang + high bed contact).
-        # The rotation chosen as ``best`` should match; the facts at that
-        # rotation must be identical from both tiers.
+        assert free.best.score != pro.best.score
         assert free.best.rotation_x == pro.best.rotation_x
         assert free.best.rotation_y == pro.best.rotation_y
         assert free.best.rotation_z == pro.best.rotation_z
@@ -990,24 +984,172 @@ class TestOrientationScoringTierSeam:
         assert free.best.print_height_mm == pro.best.print_height_mm
         assert free.best.overhang_percentage == pro.best.overhang_percentage
 
-    def test_orientation_result_shape_identical_across_tiers(self, tmp_path, monkeypatch):
-        """The ``OrientationResult`` dataclass shape is identical from
-        both tiers — only the numeric ``score`` field varies."""
+    def test_orientation_result_shape_identical_across_the_seam(self, tmp_path, monkeypatch):
+        """The ``OrientationResult`` shape is the same either side of the
+        seam; only the numeric ``score`` field varies."""
         import dataclasses
 
         stl_path = _make_flat_cube_stl(tmp_path, 20, 20, 5)
 
-        monkeypatch.setattr(
-            "kiln.design_intelligence.load_pro_overlay_or_empty",
-            lambda kind: {},
-        )
+        _hide_scorer(monkeypatch)
         free = find_optimal_orientation(stl_path)
 
-        monkeypatch.setattr(
-            "kiln.design_intelligence.load_pro_overlay_or_empty",
-            lambda kind: _STAND_IN_OVERLAY,
-        )
+        _stand_in_scorer(monkeypatch, lambda facts: 50.0)
         pro = find_optimal_orientation(stl_path)
 
         assert dataclasses.fields(type(free)) == dataclasses.fields(type(pro))
         assert dataclasses.fields(type(free.best)) == dataclasses.fields(type(pro.best))
+
+
+class TestTheFloorKeepsAPartSteady:
+    """On the bed-contact floor every flat face of a block scores the same, so
+    a tall pillar's upright pose tied with lying down and, listed first, won:
+    auto_orient_model kept it standing and check_stability's high wobble risk
+    came with no turn to lay it flat.  Between equal scores the lower part
+    now ranks first."""
+
+    def test_a_tall_pillar_is_laid_down(self, tmp_path, monkeypatch):
+        _hide_scorer(monkeypatch)
+        result = find_optimal_orientation(_make_flat_cube_stl(tmp_path, 10, 10, 80))
+        assert result.best.print_height_mm == pytest.approx(10.0, abs=0.01)
+        assert result.best.score == result.original_score  # the floor's scores are unchanged
+
+    def test_the_wobble_warning_comes_with_the_turn_that_fixes_it(self, tmp_path, monkeypatch):
+        _hide_scorer(monkeypatch)
+        stability = check_stability(_make_flat_cube_stl(tmp_path, 10, 10, 80))
+        assert stability.risk_level == "high"
+        assert stability.suggested_rotation is not None
+        assert "Try rotating" in stability.recommendation
+
+    def test_a_part_already_lying_flat_stays(self, tmp_path, monkeypatch):
+        _hide_scorer(monkeypatch)
+        result = find_optimal_orientation(_make_flat_cube_stl(tmp_path, 20, 20, 5))
+        assert (result.best.rotation_x, result.best.rotation_y, result.best.rotation_z) == (0.0, 0.0, 0.0)
+
+    def test_a_scorer_s_ranking_still_decides_between_unequal_scores(self, tmp_path, monkeypatch):
+        """The lower-part order only splits equal scores: a scorer that
+        prefers the tall pose keeps it."""
+        _stand_in_scorer(monkeypatch, lambda facts: facts["print_height_mm"])
+        result = find_optimal_orientation(_make_flat_cube_stl(tmp_path, 10, 10, 80))
+        assert result.best.print_height_mm == pytest.approx(80.0, abs=0.01)
+
+
+def _auto_orient_tool():
+    from kiln.plugins.printability_tools import plugin
+
+    tools: dict = {}
+
+    class _Mcp:
+        def tool(self, *_a, **_kw):
+            def keep(fn):
+                tools[fn.__name__] = fn
+                return fn
+
+            return keep
+
+    plugin.register(_Mcp())
+    return tools["auto_orient_model"]
+
+
+def _stand_in_note(monkeypatch, note_fn) -> None:
+    module = types.ModuleType(_SCORER_MODULE)
+    module.score_orientation = lambda facts: None
+    module.ranking_withheld_note = note_fn
+    monkeypatch.setitem(sys.modules, _SCORER_MODULE, module)
+
+
+class TestTheRankingNote:
+    """A caller ranked on the floor because Kiln Pro's ranking is not in
+    their plan is told so once, in ``upgrade_hint``; kiln-pro words it and
+    decides when.  A plain install says nothing."""
+
+    def test_the_note_is_said_once(self, tmp_path, monkeypatch):
+        note = "Ranked by bed contact. Kiln Pro ranks them its own way: https://kiln3d.com/pricing"
+        _stand_in_note(monkeypatch, lambda: note)
+        out = _auto_orient_tool()(file_path=_make_flat_cube_stl(tmp_path, 10, 10, 80))
+        assert out["success"] is True and out["upgrade_hint"] == note
+        assert str(out).count("kiln3d.com/pricing") == 1
+
+    @pytest.mark.parametrize("answer", [None, "", "boom"])
+    def test_no_note_when_kiln_pro_has_none_or_fails(self, tmp_path, monkeypatch, answer):
+        def note_fn():
+            if answer == "boom":
+                raise RuntimeError("note broke")
+            return answer
+
+        _stand_in_note(monkeypatch, note_fn)
+        out = _auto_orient_tool()(file_path=_make_flat_cube_stl(tmp_path, 10, 10, 80))
+        assert out["success"] is True and "upgrade_hint" not in out
+
+    def test_a_plain_install_says_nothing(self, tmp_path, monkeypatch):
+        _hide_scorer(monkeypatch)
+        out = _auto_orient_tool()(file_path=_make_flat_cube_stl(tmp_path, 10, 10, 80))
+        assert out["success"] is True and "upgrade_hint" not in out
+
+
+class TestKilnProRankingOnAPlainInstall:
+    """A plain ``pip install kiln3d`` has no kiln-pro.  Until 2026-10-18 it
+    ranked every caller's poses by bed contact, paying or not: Kiln's own
+    ranking was reached only by importing kiln-pro.  Now a Kiln Pro plan asks
+    Kiln's servers ONCE per part for the poses' order, best first -- never a
+    score (``kiln._pro_orientation_bridge``); a free plan never waits on the
+    network; any miss is the floor."""
+
+    def test_a_pro_plan_gets_the_served_order_in_one_ask(self, tmp_path, monkeypatch):
+        """The servers' order decides the best pose; the scores shown stay
+        the floor's.  Here the servers prefer the LAST candidate."""
+        stl = _make_flat_cube_stl(tmp_path, 20, 20, 5)
+        _hide_scorer(monkeypatch)
+        floor = find_optimal_orientation(stl, candidates=6)
+
+        sent = _served_ranking(
+            monkeypatch,
+            lambda kw: {"success": True, "status": "ok", "known": True,
+                        "order": list(reversed(range(len(kw["candidates"]))))},
+        )
+        pro = find_optimal_orientation(stl, candidates=6)
+        assert len(sent) == 1, "one ask per part, never one per pose"
+        poses = sent[0]["candidates"]
+        assert len(poses) == 7  # the original pose and the six candidates
+        assert all(set(p) == {"bed_contact_pct", "support_pct", "print_height_mm", "overhang_pct"} for p in poses)
+        # Candidates are generated X-major over 0, 45, ... degrees, so the
+        # sixth (the last one sent) is X=0, Y=225; the floor would not pick it.
+        assert (pro.best.rotation_x, pro.best.rotation_y) == (0.0, 225.0)
+        assert (floor.best.rotation_x, floor.best.rotation_y) != (0.0, 225.0)
+        # No score crosses the wire: every score shown is the floor's own.
+        assert pro.original_score == floor.original_score
+        assert pro.best.score <= floor.best.score
+
+    def test_a_free_plan_never_asks(self, tmp_path, monkeypatch):
+        stl = _make_flat_cube_stl(tmp_path, 20, 20, 5)
+        _hide_scorer(monkeypatch)  # fails the test if the servers are asked
+        assert find_optimal_orientation(stl).best.score > 0
+
+    @pytest.mark.parametrize(
+        "reply",
+        [
+            {"success": False, "status": "error", "code": "TIER_REQUIRED", "error": "needs Kiln Pro"},
+            {"success": True, "status": "ok", "known": False, "order": None},
+            {"success": True, "status": "ok", "known": True, "order": [0, 0, 1]},
+            {"success": True, "status": "ok", "known": True, "order": "best first"},
+            "not a dict",
+        ],
+    )
+    def test_any_miss_is_the_floor(self, tmp_path, monkeypatch, reply):
+        stl = _make_flat_cube_stl(tmp_path, 20, 20, 5)
+        _hide_scorer(monkeypatch)
+        floor = find_optimal_orientation(stl, candidates=6)
+        _served_ranking(monkeypatch, reply)
+        assert find_optimal_orientation(stl, candidates=6).to_dict() == floor.to_dict()
+
+    def test_servers_that_do_not_answer_are_left_alone_for_a_while(self, tmp_path, monkeypatch):
+        stl = _make_flat_cube_stl(tmp_path, 20, 20, 5)
+
+        def offline(kwargs):
+            raise ConnectionError("no route to host")
+
+        sent = _served_ranking(monkeypatch, offline)
+        for _ in range(3):
+            find_optimal_orientation(stl, candidates=4)
+        assert len(sent) == 1
+

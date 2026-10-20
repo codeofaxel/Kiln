@@ -34,7 +34,6 @@ import kiln.design_intelligence as di
 from kiln.design_intelligence import (
     DesignBrief,
     EnvironmentReport,
-    LoadEstimate,
     MaterialProfile,
     MultiMaterialReport,
     PostProcessingGuide,
@@ -49,7 +48,6 @@ from kiln.design_intelligence import (
     check_environment_compatibility,
     check_multi_material_compatibility,
     check_printer_material_compatibility,
-    estimate_load_capacity,
     find_templates_for_use_case,
     find_public_design_templates,
     get_design_constraints,
@@ -894,110 +892,30 @@ class TestDesignBrief:
 
 
 # ---------------------------------------------------------------------------
-# Structural load estimation
+# Structural load estimation: the figure is kiln-pro's, one part per call
+# (kiln._pro_load_bridge; tests/test_pro_load_bridge.py here, the method's
+# own tests in kiln-pro).  What stays is the roster.
 # ---------------------------------------------------------------------------
 
 
-def _synthetic_cell(cross_section_mm2: float, cantilever_length_mm: float) -> float:
-    """One cell of the grid the session serves for every rigid material
-    (``conftest.synthetic_material_record``): the bending formula
-    ``capacity x A^1.5 / 6 / L`` with the made-up capacity of 10 N/mm^2,
-    floored to 2 decimals.  Recomputed here so the tests below exercise
-    the lookup, the interpolation and the derating against figures that
-    belong to no real material -- the real grids are kiln-pro's and are
-    pinned there."""
-    import math
+class TestLoadRoster:
+    def test_the_roster_names_every_material_and_its_limit(self):
+        roster = _get_kb().load_tables
+        assert set(di.load_table_materials()) == {k for k in roster if not k.startswith("_")}
+        assert {row.get("limit_mode") for row in roster.values()} == {"strength", "deflection"}
 
-    return math.floor(10.0 * (cross_section_mm2 ** 1.5 / 6.0) / cantilever_length_mm * 100.0) / 100.0
-
-
-class TestLoadEstimation:
-    def test_known_petg_load_at_100mm(self, served_material_records):
-        # A grid cell (A=24 at L=100) straight from the served record, then
-        # the default weak-orientation derate (0.4).
-        estimate = estimate_load_capacity("petg", 24.0, 100.0)
-        assert isinstance(estimate, LoadEstimate)
-        assert estimate is not None
-        assert estimate.max_load_n == pytest.approx(_synthetic_cell(24.0, 100.0) * 0.4, abs=0.01)
-        assert estimate.derating_applied == pytest.approx(0.4)
-
-    def test_unknown_material_returns_none(self):
-        assert estimate_load_capacity("unobtanium", 20.0, 100.0) is None
-
-    def test_cross_section_interpolation(self, served_material_records):
-        estimate = estimate_load_capacity("petg", 30.0, 100.0)
-        assert estimate is not None
-        # Interpolated between the 24 mm^2 and 36 mm^2 cells at 100 mm,
-        # then the default weak-orientation derate (0.4).
-        expected = (_synthetic_cell(24.0, 100.0) + _synthetic_cell(36.0, 100.0)) / 2 * 0.4
-        assert estimate.max_load_n == pytest.approx(expected, abs=0.01)
-        assert any("100 mm" in msg for msg in estimate.reasoning)
-
-    def test_cantilever_length_interpolation(self, served_material_records):
-        estimate = estimate_load_capacity("petg", 24.0, 75.0)
-        assert estimate is not None
-        # Interpolated between the 50 mm and 100 mm rows at 24 mm^2, then
-        # the default weak-orientation derate (0.4); the function floors
-        # to 2 decimals.
-        expected = (_synthetic_cell(24.0, 50.0) + _synthetic_cell(24.0, 100.0)) / 2 * 0.4
-        assert estimate.max_load_n == pytest.approx(expected, abs=0.01)
-        assert any("Interpolated between 50 mm and 100 mm" in msg for msg in estimate.reasoning)
-
-    def test_longer_cantilever_reduces_capacity(self):
-        short_arm = estimate_load_capacity("nylon", 24.0, 50.0)
-        long_arm = estimate_load_capacity("nylon", 24.0, 150.0)
-        assert short_arm is not None
-        assert long_arm is not None
-        assert short_arm.max_load_n > long_arm.max_load_n
-
-    def test_derating_for_layer_orientation(self):
-        # Fixed 2026-07-16: the pair was previously inverted.  A load
-        # across the layer interfaces (True) is the WEAK direction and
-        # must carry the derate (0.4 — the worst per-material interlayer
-        # ratio); in-plane loading (False) is strong.
-        across = estimate_load_capacity("abs", 24.0, 100.0, load_across_layers=True)
-        along = estimate_load_capacity("abs", 24.0, 100.0, load_across_layers=False)
-        assert across is not None
-        assert along is not None
-        assert across.max_load_n == pytest.approx(along.max_load_n * 0.4, abs=0.01)
-        assert across.derating_applied == pytest.approx(0.4)
-        assert along.derating_applied == pytest.approx(1.0)
-        # The weak orientation must never report more capacity than the
-        # strong one — the exact inversion the 2026-07-16 audit caught.
-        assert across.max_load_n < along.max_load_n
-
-    def test_non_positive_cross_section_returns_zero(self):
-        estimate = estimate_load_capacity("petg", 0.0, 100.0)
-        assert estimate is not None
-        assert estimate.max_load_n == 0.0
-        assert any("positive" in msg.lower() for msg in estimate.reasoning)
-
-    def test_below_min_cantilever_uses_shortest_table(self):
-        at_25 = estimate_load_capacity("pla", 24.0, 25.0)
-        at_10 = estimate_load_capacity("pla", 24.0, 10.0)
-        assert at_25 is not None
-        assert at_10 is not None
-        assert at_10.max_load_n == pytest.approx(at_25.max_load_n)
-
-    def test_above_max_cantilever_uses_longest_table(self):
-        at_200 = estimate_load_capacity("pla", 24.0, 200.0)
-        at_300 = estimate_load_capacity("pla", 24.0, 300.0)
-        assert at_200 is not None
-        assert at_300 is not None
-        assert at_300.max_load_n == pytest.approx(at_200.max_load_n)
-
-    def test_case_insensitive_material_lookup(self):
-        estimate = estimate_load_capacity("PETG", 24.0, 100.0)
-        assert estimate is not None
-        assert estimate.material == "petg"
-
-    def test_load_estimate_to_dict(self):
-        estimate = estimate_load_capacity("petg", 24.0, 100.0)
-        assert estimate is not None
-        data = estimate.to_dict()
-        assert data["material"] == "petg"
-        assert "max_load_n" in data
-        assert isinstance(data["reasoning"], list)
+    def test_public_holds_no_load_method(self):
+        """The grid, the interpolation and the derating left public Kiln on
+        2026-10-17; their names coming back would be the method coming back."""
+        for name in (
+            "estimate_load_capacity",
+            "estimate_deflection_limited_load",
+            "_interpolate_cross_section_load",
+            "_select_length_rows",
+            "load_figures_unanswered",
+            "LoadEstimate",
+        ):
+            assert not hasattr(di, name), name
 
 
 # ---------------------------------------------------------------------------
@@ -1935,7 +1853,7 @@ class TestFreePathCautions:
 
     def test_helper_is_silent_when_the_overlay_merged(self, monkeypatch):
         self._overlay(monkeypatch, {"load_tables": {"pla": {"notes": ["x"]}}})
-        assert estimate_load_capacity("pla", 50.0, 40.0) is not None
+        assert _get_kb().load_tables["pla"]["notes"] == ["x"]
         assert unestablished_caution("load_tables", "Nobody checked X.") == ""
 
     # --- the third state: the table merged, this entity is not in it ------
@@ -2000,23 +1918,6 @@ class TestFreePathCautions:
         assert curated_entry_exists("load_tables", "PLA") is True   # case-folded
         assert curated_entry_exists("load_tables", "peek") is False
 
-    def test_load_estimate_cautions_for_a_material_nobody_curated(
-        self, monkeypatch
-    ):
-        """End to end, through the real answer a user receives.
-
-        The number is unchanged — this adds honesty, it does not restate
-        physics — but the bare figure no longer reads as a clearance.
-        """
-        self._overlay(monkeypatch, {"load_tables": {"pla": {"notes": ["x"]}}})
-        curated = estimate_load_capacity("pla", 50.0, 40.0)
-        uncurated = estimate_load_capacity("petg", 50.0, 40.0)
-        assert curated is not None and uncurated is not None
-        assert curated.caution == ""          # somebody looked at pla
-        assert uncurated.caution != ""        # nobody looked at petg
-        assert "petg" in uncurated.caution
-        assert "pricing" not in uncurated.caution
-
     def test_every_table_the_kb_merges_is_really_probeable(self, monkeypatch):
         """THE BUG, pinned in the direction it actually happened.
 
@@ -2064,44 +1965,10 @@ class TestFreePathCautions:
             "'no overlay' for them, so their cautions will go silent"
         )
 
-    # --- 1. estimate_load_capacity ----------------------------------------
-
-    def test_load_estimate_cautions_when_material_caveats_unreadable(
-        self, monkeypatch
-    ):
-        self._overlay(monkeypatch, None)
-        est = estimate_load_capacity("pla", 50.0, 40.0)
-        assert est is not None
-        assert est.caution, "a safe-load number shipped with no caveat at all"
-        assert "pla" in est.caution
-        assert "kiln3d.com/pricing" in est.caution
-
-    def test_load_estimate_number_is_identical_on_both_paths(self, monkeypatch):
-        # No reset between the two callers: the knowledge base resolves
-        # entitlement per read, so the free read must not decide what the paid
-        # one gets (or the other way round).
-        self._overlay(monkeypatch, None)
-        free = estimate_load_capacity("pla", 50.0, 40.0)
-        self._overlay(monkeypatch, {"load_tables": {"pla": {"notes": ["paid"]}}})
-        paid = estimate_load_capacity("pla", 50.0, 40.0)
-        assert free is not None and paid is not None
-        # Only the honesty differs; the engineering answer must not.
-        assert free.max_load_n == paid.max_load_n
-        assert free.derating_applied == paid.derating_applied
-        assert paid.caution == ""
-        assert "paid" in paid.reasoning
-
-    def test_load_estimate_prefers_a_real_public_note_over_the_caution(
-        self, monkeypatch
-    ):
-        # Where a public floor genuinely exists, surface it instead of saying
-        # nothing could be established.
-        self._overlay(monkeypatch, None)
-        _get_kb().load_tables["pla"]["notes"] = ["public floor note"]
-        est = estimate_load_capacity("pla", 50.0, 40.0)
-        assert est is not None
-        assert "public floor note" in est.reasoning
-        assert est.caution == ""
+    # --- 1. estimate_load_capacity moved to kiln-pro (2026-10-17) ---------
+    # Its caution is still asked through unestablished_caution and
+    # curated_entry_exists, against this knowledge base, where the figure is
+    # made now; kiln-pro's tests pin those three states end to end.
 
     # --- 2. design templates ----------------------------------------------
 
@@ -2314,8 +2181,10 @@ class TestFreePathCautions:
 
     # --- one helper, three call sites -------------------------------------
 
-    def test_all_three_sites_route_through_the_shared_helper(self, monkeypatch):
-        # Three hand-rolled variants is how this class of defect started.
+    def test_both_public_sites_route_through_the_shared_helper(self, monkeypatch):
+        # Three hand-rolled variants is how this class of defect started.  The
+        # third site, the load figure's caution, is kiln-pro's since
+        # 2026-10-17 and calls the same helper there.
         seen: list[str] = []
 
         def spy(
@@ -2332,7 +2201,6 @@ class TestFreePathCautions:
         self._overlay(monkeypatch, None)
         monkeypatch.setattr(di, "unestablished_caution", spy)
 
-        assert estimate_load_capacity("pla", 50.0, 40.0).caution == "spy"
         assert get_design_template("living_hinge").caution == "spy"
         assert check_multi_material_compatibility("pla", "abs").caution == "spy"
-        assert seen == ["load_tables", "design_templates", "multi_material_pairing"]
+        assert seen == ["design_templates", "multi_material_pairing"]

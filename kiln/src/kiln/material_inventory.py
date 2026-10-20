@@ -1,8 +1,12 @@
-"""Material Inventory Engine — consumption tracking, forecasting, restock
-suggestions, fleet optimization, and material sufficiency checks.
+"""Material inventory — what is on hand, how fast it is used, when it runs
+out, whether a print has enough, and which spool a job draws from.
 
-Ties together the persistence layer (spools, printer_materials, print_history)
-with intelligence about usage patterns and fleet-wide material allocation.
+Reads the persistence layer (spools, printer_materials, print_history).  On
+an install with one machine every answer is worked out here, offline.  A
+question across several machines is Kiln Business and is answered on Kiln's
+servers from the rows this install sends (:func:`inventory_answer`, the one
+router every door calls); which printer takes each job and which spool moves
+where are planned there and nowhere in this package.
 
 All public functions accept a ``db`` parameter (a :class:`~kiln.persistence.KilnDB`
 instance) as their first argument.  Imports from other Kiln modules are lazy
@@ -14,8 +18,7 @@ Usage::
     from kiln.material_inventory import get_fleet_material_summary, forecast_consumption
 
     db = get_db()
-    summary = get_fleet_material_summary(db)
-    forecast = forecast_consumption(db, material_type="PLA")
+    summary, refused = inventory_answer("summary", db, feature="Material summary")
 """
 
 from __future__ import annotations
@@ -343,114 +346,116 @@ def _determine_urgency(days_until_empty: float | None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Public API
+# Reads: this install's own rows
 # ---------------------------------------------------------------------------
+#
+# Each read is a sum or a filter over the rows it is handed.  On an install
+# with one machine they run here, over this install's rows; across machines
+# the same question is Kiln Business and is answered on Kiln's servers from
+# the rows this install sends (:func:`inventory_answer`).
 
 
-def get_fleet_material_summary(db: Any) -> list[FleetMaterialSummary]:
-    """Aggregate material inventory across all printers and spools.
+def _spool_rows(db: Any) -> list[dict[str, Any]]:
+    """The spool records, cut down to what a material answer reads."""
+    return [
+        {k: s.get(k) for k in ("id", "material_type", "color", "brand", "remaining_grams")}
+        for s in db.list_spools()
+    ]
 
-    Combines ``list_spools()`` and all ``printer_materials`` rows to produce
-    a per-material-type summary of total stock, spool counts, loaded printers,
-    and available colours.
-    """
-    # Gather data from spools
-    spools = db.list_spools()
-    # Gather data from loaded materials across all printers
-    loaded_materials = _get_all_materials(db)
 
-    # Group by material_type (normalised uppercase)
+def _loaded_rows(db: Any) -> list[dict[str, Any]]:
+    """What each printer has loaded, cut down to what a material answer reads."""
+    return [
+        {k: m.get(k) for k in ("printer_name", "tool_index", "material_type", "color", "spool_id", "remaining_grams")}
+        for m in _get_all_materials(db)
+    ]
+
+
+def _history_rows(db: Any) -> list[dict[str, Any]]:
+    """The completed prints, cut down to what consumption reads."""
+    rows: list[dict[str, Any]] = []
+    for rec in db.list_print_history(status="completed", limit=10000):
+        meta = rec.get("metadata")
+        filament_mm = meta.get("filament_used_mm") if isinstance(meta, dict) else None
+        rows.append({
+            "material_type": rec.get("material_type"),
+            "completed_at": rec.get("completed_at"),
+            "filament_used_mm": filament_mm,
+        })
+    return rows
+
+
+def summarize(spools: list[dict[str, Any]], loaded: list[dict[str, Any]]) -> list[FleetMaterialSummary]:
+    """Per-material totals over *spools* and *loaded* rows: stock in grams,
+    spool count, the printers it is loaded on, its colours."""
     agg: dict[str, dict[str, Any]] = {}
+
+    def _bucket(mt: str) -> dict[str, Any]:
+        return agg.setdefault(mt, {"total_grams": 0.0, "spool_count": 0, "printers": set(), "colors": set()})
 
     for spool in spools:
         mt = (spool.get("material_type") or "").upper()
         if not mt:
             continue
-        bucket = agg.setdefault(mt, {
-            "total_grams": 0.0,
-            "spool_count": 0,
-            "printers": set(),
-            "colors": set(),
-        })
+        bucket = _bucket(mt)
         bucket["total_grams"] += spool.get("remaining_grams", 0.0) or 0.0
         bucket["spool_count"] += 1
         color = spool.get("color")
         if color:
             bucket["colors"].add(color)
 
-    for mat in loaded_materials:
+    for mat in loaded:
         mt = (mat.get("material_type") or "").upper()
         if not mt:
             continue
-        bucket = agg.setdefault(mt, {
-            "total_grams": 0.0,
-            "spool_count": 0,
-            "printers": set(),
-            "colors": set(),
-        })
+        bucket = _bucket(mt)
         printer = mat.get("printer_name", "")
         if printer:
             bucket["printers"].add(printer)
         color = mat.get("color")
         if color:
             bucket["colors"].add(color)
-        # Only add remaining_grams from loaded materials if there is no
-        # linked spool (to avoid double-counting).
+        # A loaded row linked to a spool is counted through the spool.
         if not mat.get("spool_id") and mat.get("remaining_grams"):
             bucket["total_grams"] += mat["remaining_grams"]
 
-    results: list[FleetMaterialSummary] = []
-    for mt in sorted(agg):
-        b = agg[mt]
-        results.append(FleetMaterialSummary(
+    return [
+        FleetMaterialSummary(
             material_type=mt,
-            total_grams=round(b["total_grams"], 2),
-            spool_count=b["spool_count"],
-            printers_loaded=tuple(sorted(b["printers"])),
-            colors=tuple(sorted(b["colors"])),
-        ))
-    return results
+            total_grams=round(agg[mt]["total_grams"], 2),
+            spool_count=agg[mt]["spool_count"],
+            printers_loaded=tuple(sorted(agg[mt]["printers"])),
+            colors=tuple(sorted(agg[mt]["colors"])),
+        )
+        for mt in sorted(agg)
+    ]
 
 
-def get_on_hand_materials(
-    db: Any,
+def get_fleet_material_summary(db: Any) -> list[FleetMaterialSummary]:
+    """Per-material totals over this install's spools and loaded materials."""
+    return summarize(_spool_rows(db), _loaded_rows(db))
+
+
+def on_hand(
+    spools: list[dict[str, Any]],
+    loaded: list[dict[str, Any]],
     *,
     printer_name: str | None = None,
 ) -> list[OnHandMaterial]:
-    """Snapshot of materials the user physically has, grouped by type.
-
-    Combines loaded materials (``printer_materials`` rows) with unloaded
-    shelf spools (``list_spools()`` entries not linked to any printer).
-    This is the same physical-reality picture
-    :func:`get_fleet_material_summary` aggregates, kept per machine
-    instead of collapsed: each entry names WHICH printers have the
-    material loaded, so an answer built on it can attribute itself to a
-    machine.
-
-    :param printer_name: When given, the loaded half is scoped to that
-        one machine, and spools loaded on OTHER machines are excluded
-        entirely.  The shelf is machine-agnostic and always included —
-        a shelved spool is reachable from any printer via a swap.
-    """
-    all_loaded = _get_all_materials(db)
-    loaded_spool_ids = {m.get("spool_id") for m in all_loaded if m.get("spool_id")}
-
-    if printer_name is not None:
-        scoped_loaded = [
-            m for m in all_loaded if m.get("printer_name") == printer_name
-        ]
-    else:
-        scoped_loaded = all_loaded
-    scoped_spool_ids = {
-        m.get("spool_id") for m in scoped_loaded if m.get("spool_id")
-    }
+    """Materials physically on hand, grouped by type: loaded (and on which
+    printer) and on the shelf.  With *printer_name*, the loaded half is that
+    one printer's and a spool loaded on another printer is left out; the
+    shelf always counts, since a shelved spool can be swapped in."""
+    loaded_spool_ids = {m.get("spool_id") for m in loaded if m.get("spool_id")}
+    scoped = [m for m in loaded if m.get("printer_name") == printer_name] if printer_name is not None else loaded
+    scoped_spool_ids = {m.get("spool_id") for m in scoped if m.get("spool_id")}
 
     agg: dict[str, dict[str, Any]] = {}
 
     def _bucket(mt: str) -> dict[str, Any]:
         return agg.setdefault(mt, {"loaded": [], "shelf": [], "grams": 0.0})
 
-    for mat in scoped_loaded:
+    for mat in scoped:
         mt = (mat.get("material_type") or "").upper()
         if not mt:
             continue
@@ -462,21 +467,16 @@ def get_on_hand_materials(
             "color": mat.get("color"),
             "spool_id": mat.get("spool_id"),
         })
-        # Loaded rows without a linked spool carry their own grams; linked
-        # rows are counted through the spool below (same non-double-counting
-        # rule as get_fleet_material_summary).
+        # Unlinked rows carry their own grams; linked rows count through the spool.
         if not mat.get("spool_id") and mat.get("remaining_grams"):
             bucket["grams"] += mat["remaining_grams"]
 
-    for spool in db.list_spools():
+    for spool in spools:
         mt = (spool.get("material_type") or "").upper()
         if not mt:
             continue
         rem = spool.get("remaining_grams", 0.0) or 0.0
         if spool.get("id") in loaded_spool_ids:
-            # Loaded on some machine — visible only through that machine's
-            # printer_materials row.  When scoped, a spool loaded on a
-            # DIFFERENT machine is not available here at all.
             if spool.get("id") in scoped_spool_ids:
                 _bucket(mt)["grams"] += rem
             continue
@@ -489,110 +489,166 @@ def get_on_hand_materials(
             "remaining_grams": rem,
         })
 
-    results: list[OnHandMaterial] = []
-    for mt in sorted(agg):
-        b = agg[mt]
-        results.append(OnHandMaterial(
+    return [
+        OnHandMaterial(
             material_type=mt,
-            loaded_on=tuple(b["loaded"]),
-            shelf_spools=tuple(b["shelf"]),
-            total_grams=round(b["grams"], 2),
-        ))
-    return results
+            loaded_on=tuple(agg[mt]["loaded"]),
+            shelf_spools=tuple(agg[mt]["shelf"]),
+            total_grams=round(agg[mt]["grams"], 2),
+        )
+        for mt in sorted(agg)
+    ]
 
 
-def get_consumption_history(db: Any, *, days: int = 30) -> list[ConsumptionRecord]:
-    """Calculate material consumption from print history.
+def get_on_hand_materials(db: Any, *, printer_name: str | None = None) -> list[OnHandMaterial]:
+    """What this install physically has, grouped by type (:func:`on_hand`)."""
+    return on_hand(_spool_rows(db), _loaded_rows(db), printer_name=printer_name)
 
-    Scans completed prints within the given window and aggregates filament
-    usage per material type.  Filament length (mm) from the ``metadata``
-    JSON field is converted to grams using standard densities.
-    """
-    cutoff = time.time() - (days * 86400)
-    records = db.list_print_history(status="completed", limit=10000)
 
-    # Group usage by material type
+def consumption(history: list[dict[str, Any]], *, days: int, now: float) -> list[ConsumptionRecord]:
+    """Filament used per material over the last *days* of completed prints
+    (*history* rows: ``material_type``, ``completed_at``, ``filament_used_mm``),
+    converted to grams by the material's density."""
+    cutoff = now - (days * 86400)
     usage: dict[str, dict[str, Any]] = {}
-
-    for rec in records:
+    for rec in history:
         completed_at = rec.get("completed_at")
         if completed_at is not None and completed_at < cutoff:
             continue
-
         mt = (rec.get("material_type") or "UNKNOWN").upper()
         bucket = usage.setdefault(mt, {"grams": 0.0, "count": 0})
         bucket["count"] += 1
-
-        # Try to extract filament_used_mm from metadata
-        meta = rec.get("metadata")
-        if isinstance(meta, dict):
-            filament_mm = meta.get("filament_used_mm")
-            if filament_mm is not None:
-                bucket["grams"] += _mm_to_grams(float(filament_mm), mt)
-
-    results: list[ConsumptionRecord] = []
-    for mt in sorted(usage):
-        b = usage[mt]
-        daily_rate = b["grams"] / max(days, 1)
-        results.append(ConsumptionRecord(
+        filament_mm = rec.get("filament_used_mm")
+        if filament_mm is not None:
+            bucket["grams"] += _mm_to_grams(float(filament_mm), mt)
+    return [
+        ConsumptionRecord(
             material_type=mt,
-            grams_used=round(b["grams"], 2),
-            print_count=b["count"],
+            grams_used=round(usage[mt]["grams"], 2),
+            print_count=usage[mt]["count"],
             period_days=days,
-            daily_rate_grams=round(daily_rate, 4),
-        ))
-    return results
+            daily_rate_grams=round(usage[mt]["grams"] / max(days, 1), 4),
+        )
+        for mt in sorted(usage)
+    ]
 
 
-def forecast_consumption(
-    db: Any,
-    *,
+def get_consumption_history(db: Any, *, days: int = 30) -> list[ConsumptionRecord]:
+    """Filament used per material over this install's last *days* of prints."""
+    return consumption(_history_rows(db), days=days, now=time.time())
+
+
+def forecast(
+    summaries: list[FleetMaterialSummary],
+    history: list[ConsumptionRecord],
     material_type: str,
-    days_ahead: int = 30,
 ) -> ConsumptionForecast:
-    """Project when a material type will run out.
-
-    Combines current stock from :func:`get_fleet_material_summary` with the
-    historical consumption rate to estimate remaining days.
-
-    :param material_type: Material type to forecast (e.g. ``"PLA"``).
-    :param days_ahead: How many days of history to use for the rate estimate.
-    """
+    """When *material_type* runs out: its stock over its daily use."""
     mt_upper = material_type.upper()
-
-    # Current stock
-    summaries = get_fleet_material_summary(db)
-    current_stock = 0.0
-    for s in summaries:
-        if s.material_type == mt_upper:
-            current_stock = s.total_grams
-            break
-
-    # Consumption rate
-    history = get_consumption_history(db, days=days_ahead)
-    daily_rate = 0.0
-    for h in history:
-        if h.material_type == mt_upper:
-            daily_rate = h.daily_rate_grams
-            break
-
-    # Forecast
-    if daily_rate <= 0:
-        days_until_empty = None
-    else:
-        days_until_empty = round(current_stock / daily_rate, 1)
-
+    current_stock = next((s.total_grams for s in summaries if s.material_type == mt_upper), 0.0)
+    daily_rate = next((h.daily_rate_grams for h in history if h.material_type == mt_upper), 0.0)
+    days_until_empty = None if daily_rate <= 0 else round(current_stock / daily_rate, 1)
     urgency = _determine_urgency(days_until_empty)
-    restock = urgency in ("low", "critical")
-
     return ConsumptionForecast(
         material_type=mt_upper,
         current_stock_grams=round(current_stock, 2),
         daily_rate_grams=round(daily_rate, 4),
         days_until_empty=days_until_empty,
-        restock_recommended=restock,
+        restock_recommended=urgency in ("low", "critical"),
         urgency=urgency,
     )
+
+
+def forecast_consumption(db: Any, *, material_type: str, days_ahead: int = 30) -> ConsumptionForecast:
+    """When *material_type* runs out on this install.
+
+    :param days_ahead: How many days of history set the rate.
+    """
+    return forecast(get_fleet_material_summary(db), get_consumption_history(db, days=days_ahead), material_type)
+
+
+def restock(
+    summaries: list[FleetMaterialSummary],
+    history: list[ConsumptionRecord],
+    spools: list[dict[str, Any]],
+) -> list[RestockSuggestion]:
+    """Materials that run out within 30 days at their current use, critical
+    first, each with a store search link built from its spool's brand and
+    colour."""
+    rate_map = {h.material_type: h.daily_rate_grams for h in history}
+    suggestions: list[RestockSuggestion] = []
+    for s in summaries:
+        daily_rate = rate_map.get(s.material_type, 0.0)
+        if daily_rate <= 0:
+            continue
+        days_left = s.total_grams / daily_rate
+        if days_left >= 30:
+            continue
+        brand: str | None = None
+        color: str | None = None
+        for spool in spools:
+            if (spool.get("material_type") or "").upper() == s.material_type:
+                brand = spool.get("brand") or brand
+                color = spool.get("color") or color
+                break
+        suggestions.append(RestockSuggestion(
+            material_type=s.material_type,
+            brand=brand,
+            color=color,
+            current_grams=s.total_grams,
+            monthly_usage_grams=round(daily_rate * 30, 2),
+            days_until_empty=round(days_left, 1),
+            urgency=_determine_urgency(days_left),
+            purchase_urls=_get_purchase_urls(s.material_type, brand, color),
+        ))
+    urgency_order = {"critical": 0, "low": 1}
+    suggestions.sort(key=lambda s: urgency_order.get(s.urgency, 2))
+    return suggestions
+
+
+def get_restock_suggestions(db: Any) -> list[RestockSuggestion]:
+    """This install's materials that run out within 30 days."""
+    return restock(get_fleet_material_summary(db), get_consumption_history(db, days=30), _spool_rows(db))
+
+
+def holding(
+    loaded: list[dict[str, Any]],
+    *,
+    material_type: str,
+    color: str | None = None,
+    min_grams: float = 0.0,
+) -> list[dict[str, Any]]:
+    """The loaded rows of *material_type* (and *color*) with at least
+    *min_grams* left, most stock first."""
+    mt_upper = material_type.upper()
+    results: list[dict[str, Any]] = []
+    for mat in loaded:
+        if (mat.get("material_type") or "").upper() != mt_upper:
+            continue
+        remaining = mat.get("remaining_grams") or 0.0
+        if remaining < min_grams:
+            continue
+        if color and (mat.get("color") or "").lower() != color.lower():
+            continue
+        results.append({
+            "printer_name": mat["printer_name"],
+            "remaining_grams": remaining,
+            "color": mat.get("color"),
+            "spool_id": mat.get("spool_id"),
+        })
+    results.sort(key=lambda r: r["remaining_grams"], reverse=True)
+    return results
+
+
+def find_printers_with_material(
+    db: Any,
+    *,
+    material_type: str,
+    color: str | None = None,
+    min_grams: float = 0.0,
+) -> list[dict[str, Any]]:
+    """This install's printers with *material_type* loaded (:func:`holding`)."""
+    return holding(_loaded_rows(db), material_type=material_type, color=color, min_grams=min_grams)
 
 
 def check_material_sufficiency(
@@ -601,6 +657,7 @@ def check_material_sufficiency(
     printer_name: str,
     required_grams: float,
     material_type: str | None = None,
+    other_machines: list[dict[str, Any]] | None = None,
 ) -> MaterialCheck:
     """Check if a printer has enough material for a print.
 
@@ -609,12 +666,15 @@ def check_material_sufficiency(
     the shelf, a pause-and-swap.  Only when none of those will do does it
     offer help finding a filament, as one question: never a store, a link
     or a list unasked.
+
+    :param other_machines: The printers holding enough of the material, as
+        :func:`holding` lists them, when they come from elsewhere (Kiln's
+        servers, across machines).  ``None`` reads this install's own rows.
     """
     materials = db.list_materials(printer_name)
     loaded_grams: float | None = None
     loaded_type: str | None = material_type
 
-    # Find the primary tool material (tool_index 0)
     for mat in materials:
         if mat.get("tool_index", 0) == 0:
             loaded_grams = mat.get("remaining_grams")
@@ -634,11 +694,10 @@ def check_material_sufficiency(
     alt_printers: list[str] = []
 
     if not sufficient and loaded_type:
-        # Find alternative printers with enough material
-        candidates = find_printers_with_material(
-            db,
-            material_type=loaded_type,
-            min_grams=required_grams,
+        candidates = (
+            other_machines
+            if other_machines is not None
+            else find_printers_with_material(db, material_type=loaded_type, min_grams=required_grams)
         )
         for cand in candidates:
             cname = cand["printer_name"]
@@ -649,13 +708,12 @@ def check_material_sufficiency(
                     f"Printer {cname} has {remaining:.0f}g of {loaded_type} loaded"
                 )
 
-        # Check shelf stock (spools not loaded on any printer)
-        spools = db.list_spools()
+        # Spools on the shelf (not loaded on any printer)
         loaded_spool_ids = {
             m.get("spool_id") for m in _get_all_materials(db) if m.get("spool_id")
         }
         on_the_shelf = False
-        for spool in spools:
+        for spool in db.list_spools():
             spool_mt = (spool.get("material_type") or "").upper()
             if spool_mt != loaded_type.upper():
                 continue
@@ -698,293 +756,216 @@ def check_material_sufficiency(
     )
 
 
-def get_restock_suggestions(db: Any) -> list[RestockSuggestion]:
-    """Find materials running low and generate purchase links.
-
-    Examines all material types in the inventory and returns suggestions
-    for any that are projected to run out within 30 days, sorted by urgency
-    (critical first).
-    """
-    summaries = get_fleet_material_summary(db)
-    history = get_consumption_history(db, days=30)
-
-    rate_map: dict[str, float] = {}
-    for h in history:
-        rate_map[h.material_type] = h.daily_rate_grams
-
-    suggestions: list[RestockSuggestion] = []
-    for s in summaries:
-        daily_rate = rate_map.get(s.material_type, 0.0)
-        if daily_rate <= 0:
-            continue
-        days_left = s.total_grams / daily_rate
-        if days_left >= 30:
-            continue
-
-        urgency = _determine_urgency(days_left)
-
-        # Find the most-used brand/color from spools of this type
-        spools = db.list_spools()
-        brand: str | None = None
-        color: str | None = None
-        for spool in spools:
-            if (spool.get("material_type") or "").upper() == s.material_type:
-                brand = spool.get("brand") or brand
-                color = spool.get("color") or color
-                break
-
-        urls = _get_purchase_urls(s.material_type, brand, color)
-
-        suggestions.append(RestockSuggestion(
-            material_type=s.material_type,
-            brand=brand,
-            color=color,
-            current_grams=s.total_grams,
-            monthly_usage_grams=round(daily_rate * 30, 2),
-            days_until_empty=round(days_left, 1),
-            urgency=urgency,
-            purchase_urls=urls,
-        ))
-
-    # Sort critical first, then low
-    urgency_order = {"critical": 0, "low": 1}
-    suggestions.sort(key=lambda s: urgency_order.get(s.urgency, 2))
-    return suggestions
+# ---------------------------------------------------------------------------
+# One machine's jobs and spools
+# ---------------------------------------------------------------------------
+#
+# Which of several printers takes each job, and which spool moves to which
+# printer, are fleet questions: Kiln Business, planned on Kiln's servers.  On
+# one machine the questions are smaller -- can its loaded spool take these
+# jobs, in order, and what has to come off the shelf -- and are answered here.
 
 
-def find_printers_with_material(
-    db: Any,
-    *,
-    material_type: str,
-    color: str | None = None,
-    min_grams: float = 0.0,
-) -> list[dict[str, Any]]:
-    """Find all printers that have a specific material loaded.
+def _machine_slot(loaded: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The machine's first-tool slot: the one a print draws from.  A row
+    left under another printer's name (renamed, or never registered) does
+    not stand in for it when the registered machine has one."""
+    slots = [m for m in loaded if m.get("tool_index", 0) == 0]
+    if not slots:
+        return None
+    try:
+        from kiln.registry import get_registry
 
-    Returns a list of dicts with keys ``printer_name``, ``remaining_grams``,
-    ``color``, and ``spool_id``.
-    """
-    mt_upper = material_type.upper()
-    all_materials = _get_all_materials(db)
-
-    results: list[dict[str, Any]] = []
-    for mat in all_materials:
-        mat_type = (mat.get("material_type") or "").upper()
-        if mat_type != mt_upper:
-            continue
-        remaining = mat.get("remaining_grams") or 0.0
-        if remaining < min_grams:
-            continue
-        if color and (mat.get("color") or "").lower() != color.lower():
-            continue
-        results.append({
-            "printer_name": mat["printer_name"],
-            "remaining_grams": remaining,
-            "color": mat.get("color"),
-            "spool_id": mat.get("spool_id"),
-        })
-
-    # Sort by remaining grams descending (most stock first)
-    results.sort(key=lambda r: r["remaining_grams"], reverse=True)
-    return results
+        names = set(get_registry().list_names())
+    except Exception:  # noqa: BLE001 -- no registry: the first slot
+        names = set()
+    return next((m for m in slots if m.get("printer_name") in names), slots[0])
 
 
-def optimize_fleet_assignment(
-    db: Any,
-    *,
-    jobs: list[dict[str, Any]],
-) -> list[FleetAssignment]:
-    """Assign jobs to printers optimally by material availability.
+def plan_jobs_for_one_machine(db: Any, *, jobs: list[dict[str, Any]]) -> list[FleetAssignment]:
+    """Which of *jobs* the machine's loaded spool can take, in order.
 
-    Each job dict should contain:
-    - ``file_name``: G-code file name.
-    - ``material_type``: Required material type.
-    - ``required_grams``: Material needed.
-    - ``color`` (optional): Preferred colour.
-
-    For each job the function finds the best printer — one that has the right
-    material loaded with enough remaining stock.  Ties are broken by choosing
-    the printer with the most remaining grams (to minimise spool swaps).
+    Each job: ``file_name``, ``material_type``, ``required_grams``, optional
+    ``color``.  A job is taken when the first-tool spool is that material
+    and has enough left after the jobs before it; a colour asked for and
+    matched is said.
     """
     if not jobs:
         return []
-
-    all_materials = _get_all_materials(db)
-
-    # Build a lookup: printer_name -> list of material rows
-    printer_mats: dict[str, list[dict[str, Any]]] = {}
-    for mat in all_materials:
-        pn = mat.get("printer_name", "")
-        printer_mats.setdefault(pn, []).append(mat)
-
-    # Track remaining capacity per printer (modified as jobs are assigned)
-    capacity: dict[str, float] = {}
-    for pn, mats in printer_mats.items():
-        for m in mats:
-            if m.get("tool_index", 0) == 0:
-                capacity[pn] = m.get("remaining_grams") or 0.0
-                break
-
-    assignments: list[FleetAssignment] = []
+    slot = _machine_slot(_get_all_materials(db))
+    capacity = (slot.get("remaining_grams") or 0.0) if slot is not None else 0.0
+    out: list[FleetAssignment] = []
     for job in jobs:
         file_name = job.get("file_name", "unknown")
         mt = (job.get("material_type") or "").upper()
         required = job.get("required_grams", 0.0)
-        preferred_color = job.get("color")
-
-        best_printer: str | None = None
-        best_remaining: float = -1.0
-        best_match = False
-
-        for pn, mats in printer_mats.items():
-            for m in mats:
-                if m.get("tool_index", 0) != 0:
-                    continue
-                mat_type = (m.get("material_type") or "").upper()
-                if mat_type != mt:
-                    continue
-                remaining = capacity.get(pn, 0.0)
-                if remaining < required:
-                    continue
-                # Colour match bonus (prefer exact match but accept any)
-                color_match = (
-                    not preferred_color
-                    or (m.get("color") or "").lower() == preferred_color.lower()
-                )
-                # Prefer colour match, then most remaining
-                if color_match and not best_match:
-                    best_printer = pn
-                    best_remaining = remaining
-                    best_match = True
-                elif color_match == best_match and remaining > best_remaining:
-                    best_printer = pn
-                    best_remaining = remaining
-                    best_match = color_match
-
-        if best_printer is not None:
-            remaining_after = round(best_remaining - required, 2)
-            capacity[best_printer] = remaining_after
-            reason = f"Has {mt} loaded with {best_remaining:.0f}g remaining"
-            if best_match and preferred_color:
-                reason += f" (colour match: {preferred_color})"
-            assignments.append(FleetAssignment(
+        preferred = job.get("color")
+        if slot is not None and (slot.get("material_type") or "").upper() == mt and capacity >= required:
+            colour_match = not preferred or (slot.get("color") or "").lower() == preferred.lower()
+            remaining_after = round(capacity - required, 2)
+            reason = f"Has {mt} loaded with {capacity:.0f}g remaining"
+            if colour_match and preferred:
+                reason += f" (colour match: {preferred})"
+            out.append(FleetAssignment(
                 job_file=file_name,
-                recommended_printer=best_printer,
+                recommended_printer=slot["printer_name"],
                 reason=reason,
                 material_match=True,
                 remaining_after_print_grams=remaining_after,
             ))
+            capacity = remaining_after
         else:
-            # No suitable printer found
-            assignments.append(FleetAssignment(
+            out.append(FleetAssignment(
                 job_file=file_name,
                 recommended_printer="",
                 reason=f"No printer found with {mt} and {required:.0f}g available",
                 material_match=False,
                 remaining_after_print_grams=None,
             ))
+    return out
 
-    return assignments
 
+def swaps_for_one_machine(db: Any, *, jobs: list[dict[str, Any]]) -> list[str]:
+    """What has to come off the shelf for the machine to run *jobs*.
 
-def suggest_spool_swaps(
-    db: Any,
-    *,
-    jobs: list[dict[str, Any]],
-) -> list[str]:
-    """Suggest minimal spool swaps to run all queued jobs.
-
-    Analyses which jobs need which materials, compares against what is
-    currently loaded on each printer, and suggests moves to minimise the
-    total number of physical spool changes.
-
-    Each job dict should contain ``material_type`` and ``required_grams``.
+    Each job: ``material_type`` and ``required_grams``.  For each material
+    the loaded spool cannot cover, the shelf spools of it, largest first,
+    until the shortfall is met; the machine itself is named as where one goes
+    when what it has loaded is not needed by these jobs.
     """
     if not jobs:
         return []
+    all_loaded = _get_all_materials(db)
+    slot = _machine_slot(all_loaded)
+    slot_mt = (slot.get("material_type") or "").upper() if slot is not None else ""
 
-    all_materials = _get_all_materials(db)
-
-    # What each printer currently has loaded (tool_index 0)
-    loaded: dict[str, dict[str, Any]] = {}
-    for mat in all_materials:
-        if mat.get("tool_index", 0) == 0:
-            loaded[mat["printer_name"]] = mat
-
-    # Aggregate demand by material type
     demand: dict[str, float] = {}
     for job in jobs:
         mt = (job.get("material_type") or "").upper()
         demand[mt] = demand.get(mt, 0.0) + job.get("required_grams", 0.0)
 
-    # Check what's already satisfied
-    satisfied: dict[str, float] = {}
-    for _pn, mat in loaded.items():
-        mt = (mat.get("material_type") or "").upper()
-        remaining = mat.get("remaining_grams") or 0.0
-        satisfied[mt] = satisfied.get(mt, 0.0) + remaining
+    covered = {slot_mt: slot.get("remaining_grams") or 0.0} if slot is not None else {}
+    loaded_spool_ids = {m.get("spool_id") for m in all_loaded if m.get("spool_id")}
 
     suggestions: list[str] = []
-
     for mt, needed in sorted(demand.items()):
-        available = satisfied.get(mt, 0.0)
+        available = covered.get(mt, 0.0)
         if available >= needed:
             continue
-
         shortfall = needed - available
-
-        # Find printers with different materials that could be swapped
-        # and spools on the shelf that have this material
-        spools = db.list_spools()
-        loaded_spool_ids = {
-            m.get("spool_id") for m in all_materials if m.get("spool_id")
-        }
-
-        shelf_spools = []
-        for spool in spools:
-            spool_mt = (spool.get("material_type") or "").upper()
-            if spool_mt != mt:
-                continue
-            if spool["id"] in loaded_spool_ids:
-                continue
-            rem = spool.get("remaining_grams", 0.0) or 0.0
-            if rem > 0:
-                shelf_spools.append(spool)
-
-        # Sort shelf spools by remaining grams descending
-        shelf_spools.sort(
-            key=lambda s: s.get("remaining_grams", 0.0), reverse=True
-        )
-
-        # Find printers that don't have a demand for their current material
-        # (good candidates for swapping)
-        swap_candidates: list[str] = []
-        for pn, mat in loaded.items():
-            current_mt = (mat.get("material_type") or "").upper()
-            if current_mt == mt:
-                continue
-            if current_mt not in demand:
-                swap_candidates.append(pn)
-
-        for spool in shelf_spools:
+        shelf = [
+            s for s in db.list_spools()
+            if (s.get("material_type") or "").upper() == mt
+            and s["id"] not in loaded_spool_ids
+            and (s.get("remaining_grams", 0.0) or 0.0) > 0
+        ]
+        shelf.sort(key=lambda s: s.get("remaining_grams", 0.0), reverse=True)
+        target = slot["printer_name"] if slot is not None and slot_mt != mt and slot_mt not in demand else None
+        for spool in shelf:
             if shortfall <= 0:
                 break
             rem = spool.get("remaining_grams", 0.0) or 0.0
-            brand = spool.get("brand", "")
-            color = spool.get("color", "")
-            label = " ".join(filter(None, [brand, color, mt]))
-
-            if swap_candidates:
-                target = swap_candidates.pop(0)
-                suggestions.append(
-                    f"Load {label} spool ({rem:.0f}g) onto {target}"
-                )
-                shortfall -= rem
+            label = " ".join(filter(None, [spool.get("brand", ""), spool.get("color", ""), mt]))
+            if target:
+                suggestions.append(f"Load {label} spool ({rem:.0f}g) onto {target}")
+                target = None
             else:
-                suggestions.append(
-                    f"Swap a printer to {label} spool ({rem:.0f}g) — "
-                    f"no idle slot identified"
-                )
-                shortfall -= rem
-
+                suggestions.append(f"Swap a printer to {label} spool ({rem:.0f}g) — no idle slot identified")
+            shortfall -= rem
     return suggestions
+
+
+# ---------------------------------------------------------------------------
+# The one router every material-inventory door calls
+# ---------------------------------------------------------------------------
+
+#: The questions a door asks, and what each needs sent when it is answered
+#: across machines (Kiln's servers): spool rows, loaded rows, completed
+#: prints, the jobs.  Nothing else of the install leaves.
+FLEET_QUESTIONS: dict[str, tuple[str, ...]] = {
+    "summary": ("spools", "loaded"),
+    "history": ("history",),
+    "forecast": ("spools", "loaded", "history"),
+    "restock": ("spools", "loaded", "history"),
+    "find": ("loaded",),
+    "alternatives": ("loaded",),
+    "assign": ("loaded", "jobs"),
+    "swaps": ("loaded", "spools", "jobs"),
+    "on_hand": ("spools", "loaded"),
+}
+
+
+def registered_machines() -> int:
+    """How many machines are registered here; ``1`` when the registry cannot
+    be read, so a broken registry never stands between a person and their
+    own materials (the same posture as :func:`fleet_scope_verdict`)."""
+    try:
+        from kiln.registry import get_registry
+
+        return int(get_registry().count)
+    except Exception:  # noqa: BLE001
+        logger.debug("registry unreadable; answering for one machine", exc_info=True)
+        return 1
+
+
+def _one_machine(question: str, db: Any, params: dict[str, Any]) -> Any:
+    if question == "summary":
+        return [s.to_dict() for s in get_fleet_material_summary(db)]
+    if question == "history":
+        return [r.to_dict() for r in get_consumption_history(db, days=params["days"])]
+    if question == "forecast":
+        return forecast_consumption(db, material_type=params["material_type"], days_ahead=params["days_ahead"]).to_dict()
+    if question == "restock":
+        return [s.to_dict() for s in get_restock_suggestions(db)]
+    if question in ("find", "alternatives"):
+        return find_printers_with_material(
+            db, material_type=params["material_type"], color=params.get("color"), min_grams=params.get("min_grams", 0.0),
+        )
+    if question == "assign":
+        return [a.to_dict() for a in plan_jobs_for_one_machine(db, jobs=params["jobs"])]
+    if question == "swaps":
+        return swaps_for_one_machine(db, jobs=params["jobs"])
+    if question == "on_hand":
+        return [m.to_dict() for m in get_on_hand_materials(db)]
+    raise ValueError(f"not a material question: {question!r}")
+
+
+def inventory_answer(question: str, db: Any, *, feature: str, **params: Any) -> tuple[Any, dict[str, Any] | None]:
+    """``(answer, None)``, or ``(None, refusal)`` for a door to return as it is.
+
+    The one router: on an install with one machine the answer is worked out
+    here from this install's rows, offline and with no sign-in.  Across
+    machines it is a fleet answer: below the plan that covers the machines
+    (:func:`fleet_scope_verdict`, Kiln Business) the refusal comes back and
+    nothing is asked; on that plan Kiln's servers answer from the rows the
+    question needs (:data:`FLEET_QUESTIONS`, via
+    :mod:`kiln._pro_fleet_materials_bridge`), and a miss is said in the
+    shared served-answer voice.
+    """
+    if question not in FLEET_QUESTIONS:
+        raise ValueError(f"not a material question: {question!r}")
+    if registered_machines() <= 1:
+        return _one_machine(question, db, params), None
+    refused = fleet_scope_verdict(feature)
+    if refused is not None:
+        return None, refused
+    from kiln import _pro_fleet_materials_bridge as bridge
+
+    rows: dict[str, Any] = {}
+    needs = FLEET_QUESTIONS[question]
+    if "spools" in needs:
+        rows["spools"] = _spool_rows(db)
+    if "loaded" in needs:
+        rows["loaded"] = _loaded_rows(db)
+    if "history" in needs:
+        rows["history"] = _history_rows(db)
+    if "jobs" in needs:
+        rows["jobs"] = [
+            {k: job.get(k) for k in ("file_name", "material_type", "required_grams", "color") if k in job}
+            for job in (params.get("jobs") or [])
+            if isinstance(job, dict)
+        ]
+    asked = {k: v for k, v in params.items() if k != "jobs"}
+    if "history" in needs:
+        asked["now"] = time.time()
+    return bridge.fleet_answer(question, rows=rows, params=asked, feature=feature)

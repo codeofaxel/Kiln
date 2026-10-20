@@ -203,10 +203,15 @@ class _PrintabilityToolsPlugin:
         ) -> dict:
             """Find the optimal print orientation for a 3D model.
 
-            Evaluates multiple rotations of the model and scores each based
-            on bed adhesion, support requirements, print height, and
-            overhang coverage.  Optionally applies the best orientation and
-            writes a reoriented STL file.
+            Evaluates multiple rotations of the model, ranks them, and
+            reports each candidate's bed contact, support volume, print
+            height and overhang share.  On a plain install, and for a
+            caller below Kiln Pro on Kiln's hosted service, the ranking is
+            by bed contact, the lower part first between equals; a Kiln Pro
+            caller on the hosted service gets Kiln's own scorer
+            (https://kiln3d.com/pricing).  A caller the scorer was withheld
+            from is told so once, in ``upgrade_hint``.  Optionally applies
+            the best orientation and writes a reoriented STL file.
 
             Args:
                 file_path: Path to an STL or OBJ mesh file.
@@ -234,6 +239,7 @@ class _PrintabilityToolsPlugin:
 
             import kiln.server as _srv
             from kiln.auto_orient import (
+                _kiln_pro_ranking_note,
                 apply_orientation,
                 find_optimal_orientation,
             )
@@ -255,6 +261,10 @@ class _PrintabilityToolsPlugin:
                         f"Improvement: {result.improvement_percentage}%."
                     ),
                 }
+
+                note = _kiln_pro_ranking_note()
+                if note:
+                    resp["upgrade_hint"] = note
 
                 if apply:
                     oriented_path = apply_orientation(

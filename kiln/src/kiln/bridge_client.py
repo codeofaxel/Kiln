@@ -453,11 +453,18 @@ class BridgeClient:
         return self._pinned_license or _read_license()
 
     def _auth_headers(self) -> dict[str, str]:
-        return {
+        headers = {
             "Authorization": f"Bearer {self._bearer()}",
             "X-Kiln-Device-Fingerprint": _device_fingerprint(),
             "X-Kiln-Client-Version": _running_version(),
         }
+        # The same install id an approval ask names (:data:`_MACHINE_HEADER`),
+        # so a window a person opens on this machine covers the prints the
+        # relay brings to it.
+        machine = _machine_id()
+        if machine:
+            headers[_MACHINE_HEADER] = machine
+        return headers
 
     def _dispatch_frame(self, ws, req: Any) -> asyncio.Task | None:
         """Route one inbound frame: the relay's observe request is answered

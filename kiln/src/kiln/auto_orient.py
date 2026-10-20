@@ -7,6 +7,7 @@ only stdlib math.
 
 from __future__ import annotations
 
+import logging
 import math
 import os
 import struct
@@ -25,6 +26,8 @@ from kiln.printability import (
     _triangle_normal,
 )
 from kiln.untrusted_zip import UntrustedZipFile
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Dataclasses
@@ -209,22 +212,32 @@ def _score_orientation(
     *,
     nozzle_diameter: float = 0.4,
 ) -> tuple[float, float, float, float, float]:
-    """Score a set of triangles in their current orientation.
+    """Score a set of triangles in their current orientation (the floor).
 
     Returns ``(score, support_volume, bed_contact, print_height,
-    overhang_pct)``.
-
-    Tiering: free tier uses a single-factor "largest bed contact"
-    ranking — safe, defensible, never picks an unstable orientation.
-    Pro+ unlocks Kiln's curated multi-factor weighted ranking
-    (bed/support/height/overhang) via the ``orientation_scoring``
-    overlay. The four returned facts (volume, contact area, height,
-    overhang %) are identical from both paths — only the ``score``
-    differs.
+    overhang_pct)``; see :func:`_measure_orientation`.
     """
-    from kiln.design_intelligence import load_pro_overlay_or_empty
+    return _measure_orientation(triangles, nozzle_diameter=nozzle_diameter)[0]
 
-    # --- Geometry facts (textbook; identical from both tiers) ---------
+
+def _measure_orientation(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    *,
+    nozzle_diameter: float = 0.4,
+) -> tuple[tuple[float, float, float, float, float], dict[str, float]]:
+    """Measure a set of triangles in their current orientation.
+
+    Returns ``((score, support_volume, bed_contact, print_height,
+    overhang_pct), facts)``, ``facts`` being the four the ranking reads.
+
+    The four geometry facts are measured here and are the same wherever
+    Kiln runs.  ``score`` here is the bed-contact percentage, the safe floor:
+    a wide base is the orientation least likely to topple or lift.
+    :func:`find_optimal_orientation` asks for Kiln Pro's ranking of all the
+    poses at once (:mod:`kiln._pro_orientation_bridge`,
+    https://kiln3d.com/pricing) and uses it in place of the floor when the
+    caller's plan includes it.
+    """
     triangles = _translate_to_bed(triangles)
     all_verts: list[tuple[float, ...]] = []
     for tri in triangles:
@@ -244,15 +257,7 @@ def _score_orientation(
     bed_adhesion = _analyze_bed_adhesion(triangles, z_min, bbox)
     supports = _analyze_supports(triangles, z_min)
 
-    # --- Scoring (overlay-driven, safe-default single-factor) ---------
-    overlay = load_pro_overlay_or_empty("orientation_scoring")
-    score = _apply_orientation_scoring(
-        overlay=overlay,
-        bed_contact_pct=bed_adhesion.contact_percentage,
-        support_pct=supports.support_percentage,
-        print_height_mm=print_height,
-        overhang_pct=overhangs.overhang_percentage,
-    )
+    score = float(bed_adhesion.contact_percentage)
 
     return (
         round(score, 1),
@@ -260,49 +265,34 @@ def _score_orientation(
         bed_adhesion.contact_area_mm2,
         round(print_height, 2),
         overhangs.overhang_percentage,
-    )
+    ), {
+        "bed_contact_pct": float(bed_adhesion.contact_percentage),
+        "support_pct": float(supports.support_percentage),
+        "print_height_mm": float(print_height),
+        "overhang_pct": float(overhangs.overhang_percentage),
+    }
 
 
-def _apply_orientation_scoring(
-    *,
-    overlay: dict,
-    bed_contact_pct: float,
-    support_pct: float,
-    print_height_mm: float,
-    overhang_pct: float,
-) -> float:
-    """Compute an orientation score from raw geometric facts.
+def _kiln_pro_ranking(poses: list[dict[str, float]]) -> Any:
+    """Kiln Pro's ranking of every pose measured, asked once, or ``None`` for
+    the floor (see :mod:`kiln._pro_orientation_bridge`).  *poses* are
+    :func:`_measure_orientation`'s facts, the original pose first."""
+    from kiln import _pro_orientation_bridge
 
-    Free path (``overlay`` empty): single-factor "largest bed
-    contact" — bigger base, less likely to topple or lift, no
-    chance of picking a wildly wrong orientation. Returns the
-    bed-contact percentage directly (0..100 scale).
+    try:
+        return _pro_orientation_bridge.rank(poses)
+    except Exception:  # noqa: BLE001 -- the bed-contact floor still answers
+        logger.debug("Kiln Pro orientation ranking unavailable", exc_info=True)
+        return None
 
-    Pro+ path (``overlay`` populated): weighted multi-factor
-    combination using the curated combination_weights +
-    normalization params from the ``orientation_scoring`` overlay.
-    """
-    weights = overlay.get("combination_weights")
-    norm = overlay.get("normalization")
-    if not (weights and norm):
-        # Free-tier safe default. Already 0..100, no scaling needed.
-        return float(bed_contact_pct)
 
-    bed = min(
-        norm["bed_contact"]["cap"],
-        bed_contact_pct * norm["bed_contact"]["multiplier"],
-    )
-    sup = max(0.0, norm["support_volume"]["invert_from"] - support_pct)
-    h_cap = norm["print_height"]["cap"]
-    h_ref = norm["print_height"]["reference_mm"]
-    height = max(0.0, min(h_cap, h_cap - (print_height_mm / h_ref) * h_cap))
-    over = max(0.0, norm["overhang"]["invert_from"] - overhang_pct)
-    return (
-        bed * weights["bed_contact"]
-        + sup * weights["support_volume"]
-        + height * weights["print_height"]
-        + over * weights["overhang"]
-    )
+def _kiln_pro_ranking_note() -> str | None:
+    """One line for a caller who was ranked on the floor because Kiln Pro's
+    ranking is not in their plan, or ``None`` (worded where the ranking is
+    decided; see :func:`kiln._pro_orientation_bridge.withheld_note`)."""
+    from kiln import _pro_orientation_bridge
+
+    return _pro_orientation_bridge.withheld_note()
 
 
 # ---------------------------------------------------------------------------
@@ -374,19 +364,28 @@ def find_optimal_orientation(
     if (0.0, 0.0, 0.0) not in candidate_rotations:
         candidate_rotations.insert(0, (0.0, 0.0, 0.0))
 
-    # Score the original orientation.
-    orig_score, _, _, _, _ = _score_orientation(triangles, nozzle_diameter=nozzle_diameter)
-
-    # Score each candidate.
-    scored: list[OrientationCandidate] = []
-
+    # Measure the original pose and every candidate; the ranking is asked for
+    # once, for all of them, below.
+    orig, orig_facts = _measure_orientation(triangles, nozzle_diameter=nozzle_diameter)
+    measured: list[tuple[tuple[float, float, float], tuple[float, float, float, float, float]]] = []
+    facts = [orig_facts]
     for rx, ry, rz in candidate_rotations:
         matrix = _build_rotation_matrix(rx, ry, rz)
         rotated = _rotate_triangles(triangles, matrix)
+        pose, pose_facts = _measure_orientation(rotated, nozzle_diameter=nozzle_diameter)
+        measured.append(((rx, ry, rz), pose))
+        facts.append(pose_facts)
 
-        score, support_vol, bed_contact, height, overhang_pct = _score_orientation(
-            rotated, nozzle_diameter=nozzle_diameter
-        )
+    ranking = _kiln_pro_ranking(facts)
+    orig_score = orig[0]
+    if ranking is not None and ranking.scores is not None:
+        orig_score = round(ranking.scores[0], 1)
+
+    scored: list[OrientationCandidate] = []
+
+    for index, ((rx, ry, rz), (score, support_vol, bed_contact, height, overhang_pct)) in enumerate(measured):
+        if ranking is not None and ranking.scores is not None:
+            score = round(ranking.scores[index + 1], 1)
 
         reasoning_parts = []
         if bed_contact > 0:
@@ -409,8 +408,19 @@ def find_optimal_orientation(
             )
         )
 
-    # Sort by score descending.
-    scored.sort(key=lambda c: c.score, reverse=True)
+    if ranking is not None and ranking.order is not None:
+        # Kiln's servers ranked the poses (best first; index 0 is the
+        # original pose, which is not a candidate).  The scores shown stay
+        # the floor's: the servers hand back an order, never a score.
+        position = {pose - 1: rank for rank, pose in enumerate(ranking.order) if pose > 0}
+        scored = [c for _, c in sorted(enumerate(scored), key=lambda pair: position[pair[0]])]
+    else:
+        # Best score first; between equal scores, the lower part first.  A
+        # lower part is the steadier one, and on the bed-contact floor every
+        # flat face of a block scores the same, so without this a tall pillar
+        # kept its upright pose and the stability check had no lay-flat turn
+        # to offer.
+        scored.sort(key=lambda c: (c.score, -c.print_height_mm), reverse=True)
 
     best = scored[0]
     alternatives = scored[1:4]  # Top 3 alternatives
@@ -739,8 +749,11 @@ def duplicate_stl_on_plate(
     cell_w = model_width + spacing_mm
     cell_d = model_depth + spacing_mm
 
-    cols = int(bed_width_mm // cell_w)
-    rows = int(bed_depth_mm // cell_d)
+    # N copies take N widths and N - 1 gaps, so the gap after the last
+    # column is not charged against the bed.  Charging it refused, for one,
+    # two 120 mm parts with a 10 mm gap on a 256 mm bed, which take 250 mm.
+    cols = int((bed_width_mm + spacing_mm) // cell_w)
+    rows = int((bed_depth_mm + spacing_mm) // cell_d)
 
     if cols < 1 or rows < 1:
         raise ValueError(

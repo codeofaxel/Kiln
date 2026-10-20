@@ -18,12 +18,15 @@ pull, a screen-driven tramming -- jobs the maker runs powered) Kiln does
 not invent one: step 0 says so in Kiln's words, marked as Kiln's, and
 rides with every step of that guide instead of gating them.
 
-The guides live in kiln-pro (``kiln._pro_guide_bridge``); public Kiln keeps
-the mechanism and a tiny map of each maker's public maintenance index per
-model, so an install without kiln-pro still answers honestly: the maker's
-own index page where Kiln knows it, otherwise "your maker publishes no
-guide Kiln can step through".  Pictures are never proxied or cached: the
-maker's server serves them from the URL in the answer.  Before a step is
+The guides live in kiln-pro (``kiln._pro_guide_bridge``), read in-process
+where kiln-pro is installed and asked of Kiln's servers one step at a time
+everywhere else; public Kiln keeps the mechanism and a tiny map of each
+maker's public maintenance index per model, so an install that cannot ask
+still answers honestly: the maker's own index page where Kiln knows it,
+and why Kiln could not ask.  "Your maker publishes no guide Kiln can step
+through" is said only when the table was read and has none.  Pictures are
+never proxied or cached: the maker's server serves them from the URL in
+the answer.  Before a step is
 shown, Kiln asks the maker's server whether the picture is still there
 (one HEAD request, a short timeout, remembered for the process): a
 picture that is gone is not offered with confidence -- the step says so
@@ -321,7 +324,9 @@ def run_repair_guide(
             code="INVALID_INPUT",
         )
     maker_name, index_url = maker_index(model)
-    found = bridge.find_guide(model, topic=topic, code=code, guide=guide.strip())
+    found = bridge.find_guide(
+        model, topic=topic, code=code, guide=guide.strip(), step=int(step or 0), plan_only=bool(plan_only),
+    )
     if found is not None and "choices" in found:
         # More than one of the maker's guides answers this topic for this
         # model -- two machines behind one printer id, or two pages for one
@@ -352,6 +357,19 @@ def run_repair_guide(
         }
         if code:
             payload["hms_code"] = code
+        unread = bridge.unavailable_line(model, maker=maker_name)
+        if unread is not None:
+            # Kiln could not ask, so it does not know whether the maker has
+            # a guide for this: the maker's own pages stand in, and the
+            # sentence says why -- never "publishes no guide".
+            line = unread.pop("line")
+            payload.update(unread)
+            if maker_name and index_url:
+                payload["maker"] = maker_name
+                payload["maker_index_url"] = index_url
+                line += f" {maker_name}'s own pages are at maker_index_url."
+            payload["kiln_note"] = line
+            return payload
         if cover and cover.get("count"):
             payload["maker"] = cover.get("maker")
             payload["kiln_note"] = (
@@ -527,6 +545,17 @@ def coverage_line(printer_id: str) -> tuple[str, bool]:
 
     maker_name, index_url = maker_index(printer_id)
     cover = bridge.coverage(printer_id) if printer_id else None
+    unread = bridge.unavailable_line(printer_id, maker=maker_name) if printer_id and cover is None else None
+    if unread is not None:
+        from kiln.served_answer import clause
+
+        # No answer, so no claim about the maker's guides either way.
+        why = clause(
+            bridge.guide_unavailable(printer_id), feature="servers",
+            cannot="check which of the maker's guides it can step through", then="run kiln doctor again",
+        )
+        site = f"{maker_name}'s own site is {index_url}; " if maker_name and index_url else ""
+        return f"{site}{why}", True
     if cover and cover.get("count"):
         topics = ", ".join(cover.get("topics") or [])
         return (
@@ -536,10 +565,7 @@ def coverage_line(printer_id: str) -> tuple[str, bool]:
     if cover and cover.get("maker_index_url"):
         return f"{NO_GUIDE_SENTENCE}; {cover.get('maker')}'s own maintenance pages for this model are at {cover['maker_index_url']}", True
     if maker_name and index_url:
-        return (
-            f"{NO_GUIDE_SENTENCE}; {maker_name}'s own site is {index_url}"
-            + ("" if cover is not None else " (Kiln Pro adds the step-by-step walkthroughs)")
-        ), True
+        return f"{NO_GUIDE_SENTENCE}; {maker_name}'s own site is {index_url}", True
     return f"{NO_GUIDE_SENTENCE}", True
 
 

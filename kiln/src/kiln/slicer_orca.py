@@ -205,6 +205,15 @@ _PROCESS_SCALAR: dict[str, str] = {
     "support_material": "enable_support",
     "support_material_buildplate_only": "support_on_build_plate_only",
     "dont_support_bridges": "bridge_no_support",
+    # A support plan's keys (kiln-pro's plan_supports writes them through
+    # reslice_with_overrides): the gap to the part, the interface layers,
+    # and which extruder prints the support and its interface.
+    "support_material_contact_distance": "support_top_z_distance",
+    "support_material_bottom_contact_distance": "support_bottom_z_distance",
+    "support_material_interface_layers": "support_interface_top_layers",
+    "support_material_bottom_interface_layers": "support_interface_bottom_layers",
+    "support_material_extruder": "support_filament",
+    "support_material_interface_extruder": "support_interface_filament",
     "brim_width": "brim_width",
     "skirts": "skirt_loops",
     "skirt_distance": "skirt_distance",
@@ -532,6 +541,11 @@ def settings_to_orca_presets(
     threshold = _positive(str(settings.get("support_material_threshold", "")))
     if threshold:
         process["support_threshold_angle"] = f"{threshold:g}"
+    # PrusaSlicer's support STYLE is Orca's support TYPE: organic supports
+    # are Orca's tree supports; snug and grid are its normal supports.
+    style = str(settings.get("support_material_style", "")).strip().lower()
+    if style:
+        process["support_type"] = "tree(auto)" if style == "organic" else "normal(auto)"
     for src, dst in _PROCESS_SPEED.items():
         raw = str(settings.get(src, "")).strip()
         if raw.endswith("%"):

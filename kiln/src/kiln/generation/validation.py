@@ -5026,6 +5026,15 @@ def extract_model_from_3mf(
 # ---------------------------------------------------------------------------
 
 
+#: The most a plate's object list (``Metadata/plate_N.json``) is unpacked to.
+#: A real one is a few hundred bytes (243-463 across eight Bambu Studio files
+#: measured 2026-10-18, zero to one object each); at roughly 200 bytes an
+#: object this holds about ten thousand.  It is counted as the member unpacks,
+#: so a file that declares a small entry and holds a huge one is stopped too:
+#: the shared server opens print files a stranger brought.
+PLATE_JSON_LIMIT = 2 * 1024 * 1024
+
+
 def list_plate_objects(
     file_path: str,
     plate_number: int = 1,
@@ -5104,7 +5113,13 @@ def list_plate_objects(
         plate_json_name_lower = f"metadata/plate_{plate_number}.json"
         for candidate in [plate_json_name, plate_json_name_lower]:
             if candidate in names:
-                plate_json = _json.loads(zf.read(candidate).decode("utf-8"))
+                from kiln.gcode_metadata import read_member_text
+
+                try:
+                    text = read_member_text(zf, candidate, PLATE_JSON_LIMIT)
+                except ValueError as exc:
+                    raise ValueError(f"Plate {plate_number} metadata in {file_path} is not readable: {exc}") from exc
+                plate_json = _json.loads(text)
                 break
 
         if plate_json is None:

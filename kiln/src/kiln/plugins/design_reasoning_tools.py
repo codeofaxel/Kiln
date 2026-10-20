@@ -46,9 +46,13 @@ def _resolve_tool_build_volume(
 ) -> tuple[str, tuple[float, float, float]] | None:
     if not printer_id:
         return None
+    from kiln.printer_model_resolver import resolve_printer_model_for
     from kiln.printers.bed_fit import resolve_build_volume
 
-    resolved = resolve_build_volume(printer_id)
+    # A model id, else a printer by the name its owner gave it.
+    resolved = resolve_build_volume(printer_id) or resolve_build_volume(
+        resolve_printer_model_for(printer_id)
+    )
     if resolved is None:
         from kiln.printers.bed_fit import no_bed_reason
 
@@ -638,8 +642,9 @@ class _DesignReasoningToolsPlugin:
             :param plate_depth_mm: Build plate depth in mm (default 256).
             :param spacing_mm: Minimum gap between parts in mm (default 5).
             :param copies: Optional JSON dict of filename->count, e.g. ``{"part.stl": 3}``.
-            :param printer_id: Optional supported printer model id.  When
-                provided, printer intelligence supplies the plate size.
+            :param printer_id: Optional supported printer model id, or the
+                name of a printer set up in Kiln.  When provided, printer
+                intelligence supplies the plate size.
                 Keep passing it downstream — a later
                 ``compose_multicolor_3mf`` without it judges the layout
                 against a 256mm default plate.
@@ -737,7 +742,10 @@ class _DesignReasoningToolsPlugin:
 
             Returns:
                 Dict with ``success``, ``parts`` list (each part has ``x``, ``y`` set),
-                ``group_count``, and ``message``.
+                ``group_count``, ``fits_bed`` (``False`` when the rows run past
+                the bed: the message then gives the layout's size, the bed's, and
+                what to do, instead of the next step), ``bed_fit``, and
+                ``message``.
             """
             _srv._check_auth("design:compose")
 
@@ -782,15 +790,32 @@ class _DesignReasoningToolsPlugin:
             ]
 
             group_count = len(groups_seen) if groups_seen else len(arranged)
+            # The row layout keeps adding rows past the plate when the parts
+            # run out of room, so the layout is judged before it is called a
+            # plate -- by the same judgment the slice and start gates make.
+            from kiln.multicolor_3mf import placed_bbox, plate_bed
+            from kiln.printers.bed_fit import plate_fit
+
+            bed_w, bed_d, bed_h, bed_words = plate_bed(plate_width, plate_depth, resolved_model_id)
+            fit = plate_fit(placed_bbox(arranged), (bed_w, bed_d, bed_h), bed=bed_words)
+            if fit["fits"] is False:
+                message = (
+                    f"Laid out {len(arranged)} parts ({group_count} groups) in rows with a "
+                    f"{gap_mm}mm gap, and they do not fit. {fit['message']}"
+                )
+            else:
+                message = (
+                    f"Arranged {len(arranged)} parts ({group_count} groups) "
+                    f"on a {plate_width}\u00d7{plate_depth}mm plate with {gap_mm}mm gap. "
+                    f"Pass 'parts' directly to compose_multicolor_3mf()."
+                )
             response = {
                 "success": True,
                 "parts": result_parts,
                 "group_count": group_count,
-                "message": (
-                    f"Arranged {len(arranged)} parts ({group_count} groups) "
-                    f"on a {plate_width}\u00d7{plate_depth}mm plate with {gap_mm}mm gap. "
-                    f"Pass 'parts' directly to compose_multicolor_3mf()."
-                ),
+                "fits_bed": fit["fits"],
+                "bed_fit": fit,
+                "message": message,
             }
             if resolved_model_id:
                 response["bed_size_source"] = "printer_intelligence"
@@ -1193,8 +1218,9 @@ class _DesignReasoningToolsPlugin:
             :param bed_x_mm: Build plate X dimension (default 256).
             :param bed_y_mm: Build plate Y dimension (default 256).
             :param bed_z_mm: Build plate Z dimension (default 256).
-            :param printer_id: Optional supported printer model id.  When
-                provided, printer intelligence supplies the build volume.
+            :param printer_id: Optional supported printer model id, or the
+                name of a printer set up in Kiln.  When provided, printer
+                intelligence supplies the build volume.
             :param material: Material the supports verdict and the
                 ``printability_score`` are judged for (default ``"pla"``) —
                 ``analyze_printability``'s own, so the two agree.

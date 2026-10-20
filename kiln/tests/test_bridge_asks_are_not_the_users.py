@@ -46,6 +46,38 @@ _PERSONS_OWN_ASK = {
         "runs only when the person names the rules on check_material_environment; "
         "the per-requirement verdict is the feature they reached for"
     ),
+    "_pro_fleet_materials_bridge": (
+        "runs only when the person asks a material inventory door about several "
+        "machines on Kiln Business; the cross-machine answer is what they reached for"
+    ),
+    "_pro_material_pick_bridge": (
+        "runs only when the person asks what material a part should be, on a "
+        "plan that includes Kiln Pro; the pick is the feature they reached for"
+    ),
+    "_pro_orientation_bridge": (
+        "runs only when the person asks how to lay a part on the bed, on a plan "
+        "that includes Kiln Pro; the ranking is the feature they reached for"
+    ),
+    "_pro_load_bridge": (
+        "runs only when the person asks estimate_structural_load for a part at "
+        "Kiln Pro; the part's load figure is the feature they reached for"
+    ),
+    "_pro_ams_bridge": (
+        "runs only when the person asks ams_filament_drying to START the dryer, and "
+        "the start is refused without the check, so a signed-out refusal is the "
+        "person meeting the sign-in wall"
+    ),
+}
+
+
+#: Bridges whose one served call serves BOTH kinds of ask, and so forward the
+#: flag the caller settled instead of stating one: the decoration bridge
+#: carries a person's iterate / rollback / history (True, from the library's
+#: tools) and the print-outcome record made on the way to something else
+#: (False, from the learning tools).  The flag is the caller's parameter by
+#: name, never a default, so the AST check below still sees who said it.
+_CALLER_DECIDES = {
+    "_pro_decoration_bridge": "asked_by_user",
 }
 
 
@@ -65,6 +97,11 @@ def test_a_bridge_never_counts_its_ask_as_a_persons(path):
         flags = [kw.value for kw in call.keywords if kw.arg == "_asked_by_user"]
         assert len(flags) == 1, f"{path.name}:{call.lineno} does not say who asked"
         flag = flags[0]
+        if path.stem in _CALLER_DECIDES:
+            assert isinstance(flag, ast.Name) and flag.id == _CALLER_DECIDES[path.stem], (
+                f"{path.name}:{call.lineno} must forward the caller's {_CALLER_DECIDES[path.stem]!r}"
+            )
+            continue
         expected = path.stem in _PERSONS_OWN_ASK
         assert isinstance(flag, ast.Constant) and flag.value is expected, (
             f"{path.name}:{call.lineno} must pass _asked_by_user={expected}"
@@ -73,6 +110,8 @@ def test_a_bridge_never_counts_its_ask_as_a_persons(path):
 
 def test_every_named_own_ask_is_a_served_bridge():
     assert set(_PERSONS_OWN_ASK) <= {path.stem for path in _SERVED}
+    assert set(_CALLER_DECIDES) <= {path.stem for path in _SERVED}
+    assert not set(_CALLER_DECIDES) & set(_PERSONS_OWN_ASK)
 
 
 class TestTheFlag:

@@ -244,6 +244,62 @@ def _served_plan(request: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def around_plate(
+    record: dict[str, Any], *, printer_model: str, action: str, clearance_mm: float | None,
+) -> list[dict[str, Any]] | None:
+    """The served path around the part on the plate, for one home or park.
+
+    For an install without kiln-pro (:func:`kiln.plate_state.plan_motion_around_plate`
+    asks kiln-pro in-process first).  Only what the planner reads is sent:
+    the plate's status and the part's footprint, height, file name and the
+    model it was started on.  The same door, sign-in, device binding and cap
+    as a plan; nothing is cached, because a path is for one part where it
+    sits.  ``None`` when there is no path or no answer, with why in
+    :data:`_misses` -- and the caller refuses and asks the person, as it
+    would with no planner at all.
+    """
+    model = str(printer_model or "").strip().lower()
+    job = record.get("job") if isinstance(record, dict) else None
+    if not model or not isinstance(job, dict):
+        return None
+    key = (model, "", f"around_plate:{action}", "", False)
+    if time.monotonic() < _service_down_until:
+        if _service_down_miss is not None:
+            _misses[key] = _service_down_miss
+        return None
+    plate = {
+        "status": record.get("status"),
+        "job": {
+            "file": str(job.get("file") or "").replace("\\", "/").rsplit("/", 1)[-1],
+            "footprint_mm": job.get("footprint_mm"),
+            "max_z_mm": job.get("max_z_mm"),
+            "printer_id": job.get("printer_id"),
+        },
+    }
+    try:
+        from kiln.server import _pro_api_call
+
+        answer = _pro_api_call(
+            "motion_plan", _asked_by_user=False,
+            printer_id=model, verb=action, plate=plate, clearance_mm=clearance_mm,
+        )
+    except Exception as exc:  # noqa: BLE001 -- the network is a degrade, never a motion
+        logger.debug("around-the-plate request failed", exc_info=True)
+        miss = classify_transport_error(exc)
+        _back_off(miss)
+        _misses[key] = miss
+        return None
+    if isinstance(answer, dict) and "around_plate" in answer:
+        _misses.pop(key, None)
+        steps = answer.get("around_plate")
+        return steps if isinstance(steps, list) and steps else None
+    miss = classify_answer(answer) or Miss("unanswered", detail="an answer with no path in it")
+    if miss.code in _UNREACHABLE_CODES:
+        _back_off(miss)
+    _misses[key] = miss
+    return None
+
+
 def station_supports(adapter: Any, station: dict[str, Any] | None, capability: str) -> tuple[bool, str] | None:
     """``(ok, why)`` from local kiln-pro's gate, or ``None`` when it is not here.
 

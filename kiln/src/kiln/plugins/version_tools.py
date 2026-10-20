@@ -115,6 +115,25 @@ def _versioned_recipe_path(design_dir: str, version: int) -> str:
     return os.path.join(design_dir, f".kiln_recipe.v{version}.json")
 
 
+def _after_save_here(design_id: str, missing: ImportError) -> dict:
+    """What a version saved on an install without kiln-pro adds to its answer.
+
+    This computer's history records the version and, when the person turned
+    automatic saving on in their Kiln account, saves it there too
+    (:func:`kiln.history_courier.after_local_save`).  *missing* is the
+    ImportError the save's kiln-pro step raised: only one saying kiln-pro
+    itself is not installed counts.  kiln-pro records and saves its own
+    versions, so an ImportError from inside its step adds nothing here.
+    """
+    import sys
+
+    if (missing.name or "").split(".")[0] != "kiln_pro" or sys.modules.get("kiln_pro") is not None:
+        return {}
+    from kiln.history_courier import after_local_save
+
+    return after_local_save(design_id)
+
+
 def _load_versioned_recipe(design_dir: str, version: int) -> Any:
     """Load a specific versioned recipe or raise ValueError if not found."""
     import os
@@ -137,6 +156,7 @@ class _VersionToolsPlugin:
         - rollback_design_version
         - get_design_version
         - search_design_versions
+        - lock_design
     """
 
     @property
@@ -343,8 +363,12 @@ class _VersionToolsPlugin:
                         )
                         if registration:
                             result["version"]["branch"] = registration
-                except ImportError:
-                    pass  # Free tier — no provenance enrichment or branch registration
+                except ImportError as missing:
+                    # No kiln-pro: no provenance enrichment or branch
+                    # registration.  This computer's history keeps the
+                    # version, and the person's account gets it too when
+                    # they turned automatic saving on.
+                    result.update(_after_save_here(design_id, missing))
 
                 try:
                     from kiln_pro.plugins.git_render_tools import (
@@ -535,7 +559,10 @@ class _VersionToolsPlugin:
                         level="full",
                         source_path=target_recipe.stl_path or None,
                     )
-                except ImportError:
+                except ImportError as missing:
+                    # The rollback is a new version saved here: on an
+                    # install without kiln-pro it goes the way a save does.
+                    result.update(_after_save_here(design_id, missing))
                     return result
             except HostedUnavailableError as exc:
                 return {"ok": False, "error": str(exc)}
@@ -695,6 +722,47 @@ class _VersionToolsPlugin:
                 return {"ok": False, "error": str(exc)}
             except Exception as exc:
                 _logger.exception("search_design_versions failed")
+                return {"ok": False, "error": str(exc)}
+
+        @mcp.tool()
+        def lock_design(design_id: str, locked: bool = True) -> dict:
+            """Keep a design on this computer only: never saved to the person's Kiln account.
+
+            A locked design is never saved to the Kiln account, by any door:
+            a cloud push, an automatic save after each version, a push of one
+            of its signed releases, or a pull request.  Each is refused and
+            says the design is locked.  Branching, merging and the history
+            views keep working; when Kiln's servers run one of those, the
+            design passes through them for that call only and is not kept
+            there.  Locking removes nothing already in the account.  Free on
+            every plan.
+
+            Args:
+                design_id: The design to lock or unlock.
+                locked: ``True`` (the default) to lock it, ``False`` to unlock it.
+
+            Returns:
+                ``locked`` (the state it is now in) and ``said``: a sentence
+                to show the person, saying what the lock does and does not do.
+            """
+            import kiln.server as _srv
+            if err := _srv._check_auth("cache"):
+                return err
+
+            try:
+                _design_dir(design_id)
+                from kiln.history_courier import set_lock
+
+                answer = set_lock(design_id, locked)
+                if answer.get("status") == "error":
+                    return {"ok": False, **answer}
+                return answer
+            except HostedUnavailableError as exc:
+                return {"ok": False, "error": str(exc)}
+            except ValueError as exc:
+                return {"ok": False, "error": str(exc)}
+            except Exception as exc:
+                _logger.exception("lock_design failed")
                 return {"ok": False, "error": str(exc)}
 
 

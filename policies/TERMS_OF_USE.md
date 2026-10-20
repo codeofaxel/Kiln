@@ -1,6 +1,6 @@
 # Kiln Terms of Use
 
-*Last updated: 2026-10-12 · Version 3.2*
+*Last updated: 2026-10-17 · Version 3.3*
 
 > **Plain-English summary** — These terms govern your use of Kiln,
 > operated by Hadron Labs Inc. Kiln has two sides:
@@ -596,9 +596,14 @@ You agree **not to** use Kiln to:
    tier gating, entitlement checks, authentication, or other
    technical protection measures — **including by sharing license
    tokens across unrelated entities.**
-6. **Reimplement, substitute, or pass off non-Kiln code as a Kiln
-   paid feature in order to obtain that benefit without the
-   corresponding subscription.**
+6. **Reproduce or substitute for a Kiln paid feature using Kiln's
+   services, tools, or compute — including its free tools and its
+   compilers — whether by reimplementing it, by having an AI agent
+   author an equivalent, or by passing off non-Kiln code as that
+   feature, in order to obtain its benefit without the
+   corresponding subscription.** Designing your own original parts
+   with Kiln's free tools is always permitted; using those tools to
+   stand in for a feature we offer on a paid tier is not.
 7. Reverse-engineer, decompile, or attempt to derive the source
    code of proprietary (non-AGPL) components of Kiln, except to
    the extent such restrictions are prohibited by applicable law.

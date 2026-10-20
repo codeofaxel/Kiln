@@ -222,6 +222,13 @@ _MODEL_FLUSH_STATION: dict[str, tuple[float | None, float | None]] = {
     "bambu_a1": (-48.2, None),
 }
 
+#: The note on the opening ``M620`` line of every colour change Kiln writes
+#: (:func:`_wrap_tool_changes`).  The print gate reads it back to tell Kiln's
+#: colour change, which purges at one model's chute, from a slicer's own, so
+#: a plate written for one printer's chute is not started on another
+#: (:func:`kiln.printers.print_gate._chute_verdict`).
+KILN_COLOUR_CHANGE_NOTE = "; AMS switch to filament"
+
 
 _MODEL_END_GCODE_FILES: dict[str, str] = {
     # The A1's end is Bambu's own template -- the one stamped 20231229 that the
@@ -2064,7 +2071,7 @@ def _wrap_tool_changes(
                 if lift_floor_mm is not None and here_z is not None:
                     lifted = max(float(lift_floor_mm), here_z + 3.0)
                     result.append(f"G1 Z{lifted:.2f} F600  ; Kiln: lift clear of everything on the plate before the cutter")
-                result.append(f"M620 S{n}A   ; AMS switch to filament {n}")
+                result.append(f"M620 S{n}A   {KILN_COLOUR_CHANGE_NOTE} {n}")
                 result.append("    M1002 gcode_claim_action : 4")
                 result.append("    M400")
                 result.append("    M1002 set_filament_type:UNKNOWN")

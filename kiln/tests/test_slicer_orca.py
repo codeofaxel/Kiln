@@ -726,3 +726,30 @@ class TestAPlateOrcaWillNotMoveIsRefusedInPlainWords:
              patch("kiln.slicer.subprocess.run", return_value=_completed(206, stderr="no object is fully inside the print volume")), \
              pytest.raises(SlicerError, match="exited with code 206"):
             slice_file(_write_cube(str(tmp_path / "cube.stl")), output_dir=str(tmp_path / "out"))
+
+
+class TestSupportPlanKeysCross:
+    """The keys a support plan writes reach the Orca dialect too."""
+
+    def test_gap_interface_and_extruders_cross(self):
+        presets = settings_to_orca_presets({
+            "support_material": "1",
+            "support_material_contact_distance": "0.3",
+            "support_material_bottom_contact_distance": "0.2",
+            "support_material_interface_layers": "3",
+            "support_material_bottom_interface_layers": "2",
+            "support_material_extruder": "1",
+            "support_material_interface_extruder": "2",
+        })
+        p = presets.process
+        assert p["support_top_z_distance"] == "0.3"
+        assert p["support_bottom_z_distance"] == "0.2"
+        assert p["support_interface_top_layers"] == "3"
+        assert p["support_interface_bottom_layers"] == "2"
+        assert p["support_filament"] == "1"
+        assert p["support_interface_filament"] == "2"
+
+    def test_style_is_orcas_type(self):
+        assert settings_to_orca_presets({"support_material_style": "organic"}).process["support_type"] == "tree(auto)"
+        assert settings_to_orca_presets({"support_material_style": "snug"}).process["support_type"] == "normal(auto)"
+        assert "support_type" not in settings_to_orca_presets({"layer_height": "0.2"}).process

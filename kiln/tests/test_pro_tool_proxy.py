@@ -341,7 +341,7 @@ def test_only_report_issue_skips_the_wall(tmp_path, monkeypatch):
     monkeypatch.delenv("KILN_LICENSE_KEY", raising=False)
 
     assert server._ANONYMOUS_OK_TOOLS == frozenset({"report_issue"})
-    for tool in ("generate_coaster", "cloud_remote_list", "billing_status"):
+    for tool in ("generate_coaster", "cloud_remote_list", "usage_summary"):
         assert _pro_api_call(tool)["code"] == "KILN_ACCOUNT_NOT_PAIRED"
 
 

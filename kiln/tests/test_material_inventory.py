@@ -7,8 +7,8 @@ Covers:
 - Material sufficiency checks
 - Restock suggestions
 - Finding printers with specific materials
-- Fleet job assignment optimisation
-- Spool swap suggestions
+- One machine's jobs and spool swaps (across machines both are planned on
+  Kiln's servers: kiln-pro's tests/test_fleet_materials.py)
 """
 
 from __future__ import annotations
@@ -25,8 +25,8 @@ from kiln.material_inventory import (
     get_fleet_material_summary,
     get_on_hand_materials,
     get_restock_suggestions,
-    optimize_fleet_assignment,
-    suggest_spool_swaps,
+    plan_jobs_for_one_machine,
+    swaps_for_one_machine,
 )
 from kiln.persistence import KilnDB
 
@@ -538,74 +538,65 @@ class TestFindPrintersWithMaterial:
 # ---------------------------------------------------------------------------
 
 
-class TestFleetAssignment:
-    """Tests for optimize_fleet_assignment — job-to-printer matching."""
+class TestOneMachineJobs:
+    """plan_jobs_for_one_machine -- which jobs the machine's loaded spool takes."""
 
     def test_single_job_single_printer(self, db):
         _add_material(db, "ender3", "PLA", remaining_grams=500.0)
 
         jobs = [{"file_name": "benchy.gcode", "material_type": "PLA", "required_grams": 100.0}]
-        result = optimize_fleet_assignment(db, jobs=jobs)
+        result = plan_jobs_for_one_machine(db, jobs=jobs)
         assert len(result) == 1
         assert result[0].recommended_printer == "ender3"
         assert result[0].material_match is True
         assert result[0].remaining_after_print_grams == 400.0
 
-    def test_multiple_jobs_optimal_assignment(self, db):
-        _add_material(db, "ender3", "PLA", remaining_grams=300.0)
-        _add_material(db, "prusa", "PLA", remaining_grams=800.0)
+    def test_the_spool_runs_down_job_by_job(self, db):
+        _add_material(db, "ender3", "PLA", remaining_grams=300.0, color="white")
 
         jobs = [
-            {"file_name": "big.gcode", "material_type": "PLA", "required_grams": 500.0},
-            {"file_name": "small.gcode", "material_type": "PLA", "required_grams": 100.0},
+            {"file_name": "a.gcode", "material_type": "PLA", "required_grams": 200.0, "color": "white"},
+            {"file_name": "b.gcode", "material_type": "PLA", "required_grams": 150.0},
+            {"file_name": "c.gcode", "material_type": "PLA", "required_grams": 100.0, "color": "black"},
         ]
-        result = optimize_fleet_assignment(db, jobs=jobs)
-        assert len(result) == 2
-
-        # The big job should go to prusa (800g), small to ender3 (300g)
-        big_job = next(r for r in result if r.job_file == "big.gcode")
-        small_job = next(r for r in result if r.job_file == "small.gcode")
-        assert big_job.recommended_printer == "prusa"
-        assert big_job.material_match is True
-        assert small_job.recommended_printer == "ender3"
-        assert small_job.material_match is True
+        a, b, c = plan_jobs_for_one_machine(db, jobs=jobs)
+        assert a.recommended_printer == "ender3" and a.reason.endswith("(colour match: white)")
+        assert b.material_match is False and b.recommended_printer == ""
+        assert c.recommended_printer == "ender3" and "colour match" not in c.reason
+        assert c.remaining_after_print_grams == 0.0
 
     def test_no_matching_printer(self, db):
         _add_material(db, "ender3", "PLA", remaining_grams=500.0)
 
         jobs = [{"file_name": "flex.gcode", "material_type": "TPU", "required_grams": 100.0}]
-        result = optimize_fleet_assignment(db, jobs=jobs)
+        result = plan_jobs_for_one_machine(db, jobs=jobs)
         assert len(result) == 1
         assert result[0].material_match is False
         assert result[0].recommended_printer == ""
 
     def test_empty_jobs_list(self, db):
-        result = optimize_fleet_assignment(db, jobs=[])
-        assert result == []
+        assert plan_jobs_for_one_machine(db, jobs=[]) == []
 
     def test_to_dict_serialization(self, db):
         _add_material(db, "ender3", "PLA", remaining_grams=500.0)
         jobs = [{"file_name": "benchy.gcode", "material_type": "PLA", "required_grams": 100.0}]
-        result = optimize_fleet_assignment(db, jobs=jobs)
-        d = result[0].to_dict()
+        d = plan_jobs_for_one_machine(db, jobs=jobs)[0].to_dict()
         assert d["job_file"] == "benchy.gcode"
         assert "material_match" in d
 
 
 # ---------------------------------------------------------------------------
-# SuggestSpoolSwaps
+# One machine's spool swaps
 # ---------------------------------------------------------------------------
 
 
-class TestSuggestSpoolSwaps:
-    """Tests for suggest_spool_swaps — minimal swap suggestions."""
+class TestOneMachineSwaps:
+    """swaps_for_one_machine -- what comes off the shelf for one machine."""
 
     def test_no_swaps_needed(self, db):
         _add_material(db, "ender3", "PLA", remaining_grams=500.0)
         jobs = [{"material_type": "PLA", "required_grams": 100.0}]
-
-        result = suggest_spool_swaps(db, jobs=jobs)
-        assert result == []
+        assert swaps_for_one_machine(db, jobs=jobs) == []
 
     def test_swap_suggested_when_needed(self, db):
         # Printer has PETG loaded, but job needs PLA
@@ -614,20 +605,33 @@ class TestSuggestSpoolSwaps:
         _add_spool(db, "sp-pla", "PLA", remaining_grams=800.0, brand="Hatchbox")
 
         jobs = [{"material_type": "PLA", "required_grams": 200.0}]
-        result = suggest_spool_swaps(db, jobs=jobs)
-        assert len(result) >= 1
-        assert "PLA" in result[0].upper()
+        assert swaps_for_one_machine(db, jobs=jobs) == ["Load Hatchbox PLA spool (800g) onto ender3"]
+
+    def test_a_loaded_material_the_jobs_need_is_not_swapped_out(self, db):
+        _add_material(db, "ender3", "PETG", remaining_grams=50.0)
+        _add_spool(db, "sp-pla", "PLA", remaining_grams=800.0, brand="Hatchbox")
+        jobs = [{"material_type": "PLA", "required_grams": 200.0}, {"material_type": "PETG", "required_grams": 20.0}]
+        assert swaps_for_one_machine(db, jobs=jobs) == [
+            "Swap a printer to Hatchbox PLA spool (800g) — no idle slot identified"
+        ]
 
     def test_empty_jobs(self, db):
-        result = suggest_spool_swaps(db, jobs=[])
-        assert result == []
+        assert swaps_for_one_machine(db, jobs=[]) == []
 
     def test_no_shelf_stock_no_crash(self, db):
-        # Job needs material but nothing available
         jobs = [{"material_type": "NYLON", "required_grams": 200.0}]
-        result = suggest_spool_swaps(db, jobs=jobs)
-        # Should return empty (no spools to suggest)
-        assert isinstance(result, list)
+        assert swaps_for_one_machine(db, jobs=jobs) == []
+
+
+class TestNoCrossPrinterPlanningHere:
+    def test_the_fleet_planners_live_on_kiln_s_servers(self):
+        """Which printer takes each job and which spool goes onto which
+        printer are planned by kiln-pro (served at Kiln Business); this
+        package keeps the one-machine answers only."""
+        import kiln.material_inventory as mi
+
+        for name in ("optimize_fleet_assignment", "suggest_spool_swaps"):
+            assert not hasattr(mi, name), name
 
 
 # ---------------------------------------------------------------------------

@@ -226,6 +226,7 @@ READ_ONLY_TOOLS: set[str] = {
 
     # decoration_library_tools.py -- library queries
     "decoration_info",
+    "decoration_history",
     "decoration_quota_status",
     "list_decorations",
 

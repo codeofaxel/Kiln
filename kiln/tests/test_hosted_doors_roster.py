@@ -160,6 +160,18 @@ class TestTheVoice:
                 assert clause.startswith("Kiln can't") and not clause.endswith(".")
         assert len(seen) == len(_misses())
 
+    def test_the_served_public_note(self, monkeypatch):
+        from kiln import served_public
+
+        seen = set()
+        for miss in _misses():
+            monkeypatch.setattr(served_public, "_said", set())
+            note = served_public.say_once("sample_tool", {}, miss)[served_public.NOTE_KEY]
+            _lint(note["note"], where=f"served_public/{miss.cause}")
+            assert "sample_tool" in note["note"] and note["why"] == miss.cause
+            seen.add(note["note"])
+        assert len(seen) == len(_misses())
+
     def test_the_blade_line(self, monkeypatch):
         from kiln import _pro_cutter_bridge as cutter
 

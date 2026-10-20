@@ -12,6 +12,16 @@ other: the file states one nozzle size and the printer's own setting states
 another (:mod:`kiln.nozzle_size_check`).  One of them is wrong, and the gate
 does not start a print while they disagree.
 
+Two more judge the plate against the printer's filament path
+(:func:`_filament_path_verdict`): a plate that needs more distinct filament
+colours than the filament unit Kiln drives on this printer has slots, and a
+plate carrying the colour change Kiln writes, which sends the head to one
+printer's waste chute, on a printer whose chute is somewhere else.
+
+Every one of these is judged for the printer being started: its own
+declared model (:func:`_resolve_printer_model`), never the install's default
+printer's.
+
 Everything *probabilistic* — overhangs, thin walls, bed-adhesion/warp risk,
 abrasive nozzle wear — is the advisory layer's job and is deliberately NOT
 gated here.  (Membership test, from the safety review: "is failure or damage
@@ -386,7 +396,31 @@ def _override_active(printer_id: str | None) -> bool:
     return expiry is not None and time.monotonic() < expiry
 
 
+def _declared_model(adapter: Any) -> str:
+    """The model this adapter's setup declared, or ``""`` -- never the
+    global resolver, and never a non-string a stand-in adapter returns."""
+    with contextlib.suppress(Exception):
+        value = adapter.declared_printer_model()
+        if isinstance(value, str):
+            return value.strip()
+    return ""
+
+
 def _resolve_printer_model(adapter: Any) -> str | None:
+    """The model of the printer this start is for.
+
+    Its own declared model first -- what every setup door hands
+    :meth:`~kiln.printers.base.PrinterAdapter.set_safety_profile`, read
+    through :meth:`~kiln.printers.base.PrinterAdapter.declared_printer_model`.
+    The global resolver answers for the install's DEFAULT printer: asked
+    first, as it was until 2026-10-17, it judged a start on a second machine
+    against the first machine's bed: a 200 mm plate started on an A1 mini
+    (180 mm bed) passed against the default A1's 256 mm and was sent.  An
+    adapter that declares nothing keeps the old answers, so a single-printer
+    install is judged exactly as before.
+    """
+    if declared := _declared_model(adapter):
+        return declared
     for attr in ("printer_id", "model", "printer_model", "_model"):
         v = getattr(adapter, attr, None)
         if isinstance(v, str) and v:
@@ -408,6 +442,24 @@ def _resolve_local_job(file_name: str, kwargs: dict[str, Any]) -> str | None:
     if isinstance(file_name, str) and os.path.isfile(file_name):
         return file_name
     return None
+
+
+def with_judged_plate(file_name: str, kwargs: dict[str, Any], kept: list[str]) -> dict[str, Any]:
+    """The start's arguments, with the plate the gate judged named as
+    ``local_file_path`` when the door named none -- the door's own copy, else
+    the printer's copy the gate read back (*kept*, see :func:`run_adapter_gate`).
+
+    The adapter routes a plate from that copy the way it does for any start
+    that hands it one (the Bambu adapter builds the AMS mapping from the
+    plate's own record).  Until 2026-10-17 a start by printer-side name
+    reached the adapter with no copy, and a three-colour plate was sent with a
+    one-tray mapping.  A resume continuation is passed on exactly as its door
+    sent it.
+    """
+    if kwargs.get("local_file_path") or _is_resume_print(file_name, kwargs):
+        return kwargs
+    plate = _resolve_local_job(file_name, kwargs) or (kept[0] if kept else None)
+    return {**kwargs, "local_file_path": plate} if plate else kwargs
 
 
 class _ReadBackFailed(Exception):
@@ -784,6 +836,237 @@ def _nozzle_size_verdict(
             "self-approve it."
         ),
     }
+
+
+# ---------------------------------------------------------------------------
+# The plate against the printer's filament path
+#
+# Until 2026-10-17 neither question below was asked here.  The slot count was
+# checked only inside the Bambu adapter, on a local copy the door had to hand
+# over; a door that starts a plate by its printer-side name (the start tool
+# for a file this process did not upload, the queue, a watched start) hands
+# none, and a nine-colour plate went to a four-slot AMS Lite with a one-tray
+# mapping.  And the wrap refuses to WRITE a colour change for a printer whose
+# waste chute it has no position for, while a plate it wrote for an A1 still
+# started on a printer declared as a P1S.  Both are now judged here, on the
+# copy every door's start is judged on.  Neither has an override: a plate the
+# unit cannot feed is re-sliced with fewer colours, and a colour change for
+# another machine's chute is not one to run "anyway".
+# ---------------------------------------------------------------------------
+
+#: A plate needs more distinct filament colours than the filament unit Kiln
+#: drives on this printer has slots.
+FILAMENT_SLOTS_CODE = "FILAMENTS_EXCEED_SLOTS"
+
+#: A plate carries Kiln's colour change for a waste chute this printer does
+#: not have there.
+CHUTE_MISMATCH_CODE = "COLOR_CHANGE_CHUTE_MISMATCH"
+
+#: How much of a plate's G-code the chute check reads looking for Kiln's
+#: colour change, and the longest line it reads whole.  Kiln writes one
+#: around every tool change, the first within the opening layer, so a file
+#: with none in the bound is a file Kiln did not wrap.
+_COLOUR_CHANGE_SCAN_BYTES = 64 * 1024 * 1024
+_COLOUR_CHANGE_LINE_BYTES = 4096
+
+#: Two chute positions within this are the same chute.
+_CHUTE_MATCH_MM = 0.5
+
+#: Blocks about the printer and the file together, with nothing wrong in the
+#: file itself.
+_PAIRING_CODES = frozenset({NOZZLE_SIZE_MISMATCH, FILAMENT_SLOTS_CODE, CHUTE_MISMATCH_CODE})
+
+
+def _plate_number(kwargs: dict[str, Any]) -> int:
+    try:
+        return max(1, int(kwargs.get("plate_number") or 1))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _plate_colours(job_path: str, plate_number: int) -> list[str]:
+    """The colours a sliced plate declares for the filaments it uses, read
+    from its own ``Metadata/plate_N.json`` (the list the printer's screen and
+    its AMS mapping are built from); empty when there is none to read."""
+    from kiln.printers.bambu_3mf import _declared_filament_colors
+
+    try:
+        with UntrustedZipFile(job_path) as zf:
+            text = zf.read(f"Metadata/plate_{plate_number}.json").decode("utf-8", errors="replace")
+    except Exception:  # noqa: BLE001 -- no plate record: nothing to judge
+        return []
+    return _declared_filament_colors(text) or []
+
+
+def _kiln_colour_change_chute(job_path: str) -> tuple[float | None, float | None] | None:
+    """Where the first colour change Kiln wrote into this plate sends the
+    head to purge, as ``(x, y)`` with ``None`` for an axis it leaves alone;
+    ``None`` when the plate carries no colour change of Kiln's.
+
+    Kiln's colour change opens with :data:`~kiln.printers.bambu_3mf.KILN_COLOUR_CHANGE_NOTE`
+    on its ``M620`` line and travels to the chute right after its tool
+    select (:func:`kiln.printers.bambu_3mf._wrap_tool_changes`); a slicer's
+    own colour change carries no such note and is not read here.
+    """
+    from kiln.gcode import axis_value
+    from kiln.gcode_metadata import sliced_gcode_member, unpacks_in_chunks
+    from kiln.printers.bambu_3mf import KILN_COLOUR_CHANGE_NOTE
+
+    note = KILN_COLOUR_CHANGE_NOTE.encode("ascii")
+    try:
+        with UntrustedZipFile(job_path) as zf:
+            member = sliced_gcode_member(zf)
+            if member is None:
+                return None
+            info = zf.getinfo(member)
+            if not unpacks_in_chunks(info):
+                return None
+            with zf.open(info) as fh:
+                in_block = False
+                read = 0
+                while read < _COLOUR_CHANGE_SCAN_BYTES:
+                    line = fh.readline(_COLOUR_CHANGE_LINE_BYTES)
+                    if not line:
+                        return None
+                    read += len(line)
+                    code = line.split(b";", 1)[0].strip()
+                    if not in_block:
+                        in_block = code.startswith(b"M620 S") and note in line
+                        continue
+                    if code.startswith(b"M621"):
+                        return None  # a block that never left for a chute
+                    if code.startswith((b"G0 ", b"G1 ")):
+                        text = code.decode("ascii", errors="replace")
+                        x, y = axis_value(text, "X"), axis_value(text, "Y")
+                        if x is not None or y is not None:
+                            return (x, y)
+    except Exception:  # noqa: BLE001 -- an archive Kiln cannot read is not judged here
+        _logger.debug("print_gate: colour-change scan skipped for %s", job_path, exc_info=True)
+    return None
+
+
+def _same_chute(a: tuple[float | None, float | None], b: tuple[float | None, float | None]) -> bool:
+    return all(
+        (p is None and q is None) or (p is not None and q is not None and abs(p - q) <= _CHUTE_MATCH_MM)
+        for p, q in zip(a, b, strict=True)
+    )
+
+
+def _chute_words(point: tuple[float | None, float | None]) -> str:
+    return " ".join(f"{axis}{value:g}" for axis, value in zip("XY", point, strict=True) if value is not None)
+
+
+def _chute_verdict(adapter: Any, job_path: str, name: str) -> dict[str, Any] | None:
+    """Refuse a plate whose Kiln colour change purges at a chute this
+    printer does not have there.
+
+    The same rule the wrap applies before it writes one
+    (:func:`kiln.printers.bambu_3mf.flush_station_for`), applied to the
+    printer the plate is being started on.  A printer that declares no model
+    is not judged: the wrap gives it the A1's chute too, because nothing
+    says it is not an A1.
+    """
+    declared = _declared_model(adapter)
+    if not declared:
+        return None
+    found = _kiln_colour_change_chute(job_path)
+    if found is None:
+        return None
+    from kiln.printers.bambu_3mf import flush_station_for
+
+    station = flush_station_for(declared)
+    if station is not None and _same_chute(found, station):
+        return None
+    from kiln.printers.bed_fit import get_printer_display_name
+
+    printer = get_printer_display_name(declared) or declared
+    where = (
+        f"its own chute is at {_chute_words(station)}"
+        if station is not None
+        else "Kiln has no waste-chute position on record for it"
+    )
+    return {
+        "ok": False,
+        "blocked": True,
+        "code": CHUTE_MISMATCH_CODE,
+        "reason": (
+            f"{name} changes colour with a block Kiln wrote for another printer: before each "
+            f"purge it sends the head to {_chute_words(found)}, where that printer's waste "
+            f"chute is. This printer is set up as a {printer}, and {where}, so Kiln did not "
+            f"start it here. Print it on the printer it was sliced for, or slice it again for "
+            f"the {printer} in a single colour."
+        ),
+        "chute_in_file": list(found),
+        "suggestions": [
+            "Print it on the printer it was sliced for.",
+            f"Or slice it again for the {printer} in a single colour.",
+        ],
+    }
+
+
+def _slots_verdict(adapter: Any, name: str, colours: list[str]) -> dict[str, Any] | None:
+    """Refuse a plate that uses more filaments than the filament unit Kiln
+    drives on this printer has slots.
+
+    Counts the filaments the plate uses (its own plate record), one tray
+    each: Kiln routes every filament to a tray of its own, by colour or by
+    position, so two filaments in the same colour still take two trays.
+    That is never stricter than the Bambu adapter's own slot check on a
+    local copy (the plate's highest filament position against the tray
+    count), so a door that hands over a local copy is judged as before, and
+    a door that starts a plate by name now meets the same floor.  Like that
+    check, it counts the unit's trays, loaded or not, and not an external
+    spool.  Not judged when Kiln cannot see a unit it drives: no unit
+    reported, a read that failed, or a unit whose own tool map routes the
+    changes.
+    """
+    needed = len(colours)
+    if needed < 2:
+        return None
+    try:
+        from kiln.multi_material import multi_material_status
+
+        unit = multi_material_status(adapter)
+    except Exception:  # noqa: BLE001 -- a unit Kiln cannot read is not counted
+        return None
+    slots = unit.num_slots or 0
+    if not unit.driven_by_kiln or slots < 1 or needed <= slots:
+        return None
+    return {
+        "ok": False,
+        "blocked": True,
+        "code": FILAMENT_SLOTS_CODE,
+        "reason": (
+            f"{name} uses {needed} filaments, and this printer's {unit.label} has {slots} slots, "
+            "so it cannot load them all at once. Kiln did not start it. Slice it again with "
+            f"{slots} filaments or fewer (parts in the same colour can share one filament), or "
+            "split the parts across plates by colour and print each plate with its filaments loaded."
+        ),
+        "filaments": needed,
+        "slots": slots,
+        "multi_material": unit.to_dict(),
+        "suggestions": [
+            f"Slice it again with {slots} filaments or fewer; parts in the same colour can share one.",
+            "Or split the parts across plates by colour, and print each plate with its filaments loaded.",
+        ],
+    }
+
+
+def _filament_path_verdict(
+    adapter: Any, job_path: str, file_name: str, kwargs: dict[str, Any],
+) -> dict[str, Any] | None:
+    """The plate against this printer's filament path, or ``None``.
+
+    Only a sliced plate that declares two or more colours is read further,
+    so a one-colour start costs one small read.
+    """
+    if not str(job_path).lower().endswith(".3mf"):
+        return None
+    colours = _plate_colours(job_path, _plate_number(kwargs))
+    if len(colours) < 2:
+        return None
+    name = os.path.basename(str(file_name)) or os.path.basename(str(job_path))
+    return _chute_verdict(adapter, job_path, name) or _slots_verdict(adapter, name, colours)
 
 
 # ---------------------------------------------------------------------------
@@ -1414,7 +1697,7 @@ def _same_bed_or_original(
 
 
 def run_adapter_gate(
-    adapter: Any, file_name: str, kwargs: dict[str, Any],
+    adapter: Any, file_name: str, kwargs: dict[str, Any], *, keep: list[str] | None = None,
 ) -> dict[str, Any] | None:
     """Universal print-time backstop, called from ``PrinterAdapter.start_print``.
 
@@ -1422,6 +1705,11 @@ def run_adapter_gate(
     allow.  Soft-passes (``None``) whenever the model, local file, or material
     can't be determined, and for resume-mode continuations — the backstop only
     refuses what it can prove impossible.
+
+    :param keep: When given, the printer's own copy this gate read back is
+        appended to it rather than deleted, and the caller deletes it: the
+        start template hands it to the adapter as the plate to route from
+        (:func:`with_judged_plate`).
     """
     # Resume-mode prints are committed continuations — never re-gate them.
     if _is_resume_print(file_name, kwargs):
@@ -1509,20 +1797,30 @@ def run_adapter_gate(
                     ),
                 }
         if inspected and not verdict.get("blocked"):
+            # The plate against this printer's filament path, judged on the
+            # copy in hand -- the door's own file or the printer's -- so a
+            # start by name meets the same floor as a start with a local copy.
+            paired = _filament_path_verdict(adapter, inspected, file_name, kwargs)
+            if paired is not None:
+                verdict = paired
+        if inspected and not verdict.get("blocked"):
             # A file that passed everything above can still be for a nozzle
             # this printer says it does not have.
             sized = _nozzle_size_verdict(adapter, inspected, file_name, printer_id, override)
             if sized is not None:
                 verdict = sized
     finally:
-        if fetched:
+        if fetched and keep is not None:
+            keep.append(fetched)
+        elif fetched:
             with contextlib.suppress(OSError):
                 os.unlink(fetched)
     if fetched:
         verdict["inspected"] = "printer_copy"
-        # A nozzle-size block is about the printer and the file together;
-        # nothing is wrong with the file, so it is not told to be deleted.
-        if verdict.get("blocked") and verdict.get("code") != NOZZLE_SIZE_MISMATCH:
+        # A block about the printer and the file together -- the nozzle size,
+        # the filament path -- finds nothing wrong with the file itself, so it
+        # is not told to be deleted.
+        if verdict.get("blocked") and verdict.get("code") not in _PAIRING_CODES:
             verdict["reason"] = (
                 f"{verdict.get('reason', '')} This is the printer's own copy of "
                 f"{os.path.basename(str(file_name))}, read back from its storage: the file "

@@ -70,6 +70,7 @@ from kiln.cli.config import (
     list_printers as _list_printers,
 )
 from kiln.cli.consent_commands import register_consent_cli
+from kiln.cli.history_commands import register_design_lock_cli
 from kiln.cli.install_mcp import register_install_mcp_cli
 from kiln.cli.install_openscad import register_install_openscad_cli
 from kiln.cli.install_step_backend import register_install_step_backend_cli
@@ -13742,7 +13743,16 @@ try:
 
     register_pro_cli(cli)
 except ImportError:
-    pass  # kiln-pro not installed — pro CLI commands not available
+    # kiln-pro not installed: the design-history commands are couriers that
+    # send this computer's own history to Kiln's servers and keep the change.
+    from kiln.cli.history_commands import register_history_cli
+
+    register_history_cli(cli)
+
+# `kiln design lock / unlock`: keep a design on this computer, never saved to
+# the person's Kiln account.  On every install, onto kiln-pro's `design`
+# group when it has one.
+register_design_lock_cli(cli)
 
 
 # Auth commands — `kiln signin` / `kiln signout` / `kiln whoami` / `kiln pair`.

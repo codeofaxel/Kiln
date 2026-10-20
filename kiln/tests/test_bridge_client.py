@@ -595,3 +595,23 @@ def test_the_relay_observe_frame_is_answered_off_to_the_side_never_as_a_tool(mon
     assert observed == [("https://api.kiln3d.com", "bearer-x", "nonce-1")]
     assert ran == ["printer_status"]
     assert len(sent) == 1  # the tool's reply; the observation sends nothing down the socket
+
+
+# ---------------------------------------------------------------------------
+# Naming this install on the socket
+# ---------------------------------------------------------------------------
+
+
+def test_the_handshake_names_this_install_the_way_an_ask_does(monkeypatch):
+    """A window a person opens on this machine is granted to its install id,
+    the one an approval ask names.  The relay can let it cover the prints it
+    brings here only when the socket says which install this is; a machine
+    with no id sends no header rather than an empty one."""
+    from kiln.bridge_client import BridgeClient
+
+    client = BridgeClient(license_key="lic", call_tool=lambda *_a: None, fetch_artifact=_never_fetch)
+    install = "0123456789abcdef" * 2
+    monkeypatch.setattr("kiln.device.get_device_fingerprint", lambda: install)
+    assert client._auth_headers()["X-Kiln-Heartbeat-Device"] == install
+    monkeypatch.setattr("kiln.device.get_device_fingerprint", lambda: "")
+    assert "X-Kiln-Heartbeat-Device" not in client._auth_headers()

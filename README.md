@@ -244,7 +244,7 @@ export KILN_BAMBU_TLS_MODE=insecure   # legacy, no validation — trusted LANs o
 export KILN_BAMBU_TLS_FINGERPRINT=0123abcd...   # explicit SHA-256 pin
 ```
 
-Webcam capture is model-dependent: **A1, A1 Mini, P1P, P1S** serve frames over TLS+JPEG (no extra software). The **X1 series** (X1C, X1E) serves RTSPS, which Kiln relays via `ffmpeg` — so on an X1, both snapshots *and* the live stream need `ffmpeg` (`brew install ffmpeg` / `sudo apt install ffmpeg`). `can_snapshot` is reported `True` for every Bambu model; on an X1 without `ffmpeg`, the attempt surfaces a clear model-specific error rather than failing silently.
+Webcam capture is model-dependent: **A1, A1 Mini, P1P, P1S** serve frames over TLS+JPEG (no extra software), and Kiln can show that camera as live video in the print monitor on the computer connected to the printer. The **X1 series** (X1C, X1E) streams RTSPS, which Kiln's live-video relay does not carry: on an X1, Kiln takes snapshots by cutting a frame from that stream with `ffmpeg` (`brew install ffmpeg` / `sudo apt install ffmpeg`), and there is no live video. `can_snapshot` is reported `True` for every Bambu model; on an X1 without `ffmpeg`, the attempt surfaces a clear model-specific error rather than failing silently.
 </details>
 
 Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&utm_medium=readme)) add Git-for-3D versioning, product templates, assembly manuals, fleet workflows, SSO + SCIM, ERP webhooks, and long-term audit logs.
@@ -263,7 +263,7 @@ Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&ut
 - **Prints don't fail silently** — Cross-printer learning, automatic failure recovery, closed-loop AI generation feedback (failed prints auto-improve future generations), preflight safety checks on every job.
 - **Doomed prints stopped early** — Too big for the build plate, or a material your hotend can't melt? Caught before filament is wasted, rotated to fit when possible, one-command override. Pro shows the fix: true usable area, cleanest split, or the material to switch to.
 - **Search → Slice → Print** — Search and download 3D models from MyMiniFactory and Cults3D (search only), auto-slice with PrusaSlicer, OrcaSlicer, or BambuStudio, print — all from one agent conversation.
-- **Safety at scale** — 51 named per-printer safety profiles, G-code validation, heater watchdog, tamper-proof audit logs. Enterprise adds encrypted G-code at rest with key rotation, lockable profiles, RBAC, SSO, fleet site grouping, per-project cost tracking, and PostgreSQL HA.
+- **Safety at scale** — a named safety profile for every supported printer, G-code validation, heater watchdog, tamper-proof audit logs. Enterprise adds encrypted G-code at rest with key rotation, lockable profiles, RBAC, SSO, fleet site grouping, per-project cost tracking, and PostgreSQL HA.
 
 ## Supported Printers
 
@@ -601,9 +601,9 @@ Entry-point plugins are **default-deny** in production (`KILN_PLUGIN_POLICY=stri
 | `plugins/` | Focused MCP tool modules loaded by the plugin loader |
 | `gcode.py` | G-code safety validator with per-printer limits |
 | `gcode_interceptor.py` | Rule-based G-code interception and safety rewriting |
-| `safety_profiles.py` | Bundled safety database (51 named printer models, temps/feedrates/flow) |
+| `safety_profiles.py` | Per-printer safety limits (temps, feedrates, flow) for every supported model, served per printer from Kiln's catalogue, over a bundled generic floor for any other machine |
 | `slicer_profiles.py` | Bundled slicer profiles (auto-generates .ini files per printer) |
-| `printer_intelligence.py` | Printer knowledge base (firmware quirks, materials, failure modes) |
+| `printer_intelligence.py` | Printer roster and spec sheets: each machine's limits, per-material temperatures and motion facts, with the spec sheet served per printer from Kiln's catalogue (curated quirks, calibration recipes and failure modes are in Kiln Pro) |
 | `pipelines.py` | Pre-validated print pipelines (quick_print, calibrate, benchmark) |
 | `assembly.py` | Multi-part assembly validation and manual planning support |
 | `design_versions.py` | Local design history, version records, diffs, and rollback primitives |

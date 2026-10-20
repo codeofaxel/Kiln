@@ -657,6 +657,107 @@ def _wipe_tower_position(
 _BED_FIT_EPSILON_MM = 0.5
 
 
+#: The PrusaSlicer command line's own copy layout: ``--duplicate N`` lays out
+#: N copies of the model, ``--duplicate-distance D`` with D mm between them.
+_DUPLICATE_FLAG = "--duplicate"
+_DUPLICATE_DISTANCE_FLAG = "--duplicate-distance"
+
+
+def _copies_requested(extra_args: list[str] | None) -> tuple[int, str | None, list[str]] | None:
+    """``(copies, gap, the other arguments)`` when *extra_args* ask the
+    slicer to lay out copies, else ``None``."""
+    if not extra_args or _DUPLICATE_FLAG not in extra_args:
+        return None
+    copies: int | None = None
+    gap: str | None = None
+    rest: list[str] = []
+    i = 0
+    while i < len(extra_args):
+        arg = extra_args[i]
+        if arg in (_DUPLICATE_FLAG, _DUPLICATE_DISTANCE_FLAG) and i + 1 < len(extra_args):
+            if arg == _DUPLICATE_FLAG:
+                try:
+                    copies = int(extra_args[i + 1])
+                except ValueError:
+                    return None
+            else:
+                gap = extra_args[i + 1]
+            i += 2
+            continue
+        rest.append(arg)
+        i += 1
+    if copies is None or copies < 2:
+        return None
+    return copies, gap, rest
+
+
+def _laid_out_copies(
+    slicer: SlicerInfo,
+    input_abs: str,
+    profile: str | None,
+    extra_args: list[str] | None,
+    *,
+    timeout: int,
+) -> tuple[str, list[str]] | None:
+    """The copies a slice asks the slicer for, laid out first as a plate Kiln
+    can judge: ``(the plate, the other arguments)``, or ``None`` when the
+    slice asks for no copies.
+
+    PrusaSlicer's ``--duplicate N`` arranges the copies itself, and when they
+    do not all fit it slices the ones that do and leaves the rest out without
+    a word.  Measured 2026-10-17 on PrusaSlicer 2.9.4 with nine 110 x 105 mm
+    parts, a 12 mm gap and a 256 mm bed: it exited 0 and wrote four copies,
+    the same G-code as asking for four, so a door asked for nine printed four
+    and reported nine.  The same layout exported as a 3MF keeps every copy,
+    the ones that do not fit placed off the bed, so it is exported first and
+    judged by :func:`kiln.printers.bed_fit.plate_fit`, the judgment every
+    door that lays out a plate makes.  Copies that do not fit are refused,
+    in words; copies that do are sliced from that exported plate, so the
+    printer gets exactly the plate that was judged (slicing it gives the
+    same G-code as the duplicate flag did).
+    """
+    request = _copies_requested(extra_args)
+    if request is None:
+        return None
+    copies, gap, rest = request
+    name = os.path.basename(input_abs)
+    arranged = os.path.join(tempfile.mkdtemp(prefix="kiln_copies_"), f"{Path(input_abs).stem}_x{copies}.3mf")
+    cmd = [slicer.path, "--export-3mf", _DUPLICATE_FLAG, str(copies)]
+    if gap is not None:
+        cmd += [_DUPLICATE_DISTANCE_FLAG, gap]
+    if profile:
+        cmd += ["--load", profile]
+    cmd += ["--output", arranged, input_abs]
+
+    def _drop_partial() -> None:
+        with contextlib.suppress(OSError):
+            os.unlink(arranged)
+
+    result = _run_slicer_with_startup_retry(
+        cmd,
+        timeout=timeout,
+        retryable_returncodes=_SLIC3R_STARTUP_CRASH_RETURNCODES,
+        remove_partial_output=_drop_partial,
+        output_is_complete=lambda: os.path.isfile(arranged),
+    )
+    if result.returncode != 0 or not os.path.isfile(arranged):
+        detail = ((result.stderr or "").strip() or (result.stdout or "").strip())[:300]
+        raise SlicerError(
+            f"The slicer could not lay out {copies} copies of {name}: {detail or 'it wrote no plate'}."
+        )
+    from kiln.printers.bed_fit import PLATE_TOO_BIG_REMEDY, compute_3mf_geometry_bbox, plate_fit
+
+    bed = _bed_xy_bounds_from_profile(profile)
+    volume = (bed[2] - bed[0], bed[3] - bed[1], None) if bed is not None else None
+    if plate_fit(compute_3mf_geometry_bbox(arranged), volume)["fits"] is False:
+        raise SlicerError(
+            f"{copies} copies of {name} do not fit on this {volume[0]:g} × {volume[1]:g} mm bed: "
+            "laid out with their gap, some of them land off it. Kiln did not slice it, rather "
+            f"than print fewer copies than were asked for. {PLATE_TOO_BIG_REMEDY}"
+        )
+    return arranged, rest
+
+
 def _check_3mf_on_bed(input_abs: str, profile: str | None) -> None:
     """Refuse to slice a 3MF whose placed geometry misses the profile's bed.
 
@@ -1054,6 +1155,16 @@ def slice_file(
 
     # Find slicer
     slicer = find_slicer(slicer_path)
+
+    # Copies the slicer is asked to lay out itself are laid out FIRST, as a
+    # plate Kiln can judge, and that plate is what is sliced: the duplicate
+    # flag alone leaves out, silently, the copies that do not fit.
+    if slicer_cli_family(slicer) == _CLI_PRUSA:
+        laid_out = _laid_out_copies(slicer, input_abs, profile, extra_args, timeout=timeout)
+        if laid_out is not None:
+            input_abs, extra_args = laid_out
+            ext = ".3mf"
+            _check_3mf_on_bed(input_abs, profile)
 
     # Does this input ask for more than one filament?  Asked ONCE here,
     # at the chokepoint every slicing door funnels through, and carried
@@ -1585,8 +1696,11 @@ def slice_multicolor_copies(
     # Grid layout
     cell_w = model_width + spacing_mm
     cell_d = model_depth + spacing_mm
-    cols = int(bed_width_mm // cell_w)
-    rows = int(bed_depth_mm // cell_d)
+    # N copies take N widths and N - 1 gaps, so the gap after the last
+    # column is not charged against the bed.  Charging it refused, for one,
+    # two 120 mm parts with a 10 mm gap on a 256 mm bed, which take 250 mm.
+    cols = int((bed_width_mm + spacing_mm) // cell_w)
+    rows = int((bed_depth_mm + spacing_mm) // cell_d)
 
     if cols < 1 or rows < 1:
         raise ValueError(

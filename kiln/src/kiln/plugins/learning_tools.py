@@ -603,8 +603,10 @@ def record_print_outcome(
             pass  # Never let community sync block outcome recording
 
         # Auto-update decoration proven-settings counters when this print
-        # carried a decoration.  Mirrors the community-sync pattern — the
-        # dispatch is silent and never blocks the outcome return.
+        # carried a decoration (decoration memory: Kiln Pro, worked out on
+        # Kiln's servers).  Mirrors the community-sync pattern — the dispatch
+        # is silent and never blocks the outcome return; with no answer
+        # (offline, signed out, a plan without it) nothing is recorded.
         #
         # We only dispatch when we have real settings to record: either
         # the caller supplied them, or the library already has a proven
@@ -648,6 +650,7 @@ def record_print_outcome(
                                 mode=mode,
                                 image_style=image_style,
                                 source_job_id=job_id,
+                                asked_by_user=False,
                             )
                         else:
                             record_decoration_failure(
@@ -658,6 +661,7 @@ def record_print_outcome(
                                 image_style=image_style,
                                 failure_mode=failure_mode,
                                 source_job_id=job_id,
+                                asked_by_user=False,
                             )
             except Exception:
                 _logger.debug(

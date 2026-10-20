@@ -54,11 +54,14 @@ from __future__ import annotations
 import errno
 import http.client
 import json
+import logging
 import re
 import socket
 import ssl
 from dataclasses import dataclass
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 CAUSES = ("offline", "signed_out", "unanswered", "refused")
 
@@ -221,6 +224,24 @@ def story_for_tool(name: str, kind: str | None = None, category: str | None = No
 # ---------------------------------------------------------------------------
 # deciding why
 # ---------------------------------------------------------------------------
+
+
+#: The code a bridge's own miss carries when nothing was asked of Kiln's
+#: servers: kiln-pro on this computer answered, or failed to.
+LOCAL_FAULT_CODE = "NOT_ASKED"
+
+
+def local_fault(exc: BaseException, *, where: str = "kiln-pro on this computer", code: str = LOCAL_FAULT_CODE) -> Miss:
+    """The :class:`Miss` for an exception kiln-pro's code raised in this process.
+
+    The exception is logged here, with its traceback, and the miss says only
+    that *where* stopped.  Its text never rides in the miss: on Kiln's servers
+    this process answers a remote caller, and an exception can name a path, a
+    query or an internal that nobody outside should read.  Every bridge's
+    local path words its fault through this one helper.
+    """
+    logger.warning("%s raised; the caller is told only that it stopped", where, exc_info=(type(exc), exc, exc.__traceback__))
+    return Miss("unanswered", code, f"{where} stopped")
 
 
 def classify_answer(answer: Any) -> Miss | None:
@@ -480,6 +501,7 @@ def _tool_sentence(tool_name: str, miss: Miss, kind: str | None = None) -> str:
 #: moment the door is added, not found later.
 HOSTED_DOORS: dict[str, tuple[str, str]] = {
     "kiln.server": ("served_answer", "the paid-tool manifest stubs and the served door every bridge uses"),
+    "kiln.served_public": ("served_answer", "public design and analysis tools a signed-in install runs on Kiln's servers; a miss runs the tool here and says why once per cause"),
     "kiln._pro_motion_bridge": ("served_answer", "head-motion plans; a miss is worded by the Bambu doors"),
     "kiln._pro_cutter_bridge": ("served_answer", "blade status for the pre-flight; cut reports are fire-and-forget"),
     "kiln._pro_nozzle_bridge": ("served_answer", "the pre-print nozzle-life verdict for the pre-flight, a start and a slice; the nozzle on record, for the pre-flight's comparison and for the size a check or a slice runs with"),
@@ -487,10 +509,20 @@ HOSTED_DOORS: dict[str, tuple[str, str]] = {
     "kiln._pro_cost_bridge": ("served_answer", "cost intelligence for a print file's estimate; the estimate itself is the floor"),
     "kiln._pro_melt_bridge": ("served_answer", "a printer's own melt rates for a slice; the material's cautious figure is the floor"),
     "kiln._pro_material_rules_bridge": ("served_answer", "whether a material meets the rules a part must meet; a miss judges no requirement met"),
+    "kiln._pro_fault_bridge": ("served_answer", "what one printer fault code means and how to clear it; a miss keeps the code's family line and says why once"),
+    "kiln._pro_ams_bridge": ("served_answer", "the check an AMS dryer START passes before it is sent; a miss sends nothing, and a stop never needs it"),
+    "kiln.start_narrative": ("served_answer", "what one Bambu model's print start looks like; a miss keeps the generic line and says why instead of pointing at a sign-in the install already has"),
+    "kiln._pro_guide_bridge": ("served_answer", "one step of the maker's repair guide; a miss points at the maker's own pages and never claims the maker has no guide"),
     "kiln.plugins.fleet_tools": ("served_answer", "fleet routing on an install without the router; a miss routes nothing"),
     "kiln._pro_camera_bridge": ("served_answer", "whether a printer model ships with a camera, for always allow; a miss asks the person instead"),
     "kiln._pro_catalogue_bridge": ("served_answer", "one printer's catalogue record (limits, variants, spec sheet) at setup, kept on this computer; a miss is the record last kept, else the generic floor, said once at setup"),
-    "kiln._pro_material_bridge": ("served_answer", "one material's catalogue record (a family's brand figures, its load figures) the first time a door asks, kept on this computer; a miss is the record last kept, else the family's own range for a brand and no load figure, each door saying why"),
+    "kiln._pro_decoration_bridge": ("served_answer", "a saved decoration's memory (what printed well, versions, rollback), worked out on Kiln's servers and written into the decoration's own folder; a miss changes nothing on disk, and applying uses the standard settings"),
+    "kiln._pro_material_bridge": ("served_answer", "one material's catalogue record (a family's brand figures) the first time a door asks, kept on this computer; a miss is the record last kept, else the family's own range for a brand, each door saying why"),
+    "kiln._pro_fleet_materials_bridge": ("served_answer", "a material answer across several machines (Kiln Business), from the rows the install sends and kept nowhere; a miss gives no cross-machine answer and says why, and one machine's own answer is never asked for"),
+    "kiln._pro_material_pick_bridge": ("served_answer", "Kiln Pro's material pick for one part, asked only when the signed-in plan includes it and kept nowhere; a miss answers with the safety floor and its warnings"),
+    "kiln._pro_orientation_bridge": ("served_answer", "Kiln Pro's order of one part's print poses, asked once per part only when the signed-in plan includes it and kept nowhere; a miss ranks by bed contact"),
+    "kiln._pro_load_bridge": ("served_answer", "what one part can carry, asked per part and kept nowhere; a miss gives no figure and the door says the part is unchecked, never that it holds"),
+    "kiln.history_courier": ("served_answer", "design history pushed to, pulled from and cloned out of the person's account; a miss moves nothing and the history on this computer is untouched"),
     "kiln.stage_link": ("served_answer", "browser stage links; the four served causes word through here, the local stage is the floor"),
     "kiln.stage_cache": ("infrastructure", "the stage document upload behind stage_link; its refusals surface through stage_link"),
     "kiln.monitor_twin": ("infrastructure", "print twins pushed best-effort; the local monitor is the floor"),
@@ -534,6 +566,7 @@ __all__ = [
     "CAUSES",
     "HOSTED_DOORS",
     "KINDS",
+    "LOCAL_FAULT_CODE",
     "Miss",
     "SESSION_EXPIRED_CODE",
     "SIGNED_OUT_CODES",
@@ -545,6 +578,7 @@ __all__ = [
     "envelope_for_transport",
     "fields",
     "kind_of_tool",
+    "local_fault",
     "sentence",
     "story_for_tool",
 ]

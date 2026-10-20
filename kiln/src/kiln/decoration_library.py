@@ -5,6 +5,11 @@ Decorations are stored as JSON manifests in a local library directory
 the content file (heightmap, SVG, QR data), proven settings (depth, mode,
 material, image_style), and metadata (tags, content_type) so that a
 decoration that worked once can be reliably applied to new models.
+
+Saving, listing, looking up, applying and deleting are free.  The
+decoration's memory -- recording what printed well, replaying it, versions,
+history and rollback -- is Kiln Pro, worked out on Kiln's servers and written
+back into the decoration's own folder (:mod:`kiln._pro_decoration_bridge`).
 """
 
 from __future__ import annotations
@@ -86,14 +91,11 @@ class DecorationScaling:
 
 @dataclass
 class ProvenSetting:
-    """A print setting combination that has been proven to work.
+    """A print setting combination this decoration has printed with.
 
-    ``success_count`` and ``failure_count`` are auto-incremented from
-    :func:`record_print_outcome` when a print job carries a
-    ``decoration_slug``, so proven status reflects actual field data
-    rather than self-reports.  ``last_failure_mode`` captures the most
-    recent failure category (warping, adhesion, etc.) so later runs can
-    avoid the same pitfall.
+    ``success_count`` / ``failure_count`` count the prints reported with this
+    decoration on this material, including through ``record_print_outcome``;
+    ``last_failure_mode`` is the most recent failure category.
     """
 
     depth_mm: float
@@ -163,12 +165,8 @@ class Decoration:
     parent_version: int | None = None
     changes: dict[str, str] | None = None
     texture_params: dict[str, Any] | None = None
-    #: Prints already counted into ``proven_settings`` — ``"<job_id>:<material>"``
-    #: tokens, newest last, bounded (see ``_COUNTED_JOBS_MAX``).  The counters
-    #: are blind ``+= 1`` increments with no natural key, so two callers
-    #: recording the same physical print (the outcome tool and the pro
-    #: decoration tool, say) counted it twice.  See
-    #: :func:`record_decoration_success`.
+    #: Prints already counted into ``proven_settings``, so a print reported
+    #: twice counts once.  Kept by decoration memory (Kiln Pro).
     counted_jobs: list[str] = field(default_factory=list)
 
     @property
@@ -527,33 +525,58 @@ def delete_decoration(name_or_slug: str) -> bool:
     return True
 
 
-#: How many counted (job, material) tokens a decoration manifest remembers.
-#: Bounded and oldest-dropped, on the ``daily_stats.counted_outcomes``
-#: precedent: enough history that a repeat call minutes or days later still
-#: no-ops, without letting a manifest grow without limit.
-_COUNTED_JOBS_MAX = 200
+def default_settings(content_type: str) -> dict[str, Any]:
+    """The standard print settings for a kind of decoration: what any
+    decoration starts from before it has printed, and what a plan without
+    decoration memory uses."""
+    return dict(_DEFAULTS.get(content_type, _DEFAULTS["photo"]))
 
 
-def _counted_token(source_job_id: str | None, material: str) -> str | None:
-    """The idempotency token for one physical print of one material.
-
-    ``None`` when the caller gave no job id — a keyless call keeps the old
-    blind-increment behavior and owns its own dedupe (documented on both
-    recorders).
-    """
-    job = str(source_job_id or "").strip()[:96]
-    if not job:
-        return None
-    return f"{job}:{material}"
-
-
-def _already_counted(dec: Decoration, token: str | None) -> bool:
-    return bool(token) and token in dec.counted_jobs
+# ---------------------------------------------------------------------------
+# Decoration memory (Kiln Pro, worked out on Kiln's servers)
+#
+# What printed well, versions, history and rollback.  Each function below
+# keeps its contract; the change itself comes from Kiln's servers through
+# :mod:`kiln._pro_decoration_bridge` and is written into the decoration's own
+# folder here.  With no answer (offline, signed out, a plan without decoration
+# memory) nothing on disk changes and
+# :class:`kiln._pro_decoration_bridge.MemoryUnavailable` says why.
+# ---------------------------------------------------------------------------
 
 
-def _remember_counted(dec: Decoration, token: str | None) -> None:
-    if token:
-        dec.counted_jobs = [*dec.counted_jobs, token][-_COUNTED_JOBS_MAX:]
+def _found(name_or_slug: str) -> Decoration:
+    dec = get_decoration(name_or_slug)
+    if dec is None:
+        raise ValueError(f"Decoration not found: {name_or_slug}")
+    return dec
+
+
+def _record_outcome(
+    outcome: str,
+    name_or_slug: str,
+    *,
+    material: str,
+    depth_mm: float,
+    mode: str,
+    image_style: str,
+    failure_mode: str | None,
+    source_job_id: str | None,
+    asked_by_user: bool,
+) -> Decoration:
+    from kiln import _pro_decoration_bridge as bridge
+
+    dec = _found(name_or_slug)
+    deco_dir = _decoration_dir(dec.slug)
+    answer = bridge.ask(
+        "record", deco_dir, asked_by_user=asked_by_user, outcome=outcome,
+        material=material, depth_mm=float(depth_mm), mode=mode,
+        image_style=image_style, failure_mode=failure_mode or "",
+        source_job_id=source_job_id or "",
+    )
+    plan = answer.get("plan")
+    if isinstance(plan, dict) and plan.get("already_counted"):
+        return dec
+    return Decoration.from_dict(bridge.carry_out(deco_dir, dec.slug, plan))
 
 
 def record_decoration_success(
@@ -564,51 +587,21 @@ def record_decoration_success(
     mode: str = "emboss",
     image_style: str = "auto",
     source_job_id: str | None = None,
+    asked_by_user: bool = True,
 ) -> Decoration:
-    """Record a successful print, updating proven settings.
+    """Record a successful print with this decoration (Kiln Pro).
 
     :param source_job_id: The print this outcome came from.  Pass it and the
-        count is idempotent: the decoration remembers the ``(job, material)``
-        pairs it has already counted, so a second call for the same print —
-        an agent recording the outcome and then calling the decoration tool
-        for the same job — no-ops instead of inflating the counters.  One
-        physical print counts once, whichever door recorded it.  Omit it and
-        the counter increments blindly as it always has; a keyless caller
-        owns its own dedupe.
-
+        same print reported twice counts once.
     :raises ValueError: if the decoration is not found.
+    :raises kiln._pro_decoration_bridge.MemoryUnavailable: no answer from
+        Kiln's servers; nothing was recorded.
     """
-    dec = get_decoration(name_or_slug)
-    if dec is None:
-        raise ValueError(f"Decoration not found: {name_or_slug}")
-
-    token = _counted_token(source_job_id, material)
-    if _already_counted(dec, token):
-        return dec
-
-    now = _now_iso()
-
-    if material in dec.proven_settings:
-        ps = dec.proven_settings[material]
-        ps.success_count += 1
-        ps.last_printed = now
-        # Update depth/mode/style if they changed
-        ps.depth_mm = depth_mm
-        ps.mode = mode
-        ps.image_style = image_style
-    else:
-        dec.proven_settings[material] = ProvenSetting(
-            depth_mm=depth_mm,
-            mode=mode,
-            image_style=image_style,
-            success_count=1,
-            last_printed=now,
-        )
-
-    dec.print_count += 1
-    _remember_counted(dec, token)
-    _write_manifest(dec.slug, dec.to_dict())
-    return dec
+    return _record_outcome(
+        "success", name_or_slug, material=material, depth_mm=depth_mm,
+        mode=mode, image_style=image_style, failure_mode=None,
+        source_job_id=source_job_id, asked_by_user=asked_by_user,
+    )
 
 
 def record_decoration_failure(
@@ -620,168 +613,83 @@ def record_decoration_failure(
     image_style: str = "auto",
     failure_mode: str | None = None,
     source_job_id: str | None = None,
+    asked_by_user: bool = True,
 ) -> Decoration:
-    """Record a failed print for this decoration + material combination.
+    """Record a failed print with this decoration (Kiln Pro).
 
-    Mirror of :func:`record_decoration_success` — increments
-    ``failure_count`` on the matching :class:`ProvenSetting` and stamps
-    ``last_failed`` / ``last_failure_mode``.  When the combination has
-    never been printed before, a new :class:`ProvenSetting` is created
-    with ``success_count=0`` so the record reflects the failure without
-    falsely claiming a proven pairing.
-
-    :param source_job_id: As on :func:`record_decoration_success` — the
-        ledger is shared and carries no polarity, because one physical print
-        has one outcome: whichever verdict landed first for a ``(job,
-        material)`` pair is the one counted, and a later opposite call for
-        the same print is a correction, not a second print.
-
+    :param source_job_id: As on :func:`record_decoration_success`.
     :raises ValueError: if the decoration is not found.
+    :raises kiln._pro_decoration_bridge.MemoryUnavailable: no answer from
+        Kiln's servers; nothing was recorded.
     """
-    dec = get_decoration(name_or_slug)
-    if dec is None:
-        raise ValueError(f"Decoration not found: {name_or_slug}")
-
-    token = _counted_token(source_job_id, material)
-    if _already_counted(dec, token):
-        return dec
-
-    now = _now_iso()
-
-    if material in dec.proven_settings:
-        ps = dec.proven_settings[material]
-        ps.failure_count += 1
-        ps.last_failed = now
-        ps.last_failure_mode = failure_mode
-        # Depth/mode/style reflect the MOST RECENT attempt — useful when
-        # diagnosing whether a setting drift caused the failure.
-        ps.depth_mm = depth_mm
-        ps.mode = mode
-        ps.image_style = image_style
-    else:
-        dec.proven_settings[material] = ProvenSetting(
-            depth_mm=depth_mm,
-            mode=mode,
-            image_style=image_style,
-            success_count=0,
-            failure_count=1,
-            last_failed=now,
-            last_failure_mode=failure_mode,
-        )
-
-    dec.print_count += 1
-    _remember_counted(dec, token)
-    _write_manifest(dec.slug, dec.to_dict())
-    return dec
-
-
-def compute_decoration_scale(
-    decoration: Decoration,
-    *,
-    target_face_width_mm: float,
-    target_face_height_mm: float,
-) -> float:
-    """Compute the scale factor to fit a decoration onto a target face.
-
-    Applies a ~10% margin and respects min_detail_mm if set.
-    """
-    scaling = decoration.scaling
-    if not scaling:
-        return 1.0
-
-    # Apply 10% margin
-    usable_w = target_face_width_mm * 0.9
-    usable_h = target_face_height_mm * 0.9
-
-    scale_w = usable_w / scaling.native_width_mm if scaling.native_width_mm else 1.0
-    scale_h = usable_h / scaling.native_height_mm if scaling.native_height_mm else 1.0
-    scale = min(scale_w, scale_h)
-
-    # Clamp so min_detail stays above minimum printable threshold for FDM
-    _min_printable_detail_mm = 0.4
-    if scaling.min_detail_mm > 0 and scale < 1.0:
-        effective_detail = scaling.min_detail_mm * scale
-        if effective_detail < _min_printable_detail_mm:
-            scale = _min_printable_detail_mm / scaling.min_detail_mm
-
-    return scale
+    return _record_outcome(
+        "failed", name_or_slug, material=material, depth_mm=depth_mm,
+        mode=mode, image_style=image_style, failure_mode=failure_mode,
+        source_job_id=source_job_id, asked_by_user=asked_by_user,
+    )
 
 
 def resolve_decoration_settings(
     decoration: Decoration,
     *,
     material: str = "PLA",
+    asked_by_user: bool = False,
 ) -> dict[str, Any]:
-    """Resolve the best print settings for this decoration + material.
+    """The settings to print this decoration with on *material*.
 
-    Uses proven settings if available, otherwise falls back to per-type defaults.
+    Kiln Pro replays the settings it printed well with, from Kiln's servers.
+    A decoration that has not printed well yet, and any call that gets no
+    answer, uses the standard settings for its kind (``source: "default"``);
+    a decoration that HAS printed well and was not replayed says why in
+    ``note``.  Never raises.
     """
-    # First: exact material match from proven settings
-    if material in decoration.proven_settings:
-        ps = decoration.proven_settings[material]
-        if ps.success_count > 0:
-            return {
-                "depth_mm": ps.depth_mm,
-                "mode": ps.mode,
-                "image_style": ps.image_style,
-                "material": material,
-                "source": "proven",
-                "success_count": ps.success_count,
-            }
+    from kiln import _pro_decoration_bridge as bridge
 
-    # Second: any proven setting with success > 0
-    for mat, ps in decoration.proven_settings.items():
-        if ps.success_count > 0:
-            return {
-                "depth_mm": ps.depth_mm,
-                "mode": ps.mode,
-                "image_style": ps.image_style,
-                "material": material,
-                "source": "proven_other",
-                "success_count": ps.success_count,
-                "proven_material": mat,
-            }
+    standard = {**default_settings(decoration.content_type), "material": material, "source": "default"}
+    if not any(ps.success_count > 0 for ps in decoration.proven_settings.values()):
+        return standard
+    try:
+        answer = bridge.ask(
+            "resolve", _decoration_dir(decoration.slug),
+            asked_by_user=asked_by_user, material=material,
+        )
+    except bridge.MemoryUnavailable as miss:
+        return {**standard, **_replay_note(miss.answer)}
+    except (ValueError, OSError) as exc:
+        _logger.debug("decoration settings not replayed: %s", exc)
+        return standard
+    settings = answer.get("settings")
+    if not isinstance(settings, dict) or not {"depth_mm", "mode", "image_style"} <= set(settings):
+        return standard
+    return {**settings, "material": material}
 
-    # Third: content-type defaults
-    defaults = _DEFAULTS.get(decoration.content_type, _DEFAULTS["photo"])
+
+def _replay_note(answer: dict[str, Any]) -> dict[str, Any]:
+    """What a decoration that printed well is told when its settings were
+    not replayed: the plan, said once, or why the servers did not answer."""
+    from kiln.served_answer import classify_answer, clause, fields
+
+    if str(answer.get("code") or "") == "TIER_REQUIRED":
+        note: dict[str, Any] = {
+            "note": (
+                "Used the standard settings. Kiln Pro replays the settings "
+                "this decoration printed well with."
+            ),
+        }
+        if answer.get("upgrade_url"):
+            note["upgrade_url"] = answer["upgrade_url"]
+        return note
+    miss = classify_answer(answer)
+    if miss is None:
+        return {}
     return {
-        "depth_mm": defaults["depth_mm"],
-        "mode": defaults["mode"],
-        "image_style": defaults["image_style"],
-        "material": material,
-        "source": "default",
+        "note": "Used the standard settings: " + clause(
+            miss, feature="servers",
+            cannot="replay the settings this decoration printed well with",
+            then="apply it again",
+        ) + ".",
+        **fields(miss),
     }
-
-
-# ---------------------------------------------------------------------------
-# Versioning helpers
-# ---------------------------------------------------------------------------
-
-
-def _max_version(slug: str) -> int:
-    """Return the highest version number across all archived and current manifests.
-
-    Scans ``manifest.v*.json`` files and the current ``manifest.json`` to
-    determine the maximum version in use.
-    """
-    deco_dir = _decoration_dir(slug)
-    if not deco_dir.exists():
-        return 0
-
-    highest = 0
-
-    # Check current manifest
-    current = _read_manifest(slug)
-    if current:
-        highest = max(highest, current.get("version", 1))
-
-    # Check versioned archives
-    for child in deco_dir.iterdir():
-        m = re.match(r"^manifest\.v(\d+)\.json$", child.name)
-        if m:
-            highest = max(highest, int(m.group(1)))
-
-    return highest
 
 
 def iterate_decoration(
@@ -794,221 +702,75 @@ def iterate_decoration(
     processing: dict[str, Any] | None = None,
     scaling: DecorationScaling | None = None,
     notes: str = "",
+    asked_by_user: bool = True,
 ) -> Decoration:
-    """Create a new version of a decoration, archiving the current one.
+    """Create a new version of a decoration, archiving the current one (Kiln Pro).
 
     :raises ValueError: if the decoration is not found.
+    :raises FileNotFoundError: if *content_path* does not exist.
+    :raises kiln._pro_decoration_bridge.MemoryUnavailable: no answer from
+        Kiln's servers; nothing changed.
     """
-    current = get_decoration(name_or_slug)
-    if current is None:
-        raise ValueError(f"Decoration not found: {name_or_slug}")
+    from kiln import _pro_decoration_bridge as bridge
 
-    slug = current.slug
-    deco_dir = _decoration_dir(slug)
-    old_version = current.version
-
-    # Archive current manifest
-    archive_path = deco_dir / f"manifest.v{old_version}.json"
-    src_manifest = _manifest_path(slug)
-    if src_manifest.exists():
-        shutil.copy2(src_manifest, archive_path)
-
-    # Build changes dict
-    changes: dict[str, str] = {}
-    if depth_mm is not None:
-        # Compare against first proven setting's depth or note the change
-        for ps in current.proven_settings.values():
-            if ps.depth_mm != depth_mm:
-                changes["depth_mm"] = f"{ps.depth_mm} -> {depth_mm}"
-            break
-    if mode is not None and mode != "":
-        for ps in current.proven_settings.values():
-            if ps.mode != mode:
-                changes["mode"] = f"{ps.mode} -> {mode}"
-            break
-    if image_style is not None and image_style != "":
-        for ps in current.proven_settings.values():
-            if ps.image_style != image_style:
-                changes["image_style"] = f"{ps.image_style} -> {image_style}"
-            break
-    if content_path is not None:
-        changes["content_file"] = "updated"
-    if processing is not None:
-        changes["processing"] = "updated"
-    if scaling is not None:
-        changes["scaling"] = "updated"
-
-    new_version = old_version + 1
-
-    # Handle new content file
-    new_content_file = current.content_file
-    if content_path:
-        cp = Path(content_path)
-        if not cp.exists():
-            raise FileNotFoundError(f"Content file not found: {content_path}")
-        ext = cp.suffix
-        versioned_name = f"content.v{new_version}{ext}"
-        shutil.copy2(cp, deco_dir / versioned_name)
-        new_content_file = versioned_name
-
-    # Update proven settings if depth/mode/image_style changed
-    new_proven = {}
-    for mat, ps in current.proven_settings.items():
-        new_proven[mat] = ProvenSetting(
-            depth_mm=depth_mm if depth_mm is not None else ps.depth_mm,
-            mode=mode if mode is not None and mode != "" else ps.mode,
-            image_style=image_style if image_style is not None and image_style != "" else ps.image_style,
-            success_count=ps.success_count,
-            last_printed=ps.last_printed,
-        )
-
-    dec = Decoration(
-        name=current.name,
-        slug=slug,
-        content_type=current.content_type,
-        created=_now_iso(),
-        source_file=current.source_file,
-        content_file=new_content_file,
-        content_data=current.content_data,
-        processing=processing if processing is not None else current.processing,
-        scaling=scaling if scaling is not None else current.scaling,
-        proven_settings=new_proven if new_proven else current.proven_settings,
-        tags=list(current.tags),
-        print_count=current.print_count,
-        version=new_version,
-        parent_version=old_version,
-        changes=changes if changes else None,
-        # The counters carry forward, so the ledger that keeps them honest
-        # must carry forward with them — otherwise iterating a decoration
-        # re-opens the double-count window for prints already counted.
-        counted_jobs=list(current.counted_jobs),
+    current = _found(name_or_slug)
+    if content_path and not Path(content_path).is_file():
+        raise FileNotFoundError(f"Content file not found: {content_path}")
+    deco_dir = _decoration_dir(current.slug)
+    answer = bridge.ask(
+        "iterate", deco_dir, asked_by_user=asked_by_user,
+        depth_mm=float(depth_mm) if depth_mm else 0.0,
+        mode=mode or "", image_style=image_style or "",
+        content_suffix=Path(content_path).suffix if content_path else "",
+        processing_changed=processing is not None,
+        scaling_changed=scaling is not None,
     )
-    _write_manifest(slug, dec.to_dict())
-    _logger.debug("Iterated decoration %r v%d -> v%d", slug, old_version, new_version)
-    return dec
+    return Decoration.from_dict(bridge.carry_out(
+        deco_dir, current.slug, answer.get("plan"), content_path=content_path,
+        overrides={
+            "processing": processing,
+            "scaling": scaling.to_dict() if scaling is not None else None,
+        },
+    ))
 
 
 def rollback_decoration(
     name_or_slug: str,
     *,
     version: int,
+    asked_by_user: bool = True,
 ) -> Decoration:
-    """Roll back a decoration to a previous archived version.
-
-    Creates a NEW version (not the old version number) that restores the
-    settings from the archived version.
+    """Restore an archived version as a NEW version (Kiln Pro); history is
+    never rewritten.
 
     :raises ValueError: if the decoration or archived version is not found.
+    :raises kiln._pro_decoration_bridge.MemoryUnavailable: no answer from
+        Kiln's servers; nothing changed.
     """
-    current = get_decoration(name_or_slug)
-    if current is None:
-        raise ValueError(f"Decoration not found: {name_or_slug}")
+    from kiln import _pro_decoration_bridge as bridge
 
-    slug = current.slug
-    deco_dir = _decoration_dir(slug)
-    archive_path = deco_dir / f"manifest.v{version}.json"
-    if not archive_path.exists():
+    current = _found(name_or_slug)
+    deco_dir = _decoration_dir(current.slug)
+    if not (deco_dir / f"manifest.v{int(version)}.json").is_file():
         raise ValueError(
             f"Archived version {version} not found for decoration {name_or_slug!r}"
         )
-
-    # Load the archived version
-    try:
-        archived_data = json.loads(archive_path.read_text(encoding="utf-8"))
-        archived = Decoration.from_dict(archived_data)
-    except (json.JSONDecodeError, KeyError) as exc:
-        raise ValueError(f"Corrupt archive manifest.v{version}.json: {exc}") from exc
-
-    # Archive the CURRENT manifest before overwriting
-    current_version = current.version
-    current_archive = deco_dir / f"manifest.v{current_version}.json"
-    src_manifest = _manifest_path(slug)
-    if src_manifest.exists() and not current_archive.exists():
-        shutil.copy2(src_manifest, current_archive)
-
-    # New version = max of all versions + 1
-    new_version = _max_version(slug) + 1
-
-    # Build the rolled-back decoration
-    dec = Decoration(
-        name=archived.name,
-        slug=slug,
-        content_type=archived.content_type,
-        created=_now_iso(),
-        source_file=archived.source_file,
-        content_file=archived.content_file,
-        content_data=archived.content_data,
-        processing=archived.processing,
-        scaling=archived.scaling,
-        proven_settings=archived.proven_settings,
-        tags=list(archived.tags),
-        print_count=archived.print_count,
-        version=new_version,
-        parent_version=current_version,
-        changes={"rollback": f"restored from v{version}"},
-        # Union of both ledgers: rolling back restores the archived counters,
-        # but a print counted since then is still counted, and must not be
-        # countable a second time.
-        counted_jobs=list(
-            dict.fromkeys([*archived.counted_jobs, *current.counted_jobs])
-        )[-_COUNTED_JOBS_MAX:],
-    )
-    _write_manifest(slug, dec.to_dict())
-    _logger.debug(
-        "Rolled back decoration %r to v%d as new v%d", slug, version, new_version
-    )
-    return dec
+    answer = bridge.ask("rollback", deco_dir, asked_by_user=asked_by_user, version=int(version))
+    return Decoration.from_dict(bridge.carry_out(deco_dir, current.slug, answer.get("plan")))
 
 
-def decoration_history(name_or_slug: str) -> list[dict[str, Any]]:
-    """Return version history for a decoration, sorted by version ascending.
+def decoration_history(name_or_slug: str, *, asked_by_user: bool = True) -> list[dict[str, Any]]:
+    """Every version of a decoration, oldest first (Kiln Pro).  An empty
+    list when the decoration is not found.
 
-    Each entry includes version, created, changes, proven materials, and
-    print count.  Returns an empty list if the decoration is not found.
+    :raises kiln._pro_decoration_bridge.MemoryUnavailable: no answer from
+        Kiln's servers.
     """
+    from kiln import _pro_decoration_bridge as bridge
+
     slug = _slugify(name_or_slug) if " " in name_or_slug else name_or_slug
     deco_dir = _decoration_dir(slug)
-    if not deco_dir.exists():
+    if not (deco_dir / _MANIFEST_FILENAME).is_file():
         return []
-
-    entries: list[dict[str, Any]] = []
-
-    # Gather all manifests (versioned + current)
-    for child in deco_dir.iterdir():
-        data: dict[str, Any] | None = None
-        if child.name == _MANIFEST_FILENAME:
-            data = _read_manifest(slug)
-        elif re.match(r"^manifest\.v\d+\.json$", child.name):
-            try:
-                data = json.loads(child.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                continue
-
-        if data is None:
-            continue
-
-        try:
-            dec = Decoration.from_dict(data)
-        except (KeyError, TypeError):
-            continue
-
-        proven_materials = sorted(dec.proven_settings.keys())
-        entries.append({
-            "version": dec.version,
-            "created": dec.created,
-            "changes": dec.changes,
-            "proven_materials": proven_materials,
-            "print_count": dec.print_count,
-        })
-
-    # Deduplicate by version (current manifest may duplicate a versioned archive)
-    seen: set[int] = set()
-    unique: list[dict[str, Any]] = []
-    for entry in entries:
-        v = entry["version"]
-        if v not in seen:
-            seen.add(v)
-            unique.append(entry)
-
-    unique.sort(key=lambda e: e["version"])
-    return unique
+    history = bridge.ask("history", deco_dir, asked_by_user=asked_by_user).get("history")
+    return history if isinstance(history, list) else []

@@ -7,9 +7,9 @@ Coverage areas:
     - List decorations with filtering by content_type and tag
     - Get decoration by name or slug
     - Delete decorations
-    - Record successful prints (proven settings tracking)
-    - Compute decoration scale for target faces
-    - Resolve decoration settings (proven vs. defaults per material)
+    - Resolve decoration settings: the standard settings a decoration that
+      has not printed well starts from (replaying what printed well is
+      Kiln Pro decoration memory, served; its tests live in kiln-pro with it)
     - Dataclass round-trip serialization (to_dict / from_dict)
 """
 
@@ -24,17 +24,11 @@ from kiln.decoration_library import (
     DecorationScaling,
     ProvenSetting,
     _slugify,
-    compute_decoration_scale,
-    decoration_history,
     delete_decoration,
     get_decoration,
     get_library_dir,
-    iterate_decoration,
     list_decorations,
-    record_decoration_failure,
-    record_decoration_success,
     resolve_decoration_settings,
-    rollback_decoration,
     save_decoration,
 )
 
@@ -291,10 +285,16 @@ class TestListDecorations:
         assert result[0].slug == "tagged"
 
     def test_sorted_by_last_printed(self, tmp_path: Path):
+        import json
+
         _save_simple(tmp_path, name="Old Dec")
         _save_simple(tmp_path, name="New Dec")
-        # Record a print on the first one to give it a more recent last_printed
-        record_decoration_success("old-dec", material="PLA", depth_mm=0.6)
+        # Give the first one a print, as a recorded print leaves it.
+        manifest = get_library_dir() / "old-dec" / "manifest.json"
+        data = json.loads(manifest.read_text())
+        data["proven_settings"] = {"PLA": {"depth_mm": 0.6, "success_count": 1,
+                                           "last_printed": "2099-01-01T00:00:00+00:00"}}
+        manifest.write_text(json.dumps(data))
         result = list_decorations()
         # The one with a recorded print should sort differently
         assert len(result) == 2
@@ -347,253 +347,7 @@ class TestDeleteDecoration:
 
 
 # ---------------------------------------------------------------------------
-# record_decoration_success
-# ---------------------------------------------------------------------------
-
-
-class TestRecordDecorationSuccess:
-
-    def test_creates_new_proven_setting(self, tmp_path: Path):
-        _save_simple(tmp_path, name="Prove Me")
-        dec = record_decoration_success(
-            "prove-me", material="PLA", depth_mm=0.6, mode="emboss"
-        )
-        assert "PLA" in dec.proven_settings
-        assert dec.proven_settings["PLA"].depth_mm == 0.6
-        assert dec.proven_settings["PLA"].success_count >= 1
-
-    def test_increments_existing_success_count(self, tmp_path: Path):
-        _save_simple(tmp_path, name="Count Up")
-        record_decoration_success(
-            "count-up", material="PLA", depth_mm=0.6, mode="emboss"
-        )
-        dec = record_decoration_success(
-            "count-up", material="PLA", depth_mm=0.6, mode="emboss"
-        )
-        assert dec.proven_settings["PLA"].success_count >= 2
-
-    def test_updates_last_printed(self, tmp_path: Path):
-        _save_simple(tmp_path, name="Timestamp")
-        dec = record_decoration_success(
-            "timestamp", material="PLA", depth_mm=0.5
-        )
-        assert dec.proven_settings["PLA"].last_printed is not None
-
-    def test_increments_print_count(self, tmp_path: Path):
-        _save_simple(tmp_path, name="Print Count")
-        record_decoration_success("print-count", material="PLA", depth_mm=0.5)
-        dec = record_decoration_success("print-count", material="PLA", depth_mm=0.5)
-        assert dec.print_count >= 2
-
-    def test_not_found_raises(self):
-        with pytest.raises((ValueError, FileNotFoundError)):
-            record_decoration_success(
-                "ghost", material="PLA", depth_mm=0.5
-            )
-
-
-# ---------------------------------------------------------------------------
-# Idempotency — one physical print counts once
-#
-# The counters are blind ``+= 1`` increments.  Two doors reach them (the
-# outcome tool and the pro decoration tool), so an agent that used both for
-# one print doubled its proven-settings evidence.
-# ---------------------------------------------------------------------------
-
-
-class TestProvenSettingsIdempotency:
-
-    def test_same_job_twice_increments_once(self, tmp_path: Path):
-        _save_simple(tmp_path, name="Idem Success")
-        record_decoration_success(
-            "idem-success", material="PLA", depth_mm=0.6, source_job_id="job-77"
-        )
-        dec = record_decoration_success(
-            "idem-success", material="PLA", depth_mm=0.6, source_job_id="job-77"
-        )
-        assert dec.proven_settings["PLA"].success_count == 1
-        assert dec.print_count == 1
-
-    def test_failure_polarity_is_keyed_too(self, tmp_path: Path):
-        _save_simple(tmp_path, name="Idem Failure")
-        record_decoration_failure(
-            "idem-failure",
-            material="PETG",
-            depth_mm=0.5,
-            failure_mode="warping",
-            source_job_id="job-88",
-        )
-        dec = record_decoration_failure(
-            "idem-failure",
-            material="PETG",
-            depth_mm=0.5,
-            failure_mode="warping",
-            source_job_id="job-88",
-        )
-        assert dec.proven_settings["PETG"].failure_count == 1
-        assert dec.print_count == 1
-
-    def test_one_print_has_one_outcome_across_polarities(self, tmp_path: Path):
-        """A success and a failure for the SAME job is a correction, not two
-        prints — the first verdict is the counted one and nothing doubles."""
-        _save_simple(tmp_path, name="Idem Mixed")
-        record_decoration_success(
-            "idem-mixed", material="PLA", depth_mm=0.6, source_job_id="job-99"
-        )
-        dec = record_decoration_failure(
-            "idem-mixed", material="PLA", depth_mm=0.6, source_job_id="job-99"
-        )
-        assert dec.proven_settings["PLA"].success_count == 1
-        assert dec.proven_settings["PLA"].failure_count == 0
-        assert dec.print_count == 1
-
-    def test_different_jobs_both_count(self, tmp_path: Path):
-        """The key must not swallow real repeat prints."""
-        _save_simple(tmp_path, name="Two Prints")
-        record_decoration_success(
-            "two-prints", material="PLA", depth_mm=0.6, source_job_id="job-1"
-        )
-        dec = record_decoration_success(
-            "two-prints", material="PLA", depth_mm=0.6, source_job_id="job-2"
-        )
-        assert dec.proven_settings["PLA"].success_count == 2
-
-    def test_same_job_different_material_both_count(self, tmp_path: Path):
-        """A multi-material print records once per material, not once total."""
-        _save_simple(tmp_path, name="Two Materials")
-        record_decoration_success(
-            "two-materials", material="PLA", depth_mm=0.6, source_job_id="job-5"
-        )
-        dec = record_decoration_success(
-            "two-materials", material="PETG", depth_mm=0.6, source_job_id="job-5"
-        )
-        assert dec.proven_settings["PLA"].success_count == 1
-        assert dec.proven_settings["PETG"].success_count == 1
-
-    def test_keyless_calls_preserve_blind_increment(self, tmp_path: Path):
-        """No job id → today's behavior, unchanged: the caller owns dedupe."""
-        _save_simple(tmp_path, name="No Key")
-        record_decoration_success("no-key", material="PLA", depth_mm=0.6)
-        dec = record_decoration_success("no-key", material="PLA", depth_mm=0.6)
-        assert dec.proven_settings["PLA"].success_count == 2
-        assert dec.counted_jobs == []
-
-    def test_ledger_survives_a_manifest_round_trip(self, tmp_path: Path):
-        """The ledger lives in the manifest — a repeat call in a LATER
-        process (the real double-count shape) must still no-op."""
-        _save_simple(tmp_path, name="Round Trip")
-        record_decoration_success(
-            "round-trip", material="PLA", depth_mm=0.6, source_job_id="job-42"
-        )
-        reloaded = get_decoration("round-trip")
-        assert reloaded is not None
-        assert reloaded.counted_jobs == ["job-42:PLA"]
-
-        dec = record_decoration_success(
-            "round-trip", material="PLA", depth_mm=0.6, source_job_id="job-42"
-        )
-        assert dec.proven_settings["PLA"].success_count == 1
-
-    def test_ledger_is_bounded(self, tmp_path: Path):
-        """Oldest-dropped at the cap, so a manifest can't grow forever."""
-        from kiln.decoration_library import _COUNTED_JOBS_MAX, _remember_counted
-
-        dec = _save_simple(tmp_path, name="Bounded")
-        for i in range(_COUNTED_JOBS_MAX + 5):
-            _remember_counted(dec, f"job-{i}:PLA")
-        assert len(dec.counted_jobs) == _COUNTED_JOBS_MAX
-        assert dec.counted_jobs[-1] == f"job-{_COUNTED_JOBS_MAX + 4}:PLA"
-        assert dec.counted_jobs[0] == "job-5:PLA"
-
-
-# ---------------------------------------------------------------------------
-# compute_decoration_scale
-# ---------------------------------------------------------------------------
-
-
-class TestComputeDecorationScale:
-
-    def _make_scaled_decoration(
-        self,
-        *,
-        native_w: float = 56.0,
-        native_h: float = 56.0,
-        min_detail: float = 0.0,
-    ) -> Decoration:
-        """Build a Decoration with the given scaling for scale tests."""
-        scaling = DecorationScaling(
-            native_width_mm=native_w,
-            native_height_mm=native_h,
-            min_detail_mm=min_detail,
-            aspect_ratio=native_w / native_h if native_h else 1.0,
-        )
-        return Decoration(
-            name="Scale Test",
-            slug="scale-test",
-            content_type="photo",
-            created="2026-01-01T00:00:00",
-            source_file=None,
-            content_file=None,
-            content_data=None,
-            processing=None,
-            scaling=scaling,
-            proven_settings={},
-            tags=[],
-            print_count=0,
-        )
-
-    def test_fits_within_target(self):
-        dec = self._make_scaled_decoration(native_w=56.0, native_h=56.0)
-        scale = compute_decoration_scale(
-            dec, target_face_width_mm=80.0, target_face_height_mm=80.0
-        )
-        # Should scale up but not exceed face (with margin)
-        assert 0.5 < scale < 1.5
-
-    def test_respects_min_detail(self):
-        dec = self._make_scaled_decoration(
-            native_w=56.0, native_h=56.0, min_detail=1.2
-        )
-        # Very small face — scaling must not shrink below min_detail
-        scale = compute_decoration_scale(
-            dec, target_face_width_mm=10.0, target_face_height_mm=10.0
-        )
-        # At this scale, the min detail should still be >= 1.2mm effective
-        # The function should clamp rather than produce unusably small features
-        assert scale > 0
-
-    def test_preserves_aspect_ratio(self):
-        dec = self._make_scaled_decoration(native_w=100.0, native_h=50.0)
-        scale = compute_decoration_scale(
-            dec, target_face_width_mm=80.0, target_face_height_mm=80.0
-        )
-        # Width is the constraining dimension
-        effective_w = 100.0 * scale
-        effective_h = 50.0 * scale
-        assert effective_w <= 80.0
-        assert effective_h <= 80.0
-        # Aspect ratio preserved
-        assert abs(effective_w / effective_h - 2.0) < 0.01
-
-    def test_target_smaller_than_native_scales_down(self):
-        dec = self._make_scaled_decoration(native_w=100.0, native_h=100.0)
-        scale = compute_decoration_scale(
-            dec, target_face_width_mm=50.0, target_face_height_mm=50.0
-        )
-        assert scale < 1.0
-
-    def test_10_percent_margin(self):
-        dec = self._make_scaled_decoration(native_w=100.0, native_h=100.0)
-        scale = compute_decoration_scale(
-            dec, target_face_width_mm=100.0, target_face_height_mm=100.0
-        )
-        # Should leave ~10% margin, so effective size ~90mm not 100mm
-        effective = 100.0 * scale
-        assert effective <= 92.0  # generous tolerance
-
-
-# ---------------------------------------------------------------------------
-# resolve_decoration_settings
+# resolve_decoration_settings: the standard settings
 # ---------------------------------------------------------------------------
 
 
@@ -618,21 +372,6 @@ class TestResolveDecorationSettings:
             tags=[],
             print_count=0,
         )
-
-    def test_uses_proven_settings_for_material(self):
-        proven = ProvenSetting(
-            depth_mm=0.8,
-            mode="emboss",
-            image_style="posterize",
-            success_count=3,
-            last_printed="2026-04-01T00:00:00",
-        )
-        dec = self._make_decoration_with_proven(proven={"PLA": proven})
-        settings = resolve_decoration_settings(dec, material="PLA")
-        assert settings["depth_mm"] == 0.8
-        assert settings["mode"] == "emboss"
-        assert settings["material"] == "PLA"
-        assert settings["source"] == "proven"
 
     def test_falls_back_to_defaults_for_unknown_material(self):
         dec = self._make_decoration_with_proven(content_type="photo")
@@ -737,9 +476,7 @@ class TestDecorationToDict:
         assert len(restored.proven_settings) == len(dec.proven_settings)
 
     def test_proven_settings_serialized_correctly(self, tmp_path: Path):
-        dec = _save_simple(tmp_path, name="Serialize")
-        record_decoration_success("serialize", material="PLA", depth_mm=0.6, mode="emboss")
-        dec = get_decoration("serialize")
+        dec = _save_simple(tmp_path, name="Serialize", material="PLA")
         d = dec.to_dict()
         # proven_settings should be a dict keyed by material
         assert isinstance(d["proven_settings"], dict)
@@ -780,121 +517,6 @@ class TestDecorationToDict:
         assert dec.version == 1
         assert dec.parent_version is None
         assert dec.changes is None
-
-
-# ---------------------------------------------------------------------------
-# iterate_decoration
-# ---------------------------------------------------------------------------
-
-
-class TestIterateDecoration:
-
-    def test_creates_new_version(self, tmp_path: Path):
-        _save_simple(tmp_path, name="Iter Test", material="PLA")
-        dec = iterate_decoration("iter-test", depth_mm=0.8)
-        assert dec.version == 2
-        assert dec.parent_version == 1
-
-    def test_archives_old_manifest(self, tmp_path: Path):
-        _save_simple(tmp_path, name="Archive Test", material="PLA")
-        iterate_decoration("archive-test", depth_mm=0.8)
-        lib = get_library_dir()
-        archive = lib / "archive-test" / "manifest.v1.json"
-        assert archive.exists()
-
-    def test_changes_dict_captures_delta(self, tmp_path: Path):
-        _save_simple(tmp_path, name="Delta Test", material="PLA")
-        dec = iterate_decoration("delta-test", depth_mm=0.8)
-        assert dec.changes is not None
-        assert "depth_mm" in dec.changes
-        assert "0.6 -> 0.8" in dec.changes["depth_mm"]
-
-    def test_carries_forward_unchanged_fields(self, tmp_path: Path):
-        _save_simple(tmp_path, name="Carry Fwd", material="PLA", tags=["gift"])
-        dec = iterate_decoration("carry-fwd", depth_mm=0.9)
-        assert dec.name == "Carry Fwd"
-        assert dec.slug == "carry-fwd"
-        assert dec.tags == ["gift"]
-        assert dec.content_type == "photo"
-
-    def test_new_content_file_copied(self, tmp_path: Path):
-        _save_simple(tmp_path, name="New Content", material="PLA")
-        new_content = tmp_path / "updated.dat"
-        new_content.write_bytes(b"new heightmap data")
-        dec = iterate_decoration("new-content", content_path=str(new_content))
-        assert dec.content_file == "content.v2.dat"
-        lib = get_library_dir()
-        assert (lib / "new-content" / "content.v2.dat").exists()
-
-    def test_not_found_raises(self):
-        with pytest.raises(ValueError, match="not found"):
-            iterate_decoration("nonexistent-deco", depth_mm=1.0)
-
-
-# ---------------------------------------------------------------------------
-# rollback_decoration
-# ---------------------------------------------------------------------------
-
-
-class TestRollbackDecoration:
-
-    def test_rollback_to_v1(self, tmp_path: Path):
-        _save_simple(tmp_path, name="Rollback Test", material="PLA")
-        # Iterate to v2 with a different depth
-        iterate_decoration("rollback-test", depth_mm=0.9)
-        # Rollback to v1
-        dec = rollback_decoration("rollback-test", version=1)
-        # Should have restored v1's proven settings
-        if "PLA" in dec.proven_settings:
-            assert dec.proven_settings["PLA"].depth_mm == 0.6
-
-    def test_rollback_creates_new_version_number(self, tmp_path: Path):
-        _save_simple(tmp_path, name="Rollback VN", material="PLA")
-        iterate_decoration("rollback-vn", depth_mm=0.9)
-        # Now at v2, rollback to v1 should produce v3
-        dec = rollback_decoration("rollback-vn", version=1)
-        assert dec.version == 3
-        assert dec.parent_version == 2
-
-    def test_rollback_records_change(self, tmp_path: Path):
-        _save_simple(tmp_path, name="Rollback Change", material="PLA")
-        iterate_decoration("rollback-change", depth_mm=0.9)
-        dec = rollback_decoration("rollback-change", version=1)
-        assert dec.changes is not None
-        assert "rollback" in dec.changes
-        assert "v1" in dec.changes["rollback"]
-
-    def test_invalid_version_raises(self, tmp_path: Path):
-        _save_simple(tmp_path, name="Bad Version", material="PLA")
-        with pytest.raises(ValueError, match="not found"):
-            rollback_decoration("bad-version", version=99)
-
-
-# ---------------------------------------------------------------------------
-# decoration_history
-# ---------------------------------------------------------------------------
-
-
-class TestDecorationHistory:
-
-    def test_single_version_returns_one_entry(self, tmp_path: Path):
-        _save_simple(tmp_path, name="Solo History")
-        history = decoration_history("solo-history")
-        assert len(history) == 1
-        assert history[0]["version"] == 1
-
-    def test_multi_version_history_sorted(self, tmp_path: Path):
-        _save_simple(tmp_path, name="Multi History", material="PLA")
-        iterate_decoration("multi-history", depth_mm=0.8)
-        iterate_decoration("multi-history", depth_mm=1.0)
-        history = decoration_history("multi-history")
-        assert len(history) == 3
-        versions = [h["version"] for h in history]
-        assert versions == [1, 2, 3]
-
-    def test_not_found_returns_empty(self):
-        history = decoration_history("nonexistent-history")
-        assert history == []
 
 
 # ---------------------------------------------------------------------------
@@ -1006,44 +628,6 @@ class TestListByCategory:
 # ---------------------------------------------------------------------------
 # The counted-prints ledger survives versioning
 # ---------------------------------------------------------------------------
-
-
-class TestCountedLedgerAcrossVersions:
-    """The counters carry forward across an iterate/rollback, so the ledger
-    that keeps them honest has to carry forward too."""
-
-    def test_iterate_carries_the_ledger_forward(self, tmp_path: Path):
-        _save_simple(tmp_path, name="Iter Ledger")
-        record_decoration_success(
-            "iter-ledger", material="PLA", depth_mm=0.6, source_job_id="job-11"
-        )
-        iterate_decoration("iter-ledger", depth_mm=0.8)
-
-        dec = record_decoration_success(
-            "iter-ledger", material="PLA", depth_mm=0.8, source_job_id="job-11"
-        )
-        assert dec.proven_settings["PLA"].success_count == 1
-
-    def test_rollback_keeps_prints_counted_since_the_archive(self, tmp_path: Path):
-        _save_simple(tmp_path, name="Roll Ledger")
-        iterate_decoration("roll-ledger", depth_mm=0.8)  # archives v1
-        record_decoration_success(
-            "roll-ledger", material="PLA", depth_mm=0.8, source_job_id="job-22"
-        )
-        rollback_decoration("roll-ledger", version=1)
-
-        dec = record_decoration_success(
-            "roll-ledger", material="PLA", depth_mm=0.6, source_job_id="job-22"
-        )
-        assert dec.proven_settings.get("PLA") is None, (
-            "a print counted before the rollback must not be countable again"
-        )
-        # ...while a genuinely new print still counts, so the ledger is a
-        # filter, not a freeze.
-        fresh = record_decoration_success(
-            "roll-ledger", material="PLA", depth_mm=0.6, source_job_id="job-33"
-        )
-        assert fresh.proven_settings["PLA"].success_count == 1
 
 
 # ---------------------------------------------------------------------------

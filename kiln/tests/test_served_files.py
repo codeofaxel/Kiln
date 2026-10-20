@@ -226,11 +226,29 @@ class TestSend:
         assert uploads == []
 
     def test_a_kind_of_file_the_servers_do_not_take_is_said_plainly(self, wire, tmp_path):
-        ini = _file(tmp_path, "profile.ini", b"[print]\n")
+        blend = _file(tmp_path, "part.blend", b"BLENDER-v300")
         _kwargs, refusal = served_makes.send_inputs(
-            "decorate_during_print", {"gcode_path": ini}, MID_PRINT,
+            "decorate_during_print", {"gcode_path": blend}, MID_PRINT,
         )
-        assert refusal["code"] == "FILE_KIND_NOT_SENT" and ".ini" in refusal["error"]
+        assert refusal["code"] == "FILE_KIND_NOT_SENT" and ".blend" in refusal["error"]
+
+    def test_a_prusaslicer_profile_goes_up(self, wire, tmp_path):
+        """PrusaSlicer keeps a filament profile as a flat ``.ini``; the
+        calibration grader on Kiln's servers reads it (2026-10-17: only
+        OrcaSlicer and Bambu Studio's ``.json`` profiles could be sent)."""
+        uploads, _ = wire
+        ini = _file(tmp_path, "PLA.ini", b"filament_type = PLA\nextrusion_multiplier = 0.98\n")
+        kwargs, refusal = served_makes.send_inputs(
+            "import_third_party_calibration",
+            {"tool_name": "prusaslicer", "config_path": ini},
+            {"files": {"config_path": "one"}},
+        )
+        assert refusal is None
+        assert kwargs == {
+            "tool_name": "prusaslicer",
+            "file_tokens": {"config_path": {"token": "file-token-00000001xxxxxx", "name": "PLA.ini"}},
+        }
+        assert uploads[0]["data"] == b"filament_type = PLA\nextrusion_multiplier = 0.98\n"
 
     def test_a_refused_upload_stops_the_call_with_the_servers_words(self, wire, tmp_path, monkeypatch):
         import httpx
@@ -553,6 +571,82 @@ class TestThroughTheStub:
             "printer_name": "default",
         }
         assert server._with_local_printer({"printer_name": "default"}, None) == {"printer_name": "default"}
+
+
+
+class TestARoutedToolKeepsThePrinterItNames:
+    """A tool on the printer route reads this install's printers first and
+    sends them, each with its model; Kiln's servers then find the printer by
+    the name the person used.  Putting the model in that name's place lost
+    the printer: with no model on record the connection type went instead
+    ("octoprint" matched nothing), and two printers of one model matched
+    both.  Found by kiln-pro's plain-install smoke, 2026-10-18."""
+
+    @pytest.fixture
+    def stubs(self, monkeypatch, tmp_path):
+        import kiln.server as server
+        from kiln import served_steps
+
+        manifest = {
+            "categories": {},
+            "tools": [{
+                "name": "auto_recover",
+                "description": "Recover a failed print.",
+                "tier": "pro",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"printer_name": {"type": "string"}},
+                    "required": ["printer_name"],
+                },
+                "inputs": {"printer": "printer_name"},
+                "local_steps": {
+                    "schema_version": server._LOCAL_STEPS_SCHEMA_VERSION,
+                    "reads_first": [{"kind": "printer_facts", "want": ["job"]}],
+                    "acts": True,
+                },
+            }],
+        }
+        fake_server_file = tmp_path / "pkg" / "server.py"
+        fake_server_file.parent.mkdir()
+        (fake_server_file.parent / "pro_tool_manifest.json").write_text(json.dumps(manifest))
+        monkeypatch.setattr(server, "__file__", str(fake_server_file))
+        read_for: list[str] = []
+
+        def read_first(tool, reads, *, printer_name, call):
+            read_for.append(printer_name)
+            return {"printer_facts": {"printers": [{"name": "default", "model": "", "is_default": True}]}}, None
+
+        monkeypatch.setattr(served_steps, "read_first", read_first)
+        sent: list[dict] = []
+
+        def forwarded(name, **kwargs):
+            sent.append(kwargs)
+            return {"status": "success"}
+
+        monkeypatch.setattr(server, "_pro_api_call", forwarded)
+        registered: dict[str, object] = {}
+
+        class _Registry:
+            def tool(self, *args, **kwargs):
+                def register(fn):
+                    registered[fn.__name__] = fn
+                    return fn
+
+                return register
+
+        server._register_pro_tool_stubs(_Registry())
+        return server, registered, sent, read_for
+
+    @pytest.mark.parametrize("model", ["", "bambu_a1"])
+    @pytest.mark.parametrize("named", ["default", "Default", "active"])
+    def test_the_name_the_person_used_is_the_name_sent(self, stubs, monkeypatch, model, named):
+        server, registered, sent, read_for = stubs
+        monkeypatch.setattr(server, "_resolve_printer_model_live", lambda name=None: model)
+        monkeypatch.setattr(server, "_PRINTER_TYPE", "octoprint")
+        monkeypatch.setattr(server, "_read_config_printers", lambda: {"default": {"type": "bambu"}})
+        registered["auto_recover"](printer_name=named)
+        assert read_for == [named]
+        assert sent[-1]["printer_name"] == named
 
 
 def test_every_served_call_says_this_install_saves_files(monkeypatch):

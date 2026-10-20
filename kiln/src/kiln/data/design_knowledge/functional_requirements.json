@@ -52,14 +52,6 @@
       "gussets_required": true,
       "fillets_required": true,
       "fillet_min_radius_mm": 2
-    },
-    "load_estimation_rules": {
-      "petg_tension_capacity_n_per_mm2": 25,
-      "abs_tension_capacity_n_per_mm2": 20,
-      "nylon_tension_capacity_n_per_mm2": 35,
-      "pc_tension_capacity_n_per_mm2": 32,
-      "safety_factor": 3.0,
-      "layer_bond_derating_pct": 40
     }
   },
   "watertight": {

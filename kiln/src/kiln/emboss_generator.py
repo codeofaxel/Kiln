@@ -2020,16 +2020,29 @@ def generate_qr_openscad_module(
 ) -> tuple[str, dict]:
     """Generate an OpenSCAD module for a QR code (Business feature).
 
-    QR code generation is a paid feature. The implementation lives in
-    the kiln-pro package.
-
-    Raises :class:`ImportError` if kiln-pro is not installed.
+    QR codes are drawn on Kiln's servers.  Where this module cannot draw one
+    it raises :class:`ImportError` with a sentence true for the caller's
+    plan: a Business account is pointed at the tools that make QR codes on
+    its plan, and nobody already on the plan is told to upgrade.
     """
     try:
         from kiln_pro.decoration.qr_openscad import generate_qr_openscad_module as _impl
     except ImportError:
-        raise ImportError(
-            "QR code generation is a Business feature. "
-            "Upgrade at https://kiln3d.com/pricing"
-        ) from None
+        raise ImportError(_qr_unavailable_message()) from None
     return _impl(url, module_name=module_name, target_size_mm=target_size_mm, border=border)
+
+
+def _qr_unavailable_message() -> str:
+    """Why no QR code was drawn here, worded for the caller's plan."""
+    from kiln.licensing import LicenseTier, check_tier
+
+    try:
+        on_plan, refusal = check_tier(LicenseTier.BUSINESS)
+    except Exception:  # noqa: BLE001 -- an unreadable plan is Free
+        on_plan, refusal = False, None
+    if on_plan:
+        return (
+            "QR codes are made on Kiln's servers, not in this install. Your plan "
+            "includes them: use the generate_qr_decoration or add_qr_to_product tool."
+        )
+    return refusal or "QR codes are part of Kiln Business: https://kiln3d.com/pricing"

@@ -1645,7 +1645,10 @@ def plan_motion_around_plate(
     clearance_mm: float | None,
     printer_model: str | None = None,
 ) -> list[dict[str, Any]] | None:
-    """kiln-pro's motion planner, when it is installed; otherwise ``None``.
+    """kiln-pro's motion planner: in-process when it is installed, otherwise
+    served by Kiln's servers for a machine this install has reported
+    (:func:`kiln._pro_motion_bridge.around_plate`, free, the same door and
+    allowance as a home or park plan); ``None`` when neither answers.
 
     The hook, not the planner.  Public Kiln refuses to move a head across a
     recorded part; kiln-pro (https://kiln3d.com) may know a path around it.
@@ -1680,14 +1683,20 @@ def plan_motion_around_plate(
     try:
         from kiln_pro.bridge import plan_motion_around_plate as _pro_plan
     except ImportError:
-        return None
+        _pro_plan = None
     model = str(printer_model or "").strip()
     if model:
         station = {**(station if isinstance(station, dict) else {}), "printer_id": model}
     try:
-        plan = _pro_plan(record=state.to_dict(), station=station, action=action, clearance_mm=clearance_mm)
+        if _pro_plan is not None:
+            plan = _pro_plan(record=state.to_dict(), station=station, action=action, clearance_mm=clearance_mm)
+        else:
+            from kiln._pro_motion_bridge import around_plate
+
+            served_model = model or str((station or {}).get("printer_id") or "")
+            plan = around_plate(state.to_dict(), printer_model=served_model, action=action, clearance_mm=clearance_mm)
     except Exception:  # noqa: BLE001 -- a planner fault is "no plan", never a motion
-        logger.debug("kiln-pro motion planner raised; refusing as without it", exc_info=True)
+        logger.debug("the motion planner raised; refusing as without it", exc_info=True)
         return None
     if not isinstance(plan, list) or not plan:
         return None
