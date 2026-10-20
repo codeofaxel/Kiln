@@ -694,6 +694,26 @@ def lock_refusal(
     }
 
 
+def locked_design_label(design_id: Any, kind: str = "features", *, vault: Any = None) -> str | None:
+    """What to say when a feature or preset is saved for a design locked here, or ``None``.
+
+    A feature or preset carries its own files, never the design's; the one
+    thing of the design it would send is the design's name, as a label.  A
+    locked design's name stays on this computer, and the feature or preset
+    is still saved.
+    """
+    if not isinstance(design_id, str) or not design_id:
+        return None
+    with _opened(vault) as v:
+        if not v.is_locked(design_id):
+            return None
+    noun = "preset" if kind == "presets" else "feature"
+    return (
+        f"{design_id} is locked to this computer, so its name was left off this {noun}. "
+        f"The {noun} itself was saved to your Kiln account."
+    )
+
+
 #: Served tools whose call keeps something of a design in the person's Kiln
 #: account, and what the refusal says Kiln did not do.
 _KEEPS_IN_ACCOUNT = {"propose_design_change": "open a pull request for it in your Kiln account"}
@@ -1427,16 +1447,20 @@ def push_library(tool: str, kind: str, item_id: str, branch_id: str, *, design_i
     vault = vault or HistoryVault()
     try:
         payload = vault.library_branch_payload(kind, item_id, branch_id)
+        left_out = locked_design_label(design_id, kind, vault=vault)
     finally:
         if own:
             vault.close()
     if payload is None:
         return _refused(tool, "BRANCH_NOT_FOUND", f"No branch {branch_id} of {item_id} on this computer.")
-    body = {**payload, "design_id": design_id}
+    body = {**payload, "design_id": None if left_out else design_id}
     answer = _request(tool, "POST", f"/api/cloud/{_LIBRARY_ROUTE[kind]}/{_quote(item_id)}/branches/push", body)
     if answer.get("status") == "error":
         return answer
-    return {"status": "success", "push": answer, "item_id": item_id, "branch_id": branch_id}
+    out = {"status": "success", "push": answer, "item_id": item_id, "branch_id": branch_id}
+    if left_out:
+        out["design_left_out"] = left_out
+    return out
 
 
 def pull_library(tool: str, kind: str, item_id: str, branch_id: str | None = None,

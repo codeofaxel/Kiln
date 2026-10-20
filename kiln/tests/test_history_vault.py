@@ -1290,6 +1290,30 @@ class TestALockedDesignStaysHere:
         assert answer["code"] == "DESIGN_LOCKED"
         assert "did not save its release to your Kiln account" in answer["error"]
 
+    # A lap found (2026-10-20; fails at 9744b7e8): a feature or preset push
+    # sent the design it was made for as a label, so a design locked to this
+    # computer still had its name reach the account.  The feature's own files
+    # are its own; only the name of the locked design stays here.
+    def test_a_feature_pushed_for_a_locked_design_leaves_the_designs_name_here(self, home, monkeypatch):
+        vault = _vault(home)
+        vault._lib_put("features", "branch", "fb1", "f1", {"branch_id": "fb1", "feature_id": "f1", "name": "main"})
+        vault._lib_put("features", "version", "fv1", "f1", {"feature_version_id": "fv1", "feature_id": "f1"})
+        vault._lib_put("features", "membership", "fb1:fv1", "f1",
+                       {"branch_id": "fb1", "feature_version_id": "fv1", "position": 0})
+        vault._conn.commit()
+        vault.set_locked("mug", True)
+        vault.close()
+        sent = []
+        monkeypatch.setattr(courier, "_request", lambda tool, method, path, body=None: sent.append(body) or {})
+
+        locked = courier.push_library("cloud_push_feature_branch", "features", "f1", "fb1", design_id="mug")
+        open_ = courier.push_library("cloud_push_feature_branch", "features", "f1", "fb1", design_id="bowl")
+
+        assert locked["status"] == "success"
+        assert sent[0]["design_id"] is None and sent[0]["versions"]
+        assert "mug is locked to this computer" in locked["design_left_out"]
+        assert sent[1]["design_id"] == "bowl" and "design_left_out" not in open_
+
     def test_the_history_log_push_leaves_a_locked_designs_entries_here(self, home):
         vault = _vault(home)
         vault.apply_log_delta({"reflog": [
