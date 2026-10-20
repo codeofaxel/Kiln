@@ -51,6 +51,16 @@ SHOWN_NOTE = (
     "whatever filament is loaded."
 )
 
+#: What the block says when the word is one no stage can paint.  ``shown``
+#: still carries the word, because it is what was asked; the note says the
+#: picture does not show it and how to ask so that it will.  (2026-10-20: a
+#: make asked for in "slate" said ``shown: slate`` beside a grey part.)
+UNSHOWN_NOTE = (
+    "'{shown}' is not a colour name Kiln knows, so the preview and the stage "
+    "show the part grey; it prints in whatever filament is loaded. Ask with "
+    "a standard colour name or a hex such as #708090 and it is shown in it."
+)
+
 #: Appended to the file's own path: ``part.stl`` -> ``part.stl.color.json``.
 NOTE_SUFFIX = ".color.json"
 SCHEMA_VERSION = 1
@@ -385,6 +395,10 @@ def attach_declared_color(
             block["hex"] = hex6
             if file_path:
                 record(file_path, ShownColour(shown=shown, hex6=hex6, source=source))
+        else:
+            # A word nothing resolves is still what was asked, so it stays
+            # under ``shown``; the note stops claiming a picture in it.
+            block["note"] = UNSHOWN_NOTE.format(shown=shown)
         response["color"] = block
         return shown
     except Exception:  # noqa: BLE001 -- a display hint never costs a make
