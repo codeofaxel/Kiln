@@ -12,9 +12,12 @@ no PII.
 Two directions, and they do NOT use the same door:
 
 * **Contribute** — :func:`sync_community_print` /
-  :func:`sync_community_print_async` post one anonymized outcome
-  straight to the community table with the publishable key.  Every
-  install does this, on every tier; nothing here is gated.
+  :func:`sync_community_print_async` hand one anonymized outcome to the
+  Kiln API (:func:`send_contribution`), anonymously: no sign-in, no
+  credential, nothing that names this machine.  The server checks it and
+  writes it to the pool, so when the pool refuses a write the refusal
+  reaches Kiln rather than a log on this disk.  Every install does this,
+  on every tier; nothing here is gated.
 * **Read back** — :func:`fetch_community_insights` and
   :func:`fetch_community_insight_for_signature` ask the Kiln API for a
   *computed aggregate*, authenticated as this machine.  Nobody reads
@@ -40,20 +43,18 @@ from typing import Any
 
 _logger = logging.getLogger(__name__)
 
-_SUPABASE_URL = "https://nomzokpscfshjjzezplr.supabase.co"
-# CONTRIBUTION ONLY — the publishable key inserts an anonymized outcome and
-# nothing else.  It is deliberately absent from every read path in this
-# module: reads go to the Kiln API (see ``_INSIGHT_ROUTE``), which holds the
-# credentials the corpus actually answers to.  Pinned by
-# ``tests/test_community_sync.py::test_publishable_key_is_contribution_only``.
-# The real production publishable key, public by design: it signs in as the
-# anon role, whose only power on the corpus is adding a contribution.
-_SUPABASE_ANON_KEY = "sb_publishable_ZCJyEL0qeveSwgqv7dry3A_YI26Yw6S"
+# Kiln releases before this one wrote contributions straight into the pool
+# with the database's public key.  Those installs still do, and the database
+# keeps accepting their exact request (kiln-pro's client-write contracts pin
+# it); this release and later go through ``_CONTRIBUTE_ROUTE`` instead.
 
 # Read side — the Kiln API computes the aggregate; we never see rows.
 _HOSTED_API_URL = "https://api.kiln3d.com"
 _INSIGHT_ROUTE = "/api/community/insight"
 _STATS_ROUTE = "/api/community/stats"
+# Write side — one anonymous contribution, checked and stored by the server.
+_CONTRIBUTE_ROUTE = "/api/community/contribute"
+_CONTRIBUTE_TIMEOUT = 10.0
 
 # Pull-side cache: community aggregates rarely change within an hour,
 # and network hops on every generation would be a silent performance
@@ -124,48 +125,87 @@ def network_sends_suppressed() -> bool:
         return any(os.environ.get(v) for v in ("CI", "PYTEST_CURRENT_TEST"))
 
 
-#: Fields the corpus may not have a column for yet.  A Kiln release can
-#: reach users before the cloud migration that gives their contributions
-#: somewhere to land, and PostgREST rejects the WHOLE insert over one
-#: unknown column — so these are the fields worth dropping to save the row
-#: around them.  Named as a set rather than checked one by one: the retry
-#: below used to hardcode ``geometric_signature_v2``, which meant the next
-#: optional field to ship would have needed its own copy of the same
-#: rescue, and would have been shipped without one.
-_OPTIONAL_WIRE_FIELDS = ("geometric_signature_v2", "print_error")
+#: What the server's answer means for a queued contribution.  A refusal
+#: (400/422) is about THIS row and spends one of its retries.  Everything
+#: else that is not a delivery is about the door, not the row: too many sends
+#: from here (429), the pool unavailable or our server not answering (5xx), a
+#: server that predates the route (404), or this machine being offline.  Those
+#: come back as :data:`kiln.community_outbox.DEFERRED`, and the queue keeps
+#: the row without spending a retry -- spending them on a shut door is how
+#: twelve weeks of contributions were deleted unsent in 2026.
+_REFUSED_STATUSES = frozenset({400, 409, 413, 422})
 
 
-def _fields_the_server_refused(
-    error_body: str, body: dict[str, Any]
-) -> list[str]:
-    """Which optional fields a rejection actually named.
+def send_contribution(kind: str, record: dict[str, Any], send_id: str | None = None):
+    """Hand one anonymous contribution to the Kiln API.
 
-    PostgREST says which column it could not find ("Column 'print_error'
-    of relation 'community_prints' does not exist"), so a server missing
-    ONE new column does not cost us the others.  When the message names
-    nothing we recognise, every optional field goes — losing the row
-    entirely is the worse trade, and that is the case this whole path
-    exists to avoid.
+    :param kind: ``"print"`` or ``"recovery"`` -- which pool it joins.
+    :param record: the anonymized fields, exactly as the pool stores them.
+    :param send_id: random per-contribution token; a replay with the same
+        token is stored once.  It names the contribution, never the sender.
+    :returns: ``True`` when the server took it, ``False`` when it refused
+        this record, or :data:`kiln.community_outbox.DEFERRED` (falsy) when
+        it should simply be sent again later.  Never raises.
+
+    No credential is attached, on purpose: a contribution is anonymous, and
+    the server never looks at who sent it.
     """
-    present = [f for f in _OPTIONAL_WIRE_FIELDS if f in body]
-    named = [f for f in present if f in (error_body or "")]
-    return named or present
+    from kiln.community_outbox import DEFERRED
+
+    if not community_sharing_enabled():
+        return False
+    if network_sends_suppressed():
+        _logger.debug("Community contribution refused — test/CI runner (wire guard)")
+        return False
+
+    import urllib.error
+    import urllib.request
+
+    envelope: dict[str, Any] = {"kind": kind, "record": record}
+    if send_id:
+        envelope["send_id"] = send_id
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    try:
+        from kiln.version_check import _current_version
+
+        headers["X-Kiln-Client-Version"] = _current_version()
+    except Exception:
+        pass
+    req = urllib.request.Request(
+        f"{_api_base()}{_CONTRIBUTE_ROUTE}",
+        data=json.dumps(envelope).encode(),
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=_CONTRIBUTE_TIMEOUT) as resp:
+            if resp.status < 300:
+                return True
+            return DEFERRED
+    except urllib.error.HTTPError as exc:
+        if exc.code in _REFUSED_STATUSES:
+            _logger.debug("Community contribution refused (%s)", exc.code)
+            return False
+        _logger.debug("Community contribution deferred (%s)", exc.code)
+        return DEFERRED
+    except Exception as exc:  # noqa: BLE001 — offline, DNS, timeout
+        _logger.debug("Community contribution deferred (non-fatal): %s", exc)
+        return DEFERRED
 
 
-def sync_community_print(record: dict[str, Any], send_id: str | None = None) -> bool:
-    """Send a single community print record to Supabase.
+def sync_community_print(record: dict[str, Any], send_id: str | None = None):
+    """Send a single community print record to the shared pool.
 
     :param record: Dict with keys matching the ``community_prints`` table
         (geometric_signature, printer_model, material, settings_hash,
         settings, outcome, quality_grade, failure_mode, print_time_seconds).
     :param send_id: Optional random, per-contribution idempotency token (set
-        by the durable outbox).  When present, the insert upserts on the
-        ``send_id`` unique index with ``resolution=ignore-duplicates`` so a
-        crash-replayed row is a server-side no-op instead of a duplicate row.
-        It is random per contribution (not a user/install identifier), so it
-        carries no cross-row linkability.  When absent (or before the
-        federation column ships), the call is a plain insert.
-    :returns: True if successfully sent, False otherwise.
+        by the durable outbox), so a crash-replayed row is stored once.  It
+        is random per contribution (not a user/install identifier), so it
+        carries no cross-row linkability.
+    :returns: ``True`` if the server took it; otherwise falsy -- ``False``
+        for a refusal, :data:`kiln.community_outbox.DEFERRED` for "send it
+        again later" (see :func:`send_contribution`).
     """
     if not community_opt_in_enabled():
         _logger.debug("Community sync skipped — opt-in not enabled")
@@ -174,92 +214,27 @@ def sync_community_print(record: dict[str, Any], send_id: str | None = None) -> 
         _logger.debug("Community sync refused — test/CI runner (wire guard)")
         return False
 
-    try:
-        import urllib.error
-        import urllib.request
-
-        insert_url = f"{_SUPABASE_URL}/rest/v1/community_prints"
-        body: dict[str, Any] = {
-            "geometric_signature": record.get("geometric_signature", ""),
-            "printer_model": record.get("printer_model", ""),
-            "material": record.get("material", ""),
-            "settings_hash": record.get("settings_hash", ""),
-            "settings": record.get("settings"),
-            "outcome": record.get("outcome", ""),
-            "quality_grade": record.get("quality_grade"),
-            "failure_mode": record.get("failure_mode"),
-            "print_time_seconds": record.get("print_time_seconds"),
-        }
-        # Shipped only when present — like send_id, these fields may only
-        # reach the wire once the cloud column exists (PostgREST rejects the
-        # whole insert on an unknown column, which would lose the outcome).
-        # The retry below is what makes that survivable either way.
-        if record.get("geometric_signature_v2"):
-            body["geometric_signature_v2"] = record["geometric_signature_v2"]
-        # The raw firmware code the print tripped.  Evidence, not a verdict:
-        # ``failure_mode`` above says what Kiln concluded, this says what the
-        # machine actually reported, and only the second one can be compared
-        # across models and firmware by anybody counting them later.
-        if record.get("print_error"):
-            body["print_error"] = record["print_error"]
-        prefer = "return=minimal"
-        if send_id:
-            body["send_id"] = send_id
-            insert_url = f"{insert_url}?on_conflict=send_id"
-            prefer = "return=minimal,resolution=ignore-duplicates"
-        # Headers built HERE so the key stays referenced only by this
-        # function (pinned by test_publishable_key_is_contribution_only).
-        headers = {
-            "Content-Type": "application/json",
-            "apikey": _SUPABASE_ANON_KEY,
-            "Authorization": f"Bearer {_SUPABASE_ANON_KEY}",
-            "Prefer": prefer,
-        }
-
-        def _post(body_dict: dict[str, Any]) -> int:
-            req = urllib.request.Request(
-                insert_url,
-                data=json.dumps(body_dict).encode(),
-                headers=headers,
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                return resp.status
-
-        try:
-            status = _post(body)
-        except urllib.error.HTTPError as exc:
-            # A schema-lagged server rejects the WHOLE insert over one
-            # unknown field (400), and a column-scoped grant would refuse it
-            # (403).  Losing the outcome over an optional column is the wrong
-            # trade either way: drop what the server could not take and send
-            # the row it does understand.  A rejection with a real cause
-            # fails again below.
-            try:
-                detail = exc.read().decode("utf-8", "replace")
-            except Exception:  # noqa: BLE001 — body already consumed/closed
-                detail = ""
-            refused = (
-                _fields_the_server_refused(detail, body)
-                if exc.code in (400, 403)
-                else []
-            )
-            if refused:
-                for field in refused:
-                    body.pop(field, None)
-                status = _post(body)
-            else:
-                raise
-
-        if status < 300:
-            _logger.debug("Community print synced")
-            return True
-        _logger.debug("Community sync response: %s", status)
-        return False
-
-    except Exception as exc:
-        _logger.debug("Community sync failed (non-fatal): %s", exc)
-        return False
+    body: dict[str, Any] = {
+        "geometric_signature": record.get("geometric_signature", ""),
+        "printer_model": record.get("printer_model", ""),
+        "material": record.get("material", ""),
+        "settings_hash": record.get("settings_hash", ""),
+        "settings": record.get("settings"),
+        "outcome": record.get("outcome", ""),
+        "quality_grade": record.get("quality_grade"),
+        "failure_mode": record.get("failure_mode"),
+        "print_time_seconds": record.get("print_time_seconds"),
+    }
+    # Shipped only when present: the v2 signature and the raw firmware code
+    # the print tripped.  The second is evidence, not a verdict --
+    # ``failure_mode`` says what Kiln concluded, ``print_error`` what the
+    # machine actually reported, and only that one can be compared across
+    # models and firmware by anybody counting them later.
+    if record.get("geometric_signature_v2"):
+        body["geometric_signature_v2"] = record["geometric_signature_v2"]
+    if record.get("print_error"):
+        body["print_error"] = record["print_error"]
+    return send_contribution("print", body, send_id)
 
 
 def sync_community_print_async(record: dict[str, Any]) -> None:

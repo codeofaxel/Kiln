@@ -194,6 +194,43 @@ def test_stuck_after_max_attempts(ob):
     assert s["stuck"] == 1  # capped — not retried forever, surfaced to maintainers
 
 
+def test_a_deferred_send_spends_no_retry_and_stops_the_drain(ob):
+    """A shut or busy door is not the row's fault (2026-07-28: twelve weeks of
+    contributions spent their retries on a refusing server and were deleted)."""
+    for key in ("k1", "k2", "k3"):
+        ob.enqueue(key, _rec())
+    with mock.patch(
+        "kiln.community_sync.sync_community_print", return_value=ob.DEFERRED
+    ) as send:
+        for _ in range(ob._MAX_ATTEMPTS + 2):
+            result = ob.drain()
+    assert send.call_count == ob._MAX_ATTEMPTS + 2, "one call per drain, then it stops"
+    assert result == {"sent": 0, "failed": 0, "remaining": 3, "purged": 0}
+    assert ob.status() == {"pending": 3, "sent": 0, "stuck": 0, "total": 3}
+    # The door opens: every row lands, none was lost waiting.
+    with mock.patch("kiln.community_sync.sync_community_print", return_value=True):
+        ob.drain()
+    assert ob.status() == {"pending": 0, "sent": 3, "stuck": 0, "total": 3}
+
+
+def test_rows_sent_before_a_deferral_stay_sent(ob):
+    for key in ("k1", "k2"):
+        ob.enqueue(key, _rec())
+    answers = iter([True, ob.DEFERRED])
+    with mock.patch(
+        "kiln.community_sync.sync_community_print", side_effect=lambda *a, **k: next(answers)
+    ):
+        result = ob.drain()
+    assert result["sent"] == 1 and result["failed"] == 0
+    assert ob.status() == {"pending": 1, "sent": 1, "stuck": 0, "total": 2}
+
+
+def test_deferred_reads_as_not_sent():
+    from kiln.community_outbox import DEFERRED
+
+    assert not DEFERRED
+
+
 def test_contribute_respects_opt_out(ob):
     with mock.patch("kiln.community_sync.community_opt_in_enabled", return_value=False):
         result = ob.contribute("k1", _rec())
