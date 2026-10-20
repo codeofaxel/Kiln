@@ -595,3 +595,48 @@ def test_the_relay_observe_frame_is_answered_off_to_the_side_never_as_a_tool(mon
     assert observed == [("https://api.kiln3d.com", "bearer-x", "nonce-1")]
     assert ran == ["printer_status"]
     assert len(sent) == 1  # the tool's reply; the observation sends nothing down the socket
+
+
+class TestALapsedSignInStillNamesItsAccount:
+    """2026-10-20: a bridge whose session the server had refused dialled in
+    with an EMPTY bearer for 39 hours.  An empty bearer names nobody, so the
+    relay could record no reason and every door said "Kiln Bridge is
+    offline" while the program ran fine.  The handshake now carries the
+    lapsed session's token, so the relay can say whose sign-in lapsed."""
+
+    def _client(self, monkeypatch, tmp_path, tokens):
+        import json
+
+        import kiln.bridge_client as bc
+
+        monkeypatch.delenv("KILN_LICENSE_KEY", raising=False)
+        monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
+        monkeypatch.setenv("HOME", str(tmp_path))  # no config.yaml licence either
+        if tokens is not None:
+            (tmp_path / ".kiln").mkdir()
+            (tmp_path / ".kiln" / "auth_tokens.json").write_text(json.dumps(tokens))
+        client = bc.BridgeClient.__new__(bc.BridgeClient)
+        client._pinned_license = None
+        return client
+
+    def test_a_refused_session_is_still_presented_to_the_relay(self, monkeypatch, tmp_path):
+        client = self._client(
+            monkeypatch,
+            tmp_path,
+            {
+                "access_token": "head.claims.sig",
+                "refresh_token": "",
+                "refresh_rejected_at": "2026-10-19T01:00:00Z",
+                "email": "someone@example.com",
+            },
+        )
+        assert client._auth_headers()["Authorization"] == "Bearer head.claims.sig"
+
+    def test_a_machine_never_signed_in_presents_nothing(self, monkeypatch, tmp_path):
+        client = self._client(monkeypatch, tmp_path, None)
+        assert client._auth_headers()["Authorization"] == "Bearer "
+
+    def test_a_pinned_license_is_presented_as_given(self, monkeypatch, tmp_path):
+        client = self._client(monkeypatch, tmp_path, None)
+        client._pinned_license = "lic-123"
+        assert client._auth_headers()["Authorization"] == "Bearer lic-123"

@@ -453,8 +453,23 @@ class BridgeClient:
         return self._pinned_license or _read_license()
 
     def _auth_headers(self) -> dict[str, str]:
+        """The relay handshake's headers.
+
+        With no live credential the handshake still carries the lapsed
+        session's token (:func:`kiln.auth_session.lapsed_session_token`), so
+        the relay can record whose sign-in lapsed and say so at every door
+        instead of "offline".  The relay refuses it either way.
+        """
+        bearer = self._bearer()
+        if not bearer and not self._pinned_license:
+            try:
+                from kiln.auth_session import lapsed_session_token
+
+                bearer = lapsed_session_token()
+            except Exception:  # never let auth resolution break the bridge
+                logger.debug("lapsed session token unreadable", exc_info=True)
         return {
-            "Authorization": f"Bearer {self._bearer()}",
+            "Authorization": f"Bearer {bearer}",
             "X-Kiln-Device-Fingerprint": _device_fingerprint(),
             "X-Kiln-Client-Version": _running_version(),
         }
