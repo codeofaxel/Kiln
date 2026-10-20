@@ -1379,7 +1379,7 @@ class HistoryVault:
             if isinstance(n, int)
         ]
         recipe = _library_recipe(head, design_id)
-        recipe["version"] = max([*numbers, int(recipe.get("version") or 0)] or [1])
+        recipe["version"] = max([*numbers, int(recipe.get("version") or 0)])
         mesh = self.mesh_path(head.get("mesh_sha256"))
         if mesh is not None:
             local = folder / f"mesh-{head['mesh_sha256'][:16]}{mesh.suffix}"

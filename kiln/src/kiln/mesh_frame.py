@@ -460,7 +460,7 @@ class BesideTheFileResolver(trimesh.resolvers.FilePathResolver):
             f"the model names {str(name)[:120]!r}, which is not beside it"
         )
 
-    def namespaced(self, namespace: str) -> "BesideTheFileResolver":
+    def namespaced(self, namespace: str) -> BesideTheFileResolver:
         """A resolver for a subfolder of this one -- confined in its turn,
         so the guard does not end one level down."""
         inner = self._confined(str(namespace)) if str(namespace).strip() else None

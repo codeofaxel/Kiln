@@ -354,7 +354,7 @@ RGB = tuple[int, int, int]
 
 
 def _rgb_distance(a: RGB, b: RGB) -> float:
-    return math.sqrt(sum((x - y) ** 2 for x, y in zip(a, b)))
+    return math.sqrt(sum((x - y) ** 2 for x, y in zip(a, b, strict=True)))
 
 
 def _nearest_centre(centres: list[RGB], rgb: RGB) -> int:
@@ -633,7 +633,7 @@ def _alpha_verdict(image_path: str) -> str | None:
     sparse mark is a weaker witness than that.
     """
     try:
-        from PIL import Image
+        from PIL import Image  # noqa: F401 -- only asks whether Pillow is installed
     except ImportError:
         return None
     try:

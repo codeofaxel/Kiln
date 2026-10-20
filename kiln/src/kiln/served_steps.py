@@ -249,9 +249,7 @@ def klipper_config_fact(config: Any) -> dict[str, Any] | None:
         kept: dict[str, Any] = {}
         for key in keys:
             value = body.get(key)
-            if isinstance(value, bool) or (isinstance(value, (int, float)) and value == value):
-                kept[key] = value
-            elif isinstance(value, str) and len(value) <= _CONFIG_VALUE_LIMIT:
+            if isinstance(value, bool) or (isinstance(value, (int, float)) and value == value) or isinstance(value, str) and len(value) <= _CONFIG_VALUE_LIMIT:
                 kept[key] = value
         out[section] = kept
     return out
@@ -497,7 +495,6 @@ def _spools_fact(server: Any, name: str, question: tuple[list[str], str | None])
     whether each is loaded there, owned, or neither, on that same reading."""
     from kiln.colour_availability import colour_availability
     from kiln.multi_material import ReadOnce, multi_material_status
-
     from kiln.printers.base import PrinterEngagementError
 
     adapter = server._resolve_adapter(name)
