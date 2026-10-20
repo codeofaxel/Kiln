@@ -4469,14 +4469,46 @@ def _analysis_runner() -> Callable[..., Any] | None:
 
 
 @dataclass
+class RegionSummary:
+    """One downward region of the part, as a person would point at it.
+
+    Where it is, how big, how steep, how high, how far it spans, whether
+    the verdict says it needs supports, and whether a support under it
+    would have to stand on the model (``over_model``) rather than the
+    plate -- the fact that decides whether plate-only supports reach it
+    at all.
+    """
+
+    centroid: tuple[float, float, float]
+    area_mm2: float
+    max_angle_deg: float
+    height_above_bed_mm: float
+    span_mm: float
+    free_air_span_mm: float
+    needs_supports: bool
+    over_model: bool
+    triangle_count: int
+
+    def to_dict(self) -> dict[str, Any]:
+        d = asdict(self)
+        d["centroid"] = [round(v, 2) for v in self.centroid]
+        for key in ("area_mm2", "max_angle_deg", "height_above_bed_mm", "span_mm", "free_air_span_mm"):
+            value = d[key]
+            d[key] = None if value == math.inf else round(value, 2)
+        return d
+
+
+@dataclass
 class SupportJudgement:
     """Everything the support verdict is read from, for one part.
 
     The overhangs (after the bridge and self-supporting exemptions), the
-    bridges, the support volume, and the angle they were judged against.
+    bridges, the support volume, the angle they were judged against, and
+    each downward region as a person would point at it (:class:`RegionSummary`).
     :func:`analyze_printability` builds its report on one of these;
     :func:`judge_supports` returns one on its own, for a door that needs
-    the verdict and nothing else (the slice).
+    the verdict and nothing else (the slice), or the regions (a support
+    plan).
     """
 
     overhangs: OverhangAnalysis
@@ -4487,11 +4519,120 @@ class SupportJudgement:
     #: The nozzle the part was judged for, where it came from.
     nozzle: dict[str, Any] = field(default_factory=dict)
     triangle_count: int = 0
+    #: Every downward region, needing supports or not, largest first.
+    regions: list[RegionSummary] = field(default_factory=list)
     # The report's own bookkeeping, for its score and recommendations.
     downward_regions: list[_DownwardRegion] = field(default_factory=list)
     overhang_scoring_pct: float | None = None
     self_supporting_overhang_count: int = 0
     bridge_substituted_overhang_pct: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "overhangs": self.overhangs.to_dict(),
+            "bridging": self.bridging.to_dict(),
+            "supports": self.supports.to_dict(),
+            "overhang_threshold_deg": self.overhang_threshold_deg,
+            "nozzle": dict(self.nozzle),
+            "triangle_count": self.triangle_count,
+            "regions": [region.to_dict() for region in self.regions],
+        }
+
+
+#: Samples per region for the stands-on question: enough to cover an arm
+#: that leaves the model halfway along, few enough to stay cheap.
+_REGION_SAMPLE_CAP: int = 48
+
+
+def _summarize_regions(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    regions: list[_DownwardRegion],
+    z_min: float,
+    *,
+    layer_height: float = 0.2,
+) -> list[RegionSummary]:
+    """Each downward region as a person would point at it, largest first.
+
+    ``over_model`` is read with rays straight down from points across the
+    region: a face of the part below one of them, outside the region and
+    more than a layer away, means a support there stands on the model --
+    which plate-only supports never do (measured 2026-10-19: plate-only
+    supports placed nothing under a 40 mm cap on a post over a 60 mm
+    base).  A face touching the region from below (the post an arm sits
+    on) is the part holding itself and asks for nothing.
+    """
+    if not regions or not triangles:
+        return []
+    tris = np.asarray(triangles, dtype=np.float64)  # (T, 3, 3)
+    edge1 = tris[:, 1] - tris[:, 0]
+    edge2 = tris[:, 2] - tris[:, 0]
+    normals = np.cross(edge1, edge2)
+    areas = 0.5 * np.linalg.norm(normals, axis=1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        unit_nz = np.where(areas > 0, normals[:, 2] / (2.0 * areas), 0.0)
+    centroids = tris.mean(axis=1)
+
+    out: list[RegionSummary] = []
+    for region in regions:
+        idx = np.asarray(region.triangle_indices, dtype=np.int64)
+        if idx.size == 0:
+            continue
+        weights = areas[idx]
+        total = float(weights.sum())
+        if total <= 0:
+            continue
+        centre = (centroids[idx] * weights[:, None]).sum(axis=0) / total
+        angles = np.degrees(np.arccos(np.clip(-unit_nz[idx], -1.0, 1.0)))
+        max_angle = float(np.max(np.maximum(0.0, 90.0 - angles)))
+        height = max(0.0, float(centroids[idx][:, 2].min()) - z_min)
+        stride = max(1, idx.size // _REGION_SAMPLE_CAP)
+        samples = centroids[idx[::stride]]
+        over_model = any(
+            (gap := _gap_to_model_below(tris, point, exclude=idx)) is not None and gap > layer_height
+            for point in samples
+        )
+        out.append(RegionSummary(
+            centroid=(float(centre[0]), float(centre[1]), float(centre[2])),
+            area_mm2=total,
+            max_angle_deg=max_angle,
+            height_above_bed_mm=height,
+            span_mm=float(region.span_mm),
+            free_air_span_mm=float(region.free_air_span_mm),
+            needs_supports=bool(region.needs_supports),
+            over_model=over_model,
+            triangle_count=int(idx.size),
+        ))
+    out.sort(key=lambda r: r.area_mm2, reverse=True)
+    return out
+
+
+def _gap_to_model_below(tris: np.ndarray, point: np.ndarray, *, exclude: np.ndarray) -> float | None:
+    """The drop from *point* to the nearest face of the part straight below
+    it (an XY point-in-triangle test, then the face's height at that XY),
+    ignoring the faces in *exclude*; ``None`` when only the plate is below."""
+    px, py, pz = float(point[0]), float(point[1]), float(point[2])
+    mask = np.ones(len(tris), dtype=bool)
+    mask[exclude] = False
+    sub = tris[mask]
+    if sub.size == 0:
+        return None
+    ax, ay = sub[:, 0, 0], sub[:, 0, 1]
+    bx, by = sub[:, 1, 0], sub[:, 1, 1]
+    cx, cy = sub[:, 2, 0], sub[:, 2, 1]
+    det = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        u = ((px - ax) * (cy - ay) - (cx - ax) * (py - ay)) / det
+        v = ((bx - ax) * (py - ay) - (px - ax) * (by - ay)) / det
+    inside = (np.abs(det) > 1e-12) & (u >= -1e-9) & (v >= -1e-9) & (u + v <= 1.0 + 1e-9)
+    if not inside.any():
+        return None
+    hit = sub[inside]
+    u_h, v_h = u[inside], v[inside]
+    z_at = hit[:, 0, 2] + u_h * (hit[:, 1, 2] - hit[:, 0, 2]) + v_h * (hit[:, 2, 2] - hit[:, 0, 2])
+    below = z_at[z_at <= pz + 1e-6]
+    if below.size == 0:
+        return None
+    return float(pz - below.max())
 
 
 def _judge_supports(
@@ -4665,6 +4806,7 @@ def _judge_supports(
         supports=supports,
         overhang_threshold_deg=resolved_threshold,
         triangle_count=len(triangles),
+        regions=_summarize_regions(triangles, downward_regions, z_min, layer_height=layer_height),
         downward_regions=downward_regions,
         overhang_scoring_pct=_overhang_scoring_pct,
         self_supporting_overhang_count=_self_supporting_overhang_count,

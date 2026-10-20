@@ -250,3 +250,32 @@ def test_the_assessment_keeps_no_angle_or_bridge_number_of_its_own(tmp_path: Pat
     # The same angle the report judged this material against.
     assert result.overhang_percentage > 0
     assert overhang_threshold_deg("pla") == overhang_threshold_deg("PLA")
+
+
+def test_the_judgement_says_where_each_region_is_and_what_it_stands_on(tmp_path: Path) -> None:
+    """A support plan needs more than the verdict: where each downward
+    region is, how big, and whether a support under it would stand on the
+    model -- which plate-only supports never reach (measured 2026-10-19 on
+    a cap over its own base: zero support lines)."""
+    from kiln.printability import judge_supports
+
+    cap = _write_stl(tmp_path / "cap.stl", CASES[4][1])
+    judged = judge_supports(cap, material="pla")
+    needing = [r for r in judged.regions if r.needs_supports]
+    assert needing, judged.to_dict()["regions"]
+    underside = max(needing, key=lambda r: r.area_mm2)
+    assert underside.over_model is True
+    assert 33.5 <= underside.centroid[2] <= 34.5
+    assert underside.max_angle_deg == 90.0
+    assert underside.height_above_bed_mm > 30
+
+    tee = _write_stl(tmp_path / "t.stl", CASES[1][1])
+    arms = [r for r in judge_supports(tee, material="pla").regions if r.needs_supports]
+    assert arms and all(r.over_model is False for r in arms), [r.to_dict() for r in arms]
+
+    box = _write_stl(tmp_path / "box.stl", CASES[0][1])
+    assert judge_supports(box, material="pla").regions == []
+
+    d = judged.to_dict()
+    assert d["regions"][0]["needs_supports"] in (True, False)
+    assert set(d) == {"overhangs", "bridging", "supports", "overhang_threshold_deg", "nozzle", "triangle_count", "regions"}
