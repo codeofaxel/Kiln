@@ -613,9 +613,11 @@ def parse_slicer_features(
     would drift from this one.  A callback that raises stops the pass
     with its own exception; the stage's own readers pass none.
 
-    Raises ``FileNotFoundError`` for a missing file and ``ValueError`` when a
-    line exceeds :data:`MAX_GCODE_LINE_CHARS`. Other malformed lines are
-    skipped, not fatal.
+    Raises ``FileNotFoundError`` for a missing file and ``ValueError`` when an
+    executable line or feature-label comment exceeds
+    :data:`MAX_GCODE_LINE_CHARS`. Oversized non-feature comments are skipped:
+    slicer metadata (including thumbnails) is not needed to read the motion
+    that follows. Other malformed lines are skipped too.
     """
     path = Path(gcode_path)
     if not path.is_file():
@@ -697,6 +699,15 @@ def parse_slicer_features(
     with path.open(encoding="utf-8", errors="replace") as fh:
         for raw in fh:
             if len(raw) > MAX_GCODE_LINE_CHARS:
+                # Slicer metadata can include long thumbnail/configuration
+                # comments. They do not affect motion parsing, and skipping
+                # one preserves the rest of the file. Feature labels must
+                # stay bounded: accepting a pathological label makes the
+                # same file needlessly expensive at every fleet plate door.
+                prefix = raw[:128].lstrip().lower()
+                is_feature_label = prefix.startswith((";type", ";feature"))
+                if prefix.startswith(";") and not is_feature_label:
+                    continue
                 raise ValueError(
                     f"G-code line exceeds the {MAX_GCODE_LINE_CHARS}-character limit"
                 )

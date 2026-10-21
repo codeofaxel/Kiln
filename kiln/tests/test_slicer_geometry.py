@@ -157,21 +157,42 @@ class TestClassification:
 
 
 class TestParsing:
-    def test_overlong_line_is_refused_before_feature_parsing(self, tmp_path):
-        """A hostile comment line is refused before regex parsing."""
+    def test_overlong_metadata_comment_is_skipped_and_motion_is_still_read(self, tmp_path):
+        """Long non-feature metadata is skipped before regex parsing."""
         import time
 
         g = tmp_path / "long-label.gcode"
         g.write_text(
-            "G90\nM83\n;TYPE:x" + " " * 100_000 + "y\n"
+            "G90\nM83\n;thumbnail 200x200 " + "x" * 100_000 + "\n"
             "G1 X0 Y0 Z0.2\nG1 X10 Y10 E1\n"
         )
+        started = time.monotonic()
+        parsed = sg.parse_slicer_features(g)
+        elapsed = time.monotonic() - started
+
+        assert elapsed < 2.0, f"100 KB feature label took {elapsed:.2f}s"
+        assert parsed.model_footprint == (0.0, 0.0, 10.0, 10.0)
+
+    def test_overlong_feature_label_is_refused_before_feature_parsing(self, tmp_path):
+        """A pathological feature label is refused before regex parsing."""
+        import time
+
+        g = tmp_path / "long-label.gcode"
+        g.write_text("G90\nM83\n;TYPE:x" + " " * 100_000 + "y\nG1 X10 Y10 E1\n")
         started = time.monotonic()
         with pytest.raises(ValueError, match="line exceeds"):
             sg.parse_slicer_features(g)
         elapsed = time.monotonic() - started
 
         assert elapsed < 2.0, f"100 KB feature label took {elapsed:.2f}s"
+
+    def test_overlong_command_is_refused(self, tmp_path):
+        """An oversized motion command cannot be skipped without losing moves."""
+        g = tmp_path / "long-command.gcode"
+        g.write_text("G90\nG1 X10 Y10 E1" + " " * 100_000 + "\n")
+
+        with pytest.raises(ValueError, match="line exceeds"):
+            sg.parse_slicer_features(g)
 
     def test_reads_orca_labels_skirt_and_tower(self, tmp_path):
         g = tmp_path / "job.gcode"
