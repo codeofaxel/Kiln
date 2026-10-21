@@ -712,7 +712,10 @@ class TestAlphaEdgeCases:
         arr = np.zeros((64, 64), dtype=np.uint16)
         arr[16:48, 16:48] = 65535
         p = tmp_path / "gray16.png"
-        Image.fromarray(arr, mode="I;16").save(p, transparency=0)
+        # A uint16 array is "I;16" on its own; Pillow 13 refuses mode= for it.
+        img = Image.fromarray(arr)
+        assert img.mode == "I;16"
+        img.save(p, transparency=0)
         assert "transparency" in Image.open(p).info
 
         assert _alpha_verdict(str(p)) == "ink"

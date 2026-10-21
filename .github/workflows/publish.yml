@@ -32,8 +32,10 @@ jobs:
       - name: Install octoprint-cli with dev deps
         run: pip install -e "./octoprint-cli[dev]"
 
+      # Parallel and quiet, as ci.yml runs it: one at a time, with a line per
+      # test, the 1.5.0 suite took two hours here against CI's 25 minutes.
       - name: Run kiln tests
-        run: cd kiln && python -m pytest tests/ -v
+        run: cd kiln && python -m pytest tests/ -q -n auto
 
       - name: Run octoprint-cli tests
         run: cd octoprint-cli && python -m pytest tests/ -v
