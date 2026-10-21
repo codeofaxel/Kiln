@@ -210,8 +210,14 @@ _CLASS_KEYWORDS: tuple[tuple[str, str], ...] = (
 #: G-code, not a slicer feature) and firmware-driven moves.
 _IGNORED_KEYWORDS: tuple[str, ...] = ("custom",)
 
-_TYPE_RE = re.compile(r"^\s*;\s*(?:TYPE|FEATURE)\s*:\s*(.+?)\s*$", re.IGNORECASE)
-_S3D_FEATURE_RE = re.compile(r"^\s*;\s*feature\s+(.+?)\s*$", re.IGNORECASE)
+# This capture is greedy because the caller strips the label after matching.
+# A lazy capture followed by ``\s*$`` retries the end anchor at every
+# character when a hostile line has a long run of internal whitespace.
+_TYPE_RE = re.compile(r"^\s*;\s*(?:TYPE|FEATURE)\s*:\s*(.+)\s*$", re.IGNORECASE)
+_S3D_FEATURE_RE = re.compile(r"^\s*;\s*feature\s+(.+)\s*$", re.IGNORECASE)
+# Bound the work one malformed comment or command can make a streaming parser
+# do. Ordinary G-code commands and feature labels are far shorter than this.
+MAX_GCODE_LINE_CHARS = 64 * 1024
 #: One boundary per layer: ``;LAYER_CHANGE`` (PrusaSlicer, SuperSlicer,
 #: OrcaSlicer), ``; CHANGE_LAYER`` (Bambu Studio), ``;LAYER:n`` (Cura),
 #: ``; layer n,`` (Simplify3D).  PrusaSlicer's ``;BEFORE_LAYER_CHANGE`` /
@@ -607,8 +613,9 @@ def parse_slicer_features(
     would drift from this one.  A callback that raises stops the pass
     with its own exception; the stage's own readers pass none.
 
-    Raises ``FileNotFoundError`` for a missing file; never raises on
-    content — a malformed line is skipped, not fatal.
+    Raises ``FileNotFoundError`` for a missing file and ``ValueError`` when a
+    line exceeds :data:`MAX_GCODE_LINE_CHARS`. Other malformed lines are
+    skipped, not fatal.
     """
     path = Path(gcode_path)
     if not path.is_file():
@@ -689,6 +696,10 @@ def parse_slicer_features(
 
     with path.open(encoding="utf-8", errors="replace") as fh:
         for raw in fh:
+            if len(raw) > MAX_GCODE_LINE_CHARS:
+                raise ValueError(
+                    f"G-code line exceeds the {MAX_GCODE_LINE_CHARS}-character limit"
+                )
             line = raw.strip()
             if not line:
                 continue
