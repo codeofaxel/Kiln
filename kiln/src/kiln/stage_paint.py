@@ -97,6 +97,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import threading
 import time
 from pathlib import Path
 from typing import NamedTuple
@@ -1045,6 +1046,31 @@ _PAIR_SLICE = 400_000
 #: the same "no" the pre-pass reaches before the first pixel.
 _PAIR_CAP = 120_000_000
 
+#: One view rasterizes at a time per process.  Slicing bounds the pairs,
+#: not the frame: a view's per-pixel state at the supersampled size is
+#: still ~550 MB at peak (measured 2026-10-22, 800x600, 49k triangles).
+#: A preview bundle paints three or four views on parallel threads, and
+#: a server paints for every caller at once, so without this two
+#: requests' previews sum past a 2 GB host and the kernel kills the
+#: whole server.  Queued views wait; a caller whose deadline passes
+#: while waiting gets the views already painted, as for any deadline.
+_PAINT_SLOT = threading.BoundedSemaphore(1)
+
+
+def _take_paint_slot(deadline: float | None, last_view_s: float) -> bool:
+    """Hold the paint slot for one view, or ``False`` when the deadline
+    passes first or leaves less time than the last view took."""
+    if deadline is None:
+        _PAINT_SLOT.acquire()
+        return True
+    if not _PAINT_SLOT.acquire(timeout=max(0.0, deadline - time.monotonic())):
+        return False
+    remaining = deadline - time.monotonic()
+    if remaining <= 0 or remaining < last_view_s:
+        _PAINT_SLOT.release()
+        return False
+    return True
+
 
 class _ViewCost(NamedTuple):
     """What one view costs, and the box arithmetic that priced it.
@@ -1586,16 +1612,27 @@ def try_paint_stage_views(
             canvas_h = full_h - strip
             if canvas_h < 32:  # degenerate request: skip the letterbox
                 canvas_h = full_h
+            waited = time.monotonic()
+            if not _take_paint_slot(deadline, last_view_s):
+                logger.debug(
+                    "stage paint: another paint held the slot past the call deadline "
+                    "— stopping after %d/%d angle(s)", len(views), len(selected),
+                )
+                break
+            waited = time.monotonic() - waited
             # The browser draws this canvas at the user's supersample
             # (width * ss across), so that is the frame its bloom sees.
-            img = _paint_view(
-                v, f, az, el,
-                width=width * ss_int, height=canvas_h,
-                albedo_lin=albedo_lin, floor_y=floor_y,
-                footprint=footprint, fit_radius=radius, fit_size=fit_size,
-                plate_tex_np=plate_tex_np, corner_normals=corner_normals,
-                vertex_albedo=vertex_albedo, device_scale=ss / ss_int,
-            )
+            try:
+                img = _paint_view(
+                    v, f, az, el,
+                    width=width * ss_int, height=canvas_h,
+                    albedo_lin=albedo_lin, floor_y=floor_y,
+                    footprint=footprint, fit_radius=radius, fit_size=fit_size,
+                    plate_tex_np=plate_tex_np, corner_normals=corner_normals,
+                    vertex_albedo=vertex_albedo, device_scale=ss / ss_int,
+                )
+            finally:
+                _PAINT_SLOT.release()
             if img is None:  # raster budget said no — all or nothing
                 return None
             if canvas_h != full_h:
@@ -1609,7 +1646,8 @@ def try_paint_stage_views(
             if ss_int > 1:
                 downscale_png(out, width, height)
             views.append({"angle": label, "description": description, "path": out})
-            last_view_s = time.monotonic() - started
+            # Time spent queued for the slot is another paint's, not this view's.
+            last_view_s = time.monotonic() - started - waited
         if deadline is not None and not views:
             return None
         return views

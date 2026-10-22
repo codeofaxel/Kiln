@@ -1163,3 +1163,72 @@ def test_bloom_is_threes_own_pass() -> None:
         assert np.abs(np.array(got) - np.array(want)).max() <= 1, (
             f"{sw}x{sh} at {value}: {got} against three's {list(want)}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Memory: one view rasterizes at a time per process
+# ---------------------------------------------------------------------------
+
+
+def test_concurrent_paints_never_rasterize_two_views_at_once(
+    probe: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A view's raster peaks near 0.8 GB, and a server paints for several
+    callers (and several angles) on parallel threads.  Two at once ran a
+    2 GB host out of memory and the kernel killed the server (2026-10-22),
+    so however many threads ask, the raster runs one at a time."""
+    import threading
+    import time as _time
+
+    real = stage_paint._paint_view
+    lock = threading.Lock()
+    inside = [0]
+    most = [0]
+
+    def watched(*args, **kwargs):
+        if kwargs.get("cost_only"):
+            return real(*args, **kwargs)
+        with lock:
+            inside[0] += 1
+            most[0] = max(most[0], inside[0])
+        try:
+            _time.sleep(0.05)  # widen the window two unserialized paints would share
+            return real(*args, **kwargs)
+        finally:
+            with lock:
+                inside[0] -= 1
+
+    monkeypatch.setattr(stage_paint, "_paint_view", watched)
+    results: list = []
+
+    def paint(i: int) -> None:
+        results.append(try_paint_stage_views(
+            probe, _SEL, _ISO, output_dir=str(tmp_path / f"o{i}"), width=200, height=150,
+        ))
+
+    threads = [threading.Thread(target=paint, args=(i,)) for i in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert all(r and r[0]["path"] for r in results)
+    assert most[0] == 1
+
+
+def test_a_deadline_that_passes_while_queued_stops_cleanly(
+    probe: str, tmp_path: Path
+) -> None:
+    """Waiting behind another caller's paint spends this caller's own time:
+    past its deadline it gets what was painted (here nothing, so the next
+    backend), never a wait past the window it was given."""
+    import time as _time
+
+    stage_paint._PAINT_SLOT.acquire()
+    try:
+        started = _time.monotonic()
+        views = _render(probe, tmp_path, deadline=started + 0.2)
+        waited = _time.monotonic() - started
+    finally:
+        stage_paint._PAINT_SLOT.release()
+    assert views is None
+    assert waited < 2.0
