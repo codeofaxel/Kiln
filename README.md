@@ -10,6 +10,7 @@
   <a href="https://github.com/codeofaxel/Kiln/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="License"></a>
   <a href="https://github.com/codeofaxel/Kiln/blob/main/policies/SIGNING.md"><img src="https://img.shields.io/badge/verified%20by-sigstore%20%2B%20SLSA-0f6fdc?logo=sigstore&logoColor=white" alt="Verified by Sigstore + SLSA"></a>
   <a href="https://glama.ai/mcp/servers/codeofaxel/kiln"><img src="https://glama.ai/mcp/servers/codeofaxel/kiln/badge?v=2" alt="Kiln MCP server" width="120"></a>
+  <a href="https://mcptoplist.com/server/io.github.codeofaxel%2Fkiln"><img src="https://mcptoplist.com/badge/io.github.codeofaxel%2Fkiln.svg" alt="MCP Toplist"></a>
 </p>
 
 ---
