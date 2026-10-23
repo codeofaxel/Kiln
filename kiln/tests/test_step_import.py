@@ -3532,6 +3532,9 @@ def test_the_cache_does_not_serve_one_backends_mesh_for_another(tmp_path, monkey
     # converters live at once, and that fixture now silences FreeCAD so the
     # backend it names is the backend that runs.
     monkeypatch.setattr("kiln.step_import._ocp_available", _REAL_OCP_AVAILABLE)
+    # gmsh ranks between the two; on a machine that has it, it would answer
+    # the second call instead of the kernel.
+    monkeypatch.setattr("kiln.step_import._find_gmsh_cmd", lambda: None)
     if step_import._find_freecad_cmd() is None:
         pytest.skip("needs a real FreeCAD to compare against the kernel")
     if not _REAL_OCP_AVAILABLE():

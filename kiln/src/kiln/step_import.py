@@ -2797,6 +2797,9 @@ def _holds_no_triangles(path: str) -> bool:
             head = fh.read(84)
     except OSError:
         return False
+    if size == 0:
+        # What kernel 8.0 writes for a shape with no faces (7.9 writes nothing).
+        return True
     if len(head) == 84 and size == 84 + 50 * int.from_bytes(head[80:84], "little"):
         return size == 84
     if head.lstrip().startswith(b"solid"):
