@@ -2873,6 +2873,35 @@ def _convert_step_colour_aware(
 # ---------------------------------------------------------------------------
 
 
+def _without_comments(text: str) -> str:
+    """STEP text with its ``/* ... */`` comments removed and strings left whole.
+
+    A comment can hold a quote or a comma and a string can hold ``/*``, so
+    this walks the text rather than trusting one regular expression.
+    """
+    out: list[str] = []
+    i, n, in_string = 0, len(text), False
+    while i < n:
+        ch = text[i]
+        if in_string:
+            # A doubled '' inside a string closes and reopens it: same result.
+            in_string = ch != "'"
+            out.append(ch)
+            i += 1
+        elif ch == "'":
+            in_string = True
+            out.append(ch)
+            i += 1
+        elif text.startswith("/*", i):
+            end = text.find("*/", i + 2)
+            i = n if end < 0 else end + 2
+            out.append(" ")
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
 def get_step_metadata(step_path: str) -> dict[str, Any]:
     """Extract metadata from a STEP file without full conversion.
 
@@ -2911,25 +2940,31 @@ def get_step_metadata(step_path: str) -> dict[str, Any]:
         metadata["parse_error"] = str(exc)
         return metadata
 
+    # The header's fields are read with its comments taken out: exporters
+    # label every field (``/* originating_system */ 'Some CAD v13'``), and a
+    # field that starts with a comment does not start with its value.
+    header_end = re.search(r"\bENDSEC\s*;", text)
+    header = _without_comments(text[: header_end.end() if header_end else 65536])
+
     # FILE_SCHEMA line.
-    schema_match = re.search(r"FILE_SCHEMA\s*\(\s*\('([^']+)'\s*\)\s*\)", text)
+    schema_match = re.search(r"FILE_SCHEMA\s*\(\s*\('([^']+)'\s*\)\s*\)", header)
     if schema_match:
         metadata["schema"] = schema_match.group(1)
 
     # FILE_DESCRIPTION.
-    desc_match = re.search(r"FILE_DESCRIPTION\s*\(\s*\('([^']+)'\s*\)", text)
+    desc_match = re.search(r"FILE_DESCRIPTION\s*\(\s*\('([^']+)'\s*\)", header)
     if desc_match:
         metadata["description"] = desc_match.group(1)
 
     # FILE_NAME — author field is 7th parameter.
-    name_match = re.search(r"FILE_NAME\s*\(\s*'([^']*)'", text)
+    name_match = re.search(r"FILE_NAME\s*\(\s*'([^']*)'", header)
     if name_match:
         metadata["original_file_name"] = name_match.group(1)
 
     # FILE_NAME's originating_system (6th field) — the stamp a viewer reads
     # to answer "who made this file?".  Fields are strings or paren lists;
     # a plain split can't see that, so walk the top-level commas.
-    fn_match = re.search(r"FILE_NAME\s*\((.*?)\)\s*;", text, re.DOTALL)
+    fn_match = re.search(r"FILE_NAME\s*\((.*?)\)\s*;", header, re.DOTALL)
     if fn_match:
         fields: list[str] = []
         depth = 0
