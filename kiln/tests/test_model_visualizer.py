@@ -363,6 +363,47 @@ class TestCompileScadForBbox:
 # 3MF bundled with the tests.
 
 
+def _cube_stl(path: Path, x0: float) -> str:
+    """A 10 mm binary-STL cube starting at ``x0`` on X."""
+    corners = [(x0 + 10 * (i & 1), 10 * ((i >> 1) & 1), 10 * ((i >> 2) & 1)) for i in range(8)]
+    faces = [(0, 2, 1), (1, 2, 3), (4, 5, 6), (5, 7, 6), (0, 1, 4), (1, 5, 4),
+             (2, 6, 3), (3, 6, 7), (0, 4, 2), (2, 4, 6), (1, 3, 5), (3, 7, 5)]
+    body = b"".join(
+        struct.pack("<12f", 0, 0, 0, *corners[a], *corners[b], *corners[c]) + b"\x00\x00"
+        for a, b, c in faces
+    )
+    path.write_bytes(b"\x00" * 80 + struct.pack("<I", len(faces)) + body)
+    return str(path)
+
+
+class TestAPaintedPartTheStageDeclines:
+    """A painted 3MF the stage does not draw is painted by the colour renderer,
+    handed every angle this module picks -- which that renderer must draw.
+
+    The autouse fixture above keeps the stage out, which is exactly the case:
+    a part too dense for a stage still lands here.
+    """
+
+    def test_every_default_angle_is_drawn(self, tmp_path: Path) -> None:
+        from kiln.step_import import _write_3mf
+
+        painted = tmp_path / "painted.3mf"
+        _write_3mf(
+            [
+                {"stl_path": _cube_stl(tmp_path / "a.stl", 0.0), "name": "base", "color": "#D92626"},
+                {"stl_path": _cube_stl(tmp_path / "b.stl", 20.0), "name": "lid", "color": "#1A59D9"},
+            ],
+            str(painted),
+        )
+
+        result = visualize_model(str(painted), output_dir=str(tmp_path / "out"), share_link=False)
+
+        assert result["success"], result
+        assert result["renderer"] == "colored_mesh"
+        drawn = [v["angle"] for v in result["views"] if v.get("path")]
+        assert drawn == [label for label, _ in _CAMERA_ANGLES]
+
+
 def _make_bambu_wrapped_3mf(
     path: Path,
     *,

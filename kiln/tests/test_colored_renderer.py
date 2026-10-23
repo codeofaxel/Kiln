@@ -453,7 +453,12 @@ class TestRenderColoredMesh:
 class TestRenderMultiAngle:
     """Multi-angle colored mesh rendering."""
 
-    def test_all_six_angles(self, tmp_path: Path) -> None:
+    def test_every_angle_visualize_model_can_ask_for(self, tmp_path: Path) -> None:
+        # visualize_model hands this renderer every angle in its own table
+        # when the stage declines a painted part, so the two lists are one
+        # list: read it, never restate it.
+        from kiln.model_visualizer import _CAMERA_ANGLES as asked_for
+
         views = render_colored_mesh_multi_angle(
             _make_colored_box(),
             output_dir=str(tmp_path),
@@ -461,14 +466,7 @@ class TestRenderMultiAngle:
             height=150,
             supersample=1,
         )
-        assert len(views) == 6
-        angles = [v["angle"] for v in views]
-        assert "isometric" in angles
-        assert "front" in angles
-        assert "right" in angles
-        assert "top" in angles
-        assert "bottom" in angles
-        assert "back" in angles
+        assert [v["angle"] for v in views] == [label for label, _ in asked_for]
 
         for v in views:
             assert os.path.isfile(v["path"])

@@ -20,6 +20,8 @@ from kiln._vec import dot as _dot
 from kiln._vec import face_normal as _face_normal
 from kiln._vec import normalize as _normalize
 from kiln._vec import sub as _sub
+from kiln.model_visualizer import _ANGLE_ROTATIONS
+from kiln.model_visualizer import _CAMERA_ANGLES as _VIEWS
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -27,43 +29,24 @@ if TYPE_CHECKING:
     from kiln.threemf_parser import ColoredTriangle
 
 # ---------------------------------------------------------------------------
-# Camera angle presets — converted from OpenSCAD (rotX, rotY, rotZ) to
-# our renderer's (elevation, azimuth) system.
+# Camera angle presets — read from visualize_model's own table and converted
+# from OpenSCAD (rotX, rotY, rotZ) to this renderer's (elevation, azimuth).
 #
 # Mapping: elevation = 90 - rotX, azimuth = rotZ
+#
+# Read, never restated.  visualize_model hands this renderer every angle in
+# its table when the stage declines a painted part, so the two lists are one
+# list.  A hand copy here once lacked ``wedge_iso``: every painted part too
+# dense for a stage still then failed its whole render on that one angle.
 # ---------------------------------------------------------------------------
 
 _CAMERA_ANGLES: dict[str, dict[str, Any]] = {
-    "isometric": {
-        "elevation": 35.0,
-        "azimuth": 25.0,
-        "description": "Isometric 3/4 view",
-    },
-    "front": {
-        "elevation": 0.0,
-        "azimuth": 0.0,
-        "description": "Front view",
-    },
-    "right": {
-        "elevation": 0.0,
-        "azimuth": 90.0,
-        "description": "Right side view",
-    },
-    "top": {
-        "elevation": 75.0,
-        "azimuth": 10.0,
-        "description": "Top-down view (15 deg tilt for detail)",
-    },
-    "bottom": {
-        "elevation": -80.0,
-        "azimuth": 15.0,
-        "description": "Bottom view (near upside-down + tilt)",
-    },
-    "back": {
-        "elevation": 0.0,
-        "azimuth": 180.0,
-        "description": "Back view",
-    },
+    label: {
+        "elevation": 90.0 - _ANGLE_ROTATIONS[label][0],
+        "azimuth": float(_ANGLE_ROTATIONS[label][2]),
+        "description": description,
+    }
+    for label, description in _VIEWS
 }
 
 _DEFAULT_RENDER_DIR = "/tmp/kiln_colored_renders"
