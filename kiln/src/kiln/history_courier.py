@@ -1294,7 +1294,9 @@ _OFFER_KEY = "auto_push_offered"
 _OFFER_AT_VERSIONS = 3
 #: What an automatic push is, to the push it runs.
 _AUTO_PUSH_TOOL = "cloud_push_branch"
-_TURN_ON = "kiln cloud auto-push on"
+#: Turning it on asks for the person's second factor, which only the account
+#: page can, so the offer names that page rather than a command.
+_TURN_ON = "app.kiln3d.com/settings/account"
 
 
 def _read_prefs(vault: Any, *, fresh: bool = False) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:

@@ -1658,7 +1658,7 @@ class TestTheOneTimeOffer:
 
         assert all("auto_push_offer" not in a for a in firsts)
         offer = third["auto_push_offer"]
-        assert offer["turn_on"] == "kiln cloud auto-push on"
+        assert offer["turn_on"] == "app.kiln3d.com/settings/account"
         assert "stays off until you turn it on" in offer["said"]
         assert "auto_push_offer" not in fourth and "auto_push" not in third
         assert account.pushes() == []
@@ -1675,7 +1675,7 @@ class TestTheOneTimeOffer:
             {"named": ["mug"]}, vault=vault, tool="create_design_branch",
         )
 
-        assert answer["auto_push_offer"]["turn_on"] == "kiln cloud auto-push on"
+        assert answer["auto_push_offer"]["turn_on"] == "app.kiln3d.com/settings/account"
         assert vault.setting("auto_push_offered")
 
     def test_never_made_when_the_plan_does_not_include_it_or_the_switch_was_set(self, home, monkeypatch, plain_install):
