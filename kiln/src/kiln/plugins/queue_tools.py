@@ -88,8 +88,15 @@ def submit_job(
     priority: int = 0,
     idempotency_key: str | None = None,
     preview_token: str | None = None,
+    version_id: str | None = None,
+    design_id: str | None = None,
+    branch_id: str | None = None,
 ) -> dict:
     """Submit a print job to the queue.
+
+    ``version_id`` / ``design_id`` / ``branch_id`` name the kept design the
+    file came from, when there is one; the scheduler hands them to the
+    start so the print's record lands on that version's history.
 
     Free tier allows up to 10 queued jobs for single-printer use.
     Pro tier unlocks unlimited queue depth with multi-printer scheduling.
@@ -167,7 +174,19 @@ def submit_job(
             submitted_by="mcp-agent",
             priority=priority,
             idempotency_key=idempotency_key,
-            metadata={"preview_signoff": signoff} if signoff else None,
+            metadata=(
+                {
+                    **({"preview_signoff": signoff} if signoff else {}),
+                    **{
+                        k: v.strip()
+                        for k, v in (
+                            ("version_id", version_id), ("design_id", design_id), ("branch_id", branch_id),
+                        )
+                        if isinstance(v, str) and v.strip()
+                    },
+                }
+                or None
+            ),
         )
         job = outcome.job
         if outcome.replayed:

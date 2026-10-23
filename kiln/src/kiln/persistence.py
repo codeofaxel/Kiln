@@ -1028,7 +1028,6 @@ class KilnDB:
                     machine_fingerprint TEXT DEFAULT NULL,
                     printer_model       TEXT DEFAULT NULL,
                     nozzle_diameter_mm  REAL DEFAULT NULL,
-                    nozzle_material     TEXT DEFAULT NULL,
                     ended_at            REAL DEFAULT NULL,
                     account_sync_id     TEXT DEFAULT NULL
                 );
@@ -2620,7 +2619,6 @@ class KilnDB:
         "machine_fingerprint": "TEXT",
         "printer_model": "TEXT",
         "nozzle_diameter_mm": "REAL",
-        "nozzle_material": "TEXT",
         "ended_at": "REAL",
         "account_sync_id": "TEXT",
     }
@@ -2691,7 +2689,9 @@ class KilnDB:
                         match["id"], outcome, new_job_id=outcome["job_id"],
                     )
                     return match["id"]
-            identity = self._identity_values(outcome)
+            identity = list(self._identity_values(outcome))
+            if identity[6] is None and outcome_val not in self.UNRESOLVED_OUTCOMES:
+                identity[6] = time.time()  # a decided insert ends now
             try:
                 cur = self._conn.execute(
                     """INSERT INTO print_outcomes
@@ -2699,10 +2699,9 @@ class KilnDB:
                         outcome, quality_grade, failure_mode, settings, environment,
                         notes, agent_id, determined_by, print_error, created_at,
                         version_id, design_id, branch_id, machine_fingerprint,
-                        printer_model, nozzle_diameter_mm, nozzle_material,
-                        ended_at, account_sync_id)
+                        printer_model, nozzle_diameter_mm, ended_at, account_sync_id)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                               ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                               ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         outcome["job_id"],
                         outcome["printer_name"],
@@ -2784,29 +2783,50 @@ class KilnDB:
                 "UPDATE print_outcomes SET job_id = ? WHERE id = ?",
                 (new_job_id, row_id),
             )
-        # A stronger verdict is never overwritten by a weaker source: a
-        # reconnect's inference arriving after the person already answered
-        # must not relabel their answer as a guess.  The OUTCOME word still
-        # updates (the caller's contract), only the provenance holds -- and
-        # only on a DECIDED row.  A pending row's ``observed`` means "a
-        # watcher is on it", not a verdict, so whoever settles it says how.
+        # The identity the START stamped is the identity: a later record
+        # fills only what is still blank (COALESCE(col, ?)), so re-pointing
+        # a label at another machine, or a caller naming the wrong version,
+        # never relabels a print that already knew what it was.  The ending
+        # is stamped ONCE, on the first move to a decided word; a person's
+        # answer days later does not move it.
+        prior = self._conn.execute(
+            "SELECT determined_by, outcome FROM print_outcomes WHERE id = ?", (row_id,)
+        ).fetchone()
+        prior_by = prior[0] if prior else None
+        prior_outcome = prior[1] if prior else None
+        prior_decided = prior_outcome not in self.UNRESOLVED_OUTCOMES
         determined_by = outcome.get("determined_by")
-        if determined_by:
-            prior = self._conn.execute(
-                "SELECT determined_by, outcome FROM print_outcomes WHERE id = ?", (row_id,)
-            ).fetchone()
-            prior_by = prior[0] if prior else None
-            prior_outcome = prior[1] if prior else None
-            if (
-                prior_by
-                and prior_outcome not in self.UNRESOLVED_OUTCOMES
-                and self.DETERMINED_BY_RANK.get(prior_by, 0)
-                > self.DETERMINED_BY_RANK.get(determined_by, 0)
-            ):
-                determined_by = None
         terminal = outcome["outcome"] not in self.UNRESOLVED_OUTCOMES
-        ended_at = outcome.get("ended_at") or (time.time() if terminal else None)
-        identity = self._identity_values(outcome)
+        identity = list(self._identity_values(outcome))
+        if identity[6] is None and terminal:
+            identity[6] = time.time()
+        # A weaker source never contradicts a decided row: a reconnect's
+        # inference arriving after the person answered must not turn their
+        # "it worked" into "failed" under their own name, nor relabel it a
+        # guess.  Only blanks are filled.  A pending row's ``observed``
+        # means "a watcher is on it", not a verdict, so whoever settles it
+        # says how.
+        if (
+            prior_decided
+            and prior_by
+            and determined_by
+            and self.DETERMINED_BY_RANK.get(prior_by, 0)
+            > self.DETERMINED_BY_RANK.get(determined_by, 0)
+        ):
+            self._conn.execute(
+                """UPDATE print_outcomes
+                   SET version_id = COALESCE(version_id, ?),
+                       design_id = COALESCE(design_id, ?),
+                       branch_id = COALESCE(branch_id, ?),
+                       machine_fingerprint = COALESCE(machine_fingerprint, ?),
+                       printer_model = COALESCE(printer_model, ?),
+                       nozzle_diameter_mm = COALESCE(nozzle_diameter_mm, ?),
+                       account_sync_id = COALESCE(account_sync_id, ?)
+                   WHERE id = ?""",
+                (*identity[:6], identity[7], row_id),
+            )
+            self._conn.commit()
+            return
         self._conn.execute(
             """UPDATE print_outcomes
                SET outcome = ?, quality_grade = COALESCE(?, quality_grade),
@@ -2819,15 +2839,14 @@ class KilnDB:
                    agent_id = COALESCE(?, agent_id),
                    determined_by = COALESCE(?, determined_by),
                    print_error = COALESCE(?, print_error),
-                   version_id = COALESCE(?, version_id),
-                   design_id = COALESCE(?, design_id),
-                   branch_id = COALESCE(?, branch_id),
-                   machine_fingerprint = COALESCE(?, machine_fingerprint),
-                   printer_model = COALESCE(?, printer_model),
-                   nozzle_diameter_mm = COALESCE(?, nozzle_diameter_mm),
-                   nozzle_material = COALESCE(?, nozzle_material),
-                   ended_at = COALESCE(?, ended_at),
-                   account_sync_id = COALESCE(?, account_sync_id)
+                   version_id = COALESCE(version_id, ?),
+                   design_id = COALESCE(design_id, ?),
+                   branch_id = COALESCE(branch_id, ?),
+                   machine_fingerprint = COALESCE(machine_fingerprint, ?),
+                   printer_model = COALESCE(printer_model, ?),
+                   nozzle_diameter_mm = COALESCE(nozzle_diameter_mm, ?),
+                   ended_at = COALESCE(ended_at, ?),
+                   account_sync_id = COALESCE(account_sync_id, ?)
                WHERE id = ?""",
             (
                 outcome["outcome"],
@@ -2841,9 +2860,7 @@ class KilnDB:
                 outcome.get("agent_id"),
                 determined_by,
                 normalize_print_error(outcome.get("print_error")),
-                *identity[:7],
-                ended_at,
-                identity[8],
+                *identity,
                 row_id,
             ),
         )
@@ -2854,15 +2871,16 @@ class KilnDB:
         out: list[Any] = []
         for name in self.PRINT_OUTCOME_IDENTITY_COLUMNS:
             value = outcome.get(name)
-            if name == "nozzle_diameter_mm":
-                try:
-                    value = float(value) if value not in (None, "") else None
-                except (TypeError, ValueError):
-                    value = None
-            elif name == "ended_at":
-                value = value if isinstance(value, (int, float)) else None
+            if name in ("nozzle_diameter_mm", "ended_at"):
+                value = (
+                    float(value)
+                    if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
+                    else None
+                )
+            elif isinstance(value, (str, int)) and not isinstance(value, bool):
+                value = str(value).strip() or None
             else:
-                value = str(value).strip() if value not in (None, "") else None
+                value = None
             out.append(value)
         return tuple(out)
 

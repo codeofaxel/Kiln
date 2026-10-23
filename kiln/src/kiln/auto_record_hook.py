@@ -774,14 +774,18 @@ def print_identity_at_start(adapter: Any, kwargs: dict[str, Any]) -> dict[str, A
     except Exception:  # noqa: BLE001
         pass
     try:
-        from kiln.assumed_nozzle import assumed_nozzle
+        from kiln.assumed_nozzle import _printer_setting_mm
         from kiln.printers.base import outcome_printer_name
 
-        nozzle = assumed_nozzle(outcome_printer_name(adapter))
-        # ``default`` is Kiln's fallback, not a reading of this machine; a
-        # row that said 0.4 on its strength would be a guess wearing a fact.
-        if nozzle.source != "default":
-            out["nozzle_diameter_mm"] = float(nozzle.diameter_mm)
+        # The printer's OWN setting, read locally (a Bambu answers from its
+        # push cache; a Klipper from its config), memoised two minutes.
+        # Not the account's record: that is a served consult with a 4 s
+        # budget, and this runs inside the start, before the watchdog is
+        # even attached.  Not stock or default either: those are what the
+        # model ships with, a guess wearing a fact.  Blank is honest.
+        size, _working_with = _printer_setting_mm(outcome_printer_name(adapter))
+        if size:
+            out["nozzle_diameter_mm"] = float(size)
     except Exception:  # noqa: BLE001
         pass
     return out

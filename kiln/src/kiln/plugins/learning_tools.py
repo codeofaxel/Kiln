@@ -46,10 +46,10 @@ def _machine_identity(printer_name: str | None) -> dict[str, Any]:
     if not printer_name or printer_name == "unknown":
         return {}
     try:
+        import kiln.server as _srv
         from kiln.registry import machine_fingerprint
-        from kiln.server import _registry
 
-        adapter = _registry.get(printer_name)
+        adapter = _srv._get_registry().get(printer_name)
     except Exception:  # noqa: BLE001 -- a record never fails on identity
         return {}
     out: dict[str, Any] = {}
@@ -361,8 +361,10 @@ def record_print_outcome(
             ``proven_settings`` level.  Default False.
         determined_by: Who settled this outcome — ``"observed"`` (a
             live process watched the print end), ``"inferred"``
-            (reconstructed from printer state after the fact), or
-            ``"user_reported"`` (the human said so).  Defaults to
+            (reconstructed from printer state after the fact), ``"seen"``
+            (a camera frame judged at the ending), or
+            ``"user_reported"`` (the human said so).  A weaker source
+            never contradicts a decided row.  Defaults to
             ``"observed"`` for auto-recorded outcomes and
             ``"user_reported"`` otherwise — a manual record normally
             relays what the user reported about the part in hand.

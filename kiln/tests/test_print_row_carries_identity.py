@@ -57,7 +57,6 @@ IDENTITY = (
     "machine_fingerprint",
     "printer_model",
     "nozzle_diameter_mm",
-    "nozzle_material",
     "ended_at",
     "account_sync_id",
 )
@@ -154,10 +153,7 @@ class TestStartStamps:
         from kiln import assumed_nozzle as _an
         from kiln.persistence import get_db
 
-        monkeypatch.setattr(
-            _an, "assumed_nozzle",
-            lambda pid=None, **kw: _an.AssumedNozzle(0.6, "record", pid),
-        )
+        monkeypatch.setattr(_an, "_printer_setting_mm", lambda pid: (0.6, None))
         adapter = _fake_adapter(serial="01P00A1234", model="Bambu Lab A1")
         result = adapter.start_print(
             "bracket.gcode", version_id="v-abc", design_id="d-1", branch_id="b-main"
@@ -174,16 +170,15 @@ class TestStartStamps:
         assert row["nozzle_diameter_mm"] == 0.6
         assert row["ended_at"] is None
 
-    def test_a_foreign_file_has_no_version_and_a_default_nozzle_is_not_a_reading(
+    def test_a_foreign_file_has_no_version_and_no_reading_is_no_nozzle(
         self, tmp_kiln_env, monkeypatch
     ):
+        """No printer reading means a blank, never the stock or default size
+        (a lap found a stock size stored as a measurement, 2026-10-23)."""
         from kiln import assumed_nozzle as _an
         from kiln.persistence import get_db
 
-        monkeypatch.setattr(
-            _an, "assumed_nozzle",
-            lambda pid=None, **kw: _an.AssumedNozzle(0.4, "default", pid),
-        )
+        monkeypatch.setattr(_an, "_printer_setting_mm", lambda pid: (None, None))
         adapter = _fake_adapter(host="http://192.168.1.20/")
         adapter.start_print("download.gcode")
         row = get_db().list_unresolved_outcomes(printer_name="fake-printer")[0]
@@ -218,10 +213,7 @@ class TestEndingResolvesInPlace:
         from kiln import assumed_nozzle as _an
         from kiln.persistence import get_db
 
-        monkeypatch.setattr(
-            _an, "assumed_nozzle",
-            lambda pid=None, **kw: _an.AssumedNozzle(0.4, "printer_setting", pid),
-        )
+        monkeypatch.setattr(_an, "_printer_setting_mm", lambda pid: (0.4, None))
         adapter = _fake_adapter(serial="s1", model="M")
         before = time.time()
         adapter.start_print("bracket.gcode", version_id="v-1")
@@ -254,29 +246,39 @@ class TestEndingResolvesInPlace:
             {"job_id": "j", "printer_name": "p", "outcome": "pending", "agent_id": "auto"}
         )
         db.save_print_outcome(
-            {"job_id": "j", "printer_name": "p", "outcome": "failed",
+            {"job_id": "j", "printer_name": "p", "outcome": "success",
              "agent_id": "mcp", "determined_by": "user_reported"}
         )
         db.save_print_outcome(
             {"job_id": "j", "printer_name": "p", "outcome": "failed",
-             "agent_id": "mcp", "determined_by": "inferred"}
+             "agent_id": "mcp", "determined_by": "inferred", "version_id": "v-late"}
         )
         row = db.get_print_outcome("j")
+        # Neither the word nor the label moved; only a blank was filled.
+        assert row["outcome"] == "success"
         assert row["determined_by"] == "user_reported"
+        assert row["version_id"] == "v-late"
 
     def test_seen_is_a_valid_source_and_outranks_inferred(self, tmp_kiln_env):
         from kiln.persistence import get_db
 
         db = get_db()
         db.save_print_outcome(
-            {"job_id": "j", "printer_name": "p", "outcome": "unknown",
+            {"job_id": "j", "printer_name": "p", "outcome": "success",
              "agent_id": "auto", "determined_by": "inferred"}
         )
         db.save_print_outcome(
-            {"job_id": "j", "printer_name": "p", "outcome": "success",
+            {"job_id": "j", "printer_name": "p", "outcome": "failed",
              "agent_id": "mcp", "determined_by": "seen"}
         )
-        assert db.get_print_outcome("j")["determined_by"] == "seen"
+        row = db.get_print_outcome("j")
+        assert row["outcome"] == "failed" and row["determined_by"] == "seen"
+        db.save_print_outcome(
+            {"job_id": "j", "printer_name": "p", "outcome": "success",
+             "agent_id": "mcp", "determined_by": "inferred"}
+        )
+        row = db.get_print_outcome("j")
+        assert row["outcome"] == "failed" and row["determined_by"] == "seen"
 
     def test_record_tool_carries_the_ids_for_a_print_kiln_did_not_start(
         self, tmp_kiln_env, monkeypatch
@@ -298,3 +300,80 @@ class TestEndingResolvesInPlace:
         row = get_db().get_print_outcome("foreign-job")
         assert row["version_id"] == "v-9" and row["design_id"] == "d-9"
         assert row["determined_by"] == "user_reported"
+        assert row["ended_at"] is not None, "a decided insert ends now"
+
+    # --- defects a lap found (2026-10-23; each fails at 80a8aa00) ---
+
+    def test_the_starts_identity_survives_a_later_record(self, tmp_kiln_env, monkeypatch):
+        """A later record fills blanks only.  The lap found COALESCE(?, col)
+        letting a hand-recorded ending, reading today's registry, relabel the
+        machine and version the start had stamped."""
+        from kiln import assumed_nozzle as _an
+        from kiln.persistence import get_db
+
+        monkeypatch.setattr(_an, "_printer_setting_mm", lambda pid: (0.4, None))
+        _fake_adapter(serial="AAA", model="M").start_print("bracket.gcode", version_id="v-start")
+        db = get_db()
+        db.save_print_outcome(
+            {"job_id": "bracket", "printer_name": "fake-printer", "file_name": "bracket.gcode",
+             "outcome": "success", "agent_id": "mcp", "determined_by": "user_reported",
+             "version_id": "v-later", "machine_fingerprint": "fake-printer:serial:bbb",
+             "design_id": "d-filled"}
+        )
+        row = db.list_print_outcomes(printer_name="fake-printer")[0]
+        assert row["version_id"] == "v-start"
+        assert row["machine_fingerprint"] == "fake-printer:serial:aaa"
+        assert row["design_id"] == "d-filled", "a blank is filled"
+
+    def test_the_ending_is_stamped_once(self, tmp_kiln_env):
+        """The fit-report flow re-records days later; ended_at must not move."""
+        from kiln.persistence import get_db
+
+        db = get_db()
+        db.save_print_outcome({"job_id": "j", "printer_name": "p", "outcome": "pending", "agent_id": "auto"})
+        db.save_print_outcome(
+            {"job_id": "j", "printer_name": "p", "outcome": "success",
+             "agent_id": "auto", "determined_by": "observed", "ended_at": 1_700_000_000.0}
+        )
+        db.save_print_outcome(
+            {"job_id": "j", "printer_name": "p", "outcome": "success", "quality_grade": "good",
+             "agent_id": "mcp", "determined_by": "user_reported"}
+        )
+        row = db.get_print_outcome("j")
+        assert row["ended_at"] == 1_700_000_000.0
+        assert row["quality_grade"] == "good"
+
+    def test_odd_identity_values_are_blanks_not_crashes(self, tmp_kiln_env):
+        from kiln.persistence import get_db
+
+        db = get_db()
+        db.save_print_outcome(
+            {"job_id": "j", "printer_name": "p", "outcome": "success", "agent_id": "mcp",
+             "version_id": 7, "design_id": {"a": 1}, "branch_id": True,
+             "nozzle_diameter_mm": "0.4mm", "ended_at": "yesterday"}
+        )
+        row = db.get_print_outcome("j")
+        assert row["version_id"] == "7"
+        assert row["design_id"] is None and row["branch_id"] is None
+        assert row["nozzle_diameter_mm"] is None
+        assert isinstance(row["ended_at"], float), "a bad ended_at is replaced by now, not stored raw"
+
+    def test_the_scheduler_hands_a_queued_jobs_ids_to_the_start(self, tmp_kiln_env):
+        """submit_job keeps the ids in the job's metadata; the scheduler's
+        start carries them.  Pinned at the start kwargs, the one place every
+        door converges."""
+        from kiln.persistence import get_db
+
+        adapter = _fake_adapter(serial="s")
+        seen: dict[str, Any] = {}
+        real = adapter._start_print_impl
+
+        def _impl(file_name, **kwargs):
+            seen.update(kwargs)
+            return real(file_name, **kwargs)
+
+        adapter._start_print_impl = _impl
+        adapter.start_print("q.gcode", version_id="v-q", design_id="d-q")
+        row = get_db().list_unresolved_outcomes(printer_name="fake-printer")[0]
+        assert row["version_id"] == "v-q" and row["design_id"] == "d-q"
+        assert seen.get("version_id") == "v-q", "the adapter sees the same kwargs"
