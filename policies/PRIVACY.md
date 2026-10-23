@@ -1,6 +1,6 @@
 # Kiln Privacy Policy
 
-*Last updated: 2026-10-23 · Version 2.17*
+*Last updated: 2026-10-23 · Version 2.18*
 
 > **Plain-English summary** — Kiln is operated by **Hadron Labs Inc.**, a
 > Delaware C corporation headquartered in California. Most of Kiln runs
@@ -228,15 +228,18 @@ script loads, nothing is stored on your device, and nothing is
 joined to your browsing anywhere.
 
 When you create a Kiln account, we also note, once, how you reached
-the sign-in, as one word from a fixed list: X, GitHub, PyPI, a search
-engine, another website, no referring website, the Kiln command line,
-or an AI app's Kiln connector. Your browser works that word out from
-the name of the website that sent you to the sign-in page (never the
-page's address) or the campaign tag on the link you followed, and we
-keep only the word, on your account's sign-up record. Nothing is
-stored on your device to do this, the word is not sent to Google,
-Meta or anyone else, and it is deleted with your account. Accounts
-created before version 2.12 of this policy carry no such word.
+Kiln, as one word from a fixed list: X, GitHub, PyPI, a search engine,
+another website, no referring website, the Kiln command line, or an AI
+app's Kiln connector. Your browser works that word out from the name of
+the website that sent you (never the page's address) or the campaign
+tag on the link you followed. If you land on kiln3d.com first and sign
+in from there, the site works the word out on the first page you open.
+It keeps the word in your browser for that tab only, so it's gone when
+you close the tab, and it isn't a cookie. It also adds the word to the
+site's links into the Kiln app. We keep only the word, on your account's
+sign-up record. It isn't sent to Google, Meta or anyone else, and it's
+deleted with your account. Accounts created before version 2.12 of this
+policy carry no such word.
 
 **What gets shared (when active):**
 
