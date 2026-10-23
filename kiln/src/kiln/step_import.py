@@ -1718,7 +1718,12 @@ def _parse_kiln_result(
         StepImportError: If the subprocess failed or result not found.
     """
     if result.returncode != 0:
-        stderr = (result.stderr or "").strip()[:500]
+        stderr = (result.stderr or "").strip()
+        if "Traceback (most recent call last)" in stderr:
+            # The last line names what went wrong; the frames above it are
+            # the helper script's own and tell a person nothing.
+            stderr = stderr.splitlines()[-1].strip()
+        stderr = stderr[:500]
         raise StepImportError(
             f"{backend_name} conversion failed (exit {result.returncode}): {stderr}"
         )
@@ -2667,44 +2672,49 @@ def _parts_via_chain(
     attempted: the fall-through means the backend that ran is not the one
     the priority order names on a machine where an earlier one is installed
     but broken.  A backend's failure is a note in *warnings* on the way past.
+
+    A converter that fails on a file -- its child crashes in the mesher, or
+    exits on a traceback -- hands the file to the next one installed: that
+    is the converter failing, not the file, and the kernel behind it may
+    read the file fine.  Only when every installed converter has failed is
+    the file refused, with what each one said.
     """
+    failures: list[str] = []
+
+    def attempt(label: str, run: Any) -> _BackendParts | None:
+        logger.info("Converting STEP via %s", label)
+        try:
+            return run()
+        except Exception as exc:  # noqa: BLE001 -- the next converter gets the file
+            failures.append(f"{label} failed ({exc})")
+            warnings.append(f"{label} failed ({exc}), trying next backend")
+            logger.warning("%s backend failed: %s", label, exc)
+            return None
+
     freecad_cmd = _find_freecad_cmd()
     if freecad_cmd is not None:
-        logger.info("Converting STEP via FreeCAD (%s)", freecad_cmd)
-        try:
-            parts = _convert_via_freecad(validated_path, scratch, freecad_cmd)
+        parts = attempt("FreeCAD", lambda: _convert_via_freecad(validated_path, scratch, freecad_cmd))
+        if parts is not None:
             return parts, MeshConversion(backend="freecad", bound=_FREECAD_BOUND)
-        except StepImportError:
-            raise
-        except Exception as exc:
-            warnings.append(f"FreeCAD failed ({exc}), trying next backend")
-            logger.warning("FreeCAD backend failed: %s", exc)
 
     if _find_gmsh_cmd() is not None:
-        logger.info("Converting STEP via Gmsh")
-        try:
-            parts = _convert_via_gmsh(validated_path, scratch)
+        parts = attempt("Gmsh", lambda: _convert_via_gmsh(validated_path, scratch))
+        if parts is not None:
             return parts, MeshConversion(backend="gmsh", bound=_GMSH_BOUND)
-        except StepImportError:
-            raise
-        except Exception as exc:
-            warnings.append(f"Gmsh failed ({exc}), trying next backend")
-            logger.warning("Gmsh backend failed: %s", exc)
 
     # OCP before cadquery: it IS cadquery's kernel, so anyone with cadquery
     # has it, and going direct skips a ~2 s import for the same geometry.
     if _ocp_available():
-        logger.info("Converting STEP via OCCT (OCP)")
-        parts = _convert_via_ocp(validated_path, scratch)
-        return parts, MeshConversion(
-            backend="occt", bound=_KERNEL_BOUND, source=parts.topology
-        )
-    if _cadquery_available():
-        logger.info("Converting STEP via CadQuery")
-        parts = _convert_via_cadquery(validated_path, scratch)
-        return parts, MeshConversion(
-            backend="cadquery", bound=_KERNEL_BOUND, source=parts.topology
-        )
+        parts = attempt("OCCT", lambda: _convert_via_ocp(validated_path, scratch))
+        if parts is not None:
+            return parts, MeshConversion(backend="occt", bound=_KERNEL_BOUND, source=parts.topology)
+    elif _cadquery_available():
+        parts = attempt("CadQuery", lambda: _convert_via_cadquery(validated_path, scratch))
+        if parts is not None:
+            return parts, MeshConversion(backend="cadquery", bound=_KERNEL_BOUND, source=parts.topology)
+
+    if failures:
+        raise StepImportError("No converter could read this STEP file. " + " ".join(f"{f}." for f in failures))
     raise NoBackendError()
 
 

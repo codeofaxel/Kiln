@@ -802,6 +802,45 @@ def test_freecad_failure_falls_to_gmsh(mock_cq, mock_gmsh, mock_fc, sample_step_
         assert any("FreeCAD failed" in w for w in result.warnings)
 
 
+@patch("kiln.step_import._find_freecad_cmd", return_value=["FreeCADCmd"])
+@patch("kiln.step_import._find_gmsh_cmd", return_value=None)
+@patch("kiln.step_import._ocp_available", return_value=False)
+@patch("kiln.step_import._cadquery_available", return_value=True)
+def test_a_converter_that_crashes_hands_the_file_on(mock_cq, mock_ocp, mock_gmsh, mock_fc, sample_step_file, tmp_dir):
+    """A converter's child dying on a file is that converter failing, not the file.
+
+    A real crash arrives as a non-zero exit (a segfault in a mesher, a
+    traceback in its script), so the next installed converter gets the file.
+    """
+    crashed = MagicMock(returncode=-11, stdout="", stderr="")
+    out = tmp_dir / "body_0.stl"
+    out.write_bytes(b"\x00" * 100)
+
+    with patch("kiln.step_import.subprocess.run", return_value=crashed), patch(
+        "kiln.step_import._convert_via_cadquery", return_value=_BackendParts(outputs=[str(out)])
+    ):
+        result = convert_step_to_stl(str(sample_step_file), output_dir=str(tmp_dir / "out"))
+
+    assert result.conversion.backend == "cadquery"
+    assert any("FreeCAD failed" in w for w in result.warnings)
+
+
+@patch("kiln.step_import._find_freecad_cmd", return_value=["FreeCADCmd"])
+@patch("kiln.step_import._find_gmsh_cmd", return_value=None)
+@patch("kiln.step_import._ocp_available", return_value=False)
+@patch("kiln.step_import._cadquery_available", return_value=True)
+def test_when_every_converter_fails_the_error_names_each(mock_cq, mock_ocp, mock_gmsh, mock_fc, sample_step_file):
+    crashed = MagicMock(returncode=1, stdout="", stderr="mesher gave up")
+    with patch("kiln.step_import.subprocess.run", return_value=crashed), patch(
+        "kiln.step_import._convert_via_cadquery", side_effect=StepImportError("cadquery could not read it")
+    ):
+        with pytest.raises(StepImportError) as caught:
+            convert_step_to_stl(str(sample_step_file))
+
+    assert "mesher gave up" in str(caught.value)
+    assert "cadquery could not read it" in str(caught.value)
+
+
 # ---------------------------------------------------------------------------
 # 27. Subprocess stderr is truncated in error messages
 # ---------------------------------------------------------------------------
@@ -819,6 +858,25 @@ def test_parse_subprocess_truncates_stderr():
 
     # stderr should be capped at 500 chars.
     assert len(str(exc_info.value)) < 600
+
+
+def test_a_converter_traceback_reports_its_last_line():
+    """What a person reads is what went wrong, not the frames of a script."""
+    mock_proc = MagicMock()
+    mock_proc.returncode = 1
+    mock_proc.stdout = ""
+    mock_proc.stderr = (
+        "Traceback (most recent call last):\n"
+        '  File "/tmp/kiln_script.py", line 26, in <module>\n'
+        "    gmsh.model.mesh.generate(2)\n"
+        "Exception: Impossible to mesh periodic surface 1\n"
+    )
+
+    with pytest.raises(StepImportError) as exc_info:
+        _parse_kiln_result(mock_proc, "Gmsh")
+
+    assert str(exc_info.value).endswith("Exception: Impossible to mesh periodic surface 1")
+    assert "Traceback" not in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------
