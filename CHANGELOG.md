@@ -5,6 +5,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- **A CAD assembly now arrives as its parts.** Each part keeps its name, where it sits in the assembly, and its color, so you can print them together or one at a time.
+
 ## [1.5.0] - 2026-10-20
 
 ### Added
