@@ -120,3 +120,44 @@ def test_wrapper_raises_consent_when_blocked(monkeypatch):
             )
         )
     assert "kiln accept-terms" in str(exc.value)
+
+
+def _lapsed_sign_in(monkeypatch, tmp_path, **extra):
+    """A token file holding the server's refusal: an account, no way to renew it."""
+    import json
+
+    (tmp_path / ".kiln").mkdir()
+    (tmp_path / ".kiln" / "auth_tokens.json").write_text(json.dumps({
+        "email": "maker@example.com",
+        "tier": "pro",
+        "access_token": "expired.jwt.token",
+        "refresh_rejected_at": "2026-10-19T02:36:31Z",
+        **extra,
+    }))
+    monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
+
+
+def test_consent_message_names_a_lapsed_sign_in(monkeypatch, tmp_path):
+    # An account is on this computer but its sign-in was refused, so no
+    # accept link can be made.  "No account" would send the person to the
+    # wrong fix; signing in again picks up an account that already agreed,
+    # or brings the one-tap link.
+    monkeypatch.setattr(server, "_mint_accept_link", lambda: None)
+    _lapsed_sign_in(monkeypatch, tmp_path)
+
+    msg = server._terms_consent_message()
+
+    assert "maker@example.com" in msg
+    assert "kiln signin" in msg
+    assert "expired" in msg.lower()
+    assert "Business" in msg  # the summary is still the notice
+
+
+def test_consent_message_says_why_a_machine_sign_in_ended(monkeypatch, tmp_path):
+    monkeypatch.setattr(server, "_mint_accept_link", lambda: None)
+    _lapsed_sign_in(monkeypatch, tmp_path, refresh_rejected_reason="machine_revoked")
+
+    msg = server._terms_consent_message()
+
+    assert "removed from your Kiln account" in msg
+    assert "kiln signin" in msg

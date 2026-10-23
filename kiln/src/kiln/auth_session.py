@@ -472,6 +472,17 @@ def session_rejected(stored: dict | None = None) -> bool:
     return _rejected_verdict(_read_tokens() if stored is None else stored) is not None
 
 
+def lapsed_signin_message(stored: dict | None = None) -> str:
+    """The person-facing sentence for a sign-in the server refused, or ``""``.
+
+    The same words every other door uses for it (:func:`_signin_hint`): whose
+    session it was, and why it ended when the server said.  Empty while the
+    sign-in can still renew, and on a computer that was never signed in.
+    """
+    stored = _read_tokens() if stored is None else stored
+    return _signin_hint(stored) if session_rejected(stored) else ""
+
+
 def stored_session_state() -> str:
     """What the token file alone says about the session — never the network.
 

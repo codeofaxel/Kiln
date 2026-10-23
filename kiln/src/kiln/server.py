@@ -1236,6 +1236,27 @@ def _terms_consent_message() -> str:
             "(I can't accept for you — it has to be your tap.)"
         )
 
+    # An account IS on this computer, but the server refused its sign-in, so
+    # no link could be made.  Saying "no account" sends the person to the
+    # wrong fix; signing in again either picks up an account that already
+    # agreed or brings the one-tap link on the next call (kiln.terms.is_current).
+    try:
+        from kiln.auth_session import lapsed_signin_message
+
+        lapsed = lapsed_signin_message()
+    except Exception:
+        logger.debug("terms gate: could not read the sign-in state", exc_info=True)
+        lapsed = ""
+    if lapsed:
+        return head + (
+            f"{lapsed}\n\n"
+            "To continue, run this once in your terminal:\n"
+            "    kiln signin\n\n"
+            "If your account has already accepted these terms, that's all it "
+            "takes; if not, I'll hand you a one-tap link to accept. Then tell "
+            "me to continue. (I can't sign in or accept for you — it has to be you.)"
+        )
+
     # No account on this install — point the human at an action the agent also
     # can't take: a one-line terminal command, or signing in to accept in a
     # browser.
