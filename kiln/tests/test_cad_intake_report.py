@@ -466,9 +466,7 @@ def test_the_score_moves_when_only_the_tessellation_does(tmp_path, monkeypatch):
     for linear, angular, label in ((5e-3, 0.1, "fine"), (0.2, 0.6, "coarse")):
         monkeypatch.setattr(step_import, "_OCP_LINEAR_DEFLECTION", linear)
         monkeypatch.setattr(step_import, "_OCP_ANGULAR_DEFLECTION", angular)
-        outputs, _bodies, _topology = step_import._convert_via_ocp(
-            path, Path(tempfile.mkdtemp()), merge_bodies=True
-        )
+        outputs = step_import._convert_via_ocp(path, Path(tempfile.mkdtemp())).outputs
         scored[label] = design_scorecard(outputs[0])
 
     assert scored["fine"]["overall_score"] > scored["coarse"]["overall_score"], (

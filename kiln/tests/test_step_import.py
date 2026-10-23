@@ -40,10 +40,11 @@ from kiln.step_import import (
     NoBackendError,
     StepImportError,
     StepImportResult,
+    _BackendParts,
     install_help,
     install_remedy,
     _VALID_EXTENSIONS,
-    _parse_subprocess_result,
+    _parse_kiln_result,
     _validate_step_path,
     check_step_support,
     convert_step,
@@ -291,7 +292,7 @@ def test_output_dir_default(mock_cq, mock_gmsh, mock_fc, sample_step_file, tmp_d
 
     with patch(
         "kiln.step_import._convert_via_cadquery",
-        return_value=([str(out_stl)], 1, None),
+        return_value=_BackendParts(outputs=[str(out_stl)]),
     ):
         result = convert_step_to_stl(str(sample_step_file))
         assert str(sample_step_file.parent) in result.output_path or result.output_path == str(out_stl)
@@ -309,7 +310,7 @@ def test_output_dir_explicit(mock_cq, mock_gmsh, mock_fc, sample_step_file, tmp_
 
     with patch(
         "kiln.step_import._convert_via_cadquery",
-        return_value=([str(out_stl)], 1, None),
+        return_value=_BackendParts(outputs=[str(out_stl)]),
     ):
         result = convert_step_to_stl(
             str(sample_step_file), output_dir=str(out_dir)
@@ -334,7 +335,7 @@ def test_merge_bodies_false_splits(mock_cq, mock_gmsh, mock_fc, sample_step_file
 
     with patch(
         "kiln.step_import._convert_via_cadquery",
-        return_value=([str(body0), str(body1)], 2, None),
+        return_value=_BackendParts(outputs=[str(body0), str(body1)]),
     ):
         result = convert_step_to_stl(
             str(sample_step_file), merge_bodies=False
@@ -400,10 +401,11 @@ def test_freecad_backend(mock_cq, mock_gmsh, mock_fc, sample_step_file, tmp_dir)
 @patch("kiln.step_import._cadquery_available", return_value=False)
 def test_gmsh_backend(mock_cq, mock_gmsh, mock_fc, sample_step_file, tmp_dir):
     """Gmsh backend calls subprocess and parses result."""
-    out_stl = sample_step_file.parent / "merged.stl"
-    out_stl.write_bytes(b"\x00" * 300)
+    outs = [sample_step_file.parent / f"body_{i}.stl" for i in range(2)]
+    for out in outs:
+        out.write_bytes(b"\x00" * 84)  # an empty binary STL each, so they fuse
 
-    kiln_result = json.dumps({"body_count": 2, "outputs": [str(out_stl)]})
+    kiln_result = json.dumps({"body_count": 2, "outputs": [str(o) for o in outs]})
     mock_proc = MagicMock()
     mock_proc.returncode = 0
     mock_proc.stdout = f"KILN_RESULT:{kiln_result}\n"
@@ -412,8 +414,9 @@ def test_gmsh_backend(mock_cq, mock_gmsh, mock_fc, sample_step_file, tmp_dir):
     with patch("kiln.step_import.subprocess.run", return_value=mock_proc):
         result = convert_step_to_stl(str(sample_step_file))
 
+    # Fused by default: two parts, one STL.
     assert result.body_count == 2
-    assert len(result.warnings) >= 0  # gmsh may not warn if merge_bodies=True
+    assert len(result.output_paths) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -429,7 +432,7 @@ def test_parse_subprocess_failure():
     mock_proc.stderr = "Segmentation fault"
 
     with pytest.raises(StepImportError, match="FreeCAD conversion failed"):
-        _parse_subprocess_result(mock_proc, "FreeCAD")
+        _parse_kiln_result(mock_proc, "FreeCAD")
 
 
 def test_parse_subprocess_no_result_line():
@@ -440,7 +443,7 @@ def test_parse_subprocess_no_result_line():
     mock_proc.stderr = ""
 
     with pytest.raises(StepImportError, match="no result"):
-        _parse_subprocess_result(mock_proc, "Gmsh")
+        _parse_kiln_result(mock_proc, "Gmsh")
 
 
 # ---------------------------------------------------------------------------
@@ -482,7 +485,7 @@ def test_cadquery_fallback(mock_cq_avail, mock_gmsh, mock_fc, sample_step_file):
 
     with patch(
         "kiln.step_import._convert_via_cadquery",
-        return_value=([str(out_stl)], 1, None),
+        return_value=_BackendParts(outputs=[str(out_stl)]),
     ):
         result = convert_step_to_stl(str(sample_step_file))
         assert result.body_count == 1
@@ -609,19 +612,20 @@ def test_convert_missing_file():
 
 
 # ---------------------------------------------------------------------------
-# 18. Gmsh merge_bodies warning
+# 18. Gmsh keeps parts apart
 # ---------------------------------------------------------------------------
 
 
 @patch("kiln.step_import._find_freecad_cmd", return_value=None)
 @patch("kiln.step_import._find_gmsh_cmd", return_value="gmsh")
 @patch("kiln.step_import._cadquery_available", return_value=False)
-def test_gmsh_merge_bodies_false_warns(mock_cq, mock_gmsh, mock_fc, sample_step_file):
-    """Gmsh backend warns when merge_bodies=False since it can't split."""
-    out_stl = sample_step_file.parent / "merged.stl"
-    out_stl.write_bytes(b"\x00" * 100)
+def test_gmsh_keeps_parts_apart(mock_cq, mock_gmsh, mock_fc, sample_step_file):
+    """Gmsh writes one mesh per volume, so merge_bodies=False keeps them apart."""
+    outs = [sample_step_file.parent / f"body_{i}.stl" for i in range(2)]
+    for out in outs:
+        out.write_bytes(b"\x00" * 100)
 
-    kiln_result = json.dumps({"body_count": 1, "outputs": [str(out_stl)]})
+    kiln_result = json.dumps({"body_count": 2, "outputs": [str(o) for o in outs]})
     mock_proc = MagicMock()
     mock_proc.returncode = 0
     mock_proc.stdout = f"KILN_RESULT:{kiln_result}\n"
@@ -631,7 +635,9 @@ def test_gmsh_merge_bodies_false_warns(mock_cq, mock_gmsh, mock_fc, sample_step_
         result = convert_step_to_stl(
             str(sample_step_file), merge_bodies=False
         )
-        assert any("split" in w.lower() or "merge" in w.lower() for w in result.warnings)
+        assert result.body_count == 2
+        assert len(result.output_paths) == 2
+        assert not any("split" in w.lower() for w in result.warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -677,7 +683,7 @@ def test_parse_subprocess_malformed_json():
     mock_proc.stderr = ""
 
     with pytest.raises(StepImportError, match="malformed result JSON"):
-        _parse_subprocess_result(mock_proc, "FreeCAD")
+        _parse_kiln_result(mock_proc, "FreeCAD")
 
 
 # ---------------------------------------------------------------------------
@@ -693,7 +699,7 @@ def test_parse_subprocess_missing_keys():
     mock_proc.stderr = ""
 
     with pytest.raises(StepImportError, match="missing required keys"):
-        _parse_subprocess_result(mock_proc, "Gmsh")
+        _parse_kiln_result(mock_proc, "Gmsh")
 
 
 # ---------------------------------------------------------------------------
@@ -727,7 +733,7 @@ def test_convert_no_output_files_raises(mock_cq, mock_gmsh, mock_fc, sample_step
     # Return paths that don't exist on disk.
     with patch(
         "kiln.step_import._convert_via_cadquery",
-        return_value=(["/nonexistent/output.stl"], 1, None),
+        return_value=_BackendParts(outputs=["/nonexistent/output.stl"]),
     ):
         with pytest.raises(StepImportError, match="no output files"):
             convert_step_to_stl(str(sample_step_file))
@@ -807,7 +813,7 @@ def test_parse_subprocess_truncates_stderr():
     mock_proc.stderr = "X" * 1000
 
     with pytest.raises(StepImportError) as exc_info:
-        _parse_subprocess_result(mock_proc, "FreeCAD")
+        _parse_kiln_result(mock_proc, "FreeCAD")
 
     # stderr should be capped at 500 chars.
     assert len(str(exc_info.value)) < 600
@@ -1126,7 +1132,7 @@ def test_the_kernel_kiln_installs_is_held_to_the_versions_ci_runs():
 @patch("kiln.step_import._find_gmsh_cmd", return_value=None)
 @patch("kiln.step_import._ocp_available", return_value=True)
 @patch("kiln.step_import._cadquery_available", return_value=True)
-@patch("kiln.step_import._convert_via_ocp", return_value=(["/tmp/o.stl"], 1, None))
+@patch("kiln.step_import._convert_via_ocp", return_value=_BackendParts(outputs=["/tmp/o.stl"]))
 @patch("kiln.step_import._convert_via_cadquery")
 def test_ocp_preferred_over_cadquery(
     mock_cq_conv, mock_ocp_conv, mock_cq, mock_ocp, mock_gmsh, mock_fc,
@@ -1136,7 +1142,7 @@ def test_ocp_preferred_over_cadquery(
     out = tmp_dir / "out"
     out.mkdir()
     (out / "o.stl").write_bytes(b"x")
-    mock_ocp_conv.return_value = ([str(out / "o.stl")], 1, None)
+    mock_ocp_conv.return_value = _BackendParts(outputs=[str(out / "o.stl")])
 
     convert_step_to_stl(str(sample_step_file), output_dir=str(out))
 
@@ -1156,7 +1162,7 @@ def test_cadquery_still_used_when_ocp_absent(
     out = tmp_dir / "out"
     out.mkdir()
     (out / "o.stl").write_bytes(b"x")
-    mock_cq_conv.return_value = ([str(out / "o.stl")], 1, None)
+    mock_cq_conv.return_value = _BackendParts(outputs=[str(out / "o.stl")])
 
     convert_step_to_stl(str(sample_step_file), output_dir=str(out))
 
@@ -1188,11 +1194,8 @@ def test_ocp_converts_a_real_step_file(real_kernel, tmp_dir):
 
     out_dir = tmp_dir / "out"
     out_dir.mkdir()
-    outputs, body_count, _topology = _convert_via_ocp(
-        step_path, out_dir, merge_bodies=True
-    )
+    outputs = _convert_via_ocp(step_path, out_dir).outputs
 
-    assert body_count == 1
     assert len(outputs) == 1
     data = Path(outputs[0]).read_bytes()
     # Binary STL: 80-byte header, then a uint32 triangle count.
@@ -1313,7 +1316,7 @@ def _write_two_box_step(dest: Path) -> Path:
 
 
 def test_ocp_splits_bodies_when_asked(real_kernel, tmp_dir):
-    """merge_bodies=False writes one STL per solid.
+    """The kernel hands back one STL per solid.
 
     The single-solid happy path never reaches this branch, so without this
     the split code could be broken for as long as nobody imported a real
@@ -1327,11 +1330,8 @@ def test_ocp_splits_bodies_when_asked(real_kernel, tmp_dir):
     out_dir = tmp_dir / "split"
     out_dir.mkdir()
 
-    outputs, body_count, _topology = _convert_via_ocp(
-        step_path, out_dir, merge_bodies=False
-    )
+    outputs = _convert_via_ocp(step_path, out_dir).outputs
 
-    assert body_count == 2
     assert len(outputs) == 2
     assert sorted(p.name for p in out_dir.glob("*.stl")) == ["body_0.stl", "body_1.stl"]
     for out in outputs:
@@ -1344,19 +1344,15 @@ def test_ocp_merges_bodies_by_default(real_kernel, tmp_dir):
     """The same file merged is one STL carrying both boxes."""
     import struct
 
-    from kiln.step_import import _convert_via_ocp
-
     step_path = _write_two_box_step(tmp_dir / "two_boxes.step")
     out_dir = tmp_dir / "merged"
     out_dir.mkdir()
 
-    outputs, body_count, _topology = _convert_via_ocp(
-        step_path, out_dir, merge_bodies=True
-    )
+    result = convert_step_to_stl(str(step_path), str(out_dir))
 
-    assert body_count == 2
-    assert len(outputs) == 1
-    data = Path(outputs[0]).read_bytes()
+    assert result.body_count == 2
+    assert len(result.output_paths) == 1
+    data = Path(result.output_paths[0]).read_bytes()
     assert struct.unpack("<I", data[80:84])[0] == 24  # both boxes
 
 
@@ -1417,7 +1413,7 @@ def test_ocp_conversion_times_out_rather_than_hanging(monkeypatch, sample_step_f
     monkeypatch.setattr("kiln.step_import.subprocess.run", _hang)
 
     with pytest.raises(StepImportError) as exc_info:
-        _convert_via_ocp(Path(str(sample_step_file)), tmp_dir, merge_bodies=True)
+        _convert_via_ocp(Path(str(sample_step_file)), tmp_dir)
 
     assert "timed out" in str(exc_info.value).lower()
 
@@ -1452,7 +1448,7 @@ def test_ocp_runs_out_of_process(monkeypatch, sample_step_file, tmp_dir):
     from kiln.step_import import _convert_via_ocp
 
     monkeypatch.setattr("kiln.step_import.subprocess.run", _fake_run)
-    _convert_via_ocp(Path(str(sample_step_file)), tmp_dir, merge_bodies=True)
+    _convert_via_ocp(Path(str(sample_step_file)), tmp_dir)
 
     from kiln.step_import import SUBPROCESS_TIMEOUT_S
 
@@ -1917,24 +1913,38 @@ def test_convert_step_auto_plain_solid_stays_classic_stl(real_kernel, tmp_dir):
     assert result3.output_format == "3mf"
 
 
-def test_convert_step_auto_without_kernel_uses_classic_path(
+def test_convert_step_auto_without_kernel_keeps_parts_without_colour(
     monkeypatch, sample_step_file, tmp_dir
 ):
-    """FreeCAD/Gmsh installs can't see colour — auto degrades to the
-    classic STL chain instead of failing or pretending."""
+    """FreeCAD/Gmsh installs can't see colour, but they do see parts — auto
+    builds the same per-part 3MF from them, honestly colourless."""
+    import struct
+
     from kiln import step_import
 
-    sentinel = step_import.StepImportResult(
-        output_path="classic.stl", file_size_bytes=1, body_count=1,
-        conversion_time_s=0.0,
-    )
-    monkeypatch.setattr(step_import, "_ocp_available", lambda: False)
-    monkeypatch.setattr(
-        step_import, "convert_step_to_stl", lambda *a, **k: sentinel
-    )
+    def one_triangle(path, x):
+        path.write_bytes(
+            b"\x00" * 80 + struct.pack("<I", 1)
+            + struct.pack("<12f", 0, 0, 1, x, 0, 0, x + 1, 0, 0, x, 1, 0) + b"\x00\x00"
+        )
+        return str(path)
 
-    result = step_import.convert_step(str(sample_step_file))
-    assert result is sentinel
+    work = tmp_dir / "work"
+    work.mkdir()
+    parts = step_import._BackendParts(
+        outputs=[one_triangle(work / "a.stl", 0.0), one_triangle(work / "b.stl", 5.0)],
+        names=["lid", "base"],
+    )
+    record = step_import.MeshConversion(backend="freecad", bound=step_import._FREECAD_BOUND)
+    monkeypatch.setattr(step_import, "_ocp_available", lambda: False)
+    monkeypatch.setattr(step_import, "_parts_via_chain", lambda *a: (parts, record))
+
+    result = step_import.convert_step(str(sample_step_file), output_dir=str(tmp_dir / "out"))
+
+    assert result.output_format == "3mf"
+    assert result.part_names == ["lid", "base"]
+    assert result.part_colors == [None, None]
+    assert result.conversion.backend == "freecad"
 
 
 def test_convert_step_rejects_unknown_format(sample_step_file):
@@ -2309,7 +2319,7 @@ def test_gmsh_too_old_to_bound_falls_through_instead_of_failing(
 
     with patch("kiln.step_import.subprocess.run", _old_gmsh_then_cadquery), patch(
         "kiln.step_import._convert_via_cadquery",
-        return_value=([str(out_stl)], 1, None),
+        return_value=_BackendParts(outputs=[str(out_stl)]),
     ) as fallback:
         result = convert_step_to_stl(str(sample_step_file), output_dir=str(tmp_dir))
 
@@ -3423,7 +3433,7 @@ def test_the_console_flag_reaches_the_subprocess(tmp_path):
 
     with patch("kiln.step_import.subprocess.run", side_effect=fake_run):
         step_import._convert_via_freecad(
-            step, tmp_path, True, ["/Applications/FreeCAD.app/Contents/MacOS/FreeCAD", "-c"]
+            step, tmp_path, ["/Applications/FreeCAD.app/Contents/MacOS/FreeCAD", "-c"]
         )
 
     assert seen["cmd"][:2] == [
@@ -3444,7 +3454,7 @@ def test_a_bare_string_is_refused_rather_than_spelled_out(tmp_path):
     step = tmp_path / "part.step"
     step.write_text("ISO-10303-21;\n")
     with pytest.raises(TypeError):
-        step_import._convert_via_freecad(step, tmp_path, True, "FreeCADCmd")
+        step_import._convert_via_freecad(step, tmp_path, "FreeCADCmd")
 
 
 def test_the_cache_does_not_serve_one_backends_mesh_for_another(tmp_path, monkeypatch):

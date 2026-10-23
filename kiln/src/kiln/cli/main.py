@@ -12808,14 +12808,31 @@ def step_group() -> None:
 @step_group.command("import")
 @click.argument("file_path")
 @click.option("--output-dir", default=None, help="Output directory (default: same as input).")
-@click.option("--merge/--no-merge", "merge_bodies", default=True, help="Merge multi-body STEP into single STL.")
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["auto", "stl", "3mf"]),
+    default="auto",
+    show_default=True,
+    help="auto: one 3MF keeping each part's name, position and colour when the file has several parts or colour; else STL.",
+)
+@click.option(
+    "--merge/--no-merge",
+    "merge_bodies",
+    default=None,
+    help="--merge fuses every part into one STL; --no-merge keeps them apart. Unset follows --format.",
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def step_import(file_path: str, output_dir: str | None, merge_bodies: bool, json_mode: bool) -> None:
-    """Convert a STEP/STP file to STL for printing."""
+def step_import(
+    file_path: str, output_dir: str | None, output_format: str, merge_bodies: bool | None, json_mode: bool
+) -> None:
+    """Convert a STEP/STP file for printing, keeping an assembly's parts."""
     try:
-        from kiln.step_import import convert_step_to_stl
+        from kiln.step_import import convert_step
 
-        result = convert_step_to_stl(file_path, output_dir=output_dir, merge_bodies=merge_bodies)
+        result = convert_step(
+            file_path, output_dir=output_dir, merge_bodies=merge_bodies, output_format=output_format
+        )
         if json_mode:
             click.echo(format_response("success", data=result.to_dict(), json_mode=True))
         else:

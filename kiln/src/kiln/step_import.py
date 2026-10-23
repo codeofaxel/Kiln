@@ -177,6 +177,12 @@ def install_remedy() -> dict[str, Any]:
         "message": _HOSTED_INSTALL_HELP if hosted else _LOCAL_INSTALL_HELP,
     }
 
+# Every backend script follows one rule (see _BackendParts): one mesh per
+# SOLID, each where the assembly placed it, plus one for anything the file
+# holds outside every solid; a file with no solid is one mesh of everything.
+# What to do with those meshes -- fuse, split, or 3MF -- is decided once, in
+# _finish_conversion, never in a script.
+
 # FreeCAD Python helper script executed via FreeCADCmd.
 _FREECAD_SCRIPT_TEMPLATE = r"""
 import sys, json, os
@@ -186,35 +192,57 @@ import Mesh
 
 step_path = {step_path!r}
 output_dir = {output_dir!r}
-merge = {merge!r}
 tolerance = {tolerance!r}
 
 doc = FreeCAD.newDocument("import")
-Part.insert(step_path, doc.Name)
+try:
+    # The importer that keeps the file's part names and assembly placements.
+    import Import
+    Import.insert(step_path, doc.Name)
+except Exception:
+    # A build without it: Part's reader, which names every part after the file.
+    FreeCAD.closeDocument(doc.Name)
+    doc = FreeCAD.newDocument("import")
+    Part.insert(step_path, doc.Name)
 
-bodies = [obj for obj in doc.Objects if hasattr(obj, "Shape")]
-body_count = len(bodies)
 
-if merge or body_count <= 1:
-    shapes = [obj.Shape for obj in bodies]
-    out_path = os.path.join(output_dir, "merged.stl")
-    mesh = Mesh.Mesh()
-    for s in shapes:
-        mesh.addMesh(Mesh.Mesh(s.tessellate(tolerance)))
-    mesh.write(out_path)
-    outputs = [out_path]
-else:
-    outputs = []
-    for i, obj in enumerate(bodies):
-        name = getattr(obj, "Label", "body_%d" % i)
-        name = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
-        out_path = os.path.join(output_dir, "%s.stl" % name)
-        m = Mesh.Mesh()
-        m.addMesh(Mesh.Mesh(obj.Shape.tessellate(tolerance)))
-        m.write(out_path)
-        outputs.append(out_path)
+def is_part(obj):
+    # A shape of its own: not a container of other shapes (an assembly, a
+    # compound of parts), and not a datum plane or axis.
+    if not obj.isDerivedFrom("Part::Feature"):
+        return False
+    return not any(child.isDerivedFrom("Part::Feature") for child in obj.OutList)
 
-result = {{"body_count": body_count, "outputs": outputs}}
+
+outputs, names = [], []
+
+
+def emit(shape, name):
+    out = os.path.join(output_dir, "body_%d.stl" % len(outputs))
+    Mesh.Mesh(shape.tessellate(tolerance)).write(out)
+    outputs.append(out)
+    names.append(name)
+
+
+for obj in doc.Objects:
+    if not is_part(obj) or obj.Shape.isNull():
+        continue
+    shape = obj.Shape.copy()
+    if hasattr(obj, "getGlobalPlacement"):
+        # Inside an assembly a part's own placement is relative to its parent.
+        shape.Placement = obj.getGlobalPlacement()
+    solids = shape.Solids
+    if not solids:
+        emit(shape, obj.Label)
+        continue
+    inside = set(f.hashCode() for s in solids for f in s.Faces)
+    loose = [f for f in shape.Faces if f.hashCode() not in inside]
+    for solid in solids:
+        emit(solid, obj.Label)
+    if loose:
+        emit(Part.makeCompound(loose), obj.Label)
+
+result = {{"body_count": len(outputs), "outputs": outputs, "names": names}}
 print("KILN_RESULT:" + json.dumps(result))
 """
 
@@ -244,10 +272,6 @@ except Exception:
     raise SystemExit({unboundable_exit})
 gmsh.open(step_path)
 
-entities = gmsh.model.getEntities(3)
-body_count = max(len(entities), 1)
-
-out_path = os.path.join(output_dir, "merged.stl")
 gmsh.model.mesh.generate(2)
 # Binary, like every other backend: smaller, and it carries the header mark
 # a later conversion reads to know the file is its own.  An ASCII mesh is
@@ -256,10 +280,48 @@ try:
     gmsh.option.setNumber("Mesh.Binary", 1)
 except Exception:
     pass
-gmsh.write(out_path)
+
+outputs, names = [], []
+
+
+def name_of(dim, tag):
+    # The file's label for the entity, when this gmsh imported one.
+    try:
+        return gmsh.model.getEntityName(dim, tag).rsplit("/", 1)[-1]
+    except Exception:
+        return ""
+
+
+def write_surfaces(tags, name):
+    # While a physical group exists, only the elements in one are written.
+    group = gmsh.model.addPhysicalGroup(2, tags)
+    out = os.path.join(output_dir, "body_%d.stl" % len(outputs))
+    gmsh.write(out)
+    gmsh.model.removePhysicalGroups([(2, group)])
+    outputs.append(out)
+    names.append(name)
+
+
+volumes = gmsh.model.getEntities(3)
+if volumes:
+    gmsh.option.setNumber("Mesh.SaveAll", 0)
+    bounded = set()
+    for dim, tag in volumes:
+        faces = [t for _, t in gmsh.model.getBoundary(
+            [(dim, tag)], combined=False, oriented=False, recursive=False
+        )]
+        bounded.update(faces)
+        write_surfaces(faces, name_of(dim, tag))
+    loose = [t for _, t in gmsh.model.getEntities(2) if t not in bounded]
+    if loose:
+        write_surfaces(loose, "")
+else:
+    out = os.path.join(output_dir, "body_0.stl")
+    gmsh.write(out)
+    outputs, names = [out], [""]
 gmsh.finalize()
 
-result = {{"body_count": body_count, "outputs": [out_path]}}
+result = {{"body_count": len(outputs), "outputs": outputs, "names": names}}
 print("KILN_RESULT:" + json.dumps(result))
 """
 
@@ -485,13 +547,48 @@ class MeshConversion:
     source: SourceTopology | None = None
     """What the kernel counted in the file, when the backend that ran can say.
 
-    ``None`` is a state, not a gap: only the two kernel backends (``occt``,
-    ``cadquery``) read a topology Kiln can count.  FreeCAD and gmsh are
-    driven as converters — they are handed a path and hand back a mesh — and
-    the colour-aware ``occt-xcaf`` path walks document labels rather than
-    the shape tree.  Reporting zero solids for those would turn "we did not
-    look" into "there is no solid", which is the one wrong answer here.
+    ``None`` is a state, not a gap: only the kernel backends (``occt``,
+    ``occt-xcaf``, ``cadquery``) read a topology Kiln can count.  FreeCAD
+    and gmsh are driven as converters — they are handed a path and hand back
+    meshes — so reporting zero solids for those would turn "we did not look"
+    into "there is no solid", which is the one wrong answer here.
     """
+
+
+@dataclass
+class _BackendParts:
+    """What every backend hands back: one mesh per solid, already in place.
+
+    The rule every backend follows, in its own library's terms: a STEP's
+    parts are its SOLIDS — each instance of an assembly component, each
+    solid inside a compound — never the objects a CAD document happens to
+    group them into.  Each is written where the assembly placed it.  What
+    the file holds outside every solid (loose surfaces beside the parts) is
+    one more mesh, so nothing in the file is dropped; a file with no solid
+    at all is one mesh of everything.
+
+    Whether those meshes are then fused into one STL, kept as separate STLs,
+    or written as one 3MF is not a backend's decision.  It is made once, by
+    :func:`_finish_conversion`, so a backend that found the parts can never
+    be overruled into one anonymous mesh by a branch of its own.
+    """
+
+    outputs: list[str]
+    """One binary STL per part, in the backend's scratch folder."""
+
+    names: list[str] = field(default_factory=list)
+    """The file's name for each part; ``""`` where the backend cannot read one."""
+
+    colors: list[str | None] = field(default_factory=list)
+    """``#RRGGBB`` per part, or ``None`` where the file (or backend) has none."""
+
+    topology: SourceTopology | None = None
+    """The kernel's census of the file, when the backend can take one."""
+
+    def __post_init__(self) -> None:
+        n = len(self.outputs)
+        self.names = (list(self.names) + [""] * n)[:n]
+        self.colors = (list(self.colors) + [None] * n)[:n]
 
 
 @dataclass
@@ -505,12 +602,13 @@ class StepImportResult:
     """Size of the output STL file(s) in bytes."""
 
     body_count: int
-    """How many meshes the conversion planned to write — at least 1.
+    """How many parts the file came apart into — at least 1.
 
-    Not a count of solids, though it equals one for every file that has any:
-    a surface model has no solid and still writes its single merged mesh, so
-    this floors at 1 where :attr:`MeshConversion.source` reports 0.  The
-    honest count of what the file DECLARED lives there.
+    One per solid (an assembly component placed twice is two), whether the
+    output keeps them apart or fused them into one STL on request.  Not
+    quite a count of solids: a surface model has no solid and is still one
+    part, so this floors at 1 where :attr:`MeshConversion.source` reports 0.
+    The honest count of what the file DECLARED lives there.
     """
 
     conversion_time_s: float
@@ -526,17 +624,23 @@ class StepImportResult:
     """``"stl"`` or ``"3mf"`` — what :attr:`output_path` actually is."""
 
     part_names: list[str] = field(default_factory=list)
-    """Per-part names, when the colour-aware path ran — as a user will see them.
+    """One name per part, :attr:`body_count` of them — as a user will see them.
 
     These are the names as written to the output, whatever its format, so a
-    caller can address a part by the name it will read there.  A STEP may name
-    two bodies the same and may name none of them at all; the output may do
-    neither (see :func:`~kiln.threemf_parser.unique_object_names`), so a repeat
-    carries a ``" (2)"`` suffix and a body nobody named reads as ``Part 1``.
+    caller can address a part by the name it will read there: a 3MF object's
+    name, a per-part STL's file name.  (A fused STL holds no names; these
+    then say what went into it.)  A STEP may name two bodies the same and may
+    name none of them at all; the output may do neither (see
+    :func:`~kiln.threemf_parser.unique_object_names`), so a repeat carries a
+    ``" (2)"`` suffix and a body nobody named reads as ``Part 1``.
     """
 
     part_colors: list[str | None] = field(default_factory=list)
-    """Per-part ``#RRGGBB`` colours (or ``None``), same order as names."""
+    """Per-part ``#RRGGBB`` colours (or ``None``), same order as names.
+
+    Only the OCCT kernel reads a STEP's colours; on FreeCAD, gmsh or
+    cadquery every entry is ``None``.
+    """
 
     conversion: MeshConversion | None = None
     """Which backend drew this mesh, and at what density.
@@ -837,12 +941,8 @@ def _publish_outputs(
             continue
         base = stem if len(outputs) == 1 else f"{stem}_{src.stem}"
         dest, note = _claim_output_name(out_dir, base, src.suffix or ".stl")
-        # Whichever backend wrote it: the kernel's mesher leaves facets with
-        # no area at the pole of every ball-rounded corner, and a mesh that
-        # carries them reads as an open surface.
-        from kiln.cad_kernel import drop_collapsed_facets
-
-        drop_collapsed_facets(str(src))
+        # Already cleaned of collapsed facets by _finish_conversion, the one
+        # caller, before it asked whether each part is closed.
         _stamp_binary_stl(src)
         _move_into(src, dest)
         published.append(str(dest))
@@ -1044,16 +1144,17 @@ def check_step_support() -> dict[str, Any]:
 def _convert_via_freecad(
     step_path: Path,
     output_dir: Path,
-    merge_bodies: bool,
     freecad_cmd: Sequence[str],
-) -> tuple[list[str], int]:
-    """Run FreeCAD with a helper script to convert STEP → STL.
+) -> _BackendParts:
+    """Run FreeCAD with a helper script to convert STEP → one STL per part.
 
     *freecad_cmd* is the argv from :func:`_find_freecad_cmd`, not a bare
     name — the console flag has to stay attached to the binary that needs it.
 
-    Returns:
-        (list of output paths, body_count)
+    Names come from FreeCAD's assembly-aware importer, which labels each part
+    as the file names it (a repeat placement gets FreeCAD's own ``001``
+    suffix); on a build without that importer every part is named after the
+    file.  FreeCAD reports no colours and no topology here.
     """
     if isinstance(freecad_cmd, str):
         # A str is a Sequence[str], so splatting one would spell the command
@@ -1063,7 +1164,6 @@ def _convert_via_freecad(
     script = _FREECAD_SCRIPT_TEMPLATE.format(
         step_path=str(step_path),
         output_dir=str(output_dir),
-        merge=merge_bodies,
         tolerance=TESSELLATION_TOLERANCE,
     )
 
@@ -1093,14 +1193,18 @@ def _convert_via_freecad(
     # environment ahead of the script's own output, so this has to scan for
     # the KILN_RESULT prefix rather than read a clean stdout — which
     # _parse_kiln_result already does, line by line.
-    return _parse_subprocess_result(result, "FreeCAD")
+    return _parts_from_result(_parse_kiln_result(result, "FreeCAD"))
 
 
 def _convert_via_gmsh(
     step_path: Path,
     output_dir: Path,
-) -> tuple[list[str], int]:
-    """Run gmsh Python script to convert STEP → STL.
+) -> _BackendParts:
+    """Run gmsh Python script to convert STEP → one STL per volume.
+
+    Each volume is written from its own boundary surfaces, so two parts
+    that touch stay two closed meshes.  Names are whatever label this gmsh
+    imported for the volume, often none.
 
     Density is bounded by :data:`_GMSH_CURVATURE_ELEMENTS`: gmsh is asked for
     126 elements per full circle, which measures out at roughly R/700 of
@@ -1110,9 +1214,6 @@ def _convert_via_gmsh(
     whatever the installed gmsh derived from the model's bounding box: 330
     triangles and over 3 mm of sag on that sphere, differing per machine
     with nothing in the result to say so.
-
-    Returns:
-        (list of output paths, body_count)
 
     Raises:
         RuntimeError: the installed gmsh will not accept a density bound.
@@ -1154,7 +1255,7 @@ def _convert_via_gmsh(
             "(needs Mesh.MeshSizeFromCurvature, gmsh 4.7+)"
         )
 
-    return _parse_subprocess_result(result, "Gmsh")
+    return _parts_from_result(_parse_kiln_result(result, "Gmsh"))
 
 
 #: Tessellation bounds, set from what the PRINT PIPELINE can express rather
@@ -1280,102 +1381,27 @@ _GMSH_BOUND = TessellationBound(
 
 
 # Runs in a CHILD interpreter — see _convert_via_ocp for why.
-_OCP_SCRIPT_TEMPLATE = r'''
-import json, os, sys
-
-from OCP.BRepMesh import BRepMesh_IncrementalMesh
-from OCP.IFSelect import IFSelect_ReturnStatus
-from OCP.StlAPI import StlAPI_Writer
-from OCP.STEPControl import STEPControl_Reader
-from OCP.TopAbs import TopAbs_ShapeEnum
-from OCP.TopExp import TopExp_Explorer
-
-step_path = {step_path!r}
-output_dir = {output_dir!r}
-merge = {merge!r}
-linear = {linear!r}
-angular = {angular!r}
-
-reader = STEPControl_Reader()
-if reader.ReadFile(step_path) != IFSelect_ReturnStatus.IFSelect_RetDone:
-    sys.stderr.write("OCCT could not read the STEP file\n")
-    raise SystemExit(3)
-reader.TransferRoots()
-shape = reader.OneShape()
-
-solids = []
-explorer = TopExp_Explorer(shape, TopAbs_ShapeEnum.TopAbs_SOLID)
-while explorer.More():
-    solids.append(explorer.Current())
-    explorer.Next()
-
-# body_count is a WRITE PLAN — how many STLs to emit — so a file with no
-# solid still writes its one merged mesh.  The true count goes out
-# separately: `or 1` is where a surface model used to become "1 body" and
-# the only record of what the file actually declared was lost.
-body_count = len(solids) or 1
-
-
-def count(kind):
-    exp = TopExp_Explorer(shape, kind)
-    n = 0
-    while exp.More():
-        n += 1
-        exp.Next()
-    return n
-
-
-topology = {{
-    "solids": len(solids),
-    "shells": count(TopAbs_ShapeEnum.TopAbs_SHELL),
-    "faces": count(TopAbs_ShapeEnum.TopAbs_FACE),
-}}
-
-
-def write(target, path):
-    # Tessellate in place, then write: an untriangulated shape writes an
-    # EMPTY stl rather than failing, so meshing first is not optional.
-    BRepMesh_IncrementalMesh(target, linear, False, angular, True)
-    writer = StlAPI_Writer()
-    writer.ASCIIMode = False  # binary: ~4x smaller, identical geometry
-    writer.Write(target, path)
-
-
-if merge or body_count <= 1:
-    out = os.path.join(output_dir, "merged.stl")
-    write(shape, out)
-    outputs = [out]
-else:
-    outputs = []
-    for i, solid in enumerate(solids):
-        out = os.path.join(output_dir, "body_%d.stl" % i)
-        write(solid, out)
-        outputs.append(out)
-
-print("KILN_RESULT:" + json.dumps(
-    {{"outputs": outputs, "body_count": body_count, "topology": topology}}
-))
-'''
-
-
-# The colour-aware sibling of _OCP_SCRIPT_TEMPLATE, used when the caller
-# wants part colours and names preserved (see convert_step).  A separate
-# template rather than a flag fork: the two scripts share only the meshing
-# helper, and keeping the plain one byte-stable means its tests and its
-# behavior cannot drift while this one evolves.
 #
 # XCAF is OCCT's document layer — STEPCAFControl_Reader reads the same file
-# as STEPControl_Reader but ALSO populates colour and name attributes.  Each
-# top-level ("free") shape label is one part.  Colours nested deeper than
-# the per-part level (a sub-face painted differently inside one part) are
-# out of scope here and fall back to the part's own colour.
+# as the plain STEPControl_Reader but ALSO keeps the assembly tree, names and
+# colours.  The tree is walked down to its leaves: an assembly's components
+# are visited at their own placement, composed with their parents', so one
+# part placed twice is two parts, each where the assembly put it.  Reading
+# only the top-level ("free") labels, as this once did, hands back an
+# assembly as ONE shape under the assembly's name -- six parts, one mesh.
+# Each leaf then splits by solid (see _BackendParts for the rule).
+#
+# Colours nested deeper than the per-part level (a sub-face painted
+# differently inside one part) are out of scope here and fall back to the
+# part's own colour, then to the nearest enclosing assembly's.
 #
 # Binding gotcha that cost a probe cycle (2026-07-28): in this OCP build,
 # ColorTool.GetColor takes the TopoDS_Shape (via ShapeTool.GetShape_s), not
 # the label — the label overload expects a label OUT-param.
-_OCP_XCAF_SCRIPT_TEMPLATE = r'''
+_OCP_PARTS_SCRIPT_TEMPLATE = r'''
 import json, os, sys
 
+from OCP.BRep import BRep_Builder
 from OCP.BRepMesh import BRepMesh_IncrementalMesh
 from OCP.IFSelect import IFSelect_ReturnStatus
 from OCP.Quantity import Quantity_Color
@@ -1383,12 +1409,15 @@ from OCP.STEPCAFControl import STEPCAFControl_Reader
 from OCP.StlAPI import StlAPI_Writer
 from OCP.TCollection import TCollection_ExtendedString
 from OCP.TDataStd import TDataStd_Name
+from OCP.TDF import TDF_Label
 try:
     from OCP.TDF import TDF_LabelSequence
 except ImportError:  # OCP 8.0 moved the collection types into OCP.collections
     from OCP.collections import Sequence_TDF_Label as TDF_LabelSequence
 from OCP.TopAbs import TopAbs_ShapeEnum
 from OCP.TopExp import TopExp_Explorer
+from OCP.TopLoc import TopLoc_Location
+from OCP.TopoDS import TopoDS_Compound
 from OCP.TDocStd import TDocStd_Document
 from OCP.XCAFApp import XCAFApp_Application
 from OCP.XCAFDoc import XCAFDoc_ColorType, XCAFDoc_DocumentTool
@@ -1397,6 +1426,10 @@ step_path = {step_path!r}
 output_dir = {output_dir!r}
 linear = {linear!r}
 angular = {angular!r}
+
+SOLID = TopAbs_ShapeEnum.TopAbs_SOLID
+SHELL = TopAbs_ShapeEnum.TopAbs_SHELL
+FACE = TopAbs_ShapeEnum.TopAbs_FACE
 
 app = XCAFApp_Application.GetApplication_s()
 doc = TDocStd_Document(TCollection_ExtendedString("MDTV-XCAF"))
@@ -1424,7 +1457,7 @@ def write(target, path):
     # EMPTY stl rather than failing, so meshing first is not optional.
     BRepMesh_IncrementalMesh(target, linear, False, angular, True)
     writer = StlAPI_Writer()
-    writer.ASCIIMode = False
+    writer.ASCIIMode = False  # binary: ~4x smaller, identical geometry
     writer.Write(target, path)
 
 
@@ -1437,21 +1470,29 @@ def count(target, kind):
     return n
 
 
-# Summed over the free shapes, which together ARE the file: this path walks
-# document labels rather than one root shape, so the census is accumulated
-# instead of read off a single tree.  Same three numbers as the plain
-# reader's, so a caller cannot tell which backend counted them.
-topology = {{"solids": 0, "shells": 0, "faces": 0}}
+def pieces(shape):
+    # The solids in *shape*, then whatever it holds outside every solid.
+    solids = []
+    exp = TopExp_Explorer(shape, SOLID)
+    while exp.More():
+        solids.append(exp.Current())
+        exp.Next()
+    if not solids:
+        return [shape]
+    loose = TopoDS_Compound()
+    builder = BRep_Builder()
+    builder.MakeCompound(loose)
+    found = 0
+    for kind, avoid in ((SHELL, SOLID), (FACE, SHELL)):
+        exp = TopExp_Explorer(shape, kind, avoid)
+        while exp.More():
+            builder.Add(loose, exp.Current())
+            found += 1
+            exp.Next()
+    return solids + ([loose] if found else [])
 
-outputs, names, colors = [], [], []
-for i in range(1, labels.Length() + 1):
-    label = labels.Value(i)
-    shape = shape_tool.GetShape_s(label)
 
-    topology["solids"] += count(shape, TopAbs_ShapeEnum.TopAbs_SOLID)
-    topology["shells"] += count(shape, TopAbs_ShapeEnum.TopAbs_SHELL)
-    topology["faces"] += count(shape, TopAbs_ShapeEnum.TopAbs_FACE)
-
+def label_name(label):
     # Two things a STEP calls a "name" were stamped by software, not chosen by
     # a person, and both reach the user as gibberish in a slicer's object list:
     #
@@ -1459,37 +1500,83 @@ for i in range(1, labels.Length() + 1):
     #   PRODUCT('Open CASCADE STEP translator 7.9 1')  - writer's own identity
     #
     # Both are reported as unnamed so the caller can label them "Part 1".  The
-    # first test is against THIS body's own type rather than a list of words,
-    # so a FACE someone deliberately called "SOLID" keeps the name they chose;
-    # the second is a prefix because the trailing counter varies per file.
-    name_attr = TDataStd_Name()
-    name = ""
-    if label.FindAttribute(TDataStd_Name.GetID_s(), name_attr):
-        got = name_attr.Get().ToExtString().strip()
-        stamped_by_software = (
-            got == shape.ShapeType().name.removeprefix("TopAbs_")
-            or got.startswith("Open CASCADE STEP translator")
-        )
-        if not stamped_by_software:
-            name = got
+    # first test is against THIS label's own shape type rather than a list of
+    # words, so a FACE someone deliberately called "SOLID" keeps the name they
+    # chose; the second is a prefix because the trailing counter varies.
+    attr = TDataStd_Name()
+    if not label.FindAttribute(TDataStd_Name.GetID_s(), attr):
+        return ""
+    got = attr.Get().ToExtString().strip()
+    shape = shape_tool.GetShape_s(label)
+    stamped_by_software = (
+        (not shape.IsNull() and got == shape.ShapeType().name.removeprefix("TopAbs_"))
+        or got.startswith("Open CASCADE STEP translator")
+    )
+    return "" if stamped_by_software else got
 
+
+def label_color(label):
+    shape = shape_tool.GetShape_s(label)
+    if shape.IsNull():
+        return None
     col = Quantity_Color()
-    color = None
     for kind in (XCAFDoc_ColorType.XCAFDoc_ColorGen,
                  XCAFDoc_ColorType.XCAFDoc_ColorSurf):
         if color_tool.GetColor(shape, kind, col):
-            color = "#%02X%02X%02X" % (
+            return "#%02X%02X%02X" % (
                 round(col.Red() * 255),
                 round(col.Green() * 255),
                 round(col.Blue() * 255),
             )
-            break
+    return None
 
-    out = os.path.join(output_dir, "xcaf_part_%d.stl" % (i - 1))
-    write(shape, out)
-    outputs.append(out)
-    names.append(name)
-    colors.append(color)
+
+# Summed over every placed part, so a part placed twice counts twice --
+# which is what the file declares, and what the plain reader's one root
+# shape counts too.
+topology = {{"solids": 0, "shells": 0, "faces": 0}}
+outputs, names, colors = [], [], []
+
+
+def visit(label, location, fallback_name, instance_color, inherited_color):
+    # An instance's own colour wins over its part's, and that over the
+    # enclosing assembly's.
+    color = instance_color or label_color(label) or inherited_color
+    if shape_tool.IsAssembly_s(label):
+        components = TDF_LabelSequence()
+        shape_tool.GetComponents_s(label, components, False)
+        for i in range(1, components.Length() + 1):
+            component = components.Value(i)
+            referred = TDF_Label()
+            if not shape_tool.GetReferredShape_s(component, referred):
+                continue
+            visit(
+                referred,
+                location.Multiplied(shape_tool.GetLocation_s(component)),
+                label_name(component),
+                label_color(component),
+                color,
+            )
+        return
+    shape = shape_tool.GetShape_s(label)
+    if shape.IsNull():
+        return
+    shape = shape.Moved(location)
+    # The part's own name (its PRODUCT) before the instance's ("bracket:2").
+    name = label_name(label) or fallback_name
+    topology["solids"] += count(shape, SOLID)
+    topology["shells"] += count(shape, SHELL)
+    topology["faces"] += count(shape, FACE)
+    for piece in pieces(shape):
+        out = os.path.join(output_dir, "body_%d.stl" % len(outputs))
+        write(piece, out)
+        outputs.append(out)
+        names.append(name)
+        colors.append(color)
+
+
+for i in range(1, labels.Length() + 1):
+    visit(labels.Value(i), TopLoc_Location(), "", None, None)
 
 print("KILN_RESULT:" + json.dumps({{
     "outputs": outputs, "body_count": len(outputs),
@@ -1501,9 +1588,12 @@ print("KILN_RESULT:" + json.dumps({{
 def _convert_via_ocp(
     step_path: Path,
     output_dir: Path,
-    merge_bodies: bool,
-) -> tuple[list[str], int]:
-    """Use the OCCT kernel to convert STEP → STL, in a child interpreter.
+) -> _BackendParts:
+    """Use the OCCT kernel to convert STEP → one STL per part, in a child interpreter.
+
+    The one kernel reader behind both the plain door and the colour-aware
+    one: it walks the assembly tree, so it hands back each part with its
+    name, colour and placement (:data:`_OCP_PARTS_SCRIPT_TEMPLATE`).
 
     The same kernel cadquery wraps, called without the wrapper.  Preferred
     over :func:`_convert_via_cadquery` when both are present: it skips
@@ -1526,14 +1616,10 @@ def _convert_via_ocp(
 
     The cost is one interpreter start (~0.3 s) per conversion, which the
     other two backends already pay and a CAD import can afford.
-
-    Returns:
-        (list of output paths, body_count, source topology)
     """
-    script = _OCP_SCRIPT_TEMPLATE.format(
+    script = _OCP_PARTS_SCRIPT_TEMPLATE.format(
         step_path=str(step_path),
         output_dir=str(output_dir),
-        merge=merge_bodies,
         linear=_OCP_LINEAR_DEFLECTION,
         angular=_OCP_ANGULAR_DEFLECTION,
     )
@@ -1561,25 +1647,24 @@ def _convert_via_ocp(
         os.unlink(script_path)
 
     data = _parse_kiln_result(result, "OCCT")
-    return data["outputs"], data["body_count"], _topology_from_result(data)
+    return _parts_from_result(data, topology=_topology_from_result(data))
 
 
 def _convert_via_cadquery(
     step_path: Path,
     output_dir: Path,
-    merge_bodies: bool,
-) -> tuple[list[str], int]:
-    """Use cadquery (in-process) to convert STEP → STL.
+) -> _BackendParts:
+    """Use cadquery (in-process) to convert STEP → one STL per solid.
 
-    Returns:
-        (list of output paths, body_count, source topology)
+    Reached only when the bare kernel is not importable, which a working
+    cadquery (built on that kernel) makes rare.  Its selectors cannot ask for
+    "faces outside every solid", so loose surfaces beside solids are not
+    written here; a file with no solid is still written whole.  No names.
     """
     import cadquery as cq  # type: ignore[import-untyped]
 
     result = cq.importers.importStep(str(step_path))
     solids = result.solids().vals()
-    # See the OCP script: body_count is the write plan, topology is the fact.
-    body_count = len(solids) if solids else 1
     topology = SourceTopology(
         solids=len(solids),
         shells=len(result.shells().vals()),
@@ -1595,18 +1680,13 @@ def _convert_via_cadquery(
         "angularTolerance": _OCP_ANGULAR_DEFLECTION,
     }
 
-    if merge_bodies or body_count <= 1:
-        out_path = str(output_dir / "merged.stl")
-        cq.exporters.export(result, out_path, exportType="STL", **_tess)
-        return [out_path], body_count, topology
-    else:
-        outputs: list[str] = []
-        for i, solid in enumerate(solids):
-            out_path = str(output_dir / f"body_{i}.stl")
-            ws = cq.Workplane().add(solid)
-            cq.exporters.export(ws, out_path, exportType="STL", **_tess)
-            outputs.append(out_path)
-        return outputs, body_count, topology
+    outputs: list[str] = []
+    for i, piece in enumerate(solids or [None]):
+        out_path = str(output_dir / f"body_{i}.stl")
+        target = result if piece is None else cq.Workplane().add(piece)
+        cq.exporters.export(target, out_path, exportType="STL", **_tess)
+        outputs.append(out_path)
+    return _BackendParts(outputs=outputs, topology=topology)
 
 
 def _parse_kiln_result(
@@ -1688,72 +1768,24 @@ def _topology_from_result(data: dict[str, Any]) -> SourceTopology | None:
         return None
 
 
-def _parse_subprocess_result(
-    result: subprocess.CompletedProcess[str],
-    backend_name: str,
-) -> tuple[list[str], int]:
-    """Extract KILN_RESULT JSON from subprocess stdout.
+def _parts_from_result(
+    data: dict[str, Any],
+    *,
+    topology: SourceTopology | None = None,
+) -> _BackendParts:
+    """A child script's KILN_RESULT, as the parts every backend hands back.
 
-    Returns:
-        (list of output paths, body_count)
-
-    Raises:
-        StepImportError: If the subprocess failed or result not found.
+    Names and colours are blank where a script did not send them: naming an
+    unnamed part happens in ONE place
+    (:func:`~kiln.threemf_parser.unique_object_names`), so every door reports
+    the same "Part 1" instead of each growing its own fallback.
     """
-    data = _parse_kiln_result(result, backend_name)
-    return data["outputs"], data["body_count"]
-
-
-def _convert_via_ocp_xcaf(
-    step_path: Path,
-    output_dir: Path,
-) -> dict[str, Any]:
-    """Colour-aware OCCT conversion: one STL per part, plus names + colours.
-
-    Same child-process discipline as :func:`_convert_via_ocp` (timeout, OOM
-    isolation), different reader: XCAF sees the STEP's colour and name
-    attributes that the plain reader discards.  The caller decides what to
-    assemble from the parts — see :func:`convert_step`.
-
-    Returns:
-        The child's result dict: ``outputs``, ``body_count``, ``names``,
-        ``colors`` (hex string or ``None`` per part).
-    """
-    script = _OCP_XCAF_SCRIPT_TEMPLATE.format(
-        step_path=str(step_path),
-        output_dir=str(output_dir),
-        linear=_OCP_LINEAR_DEFLECTION,
-        angular=_OCP_ANGULAR_DEFLECTION,
+    return _BackendParts(
+        outputs=list(data["outputs"]),
+        names=[n or "" for n in data.get("names") or []],
+        colors=list(data.get("colors") or []),
+        topology=topology,
     )
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
-        f.write(script)
-        script_path = f.name
-
-    try:
-        result = subprocess.run(
-            [sys.executable, script_path],
-            capture_output=True,
-            text=True,
-            timeout=SUBPROCESS_TIMEOUT_S,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise StepImportError(
-            f"STEP conversion timed out after {SUBPROCESS_TIMEOUT_S}s. "
-            "The file is probably a large assembly — try converting a single "
-            "part, or simplify it in your CAD tool first."
-        ) from exc
-    finally:
-        os.unlink(script_path)
-
-    data = _parse_kiln_result(result, "OCCT")
-    n = len(data["outputs"])
-    # Blank rather than invented: naming an unnamed part happens in ONE place
-    # (:func:`~kiln.threemf_parser.unique_object_names`), so every door reports
-    # the same "Part 1" instead of each growing its own fallback.
-    data.setdefault("names", [""] * n)
-    data.setdefault("colors", [None] * n)
-    return data
 
 
 def _read_binary_stl(path: str) -> list[tuple[tuple[float, float, float], ...]]:
@@ -2561,17 +2593,21 @@ def convert_step_to_stl(
     """Convert a STEP (.step/.stp) file to STL.
 
     Tries backends in order: FreeCADCmd → gmsh → OCCT kernel (OCP) → cadquery.
+    Every one of them splits the file into its parts the same way (see
+    :class:`_BackendParts`), so the count, names and placement of what comes
+    out do not depend on which one this machine has.
 
-    Output is named after the STEP (``part.step`` → ``part.stl``, per body
-    ``part_body_0.stl``) and never replaces a file Kiln did not make — see
-    :func:`_claim_output_name`.
+    Output is named after the STEP (``part.step`` → ``part.stl``, per part
+    ``part_<part name>.stl``) and never replaces a file Kiln did not make —
+    see :func:`_claim_output_name`.
 
     Args:
         step_path: Path to the STEP file.
         output_dir: Directory for output STL(s).  Defaults to the STEP
             file's parent directory.
-        merge_bodies: If ``True`` (default), merge all bodies into one STL.
-            If ``False``, export each body as a separate STL.
+        merge_bodies: If ``True`` (default), fuse every part into one STL —
+            what a pipeline that only measures geometry wants.  If
+            ``False``, write one STL per part.
 
     Returns:
         A :class:`StepImportResult` with output path, body count, timing,
@@ -2589,124 +2625,224 @@ def convert_step_to_stl(
     # reach out_dir, under their STEP's name (_publish_outputs).
     scratch = Path(tempfile.mkdtemp(prefix="kiln_step_work_"))
     try:
-        return _convert_step_to_stl_via(validated_path, out_dir, scratch, merge_bodies)
+        t0 = time.monotonic()
+        warnings: list[str] = []
+        parts, conversion = _parts_via_chain(validated_path, scratch, warnings)
+        return _finish_conversion(
+            parts, conversion, warnings, validated_path, out_dir,
+            merge=merge_bodies, output_format="stl", started=t0,
+        )
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 
 
-def _convert_step_to_stl_via(
+def _parts_via_chain(
     validated_path: Path,
-    out_dir: Path,
     scratch: Path,
-    merge_bodies: bool,
-) -> StepImportResult:
-    """:func:`convert_step_to_stl`, with the backends writing into *scratch*."""
-    warnings: list[str] = []
-    # Set where a backend SUCCEEDS, never where one is merely attempted: the
-    # fall-through means the backend that ran is not the one the priority
-    # order names on a machine where an earlier one is installed but broken.
-    conversion: MeshConversion | None = None
-    t0 = time.monotonic()
+    warnings: list[str],
+) -> tuple[_BackendParts, MeshConversion]:
+    """Run the first backend that works, in priority order; return its parts.
 
-    # Try backends in priority order.
+    The record is set where a backend SUCCEEDS, never where one is merely
+    attempted: the fall-through means the backend that ran is not the one
+    the priority order names on a machine where an earlier one is installed
+    but broken.  A backend's failure is a note in *warnings* on the way past.
+    """
     freecad_cmd = _find_freecad_cmd()
     if freecad_cmd is not None:
         logger.info("Converting STEP via FreeCAD (%s)", freecad_cmd)
         try:
-            outputs, body_count = _convert_via_freecad(
-                validated_path, scratch, merge_bodies, freecad_cmd
-            )
-            conversion = MeshConversion(backend="freecad", bound=_FREECAD_BOUND)
+            parts = _convert_via_freecad(validated_path, scratch, freecad_cmd)
+            return parts, MeshConversion(backend="freecad", bound=_FREECAD_BOUND)
         except StepImportError:
             raise
         except Exception as exc:
             warnings.append(f"FreeCAD failed ({exc}), trying next backend")
             logger.warning("FreeCAD backend failed: %s", exc)
-            freecad_cmd = None  # fall through
 
-    if freecad_cmd is None:
-        gmsh_cmd = _find_gmsh_cmd()
-        if gmsh_cmd is not None:
-            logger.info("Converting STEP via Gmsh")
-            if not merge_bodies:
-                warnings.append(
-                    "Gmsh backend does not support per-body split; "
-                    "producing merged output."
-                )
-            try:
-                outputs, body_count = _convert_via_gmsh(validated_path, scratch)
-                conversion = MeshConversion(backend="gmsh", bound=_GMSH_BOUND)
-            except StepImportError:
-                raise
-            except Exception as exc:
-                warnings.append(f"Gmsh failed ({exc}), trying next backend")
-                logger.warning("Gmsh backend failed: %s", exc)
-                gmsh_cmd = None
+    if _find_gmsh_cmd() is not None:
+        logger.info("Converting STEP via Gmsh")
+        try:
+            parts = _convert_via_gmsh(validated_path, scratch)
+            return parts, MeshConversion(backend="gmsh", bound=_GMSH_BOUND)
+        except StepImportError:
+            raise
+        except Exception as exc:
+            warnings.append(f"Gmsh failed ({exc}), trying next backend")
+            logger.warning("Gmsh backend failed: %s", exc)
 
-        if gmsh_cmd is None:
-            # OCP before cadquery: it IS cadquery's kernel, so anyone with
-            # cadquery has it, and going direct skips a ~2 s import for the
-            # same geometry.
-            if _ocp_available():
-                logger.info("Converting STEP via OCCT (OCP)")
-                outputs, body_count, topology = _convert_via_ocp(
-                    validated_path, scratch, merge_bodies
-                )
-                conversion = MeshConversion(
-                    backend="occt", bound=_KERNEL_BOUND, source=topology
-                )
-            elif _cadquery_available():
-                logger.info("Converting STEP via CadQuery")
-                outputs, body_count, topology = _convert_via_cadquery(
-                    validated_path, scratch, merge_bodies
-                )
-                conversion = MeshConversion(
-                    backend="cadquery", bound=_KERNEL_BOUND, source=topology
-                )
-            else:
-                raise NoBackendError()
+    # OCP before cadquery: it IS cadquery's kernel, so anyone with cadquery
+    # has it, and going direct skips a ~2 s import for the same geometry.
+    if _ocp_available():
+        logger.info("Converting STEP via OCCT (OCP)")
+        parts = _convert_via_ocp(validated_path, scratch)
+        return parts, MeshConversion(
+            backend="occt", bound=_KERNEL_BOUND, source=parts.topology
+        )
+    if _cadquery_available():
+        logger.info("Converting STEP via CadQuery")
+        parts = _convert_via_cadquery(validated_path, scratch)
+        return parts, MeshConversion(
+            backend="cadquery", bound=_KERNEL_BOUND, source=parts.topology
+        )
+    raise NoBackendError()
 
-    elapsed = time.monotonic() - t0
 
-    # Verify at least one output file was actually created.
-    existing = [p for p in outputs if Path(p).exists()]
-    if not existing:
+def _part_file_names(paths: Sequence[str], names: Sequence[str]) -> list[str]:
+    """Move each part's mesh to a file named after the part, in a folder of its own.
+
+    So a per-part STL says which part it is, and so does a note that names a
+    part's file.  A name made safe for a file system can collide with
+    another (``a b`` and ``a_b``); the later one takes a number.
+    """
+    folder = Path(paths[0]).parent / "parts"
+    folder.mkdir(exist_ok=True)
+    taken: set[str] = set()
+    moved: list[str] = []
+    for path, name in zip(paths, names, strict=True):
+        base = re.sub(r"[^\w-]+", "_", name).strip("_") or "part"
+        candidate, n = base, 2
+        while candidate.lower() in taken:
+            candidate, n = f"{base}_{n}", n + 1
+        taken.add(candidate.lower())
+        dest = folder / f"{candidate}.stl"
+        os.replace(path, dest)
+        moved.append(str(dest))
+    return moved
+
+
+def _stl_records(path: str) -> tuple[int, bytes]:
+    """A mesh's triangles as binary STL records: ``(count, 50 bytes each)``.
+
+    Every backend writes binary; an ASCII file (a gmsh that refused the
+    binary option) is read by its vertices, with the normal left zero for
+    readers to recompute, as they do.
+    """
+    import struct
+
+    data = Path(path).read_bytes()
+    if len(data) >= 84:
+        count = int.from_bytes(data[80:84], "little")
+        if len(data) == 84 + 50 * count:
+            return count, data[84:]
+    triples = re.findall(rb"vertex\s+(\S+)\s+(\S+)\s+(\S+)", data)
+    coords = [float(x) for triple in triples for x in triple]
+    if not coords or len(coords) % 9:
+        raise StepImportError(f"{Path(path).name} is not a readable STL, so it cannot be fused")
+    records = b"".join(
+        struct.pack("<12f", 0.0, 0.0, 0.0, *coords[i:i + 9]) + b"\x00\x00"
+        for i in range(0, len(coords), 9)
+    )
+    return len(coords) // 9, records
+
+
+def _fuse_stls(paths: Sequence[str], dest: Path) -> None:
+    """Write every part's triangles into one binary STL, unchanged and in place."""
+    total = 0
+    with dest.open("wb") as fh:
+        fh.write(b"\x00" * 84)
+        for path in paths:
+            count, records = _stl_records(path)
+            fh.write(records)
+            total += count
+        fh.seek(0)
+        fh.write(_STEP_MESH_STAMP.ljust(80, b"\x00") + total.to_bytes(4, "little"))
+
+
+def _finish_conversion(
+    parts: _BackendParts,
+    conversion: MeshConversion,
+    warnings: list[str],
+    validated_path: Path,
+    out_dir: Path,
+    *,
+    merge: bool,
+    output_format: str,
+    started: float,
+) -> StepImportResult:
+    """Turn a backend's parts into the output the caller asked for.
+
+    The ONE write plan, whatever backend ran and whatever door called:
+
+    - ``merge`` → every part fused into one STL;
+    - ``"3mf"``, or ``"auto"`` with more than one part or any colour → one
+      3MF, an object per part with its name, colour and position;
+    - otherwise → one STL per part (one STL for a single part).
+
+    Each part is judged on its OWN mesh before anything is fused: parts that
+    touch share edges once fused, so asking the fused mesh whether it is
+    closed blames the conversion for the assembly being an assembly.
+    """
+    from kiln.cad_kernel import drop_collapsed_facets
+    from kiln.threemf_parser import unique_object_names
+
+    kept = [i for i, p in enumerate(parts.outputs) if Path(p).exists()]
+    if not kept:
         raise StepImportError(
             "Conversion produced no output files. "
-            f"Expected: {outputs}"
+            f"Expected: {parts.outputs}"
         )
-    missing = set(outputs) - set(existing)
-    if missing:
-        warnings.append(f"Some output files were not created: {sorted(missing)}")
+    if len(kept) < len(parts.outputs):
+        missing = sorted(set(parts.outputs) - {parts.outputs[i] for i in kept})
+        warnings.append(f"Some output files were not created: {missing}")
+    names = unique_object_names([parts.names[i] for i in kept])
+    colors = [parts.colors[i] for i in kept]
+    paths = _part_file_names([parts.outputs[i] for i in kept], names)
 
     # Non-blocking by design: a surface model still converted, and the mesh
     # it produced may be perfectly printable.  This is a note attached to a
     # success, never a refusal — see surface_model_note.
-    note = surface_model_note(conversion.source if conversion else None)
+    note = surface_model_note(conversion.source)
     if note is not None:
         warnings.append(note)
 
-    outputs, left_alone = _publish_outputs(outputs, out_dir, validated_path.stem)
-    warnings.extend(left_alone)
-
-    # Asked of the published mesh, the one every later check reads.
-    opened = open_mesh_note(conversion.source if conversion else None, outputs)
+    # Whichever backend wrote it: the kernel's mesher leaves facets with no
+    # area at the pole of every ball-rounded corner, and a mesh that carries
+    # them reads as an open surface.  Cleaned before it is asked.
+    for path in paths:
+        drop_collapsed_facets(path)
+    opened = open_mesh_note(conversion.source, paths)
     if opened is not None:
         logger.warning("%s: %s", validated_path.name, opened)
         warnings.append(opened)
 
-    # Compute total file size.
-    total_size = sum(Path(p).stat().st_size for p in outputs)
-
-    primary = outputs[0] if len(outputs) == 1 else str(out_dir)
+    stem = validated_path.stem
+    if merge and len(paths) > 1:
+        fused = Path(paths[0]).parent.parent / "fused.stl"
+        _fuse_stls(paths, fused)
+        published, left_alone = _publish_outputs([str(fused)], out_dir, stem)
+        output_format = "stl"
+    elif output_format == "3mf" or (
+        output_format == "auto" and (len(paths) > 1 or any(colors))
+    ):
+        claimed, left_alone_note = _claim_output_name(out_dir, stem, ".3mf")
+        _write_3mf(
+            [
+                {"stl_path": p, "name": n, "color": c}
+                for p, n, c in zip(paths, names, colors, strict=True)
+            ],
+            str(claimed),
+        )
+        published = [str(claimed)]
+        left_alone = [left_alone_note] if left_alone_note else []
+        output_format = "3mf"
+    else:
+        published, left_alone = _publish_outputs(paths, out_dir, stem)
+        output_format = "stl"
+    if not published:
+        raise StepImportError("Conversion produced no output files.")
+    warnings.extend(left_alone)
 
     return StepImportResult(
-        output_path=primary,
-        file_size_bytes=total_size,
-        body_count=body_count,
-        conversion_time_s=round(elapsed, 3),
+        output_path=published[0] if len(published) == 1 else str(out_dir),
+        file_size_bytes=sum(Path(p).stat().st_size for p in published),
+        body_count=len(paths),
+        conversion_time_s=round(time.monotonic() - started, 3),
         warnings=warnings,
-        output_paths=outputs,
+        output_paths=published,
+        output_format=output_format,
+        part_names=names,
+        part_colors=colors,
         conversion=conversion,
     )
 
@@ -2715,55 +2851,53 @@ def convert_step(
     step_path: str,
     output_dir: str | None = None,
     *,
-    merge_bodies: bool = True,
+    merge_bodies: bool | None = None,
     output_format: str = "auto",
 ) -> StepImportResult:
     """Convert a STEP file, choosing the output format by what it CARRIES.
 
     STL by format cannot hold colour or part identity.  When the STEP has
-    either — a coloured part, or a multi-body assembly whose parts have
-    names — flattening to STL silently throws information away that the
-    engineer put there.  So:
+    either — a coloured part, or an assembly of several parts — flattening
+    to one STL silently throws away information the engineer put there.  So:
 
-    - ``"auto"`` (default): colour or multiple bodies present → one 3MF
-      with per-part colour and name (readable by Kiln's own preview,
-      BambuStudio, and PrusaSlicer); a plain single solid → STL, exactly
-      as before.  Colour detection needs the OCCT kernel; on a FreeCAD/
-      Gmsh-only install auto falls back to the classic STL path.
-    - ``"stl"``: the classic path, byte-for-byte (:func:`convert_step_to_stl`).
-    - ``"3mf"``: force 3MF even for a plain part.  Requires the OCCT kernel.
+    - ``"auto"`` (default): colour or several parts present → one 3MF with
+      an object per part, carrying its name, position and colour (readable
+      by Kiln's own preview, BambuStudio, and PrusaSlicer); a plain single
+      solid → STL, exactly as before.  Every backend splits a file into its
+      parts; only the OCCT kernel also reads colours, so on a FreeCAD/gmsh
+      install the 3MF arrives with names and positions and no colours.
+    - ``"stl"``: :func:`convert_step_to_stl`.
+    - ``"3mf"``: force 3MF even for a plain part.
+
+    ``merge_bodies`` is the explicit request to fuse every part into one STL.
+    Left unset it follows the format: ``"stl"`` fuses (as
+    :func:`convert_step_to_stl` always has), ``"auto"`` and ``"3mf"`` keep
+    the parts.  ``True`` with ``"3mf"`` is refused: a fused 3MF is not a
+    format anyone asked for, and quietly ignoring either half is worse.
 
     Note ``ensure_mesh_path`` deliberately does NOT use auto: pipelines that
-    only analyze geometry get STL, the format every mesh tool reads.  This
-    door is for the artifact a user KEEPS.
+    only analyze geometry get one fused STL, the format every mesh tool
+    reads.  This door is for the artifact a user KEEPS.
 
     Raises:
+        ValueError: an unknown ``output_format``, or ``merge_bodies=True``
+            with ``output_format="3mf"``.
         NoBackendError: no converter available at all.
-        StepImportError: ``output_format="3mf"`` without the OCCT kernel,
-            or the conversion itself failed.
+        StepImportError: the conversion itself failed.
     """
     if output_format not in ("auto", "stl", "3mf"):
         raise ValueError(
             f"output_format must be 'auto', 'stl' or '3mf', got {output_format!r}"
         )
+    if merge_bodies and output_format == "3mf":
+        raise ValueError(
+            "merge_bodies=True fuses every part into one STL, so it cannot be "
+            "combined with output_format='3mf'. Drop one of the two."
+        )
 
     if output_format == "stl":
         return convert_step_to_stl(
-            step_path, output_dir, merge_bodies=merge_bodies
-        )
-
-    if not _ocp_available():
-        if output_format == "3mf":
-            if not check_step_support()["any_available"]:
-                raise NoBackendError()
-            raise StepImportError(
-                "3MF output (colour + part names) needs the OCCT kernel. "
-                f"Install it with: {INSTALL_COMMAND}"
-            )
-        # auto without the kernel: the FreeCAD/Gmsh chain can convert but
-        # cannot see colours — classic STL is the honest result.
-        return convert_step_to_stl(
-            step_path, output_dir, merge_bodies=merge_bodies
+            step_path, output_dir, merge_bodies=merge_bodies is not False
         )
 
     validated_path = _validate_step_path(step_path)
@@ -2772,100 +2906,23 @@ def convert_step(
     # out_dir, and what does is named after the STEP.
     scratch = Path(tempfile.mkdtemp(prefix="kiln_step_work_"))
     try:
-        return _convert_step_colour_aware(
-            validated_path, out_dir, scratch, output_format
+        t0 = time.monotonic()
+        warnings: list[str] = []
+        if _ocp_available():
+            # The kernel first here, whatever outranks it for plain STL:
+            # it is the one backend that reads a STEP's colours.
+            parts = _convert_via_ocp(validated_path, scratch)
+            conversion = MeshConversion(
+                backend="occt-xcaf", bound=_KERNEL_BOUND, source=parts.topology
+            )
+        else:
+            parts, conversion = _parts_via_chain(validated_path, scratch, warnings)
+        return _finish_conversion(
+            parts, conversion, warnings, validated_path, out_dir,
+            merge=bool(merge_bodies), output_format=output_format, started=t0,
         )
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
-
-
-def _convert_step_colour_aware(
-    validated_path: Path,
-    out_dir: Path,
-    scratch: Path,
-    output_format: str,
-) -> StepImportResult:
-    """:func:`convert_step` on the OCCT kernel, which can see colours."""
-    from kiln.threemf_parser import unique_object_names
-
-    t0 = time.monotonic()
-    data = _convert_via_ocp_xcaf(validated_path, scratch)
-    # Named once, above the branch, so both exits report the same thing: a
-    # caller reading :attr:`StepImportResult.part_names` should never have to
-    # know which output format produced them.
-    names = unique_object_names(data["names"])
-    # Same, for the census and the note it earns: this is the path
-    # import_step_file actually takes, so a surface model has to be visible
-    # here or the feature is invisible at the door users knock on.
-    conversion = MeshConversion(
-        backend="occt-xcaf",
-        bound=_KERNEL_BOUND,
-        source=_topology_from_result(data),
-    )
-    note = surface_model_note(conversion.source)
-    surface_warnings = [note] if note is not None else []
-    parts = [
-        {"stl_path": p, "name": n, "color": c}
-        for p, n, c in zip(data["outputs"], names, data["colors"], strict=True)
-    ]
-
-    has_color = any(p["color"] for p in parts)
-    wants_3mf = output_format == "3mf" or has_color or len(parts) > 1
-
-    if not wants_3mf:
-        # A plain single solid: one STL, as convert_step_to_stl writes it.
-        published, left_alone = _publish_outputs(
-            [parts[0]["stl_path"]], out_dir, validated_path.stem
-        )
-        if not published:
-            raise StepImportError("Conversion produced no output files.")
-        final = published[0]
-        opened = open_mesh_note(conversion.source, published)
-        if opened is not None:
-            logger.warning("%s: %s", validated_path.name, opened)
-            surface_warnings.append(opened)
-        elapsed = time.monotonic() - t0
-        return StepImportResult(
-            output_path=final,
-            file_size_bytes=Path(final).stat().st_size,
-            body_count=1,
-            conversion_time_s=round(elapsed, 3),
-            output_paths=[final],
-            output_format="stl",
-            part_names=names,
-            part_colors=data["colors"],
-            warnings=surface_warnings + left_alone,
-            conversion=conversion,
-        )
-
-    claimed, left_alone_note = _claim_output_name(out_dir, validated_path.stem, ".3mf")
-    out_3mf = str(claimed)
-    if left_alone_note:
-        surface_warnings.append(left_alone_note)
-    # These names are already unique; the writer re-establishes that for
-    # callers who did not, and returns what it wrote.
-    _write_3mf(parts, out_3mf)
-    opened = open_mesh_note(conversion.source, [p["stl_path"] for p in parts])
-    if opened is not None:
-        logger.warning("%s: %s", validated_path.name, opened)
-        surface_warnings.append(opened)
-    for p in parts:  # the per-part STLs were scaffolding, not output
-        with contextlib.suppress(OSError):
-            os.unlink(p["stl_path"])
-    elapsed = time.monotonic() - t0
-
-    return StepImportResult(
-        output_path=out_3mf,
-        file_size_bytes=Path(out_3mf).stat().st_size,
-        body_count=len(parts),
-        conversion_time_s=round(elapsed, 3),
-        output_paths=[out_3mf],
-        output_format="3mf",
-        part_names=names,
-        part_colors=data["colors"],
-        warnings=surface_warnings,
-        conversion=conversion,
-    )
 
 
 # ---------------------------------------------------------------------------

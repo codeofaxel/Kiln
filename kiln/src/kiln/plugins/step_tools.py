@@ -48,7 +48,7 @@ class _StepToolsPlugin:
         def import_step_file(
             file_path: str,
             output_format: str = "auto",
-            merge_bodies: bool = True,
+            merge_bodies: bool | None = None,
             output_dir: str | None = None,
             brief_id: str = "",
         ) -> dict:
@@ -60,10 +60,12 @@ class _StepToolsPlugin:
 
             **The output format follows what the file carries.**  A plain
             single-solid STEP becomes an STL.  A STEP with part colours or
-            multiple bodies becomes ONE 3MF that keeps each part's colour,
-            name, and position — so a coloured CAD assembly arrives ready
-            for a multi-material print instead of flattened grey.  Pass
-            ``output_format="stl"`` or ``"3mf"`` to force either.
+            several parts (an assembly: each placed part, a part placed
+            twice is two) becomes ONE 3MF that keeps each part's name,
+            position and colour — so a CAD assembly arrives as its parts,
+            ready to print apart or together, instead of one flattened mesh.
+            Colours need the OCCT kernel; every backend keeps the parts.
+            Pass ``output_format="stl"`` or ``"3mf"`` to force either.
 
             Use ``check_step_support`` first to verify that a conversion
             backend is installed.  After conversion, use ``diagnose_mesh``
@@ -85,9 +87,11 @@ class _StepToolsPlugin:
                 output_format: ``"auto"`` (default — 3MF when colour or
                     multiple bodies are present, else STL), ``"stl"``, or
                     ``"3mf"``.
-                merge_bodies: STL output only: if True, merge all bodies
-                    into one STL; if False, export each body separately.
-                    (3MF keeps bodies as separate named objects either way.)
+                merge_bodies: Leave unset to follow the format: ``"auto"``
+                    and ``"3mf"`` keep the parts, ``"stl"`` fuses them into
+                    one STL.  ``True`` fuses every part into one STL (with
+                    ``"auto"`` too; refused with ``"3mf"``).  ``False`` keeps
+                    them apart, one STL per part with ``"stl"``.
                 output_dir: Directory for output files.  Defaults to
                     the STEP file's parent directory.
             """
