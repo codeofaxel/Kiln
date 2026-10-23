@@ -706,6 +706,7 @@ def open_pending_outcome(
     printer_name: str,
     file_name: str | None,
     material_type: str | None = None,
+    identity: dict[str, Any] | None = None,
 ) -> str | None:
     """Open a ``pending`` outcome row the moment a print starts.
 
@@ -715,6 +716,10 @@ def open_pending_outcome(
     it ends.  The job id is synthetic (the printer's own job label
     isn't known until its firmware reports it); the resolution paths
     match by printer + file and adopt the real id.  Never raises.
+
+    *identity* is what the start knows that no later reader can recover:
+    the version and design the file came from, the machine's fingerprint
+    and model, the nozzle in it (see ``print_identity_at_start``).
 
     :returns: The synthetic job id, or ``None`` when nothing was opened.
     """
@@ -727,11 +732,59 @@ def open_pending_outcome(
             printer_name=printer_name,
             file_name=file_name,
             material_type=material_type,
+            identity=identity,
         )
         return job_id if row_id is not None else None
     except Exception as exc:
         _logger.debug("open_pending_outcome failed (non-fatal): %s", exc)
         return None
+
+
+def print_identity_at_start(adapter: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
+    """What a print's row can know at the start, and never again this cheaply.
+
+    The version, design and branch come from the CALLER (``version_id`` /
+    ``design_id`` / ``branch_id`` in the start kwargs -- a print of a foreign
+    file names none, and gets none).  The machine comes from the registry's
+    fingerprint (serial, else address), the model from what the person
+    declared, the nozzle from :func:`kiln.assumed_nozzle.assumed_nozzle`,
+    which says which source answered.  Every piece is best-effort: a blank
+    is a blank, never a guess, and nothing here can raise into a print.
+    """
+    out: dict[str, Any] = {}
+    for key in ("version_id", "design_id", "branch_id"):
+        value = kwargs.get(key)
+        if isinstance(value, str) and value.strip():
+            out[key] = value.strip()
+    try:
+        from kiln.registry import machine_fingerprint
+
+        fp = machine_fingerprint(adapter)
+        # An adapter with neither serial nor address fingerprints as its own
+        # object id -- distinct per process, meaningless across them.  A row
+        # keyed on that would split one machine's history per restart.
+        if fp and ":object:" not in fp:
+            out["machine_fingerprint"] = fp
+    except Exception:  # noqa: BLE001 -- identity never blocks a print
+        pass
+    try:
+        declared = adapter.declared_printer_model()
+        if declared:
+            out["printer_model"] = str(declared)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from kiln.assumed_nozzle import assumed_nozzle
+        from kiln.printers.base import outcome_printer_name
+
+        nozzle = assumed_nozzle(outcome_printer_name(adapter))
+        # ``default`` is Kiln's fallback, not a reading of this machine; a
+        # row that said 0.4 on its strength would be a guess wearing a fact.
+        if nozzle.source != "default":
+            out["nozzle_diameter_mm"] = float(nozzle.diameter_mm)
+    except Exception:  # noqa: BLE001
+        pass
+    return out
 
 
 def reconcile_pending_outcomes(

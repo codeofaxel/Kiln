@@ -3694,6 +3694,7 @@ class PrinterAdapter(ABC):
                 from kiln.auto_record_hook import (
                     clear_cancel_intent,
                     open_pending_outcome,
+                    print_identity_at_start,
                 )
 
                 # A cancel asked for before this print has nothing to say
@@ -3724,6 +3725,11 @@ class PrinterAdapter(ABC):
                     material_type=(
                         str(commanded_material) if commanded_material else None
                     ),
+                    # Which version of which design, on which machine, with
+                    # what nozzle: known now, unrecoverable later.  Every
+                    # reader that learns per version or per machine reads
+                    # this row, so the start is where it is written.
+                    identity=print_identity_at_start(self, kwargs),
                 )
             except Exception:  # noqa: BLE001 — bookkeeping must never affect a print
                 import logging as _logging
