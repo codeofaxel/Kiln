@@ -2930,6 +2930,10 @@ def convert_step(
 # ---------------------------------------------------------------------------
 
 
+#: How far into a STEP file its header is looked for.
+_HEADER_SCAN_CHARS = 65536
+
+
 def _without_comments(text: str) -> str:
     """STEP text with its ``/* ... */`` comments removed and strings left whole.
 
@@ -3000,8 +3004,12 @@ def get_step_metadata(step_path: str) -> dict[str, Any]:
     # The header's fields are read with its comments taken out: exporters
     # label every field (``/* originating_system */ 'Some CAD v13'``), and a
     # field that starts with a comment does not start with its value.
-    header_end = re.search(r"\bENDSEC\s*;", text)
-    header = _without_comments(text[: header_end.end() if header_end else 65536])
+    # Looked for only in the first 64 KiB, which any real header fits in many
+    # times over: a file with no ENDSEC near the top must not have its whole
+    # body walked a character at a time.
+    head = text[:_HEADER_SCAN_CHARS]
+    header_end = re.search(r"\bENDSEC\s*;", head)
+    header = _without_comments(head[: header_end.end()] if header_end else head)
 
     # FILE_SCHEMA line.
     schema_match = re.search(r"FILE_SCHEMA\s*\(\s*\('([^']+)'\s*\)\s*\)", header)
