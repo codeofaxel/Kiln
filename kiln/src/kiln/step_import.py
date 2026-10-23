@@ -214,14 +214,15 @@ def is_part(obj):
     return not any(child.isDerivedFrom("Part::Feature") for child in obj.OutList)
 
 
-outputs, names = [], []
+outputs, names, solid = [], [], []
 
 
-def emit(shape, name):
+def emit(shape, name, is_solid):
     out = os.path.join(output_dir, "body_%d.stl" % len(outputs))
     Mesh.Mesh(shape.tessellate(tolerance)).write(out)
     outputs.append(out)
     names.append(name)
+    solid.append(is_solid)
 
 
 for obj in doc.Objects:
@@ -233,16 +234,18 @@ for obj in doc.Objects:
         shape.Placement = obj.getGlobalPlacement()
     solids = shape.Solids
     if not solids:
-        emit(shape, obj.Label)
+        emit(shape, obj.Label, False)
         continue
     inside = set(f.hashCode() for s in solids for f in s.Faces)
     loose = [f for f in shape.Faces if f.hashCode() not in inside]
-    for solid in solids:
-        emit(solid, obj.Label)
+    for piece in solids:
+        emit(piece, obj.Label, True)
     if loose:
-        emit(Part.makeCompound(loose), obj.Label)
+        emit(Part.makeCompound(loose), obj.Label, False)
 
-result = {{"body_count": len(outputs), "outputs": outputs, "names": names}}
+result = {{
+    "body_count": len(outputs), "outputs": outputs, "names": names, "solid": solid,
+}}
 print("KILN_RESULT:" + json.dumps(result))
 """
 
@@ -281,7 +284,7 @@ try:
 except Exception:
     pass
 
-outputs, names = [], []
+outputs, names, solid = [], [], []
 
 
 def name_of(dim, tag):
@@ -292,7 +295,7 @@ def name_of(dim, tag):
         return ""
 
 
-def write_surfaces(tags, name):
+def write_surfaces(tags, name, is_solid):
     # While a physical group exists, only the elements in one are written.
     group = gmsh.model.addPhysicalGroup(2, tags)
     out = os.path.join(output_dir, "body_%d.stl" % len(outputs))
@@ -300,6 +303,7 @@ def write_surfaces(tags, name):
     gmsh.model.removePhysicalGroups([(2, group)])
     outputs.append(out)
     names.append(name)
+    solid.append(is_solid)
 
 
 volumes = gmsh.model.getEntities(3)
@@ -311,17 +315,19 @@ if volumes:
             [(dim, tag)], combined=False, oriented=False, recursive=False
         )]
         bounded.update(faces)
-        write_surfaces(faces, name_of(dim, tag))
+        write_surfaces(faces, name_of(dim, tag), True)
     loose = [t for _, t in gmsh.model.getEntities(2) if t not in bounded]
     if loose:
-        write_surfaces(loose, "")
+        write_surfaces(loose, "", False)
 else:
     out = os.path.join(output_dir, "body_0.stl")
     gmsh.write(out)
-    outputs, names = [out], [""]
+    outputs, names, solid = [out], [""], [False]
 gmsh.finalize()
 
-result = {{"body_count": len(outputs), "outputs": outputs, "names": names}}
+result = {{
+    "body_count": len(outputs), "outputs": outputs, "names": names, "solid": solid,
+}}
 print("KILN_RESULT:" + json.dumps(result))
 """
 
@@ -528,7 +534,7 @@ class MeshConversion:
     which backend did the work, and what it was told.  Both are facts about
     an operation that just happened here, so neither can be re-derived
     honestly from outside: the backend is picked by fall-through inside
-    :func:`convert_step_to_stl` (a machine with FreeCAD installed but broken
+    :func:`_parts_via_chain` (a machine with FreeCAD installed but broken
     uses a different one than the priority order alone predicts), and the
     bound is whichever constant that path quotes.
 
@@ -582,6 +588,14 @@ class _BackendParts:
     colors: list[str | None] = field(default_factory=list)
     """``#RRGGBB`` per part, or ``None`` where the file (or backend) has none."""
 
+    solid: list[bool] = field(default_factory=list)
+    """Whether each part is a solid, which a conversion owes a closed mesh.
+
+    False for surfaces: the file's loose surfaces beside its solids, or the
+    whole of a file that declares no solid.  Nothing promised those closed,
+    so they are never called a conversion fault for not being.
+    """
+
     topology: SourceTopology | None = None
     """The kernel's census of the file, when the backend can take one."""
 
@@ -589,6 +603,7 @@ class _BackendParts:
         n = len(self.outputs)
         self.names = (list(self.names) + [""] * n)[:n]
         self.colors = (list(self.colors) + [None] * n)[:n]
+        self.solid = (list(self.solid) + [True] * n)[:n]
 
 
 @dataclass
@@ -604,10 +619,11 @@ class StepImportResult:
     body_count: int
     """How many parts the file came apart into — at least 1.
 
-    One per solid (an assembly component placed twice is two), whether the
-    output keeps them apart or fused them into one STL on request.  Not
-    quite a count of solids: a surface model has no solid and is still one
-    part, so this floors at 1 where :attr:`MeshConversion.source` reports 0.
+    One per solid (an assembly component placed twice is two), plus one
+    for any surfaces a part carries outside its solids, whether the output
+    keeps them apart or fused them into one STL on request.  Not quite a
+    count of solids: a surface model has no solid and is still one part, so
+    this floors at 1 where :attr:`MeshConversion.source` reports 0.
     The honest count of what the file DECLARED lives there.
     """
 
@@ -1203,8 +1219,9 @@ def _convert_via_gmsh(
     """Run gmsh Python script to convert STEP → one STL per volume.
 
     Each volume is written from its own boundary surfaces, so two parts
-    that touch stay two closed meshes.  Names are whatever label this gmsh
-    imported for the volume, often none.
+    that touch stay two closed meshes.  Names are the labels gmsh imports
+    for its volumes (measured on gmsh 4.15.2: a part's own name, a repeat
+    placement under the same name); colours are not read.
 
     Density is bounded by :data:`_GMSH_CURVATURE_ELEMENTS`: gmsh is asked for
     126 elements per full circle, which measures out at roughly R/700 of
@@ -1471,14 +1488,15 @@ def count(target, kind):
 
 
 def pieces(shape):
-    # The solids in *shape*, then whatever it holds outside every solid.
+    # (piece, is_solid): the solids in *shape*, then whatever it holds
+    # outside every solid.
     solids = []
     exp = TopExp_Explorer(shape, SOLID)
     while exp.More():
-        solids.append(exp.Current())
+        solids.append((exp.Current(), True))
         exp.Next()
     if not solids:
-        return [shape]
+        return [(shape, False)]
     loose = TopoDS_Compound()
     builder = BRep_Builder()
     builder.MakeCompound(loose)
@@ -1489,7 +1507,7 @@ def pieces(shape):
             builder.Add(loose, exp.Current())
             found += 1
             exp.Next()
-    return solids + ([loose] if found else [])
+    return solids + ([(loose, False)] if found else [])
 
 
 def label_name(label):
@@ -1532,10 +1550,10 @@ def label_color(label):
 
 
 # Summed over every placed part, so a part placed twice counts twice --
-# which is what the file declares, and what the plain reader's one root
-# shape counts too.
+# which is what the file declares, and what read_exact_geometry counts over
+# the file's one root shape too.
 topology = {{"solids": 0, "shells": 0, "faces": 0}}
-outputs, names, colors = [], [], []
+outputs, names, colors, solid = [], [], [], []
 
 
 def visit(label, location, fallback_name, instance_color, inherited_color):
@@ -1567,12 +1585,13 @@ def visit(label, location, fallback_name, instance_color, inherited_color):
     topology["solids"] += count(shape, SOLID)
     topology["shells"] += count(shape, SHELL)
     topology["faces"] += count(shape, FACE)
-    for piece in pieces(shape):
+    for piece, is_solid in pieces(shape):
         out = os.path.join(output_dir, "body_%d.stl" % len(outputs))
         write(piece, out)
         outputs.append(out)
         names.append(name)
         colors.append(color)
+        solid.append(is_solid)
 
 
 for i in range(1, labels.Length() + 1):
@@ -1580,7 +1599,7 @@ for i in range(1, labels.Length() + 1):
 
 print("KILN_RESULT:" + json.dumps({{
     "outputs": outputs, "body_count": len(outputs),
-    "names": names, "colors": colors, "topology": topology,
+    "names": names, "colors": colors, "solid": solid, "topology": topology,
 }}))
 '''
 
@@ -1686,7 +1705,7 @@ def _convert_via_cadquery(
         target = result if piece is None else cq.Workplane().add(piece)
         cq.exporters.export(target, out_path, exportType="STL", **_tess)
         outputs.append(out_path)
-    return _BackendParts(outputs=outputs, topology=topology)
+    return _BackendParts(outputs=outputs, solid=[bool(solids)] * len(outputs), topology=topology)
 
 
 def _parse_kiln_result(
@@ -1749,8 +1768,8 @@ def _own_output(stdout: str | None) -> str:
 def _topology_from_result(data: dict[str, Any]) -> SourceTopology | None:
     """Read the kernel's census out of a child's KILN_RESULT, or admit none.
 
-    Shared by both OCCT scripts so the plain and colour-aware paths cannot
-    grow different ideas of what the counts mean.  Absent or malformed reads
+    The one place a child's counts become a :class:`SourceTopology`, so no
+    door grows its own idea of what they mean.  Absent or malformed reads
     as ``None`` — "we did not look" — rather than raising or, worse,
     defaulting to zero solids, which is the one wrong answer here: a child
     from a half-upgraded install would report every file as surface soup.
@@ -1784,6 +1803,7 @@ def _parts_from_result(
         outputs=list(data["outputs"]),
         names=[n or "" for n in data.get("names") or []],
         colors=list(data.get("colors") or []),
+        solid=[bool(x) for x in data.get("solid") or []],
         topology=topology,
     )
 
@@ -1931,13 +1951,13 @@ def _write_3mf(
 # Exact geometry — the file's own numbers, never the mesh's
 # ---------------------------------------------------------------------------
 
-# One reader, one answer.  Deliberately NOT folded into the two conversion
-# templates above, even though each already holds a live shape and could
-# compute these for free: a file reaches Kiln through the plain path, the
-# colour-aware path, a FreeCAD or gmsh conversion that never loads a kernel
-# shape at all, and a cache hit that converts nothing.  Four places computing
-# one measurement is four places for it to drift; this is the one that runs
-# for every one of them, and its answer is cached beside the mesh cache so no
+# One reader, one answer.  Deliberately NOT folded into the conversion
+# template above, even though it already holds a live shape and could
+# compute these for free: a file reaches Kiln through the kernel's
+# conversion, a FreeCAD or gmsh conversion that never loads a kernel shape
+# at all, and a cache hit that converts nothing.  Three places computing one
+# measurement is three places for it to drift; this is the one that runs for
+# every one of them, and its answer is cached beside the mesh cache so no
 # door pays twice for the same bytes.
 _OCP_EXACT_SCRIPT_TEMPLATE = r'''
 import json, sys
@@ -2688,19 +2708,38 @@ def _parts_via_chain(
     raise NoBackendError()
 
 
+#: Names Windows will not give a file, whatever its extension.
+_WINDOWS_RESERVED = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{i}" for i in range(1, 10)}
+    | {f"LPT{i}" for i in range(1, 10)}
+)
+
+#: Longest part name kept in a file name, in bytes.  The STEP's own name
+#: rides in front of it when published, and most file systems stop at 255.
+_PART_FILE_NAME_BYTES = 80
+
+
 def _part_file_names(paths: Sequence[str], names: Sequence[str]) -> list[str]:
     """Move each part's mesh to a file named after the part, in a folder of its own.
 
     So a per-part STL says which part it is, and so does a note that names a
     part's file.  A name made safe for a file system can collide with
-    another (``a b`` and ``a_b``); the later one takes a number.
+    another (``a b`` and ``a_b``); the later one takes a number.  The part's
+    full name is never lost: it rides in :attr:`StepImportResult.part_names`
+    and in a 3MF's object names, whatever its file is called.
     """
     folder = Path(paths[0]).parent / "parts"
     folder.mkdir(exist_ok=True)
     taken: set[str] = set()
     moved: list[str] = []
     for path, name in zip(paths, names, strict=True):
-        base = re.sub(r"[^\w-]+", "_", name).strip("_") or "part"
+        base = re.sub(r"[^\w-]+", "_", name).strip("_")
+        # Cut by bytes, not characters: a name in a non-Latin script is up to
+        # three bytes a letter, and the limit is on bytes.
+        base = base.encode("utf-8")[:_PART_FILE_NAME_BYTES].decode("utf-8", "ignore") or "part"
+        if base.upper() in _WINDOWS_RESERVED:
+            base = f"{base}_"
         candidate, n = base, 2
         while candidate.lower() in taken:
             candidate, n = f"{base}_{n}", n + 1
@@ -2734,6 +2773,25 @@ def _stl_records(path: str) -> tuple[int, bytes]:
         for i in range(0, len(coords), 9)
     )
     return len(coords) // 9, records
+
+
+def _holds_no_triangles(path: str) -> bool:
+    """True only for an STL that is well-formed and empty.
+
+    A file this cannot read says nothing either way and is kept: deciding
+    whether it is a mesh is the readers' job downstream.
+    """
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as fh:
+            head = fh.read(84)
+    except OSError:
+        return False
+    if len(head) == 84 and size == 84 + 50 * int.from_bytes(head[80:84], "little"):
+        return size == 84
+    if head.lstrip().startswith(b"solid"):
+        return b"facet" not in Path(path).read_bytes()
+    return False
 
 
 def _fuse_stls(paths: Sequence[str], dest: Path) -> None:
@@ -2776,16 +2834,35 @@ def _finish_conversion(
     from kiln.cad_kernel import drop_collapsed_facets
     from kiln.threemf_parser import unique_object_names
 
-    kept = [i for i, p in enumerate(parts.outputs) if Path(p).exists()]
+    written = [i for i, p in enumerate(parts.outputs) if Path(p).exists()]
+    if len(written) < len(parts.outputs):
+        warnings.append(
+            f"The converter skipped {len(parts.outputs) - len(written)} of "
+            f"{len(parts.outputs)} parts; the rest are here."
+        )
+    # A piece with no triangles holds nothing to print or look at -- an empty
+    # assembly, a part that is only reference points or curves.  Dropped,
+    # never handed on as an empty object.
+    kept = [i for i in written if not _holds_no_triangles(parts.outputs[i])]
     if not kept:
         raise StepImportError(
-            "Conversion produced no output files. "
-            f"Expected: {parts.outputs}"
+            "This STEP file gave no surfaces to mesh: it may be an empty "
+            "assembly, or hold only reference geometry (points, curves). If it "
+            "shows solids in your CAD tool, export them again as solids, and "
+            "if they still do not come through, please report it with the file."
         )
-    if len(kept) < len(parts.outputs):
-        missing = sorted(set(parts.outputs) - {parts.outputs[i] for i in kept})
-        warnings.append(f"Some output files were not created: {missing}")
-    names = unique_object_names([parts.names[i] for i in kept])
+    if len(kept) < len(written):
+        warnings.append(
+            f"{len(written) - len(kept)} part(s) in this file held no surfaces "
+            "(reference geometry only) and were left out."
+        )
+    solid = [parts.solid[i] for i in kept]
+    raw_names = [parts.names[i] for i in kept]
+    if any(solid):
+        # Surfaces beside the file's solids are kept, under a name that says
+        # so -- however the backend happened to group them.
+        raw_names = [n if s else f"{n} surfaces".strip() for n, s in zip(raw_names, solid, strict=True)]
+    names = unique_object_names(raw_names)
     colors = [parts.colors[i] for i in kept]
     paths = _part_file_names([parts.outputs[i] for i in kept], names)
 
@@ -2801,16 +2878,24 @@ def _finish_conversion(
     # them reads as an open surface.  Cleaned before it is asked.
     for path in paths:
         drop_collapsed_facets(path)
-    opened = open_mesh_note(conversion.source, paths)
+    opened = open_mesh_note(
+        conversion.source, [p for p, is_solid in zip(paths, solid, strict=True) if is_solid]
+    )
     if opened is not None:
         logger.warning("%s: %s", validated_path.name, opened)
         warnings.append(opened)
 
     stem = validated_path.stem
-    if merge and len(paths) > 1:
-        fused = Path(paths[0]).parent.parent / "fused.stl"
-        _fuse_stls(paths, fused)
-        published, left_alone = _publish_outputs([str(fused)], out_dir, stem)
+    if merge:
+        # Asked for one STL, so one STL -- even of a single coloured part,
+        # which "auto" would otherwise write as a 3MF to keep its colour.
+        if len(paths) > 1:
+            fused = Path(paths[0]).parent.parent / "fused.stl"
+            _fuse_stls(paths, fused)
+            paths_out = [str(fused)]
+        else:
+            paths_out = paths
+        published, left_alone = _publish_outputs(paths_out, out_dir, stem)
         output_format = "stl"
     elif output_format == "3mf" or (
         output_format == "auto" and (len(paths) > 1 or any(colors))

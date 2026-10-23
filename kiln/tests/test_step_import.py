@@ -401,9 +401,11 @@ def test_freecad_backend(mock_cq, mock_gmsh, mock_fc, sample_step_file, tmp_dir)
 @patch("kiln.step_import._cadquery_available", return_value=False)
 def test_gmsh_backend(mock_cq, mock_gmsh, mock_fc, sample_step_file, tmp_dir):
     """Gmsh backend calls subprocess and parses result."""
+    import struct
+
     outs = [sample_step_file.parent / f"body_{i}.stl" for i in range(2)]
-    for out in outs:
-        out.write_bytes(b"\x00" * 84)  # an empty binary STL each, so they fuse
+    for out in outs:  # one triangle each, so they fuse
+        out.write_bytes(b"\x00" * 80 + struct.pack("<I", 1) + struct.pack("<12f", *([0.0] * 3), 0, 0, 0, 1, 0, 0, 0, 1, 0) + b"\x00\x00")
 
     kiln_result = json.dumps({"body_count": 2, "outputs": [str(o) for o in outs]})
     mock_proc = MagicMock()
@@ -735,7 +737,7 @@ def test_convert_no_output_files_raises(mock_cq, mock_gmsh, mock_fc, sample_step
         "kiln.step_import._convert_via_cadquery",
         return_value=_BackendParts(outputs=["/nonexistent/output.stl"]),
     ):
-        with pytest.raises(StepImportError, match="no output files"):
+        with pytest.raises(StepImportError, match="gave no surfaces to mesh"):
             convert_step_to_stl(str(sample_step_file))
 
 
