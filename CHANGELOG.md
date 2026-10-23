@@ -5,9 +5,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Your print history now knows which version printed and how it ended, even after you close the chat.** Unseen endings are marked unknown, never guessed.
+
 ### Changed
 
 - **A CAD assembly now arrives as its parts.** Each part keeps its name, where it sits in the assembly, and its color, so you can print them together or one at a time.
+
+### Fixed
+
+- **The Terms prompt tells you when your sign-in has expired**, instead of acting like you have no account.
 
 ## [1.5.0] - 2026-10-20
 

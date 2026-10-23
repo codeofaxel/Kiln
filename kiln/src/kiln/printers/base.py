@@ -3694,6 +3694,7 @@ class PrinterAdapter(ABC):
                 from kiln.auto_record_hook import (
                     clear_cancel_intent,
                     open_pending_outcome,
+                    print_identity_at_start,
                 )
 
                 # A cancel asked for before this print has nothing to say
@@ -3724,6 +3725,11 @@ class PrinterAdapter(ABC):
                     material_type=(
                         str(commanded_material) if commanded_material else None
                     ),
+                    # Which version of which design, on which machine, with
+                    # what nozzle: known now, unrecoverable later.  Every
+                    # reader that learns per version or per machine reads
+                    # this row, so the start is where it is written.
+                    identity=print_identity_at_start(self, kwargs),
                 )
             except Exception:  # noqa: BLE001 — bookkeeping must never affect a print
                 import logging as _logging
@@ -3731,6 +3737,17 @@ class PrinterAdapter(ABC):
                 _logging.getLogger(__name__).debug(
                     "pending-outcome open failed", exc_info=True
                 )
+            # The ending must outlive this process: an agent session lasts
+            # minutes and a print lasts hours.  A detached watcher per
+            # machine takes the printer over once this process is gone and
+            # resolves the pending row on the real edge (kiln.ending_watch).
+            # Here, in the template, so the CLI's start is covered too.
+            try:
+                from kiln.ending_watch import spawn_ending_watch
+
+                spawn_ending_watch(self, file_name)
+            except Exception:  # noqa: BLE001 — never affects a print
+                pass
             # Whatever must follow EVERY print Kiln starts attaches here,
             # through register_print_started_hook, rather than being wired
             # into each door that starts one and missing the next door.  The

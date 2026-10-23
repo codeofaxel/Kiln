@@ -1,6 +1,6 @@
 # Kiln Privacy Policy
 
-*Last updated: 2026-10-20 · Version 2.16*
+*Last updated: 2026-10-23 · Version 2.18*
 
 > **Plain-English summary** — Kiln is operated by **Hadron Labs Inc.**, a
 > Delaware C corporation headquartered in California. Most of Kiln runs
@@ -101,7 +101,7 @@ machine by design), or to anyone who writes to us.
 | **Cookies (workshop)** | Visitors to `app.kiln3d.com` (the web workshop) | Supabase auth session cookie, CSRF token | Your browser | Consent for non-essential (§6(1)(a)); contract for session cookies |
 | **Cookies (marketing site)** | Visitors to `kiln3d.com` who explicitly grant consent via the cookie banner — only present if we're running paid acquisition campaigns and you've opted in | Consent record (`kiln_consent`); when granted, optional analytics + advertising cookies (see §3.2) | Your browser | Consent (§6(1)(a)) — opt-in; no strictly-necessary cookies on the marketing site |
 | **Fulfillment orders** | Paid users who route through Craftcloud | Ship-to address, model file, material + finish choice; the quote while you place the order; the spending limits and order approvals you set, with the email, rough network location and user-agent string of whoever changed a limit or approved an order | Passed through to Craftcloud; not retained by us beyond the order record, the quote, and your spending limits (`kiln_cloud_fulfillment_*`, `kiln_spend_cap_*`, `kiln_user_spend_cap_settings`) | Contract (§6(1)(b)) |
-| **Anonymous community learning** | All Kiln installs (free + paid) | Anonymized print + recovery outcome records — printer model, material, settings hash, success/fail outcome, recovery strategy — never your email, auth_user_id, tenant_id, file names, or geometry. Default ON; opt out with `KILN_COMMUNITY_OPT_IN=false`. | Supabase DB (`community_prints`, `community_recoveries`) | Legitimate interest — collective product improvement (§6(1)(f)) |
+| **Anonymous community learning** | All Kiln installs (free + paid) | Anonymized print + recovery outcome records — printer model, material, settings hash, success/fail outcome, recovery strategy — never your email, auth_user_id, tenant_id, file names, or geometry. Default ON on every plan. There are two switches, one for each place Kiln runs. On your computer, set `KILN_COMMUNITY_OPT_IN=false`. For what Kiln's servers record for your account, turn off **Help Kiln learn from what you print** in Account settings, or ask your AI agent to. | Supabase DB (`community_prints`, `community_recoveries`) | Legitimate interest — collective product improvement (§6(1)(f)) |
 
 **What we deliberately do NOT collect:** browsing history outside
 `kiln3d.com`, your 3D models (beyond fulfillment pass-through),
@@ -228,15 +228,18 @@ script loads, nothing is stored on your device, and nothing is
 joined to your browsing anywhere.
 
 When you create a Kiln account, we also note, once, how you reached
-the sign-in, as one word from a fixed list: X, GitHub, PyPI, a search
-engine, another website, no referring website, the Kiln command line,
-or an AI app's Kiln connector. Your browser works that word out from
-the name of the website that sent you to the sign-in page (never the
-page's address) or the campaign tag on the link you followed, and we
-keep only the word, on your account's sign-up record. Nothing is
-stored on your device to do this, the word is not sent to Google,
-Meta or anyone else, and it is deleted with your account. Accounts
-created before version 2.12 of this policy carry no such word.
+Kiln, as one word from a fixed list: X, GitHub, PyPI, a search engine,
+another website, no referring website, the Kiln command line, or an AI
+app's Kiln connector. Your browser works that word out from the name of
+the website that sent you (never the page's address) or the campaign
+tag on the link you followed. If you land on kiln3d.com first and sign
+in from there, the site works the word out on the first page you open.
+It keeps the word in your browser for that tab only, so it's gone when
+you close the tab, and it isn't a cookie. It also adds the word to the
+site's links into the Kiln app. We keep only the word, on your account's
+sign-up record. It isn't sent to Google, Meta or anyone else, and it's
+deleted with your account. Accounts created before version 2.12 of this
+policy carry no such word.
 
 **What gets shared (when active):**
 
@@ -385,7 +388,7 @@ emailing adam@kiln3d.com.
 | **Account security records** | While your account is active; deleted with your account, except your Terms of Use acceptances, which are kept as the record of what you agreed to. |
 | **Printer records in your account** | While your account is active; deleted with your account, except the record of print approvals, which is a tamper-evident log and is kept. |
 | **Usage heartbeats** | Daily rows stay in the live database for 60 days, then move to a secured, tamper-evident archive kept for 7 years (audit and compliance). Separately, a minimal anonymous record per install — a random installation ID, the first and last dates it checked in, the last app version + OS platform, and a few facts about how it started (the app version and OS platform on its first day, whether it was first used from the command line or through an AI app, the kind of printer connection it first set up and on which day, the first day it reported a full day's activity, and the first day it sliced, printed, made or decorated a model) — is kept indefinitely so we can count installs over time and see which starts lead people to keep using Kiln. Every one of those facts comes from the daily check-in described in §3.1. The installation ID is generated locally, is never sent with a signed-in request, and is not linked to any account — including if you create one later. Daily totals (installs that checked in, the activity they reported, and the printer models and connection types, app versions and platforms in use) are kept indefinitely too, with no installation ID or device fingerprint in them. Opting out of telemetry (`KILN_TELEMETRY=false`) stops all three from then on. |
-| **Anonymous community learning** | Retained indefinitely as anonymous data. You can't delete a specific contribution once it's aggregated (we strip the auth_user_id on ingestion, so we can't trace records back to you). Opt out anytime with `KILN_COMMUNITY_OPT_IN=false` — future contributions stop; past ones can't be pulled back out. |
+| **Anonymous community learning** | Retained indefinitely as anonymous data. You can't delete a specific contribution once it's aggregated (we strip the auth_user_id on ingestion, so we can't trace records back to you). Opt out anytime with `KILN_COMMUNITY_OPT_IN=false` on a computer, or **Help Kiln learn from what you print** in Account settings — future contributions stop; past ones can't be pulled back out. |
 | Security telemetry (hashed) | 90 days rolling — then automatic purge |
 | Email support threads | 2 years from last reply, then deletion |
 | Local data on your machine | **Indefinitely, until you delete it** — we cannot see it and cannot delete it for you |

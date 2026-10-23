@@ -35,7 +35,46 @@ _logger = logging.getLogger(__name__)
 
 _VALID_OUTCOMES = frozenset({"success", "failed", "partial", "cancelled"})
 _VALID_QUALITY_GRADES = frozenset({"excellent", "good", "acceptable", "poor"})
-_VALID_DETERMINED_BY = frozenset({"observed", "inferred", "user_reported"})
+
+
+def _machine_identity(printer_name: str | None) -> dict[str, Any]:
+    """Fingerprint and model of the registered printer under *printer_name*.
+
+    Best-effort and read-only: an unregistered name, or an adapter with no
+    serial and no address, contributes nothing rather than a guess.
+    """
+    if not printer_name or printer_name == "unknown":
+        return {}
+    try:
+        import kiln.server as _srv
+        from kiln.registry import machine_fingerprint
+
+        adapter = _srv._get_registry().get(printer_name)
+    except Exception:  # noqa: BLE001 -- a record never fails on identity
+        return {}
+    out: dict[str, Any] = {}
+    try:
+        fp = machine_fingerprint(adapter)
+        if fp and ":object:" not in fp:
+            out["machine_fingerprint"] = fp
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        declared = adapter.declared_printer_model()
+        if declared:
+            out["printer_model"] = str(declared)
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
+def _valid_determined_by() -> frozenset[str]:
+    # Read from the store, never copied: a value the store accepts that the
+    # door refused (or the reverse) is how a whole source of endings goes
+    # quietly missing.
+    from kiln.persistence import KilnDB
+
+    return KilnDB.VALID_DETERMINED_BY
 
 # Hard safety limits — recorded settings cannot exceed these.
 # Prevents malicious agents from poisoning the learning database
@@ -257,6 +296,9 @@ def record_print_outcome(
     auto_recorded: bool = False,
     determined_by: str | None = None,
     print_error: int | None = None,
+    version_id: str | None = None,
+    design_id: str | None = None,
+    branch_id: str | None = None,
 ) -> dict:
     """Record the outcome of a print for cross-printer learning.
 
@@ -319,8 +361,10 @@ def record_print_outcome(
             ``proven_settings`` level.  Default False.
         determined_by: Who settled this outcome — ``"observed"`` (a
             live process watched the print end), ``"inferred"``
-            (reconstructed from printer state after the fact), or
-            ``"user_reported"`` (the human said so).  Defaults to
+            (reconstructed from printer state after the fact), ``"seen"``
+            (a camera frame judged at the ending), or
+            ``"user_reported"`` (the human said so).  A weaker source
+            never contradicts a decided row.  Defaults to
             ``"observed"`` for auto-recorded outcomes and
             ``"user_reported"`` otherwise — a manual record normally
             relays what the user reported about the part in hand.
@@ -339,6 +383,13 @@ def record_print_outcome(
             captured now against the day there are enough of them to ask.
             ``0`` and unset both store NULL; a backend with no such code
             simply omits it.
+        version_id: Optional — the design version that was printed.  A
+            print started from a kept design already carries it (the
+            start stamps it); pass it here when recording a print Kiln
+            did not start, so the ending lands on that version's history.
+            Never overwrites a version the start recorded.
+        design_id: Optional — the design the version belongs to.
+        branch_id: Optional — the branch the version sits on.
     """
     import kiln.server as _srv
     from kiln.persistence import get_db, normalize_print_error
@@ -357,9 +408,9 @@ def record_print_outcome(
             f"Invalid quality_grade {quality_grade!r}. Must be one of: {', '.join(sorted(_VALID_QUALITY_GRADES))}",
             code="VALIDATION_ERROR",
         )
-    if determined_by and determined_by not in _VALID_DETERMINED_BY:
+    if determined_by and determined_by not in _valid_determined_by():
         return _srv._error_dict(
-            f"Invalid determined_by {determined_by!r}. Must be one of: {', '.join(sorted(_VALID_DETERMINED_BY))}",
+            f"Invalid determined_by {determined_by!r}. Must be one of: {', '.join(sorted(_valid_determined_by()))}",
             code="VALIDATION_ERROR",
         )
     if determined_by is None:
@@ -476,6 +527,13 @@ def record_print_outcome(
                 "notes": notes,
                 "agent_id": "auto" if auto_recorded else "mcp",
                 "determined_by": determined_by,
+                "version_id": version_id,
+                "design_id": design_id,
+                "branch_id": branch_id,
+                # The machine behind the label, for a row the start did not
+                # stamp (a print Kiln did not start, an older row).  COALESCEd
+                # at the store, so a stamped row keeps its own.
+                **_machine_identity(printer_name),
                 # Rides along whatever the outcome word turned out to be —
                 # a cancel that tripped a fault keeps the code even though
                 # it gets no failure_mode.

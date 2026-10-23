@@ -8774,9 +8774,16 @@ def start_print(
     resume_from_paused: bool = False,
     skip_preheat_reassert: bool = False,
     preview_token: str | None = None,
+    version_id: str | None = None,
+    design_id: str | None = None,
+    branch_id: str | None = None,
     printer_name: str | None = None,
 ) -> dict:
     """Start printing a file already uploaded to the printer (file must exist on printer).
+
+    ``version_id`` / ``design_id`` / ``branch_id`` name the kept design the
+    file came from, when there is one, so the print's record lands on that
+    version's history; a file that is not a Kiln design passes none.
 
     Use ``upload_file`` first, or use ``slice_and_print`` / ``run_quick_print``
     to slice + upload + print in one step. Automatically runs pre-flight safety
@@ -9065,6 +9072,11 @@ def start_print(
 
         # Build kwargs for Bambu-specific print parameters.
         print_kwargs: dict[str, Any] = {}
+        for _id_key, _id_val in (
+            ("version_id", version_id), ("design_id", design_id), ("branch_id", branch_id),
+        ):
+            if isinstance(_id_val, str) and _id_val.strip():
+                print_kwargs[_id_key] = _id_val.strip()
 
         # Resolve tri-state use_ams: "auto" | "true"/"false" | bool.  The
         # local copy (when this session uploaded the file) says which

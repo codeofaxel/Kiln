@@ -646,7 +646,28 @@ class KilnDB:
             self._conn.execute("ALTER TABLE print_outcomes ADD COLUMN determined_by TEXT DEFAULT NULL")
         if "print_error" not in columns:
             self._conn.execute("ALTER TABLE print_outcomes ADD COLUMN print_error BIGINT DEFAULT NULL")
-        elif types.get("print_error") == "integer":
+        # The identity of a print: WHICH version of WHICH design went to
+        # WHICH machine with WHAT in the hotend.  Before these, a row said
+        # a file printed on a printer label; every reader that learns per
+        # version or per machine (A/B, regression, best-version, the fleet
+        # rollup) had to be fed by hand, and was not.  All nullable: a print
+        # of a foreign file has no version, an unidentifiable adapter no
+        # fingerprint.  ``ended_at`` is the terminal edge (``created_at``
+        # stays the START time); ``account_sync_id`` is the server row once
+        # the ending is pushed to the person's account.
+        for name, sql_type in self.PRINT_OUTCOME_IDENTITY_COLUMNS.items():
+            if name not in columns:
+                self._conn.execute(
+                    f"ALTER TABLE print_outcomes ADD COLUMN {name} {sql_type} DEFAULT NULL"
+                )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_print_outcomes_version ON print_outcomes(version_id)"
+        )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_print_outcomes_machine "
+            "ON print_outcomes(machine_fingerprint)"
+        )
+        if types.get("print_error") == "integer":
             # Postgres only, and only for the few hours this column existed
             # as int4.  SQLite's INTEGER is already 64-bit; Postgres's tops
             # out at 2147483647, which every HMS family from 0x80 up
@@ -1000,7 +1021,15 @@ class KilnDB:
                     agent_id        TEXT,
                     determined_by   TEXT,
                     print_error     BIGINT DEFAULT NULL,
-                    created_at      REAL NOT NULL
+                    created_at      REAL NOT NULL,
+                    version_id          TEXT DEFAULT NULL,
+                    design_id           TEXT DEFAULT NULL,
+                    branch_id           TEXT DEFAULT NULL,
+                    machine_fingerprint TEXT DEFAULT NULL,
+                    printer_model       TEXT DEFAULT NULL,
+                    nozzle_diameter_mm  REAL DEFAULT NULL,
+                    ended_at            REAL DEFAULT NULL,
+                    account_sync_id     TEXT DEFAULT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_print_outcomes_printer
                     ON print_outcomes(printer_name);
@@ -2573,7 +2602,26 @@ class KilnDB:
     )
     LEARNING_OUTCOMES = frozenset({"success", "failed", "partial"})
     UNRESOLVED_OUTCOMES = frozenset({"pending", "unknown"})
-    VALID_DETERMINED_BY = frozenset({"observed", "inferred", "user_reported"})
+    # Who settled the ending, weakest to strongest: ``inferred`` (read off
+    # printer state on a later reconnect), ``seen`` (a camera frame judged
+    # at the ending), ``observed`` (a live process watched the terminal
+    # edge), ``user_reported`` (the person holding the part said so).  A
+    # later record never downgrades a stronger one -- see
+    # ``_resolve_row_locked``.
+    VALID_DETERMINED_BY = frozenset({"observed", "inferred", "seen", "user_reported"})
+    DETERMINED_BY_RANK = {"inferred": 1, "seen": 2, "observed": 3, "user_reported": 4}
+    #: The identity a print row carries beyond its label.  One roster: the
+    #: fresh schema, the migration, the insert and the resolve all read it.
+    PRINT_OUTCOME_IDENTITY_COLUMNS = {
+        "version_id": "TEXT",
+        "design_id": "TEXT",
+        "branch_id": "TEXT",
+        "machine_fingerprint": "TEXT",
+        "printer_model": "TEXT",
+        "nozzle_diameter_mm": "REAL",
+        "ended_at": "REAL",
+        "account_sync_id": "TEXT",
+    }
 
     def save_print_outcome(self, outcome: dict[str, Any]) -> int:
         """Save a print outcome record.  Returns row id.
@@ -2641,13 +2689,19 @@ class KilnDB:
                         match["id"], outcome, new_job_id=outcome["job_id"],
                     )
                     return match["id"]
+            identity = list(self._identity_values(outcome))
+            if identity[6] is None and outcome_val not in self.UNRESOLVED_OUTCOMES:
+                identity[6] = time.time()  # a decided insert ends now
             try:
                 cur = self._conn.execute(
                     """INSERT INTO print_outcomes
                        (job_id, printer_name, file_name, file_hash, material_type,
                         outcome, quality_grade, failure_mode, settings, environment,
-                        notes, agent_id, determined_by, print_error, created_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        notes, agent_id, determined_by, print_error, created_at,
+                        version_id, design_id, branch_id, machine_fingerprint,
+                        printer_model, nozzle_diameter_mm, ended_at, account_sync_id)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                               ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         outcome["job_id"],
                         outcome["printer_name"],
@@ -2664,6 +2718,7 @@ class KilnDB:
                         outcome.get("determined_by"),
                         normalize_print_error(outcome.get("print_error")),
                         outcome.get("created_at", time.time()),
+                        *identity,
                     ),
                 )
                 self._conn.commit()
@@ -2728,6 +2783,50 @@ class KilnDB:
                 "UPDATE print_outcomes SET job_id = ? WHERE id = ?",
                 (new_job_id, row_id),
             )
+        # The identity the START stamped is the identity: a later record
+        # fills only what is still blank (COALESCE(col, ?)), so re-pointing
+        # a label at another machine, or a caller naming the wrong version,
+        # never relabels a print that already knew what it was.  The ending
+        # is stamped ONCE, on the first move to a decided word; a person's
+        # answer days later does not move it.
+        prior = self._conn.execute(
+            "SELECT determined_by, outcome FROM print_outcomes WHERE id = ?", (row_id,)
+        ).fetchone()
+        prior_by = prior[0] if prior else None
+        prior_outcome = prior[1] if prior else None
+        prior_decided = prior_outcome not in self.UNRESOLVED_OUTCOMES
+        determined_by = outcome.get("determined_by")
+        terminal = outcome["outcome"] not in self.UNRESOLVED_OUTCOMES
+        identity = list(self._identity_values(outcome))
+        if identity[6] is None and terminal:
+            identity[6] = time.time()
+        # A weaker source never contradicts a decided row: a reconnect's
+        # inference arriving after the person answered must not turn their
+        # "it worked" into "failed" under their own name, nor relabel it a
+        # guess.  Only blanks are filled.  A pending row's ``observed``
+        # means "a watcher is on it", not a verdict, so whoever settles it
+        # says how.
+        if (
+            prior_decided
+            and prior_by
+            and determined_by
+            and self.DETERMINED_BY_RANK.get(prior_by, 0)
+            > self.DETERMINED_BY_RANK.get(determined_by, 0)
+        ):
+            self._conn.execute(
+                """UPDATE print_outcomes
+                   SET version_id = COALESCE(version_id, ?),
+                       design_id = COALESCE(design_id, ?),
+                       branch_id = COALESCE(branch_id, ?),
+                       machine_fingerprint = COALESCE(machine_fingerprint, ?),
+                       printer_model = COALESCE(printer_model, ?),
+                       nozzle_diameter_mm = COALESCE(nozzle_diameter_mm, ?),
+                       account_sync_id = COALESCE(account_sync_id, ?)
+                   WHERE id = ?""",
+                (*identity[:6], identity[7], row_id),
+            )
+            self._conn.commit()
+            return
         self._conn.execute(
             """UPDATE print_outcomes
                SET outcome = ?, quality_grade = COALESCE(?, quality_grade),
@@ -2739,7 +2838,15 @@ class KilnDB:
                    file_hash = COALESCE(?, file_hash),
                    agent_id = COALESCE(?, agent_id),
                    determined_by = COALESCE(?, determined_by),
-                   print_error = COALESCE(?, print_error)
+                   print_error = COALESCE(?, print_error),
+                   version_id = COALESCE(version_id, ?),
+                   design_id = COALESCE(design_id, ?),
+                   branch_id = COALESCE(branch_id, ?),
+                   machine_fingerprint = COALESCE(machine_fingerprint, ?),
+                   printer_model = COALESCE(printer_model, ?),
+                   nozzle_diameter_mm = COALESCE(nozzle_diameter_mm, ?),
+                   ended_at = COALESCE(ended_at, ?),
+                   account_sync_id = COALESCE(account_sync_id, ?)
                WHERE id = ?""",
             (
                 outcome["outcome"],
@@ -2751,12 +2858,31 @@ class KilnDB:
                 outcome.get("material_type"),
                 outcome.get("file_hash"),
                 outcome.get("agent_id"),
-                outcome.get("determined_by"),
+                determined_by,
                 normalize_print_error(outcome.get("print_error")),
+                *identity,
                 row_id,
             ),
         )
         self._conn.commit()
+
+    def _identity_values(self, outcome: dict[str, Any]) -> tuple[Any, ...]:
+        """The identity columns' values, in roster order, blanks as NULL."""
+        out: list[Any] = []
+        for name in self.PRINT_OUTCOME_IDENTITY_COLUMNS:
+            value = outcome.get(name)
+            if name in ("nozzle_diameter_mm", "ended_at"):
+                value = (
+                    float(value)
+                    if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
+                    else None
+                )
+            elif isinstance(value, (str, int)) and not isinstance(value, bool):
+                value = str(value).strip() or None
+            else:
+                value = None
+            out.append(value)
+        return tuple(out)
 
     def open_pending_outcome(
         self,
@@ -2764,6 +2890,7 @@ class KilnDB:
         printer_name: str,
         file_name: str | None = None,
         material_type: str | None = None,
+        identity: dict[str, Any] | None = None,
     ) -> int | None:
         """Open a ``pending`` outcome row at print START.
 
@@ -2771,19 +2898,27 @@ class KilnDB:
         sees, because Kiln initiates it — so the record never depends on
         a process still being alive when the print ends.  Returns the
         row id, or ``None`` when a row for ``job_id`` already exists.
+
+        *identity* carries what is known at the start and never again
+        this cheaply: the version and design being printed (when the
+        caller named them), the machine's fingerprint and model, and the
+        nozzle in it.  Keys outside ``PRINT_OUTCOME_IDENTITY_COLUMNS`` are
+        ignored.
         """
+        row: dict[str, Any] = {
+            "job_id": job_id,
+            "printer_name": printer_name,
+            "file_name": file_name,
+            "material_type": material_type,
+            "outcome": "pending",
+            "agent_id": "auto",
+            "notes": "opened at print start; outcome not yet known",
+        }
+        for name in self.PRINT_OUTCOME_IDENTITY_COLUMNS:
+            if identity and identity.get(name) not in (None, ""):
+                row[name] = identity[name]
         try:
-            return self.save_print_outcome(
-                {
-                    "job_id": job_id,
-                    "printer_name": printer_name,
-                    "file_name": file_name,
-                    "material_type": material_type,
-                    "outcome": "pending",
-                    "agent_id": "auto",
-                    "notes": "opened at print start; outcome not yet known",
-                }
-            )
+            return self.save_print_outcome(row)
         except ValueError:
             return None
 

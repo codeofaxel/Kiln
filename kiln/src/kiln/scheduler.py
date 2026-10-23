@@ -935,7 +935,15 @@ class JobScheduler:
                     tool="scheduler", file_name=next_job.file_name, printer_name=printer_name,
                 )
                 sent_at = time.monotonic()
-                result = adapter.start_print(next_job.file_name)
+                # A queued job that came from a kept design carries its ids in
+                # the job's metadata; the start stamps them on the print row.
+                _ids = {
+                    k: str(next_job.metadata[k]).strip()
+                    for k in ("version_id", "design_id", "branch_id")
+                    if next_job.metadata and isinstance(next_job.metadata.get(k), str)
+                    and next_job.metadata[k].strip()
+                }
+                result = adapter.start_print(next_job.file_name, **_ids)
                 verdict = resolve_print_start(
                     adapter, result, sent_at=sent_at,
                     file_name=next_job.file_name,

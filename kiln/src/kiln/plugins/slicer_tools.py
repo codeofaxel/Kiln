@@ -3099,8 +3099,17 @@ class _SlicerToolsPlugin:
             placement: str | list[float] | None = None,
             hardware: list[str] | None = None,
             color: str = "",
+            version_id: str | None = None,
+            design_id: str | None = None,
+            branch_id: str | None = None,
         ) -> dict:
             """Slice a 3D model (STL/3MF) + upload + print in one step (basic pipeline).
+
+            ``version_id`` / ``design_id`` / ``branch_id`` name the kept design
+            this file came from, when there is one: the print's record then
+            lands on that version's history (what printed, on which machine,
+            how it ended) instead of on a bare file name.  A file that is
+            not a Kiln design passes none and is recorded by file alone.
 
             Colour is a promise kept here.  A part made in a colour (the
             ``color`` the make was asked for, or the one its source named)
@@ -3623,6 +3632,13 @@ class _SlicerToolsPlugin:
                 # ``_resolve_use_ams`` helper so this matches the behaviour
                 # of the ``start_print`` MCP tool exactly.
                 print_kwargs: dict[str, Any] = {}
+                for _id_key, _id_val in (
+                    ("version_id", version_id),
+                    ("design_id", design_id),
+                    ("branch_id", branch_id),
+                ):
+                    if isinstance(_id_val, str) and _id_val.strip():
+                        print_kwargs[_id_key] = _id_val.strip()
                 ams_routing: dict[str, Any] | None = None
                 ams_routing_warnings: list[str] = []
                 # Ask the adapter that will receive the job, whatever it is.

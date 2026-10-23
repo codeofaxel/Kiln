@@ -146,6 +146,8 @@ def _row_from_job(job: dict[str, Any], printer_name: str) -> dict[str, Any] | No
             f"(server status: {status_text})"
         ),
         "created_at": created_at,
+        # The server knows when the job ended; the import time is not that.
+        "ended_at": _epoch(job.get("end_time")),
     }
 
 
