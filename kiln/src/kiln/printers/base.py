@@ -3737,6 +3737,17 @@ class PrinterAdapter(ABC):
                 _logging.getLogger(__name__).debug(
                     "pending-outcome open failed", exc_info=True
                 )
+            # The ending must outlive this process: an agent session lasts
+            # minutes and a print lasts hours.  A detached watcher per
+            # machine takes the printer over once this process is gone and
+            # resolves the pending row on the real edge (kiln.ending_watch).
+            # Here, in the template, so the CLI's start is covered too.
+            try:
+                from kiln.ending_watch import spawn_ending_watch
+
+                spawn_ending_watch(self, file_name)
+            except Exception:  # noqa: BLE001 — never affects a print
+                pass
             # Whatever must follow EVERY print Kiln starts attaches here,
             # through register_print_started_hook, rather than being wired
             # into each door that starts one and missing the next door.  The
