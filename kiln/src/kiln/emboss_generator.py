@@ -365,6 +365,115 @@ def _ray_hits_mesh(
     return False
 
 
+#: How far the part may stand above a face under a mark before the mark is
+#: moved up to meet it: below this the face is the surface.
+_SURFACE_RISE_EPS_MM = 0.05
+
+
+def _nearest_hits(
+    origins: Any, direction: Any, v0: Any, e1: Any, e2: Any
+) -> Any:
+    """Distance along *direction* to the first triangle each origin's ray meets.
+
+    Möller–Trumbore over every triangle at once, one ray at a time; ``inf``
+    where a ray meets nothing.  The same edge tolerance as
+    :func:`_ray_hits_mesh`, so a ray down a shared edge counts as a hit.
+    """
+    import numpy as np
+
+    tol = -1e-6
+    h = np.cross(direction, e2)
+    a = np.einsum("ij,ij->i", e1, h)
+    ok = np.abs(a) > 1e-12
+    f = np.where(ok, 1.0 / np.where(ok, a, 1.0), 0.0)
+    out = np.full(len(origins), np.inf)
+    for k, origin in enumerate(origins):
+        s = origin - v0
+        u = f * np.einsum("ij,ij->i", s, h)
+        q = np.cross(s, e1)
+        v = f * (q @ direction)
+        t = f * np.einsum("ij,ij->i", e2, q)
+        hit = ok & (u >= tol) & (u <= 1.0 - tol) & (v >= tol) & (u + v <= 1.0 - tol) & (t >= -1e-6)
+        if hit.any():
+            out[k] = float(t[hit].min())
+    return out
+
+
+def footprint_surface_rise(
+    model_path: str,
+    face: dict[str, Any],
+    anchor: tuple[float, float, float],
+    content_w: float,
+    content_h: float,
+    offset_x: float,
+    offset_y: float,
+) -> dict[str, Any]:
+    """How far the part stands ABOVE the face across the placed content.
+
+    The twin of :func:`footprint_material_coverage`, which asks whether
+    there is part beneath the content.  This asks whether there is part
+    on top of it: the face a mark is placed on can be covered where the
+    mark lands (a dome rising out of a flat plate, a photo relief standing
+    on a slab), and a mark cut at the face there is sealed inside the part
+    or buried under it, invisible.  Each sample point is cast from far
+    outside, along the face normal, into the part; the first surface it
+    meets is the outside the person sees, and its height above the face
+    plane is that point's rise.
+
+    :returns: ``checked`` (False when the geometry could not be read:
+        every other field is then neutral); ``rise``, the highest point
+        of the surface above the face plane (0.0 when nothing stands above
+        it); ``dip``, the lowest, counting the face itself as 0.0; and
+        ``covered``, the share of samples with part above the face.
+    """
+    blank = {"checked": False, "rise": 0.0, "dip": 0.0, "covered": 0.0}
+    if content_w <= 2 * _FOOTPRINT_EDGE_EPS_MM or content_h <= 2 * _FOOTPRINT_EDGE_EPS_MM:
+        return blank
+    from kiln.surface_intelligence import _parse_mesh
+
+    try:
+        import numpy as np
+
+        parsed = _parse_mesh(str(model_path))
+    except Exception as exc:  # noqa: BLE001 — logged, deliberately non-fatal
+        _logger.warning("surface-rise check skipped — could not read %s: %s", model_path, exc)
+        return blank
+    if not parsed:
+        return blank
+    tris = np.array([tri["vertices"] for tri in parsed], dtype=float)
+    v0 = tris[:, 0]
+    e1 = tris[:, 1] - v0
+    e2 = tris[:, 2] - v0
+
+    normal = _vec.normalize(face["normal"])
+    rot = _rotation_matrix_for_normal(list(normal))
+    span = float(np.ptp(tris.reshape(-1, 3), axis=0).max()) + 1.0
+    direction = -np.array(normal, dtype=float)
+
+    def _samples(extent: float) -> list[float]:
+        inner = extent - 2 * _FOOTPRINT_EDGE_EPS_MM
+        n = int(math.ceil(inner / _FOOTPRINT_SAMPLE_PITCH_MM)) + 1
+        n = max(3, min(_FOOTPRINT_MAX_SAMPLES_PER_AXIS, n))
+        return [-inner / 2.0 + inner * i / (n - 1) for i in range(n)]
+
+    origins = np.array([
+        _vec.add(anchor, _apply_rotation(rot, (offset_x + sx, offset_y + sy, span)))
+        for sx in _samples(content_w)
+        for sy in _samples(content_h)
+    ])
+    t = _nearest_hits(origins, direction, v0, e1, e2)
+    met = np.isfinite(t)
+    if not met.any():
+        return {**blank, "checked": True}
+    heights = np.maximum(span - t[met], 0.0)
+    return {
+        "checked": True,
+        "rise": float(heights.max()),
+        "dip": float(heights.min()),
+        "covered": float((heights > _SURFACE_RISE_EPS_MM).sum()) / len(t),
+    }
+
+
 def footprint_material_coverage(
     model_path: str,
     face: dict[str, Any],
@@ -639,6 +748,19 @@ def _text_content_block(content_info: dict) -> str:
 # Normalized (per-unit-of-font-size) metrics per (text, font): one tiny probe
 # compile EVER per string+font — metrics scale linearly with font size.
 _TEXT_METRICS_CACHE: dict[tuple[str, str], tuple[float, float, float, float]] = {}
+
+
+class ContentBuriedError(ValueError):
+    """The decoration would be sealed inside the part or buried under it.
+
+    Raised by :func:`generate_emboss_scad` when the part stands above the
+    face where the content lands by more than the mark is deep: the face
+    is covered there by other geometry (a photo relief, a boss, a rim),
+    so a mark cut at the face is hidden and a mark cut at the covering
+    surface would carve through a feature.  A gently curved cover (a
+    shallow dome over a flat plate) is not refused: the mark is moved up
+    to meet it instead.
+    """
 
 
 class ContentOffFaceError(ValueError):
@@ -1148,6 +1270,60 @@ def generate_emboss_scad(
 
     rotation_clause = _rotation_for_normal(normal)
 
+    # The face is not always the surface.  A dome can rise out of a flat
+    # plate, a relief can stand on a slab, and a mark cut at the face
+    # there is sealed inside the part (a frisbee's text and a plaque's
+    # caption were, until 2026-10-24).  Where the part stands above the
+    # face under the content, a gentle rise moves the mark up to meet the
+    # surface and deepens it, so every point is cut its full depth (or a
+    # raised mark reaches down to the lowest point); a rise that varies by
+    # more than the mark is deep is other geometry, and the mark is refused.
+    def _meet_the_surface(content_w: float, content_h: float) -> None:
+        nonlocal tx, ty, tz, depth_mm
+        found = footprint_surface_rise(
+            model_path, face, (cx, cy, cz),
+            content_w, content_h, final_offset_x, final_offset_y,
+        )
+        if not found["checked"] or found["rise"] <= _SURFACE_RISE_EPS_MM:
+            return
+        spread = found["rise"] - found["dip"]
+        placed = (
+            f"{content_type} content {content_w:.1f}x{content_h:.1f}mm on the "
+            f"{face.get('face_name', 'target')} face"
+        )
+        # Moved up only when the whole content sits under one gentle cover.
+        # Part on the face and part under something is the edge of another
+        # feature (a relief, a boss, a rim), and a cover that varies by more
+        # than the mark is deep is a feature too: cut at the face it is
+        # sealed in, cut at the cover it carves through the feature.
+        straddles = found["dip"] <= _SURFACE_RISE_EPS_MM
+        if content_type == "heightmap" or straddles or spread > depth_mm:
+            why = (
+                "part of it lands on that face and part under something "
+                "standing on it"
+                if straddles
+                else f"the surface there varies by {spread:.1f}mm, more than "
+                f"the {depth_mm:.1f}mm mark is deep"
+            )
+            raise ContentBuriedError(
+                f"{placed} would be hidden: the part stands up to "
+                f"{found['rise']:.1f}mm above that face where the content "
+                f"lands, and {why}.  Cut at the face it would be sealed "
+                f"inside the part.  Place it where the face is the outside "
+                f"of the part, or on another face."
+            )
+        lift = found["rise"] if mode == "deboss" else found["dip"]
+        unit = _vec.normalize(normal)
+        tx, ty, tz = tx + unit[0] * lift, ty + unit[1] * lift, tz + unit[2] * lift
+        depth_mm += spread
+        warnings.append(
+            f"{placed}: the part's surface stands {found['dip']:.1f}-"
+            f"{found['rise']:.1f}mm above that face there, so the mark was "
+            f"moved up to meet the surface"
+            + (f" and deepened by {spread:.1f}mm to keep its full depth" if spread > 0.01 else "")
+            + "."
+        )
+
     # Build the content-specific extrusion block
     if content_type == "svg":
         # Use content bounds if available, otherwise fall back to viewBox
@@ -1164,15 +1340,16 @@ def generate_emboss_scad(
             content_info, uniform_scale, uniform_scale, content_cx, content_cy,
             svg_id=svg_id, svg_layer=svg_layer,
         )
+        # SVG/heightmap content fills the target box by construction, so
+        # the box IS the content extent for offset clamping.
+        _clamp_offsets(target_w, target_h)
+        _check_content_on_material(target_w, target_h)
+        _meet_the_surface(target_w, target_h)
         extrude_height = depth_mm + 0.1
         content_block = (
             f"linear_extrude(height={extrude_height:.4f})\n"
             f"            {inner}"
         )
-        # SVG/heightmap content fills the target box by construction, so
-        # the box IS the content extent for offset clamping.
-        _clamp_offsets(target_w, target_h)
-        _check_content_on_material(target_w, target_h)
     elif content_type == "heightmap":
         x_scale = target_w / content_info.get("width_px", 100)
         y_scale = target_h / content_info.get("height_px", 100)
@@ -1186,6 +1363,7 @@ def generate_emboss_scad(
         )
         _clamp_offsets(target_w, target_h)
         _check_content_on_material(target_w, target_h)
+        _meet_the_surface(target_w, target_h)
     else:
         # openscad_text — caller can pre-set ``font_size`` in
         # content_info to bypass auto-sizing.  Layout owners (the
@@ -1278,6 +1456,7 @@ def generate_emboss_scad(
 
         # After the rim guard, so it judges the run that will be cut.
         _check_content_on_material(text_w_mm, text_h_mm)
+        _meet_the_surface(text_w_mm, text_h_mm)
 
         if measured_fit:
             f_w, f_h, f_minx, f_miny = measure_text_block_mm(
@@ -1523,6 +1702,32 @@ def _write_mark_handoff(scad_path: Path, scad_code: str, model_path: str, mark: 
         Path(f"{scad_path}{_MARK_HANDOFF_SUFFIX}").write_text(json.dumps(handoff), encoding="utf-8")
     except OSError:
         _logger.debug("emboss: mark hand-off not written for %s", scad_path, exc_info=True)
+
+
+def _sealed_hollows(mesh_path: str) -> int | None:
+    """Closed pieces of *mesh_path* that enclose negative volume: hollows."""
+    try:
+        import trimesh
+
+        mesh = trimesh.load(mesh_path, force="mesh")
+        return sum(
+            1 for piece in mesh.split(only_watertight=True) if piece.volume < -1e-6
+        )
+    except Exception:  # noqa: BLE001 — a check that cannot read stands aside
+        _logger.debug("hollow check could not read %s", mesh_path, exc_info=True)
+        return None
+
+
+def _new_sealed_hollows(scad_text: str, output_path: str) -> int:
+    """Hollows the compile of *scad_text* added to the mesh it imported."""
+    match = _SCAD_MESH_IMPORT_RE.search(scad_text or "")
+    if not match or not output_path.lower().endswith(".stl"):
+        return 0
+    before = _sealed_hollows(match.group(1))
+    after = _sealed_hollows(output_path)
+    if before is None or after is None:
+        return 0
+    return max(0, after - before)
 
 
 def _record_mark(scad_path: str, scad_text: str, output_path: str) -> None:
@@ -1931,6 +2136,21 @@ def compile_embossed_model(
         "compile_time_seconds": round(elapsed, 2),
         "success": True,
     }
+
+    # A mark never leaves a hollow sealed inside the part: that is a mark
+    # nobody can see, cut where the face was covered.  The placement check
+    # in generate_emboss_scad prevents it; this catches what it missed.
+    sealed = _new_sealed_hollows(_scad_text, output_path)
+    if sealed:
+        result_dict.update(
+            success=False,
+            error=(
+                f"The decoration left {sealed} hollow(s) sealed inside the "
+                f"part: it was cut where the face is covered, so it would not "
+                f"be seen.  Place it where the face is the outside of the part."
+            ),
+        )
+        return result_dict
 
     # The mark this compile applied, beside the mesh, so the decorated mesh
     # can be traced back to its source plus every mark since.
