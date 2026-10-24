@@ -13,6 +13,10 @@ includes it and calls ``main()``.  The file itself is never changed and
 nothing is written beside it; its own relative includes and imports still
 resolve, because OpenSCAD reads them relative to the file that names them.
 Pinned by ``tests/test_scad_main.py``.
+
+:func:`with_marks` writes the text and artwork carved into or raised onto a
+mesh into the source the mesh began as, so a decorated part's source is the
+whole part (:mod:`kiln.mesh_marks` records the marks).
 """
 
 from __future__ import annotations
@@ -96,6 +100,109 @@ def is_module_only(source: str) -> bool:
         _DEFINITION.match(s) or _ASSIGNMENT.match(s) or _IMPORT.match(s)
         for s in _top_level_statements(code)
     )
+
+
+#: What a mark module is called, by the kind of mark it draws.
+_MARK_NAMES = {"text": "text", "svg": "artwork", "heightmap": "relief"}
+#: The resolution a mark is compiled at on its own (OpenSCAD's defaults), so a
+#: mark drawn inside a source that sets its own ``$fn`` comes out the same.
+_MARK_RESOLUTION = "$fn = 0; $fa = 12; $fs = 2;"
+_FILE_READ = re.compile(r"\b(import|surface)\s*\(")
+
+
+def _blank_comments_and_strings(source: str) -> str:
+    """*source* with comments and string contents replaced by spaces, same length."""
+    out = list(source)
+    i, n = 0, len(source)
+    while i < n:
+        if source.startswith("//", i):
+            j = source.find("\n", i)
+            j = n if j < 0 else j
+        elif source.startswith("/*", i):
+            j = source.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+        elif source[i] == '"':
+            j = i + 1
+            while j < n and source[j] != '"':
+                j += 2 if source[j] == "\\" else 1
+            for k in range(i + 1, min(j, n)):
+                if out[k] != "\n":
+                    out[k] = " "
+            i = j + 1
+            continue
+        else:
+            i += 1
+            continue
+        for k in range(i, j):
+            if out[k] != "\n":
+                out[k] = " "
+        i = j
+    return "".join(out)
+
+
+def _free_name(code: str, wanted: str) -> str:
+    """*wanted*, or *wanted* with a number after it, that *code* does not define."""
+    name, k = wanted, 1
+    while re.search(rf"\bmodule\s+{re.escape(name)}\s*\(", code):
+        k += 1
+        name = f"{wanted}_{k}"
+    return name
+
+
+def with_marks(source: str, marks: Sequence[dict]) -> str:
+    """*source*'s design with each mark applied to it, in order.
+
+    *source* defines ``main()`` and draws nothing at the top level; so does
+    the result.  Its ``main`` is renamed ``undecorated``, each mark becomes a
+    named module of its own (``text_1``, ``text_2``, ...), and a new
+    ``main()`` cuts or adds them in the order they were applied.  A mark is
+    ``{"op": "difference" | "union", "scad", "kind"}``, as
+    :mod:`kiln.mesh_marks` records it.
+
+    :raises ValueError: if *source* is not module-only, a mark's op is
+        neither, or a mark reads a file (an imported image or SVG), which a
+        kept source cannot carry.
+    """
+    if not is_module_only(source):
+        raise ValueError("source must define main() and draw nothing at the top level")
+    code = _blank_comments_and_strings(source)
+    for mark in marks:
+        if mark.get("op") not in ("difference", "union"):
+            raise ValueError(f"unknown mark op {mark.get('op')!r}")
+        if _FILE_READ.search(_blank_comments_and_strings(mark.get("scad", ""))):
+            raise ValueError("a mark that reads a file cannot be kept in a source")
+
+    match = _MAIN_DEF.search(code)
+    base = _free_name(code, "undecorated")
+    renamed = source[: match.start()] + f"module {base}(" + source[match.end() :]
+
+    taken = _blank_comments_and_strings(renamed)
+    counts: dict[str, int] = {}
+    modules: list[str] = []
+    names: list[str] = []
+    for mark in marks:
+        stem = _MARK_NAMES.get(mark.get("kind", ""), "mark")
+        counts[stem] = counts.get(stem, 0) + 1
+        name = _free_name(taken, f"{stem}_{counts[stem]}")
+        taken += f"\nmodule {name}("
+        names.append(name)
+        body = "\n".join(f"    {line}" for line in mark["scad"].strip().splitlines())
+        modules.append(f"module {name}() {{\n    {_MARK_RESOLUTION}\n{body}\n}}")
+
+    # Consecutive marks with the same op share one boolean: A - B - C.
+    expr = f"{base}();"
+    i = 0
+    while i < len(marks):
+        op = marks[i]["op"]
+        run = [names[i]]
+        while i + len(run) < len(marks) and marks[i + len(run)]["op"] == op:
+            run.append(names[i + len(run)])
+        inner = "\n".join([expr, *(f"{name}();" for name in run)])
+        indented = "\n".join(f"    {line}" for line in inner.splitlines())
+        expr = f"{op}() {{\n{indented}\n}}"
+        i += len(run)
+    main = "module main() {\n" + "\n".join(f"    {line}" for line in expr.splitlines()) + "\n}"
+    return "\n".join([renamed.rstrip(), *modules, main]) + "\n"
 
 
 def runnable(source: str) -> str:
