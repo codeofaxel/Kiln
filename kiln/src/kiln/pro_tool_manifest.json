@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-20T06:35:15.435401+00:00",
-  "tool_count": 399,
+  "generated": "2026-10-24T10:47:37.320730+00:00",
+  "tool_count": 398,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -7457,138 +7457,6 @@
           "outcome"
         ],
         "title": "record_decoration_preset_outcomeArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "record"
-      },
-      "inputs": {
-        "mesh": "mesh_path"
-      }
-    },
-    {
-      "name": "record_design_version_outcome",
-      "description": "Record whether a print succeeded or failed for a design version.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "design_versioning",
-      "parameters": {
-        "properties": {
-          "version_id": {
-            "title": "Version Id",
-            "type": "string"
-          },
-          "printer_id": {
-            "title": "Printer Id",
-            "type": "string"
-          },
-          "material": {
-            "title": "Material",
-            "type": "string"
-          },
-          "success": {
-            "title": "Success",
-            "type": "boolean"
-          },
-          "warp_severity": {
-            "default": 0.0,
-            "title": "Warp Severity",
-            "type": "number"
-          },
-          "adhesion_issues": {
-            "default": false,
-            "title": "Adhesion Issues",
-            "type": "boolean"
-          },
-          "print_time_actual_s": {
-            "default": 0.0,
-            "title": "Print Time Actual S",
-            "type": "number"
-          },
-          "material_cost_usd": {
-            "default": 0.0,
-            "title": "Material Cost Usd",
-            "type": "number"
-          },
-          "electricity_cost_usd": {
-            "default": 0.0,
-            "title": "Electricity Cost Usd",
-            "type": "number"
-          },
-          "notes": {
-            "default": "",
-            "title": "Notes",
-            "type": "string"
-          },
-          "previous_version_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Previous Version Id"
-          },
-          "design_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Design Id"
-          },
-          "mesh_path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Mesh Path"
-          },
-          "vision_confidence": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Vision Confidence"
-          },
-          "predicted_adhesion_risk": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Predicted Adhesion Risk"
-          }
-        },
-        "required": [
-          "version_id",
-          "printer_id",
-          "material",
-          "success"
-        ],
-        "title": "record_design_version_outcomeArguments",
         "type": "object"
       },
       "offline": {

@@ -3102,6 +3102,7 @@ class _SlicerToolsPlugin:
             version_id: str | None = None,
             design_id: str | None = None,
             branch_id: str | None = None,
+            account_sync_id: str | None = None,
         ) -> dict:
             """Slice a 3D model (STL/3MF) + upload + print in one step (basic pipeline).
 
@@ -3110,6 +3111,9 @@ class _SlicerToolsPlugin:
             lands on that version's history (what printed, on which machine,
             how it ended) instead of on a bare file name.  A file that is
             not a Kiln design passes none and is recorded by file alone.
+            ``account_sync_id`` is the id the print's record already has on
+            the person's Kiln account, when the door that sent the print
+            opened it there first; agents leave it unset.
 
             Colour is a promise kept here.  A part made in a colour (the
             ``color`` the make was asked for, or the one its source named)
@@ -3636,6 +3640,7 @@ class _SlicerToolsPlugin:
                     ("version_id", version_id),
                     ("design_id", design_id),
                     ("branch_id", branch_id),
+                    ("account_sync_id", account_sync_id),
                 ):
                     if isinstance(_id_val, str) and _id_val.strip():
                         print_kwargs[_id_key] = _id_val.strip()
