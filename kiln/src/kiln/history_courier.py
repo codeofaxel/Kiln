@@ -1606,7 +1606,10 @@ def run_local(tool: str, mode: str, kwargs: dict[str, Any]) -> dict[str, Any]:
     if mode == "remote_releases":
         return remote_releases(tool, design_id)
     if mode == "push":
-        return push(tool, design_id, kwargs.get("branch_id") or None)
+        return push(
+            tool, design_id, kwargs.get("branch_id") or None,
+            make_room_for=kwargs.get("make_room_for") or None,
+        )
     if mode == "pull":
         return pull(
             tool, design_id, kwargs.get("branch_id") or None,

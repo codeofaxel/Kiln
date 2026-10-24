@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-24T10:41:16.857047+00:00",
+  "generated": "2026-10-24T11:11:30.540636+00:00",
   "tool_count": 399,
   "categories": {
     "product_generators": {
@@ -1297,7 +1297,7 @@
     },
     {
       "name": "cloud_backup_configure",
-      "description": "Turn automatic cloud backup of your designs on or off.\n\nKiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Turn automatic cloud backup of your designs on or off.\n\nKiln Pro would keep every design you make in your account, backed up automatically, and on any machine you sign in to.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "cloud_sync",
@@ -1326,12 +1326,12 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "cloud_workspace_v1",
+        "copy_version": "cloud_workspace_v2",
         "variant": "cloud_workspace",
         "feature": "Design library on every machine",
-        "headline": "Take this design library to every machine you use.",
-        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
-        "free_included": "Local files you already have stay on this machine and stay yours."
+        "headline": "Take every design to every machine you use.",
+        "outcome_preview": "Kiln Pro would keep every design you make in your account, backed up automatically, and on any machine you sign in to.",
+        "free_included": "Your free account keeps a few designs with their full history, pushed and pulled on any machine."
       },
       "offline": {
         "schema_version": 1,
@@ -1520,7 +1520,7 @@
     },
     {
       "name": "cloud_list_remote_branches",
-      "description": "List branches on the remote for *design_id*.\n\nKiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "List branches on the remote for *design_id*.\n\nKiln Pro would keep every design you make in your account, backed up automatically, and on any machine you sign in to.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "cloud_sync",
@@ -1544,12 +1544,12 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "cloud_workspace_v1",
+        "copy_version": "cloud_workspace_v2",
         "variant": "cloud_workspace",
         "feature": "Design library on every machine",
-        "headline": "Take this design library to every machine you use.",
-        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
-        "free_included": "Local files you already have stay on this machine and stay yours."
+        "headline": "Take every design to every machine you use.",
+        "outcome_preview": "Kiln Pro would keep every design you make in your account, backed up automatically, and on any machine you sign in to.",
+        "free_included": "Your free account keeps a few designs with their full history, pushed and pulled on any machine."
       },
       "offline": {
         "schema_version": 1,
@@ -1796,6 +1796,11 @@
             "default": "default",
             "title": "Remote",
             "type": "string"
+          },
+          "make_room_for": {
+            "default": "",
+            "title": "Make Room For",
+            "type": "string"
           }
         },
         "required": [
@@ -2023,7 +2028,7 @@
     },
     {
       "name": "cloud_remote_add",
-      "description": "Register a Kiln Cloud remote this machine can push to.\n\nKiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Register a Kiln Cloud remote this machine can push to.\n\nKiln Pro would keep every design you make in your account, backed up automatically, and on any machine you sign in to.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "cloud_sync",
@@ -2064,12 +2069,12 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "cloud_workspace_v1",
+        "copy_version": "cloud_workspace_v2",
         "variant": "cloud_workspace",
         "feature": "Design library on every machine",
-        "headline": "Take this design library to every machine you use.",
-        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
-        "free_included": "Local files you already have stay on this machine and stay yours."
+        "headline": "Take every design to every machine you use.",
+        "outcome_preview": "Kiln Pro would keep every design you make in your account, backed up automatically, and on any machine you sign in to.",
+        "free_included": "Your free account keeps a few designs with their full history, pushed and pulled on any machine."
       },
       "offline": {
         "schema_version": 1,
@@ -2079,7 +2084,7 @@
     },
     {
       "name": "cloud_remote_list",
-      "description": "List all registered Kiln Cloud remotes.\n\nKiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "List all registered Kiln Cloud remotes.\n\nKiln Pro would keep every design you make in your account, backed up automatically, and on any machine you sign in to.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "cloud_sync",
@@ -2090,12 +2095,12 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "cloud_workspace_v1",
+        "copy_version": "cloud_workspace_v2",
         "variant": "cloud_workspace",
         "feature": "Design library on every machine",
-        "headline": "Take this design library to every machine you use.",
-        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
-        "free_included": "Local files you already have stay on this machine and stay yours."
+        "headline": "Take every design to every machine you use.",
+        "outcome_preview": "Kiln Pro would keep every design you make in your account, backed up automatically, and on any machine you sign in to.",
+        "free_included": "Your free account keeps a few designs with their full history, pushed and pulled on any machine."
       },
       "offline": {
         "schema_version": 1,
@@ -3958,7 +3963,7 @@
     },
     {
       "name": "best_design_version",
-      "description": "Find the version with the highest success rate.\n\nKiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Find the version with the highest success rate.\n\nKiln Pro would compare how each version of this design printed and tell you which one to keep.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "design_versioning",
@@ -3990,12 +3995,12 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "durable_design_history_v1",
+        "copy_version": "durable_design_history_v2",
         "variant": "durable_design_history",
-        "feature": "Durable design history",
-        "headline": "Keep this part as the version you can return to.",
-        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
-        "free_included": "Download the current file where that option is already available."
+        "feature": "Version outcomes",
+        "headline": "See which version of this part printed best.",
+        "outcome_preview": "Kiln Pro would compare how each version of this design printed and tell you which one to keep.",
+        "free_included": "Your free account keeps the full history of the designs it saves: branch, merge and go back to any version."
       },
       "offline": {
         "schema_version": 1,
@@ -4520,7 +4525,7 @@
     },
     {
       "name": "compare_design_versions",
-      "description": "Compare print outcomes between two versions of a design.\n\nKiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Compare print outcomes between two versions of a design.\n\nKiln Pro would compare how each version of this design printed and tell you which one to keep.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "design_versioning",
@@ -4554,12 +4559,12 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "durable_design_history_v1",
+        "copy_version": "durable_design_history_v2",
         "variant": "durable_design_history",
-        "feature": "Durable design history",
-        "headline": "Keep this part as the version you can return to.",
-        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
-        "free_included": "Download the current file where that option is already available."
+        "feature": "Version outcomes",
+        "headline": "See which version of this part printed best.",
+        "outcome_preview": "Kiln Pro would compare how each version of this design printed and tell you which one to keep.",
+        "free_included": "Your free account keeps the full history of the designs it saves: branch, merge and go back to any version."
       },
       "offline": {
         "schema_version": 1,
@@ -5530,7 +5535,7 @@
     },
     {
       "name": "get_design_ancestry",
-      "description": "Walk the parent chain from a recipe back to the root.\n\nKiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Walk the parent chain from a recipe back to the root.\n\nKiln Pro would compare how each version of this design printed and tell you which one to keep.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "design_versioning",
@@ -5554,12 +5559,12 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "durable_design_history_v1",
+        "copy_version": "durable_design_history_v2",
         "variant": "durable_design_history",
-        "feature": "Durable design history",
-        "headline": "Keep this part as the version you can return to.",
-        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
-        "free_included": "Download the current file where that option is already available."
+        "feature": "Version outcomes",
+        "headline": "See which version of this part printed best.",
+        "outcome_preview": "Kiln Pro would compare how each version of this design printed and tell you which one to keep.",
+        "free_included": "Your free account keeps the full history of the designs it saves: branch, merge and go back to any version."
       },
       "offline": {
         "schema_version": 1,

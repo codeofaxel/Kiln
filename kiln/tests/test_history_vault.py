@@ -1163,6 +1163,20 @@ class TestAFullFreeAccountIsAskedWhichDesignToArchive:
         courier.push("cloud_push_branch", "mug")
         assert "make_room_for" not in sent["body"]
 
+    def test_the_agents_push_on_this_computer_carries_the_answer_too(self, home, monkeypatch):
+        """The push tool an agent calls on this computer runs here; the
+        design the person named reaches the account as the CLI's does."""
+        _library(home, "mug", [MESH_V1])
+        sent = {}
+
+        def fake_request(tool, method, path, body=None):
+            sent.update(body=body)
+            return {"pushed_versions": 1}
+
+        monkeypatch.setattr(courier, "_request", fake_request)
+        courier.run_local("cloud_push_branch", "push", {"design_id": "mug", "make_room_for": "old-mug"})
+        assert sent["body"]["make_room_for"] == "old-mug"
+
     def test_the_command_lists_the_designs_and_says_how_to_answer(self, home, monkeypatch):
         from click.testing import CliRunner
 

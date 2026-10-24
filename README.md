@@ -330,7 +330,7 @@ graph TD
     style V3 fill:#2d2d44,stroke:#f59e42,color:#fff
 ```
 
-Agents can also outsource jobs through **Craftcloud** fulfillment and search models on **MyMiniFactory** and **Cults3D** (search only). On Pro and up, the design store itself is versioned — branches, signed releases, and cross-machine cloud sync are first-class outputs of the system, not a side database.
+Agents can also outsource jobs through **Craftcloud** fulfillment and search models on **MyMiniFactory** and **Cults3D** (search only). The design store itself is versioned — branches and cross-machine cloud sync on the designs a free Kiln account keeps, and on every design with signed releases on Pro and up — first-class outputs of the system, not a side database.
 
 ## Git for 3D
 
