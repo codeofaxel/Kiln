@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-24T19:53:47.486444+00:00",
+  "generated": "2026-10-24T20:41:43.027083+00:00",
   "tool_count": 398,
   "categories": {
     "product_generators": {
@@ -4830,9 +4830,9 @@
     },
     {
       "name": "create_design",
-      "description": "Create an empty design slot \u2014 ``gh repo create`` for 3D.\n\nKiln Pro would save this as a reusable feature or decoration preset \u2014 named, versioned, and ready to apply to any future design in one step.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Create an empty design slot \u2014 ``gh repo create`` for 3D.",
+      "tier": "free",
+      "access": "free",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -4856,15 +4856,6 @@
         ],
         "title": "create_designArguments",
         "type": "object"
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "design_library_v2",
-        "variant": "design_library",
-        "feature": "Reusable features & decoration presets",
-        "headline": "Save this once, reuse it on every future design.",
-        "outcome_preview": "Kiln Pro would save this as a reusable feature or decoration preset \u2014 named, versioned, and ready to apply to any future design in one step.",
-        "free_included": "Making designs, downloading results, and your design library \u2014 listing, reopening, renaming, archiving \u2014 stay free."
       },
       "offline": {
         "schema_version": 1,
@@ -5858,9 +5849,9 @@
     },
     {
       "name": "import_external_mesh",
-      "description": "Import external geometry (STL / OBJ / PLY / GLB / glTF / 3MF / STEP) as a first-class design version. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Import external geometry (STL / OBJ / PLY / GLB / glTF / 3MF / STEP) as a first-class design version. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
+      "tier": "free",
+      "access": "free",
       "category": "design_versioning",
       "parameters": {
         "properties": {

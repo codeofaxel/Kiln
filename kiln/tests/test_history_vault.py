@@ -1177,6 +1177,26 @@ class TestAFullFreeAccountIsAskedWhichDesignToArchive:
         courier.run_local("cloud_push_branch", "push", {"design_id": "mug", "make_room_for": "old-mug"})
         assert sent["body"]["make_room_for"] == "old-mug"
 
+    def test_a_push_that_made_room_says_which_design_it_archived(self, home, monkeypatch):
+        """The reply that archived a design says so, so the person hears what
+        moved even when an agent sent the choice."""
+        from click.testing import CliRunner
+
+        from kiln.cli.history_commands import cloud_group
+
+        _library(home, "mug", [MESH_V1])
+        note = "Archived “Old mug” to make room. It’s still yours, with its whole history: unarchive it any time."
+
+        def fake_request(tool, method, path, body=None):
+            return {"pushed_versions": 1, "made_room": {"archived_design_id": "old-mug", "name": "Old mug", "note": note}}
+
+        monkeypatch.setattr(courier, "_request", fake_request)
+        out = courier.push("cloud_push_branch", "mug", make_room_for="old-mug")
+        assert out["made_room"]["archived_design_id"] == "old-mug"
+        shown = CliRunner().invoke(cloud_group, ["push", "mug", "--make-room", "old-mug"])
+        assert shown.exit_code == 0, shown.output
+        assert "Archived “Old mug” to make room." in shown.output
+
     def test_the_command_lists_the_designs_and_says_how_to_answer(self, home, monkeypatch):
         from click.testing import CliRunner
 

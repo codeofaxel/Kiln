@@ -270,7 +270,7 @@ def cloud_push(design_id: str, branch_id: str | None, make_room: str | None, jso
         sys.exit(1)
     _finish(answer, json_mode, lambda a: _with_recipes(
         _shown(a["said"]) if a.get("kept_as") else f"Pushed {design_id} to your Kiln account.", a, sent=True,
-    ))
+    ) + (f"\n{_shown(a['made_room']['note'])}" if isinstance(a.get("made_room"), dict) else ""))
 
 
 @cloud_group.command("auto-push")

@@ -7,6 +7,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Your free Kiln account keeps the full history of 3 designs.** Branch, merge, cherry-pick, undo and push on each, with every version kept. Importing a mesh or STEP file counts as one of them. At the limit, you pick a design to archive, never delete, or Kiln Pro keeps every design. See https://kiln3d.com/pricing.
+
 - **Your prints show up on your design's history.** Sign in, and each print shows on its version in the web workshop as came out, failed or not known; answer the unknown ones in one tap.
 
 - **Your print history now knows which version printed and how it ended, even after you close the chat.** Unseen endings are marked unknown, never guessed.
@@ -14,6 +16,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **A free account, offered once, when it would help.** Not signed in? Kiln now says what a free account adds at the moment it matters, like setting up a printer or saving a design, and your AI app can sign you in from the chat.
 
 ### Changed
+
+- **`kiln cloud push --make-room` answers a full free account.** It names the design to archive, and the push says which one moved.
 
 - **Every failed print gets a safe answer, and a paused print is never stopped.** Resuming after a power cut is Kiln Pro.
 

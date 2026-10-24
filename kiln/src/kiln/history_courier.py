@@ -914,6 +914,11 @@ def push(tool: str, design_id: str, branch_id: str | None = None, *, make_room_f
         return answer
     else:
         out = {"status": "success", "push": answer, "design_id": design_id, "branch_id": branch["branch_id"]}
+        made_room = answer.get("made_room") if isinstance(answer, dict) else None
+        if isinstance(made_room, dict) and made_room.get("note"):
+            # Which of their designs was archived to make room, said at the
+            # top of the answer so an agent tells the person what moved.
+            out["made_room"] = made_room
     if recipes:
         out["proven_recipes"] = _send_recipes(tool, design_id, recipes)
     return out
