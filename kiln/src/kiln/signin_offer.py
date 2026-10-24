@@ -217,6 +217,16 @@ HISTORY_OFFER = (
 )
 
 
+#: What a free account does with a print result.  Only prints of designs kept
+#: in Kiln reach the account, and the mark says how the print ended, never
+#: which version is better.
+OUTCOME_OFFER = (
+    "Recorded on this computer. Sign in to a free Kiln account and each print "
+    "of a design you keep in Kiln shows on that design's history on the web: "
+    "came out, failed, or not known."
+)
+
+
 def history_offer(tool: str) -> dict[str, Any] | None:
     """The one-time history offer for *tool*'s sign-in refusal, or ``None``.
 
@@ -240,6 +250,7 @@ __all__ = [
     "AGENT_OFFER_HINT",
     "FIELD",
     "HISTORY_OFFER",
+    "OUTCOME_OFFER",
     "KINDS",
     "MAX_OFFERS_PER_KIND",
     "REOFFER_AFTER_S",

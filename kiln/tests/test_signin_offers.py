@@ -303,3 +303,35 @@ def test_the_refusal_hint_names_the_tool_before_the_terminal_command():
 def test_get_started_names_the_kinds_already_offered(stats, monkeypatch):
     signin_offer.offer("design", "Made here.")
     assert signin_offer.offered_kinds() == ["design"]
+
+
+# ---------------------------------------------------------------------------
+# A print result recorded on this computer
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def outcome_tool(stats, tmp_path, monkeypatch):
+    import kiln.persistence as _p
+    import kiln.server as _srv
+    from kiln.plugins import learning_tools as lt
+
+    monkeypatch.setenv("KILN_DB_PATH", str(tmp_path / "kiln.db"))
+    monkeypatch.setattr(_p, "_db", None, raising=False)
+    monkeypatch.setattr(_srv, "_check_auth", lambda *_a, **_k: None)
+    yield lambda job: lt.record_print_outcome(job_id=job, outcome="success", printer_name="p")
+    monkeypatch.setattr(_p, "_db", None, raising=False)
+
+
+class TestTheOutcomeOffer:
+    def test_the_first_recorded_result_carries_the_offer_once(self, outcome_tool, stats):
+        first = outcome_tool("j1")
+        assert first["success"] is True
+        assert first["signin_offer"]["kind"] == "outcome"
+        assert "a design you keep in Kiln" in first["signin_offer"]["message"]
+        assert "signin_offer" not in outcome_tool("j2")
+        assert stats().get("offered_outcome") == 1
+
+    def test_a_signed_in_install_records_with_no_offer(self, outcome_tool, tmp_path):
+        _hold_session(tmp_path)
+        assert "signin_offer" not in outcome_tool("j1")

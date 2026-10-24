@@ -751,6 +751,16 @@ def record_print_outcome(
             result["material_type"] = material_type
         if auto_classification is not None:
             result["auto_classification"] = auto_classification
+        # On an install that was never signed in, say once what an account
+        # does with a print result (kiln.signin_offer).
+        try:
+            from kiln.signin_offer import FIELD, OUTCOME_OFFER, offer
+
+            block = offer("outcome", OUTCOME_OFFER)
+            if block is not None:
+                result[FIELD] = block
+        except Exception:  # noqa: BLE001 -- an offer never costs a recorded outcome
+            _logger.debug("outcome sign-in offer skipped", exc_info=True)
         return result
     except Exception as exc:
         _logger.exception("Unexpected error in record_print_outcome")
