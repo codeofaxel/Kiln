@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-23T10:39:25.996441+00:00",
+  "generated": "2026-10-23T23:54:08.858627+00:00",
   "tool_count": 399,
   "categories": {
     "product_generators": {
@@ -18114,7 +18114,7 @@
     },
     {
       "name": "predict_print_failure_risk",
-      "description": "Warn of a failure BEFORE it happens, while the print runs.\n\nFree door, tiered answer \u2014 Free: Clear, watch or high risk \u00b7 Pro: + What is drifting, and why \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Warn of a failure BEFORE it happens, while the print runs.\n\nFree door, tiered answer \u2014 Free: Clear, watch or high risk, 10 prints a day \u00b7 Pro: + What is drifting and why, every print \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "print_intelligence",
@@ -18175,8 +18175,8 @@
       },
       "band": {
         "domain": "recovery",
-        "free": "Clear, watch or high risk",
-        "pro": "+ What is drifting, and why",
+        "free": "Clear, watch or high risk, 10 prints a day",
+        "pro": "+ What is drifting and why, every print",
         "business": "\u2713",
         "enterprise": "\u2713"
       },
