@@ -7,6 +7,10 @@ validation, even the ``--version`` and ``--help`` probes — goes through
 pins that, because a shared helper nobody calls is the same bug with
 extra steps.
 
+It is also where a source written as named modules composed by ``main()``
+compiles to that ``main()`` (:func:`kiln.scad_main.runnable_inputs`), so every
+door that hands OpenSCAD a file gets the same answer.
+
 WHY THIS EXISTS
 ---------------
 OpenSCAD can die of SIGSEGV during startup, before it has read a single
@@ -94,6 +98,8 @@ import signal
 import subprocess
 import time
 from collections.abc import Sequence
+
+from kiln.scad_main import runnable_inputs
 
 logger = logging.getLogger(__name__)
 
@@ -246,7 +252,21 @@ def run_openscad(
         attempt — a crash that outlives every retry is still returned,
         not raised, so existing error handling at each site keeps working.
     """
-    argv = list(cmd)
+    with runnable_inputs(cmd, cwd=cwd) as argv:
+        return _run_with_retry(argv, timeout=timeout, cwd=cwd, text=text,
+                               output_path=output_path, attempts=attempts)
+
+
+def _run_with_retry(
+    argv: list[str],
+    *,
+    timeout: float | None,
+    cwd: str | None,
+    text: bool,
+    output_path: str | None,
+    attempts: int,
+) -> subprocess.CompletedProcess:
+    """The launch loop behind :func:`run_openscad`."""
     result: subprocess.CompletedProcess | None = None
 
     for attempt in range(1, max(1, attempts) + 1):
