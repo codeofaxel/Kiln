@@ -723,6 +723,16 @@ class _UtilityToolsPlugin:
                     "tool": "kiln_signin",
                     "message": AGENT_ACCOUNT_NUDGE,
                 }
+                # What this install was already offered at a moment of value
+                # (kiln.signin_offer), so the agent does not raise it again.
+                try:
+                    from kiln.signin_offer import offered_kinds
+
+                    _already = offered_kinds()
+                except Exception:  # noqa: BLE001 -- onboarding must not break
+                    _already = []
+                if _already:
+                    _account["already_offered"] = _already
             # A printer set up from the config at boot had no door to speak
             # to; its limits nudge, if one was minted, is said here, once.
             try:

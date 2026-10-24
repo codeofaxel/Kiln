@@ -1006,6 +1006,16 @@ def _count_limits_offer(stage: str, spelling: str, *, leads_to_signin: bool = Tr
         logger.debug("limits nudge not counted", exc_info=True)
 
 
+def _count_resignin() -> None:
+    """Count a sign-back-in sentence in the sign-in funnel.  Never raises."""
+    try:
+        from kiln.daily_stats import record_account_nudge
+
+        record_account_nudge("offered_resignin")
+    except Exception:  # noqa: BLE001 -- a counter never costs a setup
+        logger.debug("re-sign-in nudge not counted", exc_info=True)
+
+
 def warm_profile(printer_id: str) -> str | None:
     """Fetch *printer_id*'s record now, at setup, and mint the one sentence an
     install that could not get it is owed.  Returns that sentence, or ``None``.
@@ -1026,7 +1036,10 @@ def warm_profile(printer_id: str) -> str | None:
     Offline or unanswered is neither: the record is fetched on the next
     command that needs it, and the floor stands meanwhile with nothing to
     say to the person.  A process mints each printer's sentence once; the
-    door that speaks it takes it with :func:`pending_limits_nudge`.
+    door that speaks it takes it with :func:`pending_limits_nudge`.  The two
+    signed-out sentences are an offer of a free account, so they are paced
+    by :mod:`kiln.signin_offer` (once per printer model per install, once
+    more after two weeks), and a lapsed session hears "sign back in" instead.
 
     The two signed-out sentences are the sign-in funnel's ``offered_limits``
     and ``offered_limits_unknown`` (``daily_stats.record_limits_nudge_offer``),
@@ -1051,6 +1064,28 @@ def warm_profile(printer_id: str) -> str | None:
     candidates = [normalised] + [c for c in printer_key_candidates(spelling) if c != normalised]
     listed = _catalogue_lists(candidates)
     hotend, bed = profile.max_hotend_temp, profile.max_bed_temp
+    if cause == "signed_out":
+        from kiln.signin_offer import claim, never_signed_in
+
+        if not never_signed_in():
+            # A lapsed session: a returning owner, told to sign back in,
+            # never offered an account.
+            if listed is None:
+                return None
+            sentence = (
+                f"Kiln knows the {listed} well, and is holding it to generic limits "
+                f"({hotend:g} C hotend, {bed:g} C bed) only because your Kiln session has expired. "
+                "Sign back in and Kiln works to that printer's real limits again."
+            )
+            _count_resignin()
+            _nudged.add(normalised)
+            _pending_nudges.append(sentence)
+            return sentence
+        # Once per printer model per install (kiln.signin_offer), not once
+        # per server start: an install that stays signed out heard it.
+        if not claim("printer", listed or normalised):
+            _nudged.add(normalised)
+            return None
     if listed is not None:
         if cause != "signed_out":
             return None

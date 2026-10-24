@@ -878,6 +878,23 @@ def _isolate_printer_registry():
 
 
 @pytest.fixture(autouse=True)
+def _isolate_signin_offers(tmp_path):
+    """No test may inherit a sign-in offer an earlier test made.
+
+    ``kiln.signin_offer`` keeps once-per-install pacing in a ledger under
+    ``~/.kiln``, and _TEST_HOME is one directory for the whole session, so an
+    offer one test claimed would be "already said" for every later test.  A
+    fresh ledger per test; a test of the pacing itself makes its claims inside
+    one test.
+    """
+    from kiln import signin_offer
+
+    signin_offer.reset_for_tests(tmp_path / "signin_offers.json")
+    yield
+    signin_offer.reset_for_tests(None)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_plate_record():
     """No test may inherit a plate record an earlier test's start left.
 

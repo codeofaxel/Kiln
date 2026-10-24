@@ -562,11 +562,26 @@ def _request(
     from kiln.auth_session import _api_base, resolve_api_bearer
     from kiln.served_answer import envelope_for_http, envelope_for_transport
 
-    bearer = resolve_api_bearer().token
+    resolved = resolve_api_bearer()
+    bearer = resolved.token
     if not bearer:
         from kiln.tiers_and_terms import signed_out_message, signin_hint_fields
 
-        return {
+        if resolved.state == "needs_signin":
+            # A session that can no longer be renewed: a returning owner,
+            # told to sign back in, never offered an account.
+            return {
+                "status": "error",
+                "success": False,
+                "error": str(resolved.detail or "") or "Your Kiln session has expired. Sign back in to continue.",
+                "code": "KILN_SESSION_EXPIRED",
+                "tool": tool,
+                "why": "signed_out",
+                **signin_hint_fields(),
+            }
+        from kiln.signin_offer import FIELD, history_offer
+
+        answer = {
             "status": "error",
             "success": False,
             "error": signed_out_message(),
@@ -575,6 +590,11 @@ def _request(
             "why": "signed_out",
             **signin_hint_fields(),
         }
+        block = history_offer(tool)
+        if block is not None:
+            answer["error"] = f"{block['message']} {answer['error']}"
+            answer[FIELD] = block
+        return answer
     try:
         from kiln.version_check import _current_version
 

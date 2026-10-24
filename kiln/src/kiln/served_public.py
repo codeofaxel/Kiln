@@ -196,13 +196,48 @@ def _in_their_words(miss: Any, answer: Any) -> Any:
     return Miss(miss.cause, miss.code, "")
 
 
+#: What a free account does for a make, said once when a make ran on this
+#: computer only because the install was never signed in.
+DESIGN_OFFER = (
+    "Made on this computer. With a free Kiln account, Kiln makes it on its "
+    "servers and you can keep it in your Kiln account with its full history "
+    "(branch it, undo a change, compare versions) and open it on kiln3d.com "
+    "from any computer."
+)
+
+
+def _design_offer(name: str, result: dict[str, Any], miss: Any) -> bool:
+    """A make that ran here because the install was never signed in carries
+    the one-time account offer, and otherwise nothing about why: the make is
+    whole, and "sign in" every session would be the nag the offer's pacing
+    exists to prevent.  True when this answer is settled here."""
+    from kiln.served_answer import kind_of_tool
+    from kiln.signin_offer import FIELD, offer
+
+    if miss.cause != "signed_out" or miss.code != "KILN_ACCOUNT_NOT_PAIRED":
+        return False
+    if kind_of_tool(name) != "made":
+        return False
+    if result.get("success") is not False:
+        block = offer("design", DESIGN_OFFER)
+        if block is not None:
+            result[FIELD] = block
+    return True
+
+
 def say_once(name: str, result: Any, miss: Any) -> Any:
     """*result*, made on this computer, with the first note this session
-    for *miss*'s cause.  Later answers for the same cause say nothing."""
+    for *miss*'s cause.  Later answers for the same cause say nothing.
+
+    A make on an install that was never signed in carries the account offer
+    instead (:mod:`kiln.signin_offer`, once per install), because what the
+    person missed there is what a free account would have kept for them."""
     if miss is None or not isinstance(result, dict):
         return result
     from kiln.served_answer import fields, sentence
 
+    if _design_offer(name, result, miss):
+        return result
     with _lock:
         if miss.cause in _said:
             return result

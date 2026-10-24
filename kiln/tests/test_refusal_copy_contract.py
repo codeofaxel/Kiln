@@ -203,7 +203,10 @@ def test_agent_hint_carries_the_command_and_says_to_run_it():
     assert fields["setup_hint"] == SIGNIN_COMMAND == "kiln signin"
     assert SIGNIN_COMMAND in fields["agent_hint"]
     lowered = fields["agent_hint"].lower()
-    assert "run" in lowered
+    # The agent does it: by calling the sign-in tool, which works in any chat.
+    # The hint used to say only "Run `kiln signin`", a terminal command, and in
+    # the thirty days to 2026-10-24 no agent started a sign-in at all.
+    assert "call the `kiln_signin` tool" in lowered
     # The instruction that stops the agent relaying the command onward.
     assert "do not ask them to type" in lowered
 

@@ -172,7 +172,7 @@ _KIND_RULES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
                     r"propose_sourcing|drying_advisor|.*_advisor$|"
                     r"get_(print_confidence|material_warnings|maintenance_prediction|recovery_recommendations|"
                     r"optimal_settings|auto_tuned_settings|calibration_freshness|calibration_health))"),
-        ("made", r"^(generate|make|apply|smart_|batch_|auto_|build|render|preview|embed|export|regenerate|split|"
+        ("made", r"^(generate|make|compile|apply|smart_|batch_|auto_|build|render|preview|embed|export|regenerate|split|"
                  r"separate|paint|segment|keep_|recover_texture|derive|prepopulate|hollow|"
                  r"merge_(design|feature|decoration)|rebase|cherry_pick|iterate|rollback|undo|restore|promote|"
                  r"attach|import|add_|deboss|decorate|source_merge|wrap_gcode|change_|design_session|"

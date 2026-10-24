@@ -1016,6 +1016,14 @@ _ACCOUNT_NUDGE_STAGES = frozenset({
     "completed_limits",      # ALSO counted under its door: a sign-in that
                              # finished within a day of a limits nudge
                              # (the marker in record_limits_nudge_offer)
+    # The moment-of-value offers (kiln.signin_offer): what Kiln did on this
+    # computer alone, and what a free account would have done for it.
+    "offered_design",        # a make ran here for want of a sign-in
+    "offered_history",       # a design-history tool needed the account
+    "offered_outcome",       # a print result was kept on this computer only
+    "completed_design",      # ALSO counted under its door: a sign-in that
+    "completed_history",     # finished within a day of that kind's offer
+    "completed_outcome",
     "denied",                # cancelled in the browser
     "expired",               # the code ran out before anyone finished
     "timed_out",             # the terminal stopped waiting first
@@ -1050,6 +1058,14 @@ _LIMITS_NUDGE_MARKER_PATH: Path = Path.home() / ".kiln" / "limits_nudge_pending.
 #: as nothing, and the marker is cleared all the same.
 _LIMITS_NUDGE_FRESH_S = 24 * 3600
 _LIMITS_OFFER_STAGES = frozenset({"offered_limits", "offered_limits_unknown"})
+#: Each offer stage a marker can hold, and the stage its sign-in counts as.
+_OFFER_CONVERSIONS = {
+    "offered_limits": "completed_limits",
+    "offered_limits_unknown": "completed_limits",
+    "offered_design": "completed_design",
+    "offered_history": "completed_history",
+    "offered_outcome": "completed_outcome",
+}
 
 
 def record_limits_nudge_offer(stage: str, printer_model: str, *, leads_to_signin: bool = True) -> None:
@@ -1075,6 +1091,21 @@ def record_limits_nudge_offer(stage: str, printer_model: str, *, leads_to_signin
     name = (stage or "").strip()
     if name not in _LIMITS_OFFER_STAGES:
         return
+    _record_offer_and_marker(name, printer_model, leads_to_signin=leads_to_signin)
+
+
+def record_signin_offer(stage: str, subject: str = "") -> None:
+    """Count a moment-of-value sign-in offer (``kiln.signin_offer``) and leave
+    the marker the sign-in it leads to reads.  Any stage the marker cannot
+    convert is dropped.  *subject* (a printer model) stays in the marker on
+    this computer; the heartbeat carries the count alone.  Never raises."""
+    name = (stage or "").strip()
+    if name not in _OFFER_CONVERSIONS:
+        return
+    _record_offer_and_marker(name, subject, leads_to_signin=True)
+
+
+def _record_offer_and_marker(name: str, printer_model: str, *, leads_to_signin: bool) -> None:
     record_account_nudge(name)
     if _recording_suppressed() or not leads_to_signin:
         return
@@ -1093,8 +1124,10 @@ def record_limits_nudge_offer(stage: str, printer_model: str, *, leads_to_signin
 
 
 def record_limits_nudge_conversion() -> bool:
-    """A sign-in just completed: count ``completed_limits`` if a limits nudge
-    was shown within :data:`_LIMITS_NUDGE_FRESH_S`, and clear the marker.
+    """A sign-in just completed: count the conversion of the offer the marker
+    holds (``completed_limits`` for a limits nudge, ``completed_design`` and
+    its siblings for a moment-of-value offer) if it was shown within
+    :data:`_LIMITS_NUDGE_FRESH_S`, and clear the marker.
 
     Returns True when a conversion was counted.  The marker is removed
     whatever its age -- the sign-in it waited for has happened, and an older
@@ -1106,20 +1139,30 @@ def record_limits_nudge_conversion() -> bool:
         return False
     path = _LIMITS_NUDGE_MARKER_PATH
     shown_at = 0.0
+    stage = "offered_limits"
     try:
         if not path.is_file():
             return False
         raw = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(raw, dict):
             shown_at = float(raw.get("shown_at") or 0.0)
+            stage = str(raw.get("stage") or stage)
     except Exception as exc:  # noqa: BLE001 -- an unreadable marker is no marker
         _logger.debug("limits nudge marker unreadable: %s", exc)
     with contextlib.suppress(OSError):
         path.unlink()
     if shown_at <= 0.0 or time.time() - shown_at > _LIMITS_NUDGE_FRESH_S:
         return False
-    record_account_nudge("completed_limits")
+    completed = _OFFER_CONVERSIONS.get(stage)
+    if completed is None:
+        return False
+    record_account_nudge(completed)
     return True
+
+
+#: The same conversion under the name that says what it does now: the marker
+#: holds whichever offer came last, the limits nudge or a moment-of-value one.
+record_offer_conversion = record_limits_nudge_conversion
 
 
 def record_update_nudge(stage: str) -> None:

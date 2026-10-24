@@ -224,8 +224,10 @@ SIGNIN_COMMAND = "kiln signin"
 #: the pair trips a leak check that has nothing to do with refusal copy.
 #: Cheaper to pick another word than to weaken a security gate over wording.
 AGENT_SIGNIN_HINT = (
-    "Run `kiln signin` for the user — it opens a browser and finishes on its "
-    "own. Do not ask them to type a command. On a machine with no browser, "
+    "Sign the user in for them: call the `kiln_signin` tool and give them the "
+    "link it returns, then check with `kiln_signin_poll` once they have "
+    "approved it in the browser (in a terminal, `kiln signin` does the same). "
+    "Do not ask them to type a command. On a machine with no browser, "
     "`kiln pair <code>` works instead, with a code from "
     "https://app.kiln3d.com/connect. When sign-in finishes, retry the "
     "request that needed it: the user should not have to ask twice, and if "
@@ -244,12 +246,16 @@ AGENT_SIGNIN_HINT = (
 #: account block — and they had drifted into two wordings, one of which ended
 #: by offering the user a terminal.
 AGENT_ACCOUNT_NUDGE = (
-    "The user is not signed in. Kiln works fully without an account; a free "
-    "account adds a cloud design library with share links, plus the free "
-    "monthly allowance of Kiln's hosted tools. If the user wants to save or "
-    "share a design, offer to sign them in — call the `kiln_signin` tool and "
-    "give them the URL it returns, rather than asking them to type a command. "
-    "Mention it at most once per session, and never block work on it."
+    "The user is not signed in. Kiln works fully without an account. A free "
+    "Kiln account adds: their printer's own temperature limits and tuned "
+    "slicing profile instead of generic ones; designs kept in their Kiln "
+    "account with full history (branch, merge, undo), open on kiln3d.com from "
+    "any computer; and the free monthly allowance of Kiln's hosted tools. "
+    "Offer it once, at a moment it would help (a printer being set up, a "
+    "design they want to keep), by calling the `kiln_signin` tool and giving "
+    "them the link it returns, rather than asking them to type a command. "
+    "Signing in is free; never describe it as a paid step. Mention it at most "
+    "once per session, drop it if they decline, and never block work on it."
 )
 
 
