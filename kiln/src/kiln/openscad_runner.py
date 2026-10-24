@@ -7,6 +7,24 @@ validation, even the ``--version`` and ``--help`` probes — goes through
 pins that, because a shared helper nobody calls is the same bug with
 extra steps.
 
+It is also where a source written as named modules composed by ``main()``
+compiles to that ``main()`` (:func:`kiln.scad_main.runnable_inputs`), so every
+door that hands OpenSCAD a file gets the same answer.
+
+And it is where a mesh the fast engine left open is rebuilt with the exact
+one.  Kiln compiles with OpenSCAD's Manifold backend for speed, and that
+backend can leave parts that meet face to face unjoined: the seam comes out
+as zero-thickness scraps and open edges, so the file is no closed solid even
+though the design is.  Measured 2026-10-24 on OpenSCAD 2026.04.26: every
+clipped bookmark size tried (384 of 384) came out open, and the three-line
+slab, step and rotated ledge in ``tests/test_openscad_runner.py`` comes out as
+three open pieces, where the CGAL backend closes all of them.  Manifold is
+also what OpenSCAD 2024+ uses when no backend is named.  So when a compile
+not already on CGAL writes an STL that is not closed, the same command runs
+once more with ``--backend=cgal``, within :data:`EXACT_ENGINE_TIMEOUT_S`, and
+its file is kept only if it is closed; otherwise the first file stays.  An
+OpenSCAD too old to know the option refuses it, and the first file stays.
+
 WHY THIS EXISTS
 ---------------
 OpenSCAD can die of SIGSEGV during startup, before it has read a single
@@ -94,6 +112,8 @@ import signal
 import subprocess
 import time
 from collections.abc import Sequence
+
+from kiln.scad_main import runnable_inputs
 
 logger = logging.getLogger(__name__)
 
@@ -246,7 +266,96 @@ def run_openscad(
         attempt — a crash that outlives every retry is still returned,
         not raised, so existing error handling at each site keeps working.
     """
-    argv = list(cmd)
+    with runnable_inputs(cmd, cwd=cwd) as argv:
+        result = _run_with_retry(argv, timeout=timeout, cwd=cwd, text=text,
+                                 output_path=output_path, attempts=attempts)
+        if result.returncode == 0 and _EXACT_ENGINE_FLAG not in argv:
+            result = _closed_by_the_exact_engine(
+                argv, result, timeout=timeout, cwd=cwd, text=text,
+                output_path=output_path, attempts=attempts,
+            )
+        return result
+
+
+#: The flag that picks OpenSCAD's exact CGAL backend.  OpenSCAD 2024+ runs
+#: its fast Manifold backend unless told otherwise.
+_EXACT_ENGINE_FLAG = "--backend=cgal"
+#: The longest the exact engine may take to close what the fast one left
+#: open.  CGAL can be far slower, so past this the fast engine's file stands
+#: and the delay a person waits stays bounded.
+EXACT_ENGINE_TIMEOUT_S = 60.0
+#: Files above this are not loaded to check; the cost is memory, not time.
+_CLOSURE_CHECK_MAX_BYTES = 256 * 1024 * 1024
+
+
+def _is_open_mesh(path: str) -> bool:
+    """True when *path* is an STL whose surface has open or over-shared edges.
+
+    Anything it cannot judge (no file, not an STL, too big, trimesh absent or
+    unable to read it) counts as not open, so the compile is left alone.
+    """
+    if not path.lower().endswith(".stl") or not os.path.isfile(path):
+        return False
+    if os.path.getsize(path) > _CLOSURE_CHECK_MAX_BYTES:
+        return False
+    try:
+        import trimesh
+
+        mesh = trimesh.load(path, force="mesh")
+        return len(mesh.faces) > 0 and not mesh.is_watertight
+    except Exception:  # noqa: BLE001 — an unreadable file is the caller's to report
+        logger.debug("closure check could not read %s", path, exc_info=True)
+        return False
+
+
+def _closed_by_the_exact_engine(
+    argv: list[str],
+    fast: subprocess.CompletedProcess,
+    *,
+    timeout: float | None,
+    cwd: str | None,
+    text: bool,
+    output_path: str | None,
+    attempts: int,
+) -> subprocess.CompletedProcess:
+    """The exact engine's file when the fast one wrote an open mesh and it closes it."""
+    if not output_path:
+        return fast
+    path = os.path.join(cwd, output_path) if cwd and not os.path.isabs(output_path) else output_path
+    if not _is_open_mesh(path):
+        return fast
+
+    kept = f"{path}.fast"
+    os.replace(path, kept)
+    budget = EXACT_ENGINE_TIMEOUT_S if timeout is None else min(timeout, EXACT_ENGINE_TIMEOUT_S)
+    exact_argv = [argv[0], _EXACT_ENGINE_FLAG,
+                  *(arg for arg in argv[1:] if not arg.startswith("--backend"))]
+    try:
+        exact = _run_with_retry(exact_argv, timeout=budget, cwd=cwd, text=text,
+                                output_path=output_path, attempts=attempts)
+    except subprocess.TimeoutExpired:
+        exact = None
+    if exact is not None and exact.returncode == 0 and os.path.isfile(path) and not _is_open_mesh(path):
+        os.remove(kept)
+        logger.info("OpenSCAD's fast engine left %s open; the exact engine closed it.",
+                    os.path.basename(path))
+        return exact
+    os.replace(kept, path)
+    logger.warning("OpenSCAD's fast engine left %s open and the exact engine did not close "
+                   "it within %.0fs; keeping the fast engine's file.", os.path.basename(path), budget)
+    return fast
+
+
+def _run_with_retry(
+    argv: list[str],
+    *,
+    timeout: float | None,
+    cwd: str | None,
+    text: bool,
+    output_path: str | None,
+    attempts: int,
+) -> subprocess.CompletedProcess:
+    """The launch loop behind :func:`run_openscad`."""
     result: subprocess.CompletedProcess | None = None
 
     for attempt in range(1, max(1, attempts) + 1):

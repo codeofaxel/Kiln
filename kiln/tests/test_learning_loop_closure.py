@@ -340,20 +340,11 @@ class TestWireC_CommunityPull:
 
 class TestWireE_AutoClassify:
     def _fake_analysis(self, ftype: str, confidence: float, evidence: list[str]):
-        """Build a duck-typed analyze_failure return object."""
-        from kiln.failure_recovery import (
-            FailureClassification,
-            FailureType,
-            RecoveryAction,
-        )
+        """The classification ``_auto_classify_failure`` reads (it asks the
+        classifier alone: no recovery plan is wanted on the way to a record)."""
+        from kiln.failure_recovery import FailureClassification, FailureType
 
-        # We don't need a real recovery plan / history — only
-        # ``analysis.classification`` is read by ``_auto_classify_failure``.
-        class _FakeAnalysis:
-            pass
-
-        fa = _FakeAnalysis()
-        fa.classification = FailureClassification(
+        return FailureClassification(
             failure_type=FailureType(ftype),
             confidence=confidence,
             evidence=evidence,
@@ -361,7 +352,6 @@ class TestWireE_AutoClassify:
             time_printing_seconds=1800,
             material_wasted_grams=12.0,
         )
-        return fa
 
     def test_high_confidence_stores_mapped_mode(self, tmp_kiln_env):
         """adhesion_loss → adhesion (DB vocabulary); stored because
@@ -372,7 +362,7 @@ class TestWireE_AutoClassify:
             "adhesion_loss", 0.9, ["Mid-print progress halt", "Bed temp normal"],
         )
         with patch("kiln.server._check_auth", return_value=None), patch(
-            "kiln.failure_recovery.analyze_failure", return_value=analysis,
+            "kiln.failure_recovery.classify_failure", return_value=analysis,
         ):
             result = record_print_outcome(
                 job_id="job-1",
@@ -399,7 +389,7 @@ class TestWireE_AutoClassify:
             "warping", 0.4, ["Thin evidence"],
         )
         with patch("kiln.server._check_auth", return_value=None), patch(
-            "kiln.failure_recovery.analyze_failure", return_value=analysis,
+            "kiln.failure_recovery.classify_failure", return_value=analysis,
         ):
             result = record_print_outcome(
                 job_id="job-2",
@@ -415,6 +405,29 @@ class TestWireE_AutoClassify:
         assert ac["stored"] is False
         assert ac["confidence"] == 0.4
 
+    def test_classifying_a_failure_asks_for_no_recovery_plan(self, tmp_kiln_env):
+        """Recording an outcome classifies the failure and stops there: a
+        recovery plan is never asked for on the way, so a paying install
+        never spends a served plan (or waits on one) to file a record."""
+        from kiln import _pro_recovery_bridge
+        from kiln.plugins.learning_tools import record_print_outcome
+
+        def no_plan_wanted(*_a, **_k):
+            raise AssertionError("a recovery plan was asked for while recording an outcome")
+
+        with patch("kiln.server._check_auth", return_value=None), patch.object(
+            _pro_recovery_bridge, "ask", no_plan_wanted,
+        ):
+            result = record_print_outcome(
+                job_id="job-9",
+                outcome="failed",
+                printer_name="test-bambu",
+                material_type="PLA",
+                auto_classify=True,
+            )
+        assert result.get("success") is True
+        assert result.get("auto_classification") is not None
+
     def test_opt_in_only_does_not_trigger_by_default(self, tmp_kiln_env):
         from kiln.plugins.learning_tools import record_print_outcome
 
@@ -426,7 +439,7 @@ class TestWireE_AutoClassify:
             return analysis
 
         with patch("kiln.server._check_auth", return_value=None), patch(
-            "kiln.failure_recovery.analyze_failure", side_effect=_counting,
+            "kiln.failure_recovery.classify_failure", side_effect=_counting,
         ):
             result = record_print_outcome(
                 job_id="job-3",
@@ -444,7 +457,7 @@ class TestWireE_AutoClassify:
 
         analysis = self._fake_analysis("warping", 0.99, [])
         with patch("kiln.server._check_auth", return_value=None), patch(
-            "kiln.failure_recovery.analyze_failure", return_value=analysis,
+            "kiln.failure_recovery.classify_failure", return_value=analysis,
         ) as mock_af:
             result = record_print_outcome(
                 job_id="job-4",

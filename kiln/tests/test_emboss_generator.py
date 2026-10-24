@@ -427,6 +427,42 @@ class TestCgalBackendEnvVar:
                 compile_embossed_model(str(scad), out_stl)
 
             assert "--backend=manifold" not in captured_cmd
+            # OpenSCAD 2024+ runs Manifold when no backend is named, so the
+            # opt-out has to name CGAL or it opts out of nothing.
+            assert "--backend=cgal" in captured_cmd
+        finally:
+            _mod._openscad_version_cache = original_cache
+
+    def test_a_failed_manifold_compile_retries_on_cgal(self, tmp_path):
+        import subprocess
+
+        import kiln.emboss_generator as _mod
+        from kiln.emboss_generator import compile_embossed_model
+
+        scad = tmp_path / "test.scad"
+        scad.write_text("cube([10,10,10]);")
+        out_stl = str(tmp_path / "out.stl")
+
+        original_cache = _mod._openscad_version_cache
+        try:
+            _mod._openscad_version_cache = "2026.04.26"
+            launches: list[list[str]] = []
+
+            def fake_run(cmd, **kwargs):
+                launches.append(list(cmd))
+                if "--backend=manifold" in cmd:
+                    return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="manifold error")
+                tmp_path.joinpath("out.stl").write_bytes(b"solid\nendsolid")
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+            with patch.object(_mod, "_find_openscad", return_value="/fake/openscad"), \
+                 patch("kiln.emboss_generator.subprocess.run", side_effect=fake_run), \
+                 patch.dict(os.environ, {"KILN_OPENSCAD_BACKEND": "manifold"}):
+                result = compile_embossed_model(str(scad), out_stl)
+
+            assert result["success"], result
+            assert "--backend=manifold" in launches[0]
+            assert "--backend=cgal" in launches[-1]
         finally:
             _mod._openscad_version_cache = original_cache
 

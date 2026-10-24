@@ -1639,6 +1639,11 @@ class _DesignToolsPlugin:
             exactly as written, and the result's ``curve_resolution`` note
             says so.
 
+            Named parts: a source may define each part as its own module and
+            compose them in ``module main()``, drawing nothing at the top
+            level; it compiles to ``main()``.  Kiln keeps generated designs
+            this way, so a kept source compiles as it is.
+
             When you pass ``fastener``, the result carries a
             ``fastener_advice`` block saying the code compiled as written
             and nothing resized the hole for that fastener.  Kiln raises

@@ -135,7 +135,7 @@ The full searchable list of **70 tuned printer profiles across 15 brands** is at
 - **Marketplace publish** — one-click publish to Thingiverse/MyMiniFactory with print "birth certificate"
 - **Revenue tracking** — per-model creator analytics, 2.5% platform fee on Kiln-published models
 - **Print-as-a-Service** — local vs fulfillment cost comparison, order lifecycle management
-- **Failure recovery** — 9 failure types classified, automated recovery planning
+- **Failure recovery** — 9 failure types classified, each with a safe next step; the plan to save the print is Kiln Pro
 - **Multi-printer splitting** — round-robin and assembly-based job distribution across fleets
 - **Generation feedback loop** — failed print → improved prompt with printability constraints
 - **Smart material routing** — intent-based material recommendations across 38 materials, printer capability aware; brand filament profiles for 69 brands and lines (the per-brand tune is part of Kiln Pro)

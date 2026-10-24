@@ -312,46 +312,46 @@ def test_burn_warning_fires_on_the_same_trigger_as_the_next_step():
 # ---------------------------------------------------------------------------
 
 
-def test_the_clog_recovery_plan_leads_with_the_warning():
+def _free_clog_plan(monkeypatch):
+    """``get_recovery_plan(failure_type="nozzle_clog")`` as a free plan sees it."""
+    from kiln import _pro_recovery_bridge as bridge
+    from kiln.failure_recovery import FailureClassification, FailureType, plan_recovery
+
+    monkeypatch.setattr(bridge, "_local", lambda kind, failure: None)
+    monkeypatch.setattr(bridge, "_plan_includes_pro", lambda: False)
+    monkeypatch.setattr(bridge, "_lapsed_signin", lambda: "")
+    return plan_recovery(FailureClassification(
+        failure_type=FailureType.NOZZLE_CLOG, confidence=1.0, evidence=["Manual classification"],
+        progress_at_failure=0.0, time_printing_seconds=0, material_wasted_grams=0.0,
+    ))
+
+
+def test_the_clog_recovery_plan_leads_with_the_warning(monkeypatch):
     """The worst gap found in the door audit, pinned.
 
-    ``get_recovery_plan(failure_type="nozzle_clog")`` hands back a numbered
-    bare-hands procedure. ``failure_type`` is an enum the user picks, so
-    there is no symptom string for the troubleshooter's trigger list to
-    match — this door could never have been covered by that route. It is the
-    three-days-bare-handed scenario reached in a single call.
+    ``get_recovery_plan(failure_type="nozzle_clog")`` hands back a plan for a
+    blocked hot end. ``failure_type`` is an enum the user picks, so there is
+    no symptom string for the troubleshooter's trigger list to match — this
+    door could never have been covered by that route. The burn warning is
+    free at every tier and comes first (Kiln Pro's fix steps keep it first
+    too, pinned in kiln-pro).
     """
-    from kiln.failure_recovery import FailureType, _build_recovery
     from kiln.hotend_safety import MOLTEN_FILAMENT_WARNING
 
-    steps = _build_recovery(FailureType.NOZZLE_CLOG).steps
+    steps = _free_clog_plan(monkeypatch).steps
     assert "glove" in steps[0].lower(), "the warning is not the first step"
     assert MOLTEN_FILAMENT_WARNING in steps[0]
 
 
-def test_the_clog_plan_no_longer_asserts_a_material_blind_temperature():
-    # It used to say "heat to 250C, cool to 90C" for every material. This
-    # plan does not know the material, and 250C is well above an A1's PLA
-    # range — a number it could not stand behind. The technique is what is
-    # universal.
-    from kiln.failure_recovery import FailureType, _build_recovery
+def test_the_free_clog_plan_states_no_temperature_at_all(monkeypatch):
+    # It once said "heat to 250C, cool to 90C" for every material. The floor
+    # does not know the material, so it names no temperature and sends no
+    # heating command: it stops the print and says the nozzle needs clearing.
+    import re
 
-    text = " ".join(_build_recovery(FailureType.NOZZLE_CLOG).steps)
-    assert "250C" not in text and "90C" not in text
-    assert "steady" in text and "never a jerk" in text
-
-
-def test_the_recovery_gcode_carries_the_warning_into_the_file():
-    # This script heats the nozzle and then a PERSON pulls. The warning has
-    # to survive into the G-code itself, not just the chat around it.
-    from kiln.hotend_safety import WARNING_GCODE_COMMENT
-
-    source = (
-        Path(__file__).resolve().parent.parent
-        / "src" / "kiln" / "print_recovery.py"
-    ).read_text(encoding="utf-8")
-    assert "WARNING_GCODE_COMMENT" in source
-    assert WARNING_GCODE_COMMENT.startswith("; ")
+    plan = _free_clog_plan(monkeypatch)
+    assert not re.search(r"\d+\s*°?C\b", " ".join(plan.steps))
+    assert plan.settings_adjustments == {}
 
 
 def test_the_trigger_list_matches_intent_not_anatomy():
@@ -429,53 +429,6 @@ def test_an_ams_unit_and_slot_variant_matches_the_same_fault():
     )
     # A print_error, which has no unit aliasing, is untouched.
     assert _normalize_code("1200-8007") == "12008007"
-
-
-def test_the_clog_plan_forks_instead_of_guessing_the_temperature():
-    """"It will not extrude" has two causes that want OPPOSITE moves.
-
-    The plan used to answer with one of them unconditionally — raise 5-10C —
-    which is right for debris in the nozzle bore and strictly wrong for heat
-    creep, where the plug forms above the melt zone and more heat is what put
-    it there. It was not even self-consistent: its own prevent_recurrence
-    already named heat creep as something to avoid.
-    """
-    from kiln.failure_recovery import FailureType, _build_recovery
-
-    plan = _build_recovery(FailureType.NOZZLE_CLOG)
-    text = " ".join(plan.steps).lower()
-    assert "which failure this is" in text, "the plan does not fork"
-    assert "fan" in text, "no cheap check to tell the two apart"
-    assert "makes this worse" in text, "does not warn against raising the heat"
-
-
-def test_the_unautomatable_adjustment_is_not_in_the_automatable_map():
-    """``settings_adjustments`` is consumed programmatically.
-
-    Anything reading it applies the change, so a value whose correctness
-    depends on which root cause is in play must not sit there — a conditional
-    cannot be expressed as a key/value pair. Retraction stays, because
-    reducing it helps BOTH causes and is safe to apply without knowing which.
-    """
-    from kiln.failure_recovery import FailureType, _build_recovery
-
-    adjustments = _build_recovery(FailureType.NOZZLE_CLOG).settings_adjustments
-    assert "print_temp" not in adjustments
-    assert adjustments["retraction_distance"]
-
-
-def test_the_discriminator_comes_before_the_physical_work():
-    # A user cannot act on either branch until they know which one they are
-    # in, so the check has to precede the heating and the pull.
-    from kiln.failure_recovery import FailureType, _build_recovery
-
-    steps = [s.lower() for s in _build_recovery(FailureType.NOZZLE_CLOG).steps]
-    check = next(i for i, s in enumerate(steps) if "which failure this is" in s)
-    # "perform a cold pull", not merely "cold pull" — the safety warning at
-    # step 1 mentions the phrase too, and matching that would compare the
-    # check against the warning instead of against the instruction.
-    pull = next(i for i, s in enumerate(steps) if "perform a cold pull" in s)
-    assert check < pull
 
 
 # ---------------------------------------------------------------------------

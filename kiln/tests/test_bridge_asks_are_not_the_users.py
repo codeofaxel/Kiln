@@ -58,6 +58,11 @@ _PERSONS_OWN_ASK = {
         "runs only when the person asks how to lay a part on the bed, on a plan "
         "that includes Kiln Pro; the ranking is the feature they reached for"
     ),
+    "_pro_recovery_bridge": (
+        "runs only when the person asks what to do about a failed print (a recovery "
+        "plan, a fix plan, a failure analysis), on a plan that includes Kiln Pro; the "
+        "plan is the feature they reached for"
+    ),
     "_pro_load_bridge": (
         "runs only when the person asks estimate_structural_load for a part at "
         "Kiln Pro; the part's load figure is the feature they reached for"

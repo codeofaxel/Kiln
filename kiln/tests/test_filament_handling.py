@@ -1362,13 +1362,6 @@ class TestOtherDoors:
         assert "wipe_nozzle" in src
         assert "purge_station()" in src
 
-    def test_clog_recovery_plan_names_the_test(self):
-        from kiln.failure_recovery import FailureType, _build_recovery
-
-        plan = _build_recovery(FailureType.NOZZLE_CLOG)
-        assert any("purge_filament" in step for step in plan.steps)
-        assert any("wipe_nozzle" in step for step in plan.steps)
-
     def test_troubleshoot_printer_points_at_the_test(self):
         import kiln.server as srv
 

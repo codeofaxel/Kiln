@@ -176,7 +176,12 @@ class TestPipelineE2EHigh:
     """High-severity failures (layer_shift) require 3 monitoring checks
     and human confirmation before executing."""
 
-    def test_full_pipeline_with_confirmation(self):
+    def test_full_pipeline_with_confirmation(self, monkeypatch):
+        from kiln import _pro_recovery_bridge as bridge
+
+        # A free plan: kiln-pro not here, the plan not Kiln Pro's.
+        monkeypatch.setattr(bridge, "_local", lambda kind, failure: None)
+        monkeypatch.setattr(bridge, "_plan_includes_pro", lambda: False)
         engine = PrintRecovery()
         failure = engine.detect_failure(
             printer_name="voron",
@@ -187,8 +192,9 @@ class TestPipelineE2EHigh:
         assert failure.severity == "high"
 
         plan = engine.plan_recovery(failure)
-        # Layer shift -> RESUME_FROM_LAYER, MEDIUM confidence -> needs confirm
-        assert plan.strategy == RecoveryStrategy.RESUME_FROM_LAYER
+        # Layer shift -> the print is lost: stop it, after the person says so.
+        # (Kiln Pro's resume-from-layer plan is pinned in kiln-pro.)
+        assert plan.strategy == RecoveryStrategy.SAFE_ABORT
         assert plan.requires_confirmation is True
 
         session = engine.start_recovery(plan, failure)

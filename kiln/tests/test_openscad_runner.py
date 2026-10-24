@@ -560,3 +560,153 @@ class TestImportsOnWindowsShapedSignalModule:
         assert sets["openscad"] == sorted({-segv, 128 + segv})
         assert sets["slic3r"] == [-segv]
         assert sets["orca"] == []
+
+
+# ---------------------------------------------------------------------------
+# A mesh the fast engine leaves open is rebuilt with the exact one
+# ---------------------------------------------------------------------------
+
+#: A slab, a step on it, and a ledge rotated into place along the step's top.
+#: OpenSCAD 2026.04.26's Manifold backend writes it as three open pieces with
+#: 42 faces; CGAL writes one closed solid with 28.  Fails at ac3e1cc0.
+_LEDGE_ON_A_STEP = """\
+cube([30, 15, 1.2]);
+translate([0, 0, 1.2]) cube([30, 1, 0.6]);
+rotate([90, 0, 90]) linear_extrude(height = 30) polygon([[0, 1.8], [5, 1.8], [5, 3], [0, 3]]);
+"""
+
+_CLOSED_STL = """solid t
+facet normal 0 0 -1
+ outer loop
+  vertex 0 0 0
+  vertex 0 1 0
+  vertex 1 0 0
+ endloop
+endfacet
+facet normal 0 -1 0
+ outer loop
+  vertex 0 0 0
+  vertex 1 0 0
+  vertex 0 0 1
+ endloop
+endfacet
+facet normal -1 0 0
+ outer loop
+  vertex 0 0 0
+  vertex 0 0 1
+  vertex 0 1 0
+ endloop
+endfacet
+facet normal 1 1 1
+ outer loop
+  vertex 1 0 0
+  vertex 0 1 0
+  vertex 0 0 1
+ endloop
+endfacet
+endsolid t
+"""
+#: The same tetrahedron missing a face: open.
+_OPEN_STL = _CLOSED_STL.rsplit("facet normal 1 1 1", 1)[0] + "endsolid t\n"
+
+
+class _EngineFake:
+    """A fake OpenSCAD that writes *outputs* in turn and records each argv."""
+
+    def __init__(self, path: Path, outputs: list) -> None:
+        self.path = path
+        self.outputs = outputs
+        self.argvs: list[list[str]] = []
+
+    def __call__(self, argv, **kwargs):
+        self.argvs.append(list(argv))
+        out = self.outputs[min(len(self.argvs) - 1, len(self.outputs) - 1)]
+        if isinstance(out, BaseException):
+            raise out
+        self.path.write_text(out)
+        return subprocess.CompletedProcess(list(argv), 0, "", "")
+
+
+def _fast(out: Path) -> list[str]:
+    return ["/fake/openscad", "-o", str(out), "--backend=manifold", "in.scad"]
+
+
+class TestOpenFastCompilesAreClosedByTheExactEngine:
+    def test_a_closed_fast_compile_runs_once(self, monkeypatch, tmp_path):
+        out = tmp_path / "out.stl"
+        fake = _EngineFake(out, [_CLOSED_STL])
+        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", fake)
+        run_openscad(_fast(out), output_path=str(out))
+        assert len(fake.argvs) == 1
+
+    def test_an_open_fast_compile_is_rebuilt_without_the_flag(self, monkeypatch, tmp_path):
+        out = tmp_path / "out.stl"
+        fake = _EngineFake(out, [_OPEN_STL, _CLOSED_STL])
+        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", fake)
+        result = run_openscad(_fast(out), output_path=str(out))
+        assert result.returncode == 0
+        assert len(fake.argvs) == 2
+        assert "--backend=manifold" not in fake.argvs[1]
+        assert "--backend=cgal" in fake.argvs[1]
+        assert out.read_text() == _CLOSED_STL
+        assert not Path(f"{out}.fast").exists()
+
+    def test_an_exact_engine_that_cannot_close_it_leaves_the_fast_file(self, monkeypatch, tmp_path):
+        out = tmp_path / "out.stl"
+        fast_file = _OPEN_STL.replace("solid t", "solid fast", 1)
+        fake = _EngineFake(out, [fast_file, _OPEN_STL])
+        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", fake)
+        result = run_openscad(_fast(out), output_path=str(out))
+        assert result.returncode == 0
+        assert out.read_text() == fast_file
+
+    def test_an_exact_engine_past_its_budget_leaves_the_fast_file(self, monkeypatch, tmp_path):
+        out = tmp_path / "out.stl"
+        fake = _EngineFake(out, [_OPEN_STL, subprocess.TimeoutExpired("openscad", 60)])
+        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", fake)
+        result = run_openscad(_fast(out), timeout=600, output_path=str(out))
+        assert result.returncode == 0
+        assert out.read_text() == _OPEN_STL
+
+    def test_a_compile_on_the_exact_engine_is_not_checked(self, monkeypatch, tmp_path):
+        out = tmp_path / "out.stl"
+        fake = _EngineFake(out, [_OPEN_STL])
+        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", fake)
+        run_openscad(["/fake/openscad", "--backend=cgal", "-o", str(out), "in.scad"],
+                     output_path=str(out))
+        assert len(fake.argvs) == 1
+
+    def test_a_compile_naming_no_engine_is_checked(self, monkeypatch, tmp_path):
+        """OpenSCAD 2024+ compiles on the fast engine when none is named."""
+        out = tmp_path / "out.stl"
+        fake = _EngineFake(out, [_OPEN_STL, _CLOSED_STL])
+        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", fake)
+        run_openscad(["/fake/openscad", "-o", str(out), "in.scad"], output_path=str(out))
+        assert fake.argvs[1][:2] == ["/fake/openscad", "--backend=cgal"]
+        assert out.read_text() == _CLOSED_STL
+
+    def test_a_picture_is_not_checked(self, monkeypatch, tmp_path):
+        out = tmp_path / "out.png"
+        fake = _EngineFake(out, ["not a mesh"])
+        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", fake)
+        run_openscad(_fast(out), output_path=str(out))
+        assert len(fake.argvs) == 1
+
+    def test_a_real_ledge_on_a_step_comes_out_one_closed_solid(self, tmp_path):
+        trimesh = pytest.importorskip("trimesh")
+        from kiln.emboss_generator import _find_openscad
+
+        try:
+            exe = _find_openscad()
+        except (FileNotFoundError, RuntimeError):
+            pytest.skip("OpenSCAD required for a real compile")
+        scad = tmp_path / "ledge.scad"
+        scad.write_text(_LEDGE_ON_A_STEP)
+        out = tmp_path / "ledge.stl"
+        result = run_openscad([exe, "-o", str(out), "--backend=manifold", str(scad)],
+                              timeout=120, output_path=str(out))
+        assert result.returncode == 0, result.stderr
+        mesh = trimesh.load(out, force="mesh")
+        assert mesh.is_watertight
+        assert len(mesh.split(only_watertight=False)) == 1
+        assert float(mesh.volume) == pytest.approx(738.0, abs=1e-3)

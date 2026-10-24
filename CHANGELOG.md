@@ -11,6 +11,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Every failed print gets a safe answer, and a paused print is never stopped.** Resuming after a power cut is Kiln Pro.
+
 - **A CAD assembly now arrives as its parts.** Each part keeps its name, where it sits in the assembly, and its color, so you can print them together or one at a time.
 
 ### Fixed
