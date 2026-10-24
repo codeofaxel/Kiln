@@ -521,6 +521,18 @@ class HistoryVault:
         out["recipe"] = json.loads(out["recipe"])
         return out
 
+    def versions_with_mesh(self, sha: str | None) -> list[dict[str, Any]]:
+        """Every version whose model is exactly these bytes: ``version_id`` and
+        ``design_id``, newest first.  Empty for a fingerprint no version has."""
+        if not _sha(sha):
+            return []
+        rows = self._conn.execute(
+            "SELECT version_id, design_id FROM versions WHERE mesh_sha256 = ? "
+            "ORDER BY created_at DESC",
+            (sha,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def mesh_path(self, sha: str | None) -> Path | None:
         if not _sha(sha):
             return None

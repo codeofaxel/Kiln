@@ -3729,7 +3729,7 @@ class PrinterAdapter(ABC):
                     # what nozzle: known now, unrecoverable later.  Every
                     # reader that learns per version or per machine reads
                     # this row, so the start is where it is written.
-                    identity=print_identity_at_start(self, kwargs),
+                    identity=print_identity_at_start(self, kwargs, file_name),
                 )
             except Exception:  # noqa: BLE001 — bookkeeping must never affect a print
                 import logging as _logging

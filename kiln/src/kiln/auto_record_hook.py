@@ -95,6 +95,7 @@ outcome — the auto-record is a best-effort scaffold, not a lock.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import threading
 import time
@@ -741,7 +742,60 @@ def open_pending_outcome(
         return None
 
 
-def print_identity_at_start(adapter: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
+def _version_of_sliced_model(file_name: str | None) -> dict[str, Any]:
+    """The kept version a printer-side file was sliced from, read off this
+    computer's own records; ``{}`` when they cannot say so for certain.
+
+    The chain is exact at every step: the slice ledger names the model the
+    G-code (or its wrap) was made from (:func:`kiln.monitor_twin.sliced_entry_for`,
+    written by this computer's slicer), and the model's bytes are matched to
+    the version whose kept model is exactly those bytes (the design history,
+    :class:`kiln.history_vault.HistoryVault`).  Never a file name.  Two
+    versions sharing one model name the design and no version; a model no
+    version keeps, a file Kiln did not slice here, or records that cannot be
+    read name nothing.  This is what lets a reprint, a retry or a print
+    started any other way land on the version it really printed.
+    """
+    if not file_name:
+        return {}
+    try:
+        import hashlib
+
+        from kiln.history_vault import HistoryVault, _kiln_home
+        from kiln.monitor_twin import sliced_entry_for
+
+        entry = sliced_entry_for(file_name)
+        if not entry or not (_kiln_home() / "history_vault.db").is_file():
+            return {}
+        models = [entry.get("input"), entry.get("source")]
+        shas: list[str] = []
+        for model in models:
+            if isinstance(model, str) and os.path.isfile(model):
+                digest = hashlib.sha256()
+                with open(model, "rb") as fh:
+                    for chunk in iter(lambda: fh.read(1 << 20), b""):
+                        digest.update(chunk)
+                shas.append(digest.hexdigest())
+        if not shas:
+            return {}
+        vault = HistoryVault()
+        try:
+            found = {(r["version_id"], r["design_id"]) for sha in shas for r in vault.versions_with_mesh(sha)}
+        finally:
+            vault.close()
+    except Exception:  # noqa: BLE001 -- identity never blocks a print
+        _logger.debug("version of the sliced model not resolved", exc_info=True)
+        return {}
+    if len(found) == 1:
+        version_id, design_id = next(iter(found))
+        return {"version_id": version_id, "design_id": design_id}
+    designs = {d for _v, d in found}
+    return {"design_id": designs.pop()} if len(designs) == 1 else {}
+
+
+def print_identity_at_start(
+    adapter: Any, kwargs: dict[str, Any], file_name: str | None = None,
+) -> dict[str, Any]:
     """What a print's row can know at the start, and never again this cheaply.
 
     The version, design and branch come from the CALLER (``version_id`` /
@@ -757,6 +811,10 @@ def print_identity_at_start(adapter: Any, kwargs: dict[str, Any]) -> dict[str, A
         value = kwargs.get(key)
         if isinstance(value, str) and value.strip():
             out[key] = value.strip()
+    # Nothing named the version: the file this computer sliced says which
+    # kept version it is, exactly or not at all (_version_of_sliced_model).
+    if "version_id" not in out and "design_id" not in out:
+        out.update(_version_of_sliced_model(file_name))
     # The row's id on the person's account, when the door that started the
     # print already opened it there (the connector's print_design): the
     # account and this row then name the same print from the start.
