@@ -2339,62 +2339,42 @@ class TestMonitor:
         assert "signals" in envelope, envelope
         assert envelope["signals"].get("monitoring_active") is True
         assert envelope["signals"]["risk"]["severity"] == "amber"
-        # Stable schema: auto_recover and reroute keys exist (None on
-        # free tier).
+        # Stable schema: auto_recover and reroute keys exist (always None).
         assert "auto_recover" in envelope
         assert "reroute" in envelope
 
-    def test_monitor_json_omits_auto_recover_when_kiln_pro_unavailable(self):
-        """Free tier (no kiln_pro) -> auto_recover/reroute fields are None."""
-        import sys
-
+    def test_monitor_json_auto_recover_and_reroute_are_always_none(self):
+        """No background recovery run exists, so both keys stay None."""
         from kiln.print_health_monitor import (
             HealthSeverity,
             PrinterHealthReport,
             PrintHealthMonitor,
         )
 
-        # Force the import to fail by stubbing the kiln_pro module out
-        # of sys.modules — the envelope builder should swallow ImportError
-        # and leave both fields null.
-        saved = {
-            k: v for k, v in sys.modules.items()
-            if k.startswith("kiln_pro")
-        }
-        for k in list(saved):
-            sys.modules.pop(k, None)
-        try:
-            with patch.dict(
-                sys.modules,
-                {"kiln_pro": None, "kiln_pro.recovery": None,
-                 "kiln_pro.recovery.auto_recover_engine": None},
-            ):
-                monitor = PrintHealthMonitor()
-                with patch.object(
-                    monitor,
-                    "get_latest_signals",
-                    return_value={
-                        "monitoring_active": True,
-                        "session_id": "s-1",
-                        "session_started_at": time.time(),
-                        "issue_count": 0,
-                        "report_count": 1,
-                        "risk": None,
-                        "predictive": None,
-                        "detective": None,
-                        "auto_pause": None,
-                        "as_of": time.time(),
-                    },
-                ):
-                    report = PrinterHealthReport(
-                        printer_name="voron",
-                        metrics=[],
-                        overall_status=HealthSeverity.OK,
-                        checked_at=time.time(),
-                    )
-                    envelope = monitor._build_jsonl_envelope("voron", report)
-        finally:
-            sys.modules.update(saved)
+        monitor = PrintHealthMonitor()
+        with patch.object(
+            monitor,
+            "get_latest_signals",
+            return_value={
+                "monitoring_active": True,
+                "session_id": "s-1",
+                "session_started_at": time.time(),
+                "issue_count": 0,
+                "report_count": 1,
+                "risk": None,
+                "predictive": None,
+                "detective": None,
+                "auto_pause": None,
+                "as_of": time.time(),
+            },
+        ):
+            report = PrinterHealthReport(
+                printer_name="voron",
+                metrics=[],
+                overall_status=HealthSeverity.OK,
+                checked_at=time.time(),
+            )
+            envelope = monitor._build_jsonl_envelope("voron", report)
 
         # The fields must exist (stable schema) but be None.
         assert "auto_recover" in envelope

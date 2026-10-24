@@ -588,7 +588,7 @@ def get_printer_registry() -> PrinterRegistry:
     """Return the lazily-initialised module-level :class:`PrinterRegistry`.
 
     Modules outside ``kiln.server`` (notably ``print_health_monitor``,
-    ``heartbeat``, ``kiln_pro.recovery.auto_recover_engine``) reach for
+    ``heartbeat``) reach for
     a registry without a circular dependency on ``kiln.server``.  This
     accessor is the canonical no-circular import path; ``kiln.server``
     has its own ``_get_registry`` that adopts this same singleton, so

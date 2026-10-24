@@ -5074,9 +5074,9 @@ _SEVERITY_COLOR = {
 def _render_smart_monitoring_panel(health_monitor, printer_name: str) -> None:
     """Render the Smart Monitoring lines under the status row.
 
-    Mirrors the 5 Tier-1 fields from MCP ``monitor_print``: monitoring
-    summary, predictive risk, predictive red issue, detective failure
-    match, auto-pause status, auto-recover stage, and reroute hint.
+    Mirrors the fields from MCP ``monitor_print``: monitoring summary,
+    predictive risk, predictive red issue, detective failure match, and
+    auto-pause status.
     Each line only appears when its underlying state is present.
 
     Best-effort: any helper failure debug-logs and skips the affected
@@ -5085,47 +5085,6 @@ def _render_smart_monitoring_panel(health_monitor, printer_name: str) -> None:
     signals = health_monitor.get_latest_signals(printer_name)
     if not signals.get("monitoring_active"):
         return
-
-    # kiln-pro side — auto-recover stage + reroute hint, when installed.
-    auto_recover_block = None
-    reroute_block = None
-    try:
-        from kiln_pro.recovery.auto_recover_engine import (
-            AutoRecoverStatus as _AR_Status,
-        )
-        from kiln_pro.recovery.auto_recover_engine import (
-            list_sessions as _ar_list_sessions,
-        )
-        ar_sessions = _ar_list_sessions(printer_name=printer_name)
-        if ar_sessions:
-            terminal_states = {
-                _AR_Status.DONE_SUCCESS,
-                _AR_Status.DONE_FAILURE,
-                _AR_Status.NO_FAILURE,
-                _AR_Status.CANCELLED,
-                _AR_Status.ERRORED,
-            }
-            active = [s for s in ar_sessions if s.status not in terminal_states]
-            if active:
-                latest_active = max(active, key=lambda s: s.started_at)
-                auto_recover_block = {
-                    "stage": latest_active.status.value,
-                    "auto_recover_id": latest_active.auto_recover_id,
-                }
-            with_reroute = [s for s in ar_sessions if s.reroute_recommendation]
-            if with_reroute:
-                latest_rr = max(with_reroute, key=lambda s: s.started_at)
-                r = latest_rr.reroute_recommendation or {}
-                reroute_block = {
-                    "target_printer_id": r.get("target_printer_id"),
-                    "should_reroute": bool(r.get("should_reroute")),
-                    "reason": r.get("reason"),
-                    "blocked_by_rule": r.get("blocked_by_rule"),
-                }
-    except ImportError:
-        pass  # kiln-pro not installed — clean skip on free tier
-    except Exception as _ar_exc:
-        logger.debug("auto_recover surfacing skipped in CLI panel: %s", _ar_exc)
 
     # Render — Rich when available, plain text fallback otherwise.
     try:
@@ -5185,13 +5144,6 @@ def _render_smart_monitoring_panel(health_monitor, printer_name: str) -> None:
             f"({(det.get('failure_id') or 'n/a')[:8]}{det_age})",
         ))
 
-    if auto_recover_block:
-        ar_id_short = (auto_recover_block["auto_recover_id"] or "?")[:8]
-        body_lines.append((
-            "cyan",
-            f"Auto-recover: {auto_recover_block['stage']} (id {ar_id_short})",
-        ))
-
     ap = signals.get("auto_pause")
     if ap:
         ap_age_s = float(ap.get("age_seconds") or 0.0)
@@ -5210,21 +5162,6 @@ def _render_smart_monitoring_panel(health_monitor, printer_name: str) -> None:
             f"Auto-pause: {ap_age} "
             f"({ap.get('issue_type', 'issue')} -> {ap_status})",
         ))
-
-    if reroute_block:
-        if reroute_block.get("should_reroute"):
-            target = reroute_block.get("target_printer_id") or "?"
-            body_lines.append((
-                "cyan",
-                f"Reroute: {target} ready (was {printer_name})",
-            ))
-        else:
-            blocked = reroute_block.get("blocked_by_rule") or "blocked"
-            reason = (reroute_block.get("reason") or "")[:60]
-            body_lines.append((
-                "default",
-                f"Reroute: blocked ({blocked} — {reason})",
-            ))
 
     if rich_available:
         text = Text()

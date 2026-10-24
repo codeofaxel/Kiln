@@ -5258,7 +5258,7 @@ def _get_registry() -> PrinterRegistry:
 
     Converges with :func:`kiln.registry.get_printer_registry` so that
     callers outside ``kiln.server`` (print_health_monitor, heartbeat,
-    auto_recover_engine, etc.) see the same instance the server has
+    etc.) see the same instance the server has
     populated with adapters.
 
     Adopts the canonical singleton rather than replacing it: an
@@ -7239,9 +7239,8 @@ def monitor_print(
             _MONITOR_ELAPSED_HISTORY[_resolved_printer] = (float(elapsed_s), _now)
 
         # --- Smart-monitoring summary (Tier-1 fields) ---
-        # Five conditional lines surfacing the new monitoring/recovery
-        # wiring (predictive, detective, auto_recover, auto_pause,
-        # reroute).  Each line only appears when its underlying state
+        # Conditional lines surfacing the monitoring wiring (predictive,
+        # detective, auto_pause).  Each line only appears when its underlying state
         # is present, so a healthy print with no active monitoring
         # shows the same compact format as before.  Best-effort
         # throughout — any helper failure debug-logs and skips its
@@ -7251,9 +7250,7 @@ def monitor_print(
         _risk_line = ""
         _predictive_line = ""
         _detective_line = ""
-        _auto_recover_line = ""
         _auto_pause_line = ""
-        _reroute_line = ""
 
         # 1) Public Kiln side — monitoring summary (predictive, detective,
         #    auto-pause, headline risk score).
@@ -7329,67 +7326,6 @@ def monitor_print(
                     )
         except Exception as _sig_exc:
             logger.debug("Signal surfacing skipped: %s", _sig_exc)
-
-        # 2) kiln-pro side — auto_recover + reroute (if installed).
-        try:
-            from kiln_pro.recovery.auto_recover_engine import (
-                AutoRecoverStatus as _AR_Status,
-            )
-            from kiln_pro.recovery.auto_recover_engine import (
-                list_sessions as _ar_list_sessions,
-            )
-
-            _ar_sessions = _ar_list_sessions(printer_name=_resolved_printer)
-            if _ar_sessions:
-                # Pick the most recently-started session.  Active
-                # sessions take priority over completed ones for the
-                # AUTO_RECOVER line; reroute scans across both.
-                _ar_active = [
-                    s for s in _ar_sessions
-                    if s.status not in (
-                        _AR_Status.DONE_SUCCESS,
-                        _AR_Status.DONE_FAILURE,
-                        _AR_Status.NO_FAILURE,
-                        _AR_Status.CANCELLED,
-                        _AR_Status.ERRORED,
-                    )
-                ]
-                _candidate_for_active = (
-                    max(_ar_active, key=lambda s: s.started_at)
-                    if _ar_active else None
-                )
-                if _candidate_for_active is not None:
-                    _ar_id_short = _candidate_for_active.auto_recover_id[:8]
-                    _auto_recover_line = (
-                        f"AUTO_RECOVER: {_candidate_for_active.status.value} "
-                        f"(id {_ar_id_short})"
-                    )
-
-                # Pick the most-recently-completed session that carries
-                # a reroute recommendation (across active + completed).
-                _ar_with_reroute = [
-                    s for s in _ar_sessions if s.reroute_recommendation
-                ]
-                if _ar_with_reroute:
-                    _latest = max(_ar_with_reroute, key=lambda s: s.started_at)
-                    _r = _latest.reroute_recommendation or {}
-                    if _r.get("should_reroute"):
-                        _target = _r.get("target_printer_id") or "?"
-                        _success = _r.get("estimated_waste_pct")
-                        _reroute_line = (
-                            f"REROUTE: {_target} ready "
-                            f"(was {_resolved_printer})"
-                        )
-                    else:
-                        _blocked = _r.get("blocked_by_rule") or "blocked"
-                        _reroute_line = (
-                            f"REROUTE: blocked ({_blocked} — "
-                            f"{(_r.get('reason') or '')[:60]})"
-                        )
-        except ImportError:
-            pass  # kiln-pro not installed
-        except Exception as _ar_exc:
-            logger.debug("auto_recover surfacing skipped: %s", _ar_exc)
 
         # --- Comments ---
         comment = _generate_print_comment(
@@ -7508,12 +7444,8 @@ def monitor_print(
             lines.append(f"- {_predictive_line}")
         if _detective_line:
             lines.append(f"- {_detective_line}")
-        if _auto_recover_line:
-            lines.append(f"- {_auto_recover_line}")
         if _auto_pause_line:
             lines.append(f"- {_auto_pause_line}")
-        if _reroute_line:
-            lines.append(f"- {_reroute_line}")
         # B10 brief tail + D3 sidecar auto-derivation: surface the
         # saved-goal context when either the caller supplied a brief_id
         # OR the printed file's intent sidecar resolves to one (via the

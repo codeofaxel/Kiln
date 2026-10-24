@@ -63,7 +63,6 @@ kiln_pro.print_learning.auto_record
 kiln_pro.printability_overlay
 kiln_pro.pro_gate
 kiln_pro.recovery
-kiln_pro.recovery.auto_recover_engine
 kiln_pro.recovery.failure_rerouter
 kiln_pro.recovery.nozzle_wear_hypothesis
 kiln_pro.recovery.outcome_learning
