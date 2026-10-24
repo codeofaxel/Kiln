@@ -82,3 +82,39 @@ class TestHasOnlySafeIncludes:
     def test_non_ascii_rejected(self):
         # Unicode tricks to bypass path checks
         assert _has_only_safe_includes("include <BOSL2/\u2025/etc/passwd>") is False
+
+
+class TestBackendChoice:
+    """OpenSCAD 2024+ runs Manifold unless told otherwise, so the CGAL opt-out
+    names CGAL; leaving the flag off opted out of nothing.  Fails at ac3e1cc0."""
+
+    def _compile(self, monkeypatch, tmp_path, backend: str) -> list[str]:
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        from kiln.parametric import compile_scad_code
+
+        monkeypatch.setenv("KILN_OPENSCAD_BACKEND", backend)
+        seen: list[str] = []
+
+        def fake_run(cmd, *_args, **_kwargs):
+            seen.extend(cmd)
+            with open(cmd[cmd.index("-o") + 1], "wb") as fh:
+                fh.write(b"solid kiln\nendsolid kiln\n")
+            return SimpleNamespace(returncode=0, stderr="")
+
+        with (
+            patch("kiln.generation.openscad._find_openscad", return_value="openscad"),
+            patch("kiln.emboss_generator.get_openscad_version", return_value="2026.04.26"),
+            patch("kiln.generation.openscad.subprocess.run", side_effect=fake_run),
+        ):
+            compile_scad_code("cube(1);", output_path=str(tmp_path / "out.stl"))
+        return seen
+
+    def test_the_opt_out_names_cgal(self, monkeypatch, tmp_path):
+        cmd = self._compile(monkeypatch, tmp_path, "cgal")
+        assert "--backend=cgal" in cmd
+        assert "--backend=manifold" not in cmd
+
+    def test_the_default_names_manifold(self, monkeypatch, tmp_path):
+        assert "--backend=manifold" in self._compile(monkeypatch, tmp_path, "manifold")

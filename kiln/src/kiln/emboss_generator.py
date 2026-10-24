@@ -1840,6 +1840,9 @@ def compile_embossed_model(
         # exact arithmetic. Opt-out via KILN_OPENSCAD_BACKEND=cgal env var.
         if with_manifold:
             c.append("--backend=manifold")
+        elif version_year >= 2024:
+            # 2024+ runs Manifold unless told otherwise, so CGAL is named.
+            c.append("--backend=cgal")
         # Enable textmetrics() on 2024+ for improved font metrics in text().
         if version_year >= 2024:
             c.append("--enable=textmetrics")

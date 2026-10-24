@@ -380,18 +380,18 @@ class OpenSCADProvider(GenerationProvider):
             # of text for 4 MB of triangles, 2026-10-16).
             cmd = [binary, "--export-format", "binstl", "-o", out_path]
             # Use Manifold backend on OpenSCAD 2024+ for faster booleans.
-            # Opt-out: KILN_OPENSCAD_BACKEND=cgal
+            # Opt-out: KILN_OPENSCAD_BACKEND=cgal.  2024+ runs Manifold
+            # unless told otherwise, so the opt-out names CGAL.
             _backend = os.environ.get("KILN_OPENSCAD_BACKEND", "manifold")
-            if _backend == "manifold":
-                try:
-                    from kiln.emboss_generator import (
-                        _openscad_version_year,
-                        get_openscad_version,
-                    )
-                    if _openscad_version_year(get_openscad_version(binary)) >= 2024:
-                        cmd.append("--backend=manifold")
-                except Exception:  # noqa: BLE001
-                    pass  # version check failed — skip manifold flag
+            try:
+                from kiln.emboss_generator import (
+                    _openscad_version_year,
+                    get_openscad_version,
+                )
+                if _openscad_version_year(get_openscad_version(binary)) >= 2024:
+                    cmd.append("--backend=manifold" if _backend == "manifold" else "--backend=cgal")
+            except Exception:  # noqa: BLE001
+                pass  # version check failed — leave the backend to OpenSCAD
             if os.path.isdir(lib_path) and _supports_library_flag(binary):
                 cmd.extend(["-L", lib_path])
             cmd.append(scad_path)
