@@ -1142,6 +1142,73 @@ class TestProvenRecipesTravelWithTheDesign:
         assert answer["proven_recipes"]["code"] == "NOT_FOUND"
 
 
+class TestAFullFreeAccountIsAskedWhichDesignToArchive:
+    """At the free plan's design limit the account asks which design to
+    archive to make room; the push carries the person's answer, and the
+    command lists the designs and how to answer.  Archiving never deletes."""
+
+    def test_the_push_carries_the_design_named_to_make_room(self, home, monkeypatch):
+        _library(home, "mug", [MESH_V1])
+        sent = {}
+
+        def fake_request(tool, method, path, body=None):
+            sent.update(body=body)
+            return {"pushed_versions": 1}
+
+        monkeypatch.setattr(courier, "_request", fake_request)
+        courier.push("cloud_push_branch", "mug", make_room_for="old-mug")
+        assert sent["body"]["make_room_for"] == "old-mug"
+
+        sent.clear()
+        courier.push("cloud_push_branch", "mug")
+        assert "make_room_for" not in sent["body"]
+
+    def test_the_agents_push_on_this_computer_carries_the_answer_too(self, home, monkeypatch):
+        """The push tool an agent calls on this computer runs here; the
+        design the person named reaches the account as the CLI's does."""
+        _library(home, "mug", [MESH_V1])
+        sent = {}
+
+        def fake_request(tool, method, path, body=None):
+            sent.update(body=body)
+            return {"pushed_versions": 1}
+
+        monkeypatch.setattr(courier, "_request", fake_request)
+        courier.run_local("cloud_push_branch", "push", {"design_id": "mug", "make_room_for": "old-mug"})
+        assert sent["body"]["make_room_for"] == "old-mug"
+
+    def test_the_command_lists_the_designs_and_says_how_to_answer(self, home, monkeypatch):
+        from click.testing import CliRunner
+
+        import kiln.history_courier as hc
+        from kiln.cli.history_commands import cloud_group
+
+        asked = {}
+
+        def fake_push(*args, **kwargs):
+            asked.update(kwargs)
+            if kwargs.get("make_room_for"):
+                return {"status": "success"}
+            return {
+                "status": "error", "code": "FREE_SLOT_IN_USE",
+                "error": "3 of 3 designs kept. Archive one to make room, or Kiln Pro keeps every design.",
+                "designs": ["a", "b", "c\x1b[2J"],
+            }
+
+        monkeypatch.setattr(hc, "push", fake_push)
+        runner = CliRunner()
+
+        first = runner.invoke(cloud_group, ["push", "mug"])
+        assert first.exit_code == 1
+        assert "3 of 3 designs kept." in first.output
+        assert "Designs in your account: a, b, c" in first.output and "\x1b" not in first.output
+        assert "--make-room <design_id>" in first.output
+
+        second = runner.invoke(cloud_group, ["push", "mug", "--make-room", "b"])
+        assert second.exit_code == 0, second.output
+        assert asked["make_room_for"] == "b"
+
+
 class TestTheCommandSaysWhatBecameOfTheRecipes:
     def test_push_says_how_many_went_and_pull_says_when_they_did_not(self, home, monkeypatch):
         from click.testing import CliRunner

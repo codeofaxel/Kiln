@@ -330,7 +330,7 @@ graph TD
     style V3 fill:#2d2d44,stroke:#f59e42,color:#fff
 ```
 
-Agents can also outsource jobs through **Craftcloud** fulfillment and search models on **MyMiniFactory** and **Cults3D** (search only). On Pro and up, the design store itself is versioned — branches, signed releases, and cross-machine cloud sync are first-class outputs of the system, not a side database.
+Agents can also outsource jobs through **Craftcloud** fulfillment and search models on **MyMiniFactory** and **Cults3D** (search only). The design store itself is versioned — branches and cross-machine cloud sync on the designs a free Kiln account keeps, and on every design with signed releases on Pro and up — first-class outputs of the system, not a side database.
 
 ## Git for 3D
 
@@ -374,8 +374,8 @@ flowchart TD
 
 | Tier | What you get |
 |------|-------------|
-| Free | Linear local design history (save / diff / rollback) |
-| **Pro** | Branch · merge · cherry-pick · Ed25519 signed releases · solo cloud sync |
+| Free | Linear local design history (save / diff / rollback), plus branch · merge · cherry-pick · solo cloud sync on the designs you keep in a free Kiln account |
+| **Pro** | Branch · merge · cherry-pick · solo cloud sync on every design · Ed25519 signed releases |
 | **Business** | Team pull requests · approval gates · orgs / teams / scopes |
 | **Enterprise** | Audit log export · SSO · step-up authentication on releases · access review |
 
@@ -449,7 +449,7 @@ The Kiln MCP server (`kiln serve`) exposes **<!-- KILN_MCP_TOOL_COUNT:OLD --> 89
   - Resume an interrupted print with one call on any supported FDM printer
 - **save_design_version**
   - Save a new version of a parametric design, so you can go back to the one that worked
-  - Linear history is free; branching, merges, and signed releases are Pro
+  - Linear history is free; branching and merges are free on the designs you keep in a free Kiln account and on every design with Pro; signed releases are Pro
 - **export_step**
   - Export a finished design as a real STEP CAD file — analytic B-rep a machine shop can open and measure
 - **fleet_status** *(Business)*
@@ -490,8 +490,8 @@ All local printing is **free forever** — status, file management, slicing, fle
 
 | Tier | Price | Headline |
 |------|-------|----------|
-| **Free** | $0 | Unlimited local printing, slicing, marketplace search, safety profiles, one printer, design intelligence, linear design history. |
-| **Pro** | $49/mo | Git-for-3D branching/signed releases, product templates, procedural textures, mid-print modification, print resume, failure recovery, nozzle-wear tracking, solo cloud sync. |
+| **Free** | $0 | Unlimited local printing, slicing, marketplace search, safety profiles, one printer, design intelligence, linear design history, and Git-for-3D branching on the designs you keep in a free account. |
+| **Pro** | $49/mo | Git-for-3D branching on every design, signed releases, product templates, procedural textures, mid-print modification, print resume, failure recovery, nozzle-wear tracking, solo cloud sync. |
 | **Business** | $199/mo | Commercial use, 3 printers + 3 seats, fleet management, cross-printer learning, QR generation, assembly manuals, team pull requests, approval gates, webhooks. |
 | **Enterprise** | Contact us | Large fleets, SSO/SCIM, RBAC, audit trail, encrypted G-code at rest, white-label manuals, 99.9% SLA, on-prem/VPC. |
 

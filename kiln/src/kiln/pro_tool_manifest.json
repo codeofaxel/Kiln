@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-24T10:47:37.320730+00:00",
+  "generated": "2026-10-24T18:27:06.163995+00:00",
   "tool_count": 398,
   "categories": {
     "product_generators": {
@@ -17212,8 +17212,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      },
-      "served": false
+      }
     },
     {
       "name": "get_recovery_strategy_stats",
@@ -17250,8 +17249,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      },
-      "served": false
+      }
     },
     {
       "name": "get_telemetry_preferences",
@@ -17984,9 +17982,9 @@
     },
     {
       "name": "predict_print_failure_risk",
-      "description": "Score current failure risk BEFORE a failure occurs (Pro).\n\nKiln Pro would read this printer's recorded outcomes and return tuned settings, a success-likelihood read, and the risks to fix first.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Warn of a failure BEFORE it happens, while the print runs.\n\nFree door, tiered answer \u2014 Free: Clear, watch or high risk, 10 prints a day \u00b7 Pro: + What is drifting and why, every print \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "print_intelligence",
       "parameters": {
         "properties": {
@@ -18043,20 +18041,17 @@
         "title": "predict_print_failure_riskArguments",
         "type": "object"
       },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "learned_settings_v1",
-        "variant": "learned_settings",
-        "feature": "Settings learned from your prints",
-        "headline": "Start this print with the settings your history earned.",
-        "outcome_preview": "Kiln Pro would read this printer's recorded outcomes and return tuned settings, a success-likelihood read, and the risks to fix first.",
-        "free_included": "Slicing and printing with standard settings stay available."
+      "band": {
+        "domain": "recovery",
+        "free": "Clear, watch or high risk, 10 prints a day",
+        "pro": "+ What is drifting and why, every print",
+        "business": "\u2713",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      },
-      "served": false
+      }
     },
     {
       "name": "preview_decorated_mesh",
@@ -18676,9 +18671,9 @@
     },
     {
       "name": "record_recovery_outcome",
-      "description": "Record the outcome of a recovery attempt (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Tell Kiln how a recovery went (free at every tier).",
+      "tier": "free",
+      "access": "free",
       "category": "print_intelligence",
       "parameters": {
         "properties": {
@@ -18731,8 +18726,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      },
-      "served": false
+      }
     },
     {
       "name": "recover_power_loss_print",
