@@ -53,7 +53,7 @@ def sent(monkeypatch):
     import kiln.history_courier as hc
 
     monkeypatch.setattr(hc, "_request", fake_request)
-    monkeypatch.setattr(outcome_courier, "_locked", lambda ids: set())
+    monkeypatch.setattr(outcome_courier, "_kept_here", lambda rows: set())
     return calls
 
 
@@ -129,12 +129,13 @@ def test_what_is_never_sent(db, signed_in, sent, monkeypatch):
                            "determined_by": "observed"})
     _print(db, job="start:a1:9", outcome="pending")
     assert outcome_courier.push_owed(db=db) == {"sent": 0, "why": "nothing_owed"}
-    # A design locked to this computer: kept here, marked so it is not offered again.
-    monkeypatch.setattr(outcome_courier, "_locked", lambda ids: set(ids))
+    # A design locked to this computer: kept here, and still owed, so it goes
+    # up if the person unlocks it.
+    monkeypatch.setattr(outcome_courier, "_kept_here", lambda rows: {r["id"] for r in rows})
     _print(db, job="start:a1:3")
     out = outcome_courier.push_owed(db=db)
     assert out["why"] == "locked_to_this_computer" and sent == []
-    assert db.outcomes_owed_to_account() == []
+    assert len(db.outcomes_owed_to_account()) == 1
 
 
 def test_a_signed_out_computer_sends_nothing(db, sent, monkeypatch):
@@ -152,7 +153,7 @@ def test_a_refused_push_stays_owed(db, signed_in, monkeypatch):
 
     monkeypatch.setattr(hc, "_request", lambda *a, **k: {"status": "error", "success": False,
                                                           "code": "STORE_UNAVAILABLE"})
-    monkeypatch.setattr(outcome_courier, "_locked", lambda ids: set())
+    monkeypatch.setattr(outcome_courier, "_kept_here", lambda rows: set())
     _print(db)
     assert outcome_courier.push_owed(db=db)["why"] == "not_taken"
     assert len(db.outcomes_owed_to_account()) == 1
@@ -192,3 +193,70 @@ def test_the_start_carries_an_account_id_it_was_handed(db, signed_in, sent):
     _print(db, identity={"account_sync_id": good})
     outcome_courier.push_owed(db=db)
     assert sent[-1]["body"]["rows"][0]["source_job_id"] == good
+
+
+class _Vault:
+    """This computer's history records, as the courier reads them."""
+
+    locked: set = set()
+    versions: dict = {}
+    branches: dict = {}
+    broken = False
+
+    def __init__(self):
+        if self.broken:
+            import sqlite3
+
+            raise sqlite3.DatabaseError("file is not a database")
+
+    def design_of_version(self, version_id):
+        return self.versions.get(version_id)
+
+    def design_of_branch(self, branch_id):
+        return self.branches.get(branch_id)
+
+    def is_locked(self, design_id):
+        return design_id in self.locked
+
+    def close(self):
+        return None
+
+
+@pytest.fixture
+def vault(tmp_path, monkeypatch):
+    import kiln.history_vault as hv
+
+    (tmp_path / "history_vault.db").write_bytes(b"x")
+    monkeypatch.setattr(hv, "_kiln_home", lambda: tmp_path)
+    monkeypatch.setattr(hv, "HistoryVault", _Vault)
+    _Vault.locked, _Vault.versions, _Vault.branches, _Vault.broken = set(), {}, {}, False
+    return _Vault
+
+
+def test_a_row_naming_only_its_version_is_judged_by_its_design(db, vault):
+    """A print row may carry a version id and no design id; the design the
+    records say that version belongs to decides, and a locked one stays here."""
+    vault.versions = {"v-only": "secret-design"}
+    vault.locked = {"secret-design"}
+    db.open_pending_outcome(job_id="j", printer_name="Shop A1", identity={"version_id": "v-only"})
+    db.save_print_outcome({"job_id": "j", "printer_name": "Shop A1", "outcome": "success",
+                           "determined_by": "observed"})
+    rows = db.outcomes_owed_to_account()
+    assert outcome_courier._kept_here(rows) == {rows[0]["id"]}
+    vault.locked = set()
+    assert outcome_courier._kept_here(rows) == set()
+
+
+def test_records_that_cannot_be_read_hold_everything_back(db, vault):
+    vault.broken = True
+    _print(db)
+    rows = db.outcomes_owed_to_account()
+    assert outcome_courier._kept_here(rows) == {r["id"] for r in rows}
+
+
+def test_no_records_at_all_holds_nothing_back(db, tmp_path, monkeypatch):
+    import kiln.history_vault as hv
+
+    monkeypatch.setattr(hv, "_kiln_home", lambda: tmp_path / "nowhere")
+    _print(db)
+    assert outcome_courier._kept_here(db.outcomes_owed_to_account()) == set()

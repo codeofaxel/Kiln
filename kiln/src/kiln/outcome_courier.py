@@ -135,17 +135,41 @@ def account_row(row: dict[str, Any], sync_id: str) -> dict[str, Any]:
     return out
 
 
-def _locked(design_ids: set[str]) -> set[str]:
-    """The designs among *design_ids* that are locked to this computer."""
-    if not design_ids:
+def _kept_here(rows: list[dict[str, Any]]) -> set[int]:
+    """The ids of *rows* whose design is locked to this computer.
+
+    A row's design is every design it names: its own ``design_id``, and the
+    designs this computer's records say its version and branch belong to, so a
+    row that carries only a version id is judged by its design too.  Records
+    that exist but cannot be read hold every row back, as
+    :func:`kiln.history_vault.design_locked` does for a push: the courier waits
+    rather than send a print of a design the person may have kept here.
+    """
+    import sqlite3
+
+    from kiln.history_vault import HistoryVault, _kiln_home
+
+    if not (_kiln_home() / "history_vault.db").is_file():
         return set()
     try:
-        from kiln.history_vault import HistoryVault
-    except Exception:  # noqa: BLE001 -- no vault, nothing can be locked
-        return set()
-    vault = HistoryVault()
+        vault = HistoryVault()
+    except sqlite3.Error:
+        logger.warning("outcome courier: this computer's records could not be read; nothing was sent")
+        return {r["id"] for r in rows}
     try:
-        return {d for d in design_ids if vault.is_locked(d)}
+        held: set[int] = set()
+        for row in rows:
+            designs = {row.get("design_id")}
+            if row.get("version_id"):
+                designs.add(vault.design_of_version(row["version_id"]))
+            if row.get("branch_id"):
+                designs.add(vault.design_of_branch(row["branch_id"]))
+            if any(d and vault.is_locked(d) for d in designs):
+                held.add(row["id"])
+        return held
+    except sqlite3.Error:
+        logger.warning("outcome courier: this computer's records could not be read; nothing was sent")
+        return {r["id"] for r in rows}
     finally:
         vault.close()
 
@@ -164,13 +188,11 @@ def push_owed(*, db: Any = None, limit: int = MAX_ROWS) -> dict[str, Any]:
     owed = db.outcomes_owed_to_account(limit=limit)
     if not owed:
         return {"sent": 0, "why": "nothing_owed"}
-    locked = _locked({r["design_id"] for r in owed if r.get("design_id")})
-    # A locked design's prints are settled here and stay here: marked as
-    # taken so they are not offered again, and never sent.
-    for row in owed:
-        if row.get("design_id") in locked:
-            db.mark_pushed_to_account(row["id"], db.account_push_state(row))
-    sendable = [r for r in owed if r.get("design_id") not in locked]
+    # A locked design's prints stay here.  Not marked as sent: unlocking the
+    # design later lets them go up, and a vault that could not be read now
+    # may be readable on the next ending.
+    held = _kept_here(owed)
+    sendable = [r for r in owed if r["id"] not in held]
     if not sendable:
         return {"sent": 0, "why": "locked_to_this_computer", "kept_here": len(owed)}
 
