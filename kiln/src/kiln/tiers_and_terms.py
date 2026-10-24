@@ -248,9 +248,9 @@ AGENT_SIGNIN_HINT = (
 AGENT_ACCOUNT_NUDGE = (
     "The user is not signed in. Kiln works fully without an account. A free "
     "Kiln account adds: their printer's own temperature limits and tuned "
-    "slicing profile instead of generic ones; designs kept in their Kiln "
-    "account with full history (branch, merge, undo), open on kiln3d.com from "
-    "any computer; and the free monthly allowance of Kiln's hosted tools. "
+    "slicing profile instead of generic ones; an account that keeps the full "
+    "history of the designs they save to it (branch, merge, undo), open on "
+    "kiln3d.com from any computer; and the free monthly allowance of Kiln's hosted tools. "
     "Offer it once, at a moment it would help (a printer being set up, a "
     "design they want to keep), by calling the `kiln_signin` tool and giving "
     "them the link it returns, rather than asking them to type a command. "

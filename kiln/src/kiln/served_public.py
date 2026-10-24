@@ -200,9 +200,9 @@ def _in_their_words(miss: Any, answer: Any) -> Any:
 #: computer only because the install was never signed in.
 DESIGN_OFFER = (
     "Made on this computer. With a free Kiln account, Kiln makes it on its "
-    "servers and you can keep it in your Kiln account with its full history "
-    "(branch it, undo a change, compare versions) and open it on kiln3d.com "
-    "from any computer."
+    "servers and you can keep it in your Kiln account, which keeps the full "
+    "history of the designs you save to it (branch, undo a change, compare "
+    "versions), and open it on kiln3d.com from any computer."
 )
 
 

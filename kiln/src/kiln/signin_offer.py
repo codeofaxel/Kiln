@@ -212,8 +212,8 @@ def offer(kind: str, message: str, subject: str = "") -> dict[str, Any] | None:
 #: What a free account does for design history, in the pricing page's words
 #: for the free band ("on the designs you keep").
 HISTORY_OFFER = (
-    "A free Kiln account keeps your designs' full history: branch, merge, "
-    "cherry-pick and undo, on the designs you keep in your Kiln account."
+    "A free Kiln account keeps the full history of the designs you keep in "
+    "it: branch, merge, cherry-pick and undo."
 )
 
 
