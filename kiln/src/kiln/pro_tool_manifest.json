@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-24T18:27:06.163995+00:00",
+  "generated": "2026-10-24T19:53:47.486444+00:00",
   "tool_count": 398,
   "categories": {
     "product_generators": {
@@ -1297,7 +1297,7 @@
     },
     {
       "name": "cloud_backup_configure",
-      "description": "Turn automatic cloud backup of your designs on or off.\n\nKiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Turn automatic cloud backup of your designs on or off.\n\nKiln Pro would keep every design you make in your account, backed up automatically, and on any machine you sign in to.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "cloud_sync",
@@ -1326,12 +1326,12 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "cloud_workspace_v1",
+        "copy_version": "cloud_workspace_v2",
         "variant": "cloud_workspace",
         "feature": "Design library on every machine",
-        "headline": "Take this design library to every machine you use.",
-        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
-        "free_included": "Local files you already have stay on this machine and stay yours."
+        "headline": "Take every design to every machine you use.",
+        "outcome_preview": "Kiln Pro would keep every design you make in your account, backed up automatically, and on any machine you sign in to.",
+        "free_included": "Your free account keeps a few designs with their full history, pushed and pulled on any machine."
       },
       "offline": {
         "schema_version": 1,
@@ -1340,9 +1340,9 @@
     },
     {
       "name": "cloud_clone_design",
-      "description": "Bootstrap local storage for a remote-only design.\n\nKiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Bootstrap local storage for a remote-only design.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "cloud_sync",
       "parameters": {
         "properties": {
@@ -1362,14 +1362,12 @@
         "title": "cloud_clone_designArguments",
         "type": "object"
       },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "cloud_workspace_v1",
-        "variant": "cloud_workspace",
-        "feature": "Design library on every machine",
-        "headline": "Take this design library to every machine you use.",
-        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
-        "free_included": "Local files you already have stay on this machine and stay yours."
+      "band": {
+        "domain": "design_versions",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "business": "\u2713",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
@@ -1522,7 +1520,7 @@
     },
     {
       "name": "cloud_list_remote_branches",
-      "description": "List branches on the remote for *design_id*.\n\nKiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "List branches on the remote for *design_id*.\n\nKiln Pro would keep every design you make in your account, backed up automatically, and on any machine you sign in to.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "cloud_sync",
@@ -1546,12 +1544,12 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "cloud_workspace_v1",
+        "copy_version": "cloud_workspace_v2",
         "variant": "cloud_workspace",
         "feature": "Design library on every machine",
-        "headline": "Take this design library to every machine you use.",
-        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
-        "free_included": "Local files you already have stay on this machine and stay yours."
+        "headline": "Take every design to every machine you use.",
+        "outcome_preview": "Kiln Pro would keep every design you make in your account, backed up automatically, and on any machine you sign in to.",
+        "free_included": "Your free account keeps a few designs with their full history, pushed and pulled on any machine."
       },
       "offline": {
         "schema_version": 1,
@@ -1780,9 +1778,9 @@
     },
     {
       "name": "cloud_push_branch",
-      "description": "Push a local branch (+ its versions + sidecars) to a remote.\n\nKiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Push a local branch (+ its versions + sidecars) to a remote.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "cloud_sync",
       "parameters": {
         "properties": {
@@ -1798,6 +1796,11 @@
             "default": "default",
             "title": "Remote",
             "type": "string"
+          },
+          "make_room_for": {
+            "default": "",
+            "title": "Make Room For",
+            "type": "string"
           }
         },
         "required": [
@@ -1807,14 +1810,12 @@
         "title": "cloud_push_branchArguments",
         "type": "object"
       },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "cloud_workspace_v1",
-        "variant": "cloud_workspace",
-        "feature": "Design library on every machine",
-        "headline": "Take this design library to every machine you use.",
-        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
-        "free_included": "Local files you already have stay on this machine and stay yours."
+      "band": {
+        "domain": "design_versions",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "business": "\u2713",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
@@ -2027,7 +2028,7 @@
     },
     {
       "name": "cloud_remote_add",
-      "description": "Register a Kiln Cloud remote this machine can push to.\n\nKiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Register a Kiln Cloud remote this machine can push to.\n\nKiln Pro would keep every design you make in your account, backed up automatically, and on any machine you sign in to.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "cloud_sync",
@@ -2068,12 +2069,12 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "cloud_workspace_v1",
+        "copy_version": "cloud_workspace_v2",
         "variant": "cloud_workspace",
         "feature": "Design library on every machine",
-        "headline": "Take this design library to every machine you use.",
-        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
-        "free_included": "Local files you already have stay on this machine and stay yours."
+        "headline": "Take every design to every machine you use.",
+        "outcome_preview": "Kiln Pro would keep every design you make in your account, backed up automatically, and on any machine you sign in to.",
+        "free_included": "Your free account keeps a few designs with their full history, pushed and pulled on any machine."
       },
       "offline": {
         "schema_version": 1,
@@ -2083,7 +2084,7 @@
     },
     {
       "name": "cloud_remote_list",
-      "description": "List all registered Kiln Cloud remotes.\n\nKiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "List all registered Kiln Cloud remotes.\n\nKiln Pro would keep every design you make in your account, backed up automatically, and on any machine you sign in to.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "cloud_sync",
@@ -2094,12 +2095,12 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "cloud_workspace_v1",
+        "copy_version": "cloud_workspace_v2",
         "variant": "cloud_workspace",
         "feature": "Design library on every machine",
-        "headline": "Take this design library to every machine you use.",
-        "outcome_preview": "Kiln Pro would push your design branches to a cloud remote and pull them back on any signed-in machine, with automatic backup available.",
-        "free_included": "Local files you already have stay on this machine and stay yours."
+        "headline": "Take every design to every machine you use.",
+        "outcome_preview": "Kiln Pro would keep every design you make in your account, backed up automatically, and on any machine you sign in to.",
+        "free_included": "Your free account keeps a few designs with their full history, pushed and pulled on any machine."
       },
       "offline": {
         "schema_version": 1,
@@ -3569,9 +3570,9 @@
     },
     {
       "name": "annotate_design_branch",
-      "description": "Set the human-readable purpose string for a branch.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Set the human-readable purpose string for a branch.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -3590,6 +3591,13 @@
         ],
         "title": "annotate_design_branchArguments",
         "type": "object"
+      },
+      "band": {
+        "domain": "design_versions",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "business": "\u2713",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
@@ -3955,7 +3963,7 @@
     },
     {
       "name": "best_design_version",
-      "description": "Find the version with the highest success rate.\n\nKiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Find the version with the highest success rate.\n\nKiln Pro would compare how each version of this design printed and tell you which one to keep.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "design_versioning",
@@ -3987,12 +3995,12 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "durable_design_history_v1",
+        "copy_version": "durable_design_history_v2",
         "variant": "durable_design_history",
-        "feature": "Durable design history",
-        "headline": "Keep this part as the version you can return to.",
-        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
-        "free_included": "Download the current file where that option is already available."
+        "feature": "Version outcomes",
+        "headline": "See which version of this part printed best.",
+        "outcome_preview": "Kiln Pro would compare how each version of this design printed and tell you which one to keep.",
+        "free_included": "Your free account keeps the full history of the designs it saves: branch, merge and go back to any version."
       },
       "offline": {
         "schema_version": 1,
@@ -4405,9 +4413,9 @@
     },
     {
       "name": "cherry_pick_modification",
-      "description": "Apply one isolated semantic modification from a source branch onto a target branch. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Apply one isolated semantic modification from a source branch onto a target branch. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -4449,6 +4457,13 @@
         "title": "cherry_pick_modificationArguments",
         "type": "object"
       },
+      "band": {
+        "domain": "design_versions",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "business": "\u2713",
+        "enterprise": "\u2713"
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -4460,9 +4475,9 @@
     },
     {
       "name": "compare_branches",
-      "description": "Render a side-by-side comparison of two branches as a Mermaid ``sequenceDiagram``.\n\nKiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Render a side-by-side comparison of two branches as a Mermaid ``sequenceDiagram``.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -4492,14 +4507,12 @@
         "title": "compare_branchesArguments",
         "type": "object"
       },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "durable_design_history_v1",
-        "variant": "durable_design_history",
-        "feature": "Durable design history",
-        "headline": "Keep this part as the version you can return to.",
-        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
-        "free_included": "Download the current file where that option is already available."
+      "band": {
+        "domain": "design_versions",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "business": "\u2713",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
@@ -4512,7 +4525,7 @@
     },
     {
       "name": "compare_design_versions",
-      "description": "Compare print outcomes between two versions of a design.\n\nKiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Compare print outcomes between two versions of a design.\n\nKiln Pro would compare how each version of this design printed and tell you which one to keep.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "design_versioning",
@@ -4546,12 +4559,12 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "durable_design_history_v1",
+        "copy_version": "durable_design_history_v2",
         "variant": "durable_design_history",
-        "feature": "Durable design history",
-        "headline": "Keep this part as the version you can return to.",
-        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
-        "free_included": "Download the current file where that option is already available."
+        "feature": "Version outcomes",
+        "headline": "See which version of this part printed best.",
+        "outcome_preview": "Kiln Pro would compare how each version of this design printed and tell you which one to keep.",
+        "free_included": "Your free account keeps the full history of the designs it saves: branch, merge and go back to any version."
       },
       "offline": {
         "schema_version": 1,
@@ -4860,9 +4873,9 @@
     },
     {
       "name": "create_design_branch",
-      "description": "Create a new named branch forked from a specific version. Subsequent saves on this design flow to the new branch.\n\nKiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Create a new named branch forked from a specific version. Subsequent saves on this design flow to the new branch.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -4923,14 +4936,12 @@
         "title": "create_design_branchArguments",
         "type": "object"
       },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "durable_design_history_v1",
-        "variant": "durable_design_history",
-        "feature": "Durable design history",
-        "headline": "Keep this part as the version you can return to.",
-        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
-        "free_included": "Download the current file where that option is already available."
+      "band": {
+        "domain": "design_versions",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "business": "\u2713",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
@@ -5225,9 +5236,9 @@
     },
     {
       "name": "detect_merge_conflicts",
-      "description": "Three-way diff of two branches: what merges, and what must be decided.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Three-way diff of two branches: what merges, and what must be decided.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -5333,6 +5344,13 @@
         },
         "title": "detect_merge_conflictsArguments",
         "type": "object"
+      },
+      "band": {
+        "domain": "design_versions",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "business": "\u2713",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
@@ -5517,7 +5535,7 @@
     },
     {
       "name": "get_design_ancestry",
-      "description": "Walk the parent chain from a recipe back to the root.\n\nKiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Walk the parent chain from a recipe back to the root.\n\nKiln Pro would compare how each version of this design printed and tell you which one to keep.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "design_versioning",
@@ -5541,12 +5559,12 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "durable_design_history_v1",
+        "copy_version": "durable_design_history_v2",
         "variant": "durable_design_history",
-        "feature": "Durable design history",
-        "headline": "Keep this part as the version you can return to.",
-        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
-        "free_included": "Download the current file where that option is already available."
+        "feature": "Version outcomes",
+        "headline": "See which version of this part printed best.",
+        "outcome_preview": "Kiln Pro would compare how each version of this design printed and tell you which one to keep.",
+        "free_included": "Your free account keeps the full history of the designs it saves: branch, merge and go back to any version."
       },
       "offline": {
         "schema_version": 1,
@@ -5664,9 +5682,9 @@
     },
     {
       "name": "get_reflog_entry",
-      "description": "Fetch a single reflog entry by id.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Fetch a single reflog entry by id.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -5680,6 +5698,13 @@
         ],
         "title": "get_reflog_entryArguments",
         "type": "object"
+      },
+      "band": {
+        "domain": "design_versions",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "business": "\u2713",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
@@ -5985,9 +6010,9 @@
     },
     {
       "name": "list_cherry_pick_candidates",
-      "description": "Enumerate the semantic modifications cherry-pickable from *source_version_id* relative to *ancestor_version_id*.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Enumerate the semantic modifications cherry-pickable from *source_version_id* relative to *ancestor_version_id*.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -6006,6 +6031,13 @@
         ],
         "title": "list_cherry_pick_candidatesArguments",
         "type": "object"
+      },
+      "band": {
+        "domain": "design_versions",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "business": "\u2713",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
@@ -6217,9 +6249,9 @@
     },
     {
       "name": "list_design_branches",
-      "description": "List the branches of a design.\n\nKiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "List the branches of a design.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -6244,14 +6276,12 @@
         "title": "list_design_branchesArguments",
         "type": "object"
       },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "durable_design_history_v1",
-        "variant": "durable_design_history",
-        "feature": "Durable design history",
-        "headline": "Keep this part as the version you can return to.",
-        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
-        "free_included": "Download the current file where that option is already available."
+      "band": {
+        "domain": "design_versions",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "business": "\u2713",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
@@ -6696,9 +6726,9 @@
     },
     {
       "name": "merge_design_branches",
-      "description": "Record a merge of source into target with conflict resolution. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nKiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Record a merge of source into target with conflict resolution. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -6784,14 +6814,12 @@
         "title": "merge_design_branchesArguments",
         "type": "object"
       },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "durable_design_history_v1",
-        "variant": "durable_design_history",
-        "feature": "Durable design history",
-        "headline": "Keep this part as the version you can return to.",
-        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
-        "free_included": "Download the current file where that option is already available."
+      "band": {
+        "domain": "design_versions",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "business": "\u2713",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
@@ -7168,9 +7196,9 @@
     },
     {
       "name": "rebase_design_branch",
-      "description": "Rebase a design branch's divergent versions onto another. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nKiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Rebase a design branch's divergent versions onto another. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -7202,14 +7230,12 @@
         "title": "rebase_design_branchArguments",
         "type": "object"
       },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "durable_design_history_v1",
-        "variant": "durable_design_history",
-        "feature": "Durable design history",
-        "headline": "Keep this part as the version you can return to.",
-        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
-        "free_included": "Download the current file where that option is already available."
+      "band": {
+        "domain": "design_versions",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "business": "\u2713",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
@@ -7527,9 +7553,9 @@
     },
     {
       "name": "rename_design_branch",
-      "description": "Rename a branch.  New name must be unique per design (excluding retired branches).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Rename a branch.  New name must be unique per design (excluding retired branches).\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -7548,6 +7574,13 @@
         ],
         "title": "rename_design_branchArguments",
         "type": "object"
+      },
+      "band": {
+        "domain": "design_versions",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "business": "\u2713",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
@@ -7737,9 +7770,9 @@
     },
     {
       "name": "restore_from_reflog_entry",
-      "description": "Snap a branch back to a recorded head state.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Snap a branch back to a recorded head state.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -7770,6 +7803,13 @@
         ],
         "title": "restore_from_reflog_entryArguments",
         "type": "object"
+      },
+      "band": {
+        "domain": "design_versions",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "business": "\u2713",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
@@ -7852,9 +7892,9 @@
     },
     {
       "name": "retire_design_branch",
-      "description": "Mark a branch retired \u2014 preserves records, frees the name.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Mark a branch retired \u2014 preserves records, frees the name.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -7868,6 +7908,13 @@
         ],
         "title": "retire_design_branchArguments",
         "type": "object"
+      },
+      "band": {
+        "domain": "design_versions",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "business": "\u2713",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
@@ -8220,9 +8267,9 @@
     },
     {
       "name": "show_branch_history",
-      "description": "List the commits on a single branch, newest-first \u2014 the text-mode companion to ``visualize_branch_tree``.\n\nKiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "List the commits on a single branch, newest-first \u2014 the text-mode companion to ``visualize_branch_tree``.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -8252,14 +8299,12 @@
         "title": "show_branch_historyArguments",
         "type": "object"
       },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "durable_design_history_v1",
-        "variant": "durable_design_history",
-        "feature": "Durable design history",
-        "headline": "Keep this part as the version you can return to.",
-        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
-        "free_included": "Download the current file where that option is already available."
+      "band": {
+        "domain": "design_versions",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "business": "\u2713",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
@@ -8272,9 +8317,9 @@
     },
     {
       "name": "show_design_lineage",
-      "description": "Show the full lineage of a design as a Mermaid ``flowchart TD`` with outcomes emphasized.\n\nKiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Show the full lineage of a design as a Mermaid ``flowchart TD`` with outcomes emphasized.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -8299,14 +8344,12 @@
         "title": "show_design_lineageArguments",
         "type": "object"
       },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "durable_design_history_v1",
-        "variant": "durable_design_history",
-        "feature": "Durable design history",
-        "headline": "Keep this part as the version you can return to.",
-        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
-        "free_included": "Download the current file where that option is already available."
+      "band": {
+        "domain": "design_versions",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "business": "\u2713",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
@@ -8319,9 +8362,9 @@
     },
     {
       "name": "show_reflog",
-      "description": "List head-mutating operations newest-first.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "List head-mutating operations newest-first.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -8369,6 +8412,13 @@
         },
         "title": "show_reflogArguments",
         "type": "object"
+      },
+      "band": {
+        "domain": "design_versions",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "business": "\u2713",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
@@ -8828,9 +8878,9 @@
     },
     {
       "name": "undo_last_head_change",
-      "description": "One-tap recovery: snap *branch_id* back to the ``old_head`` of its most recent head-mutating reflog entry.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "One-tap recovery: snap *branch_id* back to the ``old_head`` of its most recent head-mutating reflog entry.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -8861,6 +8911,13 @@
         ],
         "title": "undo_last_head_changeArguments",
         "type": "object"
+      },
+      "band": {
+        "domain": "design_versions",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "business": "\u2713",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
@@ -9109,9 +9166,9 @@
     },
     {
       "name": "visualize_branch_tree",
-      "description": "Render a design / preset / feature branch tree as a Mermaid ``flowchart TD`` diagram.\n\nKiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Render a design / preset / feature branch tree as a Mermaid ``flowchart TD`` diagram.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -9141,14 +9198,12 @@
         "title": "visualize_branch_treeArguments",
         "type": "object"
       },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "durable_design_history_v1",
-        "variant": "durable_design_history",
-        "feature": "Durable design history",
-        "headline": "Keep this part as the version you can return to.",
-        "outcome_preview": "Kiln Pro would preserve this version so you can branch, restyle, compare outcomes, and return without losing today's design.",
-        "free_included": "Download the current file where that option is already available."
+      "band": {
+        "domain": "design_versions",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "business": "\u2713",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
