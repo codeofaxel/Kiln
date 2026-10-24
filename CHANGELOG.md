@@ -9,6 +9,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Your print history now knows which version printed and how it ended, even after you close the chat.** Unseen endings are marked unknown, never guessed.
 
+- **A free account, offered once, when it would help.** Not signed in? Kiln now says what a free account adds at the moment it matters, like setting up a printer or saving a design, and your AI app can sign you in from the chat.
+
 ### Changed
 
 - **Every failed print gets a safe answer, and a paused print is never stopped.** Resuming after a power cut is Kiln Pro.
