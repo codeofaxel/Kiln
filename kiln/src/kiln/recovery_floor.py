@@ -28,7 +28,7 @@ vocabularies share their values except where noted.
 
 from __future__ import annotations
 
-from kiln.hotend_safety import WARNING_STEP
+from kiln.hotend_safety import MOLTEN_FILAMENT_WARNING, WARNING_STEP
 
 STOP, WAIT, LEAVE = "stop", "wait", "leave"
 
@@ -87,6 +87,32 @@ PRINTERS_OWN_RESUME = (
     "If the printer was printing from its own memory card and its power-loss recovery is "
     "on, its screen offers to continue the print once the power is back"
 )
+
+
+#: The safety lines every plan for a failure says, at every tier, each with
+#: the words that show a plan already says it in its own way.  Kiln Pro's
+#: plan carries them too: paying unlocks depth, never switches a warning off.
+_SAFETY_LINES: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
+    "thermal_runaway": (
+        (THERMAL_RUNAWAY_STEPS[0], ("cool completely before touching",)),
+        (THERMAL_RUNAWAY_STEPS[1], ("temperature sensor", "thermistor")),
+        (THERMAL_RUNAWAY_STEPS[2], ("Do not print on it again",)),
+    ),
+}
+
+
+def with_safety_lines(failure: str, plan_steps: list[str]) -> list[str]:
+    """*plan_steps* with every safety line for *failure* it does not already
+    say: the burn warning first for a blocked nozzle, a runaway heater's
+    cool-down, check and do-not-print lines after the plan's own steps."""
+    out = list(plan_steps)
+    if failure == "nozzle_clog" and not any(MOLTEN_FILAMENT_WARNING in step for step in out):
+        out.insert(0, WARNING_STEP)
+    text = " ".join(out).lower()
+    for line, already in _SAFETY_LINES.get(failure, ()):
+        if not any(words.lower() in text for words in already):
+            out.append(line)
+    return out
 
 
 def steps(failure: str) -> list[str]:

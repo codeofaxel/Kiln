@@ -607,6 +607,10 @@ class PrintRecovery:
         if asked.answer is not None:
             plan = _plan_from_wire(asked.answer, failure)
             if plan is not None:
+                # The floor's safety lines ride on every plan, paid included.
+                plan.preparation_steps = recovery_floor.with_safety_lines(
+                    failure.failure_type.value, plan.preparation_steps,
+                )
                 return plan
             from kiln.served_answer import Miss
 

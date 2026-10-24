@@ -678,6 +678,19 @@ class TestKilnProsPlan:
         steps = engine.get_recovery_steps(session.session_id)
         assert any("park clear" in line for line in steps) and steps[-1] == "M84"
 
+    def test_a_paid_plan_carries_every_free_safety_line(self, engine: PrintRecovery, monkeypatch):
+        """Paying unlocks depth, never switches a warning off: a runaway
+        heater's plan that does not tell the person to let it cool, check the
+        heater and its sensor, and keep from printing until they are checked
+        is given those lines, after its own."""
+        from kiln import recovery_floor
+
+        thin = {**self._RESUME, "plan": {**self._RESUME["plan"], "strategy": "safe_abort", "confidence": "high",
+                                         "preparation_steps": ["Cancel print job"]}, "gcode": None}
+        self._asked(monkeypatch, thin)
+        steps = engine.plan_recovery(_failure(FailureType.THERMAL_RUNAWAY)).preparation_steps
+        assert steps == ["Cancel print job", *recovery_floor.THERMAL_RUNAWAY_STEPS]
+
     def test_a_plan_that_arrives_without_its_g_code_sends_nothing(self, engine: PrintRecovery, monkeypatch):
         self._asked(monkeypatch, {**self._RESUME, "gcode": None})
         failure = _failure(FailureType.LAYER_SHIFT)
