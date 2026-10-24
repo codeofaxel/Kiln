@@ -250,17 +250,23 @@ def _with_recipes(said: str, answer: dict[str, Any], *, sent: bool) -> str:
 @cloud_group.command("push")
 @click.argument("design_id")
 @click.argument("branch_id", required=False)
-@click.option("--replace", is_flag=True, help="Free plan: replace the design saved in your account.")
+@click.option(
+    "--make-room", "make_room", default=None, metavar="DESIGN_ID",
+    help="When your plan's designs are full: archive this design in your account to make room.",
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def cloud_push(design_id: str, branch_id: str | None, replace: bool, json_mode: bool) -> None:
+def cloud_push(design_id: str, branch_id: str | None, make_room: str | None, json_mode: bool) -> None:
     """Push BRANCH_ID of DESIGN_ID (main by default) to your Kiln account."""
     from kiln.history_courier import push
 
     branch = _branch_id(design_id, branch_id) if branch_id else None
-    answer = push("cloud_push_branch", design_id, branch, replace_confirmed=replace)
+    answer = push("cloud_push_branch", design_id, branch, make_room_for=make_room)
     if answer.get("code") == "FREE_SLOT_IN_USE" and not json_mode:
         click.echo(_shown(answer.get("error", ""), lines=True), err=True)
-        click.echo("Run again with --replace to replace it.", err=True)
+        offered = [d for d in answer.get("designs") or [] if isinstance(d, str)]
+        if offered:
+            click.echo("Designs in your account: " + ", ".join(_shown(d) for d in offered), err=True)
+            click.echo("Run again with --make-room <design_id> to archive one of them.", err=True)
         sys.exit(1)
     _finish(answer, json_mode, lambda a: _with_recipes(
         _shown(a["said"]) if a.get("kept_as") else f"Pushed {design_id} to your Kiln account.", a, sent=True,

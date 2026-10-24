@@ -660,6 +660,12 @@ class KilnDB:
                 self._conn.execute(
                     f"ALTER TABLE print_outcomes ADD COLUMN {name} {sql_type} DEFAULT NULL"
                 )
+        # What the person's account last took for this row (see
+        # ``outcomes_owed_to_account``): bookkeeping, never identity.
+        if "account_pushed_state" not in columns:
+            self._conn.execute(
+                "ALTER TABLE print_outcomes ADD COLUMN account_pushed_state TEXT DEFAULT NULL"
+            )
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_print_outcomes_version ON print_outcomes(version_id)"
         )
@@ -1029,7 +1035,8 @@ class KilnDB:
                     printer_model       TEXT DEFAULT NULL,
                     nozzle_diameter_mm  REAL DEFAULT NULL,
                     ended_at            REAL DEFAULT NULL,
-                    account_sync_id     TEXT DEFAULT NULL
+                    account_sync_id     TEXT DEFAULT NULL,
+                    account_pushed_state TEXT DEFAULT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_print_outcomes_printer
                     ON print_outcomes(printer_name);
@@ -2626,6 +2633,24 @@ class KilnDB:
     def save_print_outcome(self, outcome: dict[str, Any]) -> int:
         """Save a print outcome record.  Returns row id.
 
+        A row that settled (anything but ``pending``) is then offered to the
+        person's Kiln account (:func:`kiln.outcome_courier.push_soon`): every
+        door that writes an ending comes through here, so none has to
+        remember to.  That never raises and never waits on the network.
+        """
+        row_id = self._save_print_outcome(outcome)
+        if outcome.get("outcome") != "pending":
+            try:
+                from kiln.outcome_courier import push_soon
+
+                push_soon()
+            except Exception:  # noqa: BLE001 -- the account copy never blocks a record
+                pass
+        return row_id
+
+    def _save_print_outcome(self, outcome: dict[str, Any]) -> int:
+        """Save a print outcome record.  Returns row id.
+
         Upsert semantics on ``job_id`` (unique index): if a row for the
         same job already exists and is unresolved (``pending`` /
         ``unknown``), the new record RESOLVES it in place.  If the
@@ -2957,6 +2982,69 @@ class KilnDB:
             return None
         return self._outcome_row_to_dict(row)
 
+    # ------------------------------------------------------------------
+    # The account's copy of a print row (kiln.outcome_courier)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def account_push_state(row: dict[str, Any]) -> str:
+        """What the account must hold for *row* to be current: its word and
+        who said it.  A row whose pushed state differs is owed again."""
+        return f"{row.get('outcome') or ''}|{row.get('determined_by') or ''}"
+
+    def outcomes_owed_to_account(self, limit: int = 200) -> list[dict[str, Any]]:
+        """Rows of kept versions whose current ending the account has not taken.
+
+        Only prints of a kept version go (a foreign file has no version to
+        mark); a ``pending`` row waits until it settles or goes ``unknown``.
+        """
+        rows = self._conn.execute(
+            "SELECT * FROM print_outcomes "
+            "WHERE version_id IS NOT NULL AND version_id <> '' AND outcome <> 'pending' "
+            "AND (account_pushed_state IS NULL OR account_pushed_state <> "
+            "outcome || '|' || COALESCE(determined_by, '')) "
+            "ORDER BY created_at ASC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [self._outcome_row_to_dict(r) for r in rows]
+
+    def claim_account_sync_id(self, row_id: int) -> str:
+        """The row's id on the account: kept if the start was handed one,
+        minted once otherwise, and never changed after.
+
+        Not the job id: that starts as a placeholder and is swapped for the
+        printer's own label (often the file's name) when the firmware reports
+        it, and a file's name never goes to the account.
+        """
+        import uuid
+
+        with self._write_lock:
+            row = self._conn.execute(
+                "SELECT account_sync_id FROM print_outcomes WHERE id = ?", (row_id,)
+            ).fetchone()
+            if row is not None and row[0]:
+                return str(row[0])
+            sync_id = uuid.uuid4().hex
+            self._conn.execute(
+                "UPDATE print_outcomes SET account_sync_id = ? "
+                "WHERE id = ? AND account_sync_id IS NULL",
+                (sync_id, row_id),
+            )
+            self._conn.commit()
+            got = self._conn.execute(
+                "SELECT account_sync_id FROM print_outcomes WHERE id = ?", (row_id,)
+            ).fetchone()
+            return str(got[0]) if got and got[0] else sync_id
+
+    def mark_pushed_to_account(self, row_id: int, state: str) -> None:
+        """Record that the account took *row_id* as it stood in *state*."""
+        with self._write_lock:
+            self._conn.execute(
+                "UPDATE print_outcomes SET account_pushed_state = ? WHERE id = ?",
+                (state, row_id),
+            )
+            self._conn.commit()
+
     def list_print_outcomes(
         self,
         printer_name: str | None = None,
@@ -2964,8 +3052,13 @@ class KilnDB:
         outcome: str | None = None,
         limit: int = 50,
         include_all: bool = False,
+        version_ids: list[str] | None = None,
+        design_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Return outcome records, optionally filtered.
+
+        ``version_ids`` / ``design_id`` keep the prints of those versions or
+        of that design: a version's print history read off the one row.
 
         By default only DECIDED, learning-bearing outcomes (success /
         failed / partial) are returned — every rate and proven-settings
@@ -2981,6 +3074,15 @@ class KilnDB:
         if file_hash:
             clauses.append("file_hash = ?")
             params.append(file_hash)
+        if version_ids is not None:
+            ids = [v for v in version_ids if isinstance(v, str) and v]
+            if not ids:
+                return []
+            clauses.append(f"version_id IN ({','.join('?' for _ in ids)})")
+            params.extend(ids)
+        if design_id:
+            clauses.append("design_id = ?")
+            params.append(design_id)
         if outcome:
             clauses.append("outcome = ?")
             params.append(outcome)

@@ -95,6 +95,7 @@ outcome — the auto-record is a best-effort scaffold, not a lock.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from typing import Any
@@ -756,6 +757,12 @@ def print_identity_at_start(adapter: Any, kwargs: dict[str, Any]) -> dict[str, A
         value = kwargs.get(key)
         if isinstance(value, str) and value.strip():
             out[key] = value.strip()
+    # The row's id on the person's account, when the door that started the
+    # print already opened it there (the connector's print_design): the
+    # account and this row then name the same print from the start.
+    sync_id = kwargs.get("account_sync_id")
+    if isinstance(sync_id, str) and re.fullmatch(r"[0-9a-f]{32}", sync_id.strip()):
+        out["account_sync_id"] = sync_id.strip()
     try:
         from kiln.registry import machine_fingerprint
 

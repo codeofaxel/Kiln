@@ -7,6 +7,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Your prints show up on your design's history.** Sign in, and each print shows on its version in the web workshop as came out, failed or not known; answer the unknown ones in one tap.
+
 - **Your print history now knows which version printed and how it ended, even after you close the chat.** Unseen endings are marked unknown, never guessed.
 
 - **A free account, offered once, when it would help.** Not signed in? Kiln now says what a free account adds at the moment it matters, like setting up a printer or saving a design, and your AI app can sign you in from the chat.
