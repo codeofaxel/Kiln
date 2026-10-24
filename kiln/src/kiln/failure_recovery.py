@@ -1,8 +1,12 @@
-"""Intelligent failure recovery for 3D printing.
+"""Print failure classification, and what to do about each failure.
 
-Classifies print failures by type, suggests recovery actions, and
-automates recovery when safe to do so. Uses print history, sensor data,
-and failure pattern matching to make intelligent decisions.
+Classifies print failures by type from error messages, progress, sensor data
+and event history, and answers each with a recovery plan.  Every install
+gets the free floor (:mod:`kiln.recovery_floor`: what happened, the safety
+lines, the safe thing to do now); the steps to fix it, the settings to
+change and how to keep it from happening again are Kiln Pro's fix plan
+(https://kiln3d.com/pricing), asked for one failure at a time through
+:mod:`kiln._pro_recovery_bridge`.
 
 Failure taxonomy:
 - SPAGHETTI: Filament in air, no bed adhesion -> restart from scratch
@@ -23,10 +27,10 @@ import enum
 import json
 import logging
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from kiln.hotend_safety import WARNING_STEP
+from kiln import recovery_floor
 
 logger = logging.getLogger(__name__)
 
@@ -86,19 +90,28 @@ class FailureClassification:
 
 @dataclass
 class RecoveryPlan:
-    """Suggested recovery steps for a classified failure."""
+    """Suggested recovery steps for a classified failure.
+
+    ``floor_note`` marks the free floor and says once why it is not Kiln
+    Pro's fix plan (:func:`kiln._pro_recovery_bridge.floor_note`); it is
+    never set on Kiln Pro's plan, whose answer is unchanged by it.
+    """
 
     action: RecoveryAction
     steps: list[str]  # human-readable steps
     automated: bool  # can Kiln execute this automatically?
-    estimated_time_minutes: int
+    estimated_time_minutes: int | None  # None on the floor, which makes no estimate
     risk_level: str  # "low", "medium", "high"
     settings_adjustments: dict[str, Any]  # suggested setting changes
     prevent_recurrence: list[str]  # tips to prevent this in the future
+    floor_note: dict[str, Any] | None = field(default=None, repr=False, compare=False)
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
+        data.pop("floor_note")
         data["action"] = self.action.value
+        if self.floor_note:
+            data.update(self.floor_note)
         return data
 
 
@@ -193,304 +206,94 @@ _ERROR_KEYWORDS: dict[FailureType, list[str]] = {
 
 
 # ---------------------------------------------------------------------------
-# Recovery plan templates
+# The free floor, and Kiln Pro's fix plan as it arrives
 # ---------------------------------------------------------------------------
 
+#: How serious each failure is, as the floor says it.
+_RISK: dict[FailureType, str] = {
+    FailureType.THERMAL_RUNAWAY: "high",
+    FailureType.LAYER_SHIFT: "medium",
+    FailureType.NOZZLE_CLOG: "medium",
+    FailureType.UNKNOWN: "medium",
+}
+#: The printer abilities a fix plan reads.
+_ABILITIES = ("power_loss_recovery", "filament_sensor")
 
-def _build_recovery(failure_type: FailureType, *, printer_capabilities: dict[str, Any] | None = None) -> RecoveryPlan:
-    """Build a recovery plan for a given failure type."""
-    caps = printer_capabilities or {}
 
-    plans: dict[FailureType, RecoveryPlan] = {
-        FailureType.SPAGHETTI: RecoveryPlan(
-            action=RecoveryAction.RESTART,
-            steps=[
-                "Cancel the current print",
-                "Remove the spaghetti mess from the bed and nozzle",
-                "Clean the build plate with IPA",
-                "Re-level the bed if needed",
-                "Restart the print from scratch",
-            ],
-            automated=False,
-            estimated_time_minutes=15,
-            risk_level="low",
-            settings_adjustments={
-                "first_layer_speed": "reduce by 20%",
-                "bed_temp": "increase by 5C for better adhesion",
-            },
-            prevent_recurrence=[
-                "Ensure bed is properly leveled",
-                "Use adhesion helpers (brim, raft) for small-footprint parts",
-                "Check first layer calibration",
-            ],
-        ),
-        FailureType.LAYER_SHIFT: RecoveryPlan(
-            action=RecoveryAction.ADJUST_AND_RESTART,
-            steps=[
-                "Cancel the current print",
-                "Check belt tension on X and Y axes",
-                "Inspect pulleys for set screw tightness",
-                "Clear any obstructions from the motion path",
-                "Restart the print with reduced acceleration",
-            ],
-            automated=False,
-            estimated_time_minutes=20,
-            risk_level="medium",
-            settings_adjustments={
-                "acceleration": "reduce by 30%",
-                "jerk": "reduce by 30%",
-                "print_speed": "reduce by 20%",
-            },
-            prevent_recurrence=[
-                "Tighten belts regularly",
-                "Reduce print speed and acceleration for tall prints",
-                "Check for loose pulleys and set screws",
-            ],
-        ),
-        FailureType.ADHESION_LOSS: RecoveryPlan(
-            action=RecoveryAction.ADJUST_AND_RESTART,
-            steps=[
-                "Cancel the current print",
-                "Remove the detached part from the build plate",
-                "Clean the build plate thoroughly with IPA",
-                "Re-level the bed",
-                "Apply adhesion helper (glue stick, hairspray, or brim)",
-                "Restart the print",
-            ],
-            automated=False,
-            estimated_time_minutes=15,
-            risk_level="low",
-            settings_adjustments={
-                "bed_temp": "increase by 5-10C",
-                "first_layer_height": "increase slightly",
-                "brim_width": "add 5mm brim",
-            },
-            prevent_recurrence=[
-                "Clean bed before every print",
-                "Use a brim for parts with small footprints",
-                "Calibrate first layer height (live Z adjust)",
-                "Check bed temperature is correct for material",
-            ],
-        ),
-        FailureType.NOZZLE_CLOG: RecoveryPlan(
-            action=RecoveryAction.MAINTENANCE_REQUIRED,
-            steps=[
-                WARNING_STEP,
-                "Cancel the current print",
-                # The fork. "It will not extrude" has two root causes that
-                # want OPPOSITE temperature moves, and this plan used to
-                # answer with one of them unconditionally: raise 5-10C. That
-                # is right for debris in the nozzle bore and strictly wrong
-                # for heat creep, where the plug forms ABOVE the melt zone
-                # and more heat is what put it there. The plan's own
-                # prevent_recurrence already named heat creep, so it was not
-                # even internally consistent.
-                #
-                # The cheap check comes first because a user cannot act on
-                # either branch until they know which one they are in.
-                "Work out WHICH failure this is before changing any "
-                "temperature: look at the small fan on the side of the hot "
-                "end and confirm it is spinning, and note whether the "
-                "printer is enclosed or the room is warm",
-                "If that fan has stopped, or the machine is enclosed and "
-                "running a low-temperature filament, treat it as heat creep: "
-                "the filament is softening ABOVE the melt zone, where it "
-                "should still be solid. Fix the cooling and bring the heat "
-                "DOWN — a higher nozzle temperature makes this worse, and a "
-                "new nozzle does not prevent it coming back",
-                "If the fan is fine and the machine is not running hot, "
-                "treat it as debris in the nozzle itself, where a small "
-                "temperature increase can help it clear",
-                "Heat the nozzle to printing temperature",
-                # The old line named 250C/90C flat, for every material. That
-                # is well above an A1's PLA range and this plan does not know
-                # the material, so it stated a number it could not stand
-                # behind. The technique is what is universal; the numbers
-                # belong to the filament in the machine.
-                "Perform a cold pull: bring the nozzle to the filament's own "
-                "printing temperature, let it cool until the melt goes stiff, "
-                "then draw the filament out in one steady pull — steady, "
-                "never a jerk, which snaps it and leaves behind the debris "
-                "you were trying to remove",
-                "If clog persists, remove and clean or replace the nozzle",
-                "Reload filament (load_filament) and test extrusion with "
-                "purge_filament — it reports whether the printer raised an "
-                "extrusion fault, not just that the command was sent, and "
-                "says where the purge went (parked over the machine's own "
-                "purge chute, or in place)",
-                "Clean the tip with wipe_nozzle, which runs the machine's own "
-                "wipe-pad pass where Kiln has a verified pad position and "
-                "says so when it does not",
-                "Restart the print",
-            ],
-            automated=False,
-            estimated_time_minutes=30,
-            risk_level="medium",
-            # print_temp is deliberately NOT here. This map is consumed
-            # programmatically — anything reading it applies the change — and
-            # the correct temperature move depends on which of the two root
-            # causes above is in play. A conditional cannot be expressed in a
-            # key/value pair, and a field that must not be acted on blindly
-            # does not belong in the map of things to act on. The judgment
-            # lives in the steps, where a human reads it.
-            #
-            # retraction stays: reducing it helps BOTH causes (less molten
-            # filament dragged up into the cold zone, less grinding), so it
-            # is safe to apply without knowing which one this is.
-            settings_adjustments={
-                "retraction_distance": "reduce slightly",
-            },
-            prevent_recurrence=[
-                "Use high-quality filament",
-                "Avoid excessive retraction (causes heat creep)",
-                "Ensure PTFE tube is seated properly",
-                "Clean nozzle periodically with cold pulls",
-            ],
-        ),
-        FailureType.STRINGING: RecoveryPlan(
-            action=RecoveryAction.ADJUST_AND_RESTART,
-            steps=[
-                "Cancel the current print",
-                "Remove the stringy print from the bed",
-                "Adjust retraction settings",
-                "Restart the print",
-            ],
-            automated=False,
-            estimated_time_minutes=10,
-            risk_level="low",
-            settings_adjustments={
-                "retraction_distance": "increase by 1-2mm",
-                "retraction_speed": "increase by 10mm/s",
-                "travel_speed": "increase by 20%",
-                "print_temp": "decrease by 5-10C",
-            },
-            prevent_recurrence=[
-                "Run a retraction test (temperature tower)",
-                "Ensure filament is dry",
-                "Reduce nozzle temperature to lower end of range",
-            ],
-        ),
-        FailureType.THERMAL_RUNAWAY: RecoveryPlan(
-            action=RecoveryAction.SAFETY_SHUTDOWN,
-            steps=[
-                "The printer should have automatically shut down",
-                "Allow the printer to cool completely before touching",
-                "Inspect the thermistor and heater connections",
-                "Check for loose wires or damaged connectors",
-                "Run a PID auto-tune before resuming printing",
-                "Test with a temperature hold before printing",
-            ],
-            automated=False,
-            estimated_time_minutes=60,
-            risk_level="high",
-            settings_adjustments={
-                "pid_tune": "run PID auto-tune for hotend and bed",
-            },
-            prevent_recurrence=[
-                "Run PID auto-tune after any hardware changes",
-                "Inspect wiring periodically",
-                "Ensure thermistor is properly seated",
-                "Never leave printer unattended during first prints after maintenance",
-            ],
-        ),
-        FailureType.POWER_LOSS: RecoveryPlan(
-            action=RecoveryAction.RESUME if caps.get("power_loss_recovery") else RecoveryAction.RESTART,
-            steps=(
-                [
-                    "Power on the printer",
-                    "Use the firmware power-loss recovery feature to resume",
-                    "Monitor the first few layers after resume for quality",
-                ]
-                if caps.get("power_loss_recovery")
-                else [
-                    "Power on the printer",
-                    "Remove the partial print from the bed",
-                    "Restart the print from scratch",
-                ]
-            ),
-            automated=bool(caps.get("power_loss_recovery")),
-            estimated_time_minutes=5 if caps.get("power_loss_recovery") else 10,
-            risk_level="low",
-            settings_adjustments={},
-            prevent_recurrence=[
-                "Use a UPS (uninterruptible power supply) for the printer",
-                "Enable power-loss recovery in firmware if available",
-            ],
-        ),
-        FailureType.FILAMENT_RUNOUT: RecoveryPlan(
-            action=RecoveryAction.RESUME if caps.get("filament_sensor") else RecoveryAction.MANUAL_INTERVENTION,
-            steps=(
-                [
-                    "Load a new spool of the same filament",
-                    "Use the printer's filament change procedure to resume",
-                    "Monitor the first few layers after resume for consistency",
-                ]
-                if caps.get("filament_sensor")
-                else [
-                    "The print has likely failed without a filament sensor",
-                    "Remove the partial print",
-                    "Load a new spool",
-                    "Restart the print from scratch",
-                ]
-            ),
-            automated=bool(caps.get("filament_sensor")),
-            estimated_time_minutes=5 if caps.get("filament_sensor") else 15,
-            risk_level="low",
-            settings_adjustments={},
-            prevent_recurrence=[
-                "Check spool weight before starting long prints",
-                "Install a filament runout sensor if not present",
-                "Use spool tracking to estimate remaining filament",
-            ],
-        ),
-        FailureType.WARPING: RecoveryPlan(
-            action=RecoveryAction.ADJUST_AND_RESTART,
-            steps=[
-                "Cancel the current print",
-                "Remove the warped part from the bed",
-                "Clean the build plate",
-                "Increase bed temperature",
-                "Add a brim or use an enclosure",
-                "Restart the print",
-            ],
-            automated=False,
-            estimated_time_minutes=15,
-            risk_level="low",
-            settings_adjustments={
-                "bed_temp": "increase by 5-10C",
-                "brim_width": "add 8mm brim",
-                "enclosure": "use an enclosure if available",
-                "fan_speed": "reduce first layer fan speed to 0%",
-            },
-            prevent_recurrence=[
-                "Use an enclosure for ABS/ASA/Nylon",
-                "Increase bed temperature",
-                "Add a brim for large flat parts",
-                "Reduce part cooling fan for the first 3-5 layers",
-                "Ensure the room is free of drafts",
-            ],
-        ),
-        FailureType.UNKNOWN: RecoveryPlan(
-            action=RecoveryAction.MANUAL_INTERVENTION,
-            steps=[
-                "Cancel the current print if still running",
-                "Inspect the printer and print for obvious issues",
-                "Check printer logs for error messages",
-                "Take a photo for future reference",
-                "Clean the build plate and restart if no hardware issues found",
-            ],
-            automated=False,
-            estimated_time_minutes=20,
-            risk_level="medium",
-            settings_adjustments={},
-            prevent_recurrence=[
-                "Monitor prints more closely",
-                "Enable print monitoring tools",
-                "Record detailed failure information for better future classification",
-            ],
-        ),
-    }
-    return plans[failure_type]
+def _floor_plan(failure_type: FailureType, caps: dict[str, bool]) -> RecoveryPlan:
+    """The free floor for a classified failure: what happened (in its note),
+    the safety lines, and the safe thing to do now.  The printer's own
+    power-loss recovery and filament-change screen are the printer's, and
+    the floor says when to use them."""
+    steps = recovery_floor.steps(failure_type.value)
+    action = RecoveryAction.RESTART
+    if failure_type is FailureType.THERMAL_RUNAWAY:
+        action = RecoveryAction.SAFETY_SHUTDOWN
+        steps = [
+            "The printer should have shut its heater off by itself; if it is still heating, "
+            "stop it now with an emergency stop or switch it off at the wall",
+            *recovery_floor.THERMAL_RUNAWAY_STEPS,
+        ]
+    elif failure_type is FailureType.NOZZLE_CLOG:
+        action = RecoveryAction.MAINTENANCE_REQUIRED
+    elif failure_type in (FailureType.STRINGING, FailureType.UNKNOWN):
+        action = RecoveryAction.MANUAL_INTERVENTION
+        if failure_type is FailureType.UNKNOWN:
+            steps = [
+                "Stop the print if it is still running and look at the printer and the part",
+                "Clear the bed and reprint once nothing looks wrong",
+            ]
+    elif failure_type is FailureType.POWER_LOSS:
+        if caps.get("power_loss_recovery"):
+            action = RecoveryAction.RESUME
+            steps = ["Power the printer back on", recovery_floor.PRINTERS_OWN_RESUME,
+                     "If it does not offer to continue, clear the bed and reprint"]
+        else:
+            steps = ["Power the printer back on", recovery_floor.REPRINT]
+    elif failure_type is FailureType.FILAMENT_RUNOUT:
+        if caps.get("filament_sensor"):
+            action = RecoveryAction.RESUME
+            steps = ["Load a new spool of the same filament",
+                     "Continue from the printer's own filament-change screen"]
+        else:
+            action = RecoveryAction.MANUAL_INTERVENTION
+            steps = ["The print has likely failed without a filament sensor",
+                     "Clear the bed, load a new spool and reprint"]
+    return RecoveryPlan(
+        action=action,
+        steps=steps,
+        # A resume here is the printer's own (its power-loss recovery, its
+        # filament-change screen), which carries on without Kiln.
+        automated=action is RecoveryAction.RESUME,
+        estimated_time_minutes=None,
+        risk_level=_RISK.get(failure_type, "low"),
+        settings_adjustments={},
+        prevent_recurrence=[],
+    )
+
+
+def _plan_from_wire(answer: dict[str, Any]) -> RecoveryPlan | None:
+    """Kiln Pro's fix plan as this install's :class:`RecoveryPlan`, or
+    ``None`` when the answer is not one."""
+    said = answer.get("plan")
+    if not isinstance(said, dict):
+        return None
+
+    def _strings(value: Any) -> list[str]:
+        return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
+
+    try:
+        return RecoveryPlan(
+            action=RecoveryAction(said.get("action")),
+            steps=_strings(said.get("steps")),
+            automated=bool(said.get("automated")),
+            estimated_time_minutes=said.get("estimated_time_minutes"),
+            risk_level=str(said.get("risk_level") or "medium"),
+            settings_adjustments=dict(said.get("settings_adjustments") or {}),
+            prevent_recurrence=_strings(said.get("prevent_recurrence")),
+        )
+    except (TypeError, ValueError):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -624,13 +427,36 @@ def plan_recovery(
 ) -> RecoveryPlan:
     """Generate a recovery plan for a classified failure.
 
+    Kiln Pro's fix plan when the caller's plan includes it (asked through
+    :mod:`kiln._pro_recovery_bridge`); otherwise the free floor, whose
+    ``floor_note`` says once why.
+
     :param classification: The failure classification to plan recovery for.
-    :param printer_name: Optional printer name for context.
+    :param printer_name: Optional printer name for context (never sent).
     :param printer_capabilities: Optional dict of printer capabilities
         (e.g. ``{"power_loss_recovery": True, "filament_sensor": True}``).
     :returns: A :class:`RecoveryPlan` with actionable steps.
     """
-    return _build_recovery(classification.failure_type, printer_capabilities=printer_capabilities)
+    from kiln import _pro_recovery_bridge as bridge
+
+    given = printer_capabilities or {}
+    caps = {name: bool(given[name]) for name in _ABILITIES if name in given}
+    failure_type = classification.failure_type
+    asked = bridge.ask("fix", {"failure_type": failure_type.value, "printer_capabilities": caps})
+    if asked.answer is not None:
+        plan = _plan_from_wire(asked.answer)
+        if plan is not None:
+            return plan
+        from kiln.served_answer import Miss
+
+        asked = bridge.Asked(included=True, miss=Miss("unanswered", detail="a plan this install could not read"))
+    plan = _floor_plan(failure_type, caps)
+    _, happened = recovery_floor.HAPPENED.get(failure_type.value, recovery_floor.HAPPENED["unknown"])
+    plan.floor_note = {
+        "what_happened": happened,
+        **bridge.floor_note(asked, recovery_floor.FIX_PRO_ADDS.get(failure_type.value, "")),
+    }
+    return plan
 
 
 def analyze_failure(

@@ -496,272 +496,222 @@ class TestCommunicationLossDetection:
 
 
 # ---------------------------------------------------------------------------
-# 8. Recovery planning -- strategy selection per failure type
+# 8. The free floor -- what every install answers a failure with
 # ---------------------------------------------------------------------------
+#
+# Kiln Pro's plan (resume from a layer, restart with changed settings, the
+# G-code for it) moved to kiln-pro and is asked for through
+# kiln._pro_recovery_bridge; its own tests live there.  Here: the floor, and
+# that a plan arriving through the bridge is the one that runs.
 
 
-class TestRecoveryPlanning:
-    """Strategy selection per failure type."""
+def _failure(failure_type: FailureType, **overrides: Any) -> FailureReport:
+    base: dict[str, Any] = {
+        "failure_id": "f-floor",
+        "failure_type": failure_type,
+        "detected_at": "2026-10-24T00:00:00+00:00",
+        "printer_name": "test-printer",
+        "failed_layer": 50,
+        "total_layers": 200,
+        "failure_z_mm": 10.0,
+        "material_type": "pla",
+        "telemetry_snapshot": {"hotend_temp": 215, "bed_temp": 65},
+    }
+    base.update(overrides)
+    return FailureReport(**base)
 
-    def test_thermal_runaway_selects_safe_abort(self, engine: PrintRecovery):
-        _, plan = _detect_and_plan(engine, _make_telemetry(hotend_temp=320))
-        assert plan.strategy == RecoveryStrategy.SAFE_ABORT
 
-    def test_filament_runout_selects_wait_retry(self, engine: PrintRecovery):
-        _, plan = _detect_and_plan(engine, _make_telemetry(filament_detected=False))
-        assert plan.strategy == RecoveryStrategy.WAIT_AND_RETRY
+def _stops(steps: list[str]) -> bool:
+    """Whether a G-code sequence turns a heater off (stops the print)."""
+    return any(line.split(";", 1)[0].strip().upper().startswith(("M104 S0", "M140 S0")) for line in steps)
 
-    def test_communication_loss_selects_wait_retry(self, engine: PrintRecovery):
-        _, plan = _detect_and_plan(engine, _make_telemetry(connected=False))
-        assert plan.strategy == RecoveryStrategy.WAIT_AND_RETRY
 
-    def test_layer_shift_selects_resume(self, engine: PrintRecovery):
-        telemetry = _make_telemetry(
-            x_position=0.0, x_expected=5.0, y_position=0.0, y_expected=0.0
-        )
-        _, plan = _detect_and_plan(engine, telemetry)
-        assert plan.strategy == RecoveryStrategy.RESUME_FROM_LAYER
+@pytest.fixture()
+def free(monkeypatch):
+    """A free plan: kiln-pro is not here and the plan does not include Kiln Pro."""
+    from kiln import _pro_recovery_bridge as bridge
 
-    def test_adhesion_failure_selects_restart(self, engine: PrintRecovery):
-        _, plan = _detect_and_plan(engine, _make_telemetry(adhesion_lost=True))
-        assert plan.strategy == RecoveryStrategy.RESTART_WITH_COMPENSATION
+    monkeypatch.setattr(bridge, "_local", lambda kind, failure: None)
+    monkeypatch.setattr(bridge, "_plan_includes_pro", lambda: False)
+    monkeypatch.setattr(bridge, "_lapsed_signin", lambda: "")
 
-    def test_spaghetti_selects_safe_abort(self, engine: PrintRecovery):
-        _, plan = _detect_and_plan(
-            engine, _make_telemetry(spaghetti_detected=True)
-        )
-        assert plan.strategy == RecoveryStrategy.SAFE_ABORT
 
-    def test_warping_selects_restart(self, engine: PrintRecovery):
-        _, plan = _detect_and_plan(
-            engine, _make_telemetry(warping_detected=True)
-        )
-        assert plan.strategy == RecoveryStrategy.RESTART_WITH_COMPENSATION
+class TestTheFreeFloor:
+    """What a free plan is told, for every failure."""
 
-    def test_nozzle_clog_selects_wait_retry(self, engine: PrintRecovery):
-        _, plan = _detect_and_plan(
-            engine, _make_telemetry(nozzle_clogged=True)
-        )
-        assert plan.strategy == RecoveryStrategy.WAIT_AND_RETRY
+    @pytest.mark.parametrize("failure_type", list(FailureType))
+    def test_every_failure_has_an_answer(self, engine: PrintRecovery, free, failure_type):
+        plan = engine.plan_recovery(_failure(failure_type))
+        said = plan.to_dict()
+        assert said["floor"] is True
+        assert plan.reason and plan.preparation_steps
+        # The floor carries none of Kiln Pro's plan.
+        assert plan.resume_layer is None and plan.parameter_adjustments == {}
+        assert said["estimated_success_pct"] is None
 
-    def test_plan_has_preparation_steps(self, engine: PrintRecovery):
-        _, plan = _detect_and_plan(engine, _make_telemetry(hotend_temp=320))
-        assert len(plan.preparation_steps) > 0
-
-    def test_plan_has_risks(self, engine: PrintRecovery):
-        _, plan = _detect_and_plan(engine, _make_telemetry(hotend_temp=320))
-        assert len(plan.risks) > 0
-
-    def test_plan_has_reason(self, engine: PrintRecovery):
-        _, plan = _detect_and_plan(engine, _make_telemetry(hotend_temp=320))
-        assert plan.reason != ""
-
-    def test_resume_plan_has_overlap_layers(self, engine: PrintRecovery):
-        telemetry = _make_telemetry(
-            x_position=0.0, x_expected=5.0, y_position=0.0, y_expected=0.0
-        )
-        _, plan = _detect_and_plan(engine, telemetry)
-        # Default material (unknown) = 3-layer base + 1 for layer shift = 4
-        assert plan.layer_overlap == 4
-
-    def test_resume_overlap_varies_by_material(self, engine: PrintRecovery):
-        """Material-dependent overlap: PLA=2, TPU=4, PEEK=5."""
-        for material, expected_overlap in [("pla", 2), ("tpu", 4), ("peek", 5)]:
-            failure = FailureReport(
-                failure_id="test",
-                failure_type=FailureType.POWER_LOSS,  # Maps to RESUME_FROM_LAYER
-                detected_at="2026-01-01T00:00:00Z",
-                printer_name="test-printer",
-                failed_layer=50,
-                total_layers=100,
-                failure_z_mm=10.0,
-                material_type=material,
-            )
-            plan = engine.plan_recovery(failure)
-            assert plan.layer_overlap == expected_overlap, (
-                f"{material}: expected {expected_overlap}, got {plan.layer_overlap}"
-            )
-
-    def test_layer_shift_adds_extra_overlap(self, engine: PrintRecovery):
-        """Layer shift always adds +1 overlap on top of material default."""
-        failure = FailureReport(
-            failure_id="test",
-            failure_type=FailureType.LAYER_SHIFT,
-            detected_at="2026-01-01T00:00:00Z",
-            printer_name="test-printer",
-            failed_layer=50,
-            total_layers=100,
-            failure_z_mm=10.0,
-            material_type="pla",
-        )
+    @pytest.mark.parametrize(
+        "failure_type",
+        [FailureType.FILAMENT_RUNOUT, FailureType.COMMUNICATION_LOSS, FailureType.STRINGING],
+    )
+    def test_a_print_that_may_still_be_fine_is_never_stopped(self, engine: PrintRecovery, free, failure_type):
+        """A printer paused for filament, a printer still printing while
+        Kiln's connection is down, cosmetic stringing: stopping would destroy
+        a print that can still finish, so the floor sends nothing that stops it."""
+        failure = _failure(failure_type)
         plan = engine.plan_recovery(failure)
-        assert plan.layer_overlap == 3  # PLA base=2 + 1 for layer shift
-
-    def test_resume_plan_has_resume_layer(self, engine: PrintRecovery):
-        telemetry = _make_telemetry(
-            x_position=0.0, x_expected=5.0, y_position=0.0, y_expected=0.0
-        )
-        _, plan = _detect_and_plan(
-            engine, telemetry, job_info=_make_job_info(layer=50)
-        )
-        assert plan.resume_layer is not None
-        assert plan.resume_layer < 50  # Should back up from failed layer
-
-    def test_restart_plan_has_adjustments(self, engine: PrintRecovery):
-        _, plan = _detect_and_plan(engine, _make_telemetry(adhesion_lost=True))
-        assert len(plan.parameter_adjustments) > 0
-        assert "bed_temp_offset" in plan.parameter_adjustments
-
-
-# ---------------------------------------------------------------------------
-# 9. Confidence computation
-# ---------------------------------------------------------------------------
-
-
-class TestConfidenceComputation:
-    """Confidence levels for various failure/strategy combinations."""
-
-    def test_thermal_abort_high_confidence(self, engine: PrintRecovery):
-        _, plan = _detect_and_plan(engine, _make_telemetry(hotend_temp=320))
-        assert plan.confidence == RecoveryConfidence.HIGH
-
-    def test_filament_wait_high_confidence(self, engine: PrintRecovery):
-        _, plan = _detect_and_plan(engine, _make_telemetry(filament_detected=False))
-        assert plan.confidence == RecoveryConfidence.HIGH
-
-    def test_layer_shift_resume_medium_confidence(self, engine: PrintRecovery):
-        telemetry = _make_telemetry(
-            x_position=0.0, x_expected=5.0, y_position=0.0, y_expected=0.0
-        )
-        _, plan = _detect_and_plan(engine, telemetry)
-        assert plan.confidence == RecoveryConfidence.MEDIUM
-
-    def test_spaghetti_abort_high_confidence(self, engine: PrintRecovery):
-        _, plan = _detect_and_plan(
-            engine, _make_telemetry(spaghetti_detected=True)
-        )
-        assert plan.confidence == RecoveryConfidence.HIGH
-
-    def test_adhesion_restart_medium_confidence(self, engine: PrintRecovery):
-        _, plan = _detect_and_plan(engine, _make_telemetry(adhesion_lost=True))
-        assert plan.confidence == RecoveryConfidence.MEDIUM
-
-    def test_high_confidence_auto_executes(self, engine: PrintRecovery):
-        _, plan = _detect_and_plan(engine, _make_telemetry(hotend_temp=320))
-        assert plan.requires_confirmation is False
-
-    def test_medium_confidence_requires_confirmation(self, engine: PrintRecovery):
-        telemetry = _make_telemetry(
-            x_position=0.0, x_expected=5.0, y_position=0.0, y_expected=0.0
-        )
-        _, plan = _detect_and_plan(engine, telemetry)
-        assert plan.requires_confirmation is True
-
-    def test_estimated_success_rate_populated(self, engine: PrintRecovery):
-        _, plan = _detect_and_plan(engine, _make_telemetry(hotend_temp=320))
-        assert plan.estimated_success_pct > 0.0
-
-
-# ---------------------------------------------------------------------------
-# 10. Preparation steps
-# ---------------------------------------------------------------------------
-
-
-class TestPreparationSteps:
-    """Correct preparation steps generated per strategy."""
-
-    def test_safe_abort_includes_heater_off(self, engine: PrintRecovery):
-        _, plan = _detect_and_plan(engine, _make_telemetry(hotend_temp=320))
-        steps_text = " ".join(plan.preparation_steps)
-        assert "heater" in steps_text.lower() or "M104" in steps_text
-
-    def test_resume_includes_home(self, engine: PrintRecovery):
-        telemetry = _make_telemetry(
-            x_position=0.0, x_expected=5.0, y_position=0.0, y_expected=0.0
-        )
-        _, plan = _detect_and_plan(engine, telemetry)
-        steps_text = " ".join(plan.preparation_steps)
-        assert "home" in steps_text.lower() or "G28" in steps_text
-
-    def test_layer_shift_includes_belt_check(self, engine: PrintRecovery):
-        telemetry = _make_telemetry(
-            x_position=0.0, x_expected=5.0, y_position=0.0, y_expected=0.0
-        )
-        _, plan = _detect_and_plan(engine, telemetry)
-        steps_text = " ".join(plan.preparation_steps)
-        assert "belt" in steps_text.lower()
-
-    def test_filament_wait_includes_load(self, engine: PrintRecovery):
-        _, plan = _detect_and_plan(engine, _make_telemetry(filament_detected=False))
-        steps_text = " ".join(plan.preparation_steps)
-        assert "filament" in steps_text.lower() or "load" in steps_text.lower()
-
-    def test_nozzle_clog_includes_cold_pull(self, engine: PrintRecovery):
-        _, plan = _detect_and_plan(
-            engine, _make_telemetry(nozzle_clogged=True)
-        )
-        steps_text = " ".join(plan.preparation_steps)
-        assert "cold pull" in steps_text.lower()
-
-    def test_restart_includes_clean_bed(self, engine: PrintRecovery):
-        _, plan = _detect_and_plan(engine, _make_telemetry(adhesion_lost=True))
-        steps_text = " ".join(plan.preparation_steps)
-        assert "clean" in steps_text.lower()
-
-    def test_thermal_abort_includes_emergency_warning(self, engine: PrintRecovery):
-        _, plan = _detect_and_plan(engine, _make_telemetry(hotend_temp=320))
-        steps_text = " ".join(plan.preparation_steps)
-        assert "emergency" in steps_text.lower() or "IMMEDIATE" in steps_text
-
-
-# ---------------------------------------------------------------------------
-# 11. Recovery G-code generation
-# ---------------------------------------------------------------------------
-
-
-class TestRecoveryGcodeGeneration:
-    """Valid G-code generated for each strategy."""
-
-    def test_safe_abort_gcode(self, engine: PrintRecovery):
-        failure, plan = _detect_and_plan(engine, _make_telemetry(hotend_temp=320))
+        assert plan.strategy != RecoveryStrategy.SAFE_ABORT
         session = engine.start_recovery(plan, failure)
-        steps = engine.get_recovery_steps(session.session_id)
-        assert "M104 S0" in steps
-        assert "M140 S0" in steps
-        assert "M84" in steps
+        assert not _stops(engine.get_recovery_steps(session.session_id))
 
-    def test_resume_gcode_includes_home(self, engine: PrintRecovery):
-        telemetry = _make_telemetry(
-            x_position=0.0, x_expected=5.0, y_position=0.0, y_expected=0.0
-        )
-        failure, plan = _detect_and_plan(engine, telemetry)
+    @pytest.mark.parametrize(
+        "failure_type",
+        [FailureType.LAYER_SHIFT, FailureType.ADHESION_FAILURE, FailureType.BLOB_DETECTED,
+         FailureType.POWER_LOSS, FailureType.NOZZLE_CLOG, FailureType.WARPING],
+    )
+    def test_a_lost_print_is_stopped_after_the_person_says_so(self, engine: PrintRecovery, free, failure_type):
+        failure = _failure(failure_type)
+        plan = engine.plan_recovery(failure)
+        assert plan.strategy == RecoveryStrategy.SAFE_ABORT and plan.requires_confirmation is True
         session = engine.start_recovery(plan, failure)
-        steps = engine.get_recovery_steps(session.session_id)
-        # X/Y only — a bare G28 would descend Z onto the partial print.
-        assert "G28 X Y" in steps
-        assert "G28" not in steps
+        assert session.status == RecoveryStatus.AWAITING_CONFIRMATION
+        assert _stops(engine.get_recovery_steps(session.session_id))
 
-    def test_resume_gcode_includes_temp_commands(self, engine: PrintRecovery):
-        telemetry = _make_telemetry(
-            x_position=0.0, x_expected=5.0, y_position=0.0, y_expected=0.0
-        )
-        failure, plan = _detect_and_plan(engine, telemetry)
+    @pytest.mark.parametrize("failure_type", [FailureType.THERMAL_RUNAWAY, FailureType.SPAGHETTI])
+    def test_a_runaway_heater_or_spaghetti_stops_without_waiting(self, engine: PrintRecovery, free, failure_type):
+        """Waiting on a confirmation while a heater runs away, or while a
+        failed print wraps the hot end, can cost the machine."""
+        failure = _failure(failure_type)
+        plan = engine.plan_recovery(failure)
+        assert plan.strategy == RecoveryStrategy.SAFE_ABORT and plan.requires_confirmation is False
         session = engine.start_recovery(plan, failure)
+        assert session.status == RecoveryStatus.EXECUTING
         steps = engine.get_recovery_steps(session.session_id)
-        has_temp = any("M104" in s or "M109" in s for s in steps)
-        assert has_temp
+        assert "M104 S0" in steps and "M140 S0" in steps and "M84" in steps
+
+    def test_a_runaway_heater_keeps_every_safety_line(self, engine: PrintRecovery, free):
+        steps = " ".join(engine.plan_recovery(_failure(FailureType.THERMAL_RUNAWAY)).preparation_steps)
+        assert "IMMEDIATE: Execute emergency stop if temperature is rising" in steps
+        assert "cool completely before touching" in steps
+        assert "heater and its temperature sensor" in steps
+        assert "Do not print on it again" in steps
+
+    def test_a_clog_warns_before_anyone_touches_the_nozzle(self, engine: PrintRecovery, free):
+        from kiln.hotend_safety import WARNING_STEP
+
+        assert engine.plan_recovery(_failure(FailureType.NOZZLE_CLOG)).preparation_steps[0] == WARNING_STEP
+
+    def test_a_power_cut_says_what_the_printer_can_do_itself(self, engine: PrintRecovery, free):
+        """The printer's own power-loss recovery is the printer's, and it covers
+        a print run from its own memory card, never one streamed over USB."""
+        steps = " ".join(engine.plan_recovery(_failure(FailureType.POWER_LOSS)).preparation_steps)
+        assert "its own memory card" in steps and "power-loss recovery" in steps
+
+    def test_what_kiln_pro_adds_is_said_once_and_only_where_it_adds_something(self, engine: PrintRecovery, free):
+        shift = engine.plan_recovery(_failure(FailureType.LAYER_SHIFT)).to_dict()
+        assert "Kiln Pro" in shift["pro_adds"] and shift["required_tier"] == "pro"
+        assert shift["upgrade_url"].startswith("https://kiln3d.com/pricing")
+        # A heater that ran away is answered with the safe stop at every tier:
+        # nothing is pitched at that moment.
+        runaway = engine.plan_recovery(_failure(FailureType.THERMAL_RUNAWAY)).to_dict()
+        assert "pro_adds" not in runaway and "upgrade_url" not in runaway
+
+    def test_a_sign_in_that_ended_is_told_to_sign_back_in_never_to_upgrade(self, engine: PrintRecovery, free, monkeypatch):
+        from kiln import _pro_recovery_bridge as bridge
+
+        monkeypatch.setattr(bridge, "_lapsed_signin", lambda: "Your Kiln session has expired.")
+        said = engine.plan_recovery(_failure(FailureType.LAYER_SHIFT)).to_dict()
+        assert said["sign_in_again"] == "Your Kiln session has expired."
+        assert "pro_adds" not in said and "upgrade_url" not in said
+
+
+class TestKilnProsPlan:
+    """A plan that arrives through the bridge is the plan that runs."""
+
+    _RESUME = {
+        "success": True, "status": "ok", "known": True, "kind": "session",
+        "plan": {
+            "plan_id": "elsewhere", "failure_id": "elsewhere", "strategy": "resume_from_layer",
+            "confidence": "medium", "resume_layer": 47, "layer_overlap": 3, "preparation_steps": ["Resume"],
+            "parameter_adjustments": {"resume_z_mm": 9.4, "overlap_layers": 3}, "estimated_success_pct": 60.0,
+            "estimated_time_minutes": 306.0, "risks": ["Weak seam"], "requires_confirmation": True,
+            "reason": "Resume from layer 47",
+        },
+        "gcode": ["M104 S215", "G91", "G1 Z5 F600", "G90", "G28 X Y", "; Resume from layer 47"],
+    }
+
+    def _asked(self, monkeypatch, answer: dict):
+        from kiln import _pro_recovery_bridge as bridge
+
+        sent: list[tuple[str, dict]] = []
+
+        def ask(kind, failure):
+            sent.append((kind, failure))
+            return bridge.Asked(answer=answer, included=True)
+
+        monkeypatch.setattr(bridge, "ask", ask)
+        return sent
+
+    def test_its_plan_and_its_g_code_run(self, engine: PrintRecovery, monkeypatch):
+        sent = self._asked(monkeypatch, self._RESUME)
+        failure = _failure(FailureType.LAYER_SHIFT)
+        plan = engine.plan_recovery(failure)
+        said = plan.to_dict()
+        assert said["strategy"] == "resume_from_layer" and said["resume_layer"] == 47
+        assert said["failure_id"] == "f-floor" and "floor" not in said
+        session = engine.start_recovery(plan, failure)
+        assert engine.get_recovery_steps(session.session_id) == self._RESUME["gcode"]
+        # Only the failure's own facts were sent: no printer, job or path.
+        kind, facts = sent[0]
+        assert kind == "session" and facts["failure_type"] == "layer_shift"
+        assert "test-printer" not in str(facts) and "printer_name" not in facts
+
+    def test_a_safe_abort_is_built_here_with_the_proven_park_route(self, engine: PrintRecovery, monkeypatch):
+        from kiln.printers.safe_motion import TravelPlan
+
+        abort = {**self._RESUME, "plan": {**self._RESUME["plan"], "strategy": "safe_abort", "confidence": "high"},
+                 "gcode": None}
+        self._asked(monkeypatch, abort)
+        failure = _failure(FailureType.BLOB_DETECTED)
+        plan = engine.plan_recovery(failure)
+        route = TravelPlan(ok=True, reason="r", strategy="direct", waypoints=[(0.0, 0.0), (215.0, 215.0)])
+        session = engine.start_recovery(plan, failure, park_route=route)
+        steps = engine.get_recovery_steps(session.session_id)
+        assert any("park clear" in line for line in steps) and steps[-1] == "M84"
+
+    def test_a_plan_that_arrives_without_its_g_code_sends_nothing(self, engine: PrintRecovery, monkeypatch):
+        self._asked(monkeypatch, {**self._RESUME, "gcode": None})
+        failure = _failure(FailureType.LAYER_SHIFT)
+        plan = engine.plan_recovery(failure)
+        session = engine.start_recovery(plan, failure)
+        assert engine.get_recovery_steps(session.session_id) == []
+
+    def test_an_answer_that_is_not_a_plan_is_the_floor_and_says_why(self, engine: PrintRecovery, monkeypatch):
+        self._asked(monkeypatch, {"success": True, "known": True, "plan": {"strategy": "teleport"}})
+        said = engine.plan_recovery(_failure(FailureType.LAYER_SHIFT)).to_dict()
+        assert said["floor"] is True and said["strategy"] == "safe_abort"
+        assert said["pro_plan_missing"] and "pro_adds" not in said
+
+    def test_a_paying_caller_whose_plan_did_not_arrive_is_told_why_not_pitched(self, engine: PrintRecovery, monkeypatch):
+        from kiln import _pro_recovery_bridge as bridge
+        from kiln.served_answer import Miss
+
+        monkeypatch.setattr(bridge, "ask", lambda kind, failure: bridge.Asked(included=True, miss=Miss("offline")))
+        said = engine.plan_recovery(_failure(FailureType.LAYER_SHIFT)).to_dict()
+        assert said["floor"] is True and said["why"] == "offline"
+        assert "this computer is offline" in said["pro_plan_missing"]
+        assert "pro_adds" not in said and "upgrade_url" not in said
 
 
 # ---------------------------------------------------------------------------
-# 11b. Mid-print motion safety — every recovery sequence runs with a partial
-# print on the bed, so none of them may home Z or move in X/Y before a lift.
-# (Deliberately does not import kiln.printers.safe_motion: these assertions
-# must run — and fail — against code that predates that module.)
+# 11b. Mid-print motion safety -- the safe abort runs with a partial print on
+# the bed, so it may not home Z or move in X/Y before a lift.  (Kiln Pro's
+# resume and restart sequences are held to the same in kiln-pro.)
 # ---------------------------------------------------------------------------
 
 
 def _sequence_for(strategy: RecoveryStrategy) -> list[str]:
-    """Recovery gcode for *strategy* via the real engine path."""
+    """Recovery gcode for *strategy* via the real engine path, for a plan
+    that carries no G-code of its own."""
     engine = PrintRecovery()
     failure = FailureReport(
         failure_id="f-motion",
@@ -830,11 +780,14 @@ class TestMidPrintMotionSafety:
             f"before it — the nozzle travels at part height: {commands}"
         )
 
-    def test_resume_starts_heating_before_homing(self):
-        commands = _sequence_for(RecoveryStrategy.RESUME_FROM_LAYER)
-        heat_idx = next(i for i, c in enumerate(commands) if "M104" in c)
-        home_idx = next(i for i, c in enumerate(commands) if "G28" in c)
-        assert heat_idx < home_idx
+    @pytest.mark.parametrize(
+        "strategy",
+        [RecoveryStrategy.RESUME_FROM_LAYER, RecoveryStrategy.PARTIAL_RECOVERY, RecoveryStrategy.RESTART_WITH_COMPENSATION],
+    )
+    def test_a_plan_with_no_g_code_of_its_own_moves_nothing(self, strategy: RecoveryStrategy):
+        """Motion is never invented for a strategy whose planner did not write
+        it: a hand-built or half-arrived plan sends only comments."""
+        assert all(line.startswith(";") for line in _sequence_for(strategy))
 
     def test_abort_threads_a_proven_park_route(self):
         # A caller with live-machine facts hands the engine a PROVEN park
@@ -870,76 +823,7 @@ class TestMidPrintMotionSafety:
         no_route = _sequence_for(RecoveryStrategy.SAFE_ABORT)
         assert not any("park" in c.lower() for c in no_route)
 
-    def test_resume_gcode_includes_prime(self, engine: PrintRecovery):
-        telemetry = _make_telemetry(
-            x_position=0.0, x_expected=5.0, y_position=0.0, y_expected=0.0
-        )
-        failure, plan = _detect_and_plan(engine, telemetry)
-        session = engine.start_recovery(plan, failure)
-        steps = engine.get_recovery_steps(session.session_id)
-        has_prime = any("E5" in s or "E10" in s for s in steps)
-        assert has_prime
-
-    def test_wait_retry_filament_gcode(self, engine: PrintRecovery):
-        failure, plan = _detect_and_plan(engine, _make_telemetry(filament_detected=False))
-        session = engine.start_recovery(plan, failure)
-        steps = engine.get_recovery_steps(session.session_id)
-        assert len(steps) > 0
-
-    def test_resume_gcode_uses_actual_temps(self, engine: PrintRecovery):
-        """G-code should contain real temps from telemetry, not placeholders."""
-        telemetry = _make_telemetry(
-            x_position=0.0, x_expected=5.0, y_position=0.0, y_expected=0.0,
-            hotend_temp=195, hotend_target=210, bed_temp=58, bed_target=60,
-        )
-        failure, plan = _detect_and_plan(engine, telemetry)
-        session = engine.start_recovery(plan, failure)
-        steps = engine.get_recovery_steps(session.session_id)
-        # Should contain actual target temps (210 hotend, 60 bed), no placeholders.
-        assert any("M104 S210" in s for s in steps), f"Expected M104 S210 in {steps}"
-        assert any("M140 S60" in s for s in steps), f"Expected M140 S60 in {steps}"
-        # No placeholder braces remaining.
-        assert not any("{" in s for s in steps), f"Placeholder found in {steps}"
-
-    def test_resume_gcode_defaults_when_no_telemetry(self, engine: PrintRecovery):
-        """When telemetry has no target temps, use safe defaults (200/60)."""
-        failure = FailureReport(
-            failure_id="test",
-            failure_type=FailureType.POWER_LOSS,
-            detected_at="2026-01-01T00:00:00Z",
-            printer_name="test-printer",
-            failed_layer=50,
-            total_layers=100,
-            failure_z_mm=10.0,
-        )
-        plan = engine.plan_recovery(failure)
-        session = engine.start_recovery(plan, failure)
-        steps = engine.get_recovery_steps(session.session_id)
-        assert any("M104 S200" in s for s in steps)
-        assert any("M140 S60" in s for s in steps)
-
-    def test_resume_gcode_includes_material_comment(self, engine: PrintRecovery):
-        """G-code should document the material and overlap depth."""
-        failure = FailureReport(
-            failure_id="test",
-            failure_type=FailureType.POWER_LOSS,  # Maps to RESUME_FROM_LAYER
-            detected_at="2026-01-01T00:00:00Z",
-            printer_name="test-printer",
-            failed_layer=50,
-            total_layers=100,
-            failure_z_mm=10.0,
-            material_type="tpu",
-        )
-        plan = engine.plan_recovery(failure)
-        session = engine.start_recovery(plan, failure)
-        steps = engine.get_recovery_steps(session.session_id)
-        material_comment = [s for s in steps if "tpu" in s.lower()]
-        assert len(material_comment) > 0, f"No TPU comment in {steps}"
-        overlap_comment = [s for s in steps if "4-layer" in s]
-        assert len(overlap_comment) > 0, f"No 4-layer overlap comment in {steps}"
-
-    def test_no_recovery_gcode(self, engine: PrintRecovery):
-        # Stringing maps to NO_RECOVERY -- need to plan directly.
+    def test_no_recovery_gcode(self, engine: PrintRecovery, free):
         failure = FailureReport(
             failure_id="test",
             failure_type=FailureType.STRINGING,
@@ -1383,19 +1267,6 @@ class TestEdgeCases:
         # Blob has SAFE_ABORT as primary
         assert plan.strategy == RecoveryStrategy.SAFE_ABORT
 
-    def test_resume_layer_minimum_is_1(self, engine: PrintRecovery):
-        """Resume layer should never go below 1 even with overlap."""
-        failure = FailureReport(
-            failure_id="test",
-            failure_type=FailureType.LAYER_SHIFT,
-            detected_at="2024-01-01T00:00:00+00:00",
-            printer_name="p1",
-            failed_layer=2,
-            total_layers=100,
-        )
-        plan = engine.plan_recovery(failure)
-        assert plan.resume_layer is not None
-        assert plan.resume_layer >= 1
 
     def test_failure_history_limit_parameter(self, engine: PrintRecovery):
         for _ in range(10):
@@ -1676,18 +1547,15 @@ class TestEventEmission:
 # ---------------------------------------------------------------------------
 
 
-class TestStrategyMap:
-    """Every failure type has at least one strategy."""
+class TestEveryFailureHasAFloor:
+    """Every failure the detectors can raise has a floor answer of its own."""
 
-    def test_all_failure_types_have_strategies(self, engine: PrintRecovery):
+    def test_every_failure_type_is_worded(self):
+        from kiln import recovery_floor
+
         for ft in FailureType:
-            strategies = engine._recovery_strategies.get(ft, [])
-            assert len(strategies) > 0, f"No strategies for {ft.value}"
+            assert ft.value in recovery_floor.HAPPENED, ft.value
 
-    def test_stringing_maps_to_no_recovery(self, engine: PrintRecovery):
-        strategies = engine._recovery_strategies[FailureType.STRINGING]
-        assert RecoveryStrategy.NO_RECOVERY in strategies
-
-    def test_thermal_runaway_only_abort(self, engine: PrintRecovery):
-        strategies = engine._recovery_strategies[FailureType.THERMAL_RUNAWAY]
-        assert strategies == [RecoveryStrategy.SAFE_ABORT]
+    def test_a_heater_that_ran_away_is_only_ever_stopped(self, engine: PrintRecovery, free):
+        plan = engine.plan_recovery(_failure(FailureType.THERMAL_RUNAWAY))
+        assert plan.strategy == RecoveryStrategy.SAFE_ABORT

@@ -116,18 +116,19 @@ def _auto_classify_failure(
     primitive.
     """
     try:
-        from kiln.failure_recovery import analyze_failure
+        from kiln.failure_recovery import classify_failure
     except Exception:
         _logger.debug("Failure classifier unavailable", exc_info=True)
         return None
 
     try:
-        analysis = analyze_failure(job_id=job_id, printer_name=printer_name)
+        # The classification alone: no recovery plan is wanted here, so none
+        # is asked for.
+        classification = classify_failure(job_id=job_id, printer_name=printer_name)
     except Exception:
         _logger.debug("Failure classifier raised", exc_info=True)
         return None
 
-    classification = analysis.classification
     raw_type = classification.failure_type.value
     canonical = _to_canonical_failure_mode(raw_type)
     stored = (
@@ -317,7 +318,7 @@ def record_print_outcome(
 
     **Auto-classification** (opt-in): When ``auto_classify=True`` and the
     outcome is ``"failed"`` with no explicit ``failure_mode``, the failure
-    classifier runs (:func:`kiln.failure_recovery.analyze_failure`) and
+    classifier runs (:func:`kiln.failure_recovery.classify_failure`) and
     its result is mapped into the canonical DB vocabulary.  The
     classification is always echoed back in the ``auto_classification``
     key of the response; it is only STORED as ``failure_mode`` when the

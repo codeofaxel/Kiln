@@ -53,6 +53,7 @@ import atexit
 # Import kiln-pro early so compatibility shims are installed before
 # any try/except imports of pro modules (kiln.billing, kiln.licensing, etc.).
 import contextlib
+import functools
 import logging
 import os
 import re
@@ -22760,7 +22761,41 @@ def plan_print_recovery(
         return _error_dict(f"Failed to plan print recovery: {exc}", code="RECOVERY_ERROR")
 
 
+#: What someone without Kiln Pro can do about a power cut, said in the
+#: refusal.  Marlin's own power-loss recovery keeps its place on the
+#: printer's memory card while printing from that card, so it covers a print
+#: run from the card and never one OctoPrint streamed over USB.
+_FIRMWARE_RESUME_WITHOUT_PRO = (
+    "Without it: if the print ran from the printer's own memory card and its power-loss "
+    "recovery is on, the printer's screen offers to continue it; a print OctoPrint sent over "
+    "USB can't be continued by the printer itself, so clear the bed and reprint"
+)
+
+
+def _says_what_to_do_without(alternative: str):
+    """Put *alternative* in a tool's plan refusal: what the person can do
+    right now without the plan, second, after what they reached for.  A
+    refusal that is not about the plan (a sign-in that ended, a plan Kiln
+    could not confirm) is left as it is: that person may own the plan."""
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            out = fn(*args, **kwargs)
+            if isinstance(out, dict) and out.get("success") is False and out.get("code") == "TIER_REQUIRED":
+                out = {**out, "without_it": alternative}
+                said, sep, rest = str(out.get("error") or "").partition(". ")
+                out["error"] = f"{said}. {alternative}. {rest}" if sep else f"{said} {alternative}."
+            return out
+
+        return wrapper
+
+    return decorator
+
+
 @mcp.tool()
+@_says_what_to_do_without(_FIRMWARE_RESUME_WITHOUT_PRO)
+@requires_tier(LicenseTier.PRO)
 def firmware_resume_print(
     printer_name: str,
     job_id: str,
@@ -22781,7 +22816,10 @@ def firmware_resume_print(
     last known checkpoint and prepares it to resume printing. Uses Marlin
     M413 power-loss recovery protocol: homes X/Y (never Z), re-heats bed
     then hotend, sets Z position from checkpoint, primes the nozzle, and
-    restores fan/flow settings.
+    restores fan/flow settings.  A Kiln Pro feature
+    (https://kiln3d.com/pricing).  Without it, the printer's own power-loss
+    recovery can continue a print run from its own memory card; a print
+    OctoPrint streamed over USB cannot be continued by the printer itself.
 
     The printer will be positioned and ready after this call. Use
     start_print with a re-sliced file (starting at the target layer) or

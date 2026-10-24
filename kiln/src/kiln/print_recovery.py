@@ -1,20 +1,20 @@
-"""AI-driven print failure recovery with automatic resume.
+"""Print failure detection and recovery sessions.
 
-Detects print failures from telemetry data, classifies them, generates
-recovery plans, and can execute recovery through printer adapters --
-all without human intervention when the agent has sufficient confidence.
+Detects print failures from telemetry data and classifies them, answers each
+with a recovery plan, and runs the plan's recovery session (confirm, monitor,
+complete) on every tier.
 
 Supported failure types:
     - Layer shift, thermal runaway, filament runout, adhesion failure
     - Blob formation, power loss, nozzle clog, spaghetti, stringing, warping
     - Communication loss
 
-Recovery strategies:
-    - Resume from specific layer (with overlap for bonding)
-    - Restart with compensated parameters
-    - Partial recovery (print remaining portion)
-    - Safe abort (controlled shutdown, preserve part)
-    - Wait and retry (wait for condition to clear)
+The plan is the free floor on every install (:mod:`kiln.recovery_floor`:
+what happened, the safety lines, and the safe thing to do now, which is to
+stop the print only when it is already lost or unsafe).  Saving the print --
+resuming from a layer, restarting with changed settings, the G-code for it --
+is Kiln Pro's recovery plan (https://kiln3d.com/pricing), asked for one
+failure at a time through :mod:`kiln._pro_recovery_bridge`.
 
 Thread safety is guaranteed via :class:`threading.Lock` on all mutable
 state.  The module-level :func:`get_recovery_engine` convenience function
@@ -44,13 +44,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from kiln import recovery_floor
 from kiln.events import Event, EventBus, EventType
-from kiln.hotend_safety import WARNING_GCODE_COMMENT, WARNING_STEP
-from kiln.printers.safe_motion import (
-    build_lift_and_home_xy,
-    build_resume_preamble,
-    build_safe_abort_sequence,
-)
+from kiln.printers.safe_motion import build_safe_abort_sequence
 
 logger = logging.getLogger(__name__)
 
@@ -79,34 +75,6 @@ def _required_monitoring_checks(severity: str | None) -> int:
     if (severity or "").strip().lower() == "critical":
         return _CRITICAL_MONITORING_CHECKS
     return _MIN_MONITORING_CHECKS
-
-# Material-dependent overlap depth for layer resumption.
-# More layers = stronger bonding at the recovery seam.
-# Flexible/weak-bonding materials need more overlap for structural integrity.
-_MATERIAL_OVERLAP_LAYERS: dict[str, int] = {
-    "pla": 2,
-    "petg": 3,
-    "abs": 3,
-    "asa": 3,
-    "tpu": 4,
-    "tpu_95a": 4,
-    "tpu_85a": 5,
-    "nylon": 4,
-    "pa6": 4,
-    "pa12": 4,
-    "pc": 3,
-    "pom": 3,
-    "hips": 2,
-    "pva": 2,
-    "cf_nylon": 4,
-    "gf_nylon": 4,
-    "cf_petg": 3,
-    "cf_abs": 3,
-    "peek": 5,
-    "pei": 5,
-    "pps": 5,
-}
-_DEFAULT_OVERLAP_LAYERS = 3
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -269,7 +237,15 @@ class FailureReport:
 
 @dataclass
 class RecoveryPlan:
-    """A plan for recovering from a print failure."""
+    """A plan for recovering from a print failure.
+
+    ``steps_gcode`` is the plan's own G-code when its planner wrote it (Kiln
+    Pro's plan); a safe abort's is built here with the park route the
+    caller's machine can prove.  ``floor_note`` marks the free floor and says
+    once why it is not Kiln Pro's plan (:func:`kiln._pro_recovery_bridge
+    .floor_note`); neither is set on Kiln Pro's plan, whose answer is
+    unchanged by them.
+    """
 
     plan_id: str
     failure_id: str
@@ -279,15 +255,17 @@ class RecoveryPlan:
     layer_overlap: int = 2
     preparation_steps: list[str] = field(default_factory=list)
     parameter_adjustments: dict[str, Any] = field(default_factory=dict)
-    estimated_success_pct: float = 0.0
+    estimated_success_pct: float | None = 0.0
     estimated_time_minutes: float | None = None
     risks: list[str] = field(default_factory=list)
     requires_confirmation: bool = True
     reason: str = ""
+    steps_gcode: list[str] | None = field(default=None, repr=False, compare=False)
+    floor_note: dict[str, Any] | None = field(default=None, repr=False, compare=False)
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
-        return {
+        said = {
             "plan_id": self.plan_id,
             "failure_id": self.failure_id,
             "strategy": self.strategy.value,
@@ -302,6 +280,9 @@ class RecoveryPlan:
             "requires_confirmation": self.requires_confirmation,
             "reason": self.reason,
         }
+        if self.floor_note:
+            said.update(self.floor_note)
+        return said
 
 
 @dataclass
@@ -414,7 +395,6 @@ class PrintRecovery:
         self._checkpoints: dict[tuple[str, str], CheckpointData] = {}
         self._max_history: int = 500
         self._lock = threading.Lock()
-        self._recovery_strategies = self._build_strategy_map()
 
     # -- public API: checkpoints -------------------------------------------
 
@@ -607,41 +587,34 @@ class PrintRecovery:
         printer_capabilities: dict[str, Any] | None = None,
         safety_profile: dict[str, Any] | None = None,
     ) -> RecoveryPlan:
-        """Generate a recovery plan for a detected failure.
+        """The recovery plan for a detected failure.
 
-        Selects the best strategy based on failure type, confidence
-        assessment, and printer capabilities.
+        Kiln Pro's plan when the caller's plan includes it (asked through
+        :mod:`kiln._pro_recovery_bridge`, one failure at a time); otherwise
+        the free floor (:mod:`kiln.recovery_floor`), whose ``floor_note``
+        says once why.  ``printer_capabilities`` and ``safety_profile`` are
+        accepted for the doors that pass them and change nothing.
 
         :param failure: The failure to recover from.
         :param printer_capabilities: Optional printer capabilities dict.
         :param safety_profile: Optional safety profile dict.
         :returns: :class:`RecoveryPlan`.
         """
-        strategies = self._recovery_strategies.get(failure.failure_type, [])
-        if not strategies:
-            return self._plan_safe_abort(failure)
+        del printer_capabilities, safety_profile
+        from kiln import _pro_recovery_bridge as bridge
 
-        primary_strategy = strategies[0]
+        asked = bridge.ask("session", _wire_facts(failure))
+        if asked.answer is not None:
+            plan = _plan_from_wire(asked.answer, failure)
+            if plan is not None:
+                return plan
+            from kiln.served_answer import Miss
 
-        planners = {
-            RecoveryStrategy.RESUME_FROM_LAYER: self._plan_resume,
-            RecoveryStrategy.RESTART_WITH_COMPENSATION: self._plan_restart,
-            RecoveryStrategy.PARTIAL_RECOVERY: self._plan_partial,
-            RecoveryStrategy.SAFE_ABORT: self._plan_safe_abort,
-            RecoveryStrategy.WAIT_AND_RETRY: self._plan_wait_retry,
-            RecoveryStrategy.NO_RECOVERY: self._plan_no_recovery,
-        }
-
-        planner = planners.get(primary_strategy, self._plan_safe_abort)
-        plan = planner(failure)
-
-        # Override confidence based on actual assessment.
-        plan.confidence = self._compute_confidence(failure, plan.strategy)
-        plan.estimated_success_pct = self._estimate_success_rate(failure, plan.strategy)
-
-        # High confidence plans can auto-execute.
-        plan.requires_confirmation = plan.confidence != RecoveryConfidence.HIGH
-
+            asked = bridge.Asked(included=True, miss=Miss("unanswered", detail="a plan this install could not read"))
+        plan = _floor_plan(failure)
+        plan.floor_note = bridge.floor_note(
+            asked, recovery_floor.SESSION_PRO_ADDS.get(failure.failure_type.value, ""),
+        )
         return plan
 
     def start_recovery(
@@ -917,54 +890,6 @@ class PrintRecovery:
             "success_rate": round(success_rate, 3),
             "failure_type_distribution": failure_counts,
             "strategy_statistics": strategy_stats,
-        }
-
-    # -- private: strategy map ---------------------------------------------
-
-    def _build_strategy_map(self) -> dict[FailureType, list[RecoveryStrategy]]:
-        """Map failure types to viable recovery strategies, ordered by preference."""
-        return {
-            FailureType.LAYER_SHIFT: [
-                RecoveryStrategy.RESUME_FROM_LAYER,
-                RecoveryStrategy.SAFE_ABORT,
-            ],
-            FailureType.THERMAL_RUNAWAY: [
-                RecoveryStrategy.SAFE_ABORT,
-            ],
-            FailureType.FILAMENT_RUNOUT: [
-                RecoveryStrategy.WAIT_AND_RETRY,
-                RecoveryStrategy.RESUME_FROM_LAYER,
-            ],
-            FailureType.ADHESION_FAILURE: [
-                RecoveryStrategy.RESTART_WITH_COMPENSATION,
-                RecoveryStrategy.SAFE_ABORT,
-            ],
-            FailureType.BLOB_DETECTED: [
-                RecoveryStrategy.SAFE_ABORT,
-                RecoveryStrategy.RESUME_FROM_LAYER,
-            ],
-            FailureType.POWER_LOSS: [
-                RecoveryStrategy.RESUME_FROM_LAYER,
-                RecoveryStrategy.RESTART_WITH_COMPENSATION,
-            ],
-            FailureType.NOZZLE_CLOG: [
-                RecoveryStrategy.WAIT_AND_RETRY,
-                RecoveryStrategy.SAFE_ABORT,
-            ],
-            FailureType.SPAGHETTI: [
-                RecoveryStrategy.SAFE_ABORT,
-            ],
-            FailureType.STRINGING: [
-                RecoveryStrategy.NO_RECOVERY,
-            ],
-            FailureType.WARPING: [
-                RecoveryStrategy.RESTART_WITH_COMPENSATION,
-                RecoveryStrategy.SAFE_ABORT,
-            ],
-            FailureType.COMMUNICATION_LOSS: [
-                RecoveryStrategy.WAIT_AND_RETRY,
-                RecoveryStrategy.SAFE_ABORT,
-            ],
         }
 
     # -- private: failure detectors ----------------------------------------
@@ -1425,358 +1350,7 @@ class PrintRecovery:
             )
             return None
 
-    # -- private: recovery planners ----------------------------------------
-
-    def _plan_resume(self, failure: FailureReport) -> RecoveryPlan:
-        """Plan resume from a specific layer.
-
-        Overlap depth is material-dependent: flexible and high-performance
-        materials (TPU, nylon, PEEK) need more overlap layers for
-        structural integrity at the recovery seam, while rigid standard
-        materials (PLA, HIPS) bond sufficiently with fewer layers.
-        Layer shift failures always add one extra overlap layer because
-        positional accuracy is already compromised.
-
-        When ``failure.checkpoint`` is populated (from save_checkpoint
-        or telemetry-derived in detect_failure), the resume Z is read
-        directly from the checkpoint instead of being calculated from
-        ``failure_z_mm / failed_layer * resume_layer`` — a meaningfully
-        more accurate value when the print uses variable layer heights
-        or adaptive layers.
-        """
-        # Determine overlap from material type.
-        material = (failure.material_type or "").lower().strip().replace(" ", "_")
-        base_overlap = _MATERIAL_OVERLAP_LAYERS.get(material, _DEFAULT_OVERLAP_LAYERS)
-
-        # Layer shift gets +1 extra overlap for positional safety.
-        layer_overlap = base_overlap + 1 if failure.failure_type == FailureType.LAYER_SHIFT else base_overlap
-
-        resume_layer = (failure.failed_layer or 1) - layer_overlap
-        resume_layer = max(1, resume_layer)
-
-        # Resume Z resolution.  Checkpoint wins when available — a real
-        # observed Z from telemetry / save_checkpoint beats calculated
-        # estimates from layer * height, especially with variable-layer
-        # slicers.  Falls back to z_per_layer * resume_layer when no
-        # checkpoint exists.
-        z_per_layer = 0.2  # default assumption
-        if failure.failure_z_mm and failure.failed_layer and failure.failed_layer > 0:
-            z_per_layer = failure.failure_z_mm / failure.failed_layer
-
-        if failure.checkpoint is not None and failure.checkpoint.z_height_mm > 0:
-            # Step back layer_overlap layers from the checkpoint's
-            # observed Z, using the per-layer height as a fine-grained
-            # delta.  This handles variable-layer-height prints where
-            # resume_layer alone doesn't tell us the actual Z.
-            checkpoint_z = failure.checkpoint.z_height_mm
-            resume_z_mm = round(
-                max(0.0, checkpoint_z - layer_overlap * z_per_layer), 2,
-            )
-            resume_z_source = "checkpoint"
-        else:
-            resume_z_mm = round(resume_layer * z_per_layer, 2)
-            resume_z_source = "calculated"
-
-        estimated_time = None
-        if failure.total_layers and failure.failed_layer:
-            remaining = failure.total_layers - resume_layer
-            # Rough estimate: 2 minutes per layer.
-            estimated_time = remaining * 2.0
-
-        return RecoveryPlan(
-            plan_id=str(uuid.uuid4()),
-            failure_id=failure.failure_id,
-            strategy=RecoveryStrategy.RESUME_FROM_LAYER,
-            confidence=RecoveryConfidence.MEDIUM,
-            resume_layer=resume_layer,
-            layer_overlap=layer_overlap,
-            preparation_steps=self._generate_preparation_steps(
-                RecoveryStrategy.RESUME_FROM_LAYER, failure
-            ),
-            parameter_adjustments={
-                "resume_z_mm": resume_z_mm,
-                "resume_z_source": resume_z_source,
-                "material_type": material or "unknown",
-                "overlap_layers": layer_overlap,
-            },
-            estimated_time_minutes=estimated_time,
-            risks=[
-                "Layer bonding may be weak at the resume point",
-                "Z-offset calibration drift during recovery",
-                f"Material '{material or 'unknown'}' uses {layer_overlap}-layer overlap for bonding",
-            ],
-            reason=f"Resume printing from layer {resume_layer} with {layer_overlap}-layer "
-            f"overlap for bonding (material: {material or 'unknown'}), "
-            f"resume_z={resume_z_mm}mm ({resume_z_source})",
-        )
-
-    def _plan_restart(self, failure: FailureReport) -> RecoveryPlan:
-        """Plan full restart with compensated parameters."""
-        adjustments: dict[str, Any] = {}
-        risks: list[str] = []
-
-        if failure.failure_type == FailureType.ADHESION_FAILURE:
-            adjustments["bed_temp_offset"] = 5  # +5C
-            adjustments["first_layer_speed_pct"] = 80  # Slow first layer
-            adjustments["brim_width_mm"] = 5.0
-            risks.append("Higher bed temp may cause elephant's foot on first layer")
-        elif failure.failure_type == FailureType.WARPING:
-            adjustments["bed_temp_offset"] = 5
-            adjustments["brim_width_mm"] = 8.0
-            adjustments["enclosure_recommended"] = True
-            risks.append("Brim may be difficult to remove on finished part")
-
-        estimated_time = None
-        if failure.total_layers:
-            estimated_time = failure.total_layers * 2.0
-
-        return RecoveryPlan(
-            plan_id=str(uuid.uuid4()),
-            failure_id=failure.failure_id,
-            strategy=RecoveryStrategy.RESTART_WITH_COMPENSATION,
-            confidence=RecoveryConfidence.MEDIUM,
-            preparation_steps=self._generate_preparation_steps(
-                RecoveryStrategy.RESTART_WITH_COMPENSATION, failure
-            ),
-            parameter_adjustments=adjustments,
-            estimated_time_minutes=estimated_time,
-            risks=risks or ["Full reprint uses additional material and time"],
-            reason="Full restart with adjusted parameters to prevent recurrence",
-        )
-
-    def _plan_partial(self, failure: FailureReport) -> RecoveryPlan:
-        """Plan partial recovery (print remaining portion only)."""
-        return RecoveryPlan(
-            plan_id=str(uuid.uuid4()),
-            failure_id=failure.failure_id,
-            strategy=RecoveryStrategy.PARTIAL_RECOVERY,
-            confidence=RecoveryConfidence.LOW,
-            resume_layer=failure.failed_layer,
-            preparation_steps=self._generate_preparation_steps(
-                RecoveryStrategy.PARTIAL_RECOVERY, failure
-            ),
-            risks=[
-                "Partial prints may not be structurally sound",
-                "Layer adhesion at the split point is unreliable",
-            ],
-            reason="Print only the remaining portion of the model",
-        )
-
-    def _plan_safe_abort(self, failure: FailureReport) -> RecoveryPlan:
-        """Plan controlled shutdown to preserve the part."""
-        return RecoveryPlan(
-            plan_id=str(uuid.uuid4()),
-            failure_id=failure.failure_id,
-            strategy=RecoveryStrategy.SAFE_ABORT,
-            confidence=RecoveryConfidence.HIGH,
-            preparation_steps=self._generate_preparation_steps(
-                RecoveryStrategy.SAFE_ABORT, failure
-            ),
-            risks=["Part is incomplete and may not be usable"],
-            requires_confirmation=False,
-            reason=f"Safe abort due to {failure.failure_type.value} -- "
-            f"preserving partial print and preventing further damage",
-        )
-
-    def _plan_wait_retry(self, failure: FailureReport) -> RecoveryPlan:
-        """Plan wait for condition to clear, then retry."""
-        confidence = RecoveryConfidence.HIGH
-        wait_reason = ""
-
-        if failure.failure_type == FailureType.FILAMENT_RUNOUT:
-            wait_reason = "Load new filament, then resume print"
-            confidence = RecoveryConfidence.HIGH
-        elif failure.failure_type == FailureType.NOZZLE_CLOG:
-            wait_reason = "Perform cold pull procedure to clear clog, then resume"
-            confidence = RecoveryConfidence.MEDIUM
-        elif failure.failure_type == FailureType.COMMUNICATION_LOSS:
-            wait_reason = "Wait for connection to re-establish, then resume"
-            confidence = RecoveryConfidence.HIGH
-        else:
-            wait_reason = "Wait for condition to clear, then retry"
-
-        return RecoveryPlan(
-            plan_id=str(uuid.uuid4()),
-            failure_id=failure.failure_id,
-            strategy=RecoveryStrategy.WAIT_AND_RETRY,
-            confidence=confidence,
-            resume_layer=failure.failed_layer,
-            preparation_steps=self._generate_preparation_steps(
-                RecoveryStrategy.WAIT_AND_RETRY, failure
-            ),
-            risks=["Print quality may be affected at the interruption point"],
-            reason=wait_reason,
-        )
-
-    def _plan_no_recovery(self, failure: FailureReport) -> RecoveryPlan:
-        """Plan for failures that don't need recovery (minor issues)."""
-        return RecoveryPlan(
-            plan_id=str(uuid.uuid4()),
-            failure_id=failure.failure_id,
-            strategy=RecoveryStrategy.NO_RECOVERY,
-            confidence=RecoveryConfidence.HIGH,
-            preparation_steps=[],
-            risks=[],
-            requires_confirmation=False,
-            reason=f"{failure.failure_type.value} is a minor issue; "
-            f"print can continue, address in post-processing",
-        )
-
-    # -- private: confidence and estimation --------------------------------
-
-    def _compute_confidence(
-        self,
-        failure: FailureReport,
-        strategy: RecoveryStrategy,
-    ) -> RecoveryConfidence:
-        """Compute confidence level based on failure type and strategy."""
-        # High confidence scenarios.
-        high_confidence = {
-            (FailureType.THERMAL_RUNAWAY, RecoveryStrategy.SAFE_ABORT),
-            (FailureType.SPAGHETTI, RecoveryStrategy.SAFE_ABORT),
-            (FailureType.FILAMENT_RUNOUT, RecoveryStrategy.WAIT_AND_RETRY),
-            (FailureType.COMMUNICATION_LOSS, RecoveryStrategy.WAIT_AND_RETRY),
-            (FailureType.STRINGING, RecoveryStrategy.NO_RECOVERY),
-        }
-
-        if (failure.failure_type, strategy) in high_confidence:
-            return RecoveryConfidence.HIGH
-
-        # Medium confidence scenarios.
-        medium_confidence = {
-            (FailureType.LAYER_SHIFT, RecoveryStrategy.RESUME_FROM_LAYER),
-            (FailureType.ADHESION_FAILURE, RecoveryStrategy.RESTART_WITH_COMPENSATION),
-            (FailureType.POWER_LOSS, RecoveryStrategy.RESUME_FROM_LAYER),
-            (FailureType.NOZZLE_CLOG, RecoveryStrategy.WAIT_AND_RETRY),
-            (FailureType.WARPING, RecoveryStrategy.RESTART_WITH_COMPENSATION),
-            (FailureType.BLOB_DETECTED, RecoveryStrategy.SAFE_ABORT),
-        }
-
-        if (failure.failure_type, strategy) in medium_confidence:
-            return RecoveryConfidence.MEDIUM
-
-        # Everything else is low confidence.
-        return RecoveryConfidence.LOW
-
-    def _estimate_success_rate(
-        self,
-        failure: FailureReport,
-        strategy: RecoveryStrategy,
-    ) -> float:
-        """Estimate success percentage for a given failure/strategy pair."""
-        rates: dict[tuple[FailureType, RecoveryStrategy], float] = {
-            (FailureType.THERMAL_RUNAWAY, RecoveryStrategy.SAFE_ABORT): 95.0,
-            (FailureType.SPAGHETTI, RecoveryStrategy.SAFE_ABORT): 90.0,
-            (FailureType.FILAMENT_RUNOUT, RecoveryStrategy.WAIT_AND_RETRY): 85.0,
-            (FailureType.COMMUNICATION_LOSS, RecoveryStrategy.WAIT_AND_RETRY): 80.0,
-            (FailureType.LAYER_SHIFT, RecoveryStrategy.RESUME_FROM_LAYER): 60.0,
-            (FailureType.ADHESION_FAILURE, RecoveryStrategy.RESTART_WITH_COMPENSATION): 70.0,
-            (FailureType.POWER_LOSS, RecoveryStrategy.RESUME_FROM_LAYER): 65.0,
-            (FailureType.NOZZLE_CLOG, RecoveryStrategy.WAIT_AND_RETRY): 55.0,
-            (FailureType.WARPING, RecoveryStrategy.RESTART_WITH_COMPENSATION): 65.0,
-            (FailureType.BLOB_DETECTED, RecoveryStrategy.SAFE_ABORT): 90.0,
-            (FailureType.STRINGING, RecoveryStrategy.NO_RECOVERY): 100.0,
-        }
-
-        return rates.get((failure.failure_type, strategy), 40.0)
-
-    # -- private: step generation ------------------------------------------
-
-    def _generate_preparation_steps(
-        self,
-        strategy: RecoveryStrategy,
-        failure: FailureReport,
-    ) -> list[str]:
-        """Generate human-readable preparation steps for a recovery strategy."""
-        steps: list[str] = []
-
-        if strategy == RecoveryStrategy.RESUME_FROM_LAYER:
-            steps = [
-                "Pause current print (if still running)",
-                "Inspect print surface for damage or debris",
-                "Remove any loose material or blobs from the part",
-                "Lift nozzle clear of the part, then re-home X/Y only "
-                "(never home Z with a part on the bed)",
-                "Heat hotend and bed to target temperatures",
-                "Prime nozzle with a small extrusion",
-                "Resume print from calculated resume layer",
-            ]
-            if failure.failure_type == FailureType.LAYER_SHIFT:
-                steps.insert(2, "Check belt tension on X and Y axes")
-                steps.insert(3, "Verify stepper motor connections")
-
-        elif strategy == RecoveryStrategy.RESTART_WITH_COMPENSATION:
-            steps = [
-                "Cancel current print",
-                "Wait for printer to cool down",
-                "Clean build plate thoroughly",
-                "Apply fresh adhesion aid if needed",
-                "Re-slice with adjusted parameters",
-                "Start new print with compensated settings",
-            ]
-            if failure.failure_type == FailureType.ADHESION_FAILURE:
-                steps.insert(3, "Increase bed temperature by 5C")
-            elif failure.failure_type == FailureType.WARPING:
-                steps.insert(3, "Consider using an enclosure")
-
-        elif strategy == RecoveryStrategy.PARTIAL_RECOVERY:
-            steps = [
-                "Pause current print",
-                "Assess remaining portion that needs printing",
-                "Split G-code at the failure point",
-                "Resume with the partial G-code file",
-            ]
-
-        elif strategy == RecoveryStrategy.SAFE_ABORT:
-            steps = [
-                "Cancel print job",
-                "Turn off hotend heater (M104 S0)",
-                "Turn off bed heater (M140 S0)",
-                "Move nozzle to safe position",
-                "Disable steppers after cooldown (M84)",
-            ]
-            if failure.failure_type == FailureType.THERMAL_RUNAWAY:
-                steps.insert(0, "IMMEDIATE: Execute emergency stop if temperature is rising")
-
-        elif strategy == RecoveryStrategy.WAIT_AND_RETRY:
-            if failure.failure_type == FailureType.FILAMENT_RUNOUT:
-                steps = [
-                    "Pause print (print pauses automatically on sensor-equipped printers)",
-                    "Load new filament spool",
-                    "Purge filament until clean extrusion",
-                    "Resume print",
-                ]
-            elif failure.failure_type == FailureType.NOZZLE_CLOG:
-                steps = [
-                    WARNING_STEP,
-                    "Pause print",
-                    "Heat hotend to printing temperature",
-                    "Perform cold pull procedure (heat, pull, repeat 2-3 times)",
-                    "Verify clean extrusion with manual extrude test",
-                    "Resume print",
-                ]
-            elif failure.failure_type == FailureType.COMMUNICATION_LOSS:
-                steps = [
-                    "Check physical cable connections",
-                    "Verify network/Wi-Fi connectivity",
-                    "Wait for connection to re-establish (auto-reconnect)",
-                    "Verify printer state after reconnection",
-                    "Resume print if printer was paused",
-                ]
-            else:
-                steps = [
-                    "Wait for condition to resolve",
-                    "Verify printer state",
-                    "Resume print",
-                ]
-
-        elif strategy == RecoveryStrategy.NO_RECOVERY:
-            steps = [
-                "Continue printing -- issue is cosmetic",
-                "Address in post-processing after print completes",
-            ]
-
-        return steps
+    # -- private: recovery G-code ------------------------------------------
 
     def _generate_recovery_gcode(
         self,
@@ -1785,98 +1359,25 @@ class PrintRecovery:
         *,
         park_route: Any = None,
     ) -> list[str]:
-        """Generate G-code commands for the recovery.
+        """The G-code commands for a recovery.
 
-        Temperatures are resolved from the failure's telemetry snapshot
-        (the target temps at the time of failure).  If telemetry is
-        unavailable, conservative defaults are used (200C hotend, 60C bed).
-
-        Returns a list of G-code command strings ready to send to the
-        printer.
+        A safe abort is built here, with the park route only the caller's
+        machine can prove.  A plan that carries its own G-code (Kiln Pro's)
+        runs that.  Anything else sends nothing the printer acts on: the
+        floor's wait and leave plans are comments, and a plan that names a
+        strategy with no G-code of its own never has motion invented for it.
         """
-        # Resolve actual temperatures from telemetry captured at failure time.
-        snap = failure.telemetry_snapshot or {}
-        hotend_temp = int(snap.get("hotend_temp") or 200)
-        bed_temp = int(snap.get("bed_temp") or 60)
-
-        commands: list[str] = []
-
         if plan.strategy == RecoveryStrategy.SAFE_ABORT:
-            commands = build_safe_abort_sequence(park_route=park_route)
-
-        elif plan.strategy == RecoveryStrategy.RESUME_FROM_LAYER:
-            resume_z = plan.parameter_adjustments.get("resume_z_mm", 0)
-            overlap = plan.parameter_adjustments.get("overlap_layers", plan.layer_overlap)
-            material = plan.parameter_adjustments.get("material_type", "unknown")
-
-            commands = [
-                *build_resume_preamble(
-                    hotend_temp=hotend_temp,
-                    bed_temp=bed_temp,
-                    resume_z_mm=float(resume_z),
-                    header_comment=(
-                        f"Recovery: resume from layer {plan.resume_layer} "
-                        f"with {overlap}-layer overlap (material: {material})"
-                    ),
-                ),
-                f"; Begin overlap bonding zone: layers {plan.resume_layer} to "
-                f"{plan.resume_layer + overlap}",
-                f"; Resume from layer {plan.resume_layer}, Z={resume_z:.2f}mm",
-            ]
-
-        elif plan.strategy == RecoveryStrategy.RESTART_WITH_COMPENSATION:
-            commands = [
-                "M104 S0",  # Cool down first
-                "M140 S0",
-                # Home X/Y only — the failed print is still on the plate
-                # when these commands run.  Z homes in the new print's own
-                # start gcode, after the operator has cleared the bed.
-                *build_lift_and_home_xy(),
-                "; Apply compensated parameters before starting new print",
-            ]
-            if plan.parameter_adjustments.get("bed_temp_offset"):
-                offset = plan.parameter_adjustments["bed_temp_offset"]
-                commands.append(f"; Bed temp offset: +{offset}C")
-            if plan.parameter_adjustments.get("first_layer_speed_pct"):
-                pct = plan.parameter_adjustments["first_layer_speed_pct"]
-                commands.append(f"; First layer speed: {pct}%")
-
-        elif plan.strategy == RecoveryStrategy.WAIT_AND_RETRY:
-            if failure.failure_type == FailureType.FILAMENT_RUNOUT:
-                commands = [
-                    "; Waiting for filament load",
-                    "G1 E5 F300",  # Prime after load
-                    "; Resume print",
-                ]
-            elif failure.failure_type == FailureType.NOZZLE_CLOG:
-                commands = [
-                    # This script heats the nozzle and then a PERSON pulls,
-                    # so the warning has to survive into the file itself.
-                    WARNING_GCODE_COMMENT,
-                    "; Perform cold pull procedure",
-                    "M104 S200",  # Heat for cold pull
-                    "M109 S200",
-                    "G1 E10 F100",  # Slow extrude to test
-                    "; Resume print if extrusion is clean",
-                ]
-            else:
-                commands = [
-                    "; Wait for condition to clear",
-                    "; Resume print",
-                ]
-
-        elif plan.strategy == RecoveryStrategy.NO_RECOVERY:
-            commands = ["; No recovery action needed -- print continues"]
-
-        elif plan.strategy == RecoveryStrategy.PARTIAL_RECOVERY:
-            commands = [
-                # The paused part is on the plate: lift, then home X/Y only.
-                *build_lift_and_home_xy(),
-                f"; Split G-code at layer {plan.resume_layer}",
-                "; Load partial G-code file",
-            ]
-
-        return commands
+            return build_safe_abort_sequence(park_route=park_route)
+        if plan.steps_gcode is not None:
+            return list(plan.steps_gcode)
+        if plan.strategy == RecoveryStrategy.NO_RECOVERY:
+            return ["; No recovery action needed -- print continues"]
+        if failure.failure_type == FailureType.FILAMENT_RUNOUT:
+            return ["; Waiting for the printer's own filament change", "; Nothing is sent"]
+        if failure.failure_type == FailureType.COMMUNICATION_LOSS:
+            return ["; Waiting for the printer to answer again", "; Nothing is sent"]
+        return ["; This plan carries no G-code: nothing is sent"]
 
     # -- private: event emission -------------------------------------------
 
@@ -1911,6 +1412,114 @@ class PrintRecovery:
                 failure.printer_name,
                 exc_info=True,
             )
+
+
+# ---------------------------------------------------------------------------
+# The free floor, and Kiln Pro's plan as it arrives
+# ---------------------------------------------------------------------------
+
+#: The floor's safe step for each of the three actions (:mod:`kiln.recovery_floor`).
+_FLOOR_STRATEGY = {
+    recovery_floor.STOP: RecoveryStrategy.SAFE_ABORT,
+    recovery_floor.WAIT: RecoveryStrategy.WAIT_AND_RETRY,
+    recovery_floor.LEAVE: RecoveryStrategy.NO_RECOVERY,
+}
+#: Floor stops that run without asking: waiting on a confirmation while a
+#: heater runs away, or while a failed print wraps the hot end, can cost the
+#: machine.
+_STOPS_WITHOUT_ASKING = frozenset({FailureType.THERMAL_RUNAWAY, FailureType.SPAGHETTI})
+
+
+def _floor_plan(failure: FailureReport) -> RecoveryPlan:
+    """The free floor for *failure*: what happened, the safety lines, and the
+    safe thing to do now.  Not scored: the floor makes no estimate."""
+    action, happened = recovery_floor.HAPPENED.get(failure.failure_type.value, recovery_floor.HAPPENED["unknown"])
+    strategy = _FLOOR_STRATEGY[action]
+    without_asking = failure.failure_type in _STOPS_WITHOUT_ASKING or strategy == RecoveryStrategy.NO_RECOVERY
+    return RecoveryPlan(
+        plan_id=str(uuid.uuid4()),
+        failure_id=failure.failure_id,
+        strategy=strategy,
+        confidence=(
+            RecoveryConfidence.HIGH if failure.failure_type in _STOPS_WITHOUT_ASKING else RecoveryConfidence.UNKNOWN
+        ),
+        preparation_steps=recovery_floor.steps(failure.failure_type.value),
+        estimated_success_pct=None,
+        risks=["Part is incomplete and may not be usable"] if strategy == RecoveryStrategy.SAFE_ABORT else [],
+        requires_confirmation=not without_asking,
+        reason=happened,
+    )
+
+
+def _whole(value: Any) -> int | None:
+    """A layer count as a whole number, or ``None`` when it is not one."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+        return None
+    return int(value)
+
+
+def _reading(value: Any) -> float | None:
+    """A height or temperature as a number, or ``None`` when it is not one."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+        return None
+    return float(value)
+
+
+def _wire_facts(failure: FailureReport) -> dict[str, Any]:
+    """The failure's own facts, as Kiln Pro's planner reads them: never the
+    printer's name, the job's name, a file path or the telemetry beyond the
+    two temperatures a resume heats to."""
+    snap = failure.telemetry_snapshot or {}
+    checkpoint = failure.checkpoint
+    return {
+        "failure_id": failure.failure_id,
+        "failure_type": failure.failure_type.value,
+        "failed_layer": _whole(failure.failed_layer),
+        "total_layers": _whole(failure.total_layers),
+        "failure_z_mm": _reading(failure.failure_z_mm),
+        "material_type": failure.material_type if isinstance(failure.material_type, str) else None,
+        "checkpoint_z_mm": _reading(checkpoint.z_height_mm) if checkpoint is not None else None,
+        "hotend_temp": _reading(snap.get("hotend_temp")),
+        "bed_temp": _reading(snap.get("bed_temp")),
+    }
+
+
+def _plan_from_wire(answer: dict[str, Any], failure: FailureReport) -> RecoveryPlan | None:
+    """Kiln Pro's plan as this install's :class:`RecoveryPlan`, or ``None``
+    when the answer is not one."""
+    said = answer.get("plan")
+    gcode = answer.get("gcode")
+    if not isinstance(said, dict):
+        return None
+    if gcode is not None and not (isinstance(gcode, list) and all(isinstance(line, str) for line in gcode)):
+        return None
+
+    def _strings(value: Any) -> list[str]:
+        return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
+
+    try:
+        plan = RecoveryPlan(
+            plan_id=str(uuid.uuid4()),
+            failure_id=failure.failure_id,
+            strategy=RecoveryStrategy(said.get("strategy")),
+            confidence=RecoveryConfidence(said.get("confidence")),
+            resume_layer=said.get("resume_layer"),
+            layer_overlap=int(said.get("layer_overlap", 2)),
+            preparation_steps=_strings(said.get("preparation_steps")),
+            parameter_adjustments=dict(said.get("parameter_adjustments") or {}),
+            estimated_success_pct=said.get("estimated_success_pct"),
+            estimated_time_minutes=said.get("estimated_time_minutes"),
+            risks=_strings(said.get("risks")),
+            requires_confirmation=bool(said.get("requires_confirmation", True)),
+            reason=str(said.get("reason") or ""),
+        )
+    except (TypeError, ValueError):
+        return None
+    if plan.strategy != RecoveryStrategy.SAFE_ABORT:
+        # A plan that is not a safe abort runs only the G-code its planner
+        # wrote; one that arrived without it sends nothing.
+        plan.steps_gcode = list(gcode) if gcode is not None else []
+    return plan
 
 
 # ---------------------------------------------------------------------------
