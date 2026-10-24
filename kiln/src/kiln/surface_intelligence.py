@@ -23,6 +23,7 @@ from kiln._vec import length as _vec_length
 from kiln._vec import normalize as _vec_normalize
 from kiln._vec import scale as _vec_scale
 from kiln._vec import sub as _vec_sub
+from kiln.mesh_errors import UnreadableMeshError
 
 # ---------------------------------------------------------------------------
 # STL parsing — delegates to generation.validation (single source of truth)
@@ -47,7 +48,7 @@ def _parse_stl(path: str) -> list[dict[str, Any]]:
     errors: list[str] = []
     raw_tris, _ = _parse_stl_raw(p, errors)
     if errors:
-        raise ValueError(f"STL parse error: {'; '.join(errors)}")
+        raise UnreadableMeshError(f"STL parse error: {'; '.join(errors)}")
 
     # Convert (v1, v2, v3) tuples to dicts with computed normals
     result: list[dict[str, Any]] = []
@@ -85,7 +86,7 @@ def _parse_mesh(path: str) -> list[dict[str, Any]]:
         mesh = load_mesh(path, force="mesh", process=False)
         triangles = mesh.triangles
     except Exception as exc:
-        raise ValueError(f"Mesh parse error ({suffix}): {exc}") from exc
+        raise UnreadableMeshError(f"Mesh parse error ({suffix}): {exc}") from exc
 
     result: list[dict[str, Any]] = []
     for tri in triangles:

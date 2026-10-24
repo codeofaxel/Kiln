@@ -74,9 +74,12 @@ _TETRA_TRIS = [
 _TETRA_COLORS = [_COLORS[0], _COLORS[0], _COLORS[1], _COLORS[2]]
 
 
-def _painted_3mf(tmp_path: Path) -> str:
+def _painted_3mf(tmp_path: Path, at: tuple[float, float] = (0.0, 0.0)) -> str:
+    """The painted tetrahedron as a 3MF, in the bed's front-left corner unless
+    *at* moves it."""
+    dx, dy = at
     result = compose_painted_3mf(
-        _TETRA_TRIS,
+        [tuple((x + dx, y + dy, z) for x, y, z in tri) for tri in _TETRA_TRIS],
         _TETRA_COLORS,
         output_path=str(tmp_path / "painted.3mf"),
         name="tetra",
@@ -342,6 +345,17 @@ class TestWipeTowerPosition:
             or y >= bbox["y_max"] or y + 30 <= bbox["y_min"]
         )
 
+    def test_the_tower_clears_the_models_brim(self, tmp_path):
+        """The brim is what the model's first layer prints past the part:
+        the tower keeps its margin from the brim's edge, not the part's."""
+        threemf = _painted_3mf(tmp_path, at=(100.0, 100.0))
+        x, y = _wipe_tower_position({**_SETTINGS, "brim_width": "8"}, threemf, 30.0)
+        from kiln.printers.bed_fit import compute_3mf_geometry_bbox
+
+        bbox = compute_3mf_geometry_bbox(threemf)
+        gap = max(x - bbox["x_max"], bbox["x_min"] - (x + 30), y - bbox["y_max"], bbox["y_min"] - (y + 30))
+        assert gap >= 5.0 + 8.0 - 1e-6, (gap, (x, y), bbox)
+
     def test_no_bed_shape_means_no_position(self, tmp_path):
         assert _wipe_tower_position({}, _painted_3mf(tmp_path), 30.0) is None
 
@@ -601,7 +615,16 @@ class TestRealOrcaMulticolor:
     on a multicolor slice from a profile that thin (measured — the same
     file slices clean from the bundled bambu_a1 profile), and this class
     exists to test Kiln's real path, not to catalogue Orca's crashes.
+
+    The parts sit mid-bed.  In the corner, where the fixtures put them for
+    the unit tests, the skirt lands off the bed and OrcaSlicer refuses the
+    plate (exit 154); these tests passed on that refusal for as long as Kiln
+    misread it as a crash on exit and kept the refused file.  The refusal
+    itself is pinned in ``test_slicer_refusals.py``.
     """
+
+    #: The bed centre of the A1 the bundled profile is for, less half a part.
+    _MID_BED = (113.0, 113.0)
 
     def test_painted_3mf_keeps_all_colors(self, tmp_path):
         """The headline: three painted colors in, three tools out, with
@@ -610,13 +633,14 @@ class TestRealOrcaMulticolor:
         from kiln.slicer_profiles import resolve_slicer_profile
 
         result = slice_file(
-            _painted_3mf(tmp_path),
+            _painted_3mf(tmp_path, at=self._MID_BED),
             output_dir=str(tmp_path / "out"),
             profile=resolve_slicer_profile("bambu_a1"),
             slicer_path=_ORCA,
             timeout=600,
         )
         assert result.success, result.message
+        assert "crashed" not in result.message
         tools, changes = _count_tools(result.output_path)
         assert tools == ["0", "1", "2"]
         assert changes > 0
@@ -627,8 +651,9 @@ class TestRealOrcaMulticolor:
         from kiln.multicolor_3mf import ColorPart, compose_multicolor_3mf
 
         cube = _write_cube_stl(tmp_path / "cube.stl")
+        x, y = self._MID_BED
         composed = compose_multicolor_3mf(
-            [ColorPart(cube, extruder=1, name="cube")],
+            [ColorPart(cube, extruder=1, name="cube", x=x, y=y)],
             output_path=str(tmp_path / "plain.3mf"),
         )
         assert composed["success"], composed
@@ -642,5 +667,6 @@ class TestRealOrcaMulticolor:
             timeout=600,
         )
         assert result.success, result.message
+        assert "crashed" not in result.message
         tools, _changes = _count_tools(result.output_path)
         assert len(tools) <= 1

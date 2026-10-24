@@ -285,11 +285,25 @@ class _DesignToolsPlugin:
                 )
                 result = audit.to_dict()
                 result["success"] = True
-                result["message"] = (
-                    f"Original design readiness: {audit.readiness_score}/100 "
-                    f"({audit.readiness_grade}). "
-                    f"{'Ready for print.' if audit.ready_for_print else 'Not ready for print.'}"
-                )
+                # The printability verdict leads, and a design that is not
+                # ready says why.  The readiness score stays in the result
+                # for comparing attempts.
+                gates = getattr(audit, "gates", None) or []
+                blockers = getattr(audit, "blockers", None) or []
+                said = next((g.message for g in gates if g.name == "printability"), "")
+                other = next((b for b in blockers if b != said), None)
+                if audit.ready_for_print:
+                    outcome = "The design passes the audit."
+                elif other:
+                    outcome = f"Not ready for print: {other}"
+                elif blockers:
+                    outcome = "Not ready for print."
+                else:
+                    outcome = (
+                        "Not ready for print: it falls short of the bar this audit "
+                        "holds a design to, on the warnings in the report."
+                    )
+                result["message"] = f"{said}  {outcome}".strip()
                 return result
             except ValueError as exc:
                 return {"success": False, "error": str(exc)}
@@ -2073,7 +2087,6 @@ class _DesignToolsPlugin:
 
             Returns a risk assessment with:
             - risk_level: "low", "moderate", "high", or "critical"
-            - score_deduction: impact on overall printability score
             - large_flat_surfaces: detected flat areas prone to warping
             - height_to_base_ratio: geometry aspect ratio risk factor
             - material_warping_tendency: material's inherent warp behavior

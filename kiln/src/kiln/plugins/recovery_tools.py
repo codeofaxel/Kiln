@@ -524,6 +524,10 @@ class _RecoveryToolsPlugin:
 
                 # Structural analysis — identify geometry that will
                 # snap, crack, or topple and feed it back as constraints.
+                # A file whose size puts its units in question has none
+                # judged, and the reply opens with that question instead
+                # of calling the model clean.
+                units_question = ""
                 try:
                     from kiln.design_reasoning import analyze_structural_risks as _analyze_risks
                     from kiln.design_reasoning import assess_load_bearing as _assess_load
@@ -531,6 +535,7 @@ class _RecoveryToolsPlugin:
 
                     risks = _analyze_risks(file_path)
                     load = _assess_load(file_path)
+                    units_question = load.units_question
                     structural_fb = structural_risks_to_feedback(
                         risks,
                         original_prompt=original_prompt,
@@ -540,14 +545,14 @@ class _RecoveryToolsPlugin:
                 except (ValueError, ImportError):
                     pass  # File not STL or design_reasoning unavailable.
 
+                found = f"Found {len(feedback)} feedback items." if feedback else "No issues detected."
                 return {
                     "success": True,
                     "feedback": [f.to_dict() for f in feedback],
                     "feedback_count": len(feedback),
                     "message": (
-                        f"Found {len(feedback)} feedback items."
-                        if feedback
-                        else "No issues detected."
+                        f"{units_question}  {found}" if units_question and feedback
+                        else units_question or found
                     ),
                 }
             except Exception as exc:
@@ -625,7 +630,10 @@ class _RecoveryToolsPlugin:
                     printability_report=printability_report if printability_report else None,
                 )
 
-                # Structural feedback from mesh geometry.
+                # Structural feedback from mesh geometry: none for a file
+                # whose size puts its units in question, which the reply
+                # says first.
+                units_question = ""
                 if file_path:
                     try:
                         from kiln.design_reasoning import analyze_structural_risks as _sr_risks
@@ -634,6 +642,7 @@ class _RecoveryToolsPlugin:
 
                         risks = _sr_risks(file_path)
                         load = _sr_load(file_path)
+                        units_question = load.units_question
                         feedback.extend(
                             structural_risks_to_feedback(
                                 risks,
@@ -677,7 +686,8 @@ class _RecoveryToolsPlugin:
                     "success": True,
                     "improved_prompt": improved.to_dict(),
                     "message": (
-                        f"Improved prompt with {len(improved.constraints_added)} constraints "
+                        (f"{units_question}  " if units_question else "")
+                        + f"Improved prompt with {len(improved.constraints_added)} constraints "
                         f"(iteration {iteration})."
                     ),
                 }

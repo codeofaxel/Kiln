@@ -12,6 +12,7 @@ from kiln.mesh_validation_pipeline import (
     _mesh_fits_volume,
     run_validation_pipeline,
 )
+from kiln.printability import PiecesAnalysis
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -79,6 +80,16 @@ def _make_printability_report(
 
     mock.model_height_mm = 30.0
     mock.estimated_print_time_modifier = 1.0
+    # The fields the stop reading (kiln.printability.stops) reads, as a
+    # part that prints has them: nothing to ask about its units, a face on
+    # the bed, no wall the nozzle cannot lay, one piece.
+    mock.units_question = ""
+    mock.placement = None
+    mock.pieces = PiecesAnalysis(piece_count=1, solid_count=1)
+    mock.nozzle = {"diameter_mm": 0.4}
+    mock.bed_adhesion.contact_area_mm2 = 400.0
+    mock.thin_walls.problematic_regions = []
+    mock.thin_walls.threshold_basis = "nozzle"
     mock.to_dict.return_value = {
         "printable": mock.printable,
         "score": mock.score,
@@ -1304,10 +1315,14 @@ class TestValidationPipelinePlacementCheck:
 
     @patch(_PRINTABILITY)
     @patch(_VALIDATE)
-    def test_bundle_off_bed_mesh_is_flagged(
+    def test_bundle_part_below_the_plate_keeps_its_grade(
         self, mock_validate, mock_printability, stl_file,
     ):
-        """Geometry below z=0 drops a bundle-sourced 'A' below printable."""
+        """Inverted 2026-10-23, from "geometry below z=0 drops a bundle-sourced
+        'A' below printable".  Every slicer Kiln drives, and Kiln's slice step,
+        set such a part on the plate (measured: PrusaSlicer and
+        OrcaSlicer printed all of a cube written 12 mm under it), so the part
+        is judged resting there and the drop is said once, last."""
         mock_validate.return_value = _make_mesh_validation_result(
             bounding_box=_OFF_BED_BBOX,
         )
@@ -1318,16 +1333,10 @@ class TestValidationPipelinePlacementCheck:
         result = run_validation_pipeline(stl_file, inspection_bundle=bundle)
 
         mock_printability.assert_not_called()  # still the short-circuit path
-        assert any(
-            "below the build plate" in r for r in result.recommendations
-        )
-        assert "below the build plate" in result.recommendations[0]
-        assert result.printability_score < 50
-        assert result.printability_grade == "F"
-        assert result.printability_details["printable"] is False
-        # Placement is feasibility: it fails the run on its own, without
-        # having to clear min_printability_score first.
-        assert result.passed is False
+        assert "40.00 mm below the build plate" in result.recommendations[-1]
+        assert result.printability_score == 95
+        assert result.printability_grade == "A"
+        assert result.passed is True
 
     @patch(_PRINTABILITY)
     @patch(_VALIDATE)
@@ -1404,15 +1413,18 @@ class TestValidationPipelinePlacementCheck:
         self, mock_validate, mock_printability, stl_file,
     ):
         """The ride-along findings report the verdict the pipeline
-        reports, and the caller's own bundle dict is left untouched."""
+        reports, and the caller's own bundle dict is left untouched.  (Off
+        the bed until 2026-10-23; too big for the bed since.)"""
         mock_validate.return_value = _make_mesh_validation_result(
-            bounding_box=_OFF_BED_BBOX,
+            bounding_box=_OVERSIZED_BBOX,
         )
         bundle = _make_inspection_bundle(
             printability_score=95, printability_grade="A",
         )
 
-        result = run_validation_pipeline(stl_file, inspection_bundle=bundle)
+        result = run_validation_pipeline(
+            stl_file, inspection_bundle=bundle, build_volume=(256.0, 256.0, 256.0),
+        )
 
         details = result.printability_details
         assert details["score"] == result.printability_score
@@ -1446,13 +1458,14 @@ class TestValidationPipelinePlacementCheck:
 
     @patch(_PRINTABILITY)
     @patch(_VALIDATE)
-    def test_low_score_bar_does_not_rescue_an_off_bed_part(
+    def test_low_score_bar_does_not_rescue_an_oversized_part(
         self, mock_validate, mock_printability, stl_file,
     ):
         """min_printability_score says how ROUGH a mesh the caller will
-        take, not whether they will take one that cannot print."""
+        take, not whether they will take one that cannot print.  (An off-bed
+        part until 2026-10-23, when below the plate stopped being a fault.)"""
         mock_validate.return_value = _make_mesh_validation_result(
-            bounding_box=_OFF_BED_BBOX,
+            bounding_box=_OVERSIZED_BBOX,
         )
         bundle = _make_inspection_bundle(
             printability_score=95, printability_grade="A",
@@ -1460,20 +1473,38 @@ class TestValidationPipelinePlacementCheck:
 
         result = run_validation_pipeline(
             stl_file, inspection_bundle=bundle, min_printability_score=0,
+            build_volume=(256.0, 256.0, 256.0),
         )
 
         assert result.passed is False
         assert any(
-            "below the build plate" in w for w in result.warnings
+            "exceeds build volume" in w for w in result.warnings
         )
 
     @patch(_PRINTABILITY)
     @patch(_VALIDATE)
-    def test_direct_branch_off_bed_also_fails(
+    def test_direct_branch_oversized_also_fails(
         self, mock_validate, mock_printability, stl_file,
     ):
         """The no-bundle branch reaches the same verdict — the faults are
         read from the mesh, not from whichever path produced the score."""
+        mock_validate.return_value = _make_mesh_validation_result(
+            bounding_box=_OVERSIZED_BBOX,
+        )
+        mock_printability.return_value = _make_printability_report(
+            score=95, grade="A",
+        )
+
+        result = run_validation_pipeline(stl_file, build_volume=(256.0, 256.0, 256.0))
+
+        assert result.passed is False
+
+    @patch(_PRINTABILITY)
+    @patch(_VALIDATE)
+    def test_direct_branch_below_the_plate_passes(
+        self, mock_validate, mock_printability, stl_file,
+    ):
+        """Inverted 2026-10-23 (see test_bundle_part_below_the_plate_keeps_its_grade)."""
         mock_validate.return_value = _make_mesh_validation_result(
             bounding_box=_OFF_BED_BBOX,
         )
@@ -1483,7 +1514,7 @@ class TestValidationPipelinePlacementCheck:
 
         result = run_validation_pipeline(stl_file)
 
-        assert result.passed is False
+        assert result.passed is True
 
     @patch(_PRINTABILITY)
     @patch(_VALIDATE)
@@ -1509,8 +1540,7 @@ class TestValidationPipelinePlacementCheck:
         self, mock_validate, mock_printability, stl_file,
     ):
         """With auto_scale on, step 4 shrinks an oversized mesh to fit —
-        so step 3 must not dock the score for a size about to be fixed.
-        Off-bed geometry is still docked: scaling cannot lift a part."""
+        so step 3 must not dock the score for a size about to be fixed."""
         mock_validate.return_value = _make_mesh_validation_result(
             bounding_box=_OVERSIZED_BBOX,
         )
@@ -1548,12 +1578,12 @@ def test_placement_helper_is_the_single_shared_implementation():
     score, grade, printable, faults = _apply_placement_check(
         95,
         recs,
-        _OFF_BED_BBOX,
+        _OVERSIZED_BBOX,
         build_volume=(256.0, 256.0, 256.0),
     )
 
     assert len(faults) == 1
-    assert "below the build plate" in recs[0]
+    assert "exceeds build volume" in recs[0]
     assert recs[-1] == "increase wall count"  # existing advice preserved
     assert score == 45
     assert grade == "F"
@@ -1597,13 +1627,14 @@ def test_sub_layer_dip_below_the_plate_is_not_an_off_bed_fault():
     assert recs == []
 
 
-def test_a_real_off_bed_drop_is_still_fatal_and_states_its_depth():
-    """The loosened tolerance must not blunt the fault it exists for.
+def test_a_real_drop_below_the_plate_is_said_with_its_depth():
+    """Inverted 2026-10-23, from "a real off-bed drop is still fatal".
 
-    Half a millimetre under the plate is real lost geometry, and the
-    message has to carry a depth a reader can act on — at one decimal
-    place every fault shallower than 0.05mm printed as "0.0 mm below the
-    build plate", a verdict that argues against itself.
+    Half a millimetre under the plate is no fault: the slicer sets the part
+    on the plate (see test_bundle_part_below_the_plate_keeps_its_grade).  It
+    is still said, with a depth a reader can act on — at one decimal place
+    every drop shallower than 0.05mm printed as "0.0 mm below the build
+    plate", a sentence that argues against itself.
     """
     from kiln.printability import _apply_placement_check
 
@@ -1617,7 +1648,7 @@ def test_a_real_off_bed_drop_is_still_fatal_and_states_its_depth():
         95, recs, bbox, build_volume=(256.0, 256.0, 256.0),
     )
 
-    assert len(faults) == 1
-    assert printable is False
-    assert "0.50 mm below the build plate" in recs[0]
-    assert "0.0 mm below" not in recs[0]
+    assert faults == []
+    assert (score, grade, printable) == (95, "A", True)
+    assert "0.50 mm below the build plate" in recs[-1]
+    assert "0.0 mm below" not in recs[-1]

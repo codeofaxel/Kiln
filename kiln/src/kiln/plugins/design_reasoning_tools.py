@@ -46,20 +46,12 @@ def _resolve_tool_build_volume(
 ) -> tuple[str, tuple[float, float, float]] | None:
     if not printer_id:
         return None
-    from kiln.printer_model_resolver import resolve_printer_model_for
-    from kiln.printers.bed_fit import resolve_build_volume
+    from kiln.printers.bed_fit import require_build_volume
 
-    # A model id, else a printer by the name its owner gave it.
-    resolved = resolve_build_volume(printer_id) or resolve_build_volume(
-        resolve_printer_model_for(printer_id)
+    # A model id, or a printer by the name its owner gave it.
+    return require_build_volume(
+        printer_id, instead="omit printer_id and pass explicit bed/plate dimensions",
     )
-    if resolved is None:
-        from kiln.printers.bed_fit import no_bed_reason
-
-        raise ValueError(
-            no_bed_reason(printer_id, instead="omit printer_id and pass explicit bed/plate dimensions")
-        )
-    return resolved
 
 
 class _DesignReasoningToolsPlugin:
@@ -104,8 +96,8 @@ class _DesignReasoningToolsPlugin:
         @mcp.tool()
         def analyze_structural_risks(
             file_path: str,
-            min_cross_section_mm2: float = 4.0,
-            sharp_angle_threshold_deg: float = 60.0,
+            min_cross_section_mm2: float | None = None,
+            sharp_angle_threshold_deg: float | None = None,
         ) -> dict:
             """Analyze an STL mesh for structural weak points.
 
@@ -113,32 +105,44 @@ class _DesignReasoningToolsPlugin:
             - **thin_neck**: narrow cross-sections that will snap under load
             - **stress_concentration**: abrupt section changes that focus stress
             - **cantilever**: unsupported overhanging geometry
-            - **sharp_corner**: concave edges that initiate cracks
+            - **sharp_corner**: sharp inside (concave) corners, where cracks start;
+              outside edges never count
             - **insufficient_base**: topple risk from height-to-base ratio
             - **weak_layer_adhesion**: overhangs in structurally critical areas
 
             Returns risk locations as (x, y, z) coordinates in mm so agents
             can reason about *where* problems are, not just *that* they exist.
 
+            A file smaller than anything a printer makes (a scene exported
+            in metres) is answered with ``units_question`` and no risk: the
+            counts are ``None`` until its size is settled.
+
             :param file_path: Path to the STL file.
-            :param min_cross_section_mm2: Minimum safe cross-section area (default 4).
-            :param sharp_angle_threshold_deg: Angle for sharp edge detection (default 60).
+            :param min_cross_section_mm2: Minimum safe cross-section area.
+                Leave unset for Kiln's own threshold.
+            :param sharp_angle_threshold_deg: How far the surface must turn inward
+                across an edge, in degrees, for an inside corner to count as
+                sharp.  Leave unset for Kiln's own threshold, the same for
+                every caller.
             :returns: Dict with ``risks`` list, each containing location, severity, and description.
             """
             try:
-                from kiln.design_reasoning import analyze_structural_risks as _analyze
+                from kiln.design_reasoning import generate_improvement_plan as _plan
 
-                risks = _analyze(
+                # The plan is the one reading every structural door shares,
+                # so this door says the units question the way they do.
+                plan = _plan(
                     file_path,
                     min_cross_section_mm2=min_cross_section_mm2,
                     sharp_angle_threshold_deg=sharp_angle_threshold_deg,
                 )
                 return {
                     "success": True,
-                    "risk_count": len(risks),
-                    "critical_count": sum(1 for r in risks if r.severity == "critical"),
-                    "warning_count": sum(1 for r in risks if r.severity == "warning"),
-                    "risks": [r.to_dict() for r in risks],
+                    "risk_count": None if plan.units_question else len(plan.risks),
+                    "critical_count": plan.critical_count,
+                    "warning_count": plan.warning_count,
+                    "risks": [r.to_dict() for r in plan.risks],
+                    **({"units_question": plan.units_question} if plan.units_question else {}),
                 }
             except ValueError as exc:
                 return _srv._error_dict(str(exc), code="INVALID_ARGS")
@@ -152,7 +156,7 @@ class _DesignReasoningToolsPlugin:
         @mcp.tool()
         def recommend_design_reinforcements(
             file_path: str,
-            min_cross_section_mm2: float = 4.0,
+            min_cross_section_mm2: float | None = None,
         ) -> dict:
             """Recommend specific reinforcements for an STL mesh.
 
@@ -167,18 +171,23 @@ class _DesignReasoningToolsPlugin:
             Each recommendation includes the coordinates where the reinforcement
             should be applied and which Kiln tool to use (e.g., ``add_mesh_fillet()``).
 
+            A file smaller than anything a printer makes is answered with
+            ``units_question`` and no recommendation.
+
             :param file_path: Path to the STL file.
             :param min_cross_section_mm2: Minimum safe cross-section area.
+                Leave unset for Kiln's own threshold.
             :returns: Dict with ``reinforcements`` list.
             """
             try:
-                from kiln.design_reasoning import recommend_reinforcements as _recommend
+                from kiln.design_reasoning import generate_improvement_plan as _plan
 
-                recs = _recommend(file_path, min_cross_section_mm2=min_cross_section_mm2)
+                plan = _plan(file_path, min_cross_section_mm2=min_cross_section_mm2)
                 return {
                     "success": True,
-                    "recommendation_count": len(recs),
-                    "reinforcements": [r.to_dict() for r in recs],
+                    "recommendation_count": None if plan.units_question else len(plan.reinforcements),
+                    "reinforcements": [r.to_dict() for r in plan.reinforcements],
+                    **({"units_question": plan.units_question} if plan.units_question else {}),
                 }
             except ValueError as exc:
                 return _srv._error_dict(str(exc), code="INVALID_ARGS")
@@ -228,14 +237,16 @@ class _DesignReasoningToolsPlugin:
         @mcp.tool()
         def design_improvement_plan(
             file_path: str,
-            min_cross_section_mm2: float = 4.0,
-            sharp_angle_threshold_deg: float = 60.0,
+            min_cross_section_mm2: float | None = None,
+            sharp_angle_threshold_deg: float | None = None,
         ) -> dict:
             """Generate a complete structural improvement plan for a design.
 
             The **full design reasoning pipeline** — combines risk analysis,
             reinforcement recommendations, and load analysis into one actionable
-            report with an overall structural score (0-100, A-F grade).
+            report.  Its ``summary`` names the risks found, the worst first, and
+            the first thing to do; the overall structural score (0-100, A-F
+            grade) stays in the report for comparing versions of the part.
 
             This is the tool that makes Kiln a **design advisor**, not just a
             geometry validator. It answers: "This bracket needs a gusset at the
@@ -245,11 +256,15 @@ class _DesignReasoningToolsPlugin:
             1. **Risks**: all structural weak points with locations and severity
             2. **Reinforcements**: specific fixes and what each does for the part
             3. **Load analysis**: how the part handles forces, best print orientation
-            4. **Score**: overall structural grade with summary
+            4. **Summary**: the risks named, and a score for comparing versions
 
             :param file_path: Path to the STL file.
             :param min_cross_section_mm2: Minimum safe cross-section area.
-            :param sharp_angle_threshold_deg: Angle for sharp edge detection.
+                Leave unset for Kiln's own threshold.
+            :param sharp_angle_threshold_deg: How far the surface must turn inward
+                across an edge, in degrees, for an inside corner to count as
+                sharp.  Leave unset for Kiln's own threshold, the same for
+                every caller.
             :returns: Complete improvement plan as dict.
             """
             try:
@@ -292,9 +307,16 @@ class _DesignReasoningToolsPlugin:
             structural analysis pipeline, then applies every applicable fix:
 
             - **Thin necks** → thickened walls (+material at narrow sections)
-            - **Sharp corners** → rounded edges (stress concentration reduced at inside corners)
-            - **Insufficient base** → wider base plate (stabilizing geometry added)
-            - **Cantilevers** → triangular gusset ribs
+            - **Sharp inside corners** → rounded, so the load spreads (outside edges are left as they are)
+            - **Insufficient base** → a base plate wide enough that the part no
+              longer reads as a tipping risk
+
+            Each fix is kept only if the part it makes carries no more
+            structural risk than the part before it; one that would is left
+            out and listed in ``skipped`` with what it would have added.
+            Cantilevers are listed in ``skipped`` with where to add a rib
+            (``locations_mm``): Kiln knows where an overhang is, not which
+            wall carries it, so it does not place one.
 
             Thickening and edge rounding are done on the part's CAD file, so
             pass its STEP file when there is one (or a mesh Kiln converted
@@ -311,11 +333,12 @@ class _DesignReasoningToolsPlugin:
             Choosing the finish edge by edge for the printer and material is
             a Kiln Pro feature (https://kiln3d.com/pricing).
 
-            Returns a before/after structural score so agents can see the
-            improvement.  Reinforcements that can't be auto-applied (like
+            ``summary`` says which structural risks the part had and which
+            remain; ``before_score`` / ``after_score`` compare the two
+            versions.  Reinforcements that can't be auto-applied (like
             ``reorient``) are listed in ``skipped`` with guidance.
 
-            Requires OpenSCAD for base plate and gusset operations.
+            Requires OpenSCAD for the base plate.
 
             AGENT DISPLAY CONTRACT: a result carries a before|after self-check
             of the part.  Look at it and write what changed before calling
@@ -333,7 +356,10 @@ class _DesignReasoningToolsPlugin:
             :param material: The material it will print in.
             :param fastener: The fastener the part's holes take, e.g.
                 ``"M3"`` — pass only if the user actually named one.  Kiln
-                does not read the part looking for screw holes.
+                does not read the part looking for screw holes.  With Kiln
+                Pro (https://kiln3d.com/pricing) each hole that threads onto
+                it is prepared for it as the corners are rounded; otherwise
+                the holes are left as drawn and ``print_aware`` says so.
             :returns: Dict with before/after scores, applied/skipped reinforcements.
             """
             if err := _srv._check_auth("generate"):

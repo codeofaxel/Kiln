@@ -393,22 +393,24 @@ class _FleetToolsPlugin:
         ) -> dict:
             """Route a print job to the best available printer in the fleet.
 
-            Scores each registered printer on material match, availability,
-            queue depth, and historical success rate, then recommends the
-            best assignment with scored alternatives.  Every candidate also
-            carries a ``plate`` block -- whether the plate as it stands has
-            room for this part and how a print there would start.  A machine
-            with no room, or a plate Kiln has no record of, is never
-            recommended; when none has room the answer is a refusal
-            (``NO_ROOM``) with each machine's own sentence.  A print that
-            would start the quiet way beside a part still on the plate is
-            scored lower unless ``priority`` is high.
+            Picks the registered printer best suited to this print -- the
+            material, whether it is free, its queue and how its prints have
+            gone -- and answers the pick, the other candidates in order, best
+            first, and ``why``: a sentence saying why the pick won.  Every
+            candidate carries the facts Kiln read about it and a ``plate``
+            block -- whether the plate as it stands has room for this part
+            and how a print there would start.  A machine with no room, or a
+            plate Kiln has no record of, is never recommended; when none has
+            room the answer is a refusal (``NO_ROOM``) with each machine's
+            own sentence.
 
             Args:
                 file_path: Path to the file to print.
                 material: Required filament material (e.g. "PLA", "PETG").
                 quality: Quality preference — "draft", "standard", or "fine".
-                priority: Job urgency — "low", "normal", or "high".
+                priority: Job urgency — "low", "normal", or "high"; "high"
+                    favours a printer that can start now, beside a part
+                    still on its plate included.
             """
             if err := _srv._check_auth("print"):
                 return err

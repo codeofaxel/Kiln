@@ -1107,24 +1107,29 @@ def test_the_tool_says_a_selection_it_cannot_read_is_invalid(tools, tmp_path):
 
 
 def _needs_rounding(tmp_path: Path) -> str:
-    """The open box: its plan asks for its sharp corners to be rounded."""
+    """The open box: its plan asks for its sharp inside corners to be rounded."""
     return open_box(tmp_path / "box.step")
+
+
+def shelf(path: Path) -> str:
+    """A 4 x 30 x 30 wall with a 30 mm arm across its top: one inside corner, under the arm."""
+    return _write_step(_fuse(_box(0, 0, 0, 4, 30, 30), _box(0, 0, 26, 30, 30, 4)), path)
 
 
 @needs_cad_kernel
 def test_reinforcing_a_cad_part_rounds_it_on_the_cad_and_says_what_prints_badly(tmp_path, monkeypatch):
-    """Without a chooser: the radius asked, on every sharp edge, with the
-    edges that will droop listed and one sentence saying who chooses for you."""
+    """Without a chooser: the radius asked, on every sharp inside edge and no
+    other, with the edges that will need support listed and one sentence
+    saying who chooses for you."""
     import kiln.design_reasoning as dr
 
     monkeypatch.setattr(dr, "_edge_policy", lambda *_a, **_k: None)
-    result = dr.apply_reinforcements(_needs_rounding(tmp_path), output_path=str(tmp_path / "out.stl"), fillet_radius_mm=1.0)
+    result = dr.apply_reinforcements(shelf(tmp_path / "shelf.step"), output_path=str(tmp_path / "out.stl"), fillet_radius_mm=1.0)
     rounded = next(e for e in result.applied if e["type"] == "fillet")
     finished = rounded["edges"]["finished"]
-    assert {f["finish"] for f in finished} == {"fillet"}
-    assert sum(1 for f in finished if f["place"] == "bottom") == 4
-    assert [c["kind"] for c in rounded["edges"]["cautions"]].count("on_the_bed") == 4
-    assert "4 of the finished edges will print badly as asked" in result.print_aware
+    assert [(f["finish"], f["corner"], f["place"]) for f in finished] == [("fillet", "inside", "under")]
+    assert [c["kind"] for c in rounded["edges"]["cautions"]] == ["overhang"]
+    assert "1 of the finished edges will print badly as asked" in result.print_aware
     assert "kiln3d.com/pricing?src=agent&tool=apply_design_reinforcements" in result.print_aware
     assert measure_mesh(result.output_path).watertight is True
 
@@ -1140,25 +1145,29 @@ def test_reinforcing_hands_the_edges_to_a_chooser_and_the_cad_to_the_result(tmp_
 
         def choose(chains, frame):
             handed["frame"] = frame
-            return {c["chain"]: (CHAMFER, c["asked_mm"], "bevelled on the bed") for c in chains if c["place"] == "bottom"}
+            handed["corners"] = {c["corner"] for c in chains}
+            return {c["chain"]: (CHAMFER, c["asked_mm"], "bevelled up the corner") for c in chains if c["place"] == "vertical"}
 
         return choose
 
     monkeypatch.setattr(dr, "_edge_policy", policy)
-    # No base plate or gusset here: every edit applied was a CAD one.
+    # No base plate here: every edit applied was a CAD one.  (A gusset is
+    # never placed.)
     monkeypatch.setattr(dr, "_apply_base", lambda *_a, **_k: None)
-    monkeypatch.setattr(dr, "_apply_gusset", lambda *_a, **_k: None)
     result = dr.apply_reinforcements(
         _needs_rounding(tmp_path), output_path=str(tmp_path / "out.stl"), fillet_radius_mm=1.0,
         nozzle_mm=0.4, layer_height_mm=0.2, material="PETG", fastener="M3",
     )
     assert handed["material"] == "PETG" and handed["fastener"] == "M3"
     assert (handed["frame"].nozzle_mm, handed["frame"].layer_mm) == (0.4, 0.2)
+    assert handed["corners"] == {"inside"}  # no hole here, so only the inside edges are on offer
     rounded = next(e for e in result.applied if e["type"] == "fillet")
-    on_bed = [f for f in rounded["edges"]["finished"] if f["place"] == "bottom"]
-    assert len(on_bed) == 4 and {f["finish"] for f in on_bed} == {"chamfer"}
+    up_the_box = [f for f in rounded["edges"]["finished"] if f["place"] == "vertical"]
+    assert len(up_the_box) == 4 and {f["finish"] for f in up_the_box} == {"chamfer"}
     assert not rounded["edges"]["cautions"]
-    assert result.print_aware == "Each edge's finish was chosen for how it prints on this printer."
+    assert result.print_aware == (
+        "Each edge's finish was chosen for how it prints on this printer, and each hole for the M3 you named."
+    )
     assert result.step_path == str(tmp_path / "out.step") and os.path.isfile(result.step_path)
     assert result.to_dict()["step_path"] == result.step_path
 

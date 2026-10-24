@@ -224,7 +224,11 @@ def no_bed_reason(
     listed = catalogue_printer_id(label) if label else None
     if listed is None:
         tail = f"; {instead}, or use a supported printer model id" if instead else ""
-        return f"Unknown printer_id {label!r}{tail}."
+        return (
+            f"Unknown printer_id {label!r}: it is not a printer model Kiln supports, "
+            "and no printer you registered by that name has its model on record "
+            f"(set_printer_model records it){tail}."
+        )
     try:
         from kiln._pro_catalogue_bridge import unanswered
 
@@ -275,7 +279,47 @@ def resolve_build_volume(
         looked_up = _lookup_build_volume_exact(candidate)
         if looked_up is not None:
             return candidate, looked_up
+    # Not a model id: a printer by the name its owner gave it, whose model
+    # is the bed.  Every door takes ``printer_id`` meaning either, and a
+    # registered printer named "default" read as a model id was refused.
+    model = _model_of_named_printer(printer_id)
+    if model and _normalise_printer_id(model) != _normalise_printer_id(printer_id):
+        for candidate in _printer_id_candidates(model):
+            looked_up = _lookup_build_volume_exact(candidate)
+            if looked_up is not None:
+                return candidate, looked_up
     return None
+
+
+def _model_of_named_printer(printer_id: str | None) -> str | None:
+    """The model recorded for the printer its owner named *printer_id*, or
+    ``None``.  Never raises: a config nobody can read names no printer."""
+    if not printer_id:
+        return None
+    try:
+        from kiln.printer_model_resolver import resolve_printer_model_for
+
+        return resolve_printer_model_for(str(printer_id))
+    except Exception:  # noqa: BLE001 - an unreadable config is no printer
+        logger.debug("printer name lookup failed for %r", printer_id, exc_info=True)
+        return None
+
+
+class UnknownPrinterError(ValueError):
+    """A ``printer_id`` that names neither a printer model Kiln supports nor
+    a printer of the caller's with its model on record.  A refusal about the
+    argument, so never worth retrying unchanged."""
+
+
+def require_build_volume(
+    printer_id: str, *, instead: str,
+) -> tuple[str, tuple[float, float, float]]:
+    """:func:`resolve_build_volume`, or :class:`UnknownPrinterError` naming
+    both readings of *printer_id* and what to do *instead*."""
+    resolved = resolve_build_volume(printer_id)
+    if resolved is None:
+        raise UnknownPrinterError(no_bed_reason(printer_id, instead=instead))
+    return resolved
 
 
 def owner_stated_build_volume(printer_id: str | None) -> tuple[float, float, float] | None:

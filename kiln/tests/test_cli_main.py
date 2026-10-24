@@ -364,6 +364,32 @@ class TestIngestWatch:
         adapter.upload_file.assert_called_once_with(str(file_path))
         adapter.start_print.assert_called_once_with("widget.gcode")
 
+    def test_a_queued_file_says_why_its_printer_and_never_a_score(self, runner, tmp_path):
+        """The routing document carries a sentence for its pick (``why``).
+        The queued row relays it, and relays no score even from a router that
+        still sends one."""
+        watch_dir = tmp_path / "incoming"
+        watch_dir.mkdir()
+        (watch_dir / "widget.gcode").write_text("G28\n", encoding="utf-8")
+        adapter = MagicMock()
+        adapter.get_state.return_value = PrinterState(state=PrinterStatus.IDLE, connected=True)
+        adapter.upload_file.return_value = UploadResult(success=True, message="ok", file_name="widget.gcode")
+        adapter.start_print.return_value = PrintResult(success=True, message="Print started")
+        why = "lab-printer was picked because it is free now and it has no PLA prints on record yet."
+        routing = {"recommended_printer": {"printer_id": "lab-printer", "score": 92.0}, "why": why}
+        with (
+            patch("kiln.cli.main._load_fleet_adapters", return_value=({"lab-printer": adapter}, [])),
+            patch("kiln.cli.main._collect_routing_candidates", return_value=[{"printer_id": "lab-printer"}]),
+            patch("kiln.cli.main._route_printer_for_job", return_value=("lab-printer", routing, None)),
+        ):
+            result = runner.invoke(
+                cli, ["ingest", "watch", "--dir", str(watch_dir), "--once", "--auto-queue", "--json"],
+            )
+        assert result.exit_code == 0, result.output
+        row = json.loads(result.output)["data"]["queued"][0]
+        assert row["printer"] == "lab-printer" and row["why"] == why
+        assert "score" not in row
+
 
 class TestIngestService:
     def test_service_install_and_status(self, runner, tmp_path):
@@ -2274,7 +2300,6 @@ class TestMonitor:
                 "issue_count": 3,
                 "report_count": 12,
                 "risk": {
-                    "score": 0.55,
                     "severity": "amber",
                     "kinds": ["thermal_drift"],
                 },
@@ -2397,7 +2422,6 @@ class TestMonitor:
             "issue_count": 2,
             "report_count": 7,
             "risk": {
-                "score": 0.55,
                 "severity": "amber",
                 "kinds": ["thermal_drift"],
             },
@@ -2419,13 +2443,16 @@ class TestMonitor:
 
         # Either the Rich panel title shows up, or (if Rich isn't
         # available in this env) the plain-text fallback marker does.
-        # Either way the risk score string must appear.
+        # Either way the risk verdict and its signs must appear, and no
+        # score: the check sends none, and 0.00 beside amber would be a
+        # number nobody measured.
         out = result.output
         assert (
             "Smart Monitoring" in out
             or "[Smart Monitoring]" in out
         ), out
-        assert "0.55" in out and "amber" in out, out
+        assert "Risk: amber (thermal_drift)" in out, out
+        assert "0.00" not in out, out
 
 
 # ---------------------------------------------------------------------------

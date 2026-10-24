@@ -306,8 +306,11 @@ class _EstimateToolsPlugin:
 
                 analysed_path = sinfo.get("effective_input") or input_path
                 printability_dict: dict[str, Any] | None = None
+                verdict_key: str | None = None
+                verdict_text: str | None = None
                 adhesion_dict: dict[str, Any] | None = None
                 adhesion_rationale: str | None = None
+                brim_said = False
                 printability_note: str | None = None
                 printability_checked = False
 
@@ -321,6 +324,14 @@ class _EstimateToolsPlugin:
                     )
                     printability_dict = report.to_dict()
                     printability_checked = True
+                    from kiln.printability import footing as _footing
+                    from kiln.printability import verdict_of as _verdict_of
+
+                    verdict_key, verdict_text = _verdict_of(report)
+                    # A verdict that names how the part must be held down
+                    # has said the brim decision; it is not said twice.
+                    held_down = _footing(report)
+                    brim_said = bool(held_down) and held_down in (verdict_text or "")
                     if is_step_file(analysed_path):
                         printability_note = STEP_PRINTABILITY_NOTE
 
@@ -338,12 +349,11 @@ class _EstimateToolsPlugin:
                 parts: list[str] = [f"Estimated {time_human}"]
                 if filament_g is not None:
                     parts[0] += f", {filament_g}g {mat_upper}"
-                if printability_dict:
-                    score = printability_dict.get("score")
-                    grade = printability_dict.get("grade")
-                    if score is not None and grade:
-                        parts.append(f"Printability: {grade} ({score}/100)")
-                if adhesion_rationale:
+                # The verdict, never the score: the score is in the report
+                # for comparing versions of a part.
+                if verdict_text:
+                    parts.append(verdict_text)
+                if adhesion_rationale and not brim_said:
                     parts.append(adhesion_rationale)
                 if not printability_checked:
                     parts.append("Printability and the brim decision were not checked")
@@ -357,6 +367,9 @@ class _EstimateToolsPlugin:
                     "slice": result.to_dict(),
                     "estimate": estimate,
                     "printability": printability_dict,
+                    # The one printability answer (kiln.printability.verdict);
+                    # None when the check could not run.
+                    "verdict": verdict_key,
                     "adhesion": adhesion_dict,
                     "printer_id": effective_printer_id,
                     "profile_path": effective_profile,

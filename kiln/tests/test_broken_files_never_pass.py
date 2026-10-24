@@ -511,6 +511,10 @@ CALLERS = {
     # Callers that read an engine for information and decide nothing.
     "slicer_supports.py::decide_supports": "reads: decides a slice's supports; prints nothing",
     "support_assessment.py::_shared_verdict": "reads: the one support verdict, for the assessment",
+    "design_reasoning.py::_support_call": (
+        "reads: the one support verdict, for the slicer settings' supports; a file it cannot "
+        "read is said as not checked, never as needing none"
+    ),
     "generation/validation.py::estimate_support_volume": "reads: the one support verdict, beside a volume",
     "auto_orient.py::estimate_supports": "reads: the report's support numbers and verdict",
     "cli/main.py::generate": "reads: reports the generated mesh; prints nothing",

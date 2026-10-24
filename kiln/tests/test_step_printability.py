@@ -125,7 +125,10 @@ class TestTheEstimateDoor:
         assert cad["printability"] is not None, cad
         assert cad["printability"]["score"] == mesh["printability"]["score"]
         assert cad["adhesion"] == mesh["adhesion"]
-        assert "Printability:" in cad["message"]
+        # The verdict, the same for Kiln's mesh of the STEP file as for the
+        # mesh itself, and no score in the sentence.
+        assert mesh["verdict"] and cad["verdict"] == mesh["verdict"]
+        assert "/100" not in cad["message"]
         # What the advice rests on, in one sentence -- and only for a CAD file.
         assert "Kiln's mesh of this STEP file" in cad["printability_note"]
         assert "printability_note" not in mesh

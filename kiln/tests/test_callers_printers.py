@@ -53,11 +53,10 @@ def this_machine(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "kiln._pro_nozzle_bridge.consult_recorded_nozzle", lambda *_a, **_k: {"answered": True},
     )
-    monkeypatch.setattr(
-        "kiln.printers.bed_fit.resolve_build_volume",
-        lambda pid: (pid, BEDS[pid]) if pid in BEDS else None,
-    )
-    monkeypatch.setattr("kiln.printers.bed_fit.get_build_volume", lambda pid: BEDS.get(pid))
+    # The catalogue's beds, below the resolver: a printer named by its owner
+    # is resolved to its model by the resolver itself, the one every bed
+    # lookup goes through, so the fake must not stand in front of it.
+    monkeypatch.setattr("kiln.printers.bed_fit._lookup_build_volume_exact", lambda pid: BEDS.get(pid))
     yield
     printer_model_resolver.invalidate_cache()
 

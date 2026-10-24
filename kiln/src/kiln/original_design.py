@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from kiln.auto_orient import find_optimal_orientation
+from kiln.auto_orient import describe_orientation_change, find_optimal_orientation, worth_turning
 from kiln.design_intelligence import (
     get_design_constraints,
     get_printer_design_profile,
@@ -31,7 +31,7 @@ from kiln.generation_feedback import (
     resolve_printer_generation_context,
     structural_risks_to_feedback,
 )
-from kiln.printability import analyze_printability
+from kiln.printability import analyze_printability, passes, verdict_of
 
 
 def _intent_sidecar_exists(mesh_path: str) -> bool:
@@ -595,6 +595,10 @@ def audit_original_design(
     )
     feedback = _dedupe_feedback(feedback_items)
 
+    # The one printability answer every door gives; the score below ranks
+    # attempts against each other and is never the headline.
+    verdict_key, verdict_text = verdict_of(printability)
+
     gates: list[AuditGate] = [
         AuditGate(
             name="mesh_validation",
@@ -627,43 +631,53 @@ def audit_original_design(
         ),
         AuditGate(
             name="printability",
-            passed=printability.printable and printability.score >= 75,
+            # The verdict decides and is the message (kiln.printability
+            # .passes): a part that prints with supports is no blocker, and
+            # this audit's own bar of 75 applies where no cause is named.
+            passed=passes(verdict_key, printability.score, bar=75),
             severity=(
-                "critical"
-                if not printability.printable
-                else "warning" if printability.score < 75 else "info"
+                "critical" if verdict_key == "wont_print"
+                else "info" if passes(verdict_key, printability.score, bar=75)
+                else "warning"
             ),
-            message=(
-                f"Printability score {printability.score}/100 "
-                f"({printability.grade})."
-            ),
+            message=verdict_text,
             details=printability.to_dict(),
         ),
     ]
 
-    # Structural integrity gate — critical risks block printing.
-    if structural_plan is not None:
-        struct_critical = structural_plan.get("critical_count", 0)
-        struct_score = structural_plan.get("overall_structural_score", 100)
-        struct_grade = structural_plan.get("structural_grade", "A")
-        struct_passed = struct_critical == 0 and struct_score >= 60
+    # Structural integrity gate — critical risks block printing.  The risks
+    # decide and are the message, as the verdict is for printability: a
+    # critical risk fails the gate, warnings pass it as warnings (each kind
+    # also costs the readiness score below once), and the structural score
+    # stays in the details for comparing versions.  A file whose size puts
+    # its units in question had no risk judged: the gate says it did not
+    # run, and why, rather than passing over nothing.
+    if structural_plan is not None and structural_plan.get("units_question"):
         gates.append(
             AuditGate(
                 name="structural_integrity",
-                passed=struct_passed,
+                passed=False,
+                checked=False,
+                severity="info",
+                message=structural_plan["summary"],
+                details=structural_plan,
+            )
+        )
+    elif structural_plan is not None:
+        from kiln.design_reasoning import describe_structural_risks
+
+        struct_critical = structural_plan.get("critical_count", 0)
+        struct_warnings = structural_plan.get("warning_count", 0)
+        gates.append(
+            AuditGate(
+                name="structural_integrity",
+                passed=struct_critical == 0,
                 severity=(
                     "critical" if struct_critical > 0
-                    else "warning" if struct_score < 70
+                    else "warning" if struct_warnings > 0
                     else "info"
                 ),
-                message=(
-                    f"Structural score {struct_score}/100 ({struct_grade}). "
-                    + (
-                        f"{struct_critical} critical risk(s) found."
-                        if struct_critical > 0
-                        else "No critical structural risks."
-                    )
-                ),
+                message=describe_structural_risks(structural_risks),
                 details=structural_plan,
             )
         )
@@ -698,18 +712,21 @@ def audit_original_design(
             )
         )
 
+    # Orientation gate.  The message says what turning the part changes, in
+    # its own units, as auto_orient_model does, and the gate warns exactly
+    # when that turn gains something measurable (kiln.auto_orient
+    # .worth_turning): less support, fewer overhangs, more bed contact or a
+    # lower part.  The bed-contact scores stay in the details for comparing
+    # versions; they are not the measure of a turn, since Kiln Pro's ranking
+    # orders the poses without a score of its own.
+    turn_it = orientation is not None and worth_turning(orientation)
     if orientation is not None:
-        improvement = float(orientation.improvement_percentage)
         gates.append(
             AuditGate(
                 name="orientation_efficiency",
-                passed=improvement < 10.0,
-                severity="warning" if improvement >= 10.0 else "info",
-                message=(
-                    f"Best orientation improves score by {improvement:.1f}%."
-                    if improvement >= 10.0
-                    else "Current orientation is already close to optimal."
-                ),
+                passed=not turn_it,
+                severity="warning" if turn_it else "info",
+                message=describe_orientation_change(orientation),
                 details=orientation.to_dict(),
             )
         )
@@ -862,15 +879,21 @@ def audit_original_design(
             "severe": 20,
         }
         score -= severity_penalty.get(diagnostics.severity, 0)
-    if orientation is not None and orientation.improvement_percentage >= 10.0:
+    if turn_it:
         score -= 5
-    # Structural risk penalty — critical risks are heavy, warnings are lighter.
-    if structural_plan is not None:
-        score -= structural_plan.get("critical_count", 0) * 15
-        score -= structural_plan.get("warning_count", 0) * 5
+    # Structural risk penalty, once per KIND of risk at its worst severity:
+    # six identical peg roots are one thing to round, and one narrow neck
+    # read at twenty heights is one neck.  Different kinds add up, so a part
+    # that gains a new kind of risk never scores higher; a critical risk is
+    # heavy, a warning lighter.  The gate above still counts every risk.
+    critical_kinds = {r.risk_type for r in structural_risks if r.severity == "critical"}
+    warning_kinds = {r.risk_type for r in structural_risks if r.severity == "warning"} - critical_kinds
+    score -= len(critical_kinds) * 15
+    score -= len(warning_kinds) * 5
     # Intent-verification penalty (kiln-pro Pro+ overlay) — declared
     # geometric assertions that the mesh failed to satisfy.  Mirrors
-    # the structural_integrity contribution shape.
+    # the structural_integrity contribution shape; each declared assertion
+    # is a kind of its own.
     score -= intent_critical_count * 15
     score -= intent_warning_count * 5
     score = max(0, min(100, score))
@@ -898,10 +921,11 @@ def audit_original_design(
             desc = rec.get("description", "")
             if desc:
                 next_actions.append(desc)
-    if orientation is not None and orientation.improvement_percentage >= 10.0:
-        next_actions.append(
-            "Re-orient the model before slicing to reduce supports and improve stability."
-        )
+    if turn_it:
+        # The turn and what it gains, in measured units: the line this
+        # replaced promised less support, which a tall part laid down does
+        # not get (it stands lower).
+        next_actions.append(describe_orientation_change(orientation))
     if feedback:
         next_actions.append(
             f"Regenerate using the design-aware prompt: {prompt.improved_prompt}"
@@ -1217,10 +1241,9 @@ def generate_original_design(
     if best_attempt.result:
         best_result_path = str(best_attempt.result.get("local_path") or "")
 
-    summary = (
-        f"Best attempt scored {best_attempt.readiness_score}/100 "
-        f"({best_attempt.readiness_grade}) via {provider_used}."
-    )
+    # Attempts are ranked by their scores; what a person reads is the
+    # outcome of the best one.
+    summary = f"Best of {len(attempts)} attempt(s), via {provider_used}."
     if best_attempt.ready_for_print:
         summary += " The design is ready for print."
     elif best_attempt.error:

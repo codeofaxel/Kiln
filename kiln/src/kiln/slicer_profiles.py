@@ -214,7 +214,7 @@ _E_RESET = "G92 E0"
 _E_RESET_NEEDLE = "g92e0"
 
 
-def _ensure_layer_e_reset(settings: dict[str, str]) -> None:
+def ensure_layer_e_reset(settings: dict[str, str]) -> None:
     """Give a relative-E profile the per-layer E reset, in place.
 
     PrusaSlicer refuses to slice a Marlin-flavour profile that uses relative
@@ -786,7 +786,7 @@ def _apply_profile_invariants(settings: dict[str, str]) -> None:
     multi-extruder builder and the override fallback -- so a rule added here
     reaches all three, and no door can carry a copy that drifts.
     """
-    _ensure_layer_e_reset(settings)
+    ensure_layer_e_reset(settings)
     _ensure_start_temperatures(settings)
     _ensure_speed_coverage(settings)
 

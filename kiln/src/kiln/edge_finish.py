@@ -305,6 +305,7 @@ def _fold_in_dropped(plan: EdgePlan, kernel: dict[str, Any] | None) -> None:
             plan.left_sharp.append({
                 "edges": treatment["edges"], "place": treatment["place"], "corner": treatment["corner"],
                 "reason": f"the CAD kernel could not build it: {dropped['reason']}",
+                "failed": True,
             })
         plan.cautions[:] = [c for c in plan.cautions if not set(c["edges"]) <= gone]
 

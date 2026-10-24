@@ -67,6 +67,10 @@ def _parts() -> dict[str, tuple[str, object]]:
 
 @pytest.fixture(scope="module")
 def reports(tmp_path_factory) -> dict[str, dict]:
+    """Each part's report, read in process: the points a check took off are
+    the report's own bookkeeping and never reach a reply
+    (``kiln.printability._SCORE_ARITHMETIC``), so the reconciliation reads
+    the object, not ``to_dict``."""
     folder = tmp_path_factory.mktemp("charged_parts")
     out: dict[str, dict] = {}
     with pytest.MonkeyPatch.context() as mp:
@@ -74,7 +78,18 @@ def reports(tmp_path_factory) -> dict[str, dict]:
         for name, (material, mesh) in _parts().items():
             path = folder / f"{name}.stl"
             mesh.export(str(path))
-            out[name] = analyze_printability(str(path), material=material).to_dict()
+            out[name] = _in_process(analyze_printability(str(path), material=material))
+    return out
+
+
+def _in_process(report) -> dict:
+    """The report as a dict that still carries the score's arithmetic."""
+    out = report.to_dict()
+    out["stop_deduction"] = report.stop_deduction
+    for key in _CHARGED:
+        check = getattr(report, key, None)
+        if check is not None and isinstance(out.get(key), dict):
+            out[key]["score_deduction"] = check.score_deduction
     return out
 
 
@@ -87,6 +102,10 @@ def test_the_score_is_100_less_what_its_blocks_state(reports, name):
     report = reports[name]
     assert report["placement"]["faults"] == [], "a placement fault is charged by the floor, not a block"
     stated = _stated(report)
+    # A part that will not print as it is (the fin: a blade thinner than the
+    # nozzle) is charged by the floor as well, and the report states that
+    # charge too, so the sum still accounts for every point.
+    stated["hard stops"] = report["stop_deduction"]
     assert report["score"] == max(0, min(100, 100 + sum(stated.values()))), stated
 
 

@@ -24,6 +24,8 @@ from typing import Any
 
 import trimesh
 
+from kiln.mesh_errors import MeshFileMissing, UnreadableMeshError
+
 #: File types whose own specification puts up on +Y.
 Y_UP_TYPES = frozenset({"glb", "gltf"})
 
@@ -65,7 +67,7 @@ _CENSUS_CHUNK = 1 << 20
 _CENSUS_MAX_MODEL_BYTES = 512 * 1024 * 1024
 
 
-class MeshTooLargeError(ValueError):
+class MeshTooLargeError(UnreadableMeshError):
     """A mesh file declares more mesh than one read may hold.
 
     A :class:`ValueError`, like every other "this file cannot be read"
@@ -520,7 +522,10 @@ def load_mesh(source: Any, **kwargs: Any) -> Any:
     Kiln's own 3MF reader already uses.
 
     :raises MeshTooLargeError: past :data:`MAX_MESH_ENTRIES`.
+    :raises MeshFileMissing: a path with no file at it.
     """
+    if isinstance(source, (str, os.PathLike)) and not os.path.exists(source):
+        raise MeshFileMissing(f"No file at {os.fspath(source)}")
     refuse_an_oversized_mesh(source, kwargs.get("file_type"))
     if "resolver" not in kwargs:
         resolver = _confined_resolver(source)

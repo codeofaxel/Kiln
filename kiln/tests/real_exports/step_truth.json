@@ -1,0 +1,117 @@
+{
+ "assembly_3_bodies.step": {
+  "all_closed": true,
+  "colours": 0,
+  "export": "export_step of a three-child Compound",
+  "made_by": "build123d",
+  "min_z_mm": 0.0,
+  "piece_count": 3,
+  "pieces": [
+   {
+    "closed": true,
+    "index": 0,
+    "size_mm": [
+     40.0,
+     30.0,
+     4.0
+    ],
+    "valid": true,
+    "volume_mm3": 4800.0
+   },
+   {
+    "closed": true,
+    "index": 1,
+    "size_mm": [
+     10.0,
+     10.0,
+     16.0
+    ],
+    "valid": true,
+    "volume_mm3": 1256.637
+   },
+   {
+    "closed": true,
+    "index": 2,
+    "size_mm": [
+     16.0,
+     16.0,
+     3.0
+    ],
+    "valid": true,
+    "volume_mm3": 768.0
+   }
+  ],
+  "pieces_touch": true,
+  "rests_on_bed": true,
+  "scale_to_mm": 1.0,
+  "size_mm": [
+   40.0,
+   30.0,
+   23.0
+  ],
+  "unit": "mm",
+  "up_axis": "Z"
+ },
+ "enclosure_v1.step": {
+  "all_closed": true,
+  "colours": 0,
+  "export": "File > Export > STEP, revision 1",
+  "made_by": "Autodesk Fusion",
+  "min_z_mm": 0.0,
+  "piece_count": 1,
+  "pieces": [
+   {
+    "closed": true,
+    "index": 0,
+    "size_mm": [
+     90.0,
+     64.0,
+     32.0
+    ],
+    "valid": true,
+    "volume_mm3": 37299.042
+   }
+  ],
+  "pieces_touch": false,
+  "rests_on_bed": true,
+  "scale_to_mm": 1.0,
+  "size_mm": [
+   90.0,
+   64.0,
+   32.0
+  ],
+  "unit": "mm",
+  "up_axis": "Z"
+ },
+ "enclosure_v2.step": {
+  "all_closed": true,
+  "colours": 0,
+  "export": "File > Export > STEP, revision 2",
+  "made_by": "Autodesk Fusion",
+  "min_z_mm": 0.0,
+  "piece_count": 1,
+  "pieces": [
+   {
+    "closed": true,
+    "index": 0,
+    "size_mm": [
+     90.0,
+     64.0,
+     40.0
+    ],
+    "valid": true,
+    "volume_mm3": 44107.215
+   }
+  ],
+  "pieces_touch": false,
+  "rests_on_bed": true,
+  "scale_to_mm": 1.0,
+  "size_mm": [
+   90.0,
+   64.0,
+   40.0
+  ],
+  "unit": "mm",
+  "up_axis": "Z"
+ }
+}

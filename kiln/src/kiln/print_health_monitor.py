@@ -380,9 +380,9 @@ class MonitorSession:
     ended_at: float | None = None
     # Cached most recent predictive RiskAssessment dict (kiln-pro
     # predict_risk output).  Populated by _maybe_record_predictive_signals
-    # so monitor_print one-shot can surface the headline risk_score +
-    # severity without re-running the predictor.  None until the first
-    # tick scores a non-empty assessment.
+    # so monitor_print one-shot can surface the headline verdict and its
+    # warning signs without re-running the predictor.  None until the
+    # first tick scores a non-empty assessment.
     latest_risk_assessment: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -1911,8 +1911,8 @@ class PrintHealthMonitor:
             return
 
         # Cache the assessment so monitor_print one-shot can surface
-        # the headline risk_score + severity without re-running the
-        # predictor against the same history.
+        # the headline verdict without re-running the predictor against
+        # the same history.
         session.latest_risk_assessment = assessment
 
         for signal in assessment.get("signals", []):
@@ -2059,10 +2059,9 @@ class PrintHealthMonitor:
               "issue_count": int,                 # total issues so far
               "report_count": int,                # health reports captured
               "risk": {                           # most recent predictive
-                "score": 0.55,                    # assessment from predict_risk
-                "severity": "amber",              # (None when monitoring
-                "kinds": ["thermal_drift"],       # has not yet scored)
-              } | None,
+                "severity": "amber",              # assessment from predict_risk
+                "kinds": ["thermal_drift"],       # (None when monitoring
+              } | None,                           # has not yet scored)
               "predictive": {                     # most recent RED predictive
                 "severity": "red",                # issue (raised to issue
                 "kind": "thermal_drift",          # stream — actionable level)
@@ -2088,7 +2087,9 @@ class PrintHealthMonitor:
 
         ``risk`` reflects the LATEST predict_risk assessment, not just
         red issues — so a session at amber-severity (which doesn't fire
-        an issue) still shows up here for the headline score.
+        an issue) still shows up here with its verdict.  The check's reply
+        carries no score, so neither does this: a default beside a real
+        verdict would be a number nobody measured.
         """
         now = time.time()
         active_sessions = self.list_sessions(
@@ -2124,7 +2125,6 @@ class PrintHealthMonitor:
                 and s.get("kind") is not None
             })
             risk = {
-                "score": assessment.get("risk_score", 0.0),
                 "severity": assessment.get("severity", "clear"),
                 "kinds": kinds,
             }

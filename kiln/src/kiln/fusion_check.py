@@ -6,7 +6,12 @@ share no volume.  Every classical mesh check passes it: a boolean union
 leaves it as two disconnected bodies with zero warnings, and two
 disjoint closed shells are watertight and edge-manifold.  Visually the
 part reads as detached, structurally the junction is a sub-millimeter
-air channel, and a slicer prints two separate shells.
+air channel, and a slicer joins the two by a sliver at most.
+
+Pieces that share a surface, or where one sinks into the other, are one
+solid (:mod:`kiln.mesh_bodies`): a coat modelled on a body, letters set on
+a sign, sprinkles sunk in icing.  A slicer prints them as one part, so they
+are never a finding here and never float.
 
 This module is the shared detector every composition door calls — one
 helper, never a per-door reimplementation.  It never raises and never
@@ -106,7 +111,9 @@ def _sample_points(mesh: Any) -> Any:
 
     points = [mesh.vertices]
     try:
-        sampled, _fid = trimesh.sample.sample_surface(mesh, _GAP_SAMPLES)
+        # Seeded: the same body gives the same points, so a gap measured
+        # either side of a threshold always lands on the same side.
+        sampled, _fid = trimesh.sample.sample_surface(mesh, _GAP_SAMPLES, seed=0)
         points.append(sampled)
     except Exception:  # noqa: BLE001 — vertices alone still work
         pass
@@ -211,10 +218,58 @@ def check_fusion(
         mesh = load_mesh(mesh_path, force="mesh")
         if getattr(mesh, "is_empty", False) or len(getattr(mesh, "faces", [])) == 0:
             return {"checked": False, "reason": "mesh has no geometry"}
-        bodies = mesh.split(only_watertight=False)
+        bodies, solid_of = _pieces(mesh)
     except Exception as exc:  # noqa: BLE001
         return {"checked": False, "reason": f"mesh could not be loaded: {exc}"}
+    return _judge(bodies, solid_of, expect_single_body=expect_single_body, max_pairs=max_pairs)
 
+
+def floating_pieces(triangles: Any) -> list[int]:
+    """Which pieces of a triangle soup float: in the air, joined to nothing,
+    held by nothing.  Indices are the pieces of
+    :func:`kiln.mesh_bodies.read_triangles` on the same soup, so a door that
+    removes scrap removes exactly what this check calls scrap and never a
+    piece of the part.
+    """
+    from kiln.mesh_bodies import read_triangles
+
+    tri = np.asarray(triangles, dtype=np.float64).reshape(-1, 3, 3)
+    reading = read_triangles(tri)
+    if reading.piece_count < 2:
+        return []
+    report = judge_reading(tri, reading)
+    return sorted(
+        i - 1 for f in report["findings"] if f["relation"] == "floating" for i in f["bodies"]
+    )
+
+
+def judge_reading(triangles: Any, reading: Any) -> dict[str, Any]:
+    """:func:`check_fusion`'s report on a triangle soup that
+    :func:`kiln.mesh_bodies.read_triangles` already read as *reading*: bodies
+    are numbered as the reading's pieces (from 1), and nothing is read twice.
+    A plate of parts sits on the bed, so only the contact and air findings
+    are made (``expect_single_body=None``)."""
+    import trimesh
+
+    tri = np.asarray(triangles, dtype=np.float64).reshape(-1, 3, 3)
+    bodies = []
+    for i in range(reading.piece_count):
+        own = tri[reading.face_piece == i]
+        bodies.append(trimesh.Trimesh(
+            vertices=own.reshape(-1, 3), faces=np.arange(len(own) * 3).reshape(-1, 3),
+            process=True,
+        ))
+    return _judge(bodies, list(reading.solid_of), expect_single_body=None, max_pairs=_MAX_PAIRS)
+
+
+def _judge(
+    bodies: list[Any],
+    solid_of: list[int],
+    *,
+    expect_single_body: bool | None,
+    max_pairs: int,
+) -> dict[str, Any]:
+    """:func:`check_fusion` on pieces already read."""
     # The bed is wherever the part's lowest SUBSTANTIAL point is, not z=0:
     # a model exported at z=50 is not "all floating", and one stray sliver
     # at the floor does not make everything above it float.
@@ -227,24 +282,35 @@ def check_fusion(
     floor_z = min(float(bodies[i].bounds[0][2]) for i in substantial)
     lifts = [float(b.bounds[0][2]) - floor_z for b in bodies]
     airborne = [i for i, lift in enumerate(lifts) if lift > BED_LIFT_MM]
+    # A piece in one solid with a piece on the bed is held up by it: a coat
+    # on a body, a letter on its sign, a sprinkle sunk in the icing.
+    on_bed = {solid_of[i] for i in range(len(bodies)) if i not in airborne}
+    held = {i for i in airborne if solid_of[i] in on_bed}
+    solids = len(set(solid_of))
     result: dict[str, Any] = {
         "checked": True,
         "body_count": len(bodies),
-        "fused": len(bodies) <= 1,
+        "solid_count": solids,
+        "fused": solids <= 1,
         "grounded_bodies": len(bodies) - len(airborne),
+        # The bodies (from 1) in the air that no solid on the bed holds up.
+        "unheld_bodies": [i + 1 for i in airborne if i not in held],
         "floating_bodies": 0,
         "captive_bodies": 0,
         "void_shells": 0,
         "findings": [],
     }
-    if len(bodies) <= 1:
+    if solids <= 1 and not any(volumes[i] < 0 for i in airborne):
         return result
 
     # Attachments meet a host: measure each smaller body against the
-    # largest first, then adjacent pairs while the budget lasts.
+    # largest first, then adjacent pairs while the budget lasts.  Two pieces
+    # of one solid share material, so there is nothing to measure between
+    # them.
     order = sorted(range(len(bodies)), key=lambda i: -abs(float(bodies[i].area)))
     pairs = [(order[0], i) for i in order[1:]]
     pairs += [(a, b) for a, b in zip(order[1:], order[2:], strict=False)]
+    pairs = [(a, b) for a, b in pairs if solid_of[a] != solid_of[b]]
     for a, b in pairs[:max_pairs]:
         try:
             gap = _pair_gap_mm(bodies[a], bodies[b])
@@ -263,11 +329,11 @@ def check_fusion(
         floor = embedment_floor_mm()
         if relation == "touching":
             message = (
-                f"bodies {a + 1} and {b + 1} touch (gap {gap:.3f}mm) but share "
-                "no material — flush/tangent contact welds nothing, so they "
-                "will print as separate shells. If they are meant to be one "
-                f"part, sink the attachment at least {floor}mm into the host "
-                "and re-compose."
+                f"bodies {a + 1} and {b + 1} touch (gap {gap:.3f}mm) but barely "
+                "share material: they meet along a line, at a point or at a "
+                "small patch, so a slicer joins them by a sliver at most and the "
+                "joint will not hold. If they are meant to be one part, sink the "
+                f"attachment at least {floor}mm into the host and re-compose."
             )
         elif relation == "near":
             message = (
@@ -287,6 +353,7 @@ def check_fusion(
                 "gap_mm": round(gap, 3),
                 "relation": relation,
                 "message": message,
+                "volumes_mm3": [round(abs(volumes[a]), 3), round(abs(volumes[b]), 3)],
             }
         )
 
@@ -298,11 +365,16 @@ def check_fusion(
         if f["relation"] in ("touching", "near")
         for i in f["bodies"]
     }
-    unplaced = [i for i in airborne if i + 1 not in named]
+    shells = [i for i, v in enumerate(volumes) if v < 0 and _within_bounds(bodies[i], bodies)]
+    # A held piece is part of a solid on the bed, so it is never floating;
+    # an inner wall is still said as the void it is.
+    unplaced = [i for i in airborne if i + 1 not in named and (i not in held or i in shells)]
     if not unplaced:
         return result
-    shells = [i for i, v in enumerate(volumes) if v < 0 and _within_bounds(bodies[i], bodies)]
-    grounded = [i for i in range(len(bodies)) if i not in airborne and i not in shells]
+    grounded = [
+        i for i in range(len(bodies))
+        if (i not in airborne or i in held) and i not in shells
+    ]
     try:
         host = _concatenate([bodies[i] for i in grounded]) if grounded else None
     except Exception as exc:  # noqa: BLE001 — gaps then go unmeasured, never invented
@@ -371,10 +443,11 @@ def _contact_group_finding(members: list[int], relation: str) -> dict[str, Any]:
     floor = embedment_floor_mm()
     if relation == "touching":
         message = (
-            f"{n} more piece{'s' if n != 1 else ''} touch the part without "
-            "sharing material — flush contact welds nothing, so they print as "
-            "separate shells. If they are meant to be one part, sink them at "
-            f"least {floor}mm into it."
+            f"{n} more piece{'s' if n != 1 else ''} touch the part but barely "
+            "share material: they meet it along a line, at a point or at a "
+            "small patch, so a slicer joins them by a sliver at most and the "
+            f"joint will not hold. If they are meant to be one part, sink them "
+            f"at least {floor}mm into it."
         )
     else:
         message = (
@@ -384,6 +457,28 @@ def _contact_group_finding(members: list[int], relation: str) -> dict[str, Any]:
             "designed clearance, no action needed."
         )
     return {"bodies": [i + 1 for i in members], "relation": relation, "message": message}
+
+
+def _pieces(mesh: Any) -> tuple[list[Any], list[int]]:
+    """The mesh's pieces as every door reads them (:mod:`kiln.mesh_bodies`),
+    each as its own mesh, and the solid each prints in.
+
+    A face-adjacency split cuts two pieces laid on each other into hundreds
+    of fragments along their contact (2026-10-23: a Blender donut of 62
+    pieces read as 1,465 bodies, 1,052 of them "floating"), and how many
+    depended on the unit the file was written in.
+    """
+    import numpy as np
+
+    from kiln.mesh_bodies import read_mesh
+
+    reading = read_mesh(mesh)
+    labels = reading.face_piece
+    order = np.argsort(labels, kind="stable")
+    bounds = np.searchsorted(labels[order], np.arange(reading.piece_count + 1))
+    groups = [order[bounds[i] : bounds[i + 1]] for i in range(reading.piece_count)]
+    bodies = list(mesh.submesh(groups, append=False, only_watertight=False))
+    return bodies, list(reading.solid_of) or list(range(len(bodies)))
 
 
 def _signed_volume(body: Any) -> float:

@@ -519,10 +519,12 @@ class TestFormatSupport:
         path = _write_two_object_3mf(tmp_dir)
         report = diagnose_mesh(path)
         # Both boxes' triangles are present (12 each), and they surface as
-        # two disconnected fragments rather than one merged solid.
+        # two pieces rather than one merged solid.  Both stand on the bed, so
+        # they are a plate of parts, not floating scrap: this used to read
+        # any second piece as a fragment to delete.
         assert report.face_count == 24
         assert report.component_count == 2
-        assert report.has_floating_fragments is True
+        assert report.has_floating_fragments is False
 
 
 # ---------------------------------------------------------------------------
@@ -725,3 +727,29 @@ class TestMCPPlugin:
         # Message should mention severity for defective meshes.
         msg = result["message"].lower()
         assert any(word in msg for word in ("severity", "defect", "clean", "minor", "moderate", "severe"))
+
+
+class TestZeroAreaFacesAreNotInvertedNormals:
+    """A zero-area face has no side to face, so its winding says nothing.
+    Every zero-area sliver a bevel leaves used to read as an inverted normal
+    too: the Blender donut in the corpus was told 96 of its faces (3.7%) were
+    inside out, beside the 192 zero-area faces that were the whole story."""
+
+    DONUT = Path(__file__).parent / "real_exports" / "donut_mm.stl"
+
+    def test_the_bevel_slivers_are_counted_once(self):
+        report = diagnose_mesh(str(self.DONUT))
+        assert report.degenerate_face_count == 192
+        assert report.normals.consistent is True and report.normals.inverted_count == 0
+        assert not any("inverted normals" in d for d in report.defects)
+
+    def test_the_rest_of_the_surface_really_is_wound_one_way(self):
+        # The independent reading: trimesh's own winding check, once the
+        # zero-area faces are set aside.
+        mesh = trimesh.load(str(self.DONUT), force="mesh")
+        keep = mesh.area_faces > 1e-14 * float((mesh.extents ** 2).sum())
+        assert mesh.submesh([np.nonzero(keep)[0]], append=True).is_winding_consistent
+
+    def test_the_count_is_the_same_in_metres(self):
+        metres = diagnose_mesh(str(self.DONUT.with_name("donut_m.stl")))
+        assert metres.degenerate_face_count == 192 and metres.normals.inverted_count == 0

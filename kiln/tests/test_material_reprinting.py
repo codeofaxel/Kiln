@@ -786,9 +786,12 @@ def _make_square_stl(size: float = 10.0) -> str:
 def _read_3mf_placements(path_3mf: str) -> tuple[list[dict], list[str]]:
     """Parse a 3MF into per-item placement facts.
 
-    Returns ([{tx, ty, extruder, world_bbox}], zip_namelist).  Every build
-    item MUST carry a transform — an item without one is the coincident-
-    copies defect coming back.
+    Returns ([{tx, ty, extruder, world_bbox}], zip_namelist), one entry per
+    PART.  Every build item MUST carry a transform — an item without one is
+    the coincident-copies defect coming back.  An item whose object holds
+    ``<components>`` (parts that touch, joined into one object) contributes
+    one entry per component: the item's translation plus the component's,
+    and the extruder of its ``<part>`` in ``Metadata/model_settings.config``.
     """
     import xml.etree.ElementTree as ET
     import zipfile
@@ -798,31 +801,53 @@ def _read_3mf_placements(path_3mf: str) -> tuple[list[dict], list[str]]:
     with zipfile.ZipFile(path_3mf) as zf:
         names = zf.namelist()
         root = ET.fromstring(zf.read("3D/3dmodel.model"))
+        settings = ET.fromstring(zf.read("Metadata/model_settings.config"))
+
+    part_extruder: dict[tuple[str, str], int] = {}
+    for obj in settings.iter("object"):
+        for part in obj.findall("part"):
+            for md in part.findall("metadata"):
+                if md.get("key") == "extruder":
+                    part_extruder[(obj.get("id"), part.get("id"))] = int(md.get("value"))
 
     obj_bboxes: dict[str, tuple[float, float, float, float]] = {}
+    components: dict[str, list] = {}
     for obj in root.findall(".//m:object", ns):
         xs, ys = [], []
         for v in obj.findall(".//m:vertex", ns):
             xs.append(float(v.get("x")))
             ys.append(float(v.get("y")))
-        obj_bboxes[obj.get("id")] = (min(xs), min(ys), max(xs), max(ys))
+        if xs:
+            obj_bboxes[obj.get("id")] = (min(xs), min(ys), max(xs), max(ys))
+        components[obj.get("id")] = obj.findall(".//m:component", ns)
+
+    def _translation(el) -> tuple[float, float]:
+        transform = el.get("transform")
+        assert transform is not None, "build item has no transform (stacked at origin)"
+        vals = [float(t) for t in transform.split()]
+        return vals[9], vals[10]
 
     items: list[dict] = []
     for item in root.findall(".//m:item", ns):
-        transform = item.get("transform")
-        assert transform is not None, "build item has no transform (stacked at origin)"
-        vals = [float(t) for t in transform.split()]
-        tx, ty = vals[9], vals[10]
-        extruder = item.get(slic3r_extruder)
-        mn_x, mn_y, mx_x, mx_y = obj_bboxes[item.get("objectid")]
-        items.append(
-            {
-                "tx": tx,
-                "ty": ty,
-                "extruder": int(extruder) if extruder is not None else None,
-                "world_bbox": (mn_x + tx, mn_y + ty, mx_x + tx, mx_y + ty),
-            }
-        )
+        tx, ty = _translation(item)
+        obj_id = item.get("objectid")
+        placed = [(obj_id, 0.0, 0.0, item.get(slic3r_extruder))]
+        if components[obj_id]:
+            placed = [
+                (c.get("objectid"), *_translation(c), part_extruder[(obj_id, c.get("objectid"))])
+                for c in components[obj_id]
+            ]
+        for part_id, cx, cy, extruder in placed:
+            mn_x, mn_y, mx_x, mx_y = obj_bboxes[part_id]
+            px, py = tx + cx, ty + cy
+            items.append(
+                {
+                    "tx": px,
+                    "ty": py,
+                    "extruder": int(extruder) if extruder is not None else None,
+                    "world_bbox": (mn_x + px, mn_y + py, mx_x + px, mx_y + py),
+                }
+            )
     return items, names
 
 

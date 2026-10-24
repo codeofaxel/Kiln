@@ -5111,7 +5111,7 @@ def _render_smart_monitoring_panel(health_monitor, printer_name: str) -> None:
         severity = (risk.get("severity") or "clear").lower()
         body_lines.append((
             _SEVERITY_COLOR.get(severity, "default"),
-            f"Risk: {risk.get('score', 0.0):.2f} {severity} ({kinds_str})",
+            f"Risk: {severity} ({kinds_str})",
         ))
 
     pred = signals.get("predictive")
@@ -6888,8 +6888,10 @@ def ingest_watch_cmd(
                 "file": str(path),
                 "printer": chosen,
             }
-            if routing_data:
-                row["score"] = routing_data.get("recommended_printer", {}).get("score")
+            # Why the router chose it, in the sentence its routing document
+            # carries for the pick.
+            if routing_data and routing_data.get("why"):
+                row["why"] = routing_data["why"]
             queued.append(row)
             if not json_mode:
                 click.echo(f"Queued: {path.name} -> {chosen}")
@@ -13388,8 +13390,9 @@ def validate(file_path: str, json_mode: bool) -> None:
                 )
             )
         else:
+            # The verdict is the answer; --json carries the score for
+            # comparing versions.
             click.echo(verdict_text)
-            click.echo(f"Score: {report.score}/100  Grade: {report.grade}")
             if report.recommendations:
                 click.echo("Issues:")
                 for rec in report.recommendations:

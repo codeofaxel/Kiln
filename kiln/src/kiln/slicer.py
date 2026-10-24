@@ -45,6 +45,7 @@ from kiln.slicer_material import MaterialRefused
 from kiln.slicer_orca import (
     PRIME_TOWER_WIDTH_MM,
     ini_to_settings,
+    outside_brim_mm,
     write_orca_presets,
 )
 from kiln.slicer_supports import SliceSupports, ensure_profile_supports, witnessed
@@ -144,6 +145,34 @@ class MaterialNotPrintableError(SlicerError):
         super().__init__(message)
         self.code = code
         self.verdict = verdict or {}
+
+
+#: Part of the print lands off the printable area of the bed.
+REFUSED_OFF_THE_BED = "off_the_bed"
+#: The print paths of two objects on the plate collide.
+REFUSED_PATHS_COLLIDE = "paths_collide"
+
+
+class SlicerRefusal(SlicerError):
+    """The slicer finished the slice and refused the result.
+
+    A verdict about the print as placed, never a crash: no G-code it wrote
+    is kept, and the message says what was refused and the fix.  ``kind`` is
+    what it refused (:data:`REFUSED_OFF_THE_BED`, :data:`REFUSED_PATHS_COLLIDE`),
+    so a door that can fix the cause (dropping a skirt) answers the refusal
+    itself rather than its words; ``code`` is the door's error code;
+    ``objects`` the names the slicer gave the objects, when it gave any;
+    ``slicer`` the binary that refused.
+    """
+
+    def __init__(
+        self, message: str, *, kind: str, code: str, slicer: str, objects: tuple[str, ...] = (),
+    ) -> None:
+        super().__init__(message)
+        self.kind = kind
+        self.code = code
+        self.slicer = slicer
+        self.objects = objects
 
 
 # ---------------------------------------------------------------------------
@@ -472,6 +501,55 @@ def _record_slice(
 # fine.  So it is upstream and profile-specific, not a Kiln argv or preset bug.
 _ORCA_SIGSEGV_RETURNCODES = frozenset({-11, 139})
 
+# The other way the Orca dialect exits non-zero: it finishes the slice,
+# finds the result unprintable and exits with a status of its own.  Complete
+# G-code may already be on disk, and it is a refusal, not a crash to look
+# past.  The slicer's own words are read first, then the statuses.
+_ORCA_REFUSAL_WORDS = (
+    (REFUSED_OFF_THE_BED, re.compile(r"found gcode (?:in )?unprintable", re.IGNORECASE)),
+    (REFUSED_PATHS_COLLIDE, re.compile(r"path conflicts? found", re.IGNORECASE)),
+)
+_ORCA_REFUSAL_STATUSES = {154: REFUSED_OFF_THE_BED, 155: REFUSED_PATHS_COLLIDE}
+#: The two objects the slicer names in a path conflict.
+_PATH_CONFLICT_OBJECTS = re.compile(r"path conflicts? found between (.+?) and (.+?)\s*$", re.IGNORECASE | re.MULTILINE)
+
+
+def _orca_refusal(slicer_name: str, returncode: int, said: str) -> SlicerRefusal | None:
+    """The refusal an Orca-dialect exit is, in the person's terms, or ``None``.
+
+    Only an exit the slicer chose (a positive status) can be one: a death by
+    signal is a crash, whatever was logged before it.
+    """
+    if returncode <= 0:
+        return None
+    kind = next((k for k, words in _ORCA_REFUSAL_WORDS if words.search(said)), None)
+    kind = kind or _ORCA_REFUSAL_STATUSES.get(returncode)
+    if kind == REFUSED_OFF_THE_BED:
+        return SlicerRefusal(
+            f"{slicer_name} refused to slice: as placed, part of the print would land off the "
+            f"printable area of the bed (the skirt or brim around a part at the bed edge, or the "
+            f"prime tower). Move the part in from the bed edge, or re-place it, and slice again.",
+            kind=kind, code="PRINTS_PAST_BED", slicer=slicer_name,
+        )
+    if kind == REFUSED_PATHS_COLLIDE:
+        named = _PATH_CONFLICT_OBJECTS.search(said)
+        objects = tuple(n.strip() for n in named.groups()) if named else ()
+        which = f', "{objects[0]}" and "{objects[1]}",' if objects else ""
+        return SlicerRefusal(
+            f"{slicer_name} refused to slice: as placed, the print paths of two objects on the "
+            f"plate{which} would collide. Move them apart, or join them into one object, and "
+            f"slice again.",
+            kind=kind, code="OBJECTS_COLLIDE", slicer=slicer_name, objects=objects,
+        )
+    return None
+
+
+def _signal_of(returncode: int) -> int:
+    """The signal a crash status names: ``-11`` from Python, ``139`` (128 + 11)
+    as a shell reports the same death."""
+    return -returncode if returncode < 0 else returncode - 128
+
+
 # The macOS locale-race startup crash, slicer spelling.  The same libc race
 # kiln.openscad_runner retries for OpenSCAD kills PrusaSlicer too: seven
 # crash reports on one machine 2026-08-11..2026-08-17, every one SIGTRAP
@@ -568,8 +646,8 @@ def _bed_xy_bounds_from_profile(
 
 
 # Clearance kept between the prime tower and both the bed edge and the
-# model's footprint.  Covers the tower's own brim (3 mm) with room to
-# spare, without eating plate space a small bed does not have.
+# model's footprint (its brim included).  Covers the tower's own brim (3 mm)
+# with room to spare, without eating plate space a small bed does not have.
 _PRIME_TOWER_MARGIN_MM = 5.0
 
 
@@ -629,13 +707,16 @@ def _wipe_tower_position(
     if not bbox:
         return corner
 
+    # The model's brim is part of what its first layer prints, so the tower
+    # keeps its margin from the brim's outside edge.
+    gap = m + outside_brim_mm(settings)
     cx = (bbox["x_min"] + bbox["x_max"]) / 2.0 - w / 2.0
     cy = (bbox["y_min"] + bbox["y_max"]) / 2.0 - w / 2.0
     candidates = [
-        (bbox["x_max"] + m, _clamp(cy, bed_y_min + m, bed_y_max - m - w)),
-        (bbox["x_min"] - m - w, _clamp(cy, bed_y_min + m, bed_y_max - m - w)),
-        (_clamp(cx, bed_x_min + m, bed_x_max - m - w), bbox["y_max"] + m),
-        (_clamp(cx, bed_x_min + m, bed_x_max - m - w), bbox["y_min"] - m - w),
+        (bbox["x_max"] + gap, _clamp(cy, bed_y_min + m, bed_y_max - m - w)),
+        (bbox["x_min"] - gap - w, _clamp(cy, bed_y_min + m, bed_y_max - m - w)),
+        (_clamp(cx, bed_x_min + m, bed_x_max - m - w), bbox["y_max"] + gap),
+        (_clamp(cx, bed_x_min + m, bed_x_max - m - w), bbox["y_min"] - gap - w),
     ]
     for x, y in candidates:
         if (
@@ -1006,8 +1087,11 @@ def _slice_with_orca(
         # Orca is a Slic3r derivative, so it inherits the possibility; without
         # this the two paths would disagree about the same event, and a good
         # slice would be thrown away with a message about a Bambu crash.
+        # A crash only: this CLI also exits non-zero AFTER writing complete
+        # G-code when it REFUSES the result (_orca_refusal), and that is a
+        # verdict about the print, not a crash to look past.
         crashed_after_finishing = bool(
-            result.returncode != 0
+            (result.returncode < 0 or result.returncode in _ORCA_SIGSEGV_RETURNCODES)
             and produced
             and _gcode_output_is_complete(str(produced[-1]))
         )
@@ -1040,6 +1124,9 @@ def _slice_with_orca(
                     f"rearrange it) — move the part in from the bed edge, or "
                     f"re-place it, and slice again."
                 )
+            refusal = _orca_refusal(os.path.basename(slicer.path), result.returncode, stderr_snippet)
+            if refusal is not None:
+                raise refusal
             raise SlicerError(f"Slicer exited with code {result.returncode}. stderr: {stderr_snippet[:500]}")
 
         if not produced:
@@ -1069,7 +1156,7 @@ def _slice_with_orca(
     if crashed_after_finishing:
         message += (
             f" (the slicer crashed on exit AFTER writing complete G-code — "
-            f"signal {-result.returncode}; the output was verified complete "
+            f"signal {_signal_of(result.returncode)}; the output was verified complete "
             f"and kept)"
         )
     # The colour the part was asked to be shown -- and printed -- in follows
@@ -1091,7 +1178,52 @@ def _slice_with_orca(
     )
 
 
-def slice_file(
+def slice_file(input_path: str, **kwargs: Any) -> SliceResult:
+    """Slice a 3D model file to G-code (arguments: :func:`_slice_file`).
+
+    The one place every slicing door passes through, so a slice that fails
+    on a part smaller than anything a printer makes says why first: the
+    slicer's own "No layers were detected" names no unit, and the file is
+    most often a model exported in meters.  That sentence of the slicer's
+    goes on to advise repairing the model, which is wrong for a file whose
+    only fault is its unit, so it is said as what it means at that size;
+    any other failure keeps the slicer's words.
+    """
+    try:
+        return _slice_file(input_path, **kwargs)
+    except (SlicerNotFoundError, MaterialNotPrintableError, SlicerRefusal):
+        # A refusal is about where the print lands, never its unit, and a
+        # door answers it by its kind: rewrapped, it would lose both.
+        raise
+    except SlicerError as exc:
+        question = _units_question_for(input_path)
+        if not question:
+            raise
+        said = str(exc)
+        if _NO_LAYERS.search(said):
+            raise SlicerError(f"{question}  At that size the slicer found no layer to print.") from exc
+        raise SlicerError(f"{question}  The slicer said: {said}") from exc
+
+
+#: The slicer's words for a model too thin to cut into a single layer.
+_NO_LAYERS = re.compile(r"no layers were detected", re.IGNORECASE)
+
+
+def _units_question_for(path: str) -> str:
+    """The units question *path*'s size raises (``kiln.printability``), or
+    ``""`` when it raises none or cannot be measured."""
+    try:
+        from kiln.printability import units_question
+        from kiln.printers.bed_fit import compute_mesh_bbox
+
+        bbox = compute_mesh_bbox(path)
+        return units_question(bbox) if bbox else ""
+    except Exception:  # noqa: BLE001 - a size nobody can read asks nothing
+        logger.debug("units question unavailable for %s", path, exc_info=True)
+        return ""
+
+
+def _slice_file(
     input_path: str,
     *,
     output_dir: str | None = None,
@@ -1295,11 +1427,65 @@ def slice_file(
             )
         return result
 
+    # PrusaSlicer reads each component of a joined object as an object of
+    # its own, so a 3MF whose objects hold several parts is handed over in
+    # PrusaSlicer's own multi-part form (one object, one volume per part).
+    slic3r_input = input_abs
+    parts_dir: str | None = None
+    if ext == ".3mf":
+        from kiln.multicolor_3mf import prusa_multipart_copy
+
+        parts_dir = tempfile.mkdtemp(prefix="kiln_prusa_parts_")
+        joined_copy = os.path.join(parts_dir, Path(input_abs).name)
+        if prusa_multipart_copy(input_abs, joined_copy):
+            slic3r_input = joined_copy
+    try:
+        return _slice_with_slic3r(
+            slicer,
+            input_abs,
+            slic3r_input,
+            out_file,
+            profile=profile,
+            slicer_profile=slicer_profile,
+            extra_args=extra_args,
+            timeout=timeout,
+            filament=filament,
+            nozzle=nozzle,
+            supports=supports,
+            drawn=drawn,
+            input_path=input_path,
+        )
+    finally:
+        if parts_dir is not None:
+            shutil.rmtree(parts_dir, ignore_errors=True)
+
+
+def _slice_with_slic3r(
+    slicer: SlicerInfo,
+    input_abs: str,
+    slic3r_input: str,
+    out_file: str,
+    *,
+    profile: str | None,
+    slicer_profile: str | None,
+    extra_args: list[str] | None,
+    timeout: int,
+    filament: SliceFilament,
+    nozzle: dict[str, Any] | None,
+    supports: SliceSupports,
+    drawn: str | None,
+    input_path: str,
+) -> SliceResult:
+    """The PrusaSlicer-dialect run of :func:`slice_file`.
+
+    *slic3r_input* is the file handed to the slicer (*input_abs*, or its
+    multi-part copy); everything recorded and reported names *input_abs*.
+    """
     # Build command
     cmd: list[str] = [
         slicer.path,
         "--export-gcode",
-        input_abs,
+        slic3r_input,
         "--output",
         out_file,
     ]

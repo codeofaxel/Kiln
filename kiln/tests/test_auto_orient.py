@@ -895,34 +895,119 @@ def _served_ranking(monkeypatch, reply) -> list[dict]:
     return sent
 
 
-def _stand_in_scorer(monkeypatch, score_fn) -> list[dict]:
-    """Install a stand-in scorer module; returns the facts it was handed."""
-    seen: list[dict] = []
+def _stand_in_ranking(monkeypatch, score_fn) -> list[dict]:
+    """Install a stand-in for kiln-pro's ranking, as on Kiln's servers: it
+    scores each pose with *score_fn* and answers as kiln-pro's
+    ``rank_for_the_wire`` does, the poses' order best first and no score
+    (``known: False`` when *score_fn* answers ``None``).  The module carries
+    ``score_orientation`` too, as kiln-pro's does, so a bridge that asked for
+    the scores themselves would find them.  Returns every pose either was
+    handed; a ranking ask is marked ``asked_as_one_part``."""
+    handed: list[dict] = []
 
     def score_orientation(facts):
-        seen.append(dict(facts))
+        handed.append(dict(facts))
         return score_fn(facts)
 
+    def rank_for_the_wire(candidates):
+        handed.extend({**c, "asked_as_one_part": len(candidates)} for c in candidates)
+        scores = [score_fn(c) for c in candidates]
+        if any(score is None for score in scores):
+            return {"success": True, "status": "ok", "known": False, "order": None}
+        order = sorted(range(len(candidates)), key=lambda i: scores[i], reverse=True)
+        return {"success": True, "status": "ok", "known": True, "order": order}
+
     module = types.ModuleType(_SCORER_MODULE)
+    module.rank_for_the_wire = rank_for_the_wire
     module.score_orientation = score_orientation
     monkeypatch.setitem(sys.modules, _SCORER_MODULE, module)
-    return seen
+    return handed
+
+
+def _numbers(value) -> list[float]:
+    """Every number anywhere in *value* (a reply or a result's dict)."""
+    if isinstance(value, bool):
+        return []
+    if isinstance(value, (int, float)):
+        return [float(value)]
+    if isinstance(value, dict):
+        return [n for v in value.values() for n in _numbers(v)]
+    if isinstance(value, (list, tuple)):
+        return [n for v in value for n in _numbers(v)]
+    return []
+
+
+#: A stand-in score no measurement in a reply could equal by chance: it sits
+#: far above every share, height and area a 10 x 10 x 80 mm pillar reports.
+def _far_score(facts) -> float:
+    return 5000.0 + 7.31 * facts["print_height_mm"]
+
+
+def _measured(stl: str, rotation: tuple[float, float, float]):
+    """``_measure_orientation`` of *stl* turned by *rotation*, measured here
+    again: ``(floor_pose, facts)``."""
+    from kiln.auto_orient import _measure_orientation, _parse_mesh
+
+    triangles, _ = _parse_mesh(stl)
+    return _measure_orientation(_rotate_triangles(triangles, _build_rotation_matrix(*rotation)))
+
+
+def _poses_of(result: dict) -> list[tuple[float, float, float]]:
+    """The rotation of every pose a result (as a dict) names."""
+    return [(c["rotation_x"], c["rotation_y"], c["rotation_z"])
+            for c in (result["best"], *result["alternatives"], result["original"])]
+
+
+def _stand_in_scores_of(stl: str, result: dict) -> set[float]:
+    """What the stand-in scores every pose *result* names, as the reply
+    would carry it (rounded to a tenth) and unrounded."""
+    raw = {_far_score(_measured(stl, rotation)[1]) for rotation in _poses_of(result)}
+    return raw | {round(score, 1) for score in raw}
+
+
+def _two_overlapping_prisms_stl(tmp_path) -> str:
+    """Two 20 x 20 x 10 mm prisms left overlapping, un-merged (the second
+    shifted 5 mm along X and along Y): each body's bottom counts on its own,
+    so 800 mm2 of contact over a 25 x 25 mm footprint reads 128%."""
+    prisms = []
+    for x0, y0 in ((0.0, 0.0), (5.0, 5.0)):
+        x1, y1, h = x0 + 20.0, y0 + 20.0, 10.0
+        v = [(x0, y0, 0), (x1, y0, 0), (x1, y1, 0), (x0, y1, 0),
+             (x0, y0, h), (x1, y0, h), (x1, y1, h), (x0, y1, h)]
+        for a, b, c in ((0, 2, 1), (0, 3, 2), (4, 5, 6), (4, 6, 7), (0, 1, 5), (0, 5, 4),
+                        (2, 3, 7), (2, 7, 6), (0, 4, 7), (0, 7, 3), (1, 2, 6), (1, 6, 5)):
+            prisms.append((v[a], v[b], v[c]))
+    path = os.path.join(str(tmp_path), "two_overlapping_prisms.stl")
+    with open(path, "wb") as f:
+        f.write(b"\x00" * 80)
+        f.write(struct.pack("<I", len(prisms)))
+        for tri in prisms:
+            f.write(struct.pack("<3f", 0.0, 0.0, 0.0))
+            for vertex in tri:
+                f.write(struct.pack("<3f", *vertex))
+            f.write(struct.pack("<H", 0))
+    return path
 
 
 class TestOrientationScoringSeam:
-    """Pin the seam in ``_score_orientation``.
+    """Pin the seam in ``find_optimal_orientation``.
 
-    - No kiln-pro scorer (a plain install): the score is the bed-contact
-      percentage, nothing else.
-    - A scorer that answers: its score replaces the floor.
-    - A scorer that answers ``None`` or fails: the floor answers.
+    - No kiln-pro ranking (a plain install on the free plan): the poses are
+      ranked by bed contact, and the score is the bed-contact percentage.
+    - A ranking that answers: its ORDER decides which pose is best, and
+      every score shown stays the floor's.  Until 2026-10-23 the ranking in
+      process (Kiln's own servers) handed public Kiln a score per pose, and
+      those scores were the reply's ``score``, ``original_score`` and
+      ``improvement_percentage``: Kiln Pro's arithmetic beside the facts it
+      was worked out from.
+    - A ranking that has no answer or fails: the floor answers.
 
-    The four geometry facts are identical either way; only ``score`` moves.
-    How Kiln Pro ranks is judged in kiln-pro's own suite.
+    The four geometry facts are identical either way.  How Kiln Pro ranks is
+    judged in kiln-pro's own suite.
     """
 
     def test_plain_install_scores_by_bed_contact(self, tmp_path, monkeypatch):
-        """With the scorer unimportable, a short and a tall prism on the same
+        """With the ranking unimportable, a short and a tall prism on the same
         base score the same: height, support and overhang do not enter."""
         _hide_scorer(monkeypatch)
         from kiln import _pro_orientation_bridge
@@ -934,48 +1019,62 @@ class TestOrientationScoringSeam:
         assert short.original_score == tall.original_score
         assert short.original_score > 0
 
-    def test_scorer_score_replaces_the_floor(self, tmp_path, monkeypatch):
-        """A scorer that answers sets ``score``; the facts it is handed are
-        the ones the candidate reports."""
-        seen = _stand_in_scorer(monkeypatch, lambda facts: 12.5)
-        result = find_optimal_orientation(_make_flat_cube_stl(tmp_path, 20, 20, 5), candidates=1)
-        assert result.original_score == 12.5
-        assert result.best.score == 12.5
-        assert seen, "the scorer was never asked"
-        assert {"bed_contact_pct", "support_pct", "print_height_mm", "overhang_pct"} <= set(seen[0])
+    def test_kiln_pro_s_order_decides_and_no_score_of_its_own_crosses(self, tmp_path, monkeypatch):
+        """A/B: the stand-in prefers the TALL pose, so its order keeps a
+        pillar standing where the floor lays it down; before 2026-10-23 its
+        scores (5000 and up) were also every ``score`` in the result."""
+        stl = _make_flat_cube_stl(tmp_path, 10, 10, 80)
+        handed = _stand_in_ranking(monkeypatch, _far_score)
+        result = find_optimal_orientation(stl)
+        shown = result.to_dict()
 
-    def test_scorer_answering_none_is_the_floor(self, tmp_path, monkeypatch):
+        assert not _stand_in_scores_of(stl, shown) & set(_numbers(shown))
+        # Every score is the bed-contact percentage the pose measures.
+        for c in (result.best, *result.alternatives, result.original):
+            assert c.score == _measured(stl, (c.rotation_x, c.rotation_y, c.rotation_z))[0][0], c
+        assert result.original_score == 100.0 and result.improvement_percentage == 0.0
+        # The control: Kiln Pro's order was really applied, asked once for
+        # the whole part with the four facts of each pose.
+        assert result.best.print_height_mm == pytest.approx(80.0, abs=0.01), "the order was applied"
+        assert handed and all(pose.get("asked_as_one_part") == len(handed) for pose in handed)
+        assert all(set(pose) - {"asked_as_one_part"} == {"bed_contact_pct", "support_pct", "print_height_mm", "overhang_pct"}
+                   for pose in handed)
+
+    def test_a_ranking_with_no_answer_is_the_floor(self, tmp_path, monkeypatch):
         stl = _make_flat_cube_stl(tmp_path, 20, 20, 5)
         _hide_scorer(monkeypatch)
         floor = find_optimal_orientation(stl)
-        _stand_in_scorer(monkeypatch, lambda facts: None)
+        _stand_in_ranking(monkeypatch, lambda facts: None)
         assert find_optimal_orientation(stl).to_dict() == floor.to_dict()
 
-    def test_failing_scorer_falls_back_to_the_floor(self, tmp_path, monkeypatch):
-        """A broken scorer never takes the tool down: the floor answers."""
+    def test_failing_ranking_falls_back_to_the_floor(self, tmp_path, monkeypatch):
+        """A broken ranking never takes the tool down: the floor answers."""
         stl = _make_flat_cube_stl(tmp_path, 20, 20, 5)
         _hide_scorer(monkeypatch)
         floor = find_optimal_orientation(stl)
 
         def boom(facts):
-            raise RuntimeError("scorer broke")
+            raise RuntimeError("ranking broke")
 
-        _stand_in_scorer(monkeypatch, boom)
+        _stand_in_ranking(monkeypatch, boom)
         assert find_optimal_orientation(stl).to_dict() == floor.to_dict()
 
-    def test_facts_identical_across_the_seam(self, tmp_path, monkeypatch):
-        """Crossing the seam changes the score, never the geometry facts."""
+    def test_facts_and_scores_identical_across_the_seam(self, tmp_path, monkeypatch):
+        """Crossing the seam can change which pose is best, never a fact or a
+        score.  (This asserted until 2026-10-23 that the score DID change:
+        that was Kiln Pro's own score reaching a reply.)"""
         stl_path = _make_flat_cube_stl(tmp_path, 20, 20, 5)
 
         _hide_scorer(monkeypatch)
         free = find_optimal_orientation(stl_path)
 
         # A stand-in that prefers short parts, so its ranking keeps the flat
-        # pose best while every score differs from the floor's.
-        _stand_in_scorer(monkeypatch, lambda facts: 100.0 - facts["print_height_mm"])
+        # pose best.
+        _stand_in_ranking(monkeypatch, lambda facts: 100.0 - facts["print_height_mm"])
         pro = find_optimal_orientation(stl_path)
 
-        assert free.best.score != pro.best.score
+        assert free.best.score == pro.best.score
+        assert free.original_score == pro.original_score
         assert free.best.rotation_x == pro.best.rotation_x
         assert free.best.rotation_y == pro.best.rotation_y
         assert free.best.rotation_z == pro.best.rotation_z
@@ -986,7 +1085,7 @@ class TestOrientationScoringSeam:
 
     def test_orientation_result_shape_identical_across_the_seam(self, tmp_path, monkeypatch):
         """The ``OrientationResult`` shape is the same either side of the
-        seam; only the numeric ``score`` field varies."""
+        seam."""
         import dataclasses
 
         stl_path = _make_flat_cube_stl(tmp_path, 20, 20, 5)
@@ -994,11 +1093,43 @@ class TestOrientationScoringSeam:
         _hide_scorer(monkeypatch)
         free = find_optimal_orientation(stl_path)
 
-        _stand_in_scorer(monkeypatch, lambda facts: 50.0)
+        _stand_in_ranking(monkeypatch, lambda facts: 50.0)
         pro = find_optimal_orientation(stl_path)
 
         assert dataclasses.fields(type(free)) == dataclasses.fields(type(pro))
         assert dataclasses.fields(type(free.best)) == dataclasses.fields(type(pro.best))
+
+    def test_the_tool_s_reply_carries_no_score_of_kiln_pro_s(self, tmp_path, monkeypatch):
+        """The same at the door an agent calls, ``auto_orient_model``."""
+        stl = _make_flat_cube_stl(tmp_path, 10, 10, 80)
+        _stand_in_ranking(monkeypatch, _far_score)
+        reply = _auto_orient_tool()(file_path=stl)
+
+        assert reply["success"] is True
+        assert not _stand_in_scores_of(stl, reply["result"]) & set(_numbers(reply))
+        assert reply["result"]["best"]["print_height_mm"] == pytest.approx(80.0, abs=0.01), "the order was applied"
+
+    def test_a_share_over_the_whole_is_asked_as_the_whole(self, tmp_path, monkeypatch):
+        """Bodies left overlapping count one patch of bed once per body, so
+        the floor reads 128% contact.  The ranking is asked 100%, the most a
+        share can be, which is what the wire accepts: until 2026-10-23 a
+        plain install sent 128 and the servers refused the part."""
+        stl = _two_overlapping_prisms_stl(tmp_path)
+        _hide_scorer(monkeypatch)
+        assert find_optimal_orientation(stl, candidates=1).original_score == 128.0  # the floor's own reading
+
+        handed = _stand_in_ranking(monkeypatch, lambda facts: facts["bed_contact_pct"])
+        result = find_optimal_orientation(stl, candidates=1)
+        assert handed and all(pose["bed_contact_pct"] == 100.0 for pose in handed), handed
+        assert result.original_score == 128.0, "the floor's reading is shown as measured"
+
+        sent = _served_ranking(
+            monkeypatch,
+            lambda kw: {"success": True, "status": "ok", "known": True,
+                        "order": list(range(len(kw["candidates"])))},
+        )
+        find_optimal_orientation(stl, candidates=1)
+        assert sent and all(pose["bed_contact_pct"] <= 100.0 for pose in sent[0]["candidates"])
 
 
 class TestTheFloorKeepsAPartSteady:
@@ -1029,7 +1160,7 @@ class TestTheFloorKeepsAPartSteady:
     def test_a_scorer_s_ranking_still_decides_between_unequal_scores(self, tmp_path, monkeypatch):
         """The lower-part order only splits equal scores: a scorer that
         prefers the tall pose keeps it."""
-        _stand_in_scorer(monkeypatch, lambda facts: facts["print_height_mm"])
+        _stand_in_ranking(monkeypatch, lambda facts: facts["print_height_mm"])
         result = find_optimal_orientation(_make_flat_cube_stl(tmp_path, 10, 10, 80))
         assert result.best.print_height_mm == pytest.approx(80.0, abs=0.01)
 
@@ -1052,8 +1183,9 @@ def _auto_orient_tool():
 
 
 def _stand_in_note(monkeypatch, note_fn) -> None:
+    """kiln-pro's ranking withheld for this call, and its note."""
     module = types.ModuleType(_SCORER_MODULE)
-    module.score_orientation = lambda facts: None
+    module.rank_for_the_wire = lambda candidates: {"success": True, "status": "ok", "known": False, "order": None}
     module.ranking_withheld_note = note_fn
     monkeypatch.setitem(sys.modules, _SCORER_MODULE, module)
 

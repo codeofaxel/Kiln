@@ -17,10 +17,10 @@ import json
 import logging
 import math
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 import numpy as np
 
@@ -31,6 +31,7 @@ from kiln.generation.validation import (
     _is_bed_supported_triangle,
     _mesh_bed_z,
     _parse_mesh_file,
+    in_geometric_order,
     unprintable_geometry_reason,
 )
 
@@ -39,6 +40,38 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Dataclasses
 # ---------------------------------------------------------------------------
+
+
+#: The score's own arithmetic: how many points each check took off, and the
+#: factor the thermal check scaled its charge by.  Never served, at any
+#: tier.  The score and the grade are the answer; a reply says what each
+#: check found and what to do, and nothing reads the points behind it
+#: (2026-10-23).  The in-process report keeps them for the checks that
+#: reconcile the score (``tests/test_printability_score_is_its_stated_deductions.py``).
+_SCORE_ARITHMETIC: frozenset[str] = frozenset({
+    "score_deduction", "stop_deduction", "material_stress_factor",
+})
+
+
+def _served(analysis: Any) -> dict[str, Any]:
+    """*analysis* as a reply carries it: what every ``to_dict`` below returns.
+
+    The score's arithmetic (:data:`_SCORE_ARITHMETIC`) is never served.  A
+    check on public Kiln's own floor serves everything else; its measurements
+    are this file's.  A check Kiln Pro tuned (``analysis.tuned``) keeps its
+    verdict, its reasons and what to do about them, and leaves out the
+    numbers the tuning worked them out from (the class's ``_WORKED_OUT``),
+    which stay in the process that worked them out.  ``tuned`` itself is
+    never served.
+    """
+    out = asdict(analysis)
+    out.pop("tuned", None)
+    for key in _SCORE_ARITHMETIC:
+        out.pop(key, None)
+    if analysis.tuned:
+        for key in analysis._WORKED_OUT:
+            out.pop(key, None)
+    return out
 
 
 @dataclass
@@ -58,9 +91,13 @@ class OverhangAnalysis:
     #: ``max_overhang_angle`` reads 90 on any part with any ceiling.
     max_free_air_overhang_deg: float = 0.0
     score_deduction: int = 0  # what this block took off the score; see _score_terms
+    #: Whether Kiln Pro tuned this check; see :func:`_served`.
+    tuned: bool = field(default=False, repr=False, compare=False)
+
+    _WORKED_OUT: ClassVar[tuple[str, ...]] = ("score_deduction",)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return _served(self)
 
 
 @dataclass
@@ -71,7 +108,9 @@ class ThinWallAnalysis:
     ``threshold_mm``: the nozzle width, or — when kiln-pro supplies one
     (https://kiln3d.com) — the material's minimum wall, so this block and
     a material wall rule never disagree about whether a wall is thin.
-    ``threshold_basis`` says which (``"nozzle"`` or ``"material"``).
+    ``threshold_basis`` says which (``"nozzle"`` or ``"material"``).  A
+    reply about a check Kiln Pro tuned says the basis and not the number
+    (:func:`_served`).
 
     ``problematic_regions`` names every distinct thin feature — one
     thickness at one place — thinnest first, each with a position
@@ -87,9 +126,13 @@ class ThinWallAnalysis:
     threshold_mm: float = 0.0
     threshold_basis: str = "nozzle"
     score_deduction: int = 0  # what this block took off the score; see _score_terms
+    #: Whether Kiln Pro tuned this check; see :func:`_served`.
+    tuned: bool = field(default=False, repr=False, compare=False)
+
+    _WORKED_OUT: ClassVar[tuple[str, ...]] = ("score_deduction", "threshold_mm")
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return _served(self)
 
 
 @dataclass
@@ -138,9 +181,13 @@ class BridgingAnalysis:
     #: against.
     max_free_air_span_mm: float = 0.0
     score_deduction: int = 0  # what this block took off the score; see _score_terms
+    #: Whether Kiln Pro tuned this check; see :func:`_served`.
+    tuned: bool = field(default=False, repr=False, compare=False)
+
+    _WORKED_OUT: ClassVar[tuple[str, ...]] = ("score_deduction",)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return _served(self)
 
 
 @dataclass
@@ -151,9 +198,27 @@ class BedAdhesionAnalysis:
     contact_percentage: float  # % of bounding box footprint
     adhesion_risk: str  # "low", "medium", "high"
     score_deduction: int = 0  # what this block took off the score; see _score_terms
+    # % of the bounding box footprint that the contact's own bounding
+    # rectangle covers: near 100 for a tube or a frame, whose contact runs
+    # around its outline, and small for a part standing on one spot.
+    # ``None`` on reports built directly by a client.
+    contact_span_percentage: float | None = None
+    # % of the bounding box footprint the contact holds down, the figure
+    # ``adhesion_risk`` and the brim decision are read from.  A patch of
+    # contact that runs around an outline (a tube's rim, a frame, a cookie
+    # cutter's edge) holds the area inside it when that patch can carry the
+    # part's height.  For a part on one spot or on a few small feet, and
+    # for one whose contact already reads as good, it is
+    # ``contact_percentage``.  ``None`` on reports built directly by a
+    # client; read it through :func:`graded_contact`.
+    graded_contact_percentage: float | None = None
+    #: Whether Kiln Pro tuned this check; see :func:`_served`.
+    tuned: bool = field(default=False, repr=False, compare=False)
+
+    _WORKED_OUT: ClassVar[tuple[str, ...]] = ("score_deduction",)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return _served(self)
 
 
 @dataclass
@@ -181,9 +246,13 @@ class SupportAnalysis:
     support_regions: list[dict[str, float]]
     likely_substituted_by_bridge: bool = False
     score_deduction: int = 0  # what this block took off the score; see _score_terms
+    #: Whether Kiln Pro tuned this check; see :func:`_served`.
+    tuned: bool = field(default=False, repr=False, compare=False)
+
+    _WORKED_OUT: ClassVar[tuple[str, ...]] = ("score_deduction",)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return _served(self)
 
 
 @dataclass
@@ -235,9 +304,13 @@ class WarpingAnalysis:
     height_to_base_ratio: float  # bbox height / min(width, depth)
     material_warping_tendency: str  # from materials.json
     recommendations: list[str]
+    #: Whether Kiln Pro tuned this check; see :func:`_served`.
+    tuned: bool = field(default=False, repr=False, compare=False)
+
+    _WORKED_OUT: ClassVar[tuple[str, ...]] = ("score_deduction",)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return _served(self)
 
 
 @dataclass
@@ -251,9 +324,13 @@ class ThermalStressAnalysis:
     layer_count_analyzed: int
     material_stress_factor: float  # multiplier from material thermal properties
     recommendations: list[str]
+    #: Whether Kiln Pro tuned this check; see :func:`_served`.
+    tuned: bool = field(default=False, repr=False, compare=False)
+
+    _WORKED_OUT: ClassVar[tuple[str, ...]] = ("score_deduction", "material_stress_factor")
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return _served(self)
 
 
 @dataclass
@@ -277,7 +354,7 @@ class AdhesionForceEstimate:
     adhesion_force_n: float  # estimated adhesion force in Newtons
     peel_force_n: float  # estimated thermal peel force in Newtons
     force_ratio: float  # adhesion / peel — >1.0 means adhesion wins
-    will_detach: bool  # True if peel_force > adhesion_force
+    will_detach: bool  # True if the peel or the push test (tipping_ratio) loses
     risk_level: str  # "secure", "marginal", "likely_detach"
     score_deduction: int  # 0 to -10
     recommendations: list[str]
@@ -288,9 +365,25 @@ class AdhesionForceEstimate:
     # ``approximate``+``secure`` to "looks OK but worth a brim" in
     # an agent reply, vs. trust a ``high``+``secure`` as-is.
     model_confidence: str = "high"  # "high" | "approximate"
+    # How well the part's bed contact holds against a sideways push at the
+    # top of the part, over what that push asks of it: below 1.0 the part
+    # is pushed off.  The verdict is the worse of this and ``force_ratio``.
+    tipping_ratio: float | None = None
+    #: The plastic Kiln does not call secure on a standard build surface
+    #: (:data:`_UNVOUCHED_ON_A_STANDARD_BED`), when that alone kept this
+    #: verdict from ``secure``; empty otherwise.
+    secure_withheld_for: str = ""
+    #: Whether Kiln Pro tuned this check; see :func:`_served`.  A tuned
+    #: estimate's reply keeps ``risk_level``, ``will_detach``,
+    #: ``model_confidence`` and ``recommendations``.
+    tuned: bool = field(default=False, repr=False, compare=False)
+
+    _WORKED_OUT: ClassVar[tuple[str, ...]] = (
+        "score_deduction", "adhesion_force_n", "peel_force_n", "force_ratio", "tipping_ratio",
+    )
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return _served(self)
 
 
 @dataclass
@@ -319,9 +412,13 @@ class CostAnalysis:
         return asdict(self)
 
 
-#: Stable name for geometry that sits below the build plate.  The
-#: slicer clips anything under z = 0, so this is true of every machine
-#: — it says nothing about which bed the part was measured against.
+#: Stable name a placement fault for geometry below the build plate once
+#: carried.  No analysis raises it any more: measured 2026-10-23, PrusaSlicer
+#: and OrcaSlicer both set a cube written 12 mm below z = 0 on the plate
+#: and print all of it, and Kiln's slice gate moves such a mesh onto the plate
+#: before slicing, so a part under the plate is judged resting on it
+#: (:attr:`PlacementAnalysis.below_plate_mm`).  Kept so a reader that names it
+#: still imports.
 PLACEMENT_FAULT_OFF_BED = "off_bed"
 
 #: Stable name for a part larger than the build volume it was checked
@@ -376,6 +473,12 @@ class PlacementAnalysis:
     grade_if_placed: str | None = None
     printable_if_placed: bool | None = None
 
+    #: How far below the plate the file put the part's lowest point, when
+    #: it was more than :data:`_PLACEMENT_Z_TOLERANCE_MM` under it.  Not a
+    #: fault: every slicer Kiln drives, and Kiln's own slice gate, set the
+    #: part on the plate, so it is judged resting there and said once.
+    below_plate_mm: float | None = None
+
     @property
     def fault_names(self) -> list[str]:
         """Fault names, worst first.  Empty when the part sits fine."""
@@ -383,13 +486,43 @@ class PlacementAnalysis:
 
     @property
     def off_bed(self) -> bool:
-        """True when geometry hangs below the build plate."""
+        """True when an off-bed fault was raised, which no analysis does now
+        (see :data:`PLACEMENT_FAULT_OFF_BED`)."""
         return PLACEMENT_FAULT_OFF_BED in self.fault_names
 
     @property
     def exceeds_bed(self) -> bool:
         """True when the part is larger than the bed it was checked against."""
         return PLACEMENT_FAULT_EXCEEDS_BED in self.fault_names
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class PiecesAnalysis:
+    """How the part's pieces print: as one solid, or as separate parts.
+
+    ``piece_count`` and ``solid_count`` are :mod:`kiln.mesh_bodies`' reading
+    (pieces that share a surface or sink into one another print as one
+    solid).  Each solid past the first is a separate part, and ``parts_mm``
+    gives every part's size (width, depth, height), largest first.  The
+    pieces that start above the bed with nothing under them and nothing
+    holding them are ``floating_bodies``, and pieces held inside the part
+    without touching it are ``captive_bodies``, as :mod:`kiln.fusion_check`
+    reads them.  ``floating`` is what is said about the floating pieces (a
+    reason the part will not print as it is, :func:`stops`) and ``note``
+    what is said about separate parts that do print (:func:`verdict`); each
+    is ``""`` when there is nothing to say.
+    """
+
+    piece_count: int
+    solid_count: int
+    parts_mm: list[list[float]] = field(default_factory=list)
+    floating_bodies: int = 0
+    captive_bodies: int = 0
+    floating: str = ""
+    note: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -445,9 +578,9 @@ class PrintabilityReport:
     # read against, and what a slice's support threshold is written from
     # (:mod:`kiln.slicer_supports`).  0.0 for a report built by hand.
     overhang_threshold_deg: float = 0.0
-    # Number of disjoint connected components in the mesh (triangle
-    # islands joined by shared-vertex adjacency).  A single closed body
-    # is 1; a multi-body mesh is N.  Exposed for the kiln-pro overlay.
+    # Number of separate pieces in the mesh (:mod:`kiln.mesh_bodies`).  A
+    # single closed body is 1; a multi-body mesh is N, two bodies laid on
+    # each other included.  Exposed for the kiln-pro overlay.
     # Defaults to 0 for clients that construct PrintabilityReport
     # directly.
     connected_components: int = 0
@@ -479,9 +612,53 @@ class PrintabilityReport:
     # (:mod:`kiln.assumed_nozzle`).  ``None`` only on reports built directly
     # by a client.
     nozzle: dict[str, Any] | None = None
+    # The question the part's size raises about the file's units, in the
+    # one judgement every door uses
+    # (:func:`kiln.generation.validation.unit_verdict`), when it reads
+    # smaller than anything a printer makes; ``""`` otherwise.  A hard
+    # stop, and the first: no other size in the report means what it says
+    # until it is settled.
+    units_question: str = ""
+    # What the hard stops took off the score (:func:`_hard_stops`), beside
+    # the blocks' own ``score_deduction`` and the placement floor, so the
+    # score stays the sum of what the report says it charged.
+    stop_deduction: int = 0
+    # Whether the part prints as one solid or as separate parts, and which
+    # pieces float (:class:`PiecesAnalysis`).  ``None`` when the mesh's
+    # pieces could not be read, and on reports built directly by a client.
+    pieces: PiecesAnalysis | None = None
+    #: Whether Kiln Pro tuned this report (:func:`_mark_tuned`).  A tuned
+    #: report's reply keeps the verdict, the score and grade, every check's
+    #: risk and reasons, and what to do; see :func:`_served`.
+    tuned: bool = field(default=False, repr=False, compare=False)
+
+    _WORKED_OUT: ClassVar[tuple[str, ...]] = ("stop_deduction", "overhang_threshold_deg")
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        out = _served(self)
+        # Each check is served as itself, never as asdict's copy of it.
+        for name, check in _checks(self):
+            out[name] = check.to_dict()
+        return out
+
+
+def _checks(report: PrintabilityReport) -> list[tuple[str, Any]]:
+    """The checks in *report* that Kiln Pro can tune, by their key: every
+    field holding a block that declares what it leaves out of a reply."""
+    found = []
+    for f in fields(report):
+        value = getattr(report, f.name)
+        if hasattr(type(value), "_WORKED_OUT"):
+            found.append((f.name, value))
+    return found
+
+
+def _mark_tuned(report: PrintabilityReport) -> None:
+    """Mark *report* and every check in it as tuned by Kiln Pro, so each is
+    served without the numbers the tuning worked it out from."""
+    report.tuned = True
+    for _name, check in _checks(report):
+        check.tuned = True
 
 
 @dataclass
@@ -602,8 +779,8 @@ def _material_stress_factor(material: str | None) -> float:
     Free tier (no kiln-pro): the conservative default ``1.0`` for
     every material — high enough to flag genuine stress risks
     without being so high that every PLA print looks dangerous.
-    Pro+ tier: per-material curated values (PLA 0.6, ABS 1.5,
-    Nylon 1.6, etc.) come from the kiln-pro overlay.
+    Pro+ tier: per-material curated values come from the kiln-pro
+    overlay.
     """
     overlay_entry = _material_physics_from_overlay(material)
     value = overlay_entry.get("stress_factor")
@@ -723,7 +900,7 @@ _THERMAL_STRESS_PUBLIC_DEFAULTS: dict[str, Any] = {
         {"metric": "many_zones",            "operator": "==", "threshold": True,
          "template": "Multiple stress concentration zones detected ({stress_zones_count} layers above threshold). Consider splitting the part at the worst transition and printing as two pieces."},
         {"metric": "amplification_active",  "operator": "==", "threshold": True,
-         "template": "Material ({material}) amplifies thermal stress (factor {stress_factor:.1f}x). Print in an enclosed chamber, increase bed temperature 5-10°C above the default, and avoid sudden layer cooling."},
+         "template": "Material ({material}) amplifies thermal stress. Print in an enclosed chamber, increase bed temperature 5-10°C above the default, and avoid sudden layer cooling."},
         {"metric": "risk_level",            "operator": "==", "threshold": "moderate",
          "template": "Moderate cross-section variation (max ratio {max_ratio:.1f}x). Adding transition layers (3-5mm chamfer at the geometry change) typically eliminates the stress concentration."},
     ],
@@ -771,19 +948,22 @@ _ADHESION_FORCE_PUBLIC_DEFAULTS: dict[str, Any] = {
     # height roughly linearly until thermal equilibrium.  Multiplies
     # peel by ``(1.0 + stress_factor * z / thermal_z_scale)`` so
     # warp-prone tall prints see proportionally more peel pressure
-    # while PLA / PETG (low stress_factor 0.3-0.7) see modest impact.
+    # while PLA / PETG (a low stress factor) see modest impact.
     #
     # Calibration: thermal_z_scale=100 (mm) chosen against the
     # 31-case calibration matrix — catches all 8 truly-risky cases
     # (100% catch rate) with zero false positives on the 23 safe-
-    # print sample.  The PLA candleholder 4x4x200 (aspect 50,
-    # PLA stress=0.6) lands at ratio 3.05, just above the 3.0
-    # secure threshold — that's the only borderline case in the
-    # sample, and it's correctly classified.  Set to ``None`` in
-    # the overlay to disable.  Lower values (e.g. 50) over-flag
+    # print sample.  The PLA candleholder 4x4x200 (aspect 50) lands
+    # just above the 3.0 secure threshold — that's the only
+    # borderline case in the sample, and it's correctly classified.
+    # Set to ``None`` in the overlay to disable.  Lower values (e.g. 50) over-flag
     # warp-prone PLA; higher values (e.g. 200) miss ABS tall thin.
     # Awaiting empirical recalibration from outcome_tracker data.
     "peel_thermal_z_scale": 100.0,
+    # The push test: the sideways push (N) the nozzle can give the top of a
+    # part as it prints, which the part's bed contact has to hold at the
+    # part's full height.  A floor: tuning may raise it, never lower it.
+    "nozzle_push_force_n": 0.1,
     # As with warping: the verdict is stated here, the brim decided once
     # in recommend_adhesion from this block's risk_level.
     "recommendation_rules": [
@@ -1298,12 +1478,29 @@ def _parse_mesh(
     if problem:
         raise ValueError(problem)
 
-    return triangles, vertices
+    # In an order fixed by the geometry, so no reading below depends on the
+    # order the file wrote its triangles in (kiln.generation.validation).
+    return in_geometric_order(triangles), vertices
 
 
 # ---------------------------------------------------------------------------
 # Analysis functions
 # ---------------------------------------------------------------------------
+
+
+#: How near the overhang limit a face may lean and still count as at it.  An
+#: STL stores its corners as 32-bit floats, so a slope drawn exactly at the
+#: limit reads a few hundred-thousandths of a degree either side of it,
+#: differently wherever the part sits (measured 2026-10-23: a 45-degree
+#: chamfer read 44.99997 to 45.00001 degrees).  A thousandth of a degree is
+#: below anything a printer can tell apart and above that rounding.
+_OVERHANG_LIMIT_SLACK_DEG = 1e-3
+
+
+def _at_overhang_limit(angle_deg: float, limit_deg: float) -> bool:
+    """Whether a face leaning *angle_deg* from vertical is at or past the
+    overhang limit *limit_deg*: a slope exactly at the limit is an overhang."""
+    return angle_deg + _OVERHANG_LIMIT_SLACK_DEG >= limit_deg
 
 
 def _analyze_overhangs(
@@ -1395,12 +1592,7 @@ def _analyze_overhangs(
 
         angle_from_down = math.degrees(math.acos(max(-1.0, min(1.0, -nz))))
         overhang_angle = max(0.0, 90.0 - angle_from_down)
-        # Epsilon-tolerant comparison so an exact 45.0° slope is
-        # classified as an overhang.  math.acos(sqrt(2)/2) returns
-        # 45.00000000000001° (one ULP above 45), making
-        # `90 - that` land at 44.99999999999999° — below 45.0 by
-        # one ULP, so a strict `<` filter skipped real 45° slopes.
-        if overhang_angle + 1e-9 < max_overhang_angle:
+        if not _at_overhang_limit(overhang_angle, max_overhang_angle):
             continue
 
         overhang_count += 1
@@ -1531,6 +1723,46 @@ _CAVITY_CRACK_FLOOR_MM: float = 0.1
 # an edge shared with a differently-oriented neighbour.
 _CHORD_SUPPORT_FRACTION: float = 0.9
 
+# How far outside a triangle's own edges, as a fraction of the triangle, a
+# line may pass and still count as crossing it (``_nearest_crossings``).
+_LINE_EDGE_SLACK: float = 1e-7
+
+# A chord is tested as a corner (see ``_corner_chords``) when the face it
+# lands on leans toward the face it left by at least this much: the sine of
+# one degree.  Faces nearer parallel than that stay apart over any distance
+# a part spans.
+_CORNER_MIN_LEAN_SIN: float = 0.0175
+# Where a corner's run is read, as fractions of the way to the line where
+# its two faces would meet; the last is past that line.
+_CORNER_STEPS: tuple[float, ...] = (0.25, 0.5, 0.75, 1.0, 1.5)
+# Toward that line a corner's run is thinner than the chord measured; a run
+# this close to the chord's own length has not thinned, whatever the faces'
+# lean says.
+_CORNER_THINNING: float = 0.9
+# The widest triangles along x (above this share of them) are looked at by
+# every corner's walk; the rest are found by where they start.
+_CORNER_WIDE_QUANTILE: float = 0.99
+# A corner's walk reads crossings this many chords either side of its run
+# (and never fewer millimetres than the second): far enough to see the run
+# end to end, near enough to keep the triangles it reads few.  A point with
+# no crossing that near is read against the whole part.
+_CORNER_WINDOW_CHORDS: float = 4.0
+_CORNER_WINDOW_MIN_MM: float = 0.5
+# Where a corner's run ends is found by halving the step it ended in this
+# many times.  Just before that end the run is no wider than this fraction
+# of the nozzle (an edge, however finely it is flattened), or than this
+# fraction of the chord measured: the two faces met.
+_CORNER_EDGE_SPLITS: int = 5
+_CORNER_EDGE_NOZZLE_FRACTION: float = 0.25
+_CORNER_EDGE_FRACTION: float = 0.25
+# What the corner walks of one analysis may read, in triangles looked at:
+# each triangle a walk's path is tested against, and each one a point on it
+# is read against.  A corner is only read on a component the cast reads
+# whole (``_THIN_WALL_INTERSECTION_TRI_CAP`` triangles at most), so no one
+# reading is larger.  A walk that does not fit is not taken: its chord stays
+# the wall or gap it measured, never cleared.
+_CORNER_READ_BUDGET: int = 50_000_000
+
 
 
 def _compute_mesh_genus(
@@ -1656,6 +1888,42 @@ def _label_mesh_components(
     return comp_ids.astype(np.int64)
 
 
+def _component_targets(
+    cid: int,
+    target_v0: np.ndarray,
+    target_e1: np.ndarray,
+    target_e2: np.ndarray,
+    target_areas: np.ndarray,
+    target_comps: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    """The triangles of component *cid* a cast is run against, or ``None``
+    for a component of fewer than 4 triangles (it cannot enclose space)."""
+    target_mask = target_comps == cid
+    if target_mask.sum() < 4:
+        return None
+    # Component-local target subsampling: apply the global cap to each
+    # component so a single huge body still benefits from the memory
+    # budget, but small components keep all their triangles.  Seeded per
+    # call so a support probe casts against exactly the triangles its
+    # candidate chord was measured against.
+    tv0 = target_v0[target_mask]
+    te1 = target_e1[target_mask]
+    te2 = target_e2[target_mask]
+    tareas = target_areas[target_mask]
+    if tv0.shape[0] > _THIN_WALL_INTERSECTION_TRI_CAP:
+        rng_target = np.random.default_rng(1)
+        t_idx = rng_target.choice(
+            tv0.shape[0],
+            size=_THIN_WALL_INTERSECTION_TRI_CAP,
+            replace=False,
+            p=tareas / tareas.sum(),
+        )
+        tv0 = tv0[t_idx]
+        te1 = te1[t_idx]
+        te2 = te2[t_idx]
+    return tv0, te1, te2
+
+
 def _cast_within_components(
     origins: np.ndarray,
     directions: np.ndarray,
@@ -1665,7 +1933,9 @@ def _cast_within_components(
     target_e2: np.ndarray,
     target_areas: np.ndarray,
     target_comps: np.ndarray,
-) -> np.ndarray:
+    *,
+    with_normals: bool = False,
+) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
     """Ray-cast each origin against the triangles of its own component.
 
     Shared by the wall and cavity measurements and by the support probes
@@ -1675,49 +1945,277 @@ def _cast_within_components(
     only against that strut's triangles, so a joint overlap with a
     neighbour never reads as a wall or a cavity.
 
-    Returns one distance per ray, ``inf`` for a miss.
+    Returns one distance per ray, ``inf`` for a miss; with
+    *with_normals*, also the unit normal (by winding) of the triangle each
+    ray hit, zero for a miss.
     """
     dist = np.full(origins.shape[0], np.inf, dtype=np.float64)
+    normals = np.zeros((origins.shape[0], 3), dtype=np.float64)
     for cid in np.unique(origin_comps):
         ray_mask = origin_comps == cid
-        target_mask = target_comps == cid
-
-        # A component with fewer than 4 triangles can't enclose space —
-        # rays from it would miss everything anyway.  Skip the cast.
-        if target_mask.sum() < 4:
+        targets = _component_targets(cid, target_v0, target_e1, target_e2, target_areas, target_comps)
+        if targets is None:
             continue
-
-        # Component-local target subsampling: apply the global cap to
-        # each component so a single huge body still benefits from the
-        # memory budget, but small components keep all their triangles.
-        # Seeded per call so a support probe casts against exactly the
-        # triangles its candidate chord was measured against.
-        tv0 = target_v0[target_mask]
-        te1 = target_e1[target_mask]
-        te2 = target_e2[target_mask]
-        tareas = target_areas[target_mask]
-        if tv0.shape[0] > _THIN_WALL_INTERSECTION_TRI_CAP:
-            rng_target = np.random.default_rng(1)
-            t_probs = tareas / tareas.sum()
-            t_idx = rng_target.choice(
-                tv0.shape[0],
-                size=_THIN_WALL_INTERSECTION_TRI_CAP,
-                replace=False,
-                p=t_probs,
-            )
-            tv0 = tv0[t_idx]
-            te1 = te1[t_idx]
-            te2 = te2[t_idx]
-
-        dist[ray_mask] = _raycast_min_distances(
+        tv0, te1, te2 = targets
+        found, hit = _raycast_min_distances(
             origins[ray_mask],
             directions[ray_mask],
             tv0,
             te1,
             te2,
             min_abs_perpendicular_dot=_THIN_WALL_MIN_PERPENDICULAR_DOT,
+            return_hit=True,
         )
+        dist[ray_mask] = found
+        if with_normals:
+            face = np.cross(te1, te2)
+            face /= np.maximum(np.linalg.norm(face, axis=1), 1e-300)[:, None]
+            normals[ray_mask] = np.where((hit >= 0)[:, None], face[np.maximum(hit, 0)], 0.0)
+    if with_normals:
+        return dist, normals
     return dist
+
+
+def _nearest_crossings(
+    points: np.ndarray,
+    directions: np.ndarray,
+    v0: np.ndarray,
+    edge1: np.ndarray,
+    edge2: np.ndarray,
+    *,
+    window: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Where each point lies, read along the line through it in its
+    direction: the nearest crossing of the triangles ahead of it and behind
+    it within *window* (Möller-Trumbore, every angle counted), and whether
+    each is a way into the solid or out of it.
+
+    Returns ``(state, ahead, behind)``: ``state`` is ``1`` inside the solid,
+    ``-1`` outside it (no crossing within the window counts as outside),
+    ``0`` when the crossings either side disagree; ``ahead`` and ``behind``
+    are the distances to those crossings (``inf`` for none), so the run of
+    solid (or of air) that holds the point is ``ahead + behind`` long.
+    """
+    n_pts = points.shape[0]
+    state = np.zeros(n_pts, dtype=np.int64)
+    ahead_d = np.full(n_pts, np.inf, dtype=np.float64)
+    behind_d = np.full(n_pts, np.inf, dtype=np.float64)
+    if n_pts == 0 or v0.shape[0] == 0:
+        state[:] = -1
+        return state, ahead_d, behind_d
+    face = np.cross(edge1, edge2)
+    chunk = max(1, _RAYCAST_BATCH_BYTES // (_RAYCAST_BYTES_PER_PAIR * max(1, v0.shape[0])))
+    for start in range(0, n_pts, chunk):
+        end = min(start + chunk, n_pts)
+        o = points[start:end]
+        d = directions[start:end]
+        h = np.cross(d[:, None, :], edge2[None, :, :])
+        a = np.einsum("tj,ctj->ct", edge1, h)
+        f = 1.0 / np.where(np.abs(a) < _THIN_WALL_RAY_EPS_DET, 1.0, a)
+        s = o[:, None, :] - v0[None, :, :]
+        u = f * np.einsum("ctj,ctj->ct", s, h)
+        q = np.cross(s, edge1[None, :, :])
+        v = f * np.einsum("cj,ctj->ct", d, q)
+        t = f * np.einsum("tj,ctj->ct", edge2, q)
+        # A line through an edge two triangles share crosses one of them,
+        # whatever the rounding: the bounds are widened by a hair, and a
+        # crossing counted twice is still the one nearest.
+        edge = _LINE_EDGE_SLACK
+        hit = (np.abs(a) >= _THIN_WALL_RAY_EPS_DET) & (u >= -edge) & (v >= -edge) & ((u + v) <= 1.0 + edge)
+        # Crossing a face along the line's direction leaves the solid when
+        # the face's outward normal points the same way.
+        leaving = np.einsum("cj,tj->ct", d, face) > 0.0
+        rows = np.arange(end - start)
+        ahead_t = np.where(hit & (t > 0.0) & (t <= window), t, np.inf)
+        behind_t = np.where(hit & (t < 0.0) & (t >= -window), -t, np.inf)
+        ahead = ahead_t.argmin(axis=1)
+        behind = behind_t.argmin(axis=1)
+        ta, tb = ahead_t[rows, ahead], behind_t[rows, behind]
+        has_a, has_b = np.isfinite(ta), np.isfinite(tb)
+        # Inside: the next crossing ahead leaves, or the last one behind
+        # entered.  Outside: the reverse, or no crossing at all.
+        inside_a = has_a & leaving[rows, ahead]
+        inside_b = has_b & ~leaving[rows, behind]
+        outside_a = has_a & ~leaving[rows, ahead]
+        outside_b = has_b & leaving[rows, behind]
+        inside = (inside_a | inside_b) & ~(outside_a | outside_b)
+        outside = (outside_a | outside_b | ~(has_a | has_b)) & ~(inside_a | inside_b)
+        state[start:end] = np.where(inside, 1, np.where(outside, -1, 0))
+        ahead_d[start:end] = ta
+        behind_d[start:end] = tb
+    return state, ahead_d, behind_d
+
+
+class _CornerBudget:
+    """What the corner walks of one analysis may still read
+    (``_CORNER_READ_BUDGET``).  Once a reading does not fit, none is taken."""
+
+    __slots__ = ("left",)
+
+    def __init__(self, reads: int | None = None) -> None:
+        self.left = _CORNER_READ_BUDGET if reads is None else reads
+
+    def take(self, reads: int) -> bool:
+        if reads > self.left:
+            self.left = 0
+            return False
+        self.left -= reads
+        return True
+
+
+def _corner_chords(
+    origins: np.ndarray,
+    directions: np.ndarray,
+    chord: np.ndarray,
+    hit_normals: np.ndarray,
+    origin_comps: np.ndarray,
+    targets: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray],
+    *,
+    solid: bool,
+    edge: float,
+    budget: _CornerBudget,
+) -> np.ndarray:
+    """Mask of chords that measure a corner rather than a wall or a gap.
+
+    A chord from one face to another face that leans toward it measures a
+    corner when the two faces close into an edge of the part.  The run (of
+    solid for a wall, of air for a gap) is followed from the chord's middle
+    in steps toward the line where the faces would meet
+    (``_CORNER_STEPS``), kept at the middle of the run at every step: at the
+    first step it is still there and thinner than the chord, it never grows
+    back to the chord's length, once it ends it stays gone, and it has ended
+    by the last step, past that line.  Where it ends is then found to within
+    a small part of a step, and just before that it is no wider than *edge*
+    (or ``_CORNER_EDGE_FRACTION`` of the chord, if that is wider): the faces
+    met in an edge.  A run cut off while still wide (a thin wall's flat top)
+    is no corner, and nor is a wall or a gap whose faces stay apart.
+
+    *targets* are the cast's own (``v0, edge1, edge2, area, component`` per
+    triangle).  A chord is followed only on a component the cast reads whole
+    (``_THIN_WALL_INTERSECTION_TRI_CAP``): against the triangles of that
+    component near its path, all of them, and a point no nearby triangle
+    tells about is read against the whole component.  Every triangle looked
+    at is charged to *budget*.  A chord on a bigger component, or whose walk
+    does not fit the budget, is no corner: the wall or gap it measured stands.
+    """
+    corner = np.zeros(chord.shape[0], dtype=bool)
+    along = (directions * hit_normals).sum(axis=1)
+    toward = hit_normals * np.sign(along)[:, None]
+    cos = np.abs(along)
+    sin = np.sqrt(np.clip(1.0 - cos * cos, 0.0, 1.0))
+    candidate = np.isfinite(chord) & (cos > 0.0) & (sin >= _CORNER_MIN_LEAN_SIN)
+    if not candidate.any():
+        return corner
+    v0, edge1, edge2, areas, comps = targets
+    sizes = np.bincount(comps)
+    kind = 1 if solid else -1
+    for cid in np.unique(origin_comps[candidate]):
+        # Past the cap the cast reads a sample of the component, and a walk
+        # read against a sample can find a wall's run ending where it goes on.
+        if sizes[cid] > _THIN_WALL_INTERSECTION_TRI_CAP:
+            continue
+        whole = _component_targets(int(cid), v0, edge1, edge2, areas, comps)
+        if whole is None:
+            continue
+        cv0, ce1, ce2 = whole
+        low = np.minimum(cv0, np.minimum(cv0 + ce1, cv0 + ce2))
+        high = np.maximum(cv0, np.maximum(cv0 + ce1, cv0 + ce2))
+        # The component's triangles by where they start along x, so the ones
+        # near a path are a slice; the widest few are looked at every time.
+        reach = high[:, 0] - low[:, 0]
+        is_wide = reach > np.quantile(reach, _CORNER_WIDE_QUANTILE)
+        narrow = np.where(~is_wide)[0]
+        narrow = narrow[np.argsort(low[narrow, 0], kind="stable")]
+        narrow_x = low[narrow, 0]
+        narrow_reach = float(reach[narrow].max()) if narrow.size else 0.0
+        wide = np.where(is_wide)[0]
+        for i in np.where(candidate & (origin_comps == cid))[0]:
+            d = directions[i]
+            closing = (toward[i] - cos[i] * d) / sin[i]
+            meet = chord[i] * cos[i] / sin[i]
+            start = origins[i] + 0.5 * chord[i] * d
+            window = max(_CORNER_WINDOW_CHORDS * chord[i], _CORNER_WINDOW_MIN_MM)
+            far = start + _CORNER_STEPS[-1] * meet * closing
+            box_low = np.minimum(start, far) - window
+            box_high = np.maximum(start, far) + window
+            first = np.searchsorted(narrow_x, box_low[0] - narrow_reach, side="left")
+            last = np.searchsorted(narrow_x, box_high[0], side="right")
+            maybe = np.concatenate([narrow[first:last], wide])
+            if not budget.take(maybe.size):
+                return corner
+            near = maybe[np.all(high[maybe] >= box_low, axis=1) & np.all(low[maybe] <= box_high, axis=1)]
+            corner[i] = _walks_to_an_edge(
+                start, d, closing, meet, chord[i], (cv0[near], ce1[near], ce2[near]), whole,
+                kind=kind, edge=max(edge, _CORNER_EDGE_FRACTION * chord[i]), window=window,
+                budget=budget,
+            )
+    return corner
+
+
+def _walks_to_an_edge(
+    start: np.ndarray,
+    d: np.ndarray,
+    closing: np.ndarray,
+    meet: float,
+    chord: float,
+    near: tuple[np.ndarray, np.ndarray, np.ndarray],
+    whole: tuple[np.ndarray, np.ndarray, np.ndarray],
+    *,
+    kind: int,
+    edge: float,
+    window: float,
+    budget: _CornerBudget,
+) -> bool:
+    """One chord's walk for :func:`_corner_chords`: *near* are the triangles
+    by its path, *whole* every triangle of its component.  A reading that
+    does not fit *budget* ends the walk, and the chord is no corner."""
+    at, at_step, last_span = start, 0.0, chord
+
+    def read(point: np.ndarray, triangles: tuple[np.ndarray, ...], reach: float):
+        if not budget.take(triangles[0].shape[0]):
+            return None
+        return _nearest_crossings(point[None], d[None], *triangles, window=reach)
+
+    def step_to(fraction: float) -> tuple[bool, bool] | None:
+        nonlocal at, at_step, last_span
+        point = at + (fraction - at_step) * meet * closing
+        found = read(point, near, window)
+        if found is not None and not (np.isfinite(found[1][0]) or np.isfinite(found[2][0])):
+            # Nothing nearby says which side the point is on: ask the whole part.
+            found = read(point, whole, np.inf)
+        if found is None:
+            return None
+        state, ahead, behind = found
+        span = float(ahead[0] + behind[0])
+        inside = state[0] == kind and np.isfinite(span) and 0.0 < span < _CORNER_THINNING * chord
+        if inside:
+            at = point + 0.5 * float(ahead[0] - behind[0]) * d
+            at_step, last_span = fraction, span
+        return inside, state[0] == -kind
+
+    first_out = None
+    for step in _CORNER_STEPS:
+        took = step_to(step)
+        if took is None:
+            return False
+        inside, gone = took
+        if first_out is None:
+            if gone:
+                first_out = step
+            elif not inside:
+                return False
+        elif not gone:
+            return False
+    if first_out is None or at_step == 0.0:
+        return False
+    for _ in range(_CORNER_EDGE_SPLITS):
+        middle = 0.5 * (at_step + first_out)
+        took = step_to(middle)
+        if took is None:
+            return False
+        if not took[0]:
+            first_out = middle
+    return last_span <= edge
 
 
 def _supported_chord_mask(
@@ -1730,8 +2228,10 @@ def _supported_chord_mask(
     floor: float,
     ceiling: float,
     verify_below: float,
-) -> np.ndarray:
-    """Mask of chords that hold across the face they were measured from.
+    corners: Callable[[np.ndarray], np.ndarray] | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Mask of chords that hold across the face they were measured from,
+    and the mask of chords found to measure a corner.
 
     ``chord`` is one distance per ray (``inf`` for a miss; anything at
     or above ``ceiling`` also counts as a miss), ``faces`` the
@@ -1748,6 +2248,11 @@ def _supported_chord_mask(
     within the face, so at least one probe reads below the floor or
     misses.  A wall or groove of real width holds at every probe.
 
+    With ``corners`` (indices in, a mask of corner chords out, see
+    :func:`_corner_chords`), a verified chord must also not measure a
+    corner, so the smallest surviving chord is a wall (or a gap), never
+    the tip of a corner.
+
     Every chord below ``verify_below`` is verified.  Above it, chords
     are verified in ascending order until one holds, so the smallest
     surviving chord is always a verified one and the larger chords are
@@ -1759,18 +2264,27 @@ def _supported_chord_mask(
     measured = np.isfinite(chord) & (chord < ceiling)
     keep = measured.copy()
     verified = np.zeros(n, dtype=bool)
+    corner_mask = np.zeros(n, dtype=bool)
 
     def verify(idx: np.ndarray) -> None:
         ok = chord[idx] >= floor
-        centroids = faces[idx].mean(axis=1)
+        if corners is not None:
+            at_corner = corners(idx)
+            corner_mask[idx] = at_corner
+            ok &= ~at_corner
+        # The face probes, for the chords still in question.
+        probed = idx[ok]
+        held = np.ones(probed.size, dtype=bool)
+        centroids = faces[probed].mean(axis=1)
         for corner in range(3):
             probes = (
                 centroids
-                + _CHORD_SUPPORT_FRACTION * (faces[idx, corner, :] - centroids)
-                + _THIN_WALL_RAY_ORIGIN_OFFSET * directions[idx]
+                + _CHORD_SUPPORT_FRACTION * (faces[probed, corner, :] - centroids)
+                + _THIN_WALL_RAY_ORIGIN_OFFSET * directions[probed]
             )
-            d = cast(probes, directions[idx], origin_comps[idx])
-            ok &= np.isfinite(d) & (d < ceiling) & (d >= floor)
+            d = cast(probes, directions[probed], origin_comps[probed])
+            held &= np.isfinite(d) & (d < ceiling) & (d >= floor)
+        ok[ok] = held
         keep[idx] = ok
         verified[idx] = True
 
@@ -1785,7 +2299,7 @@ def _supported_chord_mask(
             verify(batch)
             if keep[batch].any():
                 break
-    return keep
+    return keep, corner_mask
 
 
 # Thin samples within this many millimetres of a band's thinnest sample
@@ -1887,6 +2401,7 @@ def _measure_thin_walls(
     *,
     nozzle_diameter: float = 0.4,
     thin_below_mm: float | None = None,
+    corner_budget: _CornerBudget | None = None,
 ) -> tuple[ThinWallAnalysis, float]:
     """Measure thin walls via per-component vectorized inward ray-casting.
 
@@ -1926,7 +2441,11 @@ def _measure_thin_walls(
     :func:`_analyze_cavity_widths`.  Every chord that counts has been
     verified to hold across the face it was measured from — see
     :func:`_supported_chord_mask` — so a sliver that tapers to nothing
-    within one face is dropped rather than reported at its centroid.
+    within one face is dropped rather than reported at its centroid, and a
+    chord that measures a corner (:func:`_corner_chords`) is no wall.  The
+    corners are read within *corner_budget*, which one analysis shares
+    between its walls and its gaps (a fresh :class:`_CornerBudget` when none
+    is given).
     """
     threshold = max(nozzle_diameter, thin_below_mm or 0.0)
     basis = "material" if threshold > nozzle_diameter else "nozzle"
@@ -1992,27 +2511,39 @@ def _measure_thin_walls(
     target_e1 = edge1[valid_face]
     target_e2 = edge2[valid_face]
 
-    def cast(o: np.ndarray, d: np.ndarray, c: np.ndarray) -> np.ndarray:
-        return _cast_within_components(
-            o, d, c,
-            target_v0, target_e1, target_e2, valid_areas, valid_face_comps,
-        )
+    targets = (target_v0, target_e1, target_e2, valid_areas, valid_face_comps)
 
-    exit_dist = cast(origins, directions, origin_comps)
+    def cast(o: np.ndarray, d: np.ndarray, c: np.ndarray) -> np.ndarray:
+        return _cast_within_components(o, d, c, *targets)
+
+    exit_dist, hit_normals = _cast_within_components(
+        origins, directions, origin_comps, *targets, with_normals=True,
+    )
 
     finite_mask = np.isfinite(exit_dist)
     if not finite_mask.any():
         return unmeasured()
+
+    budget = corner_budget if corner_budget is not None else _CornerBudget()
+
+    def corners(idx: np.ndarray) -> np.ndarray:
+        return _corner_chords(
+            origins[idx], directions[idx], exit_dist[idx], hit_normals[idx], origin_comps[idx],
+            targets, solid=True,
+            edge=max(_SLIVER_CHORD_FLOOR_MM, _CORNER_EDGE_NOZZLE_FRACTION * nozzle_diameter),
+            budget=budget,
+        )
 
     # A chord counts only when it holds across the face it was measured
     # from and clears the sliver floor (50 µm; well under any nozzle).
     # Sub-floor chords come from boundary slivers where curved surfaces
     # graze the bounding box at a thin angle (round-4 topology audit,
     # gyroid clipping); the support probes drop the wider end of the
-    # same slivers.  Fall through to every finite chord when nothing
-    # holds (degenerate mesh) so the consumer sees the anomaly rather
-    # than a silenced no-signal.
-    supported = _supported_chord_mask(
+    # same slivers.  A chord that measures a corner is not a wall
+    # (``_corner_chords``).  Fall through to every finite chord that is
+    # not a corner when nothing holds (degenerate mesh) so the consumer
+    # sees the anomaly rather than a silenced no-signal.
+    supported, at_corner = _supported_chord_mask(
         exit_dist,
         tris[valid_indices[sample_idx]],
         directions,
@@ -2021,8 +2552,11 @@ def _measure_thin_walls(
         floor=_SLIVER_CHORD_FLOOR_MM,
         ceiling=np.inf,
         verify_below=threshold,
+        corners=corners,
     )
-    counted = supported if supported.any() else finite_mask
+    counted = supported if supported.any() else finite_mask & ~at_corner
+    if not counted.any():
+        return unmeasured()
     measured_min = float(exit_dist[counted].min())
 
     # Judged at the precision every thickness is reported at (µm), so a
@@ -2071,6 +2605,7 @@ def _analyze_cavity_widths(
     vertices: list[tuple[float, ...]],
     *,
     nozzle_diameter: float = 0.4,
+    corner_budget: _CornerBudget | None = None,
 ) -> CavityAnalysis:
     """Measure cavity widths via per-component outward ray-casting.
 
@@ -2094,7 +2629,8 @@ def _analyze_cavity_widths(
 
     Sub-perimeter cavities (groove widths below the slicer's thinnest
     extrusion) cannot be reproduced during printing and are flagged
-    accordingly.
+    accordingly.  The air at a corner of a recess is no gap
+    (:func:`_corner_chords`, read within *corner_budget* as the walls are).
     """
     total = len(triangles)
     if total < 4:
@@ -2153,13 +2689,24 @@ def _analyze_cavity_widths(
     target_e1 = edge1[valid_face]
     target_e2 = edge2[valid_face]
 
-    def cast(o: np.ndarray, d: np.ndarray, c: np.ndarray) -> np.ndarray:
-        return _cast_within_components(
-            o, d, c,
-            target_v0, target_e1, target_e2, valid_areas, valid_face_comps,
-        )
+    targets = (target_v0, target_e1, target_e2, valid_areas, valid_face_comps)
 
-    hit_dist = cast(origins, directions, origin_comps)
+    def cast(o: np.ndarray, d: np.ndarray, c: np.ndarray) -> np.ndarray:
+        return _cast_within_components(o, d, c, *targets)
+
+    hit_dist, hit_normals = _cast_within_components(
+        origins, directions, origin_comps, *targets, with_normals=True,
+    )
+
+    budget = corner_budget if corner_budget is not None else _CornerBudget()
+
+    def corners(idx: np.ndarray) -> np.ndarray:
+        return _corner_chords(
+            origins[idx], directions[idx], hit_dist[idx], hit_normals[idx], origin_comps[idx],
+            targets, solid=False,
+            edge=max(_CAVITY_CRACK_FLOOR_MM, _CORNER_EDGE_NOZZLE_FRACTION * nozzle_diameter),
+            budget=budget,
+        )
 
     # Cap at the cavity-distance threshold — anything longer is "ray
     # exited the part into open space," not a cavity measurement.
@@ -2180,9 +2727,10 @@ def _analyze_cavity_widths(
     # coincide — a swept thread's flat root chords against the faceted
     # cylinder they were unioned with — tapers to nothing within the
     # face and is closed by the slicer before it plans a perimeter; it
-    # is tessellation, not an engraved feature.  No fall-through here:
-    # a mesh with nothing but cracks has no cavities.
-    cavity_mask = _supported_chord_mask(
+    # is tessellation, not an engraved feature.  The air at a corner of a
+    # recess is not a gap either (``_corner_chords``).  No fall-through
+    # here: a mesh with nothing but cracks has no cavities.
+    cavity_mask, _at_corner = _supported_chord_mask(
         hit_dist,
         tris[valid_indices[sample_idx]],
         directions,
@@ -2191,6 +2739,7 @@ def _analyze_cavity_widths(
         floor=_CAVITY_CRACK_FLOOR_MM,
         ceiling=cavity_max_dist,
         verify_below=nozzle_diameter,
+        corners=corners,
     )
     cavity_count = int(cavity_mask.sum())
     if cavity_count == 0:
@@ -2231,11 +2780,13 @@ def _raycast_min_distances(
     edge2: np.ndarray,
     *,
     min_abs_perpendicular_dot: float | None = None,
-) -> np.ndarray:
+    return_hit: bool = False,
+) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
     """Vectorized Möller-Trumbore ray-triangle intersection.
 
     For each ray, return the minimum positive hit distance against the
-    triangle set (``inf`` for rays that miss every triangle).
+    triangle set (``inf`` for rays that miss every triangle); with
+    *return_hit*, also the index of the triangle hit (``-1`` for a miss).
 
     ``min_abs_perpendicular_dot`` filters hits whose
     ``|dot(ray_direction, hit_face_outward_normal)|`` falls below the
@@ -2252,6 +2803,7 @@ def _raycast_min_distances(
     """
     n_rays = origins.shape[0]
     min_dist = np.full(n_rays, np.inf, dtype=np.float64)
+    min_hit = np.full(n_rays, -1, dtype=np.int64)
     chunk = max(1, _RAYCAST_BATCH_BYTES // (_RAYCAST_BYTES_PER_PAIR * max(1, v0.shape[0])))
 
     if min_abs_perpendicular_dot is not None:
@@ -2302,8 +2854,13 @@ def _raycast_min_distances(
             hit = hit & (np.abs(dn) >= min_abs_perpendicular_dot)
 
         t_masked = np.where(hit, t, np.inf)
-        min_dist[start:end] = t_masked.min(axis=1)
+        nearest = t_masked.argmin(axis=1)
+        found = t_masked[np.arange(end - start), nearest]
+        min_dist[start:end] = found
+        min_hit[start:end] = np.where(np.isfinite(found), nearest, -1)
 
+    if return_hit:
+        return min_dist, min_hit
     return min_dist
 
 
@@ -2793,6 +3350,168 @@ def _adhesion_risk_for_contact(contact_pct: float) -> str:
     return "high"
 
 
+def graded_contact(bed: BedAdhesionAnalysis) -> float:
+    """The share of the footprint *bed*'s contact holds down, in percent: the
+    figure its ``adhesion_risk`` and the brim decision are read from.
+
+    The one reader of it, so a door judging bed contact by a number of its
+    own reads the same number the grade did.  A report built directly by a
+    client has only ``contact_percentage``, and that is the answer.
+    """
+    graded = getattr(bed, "graded_contact_percentage", None)
+    return bed.contact_percentage if graded is None else graded
+
+
+#: How much a patch of bed contact must hold per millimetre of the part's
+#: height before the area its outline runs around counts as held down: the
+#: patch's weakest section modulus (mm^3) over the part's height (mm).
+_OUTLINE_HOLD_MM2 = 6.0
+
+
+def _contact_patches(tris: np.ndarray) -> list[np.ndarray]:
+    """*tris*, the bed contact as ``(n, 3, 2)`` XY triangles, split into the
+    patches whose triangles share a corner."""
+    labels = _contact_patch_labels(tris)
+    order = np.argsort(labels, kind="stable")
+    cuts = np.flatnonzero(np.diff(labels[order])) + 1
+    return [tris[group] for group in np.split(order, cuts)]
+
+
+def _corner_ids(points: np.ndarray) -> np.ndarray:
+    """One id per point of *points* ``(n, 2)``, shared by points that round
+    to the same 0.1 µm of the bed: how the contact's triangles are matched
+    corner to corner."""
+    grid = np.round(points * 1e4).astype(np.int64)
+    grid -= grid.min(axis=0)
+    keys = grid[:, 0] * (int(grid[:, 1].max()) + 1) + grid[:, 1]
+    return np.unique(keys, return_inverse=True)[1].reshape(-1)
+
+
+def _linked_labels(count: int, a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """One label per item of *count* items, the same label for any two that
+    a row of *a*, *b* links, directly or through others; numbered from 0 in
+    the order of each group's lowest item."""
+    # Hook each root onto the lowest one it meets, then point every item
+    # straight at its root.
+    label = np.arange(count)
+    while True:
+        la, lb = label[a], label[b]
+        if np.array_equal(la, lb):
+            break
+        low = np.minimum(la, lb)
+        np.minimum.at(label, la, low)
+        np.minimum.at(label, lb, low)
+        while True:
+            jumped = label[label]
+            if np.array_equal(jumped, label):
+                break
+            label = jumped
+    return np.unique(label, return_inverse=True)[1].reshape(-1)
+
+
+def _contact_patch_labels(tris: np.ndarray, ids: np.ndarray | None = None) -> np.ndarray:
+    """Which patch (:func:`_contact_patches`) each row of *tris* belongs to,
+    numbered from 0 in the order the patches are listed; *ids* are its
+    corners' :func:`_corner_ids`, when they are already known."""
+    ids = (_corner_ids(tris.reshape(-1, 2)) if ids is None else ids).reshape(-1, 3)
+    corners = _linked_labels(
+        int(ids.max()) + 1,
+        np.concatenate([ids[:, 0], ids[:, 1]]),
+        np.concatenate([ids[:, 1], ids[:, 2]]),
+    )
+    return np.unique(corners[ids[:, 0]], return_inverse=True)[1].reshape(-1)
+
+
+def _outline_corners(points: np.ndarray) -> np.ndarray:
+    """The points of *points* ``(n, 2)`` that can be corners of their convex
+    hull, sorted by x then y.  Every other point lies inside the polygon
+    through the extreme points in 64 directions, so it cannot be one."""
+    pts = np.round(points, 6)
+    if len(pts) <= 64:
+        return np.unique(pts, axis=0)
+    angles = np.linspace(0.0, 2.0 * np.pi, 64, endpoint=False)
+    xs, ys = pts[:, 0], pts[:, 1]
+    extreme = [int(np.argmax(xs * math.cos(a) + ys * math.sin(a))) for a in angles]
+    ring = [int(i) for k, i in enumerate(extreme) if k == 0 or i != extreme[k - 1]]
+    if len(ring) > 1 and ring[-1] == ring[0]:
+        ring.pop()
+    if len(ring) < 3:
+        return np.unique(pts, axis=0)
+    poly = pts[ring]
+    inside = np.ones(len(pts), dtype=bool)
+    for corner, edge in zip(poly, np.roll(poly, -1, axis=0) - poly, strict=True):
+        inside &= edge[0] * (pts[:, 1] - corner[1]) - edge[1] * (pts[:, 0] - corner[0]) > 1e-9
+    return np.unique(pts[~inside], axis=0)
+
+
+def _hull_area(corners: np.ndarray) -> float:
+    """Area of the convex hull of *corners*, sorted by x then y."""
+    pts = [tuple(p) for p in corners.tolist()]
+    if len(pts) < 3:
+        return 0.0
+
+    def half(seq: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        out: list[tuple[float, float]] = []
+        for p in seq:
+            while len(out) >= 2 and (
+                (out[-1][0] - out[-2][0]) * (p[1] - out[-2][1])
+                - (out[-1][1] - out[-2][1]) * (p[0] - out[-2][0])
+            ) <= 0:
+                out.pop()
+            out.append(p)
+        return out
+
+    hull = np.array(half(pts)[:-1] + half(pts[::-1])[:-1])
+    if len(hull) < 3:
+        return 0.0
+    xs, ys = hull[:, 0], hull[:, 1]
+    return float(abs(np.dot(xs, np.roll(ys, -1)) - np.dot(ys, np.roll(xs, -1))) / 2.0)
+
+
+def _patch_hold(patch: np.ndarray, corners: np.ndarray) -> tuple[float, float]:
+    """``(area, weakest section modulus)`` of one patch of contact, in mm^2
+    and mm^3: how much it resists the part being tipped off it, in the
+    direction it resists least.  *corners* holds its outline's corners
+    (:func:`_outline_corners`), the farthest any of it reaches."""
+    p0, p1, p2 = patch[:, 0], patch[:, 1], patch[:, 2]
+    e1, e2 = p1 - p0, p2 - p0
+    areas = np.abs(e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]) / 2.0
+    area = float(areas.sum())
+    if area <= 0.0:
+        return 0.0, 0.0
+    centre = ((p0 + p1 + p2) / 3.0 * areas[:, None]).sum(axis=0) / area
+    q0, q1, q2 = p0 - centre, p1 - centre, p2 - centre
+    x0, x1, x2, y0, y1, y2 = q0[:, 0], q1[:, 0], q2[:, 0], q0[:, 1], q1[:, 1], q2[:, 1]
+    ixx = float((areas / 6.0 * (x0 * x0 + x1 * x1 + x2 * x2 + x0 * x1 + x1 * x2 + x2 * x0)).sum())
+    iyy = float((areas / 6.0 * (y0 * y0 + y1 * y1 + y2 * y2 + y0 * y1 + y1 * y2 + y2 * y0)).sum())
+    ixy = float((areas / 12.0 * (
+        2 * (x0 * y0 + x1 * y1 + x2 * y2) + x0 * y1 + x1 * y0 + x0 * y2 + x2 * y0 + x1 * y2 + x2 * y1
+    )).sum())
+    angles = np.radians(np.arange(0.0, 180.0, 5.0))
+    c, s = np.cos(angles), np.sin(angles)
+    reach = np.abs((corners - centre) @ np.vstack([c, s])).max(axis=0)
+    second = c * c * ixx + 2 * c * s * ixy + s * s * iyy
+    held = reach > 0.0
+    return area, float((second[held] / reach[held]).min()) if held.any() else 0.0
+
+
+def _held_area(tris: np.ndarray, height: float) -> float:
+    """The bed area *tris* holds down: their own area, plus the area inside
+    the outline of the one patch that runs around the most of it, when that
+    patch holds enough for *height*.  A part on a few small feet stands on
+    the feet, wherever they are, so only one patch's outline counts and
+    only a patch strong enough for the part's height."""
+    total = 0.0
+    inside = 0.0
+    for patch in _contact_patches(tris):
+        corners = _outline_corners(patch.reshape(-1, 2))
+        area, modulus = _patch_hold(patch, corners)
+        total += area
+        if height > 0.0 and modulus / height >= _OUTLINE_HOLD_MM2:
+            inside = max(inside, _hull_area(corners) - area)
+    return total + inside
+
+
 def _analyze_bed_adhesion(
     triangles: list[tuple[tuple[float, ...], ...]],
     z_min: float,
@@ -2803,24 +3522,43 @@ def _analyze_bed_adhesion(
     """Estimate bed contact area.
 
     Sums the area of triangles whose vertices are all within one layer
-    height of the bottom of the mesh.
+    height of the bottom of the mesh, measures how much of the footprint
+    that contact spans (its own bounding rectangle), and how much of the
+    footprint it holds down (:func:`graded_contact`), which is what the
+    adhesion band is read from.
     """
     contact_threshold = z_min + layer_height
     contact_area = 0.0
+    x_lo = y_lo = math.inf
+    x_hi = y_hi = -math.inf
+    contact_xy: list[tuple[tuple[float, float], ...]] = []
 
     for tri in triangles:
         # All three vertices must be near Z_min.
         if tri[0][2] <= contact_threshold and tri[1][2] <= contact_threshold and tri[2][2] <= contact_threshold:
             contact_area += _triangle_area(tri[0], tri[1], tri[2])
+            contact_xy.append(tuple((v[0], v[1]) for v in tri))
+            for vx, vy, *_ in tri:
+                x_lo, x_hi = min(x_lo, vx), max(x_hi, vx)
+                y_lo, y_hi = min(y_lo, vy), max(y_hi, vy)
 
     # Bounding box footprint (XY projection).
     footprint = (bbox["x_max"] - bbox["x_min"]) * (bbox["y_max"] - bbox["y_min"])
     contact_pct = (contact_area / footprint * 100.0) if footprint > 0 else 0.0
+    span = (x_hi - x_lo) * (y_hi - y_lo) if x_hi >= x_lo else 0.0
+    span_pct = min(100.0, span / footprint * 100.0) if footprint > 0 else 0.0
+    graded_pct = contact_pct
+    # A contact that already reads as good needs no outline to say so.
+    if contact_xy and footprint > 0 and _adhesion_risk_for_contact(contact_pct) != "low":
+        held = _held_area(np.asarray(contact_xy, dtype=float), bbox["z_max"] - bbox["z_min"])
+        graded_pct = min(100.0, max(contact_pct, held / footprint * 100.0))
 
     return BedAdhesionAnalysis(
         contact_area_mm2=round(contact_area, 2),
         contact_percentage=round(contact_pct, 1),
-        adhesion_risk=_adhesion_risk_for_contact(contact_pct),
+        adhesion_risk=_adhesion_risk_for_contact(graded_pct),
+        contact_span_percentage=round(span_pct, 1),
+        graded_contact_percentage=round(graded_pct, 1),
     )
 
 
@@ -3040,12 +3778,7 @@ def _analyze_supports(
 
         angle_from_down = math.degrees(math.acos(max(-1.0, min(1.0, -nz))))
         overhang_angle = max(0.0, 90.0 - angle_from_down)
-        # Epsilon-tolerant comparison so an exact 45.0° slope is
-        # classified as an overhang.  math.acos(sqrt(2)/2) returns
-        # 45.00000000000001° (one ULP above 45), making
-        # `90 - that` land at 44.99999999999999° — below 45.0 by
-        # one ULP, so a strict `<` filter skipped real 45° slopes.
-        if overhang_angle + 1e-9 < max_overhang_angle:
+        if not _at_overhang_limit(overhang_angle, max_overhang_angle):
             continue
         overhang_tris.append(tri)
 
@@ -3162,7 +3895,7 @@ def _analyze_warping(
         if abs(nn[2]) > 0.95:
             area = _triangle_area(tri[0], tri[1], tri[2])
             flat_area_total += area
-            if area > 100.0 and len(large_flat_surfaces) < 20:
+            if area > 100.0:
                 centroid = _triangle_centroid(tri[0], tri[1], tri[2])
                 large_flat_surfaces.append({
                     "area_mm2": round(area, 2),
@@ -3170,7 +3903,10 @@ def _analyze_warping(
                     "centroid_y": round(centroid[1], 2),
                     "centroid_z": round(centroid[2], 2),
                 })
-    large_flat_surfaces.sort(key=lambda s: s["area_mm2"], reverse=True)
+    # The ten largest, whichever triangles of the file they are.
+    large_flat_surfaces.sort(
+        key=lambda s: (-s["area_mm2"], s["centroid_x"], s["centroid_y"], s["centroid_z"]),
+    )
     large_flat_surfaces = large_flat_surfaces[:10]
 
     base_threshold = z_min + 5.0
@@ -3270,7 +4006,7 @@ _STURDY_FEATURE_MM = 4.5   # >= this: features can flex/absorb, one level down
 _CHUNKY_FEATURE_MM = 8.0   # >= this: differential cooling is negligible
 
 # The gate only applies to materials with curated LOW thermal
-# amplification (Pro overlay: PLA 0.6, PETG ~0.8).  High-shrink
+# amplification (the Pro overlay's forgiving materials).  High-shrink
 # materials (ABS, Nylon, PP, PC, PEEK) crack at chunky transitions
 # too — bulk shrink force scales with the section — and the free
 # tier's uniform 1.0 factor deliberately keeps the conservative
@@ -3533,17 +4269,20 @@ def _analyze_thermal_stress(
     peak_zone_z = stress_zones[0]["z_mm"] if stress_zones else 0.0
     stress_zones_count = len(stress_zones)
 
+    # What a recommendation template may say.  The material's factor is
+    # not among them: a sentence is a reply, and the factor is a number
+    # the check is worked out from (``ThermalStressAnalysis._WORKED_OUT``),
+    # so no template, the overlay's included, can print it.
     rec_metrics: dict[str, Any] = {
         "risk_level": risk_level,
         "max_ratio": max_ratio,
         "material": material,
-        "stress_factor": stress_factor,
         # Amplification-active threshold tightened to >= 1.2 (was > 1.0)
-        # post wall-vs-face fix.  PETG (Pro stress_factor = 1.0) was
-        # tripping the enclosure recommendation under the old gate even
-        # though PETG genuinely doesn't need an enclosure.  >= 1.2
-        # restricts the recommendation to materials where chamber
-        # control is a real engineering necessity (ABS+, Nylon+, PC+).
+        # post wall-vs-face fix: under the old gate PETG was tripping the
+        # enclosure recommendation even though PETG genuinely doesn't need
+        # an enclosure.  >= 1.2 restricts the recommendation to materials
+        # where chamber control is a real engineering necessity (ABS+,
+        # Nylon+, PC+).
         "amplification_active": (stress_factor >= 1.2 and risk_level != "low"),
         "peak_zone_z": peak_zone_z,
         "stress_zones_count": stress_zones_count,
@@ -3567,12 +4306,754 @@ def _analyze_thermal_stress(
     )
 
 
+#: Directions the bed contact is tried in for the axis it tips over most
+#: easily: every 5 degrees across a half turn.
+_TIP_DIRECTIONS = 36
+
+#: How much of a long footing holds a sideways push at one point of the
+#: part's top: a stretch of it this many mm long per mm of the part's
+#: height when the footing is thin across, rising to the second figure
+#: when it is as wide across as the part is tall.
+_HELD_STRETCH_THIN = 0.68
+_HELD_STRETCH_WIDE = 0.96
+#: Places along a long footing that stretch is tried at, in each direction,
+#: its two ends among them.
+_HELD_STRETCH_STEPS = 49
+#: The most work the stretch check spends on one part, every direction
+#: together, counted in edges read and edge-against-place readings.  Past it
+#: the stretch is not measured and the contact is read as holding nothing,
+#: which can only make the answer more cautious, never less.
+_HELD_STRETCH_WORK = 40_000_000
+#: Readings held in memory at once.
+_HELD_STRETCH_BLOCK = 250_000
+#: What one patch costs in one direction before any of its edges are read.
+_HELD_STRETCH_PATCH_COST = 1_000
+
+
+def _held_stretch(height: float, width: float) -> float:
+    """The length (mm) of footing, *width* mm across, that holds a sideways
+    push at one point of a part *height* mm tall; ``inf`` for a footing
+    wider across than the part is tall, which is judged whole."""
+    if height <= 0.0 or width > height:
+        return math.inf
+    share = width / height
+    return height * (_HELD_STRETCH_THIN + (_HELD_STRETCH_WIDE - _HELD_STRETCH_THIN) * share)
+
+
+def _patch_outline(tris: np.ndarray, ids: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """The outline of one patch of contact, *tris* ``(n, 3, 2)`` with its
+    corners' :func:`_corner_ids` *ids* ``(n, 3)``: its edges ``(m, 2, 2)``,
+    each running with the patch on its left, and the ids of their ends."""
+    turn = (tris[:, 1, 0] - tris[:, 0, 0]) * (tris[:, 2, 1] - tris[:, 0, 1]) - (
+        tris[:, 2, 0] - tris[:, 0, 0]
+    ) * (tris[:, 1, 1] - tris[:, 0, 1])
+    order = np.where((turn < 0.0)[:, None], np.array([0, 2, 1]), np.array([0, 1, 2]))
+    ids = np.take_along_axis(ids, order, axis=1)
+    head, tail = ids.reshape(-1), np.roll(ids, -1, axis=1).reshape(-1)
+    count = int(ids.max()) + 1
+    outer = ~np.isin(head * count + tail, tail * count + head)
+    row, at = np.divmod(np.flatnonzero(outer), 3)
+    edges = np.stack([tris[row, order[row, at]], tris[row, order[row, (at + 1) % 3]]], axis=1)
+    return edges, np.stack([head[outer], tail[outer]], axis=1)
+
+
+def _straightened(edges: np.ndarray, ids: np.ndarray) -> np.ndarray:
+    """*edges*, an outline with its ends' ids *ids* (:func:`_patch_outline`),
+    with each run of edges that carry on along one straight line joined into
+    one edge.  The outline bounds exactly the same region: only corners
+    where it does not turn are taken out."""
+    if len(edges) < 2:
+        return edges
+    count = int(ids.max()) + 1
+    leaving = np.bincount(ids[:, 0], minlength=count)
+    arriving = np.bincount(ids[:, 1], minlength=count)
+    follows = np.full(count, -1, dtype=np.int64)
+    follows[ids[:, 0]] = np.arange(len(edges))
+    after = follows[ids[:, 1]]
+    run = edges[:, 1] - edges[:, 0]
+    nxt = run[np.maximum(after, 0)]
+    straight = (
+        (after >= 0)
+        & (leaving[ids[:, 1]] == 1)
+        & (arriving[ids[:, 1]] == 1)
+        & (run[:, 0] * nxt[:, 1] - run[:, 1] * nxt[:, 0] == 0.0)
+        & ((run * nxt).sum(axis=1) > 0.0)
+    )
+    continued = np.zeros(len(edges), dtype=bool)
+    continued[after[straight]] = True
+    last = np.where(straight, after, np.arange(len(edges)))
+    while True:
+        jumped = last[last]
+        if np.array_equal(jumped, last):
+            break
+        last = jumped
+    heads = np.flatnonzero(~continued)
+    return np.stack([edges[heads, 0], edges[last[heads], 1]], axis=1)
+
+
+def _edge_moments(
+    n0: np.ndarray, da: np.ndarray, dn: np.ndarray, lo: np.ndarray | float, hi: np.ndarray | float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """What the stretch of each outline edge from *lo* to *hi* of the way
+    along it adds to a region's area and first and second moments along
+    ``n``; the edge starts at *n0* and changes by *da*, *dn*."""
+    u, v = n0 + lo * dn, n0 + hi * dn
+    run = da * (hi - lo)
+    uu, uv, vv = u * u, u * v, v * v
+    return (
+        run * (u + v) / 2.0,
+        run * (uu + uv + vv) / 6.0,
+        run * (uu * u + uu * v + u * vv + vv * v) / 12.0,
+    )
+
+
+def _readings_at_places(
+    a0: np.ndarray,
+    n0: np.ndarray,
+    da: np.ndarray,
+    dn: np.ndarray,
+    whole: tuple[np.ndarray, ...],
+    first: float,
+    gap: float,
+    count: int,
+    budget: int,
+) -> tuple[tuple[np.ndarray, ...] | None, int]:
+    """At each of *count* places along ``a``, ``first + k * gap``: the area
+    and the first and second moments along ``n`` of the part of a region at
+    or below that place, and the least and most ``n`` its outline reaches
+    there; and the work it took.
+
+    The region is given by its outline edges, starting at ``(a0, n0)`` and
+    changing by ``(da, dn)``, the region on each one's left in the
+    ``(n, a)`` frame, with what each whole edge adds (:func:`_edge_moments`)
+    in *whole*.  An edge reaching past a place adds all of itself; only
+    an edge a place cuts through is read there.  ``None`` in place of the
+    readings when that would take more than *budget*.
+    """
+    near, far = np.minimum(a0, a0 + da), np.maximum(a0, a0 + da)
+    done = np.clip(np.ceil((far - first) / gap), 0, count).astype(np.int64)
+    begin = np.clip(np.floor((near - first) / gap) + 1, 0, count).astype(np.int64)
+    cuts = np.maximum(done - begin, 0)
+    work = len(a0) + int(cuts.sum())
+    if work > budget:
+        return None, work
+    readings = [np.cumsum(np.bincount(done, weights=m, minlength=count + 1))[:count] for m in whole]
+    lo, hi = np.full(count, np.inf), np.full(count, -np.inf)
+    cut = np.flatnonzero(cuts)
+    if len(cut):
+        ends = np.cumsum(cuts[cut])
+        block = 0
+        while block < len(cut):
+            stop = int(np.searchsorted(ends, ends[block] - cuts[cut[block]] + _HELD_STRETCH_BLOCK, side="right"))
+            edges = cut[block : max(stop, block + 1)]
+            block = max(stop, block + 1)
+            spans = cuts[edges]
+            e = np.repeat(edges, spans)
+            k = begin[e] + np.arange(len(e)) - np.repeat(np.cumsum(spans) - spans, spans)
+            t = np.clip((first + k * gap - a0[e]) / da[e], 0.0, 1.0)
+            rising = da[e] > 0.0
+            part = _edge_moments(n0[e], da[e], dn[e], np.where(rising, 0.0, t), np.where(rising, t, 1.0))
+            for total, piece in zip(readings, part, strict=True):
+                total += np.bincount(k, weights=piece, minlength=count)
+            at = n0[e] + t * dn[e]
+            np.minimum.at(lo, k, at)
+            np.maximum.at(hi, k, at)
+    return (readings[0], readings[1], readings[2], lo, hi), work
+
+
+def _range_extremes(
+    first: np.ndarray, last: np.ndarray, values: np.ndarray, count: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """For each slot ``0 .. count - 1``, the least and most of *values* whose
+    slot range ``first .. last`` (inclusive) holds it; ``inf`` / ``-inf``
+    where none does."""
+    first, last = np.maximum(first, 0), np.minimum(last, count - 1)
+    keep = first <= last
+    first, last, values = first[keep], last[keep], values[keep]
+    levels = max(1, (count - 1).bit_length() + 1)
+    lo, hi = np.full((levels, count), np.inf), np.full((levels, count), -np.inf)
+    level = np.zeros(count + 1, dtype=np.int64)
+    for size in range(2, count + 1):
+        level[size] = level[size // 2] + 1
+    span = level[last - first + 1]
+    for at in (first, last - (1 << span) + 1):
+        np.minimum.at(lo.reshape(-1), span * count + at, values)
+        np.maximum.at(hi.reshape(-1), span * count + at, values)
+    for q in range(levels - 1, 0, -1):
+        half = 1 << (q - 1)
+        lo[q - 1] = np.minimum(lo[q - 1], lo[q])
+        hi[q - 1] = np.maximum(hi[q - 1], hi[q])
+        lo[q - 1, half:] = np.minimum(lo[q - 1, half:], lo[q, : count - half])
+        hi[q - 1, half:] = np.maximum(hi[q - 1, half:], hi[q, : count - half])
+    return lo[0], hi[0]
+
+
+def _held_stretch_modulus(pts: np.ndarray, height: float, budget: int) -> tuple[float, int]:
+    """The weakest section modulus (mm³) of the contact when a push at one
+    point is held, on each patch of it long enough for this to matter, by
+    only a stretch of that patch (:func:`_held_stretch`), every other patch
+    counted whole; over every direction and at every one of
+    :data:`_HELD_STRETCH_STEPS` places along each such patch, its two ends
+    among them.  ``inf`` when no patch is long enough.  With it, the work
+    it spent of *budget*.
+
+    *pts* is the contact as ``(T, 3, 2)`` triangles.  A stretch wider across
+    than the part is tall is left to the whole contact.
+
+    Bounded: the work is linear in the outline's edges plus one reading for
+    each place an edge is cut at, and no more than :data:`_HELD_STRETCH_BLOCK`
+    readings are held at once.  Past *budget* the answer is ``0.0``, the
+    contact read as holding nothing, never a reading taken at fewer places,
+    so a part too costly to measure can only be told it may come off the
+    bed, never that it is secure.
+    """
+    weakest = math.inf
+    if not len(pts):
+        return weakest, 0
+    shortest = _held_stretch(height, 0.0)
+    corners = _corner_ids(pts.reshape(-1, 2))
+    labels = _contact_patch_labels(pts, corners)
+    pts = pts - pts.reshape(-1, 2).mean(axis=0)
+    patches = int(labels.max()) + 1
+    flat = pts.reshape(-1, 2)
+    lo_xy = np.full((patches, 2), np.inf)
+    hi_xy = np.full((patches, 2), -np.inf)
+    corner_patch = np.repeat(labels, 3)
+    np.minimum.at(lo_xy, corner_patch, flat)
+    np.maximum.at(hi_xy, corner_patch, flat)
+    long = np.flatnonzero(np.hypot(*(hi_xy - lo_xy).T) > shortest)
+    if not len(long):
+        return weakest, 0
+    if len(long) * _TIP_DIRECTIONS * _HELD_STRETCH_PATCH_COST > budget:
+        return 0.0, budget  # the patches alone would spend the budget
+    # Each patch's area moments about the origin, for any direction at once.
+    x, y = pts[:, :, 0], pts[:, :, 1]
+    area = np.abs((x[:, 1] - x[:, 0]) * (y[:, 2] - y[:, 0]) - (x[:, 2] - x[:, 0]) * (y[:, 1] - y[:, 0])) / 2.0
+    sums = np.stack([
+        np.bincount(labels, weights=w, minlength=patches)
+        for w in (
+            area,
+            area * x.sum(axis=1) / 3.0,
+            area * y.sum(axis=1) / 3.0,
+            area * ((x * x).sum(axis=1) + x[:, 0] * x[:, 1] + x[:, 1] * x[:, 2] + x[:, 2] * x[:, 0]) / 6.0,
+            area * (
+                2.0 * (x * y).sum(axis=1)
+                + x[:, 0] * y[:, 1] + x[:, 1] * y[:, 0] + x[:, 0] * y[:, 2]
+                + x[:, 2] * y[:, 0] + x[:, 1] * y[:, 2] + x[:, 2] * y[:, 1]
+            ) / 12.0,
+            area * ((y * y).sum(axis=1) + y[:, 0] * y[:, 1] + y[:, 1] * y[:, 2] + y[:, 2] * y[:, 0]) / 6.0,
+        )
+    ])
+    totals = sums.sum(axis=1)
+    order = np.argsort(labels, kind="stable")
+    bounds = np.searchsorted(labels[order], np.stack([long, long + 1]))
+    corners = corners.reshape(-1, 3)
+    outlines = {}
+    for i, lo, hi in zip(long, *bounds, strict=True):
+        rows = order[lo:hi]
+        outlines[int(i)] = _straightened(*_patch_outline(pts[rows], corners[rows]))
+    work = 0
+    for theta in np.pi * np.arange(_TIP_DIRECTIONS) / _TIP_DIRECTIONS:
+        c, s = math.cos(theta), math.sin(theta)
+        frame = np.array([[-s, c], [c, s]]).T
+
+        def moments(m: np.ndarray, c: float = c, s: float = s) -> np.ndarray:
+            return np.array([m[0], c * m[1] + s * m[2], c * c * m[3] + 2.0 * c * s * m[4] + s * s * m[5]])
+
+        if patches > 1:
+            across = flat @ np.array([c, s])
+            reach_lo = np.full(patches, np.inf)
+            reach_hi = np.full(patches, -np.inf)
+            np.minimum.at(reach_lo, corner_patch, across)
+            np.maximum.at(reach_hi, corner_patch, across)
+            work += len(flat)
+        for i in long:
+            edges = outlines[int(i)]
+            work += _HELD_STRETCH_PATCH_COST + len(edges)
+            if work > budget:
+                return 0.0, work
+            if not len(edges):
+                continue
+            start, stop = edges[:, 0] @ frame, edges[:, 1] @ frame
+            step = stop - start
+            a_lo, a_hi = float(start[:, 0].min()), float(start[:, 0].max())
+            if a_hi - a_lo <= shortest:
+                continue
+            gap = (a_hi - a_lo - shortest) / (_HELD_STRETCH_STEPS - 1)
+            # A corner on a place's edge, to within rounding, is in that place.
+            lo, hi = _range_extremes(
+                np.ceil((start[:, 0] - a_lo - shortest) / gap - 1e-9).astype(np.int64),
+                np.floor((start[:, 0] - a_lo) / gap + 1e-9).astype(np.int64),
+                start[:, 1], _HELD_STRETCH_STEPS,
+            )
+            # The outline's corners alone already reach wider than the part
+            # is tall in every place: no stretch of this patch is judged.
+            if np.all(hi - lo > height):
+                continue
+            whole = _edge_moments(start[:, 1], step[:, 0], step[:, 1], 0.0, 1.0)
+            readings = []
+            for first in (a_lo, a_lo + shortest):
+                read, spent = _readings_at_places(
+                    start[:, 0], start[:, 1], step[:, 0], step[:, 1], whole,
+                    first, gap, _HELD_STRETCH_STEPS, budget - work,
+                )
+                work += spent
+                if read is None:
+                    return 0.0, work
+                readings.append(read)
+            (a_low, f_low, s_low, x_lo_low, x_hi_low), (a_high, f_high, s_high, x_lo_high, x_hi_high) = readings
+            lo = np.minimum(lo, np.minimum(x_lo_low, x_lo_high))
+            hi = np.maximum(hi, np.maximum(x_hi_low, x_hi_high))
+            stretch = np.array([_held_stretch(height, float(w)) for w in hi - lo])
+            judged = (hi > lo) & np.isfinite(stretch)
+            if not judged.any():
+                continue
+            sign = 1.0 if float(whole[0].sum()) >= 0.0 else -1.0
+            piece = [sign * (high - low) for high, low in ((a_high, a_low), (f_high, f_low), (s_high, s_low))]
+            held = judged & (piece[0] > 0.0)
+            if not held.any():
+                continue
+            scale = np.minimum(stretch[held], a_hi - a_lo) / shortest
+            rest = moments(totals) - moments(sums[:, i])
+            area_, first_, second_ = (m[held] * scale + r for m, r in zip(piece, rest, strict=True))
+            lo, hi = lo[held], hi[held]
+            if patches > 1:
+                lo = np.minimum(lo, np.delete(reach_lo, i).min())
+                hi = np.maximum(hi, np.delete(reach_hi, i).max())
+            centre = first_ / area_
+            inertia = np.maximum(second_ - area_ * centre * centre, 0.0)
+            reach = np.maximum(hi - centre, centre - lo)
+            weakest = min(weakest, float((inertia / reach).min()))
+    return weakest, work
+
+
+#: The part is cut at heights between the heights its corners lie at, the
+#: only heights its section can change at, to find where its separate
+#: footings join: at most this many cuts.
+_JOIN_LEVELS = 64
+#: The most work the join reading spends, counted in triangles cut and in
+#: footing points tested against outline segments.  Past it a footing not
+#: yet found joined is read as standing alone up to the part's full height,
+#: which can only make the answer more cautious.
+_JOIN_WORK = 20_000_000
+
+
+def _cut_loops(tris: np.ndarray, z: float) -> tuple[np.ndarray, np.ndarray] | None:
+    """The outline of the mesh *tris* ``(T, 3, 3)`` cut at height *z*, no
+    corner of the mesh at that height: the cut's segments ``(m, 2, 2)`` in XY
+    and the closed loop each belongs to ``(m,)``, numbered from 0.  ``None``
+    when the cut does not close everywhere."""
+    below = tris[:, :, 2] < z
+    rows = np.flatnonzero(below.any(axis=1) & ~below.all(axis=1))
+    if not len(rows):
+        return np.empty((0, 2, 2)), np.empty(0, dtype=np.int64)
+    t = tris[rows]
+    ends = []
+    for a, b in ((0, 1), (1, 2), (2, 0)):
+        u, v = t[:, a], t[:, b]
+        # The edge's ends in one fixed order, so both triangles on it cut
+        # it at the same point.
+        swap = (u[:, 0] > v[:, 0]) | (
+            (u[:, 0] == v[:, 0]) & ((u[:, 1] > v[:, 1]) | ((u[:, 1] == v[:, 1]) & (u[:, 2] > v[:, 2])))
+        )
+        lo, hi = np.where(swap[:, None], v, u), np.where(swap[:, None], u, v)
+        crosses = (lo[:, 2] < z) != (hi[:, 2] < z)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            s = (z - lo[:, 2]) / (hi[:, 2] - lo[:, 2])
+            at = lo[:, :2] + s[:, None] * (hi[:, :2] - lo[:, :2])
+        ends.append(np.where(crosses[:, None], at, np.nan))
+    pts = np.stack(ends, axis=1)  # (c, 3, 2)
+    hit = ~np.isnan(pts[:, :, 0])
+    if not np.all(hit.sum(axis=1) == 2):
+        return None
+    seg = pts[hit].reshape(-1, 2, 2)
+    ids = _corner_ids(seg.reshape(-1, 2)).reshape(-1)
+    if np.any(np.bincount(ids) != 2):
+        return None
+    # The two segments meeting at each end are one loop.
+    pair = (np.argsort(ids, kind="stable") // 2).reshape(-1, 2)
+    return seg, _linked_labels(len(seg), pair[:, 0], pair[:, 1])
+
+
+def _inside_loops(points: np.ndarray, seg: np.ndarray, loops: np.ndarray, count: int) -> np.ndarray:
+    """Which of *count* loops, made of the segments *seg* ``(m, 2, 2)`` with
+    the loop of each in *loops*, each of *points* ``(P, 2)`` lies inside:
+    ``(P, count)``, a point inside a loop when a ray from it crosses the
+    loop an odd number of times.  No more than :data:`_HELD_STRETCH_BLOCK`
+    point-against-segment readings are held at once."""
+    inside = np.zeros((len(points), count), dtype=bool)
+    if not len(seg) or not len(points):
+        return inside
+    ax, ay, bx, by = seg[:, 0, 0], seg[:, 0, 1], seg[:, 1, 0], seg[:, 1, 1]
+    step = max(1, _HELD_STRETCH_BLOCK // len(seg))
+    for lo in range(0, len(points), step):
+        px, py = points[lo : lo + step, 0][:, None], points[lo : lo + step, 1][:, None]
+        spans = (ay > py) != (by > py)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            x_at = ax + (py - ay) * (bx - ax) / (by - ay)
+        hits = spans & (px < x_at)
+        rows = len(hits)
+        slot = loops[None, :] + count * np.arange(rows)[:, None]
+        crossings = np.bincount(slot[hits], minlength=rows * count).reshape(rows, count)
+        inside[lo : lo + rows] = crossings % 2 == 1
+    return inside
+
+
+def _footing_join_heights(
+    tris: np.ndarray, z_min: float, points: np.ndarray, height: float, budget: int,
+) -> np.ndarray:
+    """For each footing standing at one of *points* ``(P, 2)``, how far above
+    the bed (mm) a layer of the mesh *tris* ``(T, 3, 3)`` first joins it to
+    another footing; *height*, the part's height, for one no layer joins.
+
+    Footings are joined at a height when their points lie inside the same
+    loops of the part's section there, and inside the part.  The section is
+    read at up to :data:`_JOIN_LEVELS` heights between the heights the mesh
+    has corners at; when every such gap is read, the join is placed at the
+    bottom of the gap it is first seen in, else at the height it is first
+    seen at, which can only be higher than where it happened.  Past *budget*,
+    or where a cut does not close, nothing more is joined.
+    """
+    heights = np.full(len(points), float(height))
+    corners = np.unique(tris[:, :, 2])
+    corners = corners[(corners > z_min) & (corners < z_min + height)]
+    edges = np.concatenate(([z_min], corners, [z_min + height]))
+    exact = len(edges) - 1 <= _JOIN_LEVELS
+    bounds = edges if exact else edges[np.unique(np.linspace(0, len(edges) - 1, _JOIN_LEVELS + 1).round().astype(int))]
+    joined = np.zeros(len(points), dtype=bool)
+    work = 0
+    for k in range(len(bounds) - 1):
+        # Cut midway through the gap between corners this height lies in.
+        i = int(np.searchsorted(edges, (bounds[k] + bounds[k + 1]) / 2.0, side="right"))
+        level = (edges[i - 1] + edges[i]) / 2.0
+        work += len(tris)
+        if work > budget:
+            break
+        cut = _cut_loops(tris, level)
+        if cut is None:
+            continue
+        seg, loops = cut
+        count = int(loops.max()) + 1 if len(loops) else 0
+        work += len(points) * len(seg)
+        if work > budget:
+            break
+        if count == 0:
+            continue
+        inside = _inside_loops(points, seg, loops, count)
+        # Footings inside the same loops, an odd number of them (inside the
+        # part), stand in one piece at this height.
+        _, group, size = np.unique(inside, axis=0, return_inverse=True, return_counts=True)
+        together = (inside.sum(axis=1) % 2 == 1) & (size[group.reshape(-1)] > 1)
+        new = together & ~joined
+        if new.any():
+            above = (bounds[k] if exact else level) - z_min
+            heights[new] = above if above > 0.0 else level - z_min
+            joined |= new
+        if joined.all():
+            break
+    return heights
+
+
+def _contact_modulus(pts: np.ndarray, height: float, budget: int) -> tuple[float, int]:
+    """The section modulus (mm³) of the contact *pts* ``(T, 3, 2)`` about the
+    axis it tips over most easily: the whole of it and, for a part *height*
+    mm tall, the stretch of each long patch that holds a push at one point
+    (:func:`_held_stretch_modulus`), whichever is weaker; and the work spent
+    of *budget*.  ``0.0`` when nothing touches the bed."""
+    x, y = pts[:, :, 0], pts[:, :, 1]
+    a = np.abs(
+        (x[:, 1] - x[:, 0]) * (y[:, 2] - y[:, 0]) - (x[:, 2] - x[:, 0]) * (y[:, 1] - y[:, 0])
+    ) / 2.0
+    area = float(a.sum())
+    if area <= 0.0:
+        return 0.0, 0
+    # Area moments of each triangle, summed: first, then second about the origin.
+    cx = float((a * x.sum(axis=1)).sum()) / (3.0 * area)
+    cy = float((a * y.sum(axis=1)).sum()) / (3.0 * area)
+
+    def _second(u: np.ndarray, v: np.ndarray) -> float:
+        cross = (
+            2.0 * (u * v).sum(axis=1)
+            + u[:, 0] * v[:, 1] + u[:, 1] * v[:, 0]
+            + u[:, 0] * v[:, 2] + u[:, 2] * v[:, 0]
+            + u[:, 1] * v[:, 2] + u[:, 2] * v[:, 1]
+        )
+        return float((a * cross).sum()) / 12.0
+
+    jxx = _second(x, x) - area * cx * cx
+    jyy = _second(y, y) - area * cy * cy
+    jxy = _second(x, y) - area * cx * cy
+    theta = np.pi * np.arange(_TIP_DIRECTIONS) / _TIP_DIRECTIONS
+    nx, ny = np.cos(theta), np.sin(theta)
+    inertia = np.maximum(nx * nx * jxx + 2.0 * nx * ny * jxy + ny * ny * jyy, 0.0)
+    corners = pts.reshape(-1, 2) - (cx, cy)
+    reach = np.empty(_TIP_DIRECTIONS)
+    chunk = max(1, _HELD_STRETCH_BLOCK // len(corners))
+    for lo in range(0, _TIP_DIRECTIONS, chunk):
+        reach[lo : lo + chunk] = np.abs(corners @ np.vstack((nx[lo : lo + chunk], ny[lo : lo + chunk]))).max(axis=0)
+    reachable = reach > 0.0
+    if not reachable.any():
+        return 0.0, 0
+    whole = float((inertia[reachable] / reach[reachable]).min())
+    if height <= 0.0:
+        return whole, 0
+    stretch, spent = _held_stretch_modulus(pts, height, budget)
+    if stretch <= 0.0:
+        return 0.0, spent
+    side, more = _held_side_modulus(pts, height, budget - spent)
+    return min(whole, stretch, side), spent + more
+
+
+#: A straight side of a footing's outline whose two ends are held by walls
+#: at right angles, as a frame's or an open box's sides are, holds a push at
+#: one point of its top with a stretch of itself this many mm long per mm of
+#: the part's height when the side is thin across, rising to the second
+#: figure when it is as thick across as the part is tall; a side thicker
+#: than that is judged whole.
+_HELD_SIDE_THIN = 1.85
+_HELD_SIDE_WIDE = 1.96
+#: How much of a long side's concentration a push near a held end makes, by
+#: the push's distance from that end in heights (the middle of a side is
+#: half its length from each end); linear between, and a long side beyond.
+_HELD_SIDE_NEAR_END = ((0.0, 0.0), (0.5, 0.69), (1.0, 0.96), (2.0, 1.0))
+#: An outline holds the end of a side when, within this many heights of path
+#: past that end, it moves at least one height away from the side's line.
+_HELD_SIDE_HOLD_PATH = 1.5
+#: Sides shorter than this share of the part's height are not read: held at
+#: both ends, they are stronger than any side that is.
+_HELD_SIDE_SHORTEST = 0.125
+#: A side is a run of outline edges that turn less than this in all; where
+#: the outline has turned this much, a side ends.
+_HELD_SIDE_RUN_TURN = math.radians(5.0)
+
+
+def _outline_runs(edges: np.ndarray, nxt: np.ndarray) -> list[list[int]]:
+    """The edges of the outline *edges* (``nxt`` the edge after each) in
+    runs, each a list of edge indices in order along its loop, that turn less
+    than :data:`_HELD_SIDE_RUN_TURN` in all; each loop's runs begin at its
+    sharpest corner."""
+    seen = np.zeros(len(edges), dtype=bool)
+    runs: list[list[int]] = []
+    for start in range(len(edges)):
+        if seen[start]:
+            continue
+        loop: list[int] = []
+        e = start
+        while not seen[e]:
+            seen[e] = True
+            loop.append(e)
+            e = int(nxt[e])
+        d = edges[loop, 1] - edges[loop, 0]
+        angle = np.arctan2(d[:, 1], d[:, 0])
+        turn = np.abs((np.roll(angle, -1) - angle + np.pi) % (2.0 * np.pi) - np.pi)  # after each edge
+        sharpest = int(np.argmax(turn))
+        begin = (sharpest + 1) % len(loop) if turn[sharpest] >= _HELD_SIDE_RUN_TURN else 0
+        run, bent = [loop[begin]], 0.0
+        for j in range(1, len(loop)):
+            k = (begin + j) % len(loop)
+            bent += float(turn[k - 1])
+            if bent >= _HELD_SIDE_RUN_TURN:
+                runs.append(run)
+                run, bent = [loop[k]], 0.0
+            else:
+                run.append(loop[k])
+        runs.append(run)
+    return runs
+
+
+def _outline_departs(
+    edges: np.ndarray, step: np.ndarray, at: int, a: np.ndarray, along: np.ndarray, height: float,
+) -> tuple[bool, int]:
+    """Whether the outline *edges*, walked from edge *at* by *step* (the
+    index of the edge after, or before, each), moves at least *height* away
+    from the line through *a* along *along* within :data:`_HELD_SIDE_HOLD_PATH`
+    heights of path; and the edges walked."""
+    norm = float(np.hypot(*along))
+    if norm <= 0.0:
+        return False, 0
+    path, walked, e = 0.0, 0, int(step[at])
+    while e >= 0 and e != at and path < _HELD_SIDE_HOLD_PATH * height:
+        walked += 1
+        run = edges[e, 1] - edges[e, 0]
+        path += float(np.hypot(*run))
+        for p in edges[e]:
+            if abs(along[0] * (p[1] - a[1]) - along[1] * (p[0] - a[0])) / norm >= height:
+                return True, walked
+        e = int(step[e])
+    return False, walked
+
+
+def _held_side_modulus(pts: np.ndarray, height: float, budget: int) -> tuple[float, int]:
+    """The weakest section modulus (mm³) of the contact where a straight
+    side of a patch's outline (:func:`_outline_runs`), held at both ends by
+    walls at right angles (:func:`_outline_departs`), holds a push at one
+    point of its top by only the stretch of itself such a side holds it
+    with: a strip as long as that stretch and as thick as the wall is there;
+    ``inf`` when no patch has such a side.  With it, the work spent of
+    *budget*; past the budget ``0.0``, the contact read as holding nothing.
+
+    *pts* is the contact as ``(T, 3, 2)`` triangles.  A side thicker across
+    than the part is tall is left to the whole contact; a curved outline has
+    no such side, and is left to the whole contact too.
+    """
+    weakest = math.inf
+    if not len(pts) or height <= 0.0:
+        return weakest, 0
+    corners = _corner_ids(pts.reshape(-1, 2))
+    labels = _contact_patch_labels(pts, corners)
+    corners = corners.reshape(-1, 3)
+    patches = int(labels.max()) + 1
+    order = np.argsort(labels, kind="stable")
+    starts = np.searchsorted(labels[order], np.arange(patches + 1))
+    work = 0
+    shortest = _HELD_SIDE_SHORTEST * height
+    flat = pts.reshape(-1, 2)
+    corner_patch = np.repeat(labels, 3)
+    lo_xy = np.full((patches, 2), np.inf)
+    hi_xy = np.full((patches, 2), -np.inf)
+    np.minimum.at(lo_xy, corner_patch, flat)
+    np.maximum.at(hi_xy, corner_patch, flat)
+    for i in np.flatnonzero(np.hypot(*(hi_xy - lo_xy).T) >= shortest):
+        rows = order[starts[i] : starts[i + 1]]
+        work += len(rows)
+        if work > budget:
+            return 0.0, work
+        edges = _straightened(*_patch_outline(pts[rows], corners[rows]))
+        if len(edges) < 3:
+            continue
+        ends = _corner_ids(edges.reshape(-1, 2)).reshape(-1, 2)
+        count = int(ends.max()) + 1
+        after = np.full(count, -1, dtype=np.int64)
+        after[ends[:, 0]] = np.arange(len(edges))
+        before = np.full(count, -1, dtype=np.int64)
+        before[ends[:, 1]] = np.arange(len(edges))
+        nxt, prv = after[ends[:, 1]], before[ends[:, 0]]
+        if (nxt < 0).any() or (prv < 0).any():
+            continue  # an outline that does not close is not read
+        work += len(edges)
+        if work > budget:
+            return 0.0, work
+        a, d = edges[:, 0], edges[:, 1] - edges[:, 0]
+        for run in _outline_runs(edges, nxt):
+            first, last = run[0], run[-1]
+            chord = edges[last, 1] - edges[first, 0]
+            length = float(np.hypot(*chord))
+            if length < shortest:
+                continue
+            held, walked = _outline_departs(edges, nxt, last, edges[first, 0], chord, height)
+            work += walked
+            if held:
+                held, walked = _outline_departs(edges, prv, first, edges[first, 0], chord, height)
+                work += walked
+            if work > budget:
+                return 0.0, work
+            if not held:
+                continue
+            # The wall's thickness under this side: from the side's middle,
+            # into the patch, to the first outline edge met.
+            middle = (edges[first, 0] + edges[last, 1]) / 2.0
+            inward = np.array([-chord[1], chord[0]]) / length
+            work += len(edges)
+            if work > budget:
+                return 0.0, work
+            denom = inward[0] * d[:, 1] - inward[1] * d[:, 0]
+            with np.errstate(divide="ignore", invalid="ignore"):
+                s = ((a[:, 0] - middle[0]) * d[:, 1] - (a[:, 1] - middle[1]) * d[:, 0]) / denom
+                u = ((a[:, 0] - middle[0]) * inward[1] - (a[:, 1] - middle[1]) * inward[0]) / denom
+            hit = (np.abs(denom) > 1e-12) & (s > 1e-9) & (u >= -1e-9) & (u <= 1.0 + 1e-9)
+            hit[run] = False
+            if not hit.any():
+                continue
+            thick = float(s[hit].min())
+            if thick >= height:
+                continue
+            share = float(np.interp(
+                length / (2.0 * height), [p[0] for p in _HELD_SIDE_NEAR_END], [p[1] for p in _HELD_SIDE_NEAR_END],
+            ))
+            if share <= 0.0:
+                continue
+            stretch = height * (_HELD_SIDE_THIN + (_HELD_SIDE_WIDE - _HELD_SIDE_THIN) * thick / height) / share
+            weakest = min(weakest, stretch * thick * thick / 6.0)
+    return weakest, work
+
+
+def _footing_section_modulus(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    z_min: float,
+    *,
+    layer_height: float = 0.2,
+    height: float | None = None,
+) -> float:
+    """The section modulus (mm³) of the part's bed contact about the axis
+    it tips over most easily; ``0.0`` when nothing touches the bed.
+
+    The contact is the triangles lying within one layer of the bottom of
+    the mesh, the same contact the bed-adhesion analysis measures, taken as
+    their outline on the bed.  With *height*, the part's height, a patch of
+    it longer than the stretch that holds a push at one point
+    (:func:`_held_stretch`), and narrower across than the part is tall, is
+    also judged with only that stretch of it, wherever along it the push
+    lands (:func:`_held_stretch_modulus`, which is bounded in work and
+    memory and reads a contact too costly to measure as holding nothing).
+
+    A part standing on more than one patch of contact prints each patch as
+    a column of its own until a layer joins it to another
+    (:func:`_footing_join_heights`), so each patch is also judged alone, at
+    the height that layer lies at, and the answer is scaled to the part's
+    height so that one figure stands for the whole part; a patch no layer
+    joins is judged alone at the part's full height.  Each patch's reading
+    is charged to the same work budget, :data:`_HELD_STRETCH_PATCH_COST`
+    and up, so a part on more patches than the budget can read, or whose
+    patches spend it, is read as holding nothing, never as secure.
+    """
+    threshold = z_min + layer_height
+    contact = [
+        (tri[0][:2], tri[1][:2], tri[2][:2])
+        for tri in triangles
+        if tri[0][2] <= threshold and tri[1][2] <= threshold and tri[2][2] <= threshold
+    ]
+    if not contact:
+        return 0.0
+    pts = np.asarray(contact, dtype=np.float64)  # (T, 3, 2)
+    height = float(height) if height is not None and height > 0.0 else 0.0
+    modulus, spent = _contact_modulus(pts, height, _HELD_STRETCH_WORK)
+    if height <= 0.0 or modulus <= 0.0:
+        return modulus
+    labels = _contact_patch_labels(pts)
+    patches = int(labels.max()) + 1
+    if patches < 2:
+        return modulus
+    budget = _HELD_STRETCH_WORK - spent - patches * _HELD_STRETCH_PATCH_COST
+    if budget < 0:
+        return 0.0  # the patches alone would spend the budget
+    x, y = pts[:, :, 0], pts[:, :, 1]
+    a = np.abs(
+        (x[:, 1] - x[:, 0]) * (y[:, 2] - y[:, 0]) - (x[:, 2] - x[:, 0]) * (y[:, 1] - y[:, 0])
+    )
+    # The rows of each patch, grouped once; and each patch's largest
+    # triangle, whose middle is the point the sections above are read at.
+    order = np.argsort(labels, kind="stable")
+    starts = np.searchsorted(labels[order], np.arange(patches + 1))
+    points = pts[np.lexsort((a, labels))[starts[1:] - 1]].mean(axis=1)
+    joins = _footing_join_heights(
+        np.asarray(triangles, dtype=np.float64)[:, :, :3], z_min, points, height, _JOIN_WORK,
+    )
+    for i in range(patches):
+        alone, used = _contact_modulus(pts[order[starts[i] : starts[i + 1]]], float(joins[i]), budget)
+        budget -= used
+        modulus = min(modulus, alone * height / float(joins[i]))
+        if modulus <= 0.0:
+            break
+    return modulus
+
+
 def _estimate_adhesion_force(
     contact_area_mm2: float,
     bbox: dict[str, float],
     *,
     material: str = "pla",
     overlay: dict[str, Any] | None = None,
+    footing_modulus_mm3: float | None = None,
 ) -> AdhesionForceEstimate:
     """Predict whether bed adhesion force exceeds warping/peel force.
 
@@ -3585,6 +5066,16 @@ def _estimate_adhesion_force(
     every material; kiln-pro overlay supplies per-material curated
     values via :func:`_material_adhesion_strength` and
     :func:`_material_shrinkage_strain`.
+
+    Two tests, and the worse one decides the verdict: the peel balance
+    above (``force_ratio``) and the push test (``tipping_ratio``), whether
+    the part's bed contact holds the sideways push the nozzle can give the
+    top of the part.  Tuning may make the push test stricter, never looser:
+    the push is never taken below the public floor's, nor the hold above
+    it.  *footing_modulus_mm3* is the contact's
+    :func:`_footing_section_modulus`; without it the contact is read as a
+    solid strip as long as the part, of which the stretch that holds a push
+    at one point (:func:`_held_stretch`) is what counts.
     """
     cfg = (overlay or {}).get("adhesion_force") or _ADHESION_FORCE_PUBLIC_DEFAULTS
     peel_scale = cfg.get("peel_force_scale", 0.01)
@@ -3621,24 +5112,34 @@ def _estimate_adhesion_force(
     # (high CTE, high stress_factor) generate cyclic peel stress as
     # each layer cools and contracts against the constrained base.
     # Linear-in-z accumulation until thermal equilibrium; multiplied
-    # by per-material stress_factor (PLA ~0.6, ABS ~1.5, PP ~2.0,
-    # Nylon ~1.6).  Disabled by setting thermal_z_scale to ``None``
-    # in the overlay.  See _ADHESION_FORCE_PUBLIC_DEFAULTS docstring
-    # for calibration rationale (z_scale=100 chosen against the
-    # 31-case sweep; catches all 8 truly-risky cases with zero
-    # false positives).
+    # by the material's stress factor.  Disabled by setting
+    # thermal_z_scale to ``None`` in the overlay.  See
+    # _ADHESION_FORCE_PUBLIC_DEFAULTS docstring for calibration
+    # rationale (z_scale=100 chosen against the 31-case sweep; catches
+    # all 8 truly-risky cases with zero false positives).
     thermal_z_scale = cfg.get("peel_thermal_z_scale", 100.0)
     if thermal_z_scale is not None and z_span > 0:
         stress_factor = _material_stress_factor(material)
         peel_force *= 1.0 + float(stress_factor) * (z_span / float(thermal_z_scale))
 
     force_ratio = adhesion_force / max(peel_force, 0.001)
-    will_detach = force_ratio < 1.0
+
+    # The push test, read against the public floor whatever the tier.
+    floor_push_n = float(_ADHESION_FORCE_PUBLIC_DEFAULTS["nozzle_push_force_n"])
+    push_n = max(float(cfg.get("nozzle_push_force_n") or floor_push_n), floor_push_n)
+    hold_strength = min(adhesion_strength, _DEFAULT_ADHESION_STRENGTH)
+    if footing_modulus_mm3 is None:
+        width = contact_area_mm2 / longest_xy if longest_xy > 0 else 0.0
+        footing_modulus_mm3 = width * width * min(longest_xy, _held_stretch(z_span, width)) / 6.0
+    tipping_ratio = hold_strength * footing_modulus_mm3 / max(push_n * z_span, 1e-9)
+
+    deciding_ratio = min(force_ratio, tipping_ratio)
+    will_detach = deciding_ratio < 1.0
 
     risk_thresholds = cfg.get("risk_thresholds", {})
-    if force_ratio >= risk_thresholds.get("secure", 3.0):
+    if deciding_ratio >= risk_thresholds.get("secure", 3.0):
         risk_level = "secure"
-    elif force_ratio >= risk_thresholds.get("marginal", 1.5):
+    elif deciding_ratio >= risk_thresholds.get("marginal", 1.5):
         risk_level = "marginal"
     else:
         risk_level = "likely_detach"
@@ -3661,6 +5162,13 @@ def _estimate_adhesion_force(
         and aspect_ratio > float(aspect_threshold)
     )
     if geometry_extreme and risk_level == "secure":
+        risk_level = "marginal"
+
+    # A plastic whose hold on a standard build surface Kiln does not vouch
+    # for is never called secure, whatever its footing holds, on any tier.
+    unvouched = _unvouched_on_a_standard_bed(material)
+    withheld = unvouched is not None and risk_level == "secure"
+    if withheld:
         risk_level = "marginal"
 
     score_deduction = int(cfg.get("score_deductions", {}).get(risk_level, 0))
@@ -3700,7 +5208,7 @@ def _estimate_adhesion_force(
     # because the force-balance result was suspect for this shape.
     if geometry_extreme:
         model_confidence = "approximate"
-    elif force_ratio > 10.0 or force_ratio < 0.5:
+    elif deciding_ratio > 10.0 or deciding_ratio < 0.5:
         model_confidence = "high"
     else:
         model_confidence = "approximate"
@@ -3712,9 +5220,37 @@ def _estimate_adhesion_force(
         will_detach=will_detach,
         risk_level=risk_level,
         score_deduction=score_deduction,
-        recommendations=recommendations,
+        recommendations=(
+            list(recommendations)
+            + [f"{unvouched} holds a standard build surface weakly, so Kiln does not call this part's hold on one secure."]
+            if unvouched is not None else recommendations
+        ),
         model_confidence=model_confidence,
+        tipping_ratio=round(tipping_ratio, 3),
+        secure_withheld_for=unvouched if withheld else "",
     )
+
+
+#: Plastics whose hold on a standard build surface Kiln does not vouch for,
+#: by family, with the name each is called by: a part in one is never
+#: called secure, whatever its footing.
+_UNVOUCHED_ON_A_STANDARD_BED: dict[str, str] = {
+    "pp": "PP", "nylon": "Nylon", "pa": "Nylon", "peek": "PEEK", "pc": "PC", "polycarbonate": "PC", "abs": "ABS",
+}
+
+
+def _unvouched_on_a_standard_bed(material: str | None) -> str | None:
+    """The name of the family in :data:`_UNVOUCHED_ON_A_STANDARD_BED` that
+    *material* belongs to (``abs_esd``, ``pc_abs``, ``pa6_gf`` and
+    ``cf_nylon`` among them), or ``None``."""
+    if not material:
+        return None
+    for token in material.strip().lower().replace("-", "_").replace("/", "_").replace(" ", "_").split("_"):
+        if token in _UNVOUCHED_ON_A_STANDARD_BED:
+            return _UNVOUCHED_ON_A_STANDARD_BED[token]
+        if token.startswith("pa") and token[2:].isdigit():
+            return _UNVOUCHED_ON_A_STANDARD_BED["pa"]
+    return None
 
 
 def _score_terms(
@@ -3858,10 +5394,11 @@ def _score_to_grade(score: int) -> str:
 # they cannot drift apart on that verdict.
 # ---------------------------------------------------------------------------
 
-#: Score deducted per placement failure.  Sized so that a single
-#: failure lands any report under :data:`_PRINTABLE_SCORE_MIN` from any
-#: starting grade — a part off the bed or over the bed's edge does not
-#: print at all, so an otherwise clean A must not still read printable.
+#: Score deducted per placement failure, and per hard stop
+#: (:func:`_hard_stops`).  Sized so that a single failure lands any report
+#: under :data:`_PRINTABLE_SCORE_MIN` from any starting grade — a part over
+#: the bed's edge, resting on a point, or 1000 times too small does not
+#: print at all, so an otherwise clean A must not still read as one.
 _PLACEMENT_PENALTY = 50
 
 #: Slack allowed below z=0 before the part counts as off the bed.
@@ -3922,14 +5459,11 @@ def _resolve_placement_volume(
         return build_volume
     if printer_id:
         try:
-            from kiln.printer_model_resolver import resolve_printer_model_for
             from kiln.printers.bed_fit import get_build_volume
 
             # A model id, else a printer by the name its owner gave it:
-            # that printer's model is the bed.
-            volume = get_build_volume(printer_id) or get_build_volume(
-                resolve_printer_model_for(printer_id)
-            )
+            # that printer's model is the bed (the one resolver's answer).
+            volume = get_build_volume(printer_id)
         except Exception:  # pragma: no cover - catalogue unavailable
             volume = None
         if volume is not None:
@@ -3999,25 +5533,32 @@ def _placement_fault_records(
                 )
             )
 
-    z_min = bbox.get("z_min")
-    if z_min is not None and z_min < -_PLACEMENT_Z_TOLERANCE_MM:
-        faults.append(
-            PlacementFault(
-                name=PLACEMENT_FAULT_OFF_BED,
-                message=(
-                    # 2 decimals, not 1: at 1 decimal every fault within a
-                    # tenth of the plate printed as "0.0 mm below the build
-                    # plate", which reads as no depth at all and made the
-                    # verdict look like a bug even when it was right.
-                    f"Part sits {abs(z_min):.2f} mm below the build plate "
-                    f"(z_min = {z_min:.2f} mm) — anything under the plate is lost "
-                    f"when it slices. Drop it onto the plate first "
-                    f"(center_model_on_bed)."
-                ),
-            )
-        )
-
+    # Below the plate is where the file put the part, not a fault of it:
+    # the slicer and Kiln's slice gate set it on the plate
+    # (:func:`_below_plate_mm`, said once by :func:`_apply_placement_check`).
     return faults
+
+
+def _below_plate_mm(bbox: dict[str, float] | None) -> float | None:
+    """How far under the plate *bbox* reaches, past the tolerance, or ``None``."""
+    z_min = (bbox or {}).get("z_min")
+    if z_min is None or z_min >= -_PLACEMENT_Z_TOLERANCE_MM:
+        return None
+    return round(-float(z_min), 2)
+
+
+def below_plate_note(below_mm: float | None) -> str:
+    """The one sentence a report says about a part the file put under the
+    plate, or ``""``.  2 decimals, so a dip of a few hundredths does not
+    read as "0.0 mm"."""
+    if below_mm is None:
+        return ""
+    return (
+        f"As written, the part's lowest point is {below_mm:.2f} mm below the build "
+        "plate (exporters often put the origin at the middle of the part). It was "
+        "judged resting on the plate, which is where the slicer and Kiln's slice "
+        "step put it; the file itself was not moved."
+    )
 
 
 def _placement_faults(
@@ -4050,11 +5591,10 @@ def _apply_placement_check(
 ) -> tuple[int, str, bool, list[str]]:
     """Grade where the part sits, on top of how it is shaped.
 
-    Flags the two placement faults no shape metric can see:
-
-    * a part larger than the resolved build volume
-    * geometry below the bed (``z_min`` under 0) — the slicer silently
-      clips whatever hangs through the plate
+    Flags the placement fault no shape metric can see — a part larger
+    than the resolved build volume — and says once when the file put the
+    part below the plate, which the slicer settles by setting it on the
+    plate (:func:`below_plate_note`), so it is no fault.
 
     Each fault goes to the TOP of *recommendations* (mutated in place —
     placement outranks tuning advice) and deducts from the score.  Grade
@@ -4075,6 +5615,10 @@ def _apply_placement_check(
     faults = _placement_faults(
         bbox, build_volume=build_volume, printer_id=printer_id,
     )
+    # Said last: it is a fact about the file, never the reason to look.
+    note = below_plate_note(_below_plate_mm(bbox))
+    if note and note not in recommendations:
+        recommendations.append(note)
     if faults:
         recommendations[:0] = faults
         score = max(0, score - _PLACEMENT_PENALTY * len(faults))
@@ -4423,18 +5967,17 @@ def analyze_printability(
         ``"tree"`` (Cura tree). Public-tier behavior is unaffected —
         public Kiln returns the naive area×height estimate regardless.
         When kiln-pro is installed (Pro+ tier), this hint is forwarded
-        to the overlay's supports-calibration module which translates
-        the naive number into expected slicer extrusion volume for the
-        chosen style (Grid ÷ 2.0, Snug ÷ 3.0, Organic / Tree ÷ 5.0 per
-        the 2026-05-17 audit's empirical divisors). See
+        to Kiln Pro's support advice for the chosen style; see
         ``enrichment.supports_calibration`` on the returned report.
     :returns: A :class:`PrintabilityReport` with scores, grades, and
         recommendations.  When the kiln-pro package is installed (Pro+
         tier), the report is enriched with material-specific tuning
         and the ``enrichment`` field is populated -- a finding there may
         lower the score, never raise it; free / public installs see the
-        safety-floor result unchanged.  See
-        https://kiln3d.com for tier details.
+        safety-floor result unchanged.  A report Kiln Pro tuned keeps
+        every verdict, risk, reason and fix in its reply and leaves out
+        the numbers its checks were worked out from (:func:`_served`).
+        See https://kiln3d.com for tier details.
     :raises ValueError: If the file cannot be parsed -- including a STEP
         file that could not be turned into a mesh, whose message is the
         converter's own and whose ``__cause__`` is the
@@ -4767,7 +6310,7 @@ def _judge_supports(
                 math.acos(max(-1.0, min(1.0, -nn[2])))
             )
             overhang_angle = max(0.0, 90.0 - angle_from_down)
-            if overhang_angle + 1e-9 < resolved_threshold:
+            if not _at_overhang_limit(overhang_angle, resolved_threshold):
                 continue
             _self_supporting_overhang_count += 1
         if _self_supporting_overhang_count > 0:
@@ -4829,6 +6372,126 @@ def _judge_supports(
     )
 
 
+def _mm_said(value: float) -> str:
+    return f"{value:.1f}".rstrip("0").rstrip(".") if value < 10 else f"{value:.0f}"
+
+
+def _size_said(size: list[float]) -> str:
+    return " x ".join(_mm_said(v) for v in size) + " mm"
+
+
+def _judge_pieces(triangles: list[tuple[tuple[float, ...], ...]], reading: Any) -> PiecesAnalysis | None:
+    """Whether *reading*'s pieces print as one solid, which separate parts
+    they make and which of them float (:class:`PiecesAnalysis`).
+
+    Pieces in the air are judged as :mod:`kiln.fusion_check` judges them,
+    and said in its words, so the make doors that refuse a floating piece
+    and this report name the same pieces.  ``None`` when the mesh has no
+    pieces to read.
+    """
+    if reading is None or reading.piece_count == 0:
+        return None
+    solid_of = list(reading.solid_of) or list(range(reading.piece_count))
+    lows: dict[int, np.ndarray] = {}
+    highs: dict[int, np.ndarray] = {}
+    for piece, solid in zip(reading.pieces, solid_of, strict=True):
+        centre, half = np.asarray(piece.center), np.asarray(piece.size) / 2.0
+        lows[solid] = np.minimum(lows.get(solid, centre - half), centre - half)
+        highs[solid] = np.maximum(highs.get(solid, centre + half), centre + half)
+    size_of = {s: [round(float(v), 2) for v in highs[s] - lows[s]] for s in lows}
+    largest_first = sorted(size_of, key=lambda s: (-float(np.prod(size_of[s])), size_of[s]))
+    block = PiecesAnalysis(
+        piece_count=reading.piece_count,
+        solid_count=len(size_of),
+        parts_mm=[size_of[s] for s in largest_first[:_PARTS_LISTED]],
+    )
+    if block.solid_count < 2:
+        return block
+
+    from kiln.fusion_check import judge_reading
+
+    try:
+        fusion = judge_reading(triangles, reading)
+    except Exception:  # noqa: BLE001 -- the parts are still counted; the air goes unjudged
+        logger.debug("pieces in the air unjudged", exc_info=True)
+        block.note = f"It prints as {block.solid_count} separate parts, not one."
+        return block
+    findings = fusion.get("findings") or []
+    block.floating_bodies = int(fusion.get("floating_bodies") or 0)
+    block.captive_bodies = int(fusion.get("captive_bodies") or 0)
+    floating = next((f for f in findings if f.get("relation") == "floating"), None)
+    if floating is not None:
+        block.floating = str(floating["message"])
+        return block
+    unheld = set(fusion.get("unheld_bodies") or [])
+    in_air = {solid_of[body - 1] for body in unheld}
+    standing = [s for s in largest_first if s not in in_air]
+    said: list[str] = []
+    if len(standing) >= 2:
+        largest, rest = size_of[standing[0]], [size_of[s] for s in standing[1:]]
+        across = [max(size[0], size[1]) for size in rest]
+        if len(rest) == 1:
+            others = f"and one {_size_said(rest[0])}"
+        elif max(across) - min(across) < 0.05:
+            others = f"and {len(rest)} more, each {_mm_said(min(across))} mm across"
+        else:
+            others = f"and {len(rest)} more, {_mm_said(min(across))} to {_mm_said(max(across))} mm across"
+        said.append(
+            f"It prints as {len(standing)} separate parts on the plate, not one: the largest is "
+            f"{_size_said(largest)} {others}, and each comes off the plate on its own. "
+            "If they belong together, join them so they overlap."
+        )
+    # The pieces in the air that do print, by how the fusion check found
+    # them: resting on the part, a clearance away from it, held inside it.
+    resting: set[int] = set()
+    close: set[int] = set()
+    for finding in findings:
+        named = unheld & set(finding.get("bodies") or [])
+        if finding.get("relation") == "touching":
+            resting |= named
+        elif finding.get("relation") == "near":
+            close |= named
+    close -= resting
+    if resting:
+        said.append(_in_the_air_said(len(resting), resting=True))
+    if close:
+        said.append(_in_the_air_said(len(close), resting=False))
+    captive = next((f for f in findings if f.get("relation") == "captive"), None)
+    if captive is not None:
+        said.append(str(captive["message"]))
+    block.note = " ".join(said)
+    return block
+
+
+def _in_the_air_said(count: int, *, resting: bool) -> str:
+    """What is said of *count* pieces off the plate that rest on the part
+    without being joined to it (*resting*), or sit a clearance away from it."""
+    from kiln.fusion_check import NEAR_GAP_MM, embedment_floor_mm
+
+    one = count == 1
+    them, they = ("it", "it") if one else ("them", "they")
+    belong = "belongs" if one else "belong"
+    sink = f"If {they} {belong} to the part, sink {them} at least {embedment_floor_mm():g} mm into it."
+    pieces = "1 piece" if one else f"{count} pieces"
+    if resting:
+        rest = "rests" if one else "rest"
+        return (
+            f"{pieces} {rest} on the part without being joined to it: touching it along a "
+            f"line, at a point or at a small patch, so a slicer joins {them} by a sliver at "
+            f"most. {sink}"
+        )
+    sit = "sits" if one else "sit"
+    return (
+        f"{pieces} {sit} less than {NEAR_GAP_MM:g} mm from the part, joined to nothing, "
+        f"so {they} {'prints' if one else 'print'} loose on it: fine for a designed "
+        f"clearance. {sink}"
+    )
+
+
+#: The parts a report lists by size, largest first; the count says the rest.
+_PARTS_LISTED: int = 20
+
+
 def _mesh_path_for_analysis(file_path: str) -> str:
     """A CAD file is analysed as Kiln's mesh of it, through the shared door
     (cached by content; anything already a mesh passes straight through).
@@ -4852,6 +6515,14 @@ def _load_mesh_for_analysis(
     """The mesh as every analysis here reads it: parsed, membranes dropped,
     winding normalised, with its bounding box and the plate it rests on."""
     triangles, vertices = _parse_mesh(file_path)
+    return _prepare_parsed(triangles, vertices)
+
+
+def _prepare_parsed(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    vertices: list[tuple[float, ...]],
+) -> tuple[list[tuple[tuple[float, ...], ...]], list[tuple[float, ...]], dict[str, float], float]:
+    """:func:`_load_mesh_for_analysis` on a mesh already parsed."""
     # Membranes must go BEFORE winding normalization: a zero-thickness
     # pair has no meaningful outward orientation to normalize.
     triangles = _drop_membrane_pairs(triangles)
@@ -4929,7 +6600,24 @@ def _analyze_printability_here(
             logger.warning("hole check stopped on %s: %s", Path(file_path).name, exc)
             _tell_whoever_runs_this_machine(file_path, exc)
 
-    triangles, vertices, bbox, z_min = _load_mesh_for_analysis(file_path)
+    parsed, parsed_vertices = _parse_mesh(file_path)
+    # Pieces as every door that counts them reads them (kiln.mesh_bodies),
+    # on the file's own triangles: corners joined at a fraction of the
+    # part's size, so a meter export counts the same as a millimeter one,
+    # and two pieces laid on each other stay two.  Read before the
+    # membranes are dropped and the winding is evened out, which both
+    # rewrite the very contact that tells the pieces apart, and before the
+    # analysis below holds its own copy of the mesh.
+    pieces = None
+    if parsed:
+        from kiln.mesh_bodies import read_triangles
+
+        with contextlib.suppress(ValueError, IndexError, MemoryError):
+            pieces = read_triangles(parsed)
+    # Which separate parts those pieces print as, and which float.
+    parts = _judge_pieces(parsed, pieces)
+    triangles, vertices, bbox, z_min = _prepare_parsed(parsed, parsed_vertices)
+    del parsed, parsed_vertices
 
     # Soft tier seam: load the printability_judgment overlay once and
     # pass it to each material-derived sub-analysis. Empty overlay ->
@@ -4965,26 +6653,21 @@ def _analyze_printability_here(
     if len(triangles) > 0:
         try:
             tris_arr = np.asarray(triangles, dtype=np.float64)
-            comp_ids = _label_mesh_components(tris_arr)
-            component_count = int(comp_ids.max() + 1)
-            mesh_genus = _compute_mesh_genus(tris_arr, component_count)
+            component_count = pieces.piece_count if pieces is not None else 0
+            # Genus is Euler arithmetic on this mesh's own vertices, edges
+            # and faces, so it takes the component count of the same
+            # scheme (shared edges, exact corners), not the piece count.
+            mesh_genus = _compute_mesh_genus(
+                tris_arr, int(_label_mesh_components(tris_arr).max() + 1),
+            )
             tris_arr_for_pro = tris_arr
-            if component_count >= 2:
-                # Per-component bbox volume: max-min along each axis.
-                # Coefficient of variation (std / mean) measures spread;
-                # uniformity = 1 - clamp(cv, 0, 1) maps to 0–1 with 1 =
-                # all components identical.
-                tri_min = tris_arr.min(axis=1)  # (T, 3) per-tri min
-                tri_max = tris_arr.max(axis=1)  # (T, 3) per-tri max
-                comp_bbox_volumes = np.zeros(component_count)
-                for cid in range(component_count):
-                    mask = comp_ids == cid
-                    if not mask.any():
-                        continue
-                    lo = tri_min[mask].min(axis=0)
-                    hi = tri_max[mask].max(axis=0)
-                    extents = np.maximum(hi - lo, 1e-12)
-                    comp_bbox_volumes[cid] = float(extents.prod())
+            if component_count >= 2 and pieces is not None:
+                # Per-component bbox volume.  Coefficient of variation
+                # (std / mean) measures spread; uniformity = 1 - clamp(cv,
+                # 0, 1) maps to 0–1 with 1 = all components identical.
+                comp_bbox_volumes = np.array([
+                    float(np.prod(np.maximum(piece.size, 1e-12))) for piece in pieces.pieces
+                ])
                 mean_vol = float(comp_bbox_volumes.mean())
                 if mean_vol > 0:
                     std_vol = float(comp_bbox_volumes.std())
@@ -5014,11 +6697,15 @@ def _analyze_printability_here(
         component_size_uniformity=round(component_size_uniformity, 3),
         genus=mesh_genus,
     )
+    # The walls and the gaps share one budget for the corners they read.
+    corner_budget = _CornerBudget()
     thin_walls, sub_nozzle_wall_pct = _measure_thin_walls(
         triangles, vertices,
-        nozzle_diameter=nozzle_diameter, thin_below_mm=wall_floor,
+        nozzle_diameter=nozzle_diameter, thin_below_mm=wall_floor, corner_budget=corner_budget,
     )
-    cavities = _analyze_cavity_widths(triangles, vertices, nozzle_diameter=nozzle_diameter)
+    cavities = _analyze_cavity_widths(
+        triangles, vertices, nozzle_diameter=nozzle_diameter, corner_budget=corner_budget,
+    )
     bed_adhesion = _analyze_bed_adhesion(triangles, z_min, bbox, layer_height=layer_height)
     judged = _judge_supports(
         triangles, z_min, bbox,
@@ -5040,6 +6727,9 @@ def _analyze_printability_here(
     adhesion_force = _estimate_adhesion_force(
         bed_adhesion.contact_area_mm2, bbox, material=material,
         overlay=judgment_overlay,
+        footing_modulus_mm3=_footing_section_modulus(
+            triangles, z_min, layer_height=layer_height, height=bbox["z_max"] - bbox["z_min"],
+        ),
     )
 
     score_terms = _score_terms(
@@ -5199,6 +6889,7 @@ def _analyze_printability_here(
         score_if_placed=score_if_placed,
         grade_if_placed=_score_to_grade(score_if_placed),
         printable_if_placed=score_if_placed >= _PRINTABLE_SCORE_MIN,
+        below_plate_mm=_below_plate_mm(bbox),
     )
 
     model_height = bbox["z_max"] - bbox["z_min"]
@@ -5252,6 +6943,8 @@ def _analyze_printability_here(
         placement=placement,
         adhesion=adhesion,
         nozzle=nozzle.to_dict(),
+        units_question=units_question(bbox),
+        pieces=parts,
     )
 
     # Optional kiln-pro enrichment: when the kiln-pro package is
@@ -5365,12 +7058,56 @@ def _analyze_printability_here(
     # slicer lays down almost nothing) both came back "printable" at C,
     # because the thin-wall and adhesion deductions are capped and the
     # score alone cannot reach the floor.
-    for stop in reversed(_hard_stops(report, nozzle_diameter)):
+    # A part that will not print as it is cannot read as an A beside the
+    # sentence saying so: each stop costs what a placement fault costs, on
+    # the score and on the score it would have if placed.
+    stops = _hard_stops(report, nozzle_diameter)
+    if stops:
+        cost = _PLACEMENT_PENALTY * len(stops)
+        report.stop_deduction = -min(cost, report.score)
+        report.score = max(0, report.score - cost)
+        report.grade = _score_to_grade(report.score)
+        if report.placement is not None and report.placement.score_if_placed is not None:
+            report.placement.score_if_placed = max(0, report.placement.score_if_placed - cost)
+            report.placement.grade_if_placed = _score_to_grade(report.placement.score_if_placed)
+            report.placement.printable_if_placed = False
+    for stop in reversed(stops):
         report.printable = False
         if stop not in report.recommendations:
             report.recommendations.insert(0, stop)
 
+    # A report any of Kiln Pro's data shaped is served without the numbers
+    # that data worked out; one on the floor alone is served whole
+    # (:func:`_served`).
+    if (
+        judgment_overlay
+        or wall_floor is not None
+        or report.enrichment is not None
+        or _material_physics_from_overlay(material)
+    ):
+        _mark_tuned(report)
     return report
+
+
+def units_question(bbox: dict[str, float]) -> str:
+    """The units question the part's size raises, or ``""``: asked only when
+    it reads smaller than anything a printer makes, in the words of the one
+    judgement every door uses."""
+    from kiln.generation.validation import unit_verdict
+
+    largest = max(
+        bbox["x_max"] - bbox["x_min"],
+        bbox["y_max"] - bbox["y_min"],
+        bbox["z_max"] - bbox["z_min"],
+    )
+    verdict = unit_verdict(float(largest))
+    if not verdict.below_printable:
+        return ""
+    return (
+        verdict.describe_unchanged()
+        + "  Until it is, no other measurement in this report describes the part "
+        "you meant."
+    )
 
 
 def _hard_stops(report: PrintabilityReport, nozzle_diameter: float) -> list[str]:
@@ -5378,11 +7115,18 @@ def _hard_stops(report: PrintabilityReport, nozzle_diameter: float) -> list[str]
 
     Read off fields the analysis already measured, so :func:`verdict` can
     re-derive the same answer from a finished report.  A stop is a
-    physical fact a slicer cannot work around: nothing touches the bed,
-    or a wall is thinner than the nozzle can extrude.  Cones and
-    pyramids measure a zero-thickness apex without listing a thin REGION,
-    so the wall rule reads the regions, not the minimum.
+    physical fact a slicer cannot work around: the part is smaller than
+    anything a printer makes (its units are in question), nothing touches
+    the bed, a piece floats with nothing under it, or a wall is thinner than
+    the nozzle can extrude.  Cones and pyramids measure a zero-thickness
+    apex without listing a thin REGION, so the wall rule reads the regions,
+    not the minimum.
     """
+    # The units first, and alone: at a thousandth of its size every other
+    # measurement is of a part nobody meant, so its stops would send the
+    # reader to fix the wrong thing ("lay it on a flat face").
+    if report.units_question:
+        return [report.units_question]
     stops: list[str] = []
     bed = report.bed_adhesion
     # Less than one nozzle-width square touching the bed is a point or an
@@ -5393,6 +7137,10 @@ def _hard_stops(report: PrintabilityReport, nozzle_diameter: float) -> list[str]
             "part rests on a point or an edge, so the first layer has nowhere to "
             "go. Lay it on a flat face, or add a base."
         )
+    # A piece in the air that nothing joins or holds prints as a loose part
+    # on supports, or not at all (kiln.fusion_check's own sentence).
+    if report.pieces is not None and report.pieces.floating:
+        stops.append(report.pieces.floating)
     walls = report.thin_walls
     thin = [
         r for r in (walls.problematic_regions if walls is not None else [])
@@ -5408,6 +7156,88 @@ def _hard_stops(report: PrintabilityReport, nozzle_diameter: float) -> list[str]
     return stops
 
 
+def stops(report: PrintabilityReport) -> list[str]:
+    """Why *report*'s part will not print as it is, worst first: its
+    placement faults, then its hard stops (:func:`_hard_stops`).  Empty when
+    nothing stops it.  The one reading :func:`verdict` and every pipeline
+    that passes or fails a part take, so none can pass what this refuses."""
+    faults = [f.message for f in report.placement.faults] if report.placement else []
+    # The nozzle the analysis ran for.  Pro may set the thin-wall
+    # threshold to a material minimum, which is tuning, not this floor.
+    nozzle = float((report.nozzle or {}).get("diameter_mm") or 0.0)
+    if nozzle <= 0.0 and report.thin_walls is not None and report.thin_walls.threshold_basis == "nozzle":
+        nozzle = float(report.thin_walls.threshold_mm or 0.0)
+    return faults + _hard_stops(report, nozzle or 0.4)
+
+
+def _mm2_said(area: float) -> str:
+    return f"{area:.0f}" if area >= 10.0 else f"{area:.1f}".rstrip("0").rstrip(".")
+
+
+def footing(report: PrintabilityReport) -> str:
+    """What the way *report*'s part stands on the bed asks of the print, as
+    one sentence, or ``""``.
+
+    Said after an answer that the part prints, so that answer is never an
+    all-clear for a part that comes off the bed.  It speaks when the part
+    stands on too little of the bed: its contact is in the ``high`` band.
+    The fix is the report's own brim or raft decision
+    (:func:`recommend_adhesion`), the one the slice applies.  A tube, a ring
+    or a frame touches the bed only along its outline yet stands as steadily
+    as it is wide, so it is not named: a report whose band reads the contact
+    the outline holds down (``graded_contact_percentage``) already grades it
+    out of the ``high`` band, and on one without that figure the share of
+    the footprint the contact spans must be in the ``high`` band too.
+
+    It also speaks when the adhesion-force verdict expects the part to come
+    off the bed partway through (``likely_detach``) or says it may
+    (``marginal``): a tall part on a narrow footing stands on all of its
+    footprint, so the contact bands never see it.  When that verdict was
+    kept from ``secure`` only by the plastic (``secure_withheld_for``), the
+    sentence names the plastic and its weak hold on a standard build
+    surface, not the part's height.  The words are the same on every tier;
+    only the report's own verdict and brim decision vary.
+    """
+    bed = report.bed_adhesion
+    if bed is not None and bed.adhesion_risk == "high" and _on_a_small_spot(bed):
+        dims = report.dimensions_mm or {}
+        width_mm, depth_mm = dims.get("width_mm"), dims.get("depth_mm")
+        under = f" under a part {width_mm:.0f} x {depth_mm:.0f} mm across" if width_mm and depth_mm else ""
+        return f"It stands on only {_mm2_said(bed.contact_area_mm2)} mm2 of the bed{under}, so {_hold_down(report)}."
+    force = report.adhesion_force
+    level = getattr(force, "risk_level", "") if force is not None else ""
+    if level == "likely_detach":
+        return f"It is tall for what it stands on and is likely to come off the bed before it finishes, so {_hold_down(report)}."
+    if level == "marginal":
+        weak = getattr(force, "secure_withheld_for", "")
+        if weak:
+            return f"{weak} holds a standard build surface weakly, so it could come off the bed before it finishes; {_hold_down(report)}."
+        return f"It is tall for what it stands on and could come off the bed before it finishes, so {_hold_down(report)}."
+    return ""
+
+
+def _on_a_small_spot(bed: BedAdhesionAnalysis) -> bool:
+    """Whether *bed*, already in the ``high`` band, stands on a small spot
+    rather than around a wide outline: a band read from the held-down
+    contact has told the two apart; otherwise the span of the contact does."""
+    if getattr(bed, "graded_contact_percentage", None) is not None:
+        return True
+    span = getattr(bed, "contact_span_percentage", None)
+    return span is not None and _adhesion_risk_for_contact(span) == "high"
+
+
+def _hold_down(report: PrintabilityReport) -> str:
+    """How *report*'s part is held down, from its own brim or raft decision."""
+    rec = report.adhesion
+    if rec is not None and rec.use_raft:
+        return "print it on a raft"
+    if rec is not None and rec.brim_width_mm > 0:
+        width = rec.brim_width_mm
+        article = "an" if str(width).startswith("8") or width in (11, 18) else "a"
+        return f"print it with {article} {width} mm brim"
+    return "print it with a brim"
+
+
 def verdict(report: PrintabilityReport) -> tuple[str, str]:
     """The one thing the check says about a part, as ``(key, sentence)``.
 
@@ -5416,24 +7246,93 @@ def verdict(report: PrintabilityReport) -> tuple[str, str]:
     normal print, not a warning), ``wont_print`` (a placement fault or a
     hard stop, named), and ``check`` for a score under the printable
     line with no single cause to point at.  The score stays on the
-    report for comparing versions; it is not the headline.
+    report for comparing versions; it is not the headline.  An answer that
+    the part prints, or asks for a check, goes on to say how it must be held
+    down when it stands on one small spot or is expected to come off the bed
+    (:func:`footing`), after its first sentence, and then that it prints as
+    separate parts when it does (:class:`PiecesAnalysis`).
     """
-    faults = [f.message for f in report.placement.faults] if report.placement else []
-    # The nozzle the analysis ran for.  Pro may set the thin-wall
-    # threshold to a material minimum, which is tuning, not this floor.
-    nozzle = float((report.nozzle or {}).get("diameter_mm") or 0.0)
-    if nozzle <= 0.0 and report.thin_walls is not None and report.thin_walls.threshold_basis == "nozzle":
-        nozzle = float(report.thin_walls.threshold_mm or 0.0)
-    stops = faults + _hard_stops(report, nozzle or 0.4)
-    if stops:
-        return "wont_print", f"Won't print as it is: {stops[0]}"
+    found = stops(report)
+    if found:
+        return "wont_print", f"Won't print as it is: {found[0]}"
+    notes = (footing(report), report.pieces.note if report.pieces is not None else "")
     reason = support_verdict(report)
     if reason:
-        return "prints_with_supports", f"Prints with supports ({reason})."
+        return "prints_with_supports", " ".join(filter(None, (f"Prints with supports ({reason}).", *notes)))
     if report.printable:
-        return "ready", "Ready to print."
+        return "ready", " ".join(filter(None, ("Ready to print.", *notes)))
     first = report.recommendations[0] if report.recommendations else "see the report"
-    return "check", f"Check before printing: {first}"
+    return "check", " ".join(filter(None, (f"Check before printing: {first}", *notes)))
+
+
+def verdict_from_findings(findings: dict[str, Any]) -> tuple[str, str]:
+    """:func:`verdict` for a part known only by its summary findings (an
+    inspection bundle's printability channel, a
+    :class:`BundlePrintabilityFindings`).
+
+    The findings carry the verdict when their producer read it
+    (``verdict`` / ``verdict_text``).  Older findings have only the summary
+    fields, so it is rebuilt from them in the order :func:`verdict` takes,
+    after whatever stops the part, which a caller that can see the part's
+    placement says first.
+    """
+    if findings.get("verdict") and findings.get("verdict_text"):
+        return str(findings["verdict"]), str(findings["verdict_text"])
+    if findings.get("needs_supports"):
+        return "prints_with_supports", "Prints with supports."
+    if findings.get("printable"):
+        return "ready", "Ready to print."
+    recs = findings.get("recommendations") or []
+    return "check", f"Check before printing: {recs[0] if recs else 'see the report'}"
+
+
+def verdict_of(report: PrintabilityReport | BundlePrintabilityFindings) -> tuple[str, str]:
+    """:func:`verdict` for either kind of report a door may hold.
+
+    The verdict is a reading of the report, never a reason to lose it: a
+    report it cannot read (a field missing or of the wrong kind) falls back
+    to the report's own printable flag, and the debug log says why.
+    """
+    if isinstance(report, BundlePrintabilityFindings):
+        return verdict_from_findings(report.to_dict())
+    try:
+        if not isinstance(report, PrintabilityReport):
+            raise TypeError(f"not a printability report: {type(report).__name__}")
+        return verdict(report)
+    except Exception:  # noqa: BLE001 -- the report stands without its verdict
+        logger.debug("printability verdict unavailable", exc_info=True)
+        if getattr(report, "printable", False):
+            return "ready", "Ready to print."
+        return "check", "Check before printing: see the report."
+
+
+#: The verdicts a part passes a printability gate with: it prints as it is,
+#: or with the supports a slicer adds, which is a normal print.
+PRINTS: frozenset[str] = frozenset({"ready", "prints_with_supports"})
+
+
+def passes(verdict_key: str, score: int, *, bar: int, required: int | None = None) -> bool:
+    """Whether a gate passes a part :func:`verdict` called *verdict_key*.
+
+    The verdict decides.  A part that prints, as it is or with supports,
+    passes whatever its score, and one that won't print (or was never
+    judged) fails whatever its score: the score is for comparing versions
+    of a part, not for telling a person whether it prints.  Only ``check``
+    (under the printable line with no single cause to name) has nothing but
+    the score to go on, so there the gate's own *bar* decides.
+
+    *required* is a minimum the CALLER asked for, a quality bar of their
+    own: it holds for every part, one that prints included.  One rule for
+    every gate, so no door fails a part another door told the person prints
+    unless the person asked for more.
+    """
+    if verdict_key == "wont_print" or not verdict_key:
+        return False
+    if required is not None and score < required:
+        return False
+    if verdict_key in PRINTS:
+        return True
+    return score >= bar
 
 
 # ---------------------------------------------------------------------------
@@ -5487,8 +7386,9 @@ def recommend_adhesion(
 ) -> AdhesionRecommendation:
     """Recommend brim/raft settings based on model geometry + material + printer.
 
-    The one brim / raft decision for a part.  Uses the contact percentage
-    and adhesion risk from :class:`BedAdhesionAnalysis` combined with
+    The one brim / raft decision for a part.  Uses the share of the
+    footprint the contact holds down (:func:`graded_contact`) and the
+    adhesion risk read from it, from :class:`BedAdhesionAnalysis`, combined with
     material warping tendency and printer type, then raises the brim when
     the part's own warping or adhesion-force verdict calls for one.  Those
     two analyses describe their risk and leave the brim to this function,
@@ -5507,8 +7407,13 @@ def recommend_adhesion(
     """
     mat_upper = material.upper()
     is_warp_material = mat_upper in _HIGH_WARP_MATERIALS
-    pct = bed_adhesion.contact_percentage
+    # The share the contact holds down, which the risk band was read from;
+    # a part standing on its outline is told that, not handed a share of
+    # its footprint it barely touches.
+    pct = graded_contact(bed_adhesion)
     risk = bed_adhesion.adhesion_risk
+    outlined = pct > bed_adhesion.contact_percentage
+    said = f"{pct:.1f}% of the footprint, inside the outline it stands on" if outlined else f"{pct:.1f}%"
 
     brim = 0
     raft = False
@@ -5522,27 +7427,27 @@ def recommend_adhesion(
         brim = 8
         raft = is_warp_material
         rationale = (
-            f"Tiny contact area ({pct:.1f}% of footprint) — extreme adhesion risk. "
+            f"Tiny contact area ({said if outlined else f'{pct:.1f}% of footprint'}) — extreme adhesion risk. "
             f"{'Raft recommended for warping material.' if raft else '8mm brim mandatory.'}"
         )
     elif pct < 5.0 and is_warp_material:
         brim = 8
         raft = True
-        rationale = f"Low contact ({pct:.1f}%) with {mat_upper} (high warp) — raft recommended."
+        rationale = f"Low contact ({said}) with {mat_upper} (high warp) — raft recommended."
     elif pct < 5.0 and (is_bedslinger_printer or not has_enclosure):
         brim = 8
-        rationale = f"Low contact ({pct:.1f}%) on {'bed-slinger' if is_bedslinger_printer else 'open-frame'} printer — 8mm brim."
+        rationale = f"Low contact ({said}) on {'bed-slinger' if is_bedslinger_printer else 'open-frame'} printer — 8mm brim."
     elif pct < 5.0:
         brim = 5
-        rationale = f"Low contact area ({pct:.1f}%) — 5mm brim recommended."
+        rationale = f"Low contact area ({said}) — 5mm brim recommended."
     elif risk == "high" and is_warp_material:
         # The rest of the ``high`` band: 5% and up.  No narrower than the
         # ``medium`` rows below it and no wider than the rows above.
         brim = 8
-        rationale = f"Low contact ({pct:.1f}%) with {mat_upper} (high warp) — wide 8mm brim."
+        rationale = f"Low contact ({said}) with {mat_upper} (high warp) — wide 8mm brim."
     elif risk == "high":
         brim = 5
-        rationale = f"Low bed contact ({pct:.1f}%) — 5mm brim recommended."
+        rationale = f"Low bed contact ({said}) — 5mm brim recommended."
     elif risk == "medium" and is_warp_material:
         brim = 8
         rationale = f"Moderate contact with {mat_upper} (high warp) — wide 8mm brim."
@@ -5551,7 +7456,7 @@ def recommend_adhesion(
         rationale = "Moderate contact on bed-slinger — 5mm brim for safety."
     elif risk == "medium":
         brim = 3
-        rationale = f"Moderate bed contact ({pct:.1f}%) — 3mm brim recommended."
+        rationale = f"Moderate bed contact ({said}) — 3mm brim recommended."
     elif is_warp_material and model_height_mm > 50.0:
         brim = 5
         rationale = f"Tall model ({model_height_mm:.0f}mm) with {mat_upper} — precautionary 5mm brim."
@@ -5562,7 +7467,7 @@ def recommend_adhesion(
         brim = 5
         rationale = f"{mat_upper} warps without an enclosure — precautionary 5mm brim."
     else:
-        rationale = f"Good bed contact ({pct:.1f}%), no brim needed."
+        rationale = f"Good bed contact ({said}), no brim needed."
 
     # The part's own verdicts can raise the brim, never lower it, and a
     # raft already covers what a brim would.  The widths are the ones
@@ -5577,9 +7482,10 @@ def recommend_adhesion(
                     "glue stick also works)."
                 )))
             elif adhesion_force.risk_level == "marginal":
+                weak = getattr(adhesion_force, "secure_withheld_for", "")
                 raises.append((5, (
-                    "5mm brim: adhesion is borderline for this part's height "
-                    "and footprint."
+                    f"5mm brim: {weak} holds a standard build surface weakly." if weak else
+                    "5mm brim: adhesion is borderline for this part's height and footprint."
                 )))
         if warping is not None and warping.risk_level in ("high", "critical"):
             width = 8 if warping.risk_level == "critical" else 5
@@ -5592,7 +7498,7 @@ def recommend_adhesion(
                 brim, rationale = width, reason
         if brim == 0 and warping is not None and warping.risk_level == "moderate":
             rationale = (
-                f"Good bed contact ({pct:.1f}%), no brim needed: the warping "
+                f"Good bed contact ({said}), no brim needed: the warping "
                 f"risk for {mat_upper} is moderate, below the level that "
                 f"calls for one."
             )
@@ -5609,7 +7515,7 @@ def recommend_adhesion(
         brim_width_mm=brim,
         use_raft=raft,
         adhesion_risk=risk,
-        contact_percentage=pct,
+        contact_percentage=bed_adhesion.contact_percentage,
         rationale=rationale,
         slicer_overrides=overrides,
     )
@@ -5709,7 +7615,9 @@ def collect_failure_signals(
             signals["print_error"] = state.print_error
     if report is not None:
         signals["adhesion_risk"] = report.bed_adhesion.adhesion_risk
-        signals["contact_percentage"] = report.bed_adhesion.contact_percentage
+        # The share the grade read, so the diagnosis and the report it
+        # diagnoses describe the same contact.
+        signals["contact_percentage"] = graded_contact(report.bed_adhesion)
         signals["overhang_pct"] = report.overhangs.overhang_percentage
         signals["max_bridge_mm"] = report.bridging.max_bridge_length_mm
     if material:

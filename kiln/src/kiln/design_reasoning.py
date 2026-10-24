@@ -11,7 +11,8 @@ Public API:
     recommend_reinforcements   — gussets, ribs, fillets at specific locations
     assess_load_bearing        — identify load surfaces and stress flow
     generate_improvement_plan  — full actionable plan for a design
-    apply_reinforcements       — auto-apply fixes (thicken, fillet, base, gusset)
+    describe_structural_risks  — what a person is told about the risks found
+    apply_reinforcements       — auto-apply fixes (thicken, fillet, base plate)
     infer_print_settings       — structural risks → optimal slicer settings
     StructuralRisk             — single risk finding dataclass
     ReinforcementRecommendation — single fix recommendation dataclass
@@ -26,11 +27,13 @@ import contextlib
 import logging
 import math
 import struct
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from kiln.cost_estimator import BUILTIN_MATERIALS, DEFAULT_MATERIAL, resolve_material
+from kiln.mesh_errors import UnreadableMeshError
 
 logger = logging.getLogger(__name__)
 
@@ -49,25 +52,58 @@ logger = logging.getLogger(__name__)
 #
 # Stricter direction per metric (the public floor that surfaces a feature):
 #   - thin_neck_ratio:           HIGHER value flags MORE thin sections
-#   - cantilever_risk_ratio:     LOWER value flags MORE cantilevers
+#   - tipping_ratio:             LOWER value flags MORE tall, narrow parts
 #   - min_cross_section_mm2:     HIGHER value flags MORE small sections
-#   - sharp_angle_threshold_deg: HIGHER value flags MORE less-acute corners
 #
-# The kiln-pro overlay supplies tighter calibrated values for these
-# thresholds; the public defaults below are the conservative floor.
+# The kiln-pro overlay supplies calibrated values for those three; the
+# public defaults below are the conservative floor.  The sharp-corner
+# threshold is NOT a tier dial: one value, every caller (see
+# ``_SHARP_ANGLE_THRESHOLD_DEG_PUBLIC``).  The tools leave every threshold
+# unset so the engine resolves it; a caller who passes one pins that dial.
 
 # Stress concentration threshold: cross-section area ratio that signals a
 # "thin neck" where load transfer becomes risky.
 _THIN_NECK_RATIO_PUBLIC = 0.35
 
-# Cantilever length-to-thickness ratio where deflection becomes concerning.
-_CANTILEVER_RISK_RATIO_PUBLIC = 4.0
+# Height-to-base ratio past which a part may tip over on the plate.
+_TIPPING_RATIO_PUBLIC = 4.0
 
 # Minimum cross-section area (mm²) below which any section is flagged.
 _MIN_CROSS_SECTION_MM2_PUBLIC = 5.0
 
-# Angle (degrees) below which a vertex is "sharp" — stress-concentration risk.
+# How far the surface turns inward across an inside edge (the angle between
+# its two faces' normals, in degrees) before the corner counts as sharp.  At 65
+# a corner counts when the material wraps 245 degrees or more around the edge:
+# a square inside corner (270) counts, a pentagonal pocket's corners (252)
+# count, a hexagonal pocket's corners (240, the nut trap) do not, and an
+# inside fillet faceted in steps of 45 degrees or less does not.  One value at
+# every tier and every door; a caller may pin another.  Only inside
+# (re-entrant) edges are judged; see :func:`_find_sharp_corners`.  Pinned by
+# ``tests/test_one_sharp_corner_dial.py``.
 _SHARP_ANGLE_THRESHOLD_DEG_PUBLIC = 65.0
+
+# Sharp inside edges that meet, or pass close by each other, are one corner:
+# one place to round, one finding.  "Close" is read on a grid of cells this
+# wide (:func:`_corners`): always under 1.25 mm, never over about 9.
+_CORNER_CELL_MM = 2.5
+
+# An inside corner whose edges total less than this (mm) is not counted: a
+# printed corner is never sharper than the bead that forms it, so a crease
+# this short is not in the print.  It is the width of a common line, and the
+# creases two rounds leave where they meet are well under it.  Pinned by
+# ``tests/test_tiny_creases_are_not_sharp_corners.py``.
+_CORNER_FLOOR_MM = 0.4
+
+# The most points the grouping lays along a part's inside edges, a point every
+# 1.25 mm: over a kilometre of inside edge.  A file asking for more (one edge
+# kilometres long, say) is grouped by its edges' ends alone, so the work is
+# bounded by the file's size, never by the distances written in it.
+_CORNER_POINT_BUDGET = 1_000_000
+
+# A corner further than this from the origin (1,000 km) is not part of a
+# printable part; a face reaching it is left out of the corner check, as a
+# face with no position (NaN or infinite) is.
+_FARTHEST_MM = 1e9
 
 # Number of Z-slices for cross-section analysis (implementation detail).
 _NUM_SLICES = 40
@@ -141,8 +177,11 @@ class LoadAnalysis:
     load_surfaces: list[dict[str, Any]]  # surfaces that bear load
     weak_axis: str  # axis most vulnerable to failure
     layer_direction_concern: str  # how print layers affect strength
-    recommended_print_orientation: str  # "upright", "on_side", "on_back"
+    recommended_print_orientation: str  # "upright", "on_side", "on_back"; "" when not judged
     orientation_reasoning: str
+    #: The units question the file's size raises; when set, nothing above
+    #: was judged.
+    units_question: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -152,6 +191,7 @@ class LoadAnalysis:
             "layer_direction_concern": self.layer_direction_concern,
             "recommended_print_orientation": self.recommended_print_orientation,
             "orientation_reasoning": self.orientation_reasoning,
+            **({"units_question": self.units_question} if self.units_question else {}),
         }
 
 
@@ -163,11 +203,15 @@ class DesignImprovementPlan:
     risks: list[StructuralRisk] = field(default_factory=list)
     reinforcements: list[ReinforcementRecommendation] = field(default_factory=list)
     load_analysis: LoadAnalysis | None = None
-    overall_structural_score: int = 0  # 0-100
+    #: 0-100; the score, grade and counts are None when nothing was judged.
+    overall_structural_score: int | None = 0
     structural_grade: str = ""  # A-F
-    critical_count: int = 0
-    warning_count: int = 0
+    critical_count: int | None = 0
+    warning_count: int | None = 0
     summary: str = ""
+    #: The units question the file's size raises.  When set it is the
+    #: summary, and no risk was judged: none is counted, scored or listed.
+    units_question: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -180,7 +224,17 @@ class DesignImprovementPlan:
             "critical_count": self.critical_count,
             "warning_count": self.warning_count,
             "summary": self.summary,
+            **({"units_question": self.units_question} if self.units_question else {}),
         }
+
+    @classmethod
+    def not_judged(cls, file_path: str, units_question: str) -> DesignImprovementPlan:
+        """The plan for a file whose size puts its units in question: that
+        question, and nothing counted, scored or recommended."""
+        return cls(
+            file_path=file_path, overall_structural_score=None, critical_count=None,
+            warning_count=None, summary=units_question, units_question=units_question,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +264,54 @@ def _parse_stl_for_analysis(
     if errors:
         return [], []
     return triangles, vertices
+
+
+#: What the structural analysis adds to the units question: it judges nothing
+#: until the size is settled, because every risk it finds is measured against
+#: a part's real size.
+_NOT_JUDGED = (
+    "  Until its size is settled, the structural analysis judges nothing: a risk "
+    "found at this size would describe a part nobody meant."
+)
+
+
+@dataclass(frozen=True)
+class _Part:
+    """A mesh as the structural analysis reads it, and what its size says.
+
+    ``units_question`` is the units question the file's size raises, or
+    ``""``: asked when the file reads smaller than anything a printer makes,
+    in the words of the one judgement every door uses
+    (:func:`kiln.generation.validation.unit_verdict`).  Nothing is rescaled.
+    """
+
+    triangles: list[tuple[tuple[float, ...], ...]]
+    vertices: list[tuple[float, ...]]
+    bbox: dict[str, float]
+    units_question: str = ""
+
+
+def _read_part(file_path: str) -> _Part:
+    """Read *file_path* for the structural analysis: the one entry every
+    structural door's reading passes through, so each reads a file's units
+    the way every other mesh door does.
+
+    A file whose size puts its units in question is answered with that
+    question and no risk: the risks are judged against sizes a printer
+    makes, so at a thousandth of the part's size each one describes a part
+    nobody meant (the same scene exported in metres and in millimetres gave
+    different risks).
+    """
+    from kiln.generation.validation import unit_verdict
+
+    triangles, vertices = _parse_stl_for_analysis(file_path)
+    bbox = _bounding_box(vertices)
+    if not triangles:
+        return _Part(triangles, vertices, bbox)
+    largest = max(bbox["max_x"] - bbox["min_x"], bbox["max_y"] - bbox["min_y"], bbox["max_z"] - bbox["min_z"])
+    verdict = unit_verdict(float(largest))
+    question = verdict.describe_unchanged() + _NOT_JUDGED if verdict.below_printable else ""
+    return _Part(triangles, vertices, bbox, question)
 
 
 def _bounding_box(
@@ -432,31 +534,41 @@ def _find_thin_necks(
     if max_area < 1.0:
         return risks
 
-    # Find sections that are unusually thin relative to neighbors
+    # Flag each slice that is too thin, or much thinner than the slices beside
+    # it.  Neighbouring slices flagged for the same reason are one neck: it is
+    # reported once, at its narrowest slice, where that slice is.
+    flagged: list[tuple[int, str, float]] = []  # (slice, kind, what it was flagged on)
     for i in range(1, len(areas) - 1):
-        z, area = areas[i]
-        _, area_below = areas[i - 1]
-        _, area_above = areas[i + 1]
-
-        neighbor_avg = (area_below + area_above) / 2.0
-
-        # Thin neck: area drops below threshold AND below neighbor average
+        area = areas[i][1]
+        neighbor_avg = (areas[i - 1][1] + areas[i + 1][1]) / 2.0
         if area < min_area_mm2:
-            severity = "critical" if area < min_area_mm2 * 0.5 else "warning"
-            cx = (bbox["min_x"] + bbox["max_x"]) / 2
-            cy = (bbox["min_y"] + bbox["max_y"]) / 2
+            flagged.append((i, "thin_neck", area))
+        elif neighbor_avg > 0 and area / neighbor_avg < ratio_threshold:
+            flagged.append((i, "stress_concentration", area / neighbor_avg))
+    runs: list[list[tuple[int, str, float]]] = []
+    for item in flagged:
+        if runs and runs[-1][-1][1] == item[1] and runs[-1][-1][0] == item[0] - 1:
+            runs[-1].append(item)
+        else:
+            runs.append([item])
+
+    for run in runs:
+        middle = (run[0][0] + run[-1][0]) / 2.0  # a neck of even width is placed at its middle
+        i, kind, measure = min(run, key=lambda item: (item[2], abs(item[0] - middle)))
+        z, area = areas[i]
+        low, high = areas[run[0][0]][0], areas[run[-1][0]][0]
+        cx, cy = _section_centre(_cross_section_at_z(triangles, z), bbox)
+        size = (bbox["max_x"] - bbox["min_x"], bbox["max_y"] - bbox["min_y"], high - low + 2 * step)
+        along = f", and stays that thin from Z={low:.1f} to {high:.1f} mm" if len(run) > 1 else ""
+        if kind == "thin_neck":
             risks.append(
                 StructuralRisk(
                     risk_type="thin_neck",
-                    severity=severity,
+                    severity="critical" if area < min_area_mm2 * 0.5 else "warning",
                     location_mm=(cx, cy, z),
-                    region_size_mm=(
-                        bbox["max_x"] - bbox["min_x"],
-                        bbox["max_y"] - bbox["min_y"],
-                        step * 2,
-                    ),
+                    region_size_mm=size,
                     description=(
-                        f"Cross-section narrows to {area:.1f} mm² at Z={z:.1f} mm. "
+                        f"Cross-section narrows to {area:.1f} mm² at Z={z:.1f} mm{along}. "
                         f"This creates a weak point where the part is likely to snap "
                         f"under load. Minimum safe cross-section is {min_area_mm2:.0f} mm²."
                     ),
@@ -465,27 +577,20 @@ def _find_thin_necks(
                     metric_threshold=min_area_mm2,
                 )
             )
-        elif neighbor_avg > 0 and area / neighbor_avg < ratio_threshold:
-            # Sudden constriction relative to neighbors
-            cx = (bbox["min_x"] + bbox["max_x"]) / 2
-            cy = (bbox["min_y"] + bbox["max_y"]) / 2
+        else:
             risks.append(
                 StructuralRisk(
                     risk_type="stress_concentration",
                     severity="warning",
                     location_mm=(cx, cy, z),
-                    region_size_mm=(
-                        bbox["max_x"] - bbox["min_x"],
-                        bbox["max_y"] - bbox["min_y"],
-                        step * 2,
-                    ),
+                    region_size_mm=size,
                     description=(
-                        f"Cross-section drops to {area / neighbor_avg:.0%} of adjacent "
-                        f"sections at Z={z:.1f} mm. This abrupt change concentrates "
+                        f"Cross-section drops to {measure:.0%} of adjacent "
+                        f"sections at Z={z:.1f} mm{along}. This abrupt change concentrates "
                         f"stress and may cause cracking under load."
                     ),
                     metric_name="section_ratio",
-                    metric_value=area / neighbor_avg,
+                    metric_value=measure,
                     metric_threshold=ratio_threshold,
                 )
             )
@@ -493,92 +598,405 @@ def _find_thin_necks(
     return risks
 
 
+def _section_centre(
+    segments: list[tuple[tuple[float, float], tuple[float, float]]],
+    bbox: dict[str, float],
+) -> tuple[float, float]:
+    """Where a cross-section sits on the bed: the middle of its outline,
+    weighted by length; the middle of the part when the slice has none."""
+    total = cx = cy = 0.0
+    for (x1, y1), (x2, y2) in segments:
+        length = math.hypot(x2 - x1, y2 - y1)
+        total += length
+        cx += length * (x1 + x2) / 2.0
+        cy += length * (y1 + y2) / 2.0
+    if total <= 0.0:
+        return (bbox["min_x"] + bbox["max_x"]) / 2, (bbox["min_y"] + bbox["max_y"]) / 2
+    return cx / total, cy / total
+
+
+#: How far a member must reach out from what holds it up, with nothing under
+#: it, to be read as a cantilever (mm) -- and it must reach at least as far as
+#: it is thick where it leaves its support.  A shorter overhang is a lip or a
+#: ledge, which the printability check's support verdict already covers; one
+#: thicker than it is long is a boss or a bracket, which a load on its end
+#: cannot bend.  Pinned by ``tests/test_cantilever_reaches_further_than_it_is_thick.py``.
+_CANTILEVER_MIN_REACH_MM = 5.0
+
+#: The cantilever reading looks down vertical columns this far apart (mm), or
+#: further apart on a part too large to read this finely within the budgets
+#: below.
+_COLUMN_MM = 0.5
+
+#: The most columns one reading lays out, and the most (face, column) pairs it
+#: tests for where a column crosses a face: the work is bounded by these and
+#: by the file's size, never by the distances written in it.
+_COLUMN_BUDGET = 250_000
+_COLUMN_TEST_BUDGET = 1_000_000
+
+#: The (face, column) tests made at once, for memory.
+_COLUMN_CHUNK = 50_000
+
+#: Where each column runs inside its cell, as fractions of the cell: off the
+#: middle, so the edges a CAD part draws along round numbers and diagonals
+#: pass beside a column rather than through it.
+_COLUMN_OFFSET = (0.5731, 0.5377)
+
+#: Material closer than this (mm) along a column is one piece: two bodies
+#: that touch, written a rounding error apart, are one.
+_COLUMN_JOIN_MM = 0.01
+
+#: A member's reach is measured from at most this many (point, support)
+#: pairs across the whole part, points spread evenly over each member.
+_REACH_PAIR_BUDGET = 16_000_000
+
+#: A point of an overhang with support on its far side too -- support further
+#: round than this from the nearest, seen from the point (degrees) -- is held
+#: at both ends: a bridge, not a cantilever.
+_BRIDGE_TURN_DEG = 120.0
+
+
 def _find_cantilevers(
     triangles: list[tuple[tuple[float, ...], ...]],
-    bbox: dict[str, float],
 ) -> list[StructuralRisk]:
-    """Detect cantilevered regions (geometry extending far from support).
+    """Find cantilevers: members that reach out sideways from what holds
+    them up, with nothing under them -- a shelf arm, a flange printed in the
+    air, a hook's reach, the rim of a cap on a stem.  One finding each,
+    however finely it was tessellated, the longest first.
 
-    Uses horizontal cross-section centroid drift — if the centroid shifts
-    dramatically between slices, there's a cantilever.
+    The part is judged as it sits in the file.  Material is held up where it
+    rests on the bed, or where the material beside it comes down from it at
+    least as steeply as 45 degrees and is held up itself: a wall, a post, a
+    brace.  Material with air under it and neither is overhanging, and an
+    overhang reaching at least ``_CANTILEVER_MIN_REACH_MM`` from the nearest
+    support, and at least as far as it is thick where it leaves that support,
+    with no support on its far side, is a cantilever.
+
+    Never a cantilever: a peg, or a bracket's upright, held from below its
+    whole height as it prints (a column; a thin neck or a tall slender post
+    is another check's); an overhang held at both ends (a bridge: the roof of
+    a slot, the top of a window); a rounded underside curving down to the bed
+    (a sphere, a donut), held by nothing beside it, whose overhang the
+    printability check judges; a boss or a bracket thicker than it is long,
+    which a load on its end cannot bend.  Pieces that only touch are read as
+    one part.
+
+    On a part too large to read at :data:`_COLUMN_MM` within the budgets,
+    the columns stand further apart, and a member narrower than they are
+    apart can go unseen.
     """
+    import numpy as np
+
+    from kiln.generation.validation import _bed_threshold_z
+
+    tri = np.asarray(triangles, dtype=np.float64).reshape(-1, 3, 3)
+    with np.errstate(invalid="ignore"):
+        tri = tri[(np.abs(tri) <= _FARTHEST_MM).all(axis=(1, 2))]  # NaN fails too
+    if not len(tri):
+        return []
+    cols = _material_columns(tri)
+    pieces = len(cols.bottom)
+    if not pieces:
+        return []
+    on_bed = cols.bottom <= _bed_threshold_z(float(tri[:, :, 2].min()))
+
+    # What holds what: a piece beside this one, starting at least a column's
+    # width lower (45 degrees) and running up to this one's underside.
+    beside = cols.beside()
+    holder = np.full((pieces, 4), -1, dtype=np.int64)
+    for d, column in enumerate(beside):
+        h = cols.piece_from(column, cols.bottom - cols.cell * 0.999)  # a 45-degree chamfer holds
+        reaches = (h >= 0) & (cols.top[np.maximum(h, 0)] >= cols.bottom - _COLUMN_JOIN_MM)
+        holder[:, d] = np.where(reaches, h, -1)
+    held_up = _held_up(on_bed, holder)
+
+    overhang = ~on_bed  # air under it
+    if not overhang.any():
+        return []
+    support = overhang & held_up
+    # Undersides beside each other, no steeper than 45 degrees, are one surface.
+    index = np.full(pieces, -1, dtype=np.int64)
+    index[overhang] = np.arange(int(overhang.sum()))
+    pairs = []
+    for column in beside[0], beside[2]:  # each pair of neighbours once
+        other = cols.piece_from(column, cols.bottom + cols.cell)
+        safe = np.maximum(other, 0)
+        joined = (overhang & (other >= 0) & overhang[safe]
+                  & (np.abs(cols.bottom[safe] - cols.bottom) <= cols.cell))
+        pairs.append(np.stack([index[joined], index[safe[joined]]]))
+    surfaces = _joined(int(overhang.sum()), pairs)
+
+    members = []
+    smallest = _CANTILEVER_MIN_REACH_MM / (cols.cell * math.sqrt(2.0))  # columns a reach that long spans
+    overhang_at = np.flatnonzero(overhang)
+    for surface in surfaces:
+        if len(surface) < smallest:
+            continue
+        surface = overhang_at[surface]
+        holds, hangs = surface[support[surface]], surface[~held_up[surface]]
+        if len(holds) and len(hangs):
+            members.append((holds, hangs))
+    demand = sum(len(h) * len(f) for h, f in members)
+    share = min(1.0, math.sqrt(_REACH_PAIR_BUDGET / demand)) if demand else 1.0
+
     risks: list[StructuralRisk] = []
-    z_min = bbox["min_z"]
-    z_max = bbox["max_z"]
-    z_range = z_max - z_min
-
-    if z_range < 2.0:
-        return risks
-
-    n_slices = min(_NUM_SLICES, max(10, int(z_range / 0.5)))
-    step = z_range / n_slices
-    width = bbox["max_x"] - bbox["min_x"]
-    depth = bbox["max_y"] - bbox["min_y"]
-    base_dim = max(width, depth)
-
-    if base_dim < 1.0:
-        return risks
-
-    # Track centroid and extent at each Z
-    prev_cx: float | None = None
-    prev_cy: float | None = None
-    prev_z: float = z_min
-
-    for i in range(1, n_slices):
-        z = z_min + i * step
-        segments = _cross_section_at_z(triangles, z)
-        if not segments:
+    for holds, hangs in members:
+        found = _cantilever_reach(cols, _spread(holds, share), _spread(hangs, share))
+        if found is None:
             continue
-
-        # Compute centroid of this cross-section
-        all_pts: list[tuple[float, float]] = []
-        for s in segments:
-            all_pts.extend(s)
-
-        if not all_pts:
+        reach, base, spread_xy = found
+        thick = float(cols.top[base] - cols.bottom[base])
+        if reach < max(_CANTILEVER_MIN_REACH_MM, thick):
             continue
-
-        cx = sum(p[0] for p in all_pts) / len(all_pts)
-        cy = sum(p[1] for p in all_pts) / len(all_pts)
-
-        # Compute extent (width of cross-section)
-        xs = [p[0] for p in all_pts]
-        ys = [p[1] for p in all_pts]
-        extent_x = max(xs) - min(xs)
-        extent_y = max(ys) - min(ys)
-
-        if prev_cx is not None:
-            drift = math.sqrt((cx - prev_cx) ** 2 + (cy - prev_cy) ** 2)  # type: ignore[operator]
-            dz = z - prev_z
-            extent = max(extent_x, extent_y)
-
-            # Cantilever: centroid drifts significantly with no widening of base
-            if drift > 0 and dz > 0:
-                cantilever_ratio = drift / max(dz, 1.0)
-                if cantilever_ratio > 1.5 and extent > base_dim * 0.3:
-                    risks.append(
-                        StructuralRisk(
-                            risk_type="cantilever",
-                            severity="warning",
-                            location_mm=(cx, cy, z),
-                            region_size_mm=(extent_x, extent_y, dz),
-                            description=(
-                                f"Cantilevered geometry at Z={z:.1f} mm — "
-                                f"center of mass shifts {drift:.1f} mm over {dz:.1f} mm "
-                                f"of height. Unsupported overhangs weaken layer adhesion "
-                                f"and risk print failure."
-                            ),
-                            metric_name="cantilever_drift_ratio",
-                            metric_value=cantilever_ratio,
-                            metric_threshold=1.5,
-                        )
-                    )
-
-        prev_cx = cx
-        prev_cy = cy
-        prev_z = z
-
+        (x, y), z = cols.centres(np.array([base]))[0], float(cols.bottom[base])
+        risks.append(
+            StructuralRisk(
+                risk_type="cantilever",
+                severity="warning",
+                location_mm=(float(x), float(y), z),
+                region_size_mm=(float(spread_xy[0]), float(spread_xy[1]), thick),
+                description=(
+                    f"Cantilever at ({x:.1f}, {y:.1f}, {z:.1f}): it reaches {reach:.0f} mm "
+                    f"out from what holds it up, {thick:.1f} mm thick ({reach / thick:.1f} times "
+                    f"its thickness), with nothing under it. A load on its end bends it hardest "
+                    f"where it meets its support, so that is where it is most likely to break."
+                ),
+                metric_name="cantilever_reach_mm",
+                metric_value=reach,
+                metric_threshold=_CANTILEVER_MIN_REACH_MM,
+            )
+        )
+    risks.sort(key=lambda r: -r.metric_value)
     return risks
+
+
+def _spread(items: Any, share: float) -> Any:
+    """``share`` of ``items``, at least one, spread evenly through them."""
+    import numpy as np
+
+    keep = max(1, math.ceil(len(items) * share))
+    if keep >= len(items):
+        return items
+    return items[np.linspace(0, len(items) - 1, keep).astype(np.int64)]
+
+
+def _cantilever_reach(cols: _Columns, holds: Any, hangs: Any) -> tuple[float, int, Any] | None:
+    """How far an overhang reaches from its supports ``holds``, measured from
+    the points of it hanging in the air, ``hangs`` (pieces of ``cols``):
+    ``(reach, the support it reaches from, its spread in x and y)``, or None
+    when every point of it is held at both ends.
+
+    A point's reach is its distance to the nearest support, one column added
+    for the half column at each end the centres leave out.  A point with
+    support on its far side as well (:data:`_BRIDGE_TURN_DEG`) is a bridge's,
+    and reaches nothing.
+    """
+    import numpy as np
+
+    at = cols.centres(holds)
+    points = cols.centres(hangs)
+    nearest = np.empty(len(hangs), dtype=np.int64)
+    gap = np.empty(len(hangs))
+    bridged = np.empty(len(hangs), dtype=bool)
+    far_side = math.cos(math.radians(_BRIDGE_TURN_DEG))
+    rows = max(1, 1_000_000 // max(1, len(holds)))  # pairs per pass, for memory
+    for s in range(0, len(hangs), rows):
+        to = at[None, :, :] - points[s:s + rows, None, :]
+        dist = np.linalg.norm(to, axis=2)
+        k = dist.argmin(axis=1)
+        near = dist[np.arange(len(k)), k]
+        towards = to[np.arange(len(k)), k] / np.maximum(near, 1e-12)[:, None]
+        turn = np.einsum("ijk,ik->ij", to, towards) / np.maximum(dist, 1e-12)
+        nearest[s:s + rows], gap[s:s + rows] = k, near
+        bridged[s:s + rows] = (turn < far_side).any(axis=1)
+    if bridged.all():
+        return None
+    reach = np.where(bridged, -1.0, gap)
+    # Of the points reaching furthest (to within a column), the middle one:
+    # the far end of an arm, not one of its corners.
+    far = np.flatnonzero(reach >= reach.max() - cols.cell)
+    tip = int(far[np.linalg.norm(points[far] - points[far].mean(axis=0), axis=1).argmin()])
+    free = points[~bridged]
+    spread_xy = free.max(axis=0) - free.min(axis=0) + cols.cell
+    return float(reach.max()) + cols.cell, int(holds[nearest[tip]]), spread_xy
+
+
+def _held_up(on_bed: Any, holder: Any) -> Any:
+    """Which pieces are held up: those resting on the bed, then every piece
+    a held-up piece holds (``holder[p]`` names the pieces beside ``p`` that
+    hold it, -1 for none), and so on up.  Each piece is visited once."""
+    import numpy as np
+
+    held = on_bed.copy()
+    who = holder.reshape(-1)
+    whom = np.repeat(np.arange(len(holder)), holder.shape[1])
+    has = who >= 0
+    order = np.argsort(who[has], kind="stable")
+    who, whom = who[has][order], whom[has][order]
+    first = np.searchsorted(who, np.arange(len(holder)))
+    count = np.searchsorted(who, np.arange(len(holder)), side="right") - first
+    frontier = np.flatnonzero(held)
+    while len(frontier):
+        n = count[frontier]
+        step = np.arange(n.sum()) - np.repeat(np.cumsum(n) - n, n)
+        lifted = np.unique(whom[np.repeat(first[frontier], n) + step])
+        frontier = lifted[~held[lifted]]
+        held[frontier] = True
+    return held
+
+
+@dataclass(frozen=True)
+class _Columns:
+    """Where a part is solid, read down vertical columns ``cell`` mm apart
+    laid over it from ``origin``, ``shape`` columns along x and along y.
+
+    Each piece is one stretch of solid in one column, ``bottom`` to ``top``,
+    sorted by column and then upward; ``key`` orders them the same way, for
+    finding the piece of a column at a height.
+    """
+
+    origin: Any
+    cell: float
+    shape: tuple[int, int]
+    column: Any
+    bottom: Any
+    top: Any
+    key: Any
+    z_from: float
+    z_span: float
+
+    def piece_from(self, column: Any, z: Any) -> Any:
+        """For each ``column`` (an index, or -1), its highest piece starting
+        at or below ``z``; -1 where there is none."""
+        import numpy as np
+
+        at = np.searchsorted(self.key, _column_key(column, z, self.z_from, self.z_span), side="right") - 1
+        safe = np.maximum(at, 0)
+        found = (at >= 0) & (column >= 0) & (self.column[safe] == column)
+        return np.where(found, at, -1)
+
+    def beside(self) -> list[Any]:
+        """For every piece, the column next to its own in each of four
+        directions (+x, -x, +y, -y), or -1 past the edge of the grid."""
+        import numpy as np
+
+        nx, ny = self.shape
+        ix, iy = self.column % nx, self.column // nx
+        out = []
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            jx, jy = ix + dx, iy + dy
+            inside = (jx >= 0) & (jx < nx) & (jy >= 0) & (jy < ny)
+            out.append(np.where(inside, jy * nx + jx, -1))
+        return out
+
+    def centres(self, pieces: Any) -> Any:
+        """The (x, y) of the columns ``pieces`` stand in."""
+        import numpy as np
+
+        nx = self.shape[0]
+        ix, iy = self.column[pieces] % nx, self.column[pieces] // nx
+        return np.stack([self.origin[0] + (ix + _COLUMN_OFFSET[0]) * self.cell,
+                         self.origin[1] + (iy + _COLUMN_OFFSET[1]) * self.cell], axis=1)
+
+
+def _column_key(column: Any, z: Any, z_from: float, z_span: float) -> Any:
+    """A key ordering (column, height) pairs as :class:`_Columns` sorts its
+    pieces: the column, then the height as a fraction of half a unit, so no
+    height reaches the next column's keys."""
+    import numpy as np
+
+    return column + np.clip((z - z_from) / z_span, 0.0, 1.0) * 0.5
+
+
+def _column_grid(tri: Any) -> tuple[Any, float, Any, Any, Any]:
+    """The columns to read ``tri`` down: ``(origin, cell, shape, first,
+    count)``, where ``first`` and ``count`` say which columns (along x and
+    along y) each face's outline spans.  Cells start at :data:`_COLUMN_MM`
+    and widen until the grid and the tests fit their budgets, or until one
+    column covers the part."""
+    import numpy as np
+
+    flat = tri[:, :, :2]
+    origin, far = flat.min(axis=(0, 1)), flat.max(axis=(0, 1))
+    low, high = flat.min(axis=1), flat.max(axis=1)
+    offset = np.asarray(_COLUMN_OFFSET)
+    cell = _COLUMN_MM
+    while True:
+        shape = np.maximum(np.floor((far - origin) / cell - offset).astype(np.int64) + 1, 1)
+        first = np.clip(np.ceil((low - origin) / cell - offset), 0, shape - 1).astype(np.int64)
+        last = np.clip(np.floor((high - origin) / cell - offset), -1, shape - 1).astype(np.int64)
+        count = np.maximum(last - first + 1, 0)
+        tests = int((count[:, 0] * count[:, 1]).sum())
+        fits = int(shape[0]) * int(shape[1]) <= _COLUMN_BUDGET and tests <= _COLUMN_TEST_BUDGET
+        if fits or (shape == 1).all():
+            return origin, cell, shape, first, count
+        cell *= 1.5
+
+
+def _material_columns(tri: Any) -> _Columns:
+    """Read a part down vertical columns (:func:`_column_grid`): where each
+    column crosses a face, and from those crossings where it is solid.
+
+    Going up a column, a face looking down is where solid starts and one
+    looking up is where it ends; counting them, a column is solid wherever
+    more have started than ended, so bodies that overlap or touch are read as
+    the solid they make together.  An inside-out mesh has every face turned
+    over, and is read turned back.  A column whose faces do not close (a hole
+    in the surface) is left out, and so is a face standing on its edge, which
+    no column crosses.
+    """
+    import numpy as np
+
+    origin, cell, shape, first, count = _column_grid(tri)
+    offset = np.asarray(_COLUMN_OFFSET)
+    (x0, y0), (x1, y1), (x2, y2) = (tri[:, k, :2].T for k in range(3))
+    twice_area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0)  # seen from above; below zero it faces down
+    centred = tri - tri.reshape(-1, 3).mean(axis=0)
+    outward = 1.0 if np.einsum("ij,ij->", centred[:, 0], np.cross(centred[:, 1], centred[:, 2])) >= 0 else -1.0
+    tests = count[:, 0] * count[:, 1]
+    faces = np.flatnonzero((np.abs(twice_area) > 1e-12) & (tests > 0))
+
+    column, height, step = [np.empty(0, dtype=np.int64)], [np.empty(0)], [np.empty(0, dtype=np.int8)]
+    done = np.cumsum(tests[faces])
+    total = int(done[-1]) if len(done) else 0
+    for part in np.split(faces, np.searchsorted(done, np.arange(_COLUMN_CHUNK, total, _COLUMN_CHUNK))):
+        across, per = count[part, 0], tests[part]
+        face = np.repeat(part, per)
+        k = np.arange(per.sum()) - np.repeat(np.cumsum(per) - per, per)
+        ix = first[face, 0] + k % np.repeat(across, per)
+        iy = first[face, 1] + k // np.repeat(across, per)
+        px, py = origin[0] + (ix + offset[0]) * cell, origin[1] + (iy + offset[1]) * cell
+        t, a = tri[face], twice_area[face]
+        u = ((px - t[:, 0, 0]) * (t[:, 2, 1] - t[:, 0, 1]) - (t[:, 2, 0] - t[:, 0, 0]) * (py - t[:, 0, 1])) / a
+        v = ((t[:, 1, 0] - t[:, 0, 0]) * (py - t[:, 0, 1]) - (px - t[:, 0, 0]) * (t[:, 1, 1] - t[:, 0, 1])) / a
+        w = 1.0 - u - v
+        hit = (u >= 0) & (v >= 0) & (w >= 0)
+        column.append((iy * shape[0] + ix)[hit])
+        height.append((w * t[:, 0, 2] + u * t[:, 1, 2] + v * t[:, 2, 2])[hit])
+        step.append(np.where(a[hit] * outward < 0, 1, -1).astype(np.int8))
+    c, z, s = np.concatenate(column), np.concatenate(height), np.concatenate(step)
+    if len(c):
+        order = np.lexsort((-s, z, c))  # where two faces meet at one height, solid starts first
+        c, z, s = c[order], z[order], s[order]
+        starts = np.flatnonzero(np.r_[True, c[1:] != c[:-1]])
+        ends = np.r_[starts[1:], len(c)] - 1
+        wound = np.cumsum(s, dtype=np.int64)
+        depth = wound - np.repeat(np.r_[0, wound[starts[1:] - 1]], ends - starts + 1)  # solid above each crossing
+        closed = ~np.isin(c, c[ends[depth[ends] != 0]])
+        enter = closed & (depth > 0) & (depth - s <= 0)
+        leave = closed & (depth <= 0) & (depth - s > 0)
+        c, z, top = c[enter], z[enter], z[leave]
+    else:
+        top = z
+    if len(c):
+        # Solid closer than _COLUMN_JOIN_MM along a column is one piece.
+        apart = np.r_[True, (c[1:] != c[:-1]) | (z[1:] - top[:-1] > _COLUMN_JOIN_MM)]
+        c, z, top = c[apart], z[apart], top[np.r_[apart[1:], True]]
+    # Every height a reading asks about lies within two cells of a piece.
+    z_from = float(z.min()) - 2 * cell - 1.0 if len(z) else 0.0
+    z_span = float(top.max()) + 2 * cell + 1.0 - z_from if len(top) else 1.0
+    return _Columns(origin, cell, (int(shape[0]), int(shape[1])), c, z, top,
+                    _column_key(c, z, z_from, z_span), z_from, z_span)
 
 
 def _find_sharp_corners(
@@ -586,88 +1004,215 @@ def _find_sharp_corners(
     *,
     angle_threshold_deg: float = _SHARP_ANGLE_THRESHOLD_DEG_PUBLIC,
 ) -> list[StructuralRisk]:
-    """Find sharp internal corners that create stress concentrations.
+    """Find sharp inside corners, where load concentrates and cracks start.
 
-    Sharp concave edges concentrate stress and are common failure points.
+    An edge counts when the surface turns INWARD across it -- the material
+    wraps more than 180 degrees around it, as at the root of a peg, the inside
+    of an L-bracket or the base of a rib -- by at least ``angle_threshold_deg``.
+    An outside edge (the rim of a box or a cylinder, the facets of a convex
+    curve) concentrates no stress and never counts.  Sharp inside edges that
+    meet, or pass close by each other (:func:`_corners`), are one corner and
+    one finding, however finely the surface was tessellated; and a finding is
+    a warning to round it, never more, since how many facets a corner has
+    says nothing about how bad it is.  A corner whose edges total less than
+    :data:`_CORNER_FLOOR_MM` is not in the print and is not counted.
+
+    Every edge of the mesh is read.  An edge whose two faces disagree about
+    which side is outside is left out, since its corner cannot be told from
+    its edge; and pieces that only touch (a peg set on a plate without being
+    joined to it) share no edge, so the corner between them is not seen.
     """
-    risks: list[StructuralRisk] = []
+    import numpy as np
 
-    if len(triangles) > 50000:
-        # Subsample for performance — check every Nth triangle pair
-        sample_step = max(1, len(triangles) // 5000)
-    else:
-        sample_step = 1
-
-    # Build edge → face map for sampled triangles
-    edge_faces: dict[tuple[tuple[float, ...], ...], list[int]] = {}
-    sampled_indices = list(range(0, len(triangles), sample_step))
-
-    for idx in sampled_indices:
-        tri = triangles[idx]
-        for i in range(3):
-            v0 = tri[i]
-            v1 = tri[(i + 1) % 3]
-            # Canonical edge key (sorted by coordinate tuple)
-            edge = (min(v0, v1), max(v0, v1))
-            if edge not in edge_faces:
-                edge_faces[edge] = []
-            edge_faces[edge].append(idx)
-
-    cos_threshold = math.cos(math.radians(angle_threshold_deg))
-    sharp_points: list[tuple[float, float, float]] = []
-
-    for edge, face_indices in edge_faces.items():
-        if len(face_indices) != 2:
+    if not triangles:
+        return []
+    edges, verts, turns = _sharp_inside_edges(triangles, angle_threshold_deg)
+    corners = []
+    for group in _corners(edges, verts):
+        a, b = verts[edges[group, 0]], verts[edges[group, 1]]
+        lengths = np.linalg.norm(b - a, axis=1)
+        if lengths.sum() < _CORNER_FLOOR_MM:
             continue
+        middle = ((a + b) / 2 * lengths[:, None]).sum(axis=0) / lengths.sum()
+        ends = np.vstack([a, b])
+        corners.append((float(lengths.sum()), middle, ends.max(axis=0) - ends.min(axis=0), float(turns[group].max())))
+    # The longest corner first: the one a fillet does the most for.
+    corners.sort(key=lambda c: -c[0])
 
-        n0 = _triangle_normal(triangles[face_indices[0]])
-        n1 = _triangle_normal(triangles[face_indices[1]])
-        dot = n0[0] * n1[0] + n0[1] * n1[1] + n0[2] * n1[2]
-
-        # Sharp concave edge: normals diverge (dot < cos_threshold)
-        if dot < cos_threshold:
-            # Midpoint of edge
-            mx = (edge[0][0] + edge[1][0]) / 2
-            my = (edge[0][1] + edge[1][1]) / 2
-            mz = (edge[0][2] + edge[1][2]) / 2
-            sharp_points.append((mx, my, mz))
-
-    # Cluster nearby sharp points to avoid flooding with individual edge reports
-    if sharp_points:
-        clusters = _cluster_points(sharp_points, cluster_radius=5.0)
-        for center, count in clusters:
-            if count >= 2:  # At least a few sharp edges clustered together
-                severity = "warning" if count < 10 else "critical"
-                risks.append(
-                    StructuralRisk(
-                        risk_type="sharp_corner",
-                        severity=severity,
-                        location_mm=center,
-                        region_size_mm=(10.0, 10.0, 10.0),  # approximate
-                        description=(
-                            f"Cluster of {count} sharp internal edges near "
-                            f"({center[0]:.1f}, {center[1]:.1f}, {center[2]:.1f}). "
-                            f"Sharp concave corners concentrate stress and are "
-                            f"common fracture initiation points. Add fillets."
-                        ),
-                        metric_name="sharp_edge_count",
-                        metric_value=float(count),
-                        metric_threshold=2.0,
-                    )
-                )
-
+    risks: list[StructuralRisk] = []
+    for length, middle, size, turn in corners:
+        cx, cy, cz = (float(c) for c in middle)
+        risks.append(
+            StructuralRisk(
+                risk_type="sharp_corner",
+                severity="warning",
+                location_mm=(cx, cy, cz),
+                region_size_mm=(float(size[0]), float(size[1]), float(size[2])),
+                description=(
+                    f"Sharp inside corner near ({cx:.1f}, {cy:.1f}, {cz:.1f}), "
+                    f"{length:.1f} mm of edge. Load concentrates at a sharp "
+                    f"inside corner and cracks start there; a fillet spreads it."
+                ),
+                metric_name="inside_corner_turn_deg",
+                metric_value=turn,
+                metric_threshold=angle_threshold_deg,
+            )
+        )
     return risks
+
+
+def _sharp_inside_edges(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    angle_threshold_deg: float,
+) -> tuple[Any, Any, Any]:
+    """The edges of a mesh where the surface turns inward by more than
+    ``angle_threshold_deg``: ``(edges, vertices, turns)``, each edge a pair of
+    indices into ``vertices`` and its turn in degrees.
+
+    Faces are joined where they share corners exactly, the way the mesh was
+    written.  An edge shared by two faces is written once each way when the
+    faces agree which side is outside; the turn from the first face's normal
+    to the second's then points along the edge as the first face writes it
+    when the edge is convex, and against it when the edge is an inside one.
+    Faces with no area or no position (:data:`_FARTHEST_MM`), and edges
+    shared by more than two faces, are left out.
+    """
+    import numpy as np
+
+    tri = np.asarray(triangles, dtype=np.float64).reshape(-1, 3, 3)
+    with np.errstate(invalid="ignore"):
+        tri = tri[(np.abs(tri) <= _FARTHEST_MM).all(axis=(1, 2))]  # NaN fails too
+    if not len(tri):
+        return np.empty((0, 2), dtype=np.int64), np.empty((0, 3)), np.empty(0)
+    # Corners at the same point are one vertex.
+    flat = tri.reshape(-1, 3)
+    order = np.lexsort(flat.T[::-1])
+    in_order = flat[order]
+    new = np.r_[True, (in_order[1:] != in_order[:-1]).any(axis=1)]
+    verts = in_order[new]
+    faces = np.empty(len(flat), dtype=np.int64)
+    faces[order] = np.cumsum(new) - 1
+    faces = faces.reshape(-1, 3)
+    cross = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
+    twice_area = np.linalg.norm(cross, axis=1)
+    whole = twice_area > 1e-12
+    normals = np.zeros_like(cross)
+    normals[whole] = cross[whole] / twice_area[whole, None]
+    # An inside-out mesh turns every corner around.  Measured from the part's
+    # middle, so a surface that is not closed is judged the same wherever it sits.
+    centred = tri - verts.mean(axis=0)
+    outward = 1.0 if np.einsum("ij,ij->", centred[:, 0], np.cross(centred[:, 1], centred[:, 2])) >= 0 else -1.0
+
+    halves = faces[:, [0, 1, 1, 2, 2, 0]].reshape(-1, 2)
+    face_of = np.repeat(np.arange(len(faces)), 3)
+    key = halves.min(axis=1).astype(np.int64) * len(verts) + halves.max(axis=1)
+    order = np.argsort(key, kind="stable")
+    in_order = key[order]
+    first = np.flatnonzero(np.r_[True, in_order[1:] != in_order[:-1]])
+    count = np.diff(np.r_[first, len(key)])
+    shared = first[count == 2]  # an edge three faces share is not one corner
+    h0, h1 = order[shared], order[shared + 1]
+    f0, f1 = face_of[h0], face_of[h1]
+    keep = (halves[h0, 0] == halves[h1, 1]) & whole[f0] & whole[f1]
+    h0, f0, f1 = h0[keep], f0[keep], f1[keep]
+
+    n0, n1 = normals[f0], normals[f1]
+    along = verts[halves[h0, 1]] - verts[halves[h0, 0]]
+    along /= np.linalg.norm(along, axis=1)[:, None]
+    # The sine of the turn, signed: below zero, the surface turns inward.  Two
+    # faces folded flat onto each other turn neither way and are left out.
+    side = outward * np.einsum("ij,ij->i", np.cross(n0, n1), along)
+    inward = side < -1e-9
+    cos_turn = np.einsum("ij,ij->i", n0, n1)
+    sharp = inward & (cos_turn < math.cos(math.radians(angle_threshold_deg)))
+    turns = np.degrees(np.arccos(np.clip(cos_turn[sharp], -1.0, 1.0)))
+    return halves[h0[sharp]], verts, turns
+
+
+def _corners(edges: Any, verts: Any) -> list[Any]:
+    """Sharp inside edges grouped into corners, each an array of indices into
+    ``edges``: edges that meet, or pass through the same or neighbouring
+    ``_CORNER_CELL_MM`` cells, are one corner.  Edges closer than half a cell
+    are always joined, and edges further apart than about three and a half
+    cells never are.
+
+    Past :data:`_CORNER_POINT_BUDGET` only each edge's two ends are laid down,
+    and on a part too large to number its cells, only edges that meet are
+    joined.  Either way every corner is still found; nearby ones may be told
+    apart that would otherwise be one.
+    """
+    import itertools
+
+    import numpy as np
+
+    if not len(edges):
+        return []
+    cell = _CORNER_CELL_MM
+    # Points along every edge, its two ends among them, no more than half a
+    # cell apart; the cells they fall in, counted from the corner nearest the
+    # origin so a part is grouped the same wherever it sits.
+    a, b = verts[edges[:, 0]], verts[edges[:, 1]]
+    steps = np.ceil(np.linalg.norm(b - a, axis=1) / (cell / 2)) + 1
+    if steps.sum() > _CORNER_POINT_BUDGET:
+        logger.info("Inside corners grouped by their edges' ends: %d edges ask for %.3g points", len(edges), steps.sum())
+        steps = np.full(len(edges), 2.0)
+    steps = steps.astype(np.int64)
+    owner = np.repeat(np.arange(len(edges)), steps)
+    nth = np.arange(len(owner)) - np.repeat(np.cumsum(steps) - steps, steps)
+    points = a[owner] + (b - a)[owner] * (nth / np.repeat(steps - 1, steps))[:, None]
+    grid = np.floor((points - points.min(axis=0)) / cell).astype(np.int64) + 1
+    span = grid.max(axis=0) + 2
+    if float(span[0]) * float(span[1]) * float(span[2]) >= 2.0**62:
+        # Too large to number every cell: join the edges that meet.
+        ends = edges.reshape(-1)
+        _, first_end, which_end = np.unique(ends, return_index=True, return_inverse=True)
+        end_owner = np.repeat(np.arange(len(edges)), 2)
+        return _joined(len(edges), [np.stack([end_owner, end_owner[first_end][which_end.reshape(-1)]])])
+
+    def number(g: Any) -> Any:
+        return (g[..., 0] * span[1] + g[..., 1]) * span[2] + g[..., 2]
+
+    cells, first, which = np.unique(number(grid), return_index=True, return_inverse=True)
+    one = owner[first]  # an edge in each cell
+    pairs = [np.stack([owner, one[which.reshape(-1)]])]
+    for step in itertools.product((-1, 0, 1), repeat=3):
+        if step > (0, 0, 0):  # each pair of neighbouring cells once
+            there = number(grid[first] + np.asarray(step))
+            at = np.minimum(np.searchsorted(cells, there), len(cells) - 1)
+            hit = cells[at] == there
+            pairs.append(np.stack([one[hit], one[at[hit]]]))
+    return _joined(len(edges), pairs)
+
+
+def _joined(count: int, pairs: list[Any]) -> list[Any]:
+    """``count`` items in the groups ``pairs`` (arrays of two rows) join them into."""
+    import numpy as np
+
+    parent = list(range(count))
+
+    def root(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for u, v in np.unique(np.concatenate(pairs, axis=1), axis=1).T.tolist():
+        parent[root(u)] = root(v)
+    groups: dict[int, list[int]] = {}
+    for i in range(count):
+        groups.setdefault(root(i), []).append(i)
+    return [np.asarray(g) for g in groups.values()]
 
 
 def _check_base_adequacy(
     triangles: list[tuple[tuple[float, ...], ...]],
     bbox: dict[str, float],
     *,
-    cantilever_risk_ratio: float = _CANTILEVER_RISK_RATIO_PUBLIC,
+    tipping_ratio: float = _TIPPING_RATIO_PUBLIC,
 ) -> list[StructuralRisk]:
     """Check if the base (bottom layer) is adequate for the part's height.
 
-    ``cantilever_risk_ratio`` is the height-to-base ratio above which
+    ``tipping_ratio`` is the height-to-base ratio above which
     the part is flagged as toppling-prone.  Lower → more parts flagged
     (public-stricter)."""
     risks: list[StructuralRisk] = []
@@ -715,7 +1260,7 @@ def _check_base_adequacy(
 
     # Tall with narrow base (stability)
     base_min_dim = min(width, depth) if min(width, depth) > 0 else max(width, depth)
-    if base_min_dim > 0 and z_range / base_min_dim > cantilever_risk_ratio:
+    if base_min_dim > 0 and z_range / base_min_dim > tipping_ratio:
         risks.append(
             StructuralRisk(
                 risk_type="insufficient_base",
@@ -728,12 +1273,12 @@ def _check_base_adequacy(
                 region_size_mm=(width, depth, z_range * 0.2),
                 description=(
                     f"Height-to-base ratio is {z_range / base_min_dim:.1f}:1 "
-                    f"(threshold: {cantilever_risk_ratio:.1f}:1). Part may tip or "
+                    f"(threshold: {tipping_ratio:.1f}:1). Part may tip or "
                     f"warp during printing. Add a wider base, use a brim, or re-orient."
                 ),
                 metric_name="height_to_base_ratio",
                 metric_value=z_range / base_min_dim,
-                metric_threshold=cantilever_risk_ratio,
+                metric_threshold=tipping_ratio,
             )
         )
 
@@ -824,44 +1369,6 @@ def _find_weak_layer_adhesion_zones(
     return risks
 
 
-def _cluster_points(
-    points: list[tuple[float, float, float]],
-    *,
-    cluster_radius: float = 5.0,
-) -> list[tuple[tuple[float, float, float], int]]:
-    """Simple greedy clustering of 3D points.
-
-    Returns list of (centroid, count) for each cluster.
-    """
-    used = [False] * len(points)
-    clusters: list[tuple[tuple[float, float, float], int]] = []
-
-    for i, p in enumerate(points):
-        if used[i]:
-            continue
-        # Start a new cluster
-        cluster_pts = [p]
-        used[i] = True
-        for j in range(i + 1, len(points)):
-            if used[j]:
-                continue
-            dist = math.sqrt(
-                (points[j][0] - p[0]) ** 2
-                + (points[j][1] - p[1]) ** 2
-                + (points[j][2] - p[2]) ** 2
-            )
-            if dist <= cluster_radius:
-                cluster_pts.append(points[j])
-                used[j] = True
-
-        cx = sum(pt[0] for pt in cluster_pts) / len(cluster_pts)
-        cy = sum(pt[1] for pt in cluster_pts) / len(cluster_pts)
-        cz = sum(pt[2] for pt in cluster_pts) / len(cluster_pts)
-        clusters.append(((cx, cy, cz), len(cluster_pts)))
-
-    return clusters
-
-
 # ---------------------------------------------------------------------------
 # Reinforcement recommendations
 # ---------------------------------------------------------------------------
@@ -870,16 +1377,13 @@ def _cluster_points(
 def _generate_reinforcements(
     risks: list[StructuralRisk],
     bbox: dict[str, float],
-    *,
-    min_cross_section_mm2: float = _MIN_CROSS_SECTION_MM2_PUBLIC,
-    cantilever_risk_ratio: float = _CANTILEVER_RISK_RATIO_PUBLIC,
 ) -> list[ReinforcementRecommendation]:
     """Generate specific reinforcement recommendations for identified risks.
 
-    Thresholds drive recommendation phrasing (e.g. "redesign with a
-    minimum X mm dimension") so they match the bands the risks were
-    flagged against.  Wording stays identical across tiers; only the
-    quoted numbers track the active threshold."""
+    A number the advice quotes ("redesign with a minimum X mm dimension",
+    "below X:1") is the threshold its risk was flagged against
+    (``risk.metric_threshold``), so the advice and the risk always agree,
+    and wording stays identical across tiers."""
     recs: list[ReinforcementRecommendation] = []
 
     for risk in risks:
@@ -893,7 +1397,7 @@ def _generate_reinforcements(
                         f"Thicken the narrow section at Z={risk.location_mm[2]:.1f} mm. "
                         f"Current cross-section is {risk.metric_value:.1f} mm². "
                         f"Use thicken_mesh_walls() to add material, or redesign "
-                        f"with a minimum {math.sqrt(min_cross_section_mm2):.1f} mm dimension."
+                        f"with a minimum {math.sqrt(risk.metric_threshold):.1f} mm dimension."
                     ),
                     estimated_strength_gain="More material where the part is thinnest",
                     addresses_risk="thin_neck",
@@ -942,10 +1446,10 @@ def _generate_reinforcements(
                     priority="medium",
                     location_mm=risk.location_mm,
                     description=(
-                        f"Add fillets to the {int(risk.metric_value)} sharp edges "
-                        f"near ({risk.location_mm[0]:.0f}, {risk.location_mm[1]:.0f}, "
-                        f"{risk.location_mm[2]:.0f}). A 1-2 mm radius fillet reduces "
-                        f"stress concentration at concave corners. Use add_mesh_fillet()."
+                        f"Round the sharp inside corner near ({risk.location_mm[0]:.0f}, "
+                        f"{risk.location_mm[1]:.0f}, {risk.location_mm[2]:.0f}) with a "
+                        f"1-2 mm fillet: a rounded inside corner spreads the load a "
+                        f"sharp one concentrates. Use add_mesh_fillet()."
                     ),
                     estimated_strength_gain="Rounds the corner so load isn't focused there",
                     addresses_risk="sharp_corner",
@@ -977,7 +1481,7 @@ def _generate_reinforcements(
                         location_mm=risk.location_mm,
                         description=(
                             "Widen the base to reduce the height-to-base ratio below "
-                            f"{cantilever_risk_ratio:.1f}:1. Add a brim in the slicer "
+                            f"{risk.metric_threshold:.1f}:1. Add a brim in the slicer "
                             f"for print adhesion, or add a permanent flange to the design."
                         ),
                         estimated_strength_gain="Eliminates topple risk during print and use",
@@ -1170,7 +1674,10 @@ def analyze_structural_risks(
 
     Explicit kwargs pin a dial (surface == escalate), disabling its
     demotion — power-user escape hatch.  ``None`` means "surface at the
-    public floor; demote with the overlay if loaded."
+    public floor; demote with the overlay if loaded."  The sharp-corner
+    threshold is one value at every tier (``_SHARP_ANGLE_THRESHOLD_DEG_PUBLIC``):
+    the overlay never moves it, and an inside corner that counts is a
+    warning for every caller.
 
     Performs geometric analysis to find:
     - Thin necks (narrow cross-sections that will snap)
@@ -1183,18 +1690,20 @@ def analyze_structural_risks(
     :param file_path: Path to STL file.
     :param min_cross_section_mm2: Override the resolved threshold.
         ``None`` (default) = use the overlay if loaded, else the
-        stricter public default (5.0 mm²; overlay-calibrated = 4.0).
+        stricter public default (5.0 mm²).
     :param sharp_angle_threshold_deg: Same semantics; public default
-        65.0°, overlay-calibrated 60.0°.
-    :returns: List of :class:`StructuralRisk` findings.
+        65.0°.
+    :returns: List of :class:`StructuralRisk` findings; empty for a file
+        whose size puts its units in question, where no risk is judged
+        (:func:`generate_improvement_plan` carries the question).
     """
     from kiln.design_intelligence import load_pro_overlay_or_empty
 
-    triangles, vertices = _parse_stl_for_analysis(file_path)
-    if not triangles:
+    part = _read_part(file_path)
+    if not part.triangles or part.units_question:
         return []
 
-    bbox = _bounding_box(vertices)
+    triangles, bbox = part.triangles, part.bbox
 
     # --- Demote-not-delete tiering.
     # SURFACE thresholds are always the public (stricter) values, so a Pro
@@ -1208,7 +1717,7 @@ def analyze_structural_risks(
     # for that dial (power-user escape hatch).
     overlay = load_pro_overlay_or_empty("structural_thresholds")
     surf_thin = _THIN_NECK_RATIO_PUBLIC
-    surf_cant = _CANTILEVER_RISK_RATIO_PUBLIC
+    surf_cant = _TIPPING_RATIO_PUBLIC
     surf_area = (min_cross_section_mm2 if min_cross_section_mm2 is not None
                  else _MIN_CROSS_SECTION_MM2_PUBLIC)
     surf_sharp = (sharp_angle_threshold_deg if sharp_angle_threshold_deg is not None
@@ -1220,7 +1729,7 @@ def analyze_structural_risks(
             triangles, bbox, min_area_mm2=area, ratio_threshold=thin,
         ))
         out.extend(_find_sharp_corners(triangles, angle_threshold_deg=sharp))
-        out.extend(_check_base_adequacy(triangles, bbox, cantilever_risk_ratio=cant))
+        out.extend(_check_base_adequacy(triangles, bbox, tipping_ratio=cant))
         return out
 
     def _key(r: StructuralRisk) -> tuple:
@@ -1234,11 +1743,10 @@ def analyze_structural_risks(
 
     if overlay:
         esc_thin = overlay.get("thin_neck_ratio", surf_thin)
-        esc_cant = overlay.get("cantilever_risk_ratio", surf_cant)
+        esc_cant = overlay.get("tipping_ratio", surf_cant)
         esc_area = surf_area if min_cross_section_mm2 is not None else overlay.get(
             "min_cross_section_mm2", surf_area)
-        esc_sharp = surf_sharp if sharp_angle_threshold_deg is not None else overlay.get(
-            "sharp_angle_threshold_deg", surf_sharp)
+        esc_sharp = surf_sharp  # one value at every tier; never the overlay's to move
         # Features that still trip the calibrated thresholds are genuine
         # warnings; those that only trip the stricter public floor are
         # borderline → demote to "info" rather than drop them.
@@ -1254,7 +1762,7 @@ def analyze_structural_risks(
 
     # Dial-free detectors are unaffected by the overlay; run once.
     risks: list[StructuralRisk] = dial_risks
-    risks.extend(_find_cantilevers(triangles, bbox))
+    risks.extend(_find_cantilevers(triangles))
     risks.extend(_find_weak_layer_adhesion_zones(triangles, bbox))
 
     # Sort by severity: critical first, then warning, then info
@@ -1275,40 +1783,40 @@ def recommend_reinforcements(
     :param min_cross_section_mm2: Minimum safe cross-section area; ``None``
         defers to ``analyze_structural_risks`` (overlay-resolved or
         stricter public default).
-    :returns: List of :class:`ReinforcementRecommendation`.
+    :returns: List of :class:`ReinforcementRecommendation`; empty for a
+        file whose size puts its units in question.
     """
-    from kiln.design_intelligence import load_pro_overlay_or_empty
-
-    triangles, vertices = _parse_stl_for_analysis(file_path)
-    if not triangles:
+    part = _read_part(file_path)
+    if not part.triangles or part.units_question:
         return []
 
-    bbox = _bounding_box(vertices)
+    bbox = part.bbox
     risks = analyze_structural_risks(
         file_path, min_cross_section_mm2=min_cross_section_mm2
     )
-    overlay = load_pro_overlay_or_empty("structural_thresholds")
-    resolved_min = (
-        min_cross_section_mm2 if min_cross_section_mm2 is not None
-        else overlay.get("min_cross_section_mm2", _MIN_CROSS_SECTION_MM2_PUBLIC)
-    )
-    resolved_cantilever = overlay.get(
-        "cantilever_risk_ratio", _CANTILEVER_RISK_RATIO_PUBLIC,
-    )
-    return _generate_reinforcements(
-        risks, bbox,
-        min_cross_section_mm2=resolved_min,
-        cantilever_risk_ratio=resolved_cantilever,
-    )
+    return _generate_reinforcements(risks, bbox)
 
 
 def assess_load_bearing(file_path: str) -> LoadAnalysis:
     """Analyze load-bearing characteristics from mesh geometry.
 
     :param file_path: Path to STL file.
-    :returns: :class:`LoadAnalysis` with load surface info and orientation advice.
+    :returns: :class:`LoadAnalysis` with load surface info and orientation
+        advice; for a file whose size puts its units in question, that
+        question and nothing judged.
     """
-    triangles, vertices = _parse_stl_for_analysis(file_path)
+    part = _read_part(file_path)
+    if part.units_question:
+        return LoadAnalysis(
+            primary_load_axis="unknown",
+            load_surfaces=[],
+            weak_axis="unknown",
+            layer_direction_concern="",
+            recommended_print_orientation="",
+            orientation_reasoning="",
+            units_question=part.units_question,
+        )
+    triangles, bbox = part.triangles, part.bbox
     if not triangles:
         return LoadAnalysis(
             primary_load_axis="unknown",
@@ -1319,8 +1827,164 @@ def assess_load_bearing(file_path: str) -> LoadAnalysis:
             orientation_reasoning="Default — mesh could not be analyzed.",
         )
 
-    bbox = _bounding_box(vertices)
     return _analyze_load_bearing(triangles, bbox)
+
+
+# ---------------------------------------------------------------------------
+# What a person is told about the risks
+# ---------------------------------------------------------------------------
+#
+# A sentence names the risks the analysis found and the first thing to do.
+# The structural score and grade rank versions of a part against each other
+# and stay in the report, the same rule the printability score follows: a
+# person told "Score: 62/100 (D)" learns nothing to act on.
+
+#: Each kind of structural risk in plain words (one of it, several) and the
+#: first thing to do about it.
+_RISK_WORDS: dict[str, tuple[str, str, str]] = {
+    "thin_neck": ("thin neck", "thin necks", "thicken the narrow section"),
+    "stress_concentration": (
+        "abrupt change in cross-section", "abrupt changes in cross-section",
+        "smooth the change in section with a fillet",
+    ),
+    "cantilever": ("cantilever", "cantilevers", "add a gusset under the overhang"),
+    "sharp_corner": ("sharp inside corner", "sharp inside corners", "round the inside corners with fillets"),
+    "insufficient_base": ("tipping risk", "tipping risks", "widen the base or add a brim"),
+    "weak_layer_adhesion": (
+        "overhang area with weak layer bonds", "overhang areas with weak layer bonds",
+        "orient the part so the load runs along the layers",
+    ),
+}
+
+#: The severities a sentence counts; an ``info`` finding is a borderline note.
+_COUNTED = ("critical", "warning")
+
+
+def _risk_words(risk_type: str) -> tuple[str, str, str]:
+    plain = risk_type.replace("_", " ")
+    return _RISK_WORDS.get(risk_type, (plain, f"{plain}s", "see the reinforcements in the plan"))
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}" if n == 1 else f"{n} {word}s"
+
+
+def structural_risk_counts(risks: Sequence[StructuralRisk]) -> str:
+    """How many structural risks a part has, in words: ``"1 critical
+    structural risk and 3 warnings"``, or ``"no structural risks"``."""
+    critical = sum(1 for r in risks if r.severity == "critical")
+    warnings = sum(1 for r in risks if r.severity == "warning")
+    if critical and warnings:
+        return f"{_plural(critical, 'critical structural risk')} and {_plural(warnings, 'warning')}"
+    if critical:
+        return _plural(critical, "critical structural risk")
+    if warnings:
+        return _plural(warnings, "structural warning")
+    return "no structural risks"
+
+
+def _named_risks(
+    risks: Sequence[StructuralRisk], done: frozenset[str] = frozenset(),
+) -> tuple[str, str | None]:
+    """Each kind of counted risk named with how many, the worst first, and
+    the first thing to do about the worst kind an edit has not already
+    addressed (*done*); ``None`` when every kind left was addressed."""
+    kinds: dict[str, list[StructuralRisk]] = {}
+    for risk in risks:
+        if risk.severity in _COUNTED:
+            kinds.setdefault(risk.risk_type, []).append(risk)
+
+    def critical(group: list[StructuralRisk]) -> int:
+        return sum(1 for r in group if r.severity == "critical")
+
+    # Critical kinds first, then the most frequent; a tie keeps the
+    # analysis's own order.
+    order = sorted(kinds.items(), key=lambda kv: (-critical(kv[1]), -len(kv[1])))
+    named = []
+    for kind, group in order:
+        one, many, _ = _risk_words(kind)
+        n, c = len(group), critical(group)
+        said = f"{'an' if one[0] in 'aeiou' else 'a'} {one}" if n == 1 else f"{n} {many}"
+        if c:
+            said += " (critical)" if c == n else f" ({c} critical)"
+        named.append(said)
+    first = next((_risk_words(kind)[2] for kind, _ in order if kind not in done), None)
+    return ", ".join(named), first
+
+
+def _borderline_note(risks: Sequence[StructuralRisk]) -> str:
+    notes = sum(1 for r in risks if r.severity not in _COUNTED)
+    if not notes:
+        return ""
+    return f" {_plural(notes, 'borderline feature')} {'is' if notes == 1 else 'are'} noted in the report."
+
+
+def describe_structural_risks(risks: Sequence[StructuralRisk]) -> str:
+    """What a person is told about a part's structural risks: how many, each
+    kind named with the worst first, and the first thing to do.
+
+    The one wording every door uses (the improvement plan, the reinforcement
+    result, the slicer-settings note, the template sweep, the design audit's
+    structural gate).  It states no score or grade.
+    """
+    if not any(r.severity in _COUNTED for r in risks):
+        return "No structural risks found." + _borderline_note(risks)
+    named, first = _named_risks(risks)
+    return f"{structural_risk_counts(risks)}: {named}. First, {first}." + _borderline_note(risks)
+
+
+def _carries_more_risk(before: DesignImprovementPlan, after: DesignImprovementPlan) -> bool:
+    """Whether *after* carries more structural risk than *before*: more
+    critical risks, or as many and more warnings.
+
+    Read from the risks, not the scores, because the score stops at 0: a
+    part that went from one critical risk to three scores 0 both times.  The
+    one test both the reinforcement's own check of each step and the
+    sentence it ends with (:func:`describe_structural_change`) use.
+    """
+    return (after.critical_count, after.warning_count) > (before.critical_count, before.warning_count)
+
+
+def describe_structural_change(
+    before: DesignImprovementPlan,
+    after: DesignImprovementPlan,
+    applied: Sequence[dict[str, Any]] = (),
+) -> str:
+    """What reinforcing a part did to its structural risks, in words: what
+    it had and what is left, and whether it now carries more
+    (:func:`_carries_more_risk`).
+
+    The next step is never an edit *applied* already addressed: risks of a
+    kind it addressed are ones it did not reach, and are said as that, with
+    the edges it left sharp on purpose counted.
+    """
+    had = structural_risk_counts(before.risks)
+    if not any(r.severity in _COUNTED for r in after.risks):
+        if not any(r.severity in _COUNTED for r in before.risks):
+            return "No structural risks before or after."
+        return f"It had {had}; none remain." + _borderline_note(after.risks)
+    done = frozenset(
+        kind for entry in applied for kind in [entry.get("addresses"), *entry.get("also_addresses", [])] if kind
+    )
+    named, first = _named_risks(after.risks, done)
+    if first:
+        now = f"it now has {structural_risk_counts(after.risks)}: {named}. First, {first}."
+    else:
+        left = [
+            edge for entry in applied for edge in ((entry.get("edges") or {}).get("left_sharp") or ())
+            if edge.get("corner") != "smooth"
+        ]
+        failed = sum(1 for edge in left if edge.get("failed"))
+        now = f"it now has {structural_risk_counts(after.risks)}: {named}, which the reinforcement did not reach."
+        if len(left) > failed:
+            now += f" It left {_plural(len(left) - failed, 'edge')} sharp on purpose."
+        if failed:
+            now += f" The CAD kernel could not round {_plural(failed, 'edge')}."
+    if _carries_more_risk(before, after):
+        said = f"The reinforced part carries more structural risk than the original: it had {had}; {now}"
+    else:
+        said = f"It had {had}; {now}"
+    return said + _borderline_note(after.risks)
 
 
 def generate_improvement_plan(
@@ -1337,18 +2001,20 @@ def generate_improvement_plan(
     :param file_path: Path to STL file.
     :param min_cross_section_mm2: Minimum safe cross-section area.
     :param sharp_angle_threshold_deg: Angle threshold for sharp edge detection.
-    :returns: :class:`DesignImprovementPlan`.
+    :returns: :class:`DesignImprovementPlan`.  For a file whose size puts
+        its units in question, the plan is that question and nothing else:
+        no risk, count, score or reinforcement.
     """
-    triangles, vertices = _parse_stl_for_analysis(file_path)
-    if not triangles:
+    part = _read_part(file_path)
+    if not part.triangles:
         return DesignImprovementPlan(
             file_path=file_path,
             summary="Could not parse mesh file.",
         )
+    if part.units_question:
+        return DesignImprovementPlan.not_judged(file_path, part.units_question)
 
-    from kiln.design_intelligence import load_pro_overlay_or_empty
-
-    bbox = _bounding_box(vertices)
+    triangles, bbox = part.triangles, part.bbox
 
     # Run all analyses
     risks = analyze_structural_risks(
@@ -1356,29 +2022,23 @@ def generate_improvement_plan(
         min_cross_section_mm2=min_cross_section_mm2,
         sharp_angle_threshold_deg=sharp_angle_threshold_deg,
     )
-    overlay = load_pro_overlay_or_empty("structural_thresholds")
-    resolved_min = (
-        min_cross_section_mm2 if min_cross_section_mm2 is not None
-        else overlay.get("min_cross_section_mm2", _MIN_CROSS_SECTION_MM2_PUBLIC)
-    )
-    resolved_cantilever = overlay.get(
-        "cantilever_risk_ratio", _CANTILEVER_RISK_RATIO_PUBLIC,
-    )
-    reinforcements = _generate_reinforcements(
-        risks, bbox,
-        min_cross_section_mm2=resolved_min,
-        cantilever_risk_ratio=resolved_cantilever,
-    )
+    reinforcements = _generate_reinforcements(risks, bbox)
     load = _analyze_load_bearing(triangles, bbox)
 
     # Compute structural score
     critical_count = sum(1 for r in risks if r.severity == "critical")
     warning_count = sum(1 for r in risks if r.severity == "warning")
 
-    # Start at 100, subtract for risks
+    # Start at 100 and subtract once per KIND of risk, at its worst severity:
+    # six identical peg roots are one thing to round, and one narrow neck
+    # read at twenty heights is one neck.  Different kinds add up, so a part
+    # that gains a new kind of risk never scores higher.  The counts above
+    # still count every risk.
+    critical_kinds = {r.risk_type for r in risks if r.severity == "critical"}
+    warning_kinds = {r.risk_type for r in risks if r.severity == "warning"} - critical_kinds
     score = 100
-    score -= critical_count * 25
-    score -= warning_count * 10
+    score -= len(critical_kinds) * 25
+    score -= len(warning_kinds) * 10
     score = max(0, min(100, score))
 
     # Grade
@@ -1393,20 +2053,11 @@ def generate_improvement_plan(
     else:
         grade = "F"
 
-    # Build summary
-    if not risks:
-        summary = (
-            f"No structural risks detected. Score: {score}/100 ({grade}). "
-            f"Design appears structurally sound for typical FDM printing."
-        )
-    else:
-        risk_types = list(set(r.risk_type for r in risks))
-        summary = (
-            f"Found {len(risks)} structural risk(s) ({critical_count} critical, "
-            f"{warning_count} warning). Score: {score}/100 ({grade}). "
-            f"Risk types: {', '.join(risk_types)}. "
-            f"{len(reinforcements)} reinforcement(s) recommended."
-        )
+    # The summary names the risks; the score and grade above stay in the
+    # plan for comparing versions of the part.
+    summary = describe_structural_risks(risks)
+    if reinforcements:
+        summary += f" {_plural(len(reinforcements), 'reinforcement')} recommended."
 
     return DesignImprovementPlan(
         file_path=file_path,
@@ -1434,8 +2085,9 @@ class ReinforcementResult:
     original_path: str
     applied: list[dict[str, Any]] = field(default_factory=list)
     skipped: list[dict[str, Any]] = field(default_factory=list)
-    before_score: int = 0
-    after_score: int = 0
+    #: None when nothing was judged (``units_question``).
+    before_score: int | None = 0
+    after_score: int | None = 0
     before_grade: str = ""
     after_grade: str = ""
     summary: str = ""
@@ -1444,6 +2096,9 @@ class ReinforcementResult:
     step_path: str | None = None
     #: What the edge finishing did, or would do, about how the part prints.
     print_aware: str = ""
+    #: The units question the file's size raises: when set, nothing was
+    #: judged, reinforced or written, and ``output_path`` is the file as given.
+    units_question: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1458,6 +2113,7 @@ class ReinforcementResult:
             "summary": self.summary,
             **({"step_path": self.step_path} if self.step_path else {}),
             **({"print_aware": self.print_aware} if self.print_aware else {}),
+            **({"units_question": self.units_question} if self.units_question else {}),
         }
 
 
@@ -1477,6 +2133,9 @@ class PrintSettingsRecommendation:
     orientation_reason: str
     special_notes: list[str] = field(default_factory=list)
     confidence: str = "high"  # "high", "medium", "low"
+    #: The units question the file's size raises: when set, the settings
+    #: are the material's defaults and nothing about the part was judged.
+    units_question: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1492,6 +2151,7 @@ class PrintSettingsRecommendation:
             "orientation_reason": self.orientation_reason,
             "special_notes": self.special_notes,
             "confidence": self.confidence,
+            **({"units_question": self.units_question} if self.units_question else {}),
         }
 
 
@@ -1518,31 +2178,40 @@ def apply_reinforcements(
     1. **thicken_wall** → :func:`kiln.wall_thicken.thicken_part` (the CAD file when
        there is one, a measured mesh offset otherwise)
     2. **fillet** / **chamfer** → :func:`kiln.edge_finish.fillet_part` /
-       ``chamfer_part``, on the part's CAD file, at the angle the plan found
-       the sharp edges at and sized for the printer it prints on
-    3. **add_base** → unions a wider base plate via OpenSCAD boolean
-    4. **gusset** → unions triangular gusset ribs at cantilever bases
+       ``chamfer_part``, on the part's CAD file, on its sharp inside edges at
+       the angle the plan found them at, sized for the printer it prints on
+    3. **add_base** → unions a base plate under the part via OpenSCAD
+       boolean, wide enough that the part no longer reads as a tipping risk
+       at the ratio the risk was found at
 
     The edits that work on the part's CAD file run first and hand the CAD
-    on to each other; the base plate and gussets are unions on the mesh, so
-    they run after.  When every edit applied was a CAD one, the result
-    carries ``step_path``: the reinforced part as CAD.
+    on to each other; the base plate is a union on the mesh, so it runs
+    after.  When every edit applied was a CAD one, the result carries
+    ``step_path``: the reinforced part as CAD.
 
-    Thickening, rounding and bevelling act on the whole part, so each runs
-    once: its one entry names the first risk it ``addresses`` and lists the
-    rest of its kind under ``also_addresses``.  Reinforcements that can't be
-    auto-applied (like ``reorient``) are listed in ``skipped`` with guidance
-    for the agent.
+    Thickening, rounding, bevelling and the base plate act on the whole
+    part, so each runs once: its one entry names the first risk it
+    ``addresses`` and lists the rest of its kind under ``also_addresses``.
+    Each edit is kept only if the part it makes carries no more structural
+    risk than the part before it (:func:`_carries_more_risk`); one that does
+    is left out, listed in ``skipped`` with what it would have added, so the
+    part handed back is never worse than the part given.  Reinforcements
+    that can't be auto-applied are listed in ``skipped`` with guidance for
+    the agent: ``reorient``, and ``gusset``, since a cantilever finding says
+    where an overhang is but not which wall it hangs from, and a rib placed
+    without that braces nothing (``locations_mm`` lists where to add one).
 
     Edge finishing is literal by default -- the radius asked, on every sharp
-    edge -- and its entry lists what will print badly.  kiln-pro
+    inside edge; outside edges are left as they are -- and its entry lists
+    what will print badly.  kiln-pro
     (https://kiln3d.com) may choose the finish edge by edge for the printer
     and material instead; ``print_aware`` says which happened.
 
     :param file_path: Path to the part: an STL, or its STEP file.
     :param output_path: Output path (defaults to ``<name>_reinforced.stl``).
     :param min_cross_section_mm2: Minimum safe cross-section area.
-    :param sharp_angle_threshold_deg: Angle for sharp edge detection.
+    :param sharp_angle_threshold_deg: How far the surface must turn inward
+        across an edge, in degrees, for an inside corner to count as sharp.
     :param fillet_radius_mm: Fillet radius for sharp corners.
     :param wall_thicken_mm: Amount to thicken thin walls.
     :param base_height_mm: Height of stabilizing base plate.
@@ -1551,7 +2220,10 @@ def apply_reinforcements(
     :param layer_height_mm: The layer height it will print at.
     :param material: The material it will print in.
     :param fastener: The fastener the part's holes take, when the user named
-        one; nothing reads the geometry to guess it.
+        one; nothing reads the geometry to guess it.  With kiln-pro's edge
+        choice, each hole that threads onto it is prepared for it as the
+        corners are rounded; without, the holes are left as drawn and
+        ``print_aware`` says so once.
     :returns: :class:`ReinforcementResult` with before/after scores.
     """
     from kiln.step_import import ensure_mesh_path, is_step_file
@@ -1569,6 +2241,18 @@ def apply_reinforcements(
         min_cross_section_mm2=min_cross_section_mm2,
         sharp_angle_threshold_deg=sharp_angle_threshold_deg,
     )
+
+    if plan.units_question:
+        # Nothing judged, so nothing to reinforce, and no file is written: a
+        # copy of the file as given would read as the reinforced part.
+        return ReinforcementResult(
+            output_path=file_path,
+            original_path=file_path,
+            before_score=None,
+            after_score=None,
+            summary=f"{plan.units_question}  Nothing was reinforced and no file was written.",
+            units_question=plan.units_question,
+        )
 
     if not plan.reinforcements:
         out = output_path or str(path)
@@ -1615,11 +2299,11 @@ def apply_reinforcements(
 
     printer = {"printer_id": printer_id, "nozzle_mm": nozzle_mm, "layer_height_mm": layer_height_mm, "material": material}
     policy = _edge_policy(material, fastener)
-    edge_notes: list[str] = []
+    edge_replies: list[dict[str, Any]] = []
 
-    # Thickening, rounding and bevelling act on the WHOLE part, not on the
-    # spot a recommendation names: each runs once, and every later
-    # recommendation of its kind is answered by that one edit.  (Run once per
+    # Thickening, rounding, bevelling and the base plate act on the WHOLE
+    # part, not on the spot a recommendation names: each runs once, and every
+    # later recommendation of its kind is answered by that one edit.  (Run once per
     # recommendation, fourteen sharp corners filleted the part fourteen
     # times over -- or refused it fourteen times, identically.)
     whole_part = {
@@ -1635,10 +2319,48 @@ def apply_reinforcements(
             {"distance_mm": _CHAMFER_MM},
         ),
     }
+    # The base plate is sized from the tipping risk it answers, read off the
+    # risk itself: the ratio it was found at.
+    tipping = [r.metric_threshold for r in plan.risks if r.metric_name == "height_to_base_ratio"]
+    whole_part["add_base"] = (
+        lambda p: _base_reply(_apply_base(as_mesh(p), work_dir, base_height_mm, min(tipping, default=None))),
+        {"height_mm": base_height_mm},
+    )
     answered: dict[str, dict[str, Any]] = {}
 
     def as_mesh(p: str) -> str:
         return ensure_mesh_path(p)[0] if is_step_file(p) else p
+
+    # Every edit is measured as it lands, read the way the original was, and
+    # kept only if the part it makes carries no more structural risk than the
+    # part before it, in no more solids and as sealed.  One reading per edit,
+    # and at most one edit of each kind, so the work stays a few passes over
+    # the file whatever it holds.
+    measured = (plan, _part_shape(mesh_path))
+
+    def kept(reply: dict[str, Any]) -> dict[str, Any]:
+        """*reply*, or the same edit left out with the reason."""
+        nonlocal measured
+        made_path = as_mesh(reply["path"])
+        made = generate_improvement_plan(
+            made_path, min_cross_section_mm2=min_cross_section_mm2,
+            sharp_angle_threshold_deg=sharp_angle_threshold_deg,
+        )
+        before, (solids, sealed) = measured
+        shape = _part_shape(made_path)
+        if made.load_analysis is None:
+            why = "Kiln could not read back the part it made"
+        elif _carries_more_risk(before, made):
+            why = (f"the part it made carried more structural risk: {structural_risk_counts(made.risks)}, "
+                   f"where the part before it had {structural_risk_counts(before.risks)}")
+        elif shape[0] > solids:
+            why = f"the part it made printed as {_plural(shape[0], 'separate solid')} where the part before it was {solids}"
+        elif sealed and not shape[1]:
+            why = "the part it made had holes in its surface where the part before it was sealed"
+        else:
+            measured = (made, shape)
+            return reply
+        return {**reply, "success": False, "message": f"Left out: {why}."}
 
     for rec in sorted_recs:
         try:
@@ -1647,16 +2369,20 @@ def apply_reinforcements(
                 entry = answered[kind]
                 if rec.addresses_risk != entry["addresses"] and rec.addresses_risk not in entry.get("also_addresses", []):
                     entry.setdefault("also_addresses", []).append(rec.addresses_risk)
+                if "locations_mm" in entry:
+                    entry["locations_mm"].append([round(c, 1) for c in rec.location_mm])
 
             elif kind in whole_part:
                 edit, settings = whole_part[kind]
                 reply = edit(current_path)
                 if reply.get("success"):
+                    reply = kept(reply)
+                if reply.get("success"):
                     current_path, current_step = reply["path"], reply.get("step_path")
                     answered[kind] = {"type": kind, **settings, "addresses": rec.addresses_risk}
                     if reply.get("edges"):
                         answered[kind]["edges"] = reply["edges"]
-                        edge_notes.append(_print_aware_note(reply, policy is not None))
+                        edge_replies.append(reply)
                     applied.append(answered[kind])
                 else:
                     answered[kind] = {"type": kind, "reason": reply["message"], "addresses": rec.addresses_risk}
@@ -1664,41 +2390,16 @@ def apply_reinforcements(
                         answered[kind]["edges"] = reply["edges"]
                     skipped.append(answered[kind])
 
-            elif rec.reinforcement_type == "add_base":
-                result = _apply_base(
-                    as_mesh(current_path), work_dir, base_height_mm,
-                )
-                if result:
-                    current_path, current_step = result, None
-                    applied.append({
-                        "type": "add_base",
-                        "height_mm": base_height_mm,
-                        "addresses": rec.addresses_risk,
-                    })
-                else:
-                    skipped.append({
-                        "type": "add_base",
-                        "reason": "Could not generate base (OpenSCAD not available)",
-                        "addresses": rec.addresses_risk,
-                    })
-
-            elif rec.reinforcement_type == "gusset":
-                result = _apply_gusset(
-                    as_mesh(current_path), work_dir, rec.location_mm,
-                )
-                if result:
-                    current_path, current_step = result, None
-                    applied.append({
-                        "type": "gusset",
-                        "location_mm": list(rec.location_mm),
-                        "addresses": rec.addresses_risk,
-                    })
-                else:
-                    skipped.append({
-                        "type": "gusset",
-                        "reason": "Could not generate gusset (OpenSCAD not available)",
-                        "addresses": rec.addresses_risk,
-                    })
+            elif kind == "gusset":
+                # Listed, never placed: a rib braces an overhang only from the
+                # wall it hangs from, and the finding does not say which wall
+                # that is.  (Placed at the finding, it was a flat triangle on
+                # the bed: loose in a donut's hole, loose under a post's arm.)
+                answered[kind] = {
+                    "type": "gusset", "reason": _GUSSET_NOT_PLACED, "addresses": rec.addresses_risk,
+                    "locations_mm": [[round(c, 1) for c in rec.location_mm]], "guidance": _GUSSET_GUIDANCE,
+                }
+                skipped.append(answered[kind])
 
             elif rec.reinforcement_type == "reorient":
                 # Can't auto-apply rotation — agent needs to decide
@@ -1765,18 +2466,12 @@ def apply_reinforcements(
             f"Skipped {len(skipped)}: "
             f"{', '.join(s['type'] for s in skipped)}."
         )
-    score_delta = after_plan.overall_structural_score - plan.overall_structural_score
-    if score_delta > 0:
-        summary_parts.append(
-            f"Score improved {plan.overall_structural_score} → "
-            f"{after_plan.overall_structural_score} "
-            f"({plan.structural_grade} → {after_plan.structural_grade})."
-        )
-    elif score_delta == 0 and applied:
-        summary_parts.append(
-            f"Score unchanged at {plan.overall_structural_score} "
-            f"({plan.structural_grade}) — improvements may be micro-level."
-        )
+    # What changed, in risks named; before_score / after_score below compare
+    # the two versions.
+    if applied:
+        summary_parts.append(describe_structural_change(plan, after_plan, applied))
+    else:
+        summary_parts.append(f"The part is as it was. {describe_structural_risks(plan.risks)}")
 
     return ReinforcementResult(
         output_path=output_path,
@@ -1789,7 +2484,7 @@ def apply_reinforcements(
         after_grade=after_plan.structural_grade,
         summary=" ".join(summary_parts),
         step_path=step_path,
-        print_aware=" ".join(n for n in edge_notes if n),
+        print_aware=_print_aware_note(edge_replies, policy is not None, fastener),
     )
 
 
@@ -1816,19 +2511,35 @@ def _edge_policy(material: str | None, fastener: str | None = None) -> Any:
     return lambda chains, frame: choose(chains, frame, material=material, fastener=fastener)
 
 
-def _print_aware_note(reply: dict[str, Any], chosen_per_edge: bool) -> str:
-    """One sentence on how the finished edges will print."""
-    cautions = len(reply["edges"]["cautions"])
+def _print_aware_note(
+    replies: dict[str, Any] | Sequence[dict[str, Any]], chosen_per_edge: bool, fastener: str | None = None,
+) -> str:
+    """What the edge finishing did about how the part prints, and what it did
+    about the holes when a fastener was named -- one note, and the tier that
+    chooses named once, with the link, only when there was something to choose.
+
+    *replies* is the edge step's reply, or every edge step's reply; a step
+    that finished nothing contributes no caution.
+    """
+    found = [replies] if isinstance(replies, dict) else list(replies)
+    cautions = sum(len(reply["edges"]["cautions"]) for reply in found)
     if chosen_per_edge:
-        return "Each edge's finish was chosen for how it prints on this printer."
-    if not cautions:
+        said = "Each edge's finish was chosen for how it prints on this printer"
+        return said + (f", and each hole for the {fastener} you named." if fastener else ".")
+    if not cautions and not fastener:
         return ""
     from kiln.tiers_and_terms import upgrade_link
 
-    return (
-        f"{cautions} of the finished edges will print badly as asked; each entry's edges.cautions says how. "
-        f"Kiln Pro chooses the finish edge by edge for your printer and material: {upgrade_link('apply_design_reinforcements')}"
-    )
+    parts = []
+    if cautions:
+        parts.append(f"{cautions} of the finished edges will print badly as asked; each entry's edges.cautions says how.")
+    if fastener:
+        parts.append(f"The holes are left as drawn for the {fastener} you named.")
+    does = ["chooses the finish edge by edge for your printer and material"] if cautions else []
+    if fastener:
+        does.append(f"prepares each hole that takes the {fastener} as it rounds the corners")
+    parts.append(f"Kiln Pro {' and '.join(does)}: {upgrade_link('apply_design_reinforcements')}")
+    return " ".join(parts)
 
 
 def _apply_thicken(
@@ -1854,24 +2565,87 @@ def _apply_edge_finish(
     printer: dict[str, Any],
     choose: Any,
 ) -> dict[str, Any]:
-    """Round or bevel through the one door; its reply, success or not."""
-    try:
-        from kiln.edge_finish import finish_part
+    """Round or bevel the part's sharp INSIDE edges through the one door; its reply, success or not.
 
-        return finish_part(
-            part_path, kind=kind, size_mm=size_mm, angle_threshold_deg=angle_deg,
+    Only inside edges, the ones the structural analysis counts
+    (:func:`_find_sharp_corners`): a rounded inside corner spreads the load a
+    sharp one concentrates, while rounding an outside edge changes how the
+    part looks and fits for no strength.  They are selected by kind, at the
+    plan's threshold, rather than one by one, so the door's own rules still
+    hold: the floor of a blind hole stays as it is unless named.
+    """
+    try:
+        from kiln.edge_finish import NOTHING_FINISHED, finish_part
+
+        reply = finish_part(
+            part_path, kind=kind, size_mm=size_mm, edges="inside", angle_threshold_deg=angle_deg,
             output_path=str(Path(work_dir) / f"{kind}ed.stl"), choose=choose, **printer,
         )
     except Exception as exc:  # noqa: BLE001
         return {"success": False, "message": f"Edge finishing could not run: {exc}"}
+    if reply.get("code") == NOTHING_FINISHED and not reply.get("edges", {}).get("left_sharp"):
+        verb = "round" if kind == "fillet" else "bevel"
+        reply["message"] = (
+            f"Kiln did not {verb} any edge: the part has no sharp inside corner. Its outside edges are left as they are."
+        )
+    return reply
+
+
+#: How much wider than the part, on each side, a base plate reaches when no
+#: tipping ratio sets its width.
+_BASE_SPREAD = 1.3
+
+#: How far inside the tipping ratio a base plate keeps the part: a tenth
+#: wider than the ratio asks, so the part stands clear of the line, not on it.
+_BASE_CLEARANCE = 1.1
+
+#: Why a cantilever's gusset is listed and not placed.
+_GUSSET_NOT_PLACED = (
+    "Kiln does not place gussets: a rib braces an overhang only where it joins the wall the "
+    "overhang hangs from, and Kiln's cantilever finding says where the overhang is, not which "
+    "wall carries it."
+)
+_GUSSET_GUIDANCE = (
+    "Add a triangular rib under each overhang in locations_mm, joined to the wall it hangs from, "
+    "in the part's design; or print it with supports under the overhang."
+)
+
+
+def _part_shape(stl_path: str) -> tuple[int, bool]:
+    """How many separate solids the mesh at *stl_path* prints as, and whether
+    every piece of it is sealed: the one piece reading every door uses
+    (:func:`kiln.mesh_bodies.read_triangles`)."""
+    from kiln.mesh_bodies import read_triangles
+
+    triangles, _ = _parse_stl_for_analysis(stl_path)
+    if not triangles:
+        return 0, False
+    reading = read_triangles(triangles)
+    return reading.solid_count, reading.sealed
+
+
+def _base_reply(path: str | None) -> dict[str, Any]:
+    """:func:`_apply_base`'s result in the shape every whole-part edit replies in."""
+    if path:
+        return {"success": True, "path": path}
+    return {"success": False, "message": "Could not generate base (OpenSCAD not available)"}
 
 
 def _apply_base(
     stl_path: str,
     work_dir: str,
     height_mm: float,
+    tipping_ratio: float | None = None,
 ) -> str | None:
-    """Add a stabilizing base plate via OpenSCAD boolean union."""
+    """Add a stabilizing base plate via OpenSCAD boolean union.
+
+    The plate reaches :data:`_BASE_SPREAD` times the part's width on each
+    axis, and when the part was found to tip at *tipping_ratio* (height over
+    narrowest width), wide enough that the part with its plate stands
+    :data:`_BASE_CLEARANCE` inside that ratio.  (A plate a third wider than
+    a 5 mm post 60 mm tall left it a tipping risk at 9.5 to 1, and added a
+    sharp inside corner where the post meets the plate.)
+    """
     try:
         from kiln.generation.openscad import _find_openscad, boolean_mesh_operation
 
@@ -1884,9 +2658,11 @@ def _apply_base(
             return None
         bbox = _bounding_box(vertices)
 
-        # Create a base plate wider than the part
-        width_x = (bbox["max_x"] - bbox["min_x"]) * 1.3
-        width_y = (bbox["max_y"] - bbox["min_y"]) * 1.3
+        width_x = (bbox["max_x"] - bbox["min_x"]) * _BASE_SPREAD
+        width_y = (bbox["max_y"] - bbox["min_y"]) * _BASE_SPREAD
+        if tipping_ratio:
+            standing = (bbox["max_z"] - bbox["min_z"] + height_mm) / tipping_ratio * _BASE_CLEARANCE
+            width_x, width_y = max(width_x, standing), max(width_y, standing)
         cx = (bbox["min_x"] + bbox["max_x"]) / 2
         cy = (bbox["min_y"] + bbox["max_y"]) / 2
 
@@ -1920,79 +2696,25 @@ def _apply_base(
         return None
 
 
-def _apply_gusset(
-    stl_path: str,
-    work_dir: str,
-    location_mm: tuple[float, float, float],
-) -> str | None:
-    """Add a triangular gusset rib at a cantilever base via OpenSCAD."""
-    try:
-        from kiln.generation.openscad import _find_openscad, boolean_mesh_operation
-
-        _find_openscad()
-
-        # Parse mesh for context
-        _, vertices = _parse_stl_for_analysis(stl_path)
-        if not vertices:
-            return None
-        bbox = _bounding_box(vertices)
-
-        # Gusset dimensions: proportional to part size
-        gusset_thickness = 2.0  # mm
-        gusset_size = min(
-            (bbox["max_x"] - bbox["min_x"]) * 0.3,
-            (bbox["max_z"] - bbox["min_z"]) * 0.3,
-            15.0,  # cap at 15mm
-        )
-        gusset_size = max(gusset_size, 3.0)  # minimum 3mm
-
-        # Create a triangular gusset using OpenSCAD polyhedron
-        # The gusset sits at the identified location as a right-triangle rib
-        x, y, z = location_mm
-
-        # Generate gusset as a right-triangle prism via OpenSCAD code
-        scad_code = f"""
-// Triangular gusset rib
-translate([{x - gusset_thickness / 2}, {y}, {bbox['min_z']}])
-linear_extrude(height={gusset_thickness})
-polygon(points=[
-    [0, 0],
-    [{gusset_size}, 0],
-    [0, {gusset_size}]
-]);
-"""
-        scad_path = str(Path(work_dir) / "gusset.scad")
-        gusset_stl = str(Path(work_dir) / "gusset.stl")
-        Path(scad_path).write_text(scad_code, encoding="utf-8")
-
-        from kiln.generation.openscad import _find_openscad as _find
-
-        binary = _find()
-        from kiln.openscad_runner import run_openscad
-
-        run_openscad(
-            [binary, "-o", gusset_stl, scad_path],
-            timeout=30,
-            text=False,
-            output_path=gusset_stl,
-        )
-
-        if not Path(gusset_stl).is_file() or Path(gusset_stl).stat().st_size < 100:
-            return None
-
-        # Union the gusset with the part
-        out = str(Path(work_dir) / "with_gusset.stl")
-        boolean_mesh_operation("union", [stl_path, gusset_stl], output_path=out)
-        return out
-
-    except Exception as exc:
-        logger.debug("Gusset application failed: %s", exc)
-        return None
-
-
 # ---------------------------------------------------------------------------
 # Slicer profile inference from structural analysis
 # ---------------------------------------------------------------------------
+
+
+def _support_call(file_path: str, material: str) -> tuple[bool, str]:
+    """Whether the part needs supports, and why, in the words every other
+    door uses: :func:`kiln.printability.support_verdict`, the one answer the
+    report, the pre-print check and the slice itself give."""
+    from kiln.printability import judge_supports, support_verdict
+
+    try:
+        reason = support_verdict(judge_supports(file_path, material=material.lower()))
+    except Exception as exc:  # noqa: BLE001 -- an unread part claims nothing
+        logger.debug("support check skipped for %s: %s", file_path, exc)
+        return False, "Kiln could not run its support check on this file, so supports are left off."
+    if reason:
+        return True, f"Prints with supports ({reason})."
+    return False, "Kiln's support check finds no overhang or bridge that needs support."
 
 
 def infer_print_settings(
@@ -2011,7 +2733,8 @@ def infer_print_settings(
     :param file_path: Path to STL file.
     :param material: Filament material (PLA, PETG, ABS, Nylon, TPU).
     :param min_cross_section_mm2: Minimum safe cross-section area.
-    :param sharp_angle_threshold_deg: Angle for sharp edge detection.
+    :param sharp_angle_threshold_deg: How far the surface must turn inward
+        across an edge, in degrees, for an inside corner to count as sharp.
     :returns: :class:`PrintSettingsRecommendation`.
     """
     plan = generate_improvement_plan(
@@ -2024,12 +2747,30 @@ def infer_print_settings(
     mat = material.upper()
     defaults = _MATERIAL_DEFAULTS.get(mat, _MATERIAL_DEFAULTS["PLA"])
 
+    if plan.units_question:
+        # Nothing about the part was judged, so no setting is tuned to it and
+        # no reason claims anything was or was not found.
+        return PrintSettingsRecommendation(
+            perimeters=defaults["perimeters"],
+            infill_percent=defaults["infill"],
+            infill_pattern=defaults["infill_pattern"],
+            layer_height_mm=defaults["layer_height"],
+            support_enabled=False,
+            support_reason="",
+            brim_enabled=False,
+            brim_reason="",
+            print_orientation="",
+            orientation_reason="",
+            special_notes=["These are the material's default settings; nothing about the part was judged."],
+            confidence="low",
+            units_question=plan.units_question,
+        )
+
     perimeters = defaults["perimeters"]
     infill = defaults["infill"]
     infill_pattern = defaults["infill_pattern"]
     layer_height = defaults["layer_height"]
-    support = False
-    support_reason = "No overhangs requiring support detected."
+    support, support_reason = _support_call(file_path, material)
     brim = False
     brim_reason = "Base contact area is adequate."
     notes: list[str] = []
@@ -2062,18 +2803,12 @@ def infer_print_settings(
             "at cross-section transitions."
         )
 
-    # Cantilever → enable supports, increase perimeters
+    # Cantilever → more perimeters where it meets its support.  Whether it
+    # needs supports is the one support verdict's call, made above.
     if has_cantilever:
-        support = True
-        support_reason = (
-            "Cantilever geometry detected — supports prevent drooping "
-            "during printing and maintain dimensional accuracy."
-        )
         perimeters = max(perimeters, 3)
-        notes.append(
-            "Supports enabled for cantilever overhangs. Consider tree supports "
-            "for easier removal."
-        )
+        if support:
+            notes.append("Supports are on for the overhangs. Consider tree supports for easier removal.")
 
     # Weak layer adhesion → slower speed, higher temp, more perimeters
     if has_weak_adhesion:
@@ -2108,12 +2843,12 @@ def infer_print_settings(
         orientation = plan.load_analysis.recommended_print_orientation
         orientation_reason = plan.load_analysis.orientation_reasoning
 
-    # Grade-based overall adjustments
+    # Grade-based overall adjustments; the note names what was found.
     if plan.structural_grade in ("D", "F"):
         infill = max(infill, 50)
         perimeters = max(perimeters, 4)
         notes.append(
-            f"Structural grade {plan.structural_grade} — using high infill "
+            f"With {structural_risk_counts(plan.risks)}, using high infill "
             f"and perimeters to compensate for geometry weaknesses."
         )
 
@@ -2325,6 +3060,7 @@ def optimize_template_params(
     best_grade = "F"
     best_params: dict[str, Any] = {}
     best_stl = ""
+    best_risks: list[StructuralRisk] = []
     all_scores: list[dict[str, Any]] = []
 
     for idx, combo in enumerate(all_combos):
@@ -2373,6 +3109,10 @@ def optimize_template_params(
         try:
             plan = generate_improvement_plan(stl_path)
             score = plan.overall_structural_score
+            if score is None:
+                # Nothing judged: Kiln drew it in millimetres, so a variant
+                # this small is too small to print, and no candidate.
+                continue
             grade = plan.structural_grade
 
             all_scores.append({
@@ -2388,6 +3128,7 @@ def optimize_template_params(
                 best_grade = grade
                 best_params = params
                 best_stl = stl_path
+                best_risks = plan.risks
         except Exception:
             continue
 
@@ -2406,10 +3147,11 @@ def optimize_template_params(
                 with contextlib.suppress(Exception):
                     Path(scad).unlink()
 
+    # The scores pick the strongest variant (all_scores keeps them for
+    # comparing); the summary says what the analysis found in it.
     summary = (
-        f"Tested {len(all_scores)} variants of {tpl.get('display_name', template_id)}. "
-        f"Best score: {best_score}/100 ({best_grade}). "
-        f"Score range: {min(s['score'] for s in all_scores)}-{max(s['score'] for s in all_scores)}."
+        f"Tested {len(all_scores)} variants of {tpl.get('display_name', template_id)}; "
+        f"best_params is the strongest. {describe_structural_risks(best_risks)}"
     )
 
     return OptimizationResult(
@@ -2932,7 +3674,7 @@ def estimate_weight(
     # Parse triangles
     triangles, _verts = _parse_stl_for_analysis(file_path)
     if not triangles:
-        raise ValueError(f"Could not parse triangles from {file_path}")
+        raise UnreadableMeshError(f"Could not parse triangles from {file_path}")
 
     # Compute signed volume via divergence theorem
     total_volume = 0.0
@@ -3379,7 +4121,7 @@ def cross_section_at_plane(
 
     triangles, _verts = _parse_stl_for_analysis(file_path)
     if not triangles:
-        raise ValueError(f"Could not parse triangles from {file_path}")
+        raise UnreadableMeshError(f"Could not parse triangles from {file_path}")
 
     bbox = _bounding_box(_verts)
 
