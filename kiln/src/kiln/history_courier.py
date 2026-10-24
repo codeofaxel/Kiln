@@ -821,14 +821,17 @@ def _bring_recipes(tool: str, design_id: str, vault: Any) -> dict[str, Any]:
     return {"in_account": len(rows), "files_changed": vault.merge_proven_rows(design_id, rows)}
 
 
-def push(tool: str, design_id: str, branch_id: str | None = None, *, replace_confirmed: bool = False, vault: Any = None) -> dict[str, Any]:
+def push(tool: str, design_id: str, branch_id: str | None = None, *, make_room_for: str | None = None, vault: Any = None) -> dict[str, Any]:
     """Send one branch of this computer's history, and the design's proven
     recipes, to the person's Kiln account.
 
     Refused here, sending nothing, when the design is locked to this
     computer.  When the account's branch moved on another computer, this
     computer's versions are kept there as a branch of their own instead
-    (:func:`_keep_as_this_computers`).
+    (:func:`_keep_as_this_computers`).  *make_room_for* is the person's
+    answer when their plan's designs are full (``FREE_SLOT_IN_USE``): the
+    design in their account to archive so this one fits.  Kiln's servers
+    archive it, never delete it, and only when this push is kept.
     """
     from kiln.history_vault import HistoryVault
 
@@ -877,8 +880,8 @@ def push(tool: str, design_id: str, branch_id: str | None = None, *, replace_con
         "memberships": members,
         "provenance_sidecars": _without_local_paths(sidecars),
     }
-    if replace_confirmed:
-        body["replace_confirmed"] = True
+    if make_room_for:
+        body["make_room_for"] = make_room_for
     refused = _send_models(tool, body, meshes)
     if refused is not None:
         return refused
@@ -926,9 +929,10 @@ def _keep_as_this_computers(
     """Keep this computer's versions of a branch the account moved on, as
     ``<branch>@<computer>``: a branch of their own, the moved one untouched.
 
-    The free plan cannot push a branch other than ``main``, so a refusal of
-    the plan's leaves the server's own answer (*refused*) as it was; nothing
-    is recorded here unless the account kept the branch.  Never merges.
+    A refusal of the plan's (a design the plan does not keep) leaves the
+    server's own answer (*refused*) as it was; nothing is recorded here
+    unless the account kept the branch.  Never merges, and never makes room:
+    this design is already in the account.
     """
     with _opened(vault) as v:
         computer = v.computer_name()
@@ -947,7 +951,7 @@ def _keep_as_this_computers(
         "status": "active",
     }
     members = [{**m, "branch_id": own_id} for m in body.get("memberships") or []]
-    sent = {k: val for k, val in body.items() if k != "replace_confirmed"}
+    sent = {k: val for k, val in body.items() if k != "make_room_for"}
     answer = _request(
         tool, "POST", f"/api/cloud/designs/{_quote(design_id)}/branches/push",
         {**sent, "branch": own, "memberships": members},
