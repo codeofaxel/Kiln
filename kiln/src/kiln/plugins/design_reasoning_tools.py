@@ -1230,10 +1230,17 @@ class _DesignReasoningToolsPlugin:
         ) -> dict:
             """Single-call print readiness check with optional auto-repair.
 
-            Runs the full validation battery: parseable, manifold, no floating
-            regions, supports (``analyze_printability``'s own verdict, which
-            knows a short ceiling bridges), fits build plate, no degenerate
-            triangles.
+            Checks the mesh is sound (parseable, manifold, no floating
+            regions, no degenerate triangles, fits the build plate) and reads
+            ``analyze_printability``'s verdict, which knows a short ceiling
+            bridges.  ``can_print`` is true only when the mesh is sound and
+            Kiln's verdict lets the part print, the same verdict the print
+            pipeline refuses on.  ``verdict`` is ``ready_to_print``,
+            ``printable_with_supports``, ``check_before_printing`` (the
+            verdict asks for a check; it still prints, with a warning),
+            ``wont_print`` (sound, but it won't print as it is) or
+            ``needs_fixes`` (a mesh fault, named in ``issues``).
+            ``validate_and_prepare`` runs the full pre-print pipeline.
 
             With ``auto_fix=True``, automatically repairs degenerate triangles,
             closes holes, and removes floating regions.
@@ -1317,10 +1324,17 @@ class _DesignReasoningToolsPlugin:
                 return _refusal
 
             try:
+                from kiln.auto_orient import support_estimate_message
                 from kiln.generation.validation import estimate_support_volume
 
                 result = estimate_support_volume(file_path)
-                return {"success": True, **result}
+                message = support_estimate_message(
+                    result["printability_verdict"], result["printability_verdict_text"],
+                    result["support_reason"],
+                    f"Estimated support volume: {result['support_volume_mm3']:.1f} mm3 "
+                    f"({result['support_weight_g']:.1f} g).",
+                )
+                return {"success": True, **result, "message": message}
             except Exception as exc:
                 return _srv._error_dict(
                     f"Support estimation failed: {exc}", code="SUPPORT_ERROR"

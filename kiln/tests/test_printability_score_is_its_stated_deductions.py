@@ -54,6 +54,12 @@ def _parts() -> dict[str, tuple[str, object]]:
             _box((10, 10, 20), (90, 100, 10)), _box((10, 10, 20), (140, 100, 10)),
             _box((60, 10, 4), (115, 100, 22)),
         ])),
+        # The same beam made one solid with its posts: a slicer will likely
+        # bridge its 30 mm, so it is charged as a bridge, by its span.
+        "fused_bridge": ("PLA", trimesh.boolean.union([
+            _box((10, 10, 20), (90, 100, 10)), _box((10, 10, 20), (130, 100, 10)),
+            _box((50, 10, 5), (110, 100, 22.5)),
+        ])),
         # A blade thinner than the nozzle.
         "fin": ("PLA", trimesh.util.concatenate([
             _box((30, 30, 3), (100, 100, 1.5)), _box((20, 0.2, 10), (100, 100, 8)),
@@ -118,6 +124,12 @@ def test_every_charged_block_states_its_share(reports, name):
 
 
 def test_every_kind_of_charge_is_exercised(reports):
-    """Without this the sum could hold only because nothing was charged."""
+    """Without this the sum could hold only because nothing was charged.
+
+    ``overhangs`` is not among them since 2026-10-24: the underside it finds
+    is charged once, by area, on ``supports``, and its own block states 0.
+    The fused bridge keeps ``bridging`` charged (a long bridge the support
+    area did not pay for)."""
     charged = {key for report in reports.values() for key, points in _stated(report).items() if points < 0}
-    assert {"overhangs", "thin_walls", "bridging", "bed_adhesion", "supports", "warping", "thermal_stress"} <= charged
+    assert {"thin_walls", "bridging", "bed_adhesion", "supports", "warping", "thermal_stress"} <= charged
+    assert all(report["overhangs"]["score_deduction"] == 0 for report in reports.values())

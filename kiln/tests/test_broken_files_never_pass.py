@@ -322,6 +322,32 @@ def test_the_gate_refuses_when_the_check_cannot_run(files):
     assert gate.report is None and gate.path == files["cube.stl"]
 
 
+@pytest.mark.parametrize("name", BROKEN_NAMES)
+def test_the_pre_flight_row_fails_a_broken_file_as_the_door_would(name, files):
+    """The pre-flight check's model row is the print door's own check, run
+    early: it fails a broken file with the door's reason, and never lists
+    one as "could not check" (2026-10-24: a bad 3MF and a bad STEP file
+    passed the row as unchecked while the door refused them)."""
+    from kiln import server
+
+    row = server._preflight_model_row(files[name], printer_name=None, material=None)
+
+    if name == "missing.stl":
+        assert row is None
+        return
+    assert row is not None and row["passed"] is False, row
+    assert row.get("checked", True) is True, row
+    assert row["message"].startswith("Not ready"), row
+
+
+def test_the_pre_flight_row_still_passes_a_real_part(files):
+    from kiln import server
+
+    row = server._preflight_model_row(files["cube.stl"], printer_name=None, material=None)
+
+    assert row is not None and row["passed"] is True and row["printability_verdict"] == "ready", row
+
+
 def test_the_gate_passes_what_is_not_a_mesh_and_a_real_part(files, tmp_path):
     from kiln.plugins.validation_pipeline_tools import gate_for_print
 
@@ -495,6 +521,7 @@ CALLERS = {
     "cli/main.py::_cli_print_gate": "door: kiln slice --print-after and kiln generate-and-print, tested above",
     "cli/main.py::validate": "door: kiln validate, tested above",
     "plugins/validation_pipeline_tools.py::gate_for_print": "the gate itself, tested above",
+    "server.py::_preflight_model_row": "door: the pre-flight check's model row is the gate run early, tested above",
     # The verdict tools and engines.
     "plugins/validation_pipeline_tools.py::register.validate_and_prepare": "tool: tested above",
     "plugins/design_reasoning_tools.py::register.check_print_readiness": "tool: tested above",

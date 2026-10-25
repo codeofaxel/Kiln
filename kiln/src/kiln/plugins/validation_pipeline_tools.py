@@ -461,12 +461,19 @@ class PrintGate:
 
     @property
     def summary(self) -> dict[str, Any] | None:
-        """The short block a door attaches to its own result."""
+        """The short block a door attaches to its own result.
+
+        It names the printability verdict and its sentence, so every print
+        door's reply says whether the part prints, not only how it scored.
+        """
         if self.report is None:
             return None
         return {
             key: self.report.get(key)
-            for key in ("printability_score", "readiness_score", "ready_to_print", "repaired", "summary")
+            for key in (
+                "printability_verdict", "printability_verdict_text",
+                "printability_score", "readiness_score", "ready_to_print", "repaired", "summary",
+            )
         }
 
 
@@ -812,6 +819,10 @@ class _ValidationPipelinePlugin:
                 "recommendations": recommendations,
                 "scale_factor": round(scale_factor, 2) if scale_factor else 0,
                 "ready_to_print": ready,
+                # The verdict ``ready_to_print`` was read from, in the two
+                # keys every door carries (2026-10-24: the flag stood alone).
+                "printability_verdict": prepared_report.get("printability_verdict"),
+                "printability_verdict_text": prepared_report.get("printability_verdict_text"),
                 "next_action": next_action,
             }
             try:

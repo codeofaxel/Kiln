@@ -82,7 +82,9 @@ class OverhangAnalysis:
     overhang_triangle_count: int
     overhang_percentage: float  # % of total triangles
     needs_supports: bool
-    worst_regions: list[dict[str, float]]  # [{x, y, z, angle}]
+    #: One entry per overhanging AREA (triangles sharing an edge), the
+    #: largest first, at most five: ``{x, y, z, angle, area_mm2}``.
+    worst_regions: list[dict[str, float]]
     #: Steepest overhang that actually hangs in free air: excludes
     #: faces of self-supporting regions (short bridges, lateral
     #: closes, boolean seams, bed-proximate ceilings) AND flat bridge
@@ -90,7 +92,9 @@ class OverhangAnalysis:
     #: per-material overhang limits should be compared against —
     #: ``max_overhang_angle`` reads 90 on any part with any ceiling.
     max_free_air_overhang_deg: float = 0.0
-    score_deduction: int = 0  # what this block took off the score; see _score_terms
+    #: Always 0: the underside this block finds is charged once, by area,
+    #: on the supports block (see _score_terms).
+    score_deduction: int = 0
     #: Whether Kiln Pro tuned this check; see :func:`_served`.
     tuned: bool = field(default=False, repr=False, compare=False)
 
@@ -239,6 +243,12 @@ class SupportAnalysis:
     square bridges where the gap is <30mm. The user may want to FORCE
     supports for surface-quality reasons even when the slicer wouldn't
     generate them.
+
+    The score charges for needing supports here, once, by
+    ``support_area_percentage``: how much of the underside supports hold
+    up.  The volume is reported and not charged, because it clamps at
+    100 % under any wide ceiling and so says little about one part against
+    another.
     """
 
     estimated_support_volume_mm3: float
@@ -250,6 +260,17 @@ class SupportAnalysis:
     tuned: bool = field(default=False, repr=False, compare=False)
 
     _WORKED_OUT: ClassVar[tuple[str, ...]] = ("score_deduction",)
+    #: The part's underside as seen from below: every downward face's area
+    #: projected onto the plate, the faces it stands on included.
+    underside_area_mm2: float | None = None
+    #: The part of that underside supports must hold up: the overhang faces
+    #: left once the undersides a slicer bridges or reaches sideways are
+    #: set aside, projected the same way.
+    support_area_mm2: float | None = None
+    #: ``support_area_mm2`` as a % of ``underside_area_mm2``: the figure the
+    #: score charges for needing supports.  ``None`` on a block built
+    #: without the mesh (a client's own report).
+    support_area_percentage: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return _served(self)
@@ -300,7 +321,7 @@ class WarpingAnalysis:
     risk_level: str  # "low", "moderate", "high", "critical"
     score_deduction: int  # 0 to -20
     large_flat_surfaces: list[dict[str, float]]  # [{area_mm2, centroid_x/y/z}]
-    sharp_corners_at_base: int  # corners with angle < 90° in bottom 5mm
+    sharp_corners_at_base: int  # sharp outside corners of the footprint (_footprint_sharp_corners)
     height_to_base_ratio: float  # bbox height / min(width, depth)
     material_warping_tendency: str  # from materials.json
     recommendations: list[str]
@@ -845,9 +866,12 @@ _WARPING_PUBLIC_DEFAULTS: dict[str, Any] = {
         #   the threshold above which the practical "tall thin" label
         #   applies (CNC Kitchen / Stefan Hermann convention).
         # - sharp_corners>10 -> sharp_corners>8 score 1.  Same idea:
-        #   sharp corners curl at the base in any high-CTE material;
-        #   8 corners (2 per side on a typical box base) is the floor
-        #   above which curling becomes the dominant failure mode.
+        #   sharp outside corners are where a high-CTE part lifts
+        #   first.  A plain block has 4, so past 8 the footprint is
+        #   mostly corners (a star, a part on several square feet) and
+        #   curling becomes the dominant failure mode.  The count is
+        #   read on the footprint's outline (_footprint_sharp_corners);
+        #   this rule moved no calibration verdict when it changed.
         {"metric": "flat_area_total_mm2",  "operator": ">", "threshold": 20000.0, "score": 2},
         {"metric": "flat_area_total_mm2",  "operator": ">", "threshold": 4000.0,  "score": 1},
         {"metric": "height_to_base_ratio", "operator": ">", "threshold": 5.0,     "score": 2},
@@ -875,8 +899,11 @@ _WARPING_PUBLIC_DEFAULTS: dict[str, Any] = {
          "template": "Tall/narrow geometry (ratio {height_to_base_ratio:.1f}). Consider splitting into shorter sections or adding a wider base."},
         {"metric": "material_tendency",    "operator": "in", "threshold": ["high", "very_high"],
          "template": "Material ({material}) has {material_tendency} warping tendency. Print in an enclosed chamber and increase bed temperature to reduce thermal gradients."},
-        {"metric": "sharp_corners_at_base","operator": ">", "threshold": 5,
-         "template": "Sharp corners at the base are prone to curling."},
+        # Speaks only for a part whose warping risk is moderate or above
+        # (sharp_corners_at_risk is the count then, 0 otherwise), so four
+        # corners on a part that will not warp are not something to act on.
+        {"metric": "sharp_corners_at_risk","operator": ">=", "threshold": 1,
+         "template": "The footprint has {sharp_corners_phrase}: corners are where a part that warps lifts first, so rounding them in the design helps it stay down."},
     ],
 }
 
@@ -1576,9 +1603,10 @@ def _analyze_overhangs(
     total = len(triangles)
     overhang_count = 0
     max_angle = 0.0
-    worst_regions: list[dict[str, float]] = []
+    picked: list[int] = []  # indices of the overhanging triangles
+    angles: list[float] = []
 
-    for tri in triangles:
+    for index, tri in enumerate(triangles):
         if z_min is not None and _is_bed_supported_triangle(tri, z_min, layer_height):
             continue
 
@@ -1598,18 +1626,8 @@ def _analyze_overhangs(
         overhang_count += 1
         if overhang_angle > max_angle:
             max_angle = overhang_angle
-        centroid = _triangle_centroid(tri[0], tri[1], tri[2])
-        if len(worst_regions) < 10:
-            worst_regions.append(
-                {
-                    "x": round(centroid[0], 2),
-                    "y": round(centroid[1], 2),
-                    "z": round(centroid[2], 2),
-                    "angle": round(overhang_angle, 1),
-                }
-            )
-
-    worst_regions.sort(key=lambda r: r["angle"], reverse=True)
+        picked.append(index)
+        angles.append(overhang_angle)
 
     overhang_pct = (overhang_count / total * 100.0) if total > 0 else 0.0
 
@@ -1618,8 +1636,97 @@ def _analyze_overhangs(
         overhang_triangle_count=overhang_count,
         overhang_percentage=round(overhang_pct, 1),
         needs_supports=overhang_count > 0,
-        worst_regions=worst_regions[:5],
+        worst_regions=_overhang_regions(triangles, picked, angles),
     )
+
+
+#: How many overhang regions the report names: enough to ring every
+#: underside of an ordinary part, few enough to read as a caption.
+_WORST_REGIONS_NAMED = 5
+
+
+def _overhang_regions(
+    triangles: list[tuple[tuple[float, ...], ...]], picked: list[int], angles: list[float],
+) -> list[dict[str, float]]:
+    """The overhanging AREAS of a part, largest first, at most five.
+
+    Overhanging triangles that share an edge are one region, so a cap's
+    whole underside is one entry however finely it is tessellated, and a
+    T-shape's two wings are two.  Each region carries its area-weighted
+    centroid (where to draw its ring), its steepest angle, and its area in
+    mm2, which is what ranks it: a wide underside is the one worth naming.
+    Before 2026-10-24 this list held the first ten overhanging triangles in
+    file order, so one underside read as several "areas".
+    """
+    if not picked:
+        return []
+    corners = np.asarray([triangles[i] for i in picked], dtype=np.float64).reshape(len(picked), 3, 3)
+    # Weld corners that are the same point by their 32-bit pattern, the way
+    # an STL stores them (adding 0.0 turns -0.0 into 0.0 first).
+    bits = (corners.reshape(-1, 3).astype(np.float32) + np.float32(0.0)).view(np.uint32).astype(np.uint64)
+    _, point_id = np.unique(
+        (bits[:, 0] << np.uint64(32)) | bits[:, 1], return_inverse=True,
+    )
+    _, point_id = np.unique(point_id.astype(np.uint64) << np.uint64(32) | bits[:, 2], return_inverse=True)
+    faces = point_id.reshape(len(picked), 3)
+    region = _edge_connected_labels(faces)
+
+    v0, v1, v2 = corners[:, 0], corners[:, 1], corners[:, 2]
+    area = 0.5 * np.linalg.norm(np.cross(v1 - v0, v2 - v0), axis=1)
+    centroid = corners.mean(axis=1)
+    labels, label_of = np.unique(region, return_inverse=True)
+    region_area = np.bincount(label_of, weights=area)
+    weighted = np.stack([np.bincount(label_of, weights=area * centroid[:, k]) for k in range(3)], axis=1)
+    steepest = np.zeros(len(labels))
+    np.maximum.at(steepest, label_of, np.asarray(angles, dtype=np.float64))
+    # A region of zero-area triangles has nowhere to be drawn and is nothing
+    # to support; it is left out rather than placed at the origin.
+    drawn = region_area > 0
+    order = np.argsort(-region_area[drawn], kind="stable")[:_WORST_REGIONS_NAMED]
+    out: list[dict[str, float]] = []
+    for k in np.nonzero(drawn)[0][order]:
+        x, y, z = weighted[k] / region_area[k]
+        out.append({
+            "x": round(float(x), 2),
+            "y": round(float(y), 2),
+            "z": round(float(z), 2),
+            "angle": round(float(steepest[k]), 1),
+            "area_mm2": round(float(region_area[k]), 2),
+        })
+    return out
+
+
+def _edge_connected_labels(faces: np.ndarray) -> np.ndarray:
+    """One label per face; faces that share an edge share a label.
+
+    Whole-array work: every pass hangs each root that touches a lower root
+    under it and follows parents to the root, so a region of any size
+    settles in a few passes and nothing walks the faces one at a time.
+    """
+    count = len(faces)
+    edges = faces[:, [0, 1, 1, 2, 2, 0]].reshape(-1, 2)
+    key = np.minimum(edges[:, 0], edges[:, 1]).astype(np.int64) * (int(faces.max()) + 1) + np.maximum(edges[:, 0], edges[:, 1])
+    face_of_edge = np.repeat(np.arange(count), 3)
+    order = np.argsort(key, kind="stable")
+    same = key[order][1:] == key[order][:-1]
+    face_a = face_of_edge[order[:-1][same]]
+    face_b = face_of_edge[order[1:][same]]
+    parent = np.arange(count)
+    while True:
+        while True:
+            grand = parent[parent]
+            if np.array_equal(grand, parent):
+                break
+            parent = grand
+        root_a, root_b = parent[face_a], parent[face_b]
+        apart = root_a != root_b
+        if not apart.any():
+            break
+        high = np.maximum(root_a[apart], root_b[apart])
+        low = np.minimum(root_a[apart], root_b[apart])
+        hung, pick = np.unique(high, return_index=True)
+        parent[hung] = low[pick]
+    return parent
 
 
 # Cap the number of sample rays per ``_analyze_thin_walls`` invocation.
@@ -3285,8 +3392,8 @@ def _analyze_bridging(
     span.
 
     ``bridge_count`` is the per-TRIANGLE count of near-flat
-    (normal z ≤ -0.9) ceiling faces (back-compat with the public
-    scoring formula's ``min(15, 5 + bridge_count)``).
+    (normal z ≤ -0.9) ceiling faces.  The score reads the span, never
+    this count (see :func:`_score_terms`).
     """
     if normalize_winding:
         triangles = _normalize_triangle_winding(triangles)
@@ -3856,6 +3963,202 @@ def _get_material_warping_tendency(material: str) -> str:
     return tendency
 
 
+#: The stretch of footprint outline a corner is read over, in mm.  Where the
+#: outline follows a circle of radius R it turns by 1/R radians in each mm of
+#: it, however many facets the circle was cut into, so a circle or a rounded
+#: corner reads as a corner only when R is under 1 mm / 1.536 = 0.65 mm (the
+#: turn below): a round part has no corners at any resolution, and a corner
+#: rounded off by less than that still prints as one.  It is also the length
+#: a slicer simplifies a first-layer outline to before it looks for corners to
+#: put brim ears on.  Fixed geometry, not tied to the nozzle.
+_CORNER_ARC_MM = 1.0
+
+#: How far the outline must turn toward the material within that stretch to
+#: be a sharp corner: 88 degrees, an inside angle of 92 or less.  A square's
+#: corners turn exactly 90, so they count with room left for a file's
+#: rounding; a pentagon's turn 72 and a chamfer's 45, so they do not.
+_SHARP_CORNER_TURN_DEG = 88.0
+
+#: The warping verdicts the corner advice speaks for.
+_CORNERS_WORTH_SAYING = ("moderate", "high", "critical")
+
+
+def _outline_rings(edges: np.ndarray, ids: np.ndarray) -> list[np.ndarray]:
+    """The outline *edges* of one patch of contact, with their ends' *ids*
+    (:func:`_patch_outline`, the patch on each edge's left), joined end to end
+    into closed rings of points: outer rings run counter-clockwise, holes
+    clockwise.  Where two parts of the patch touch at one point the ring takes
+    the sharpest left turn there, which keeps it on the part it came round, so
+    each part is a ring of its own and no ring crosses itself.
+
+    Linear in the edges but for one sort.  The edges leaving each point are
+    put in heading order once, and the sharpest left turn from an edge
+    arriving at a point is the edge leaving it whose heading comes next below
+    the way straight back: one binary search, for every edge at once.  A
+    point the whole outline runs through (thousands of thin triangles meeting
+    at one corner) costs its share of the sort, not a scan on every visit.
+    """
+    run = edges[:, 1] - edges[:, 0]
+    heading = np.arctan2(run[:, 1], run[:, 0])  # in (-pi, pi]
+    back = np.where(heading > 0.0, heading - np.pi, heading + np.pi)  # straight back, in (-pi, pi]
+    # Every leaving edge under one sort key: the point it leaves times 8, plus
+    # its heading shifted into (0, 2 pi], so each point's edges sit together
+    # and in heading order.
+    key = ids[:, 0] * 8.0 + (heading + np.pi)
+    order = np.argsort(key, kind="stable")
+    key = key[order]
+    at = ids[:, 1] * 8.0
+    lo = np.searchsorted(key, at)
+    hi = np.searchsorted(key, at + 8.0)
+    pick = np.searchsorted(key, at + (back + np.pi), side="right") - 1
+    pick = np.where(pick >= lo, pick, hi - 1)  # nothing below the way back: round to the top
+    after = np.where(lo < hi, order[np.clip(pick, 0, len(order) - 1)], -1).tolist()
+    used = [False] * len(edges)
+    rings: list[np.ndarray] = []
+    for start in range(len(edges)):
+        if used[start]:
+            continue
+        walk, k = [], start
+        while k >= 0 and not used[k]:
+            used[k] = True
+            walk.append(k)
+            k = after[k]
+            if k >= 0 and used[k] and k != start:
+                # Two edges arriving at one point can be handed the same edge
+                # leaving it only where the outline runs over itself (two faces
+                # lying on the bed one over the other, a part thinner than a
+                # layer).  The second takes the sharpest left turn still free
+                # there, the next one down that point's list: a scan of the
+                # edges leaving that one point, and only for a repeated edge.
+                lo_k, hi_k, j = int(lo[walk[-1]]), int(hi[walk[-1]]), int(pick[walk[-1]])
+                free = (int(order[lo_k + (j - lo_k - q) % (hi_k - lo_k)]) for q in range(hi_k - lo_k))
+                k = next((e for e in free if not used[e]), -1)
+        if len(walk) >= 3:
+            rings.append(edges[walk, 0])
+    return rings
+
+
+def _ring_layout(sizes: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """For rings of *sizes* points laid end to end: the ring each point is on,
+    where each ring starts, and each point's place on its own ring."""
+    ring_of = np.repeat(np.arange(len(sizes)), sizes)
+    first = np.r_[0, np.cumsum(sizes)[:-1]]
+    return ring_of, first, np.arange(int(sizes.sum())) - first[ring_of]
+
+
+def _first_largest(values: np.ndarray, start: np.ndarray, stop: np.ndarray) -> np.ndarray:
+    """The index of the largest of *values* in each window ``[start, stop)``,
+    the first on a tie.  A table of the best index over every run of 1, 2, 4,
+    ... values is built a doubling at a time, and each window is read as the
+    better of the two runs of its own size that cover it: about log2 of the
+    longest window passes over *values*, whatever the number of windows."""
+    level = np.frexp((stop - start).astype(np.float64))[1] - 1  # the largest run that fits each window
+    best = np.arange(len(values))
+    out = np.empty(len(start), dtype=np.int64)
+    width = 1
+    for k in range(int(level.max()) + 1):
+        here = level == k
+        left, right = best[start[here]], best[stop[here] - width]
+        out[here] = np.where(values[right] > values[left], right, left)
+        later = np.r_[best[width:], best[len(best) - width:]]  # past the end: never read
+        best = np.where(values[later] > values[best], later, best)
+        width *= 2
+    return out
+
+
+def _sharp_corners_of_rings(rings: list[np.ndarray]) -> int:
+    """How many sharp corners the closed *rings*, material on their left, turn
+    round: places where a ring turns toward the material by
+    :data:`_SHARP_CORNER_TURN_DEG` or more within :data:`_CORNER_ARC_MM` of
+    outline.  A right turn takes away from a left one, so an inside corner
+    never counts, nor does any corner of a hole, whose ring runs the other
+    way.  Turns closer together than that stretch are one corner, and a ring
+    no longer than two stretches is a dot with none.
+
+    Every ring is read in one pass, so a contact of many small islands costs
+    what one ring of as many points does."""
+    if not rings:
+        return 0
+    pts = np.concatenate(rings)
+    sizes = np.array([len(r) for r in rings])
+    ring_of, first, local = _ring_layout(sizes)
+    ahead = first[ring_of] + (local + 1) % sizes[ring_of]
+    keep = np.hypot(*(pts[ahead] - pts).T) > 1e-6  # a point repeating the next has no direction
+    sizes = np.bincount(ring_of[keep], minlength=len(sizes))
+    keep &= sizes[ring_of] >= 3
+    pts, sizes = pts[keep], sizes[sizes >= 3]
+    if not len(sizes):
+        return 0
+    ring_of, first, local = _ring_layout(sizes)
+    n = sizes[ring_of]
+    run = pts[first[ring_of] + (local + 1) % n] - pts  # edge i runs from point i to the next
+    came = run[first[ring_of] + (local - 1) % n]
+    turn = np.arctan2(came[:, 0] * run[:, 1] - came[:, 1] * run[:, 0], (came * run).sum(axis=1))
+    length = np.hypot(run[:, 0], run[:, 1])
+    perimeter = np.bincount(ring_of, weights=length)
+    along = np.cumsum(length) - length
+    at = along - along[first][ring_of]  # how far along its ring each point is
+    # Each ring twice round, one ring after another, so a stretch may run on
+    # past its ring's start and never into the next ring.
+    base = np.r_[0.0, np.cumsum(2.0 * perimeter)[:-1]][ring_of]
+    copy = 2 * first[ring_of] + local
+    pos, turns = np.empty(2 * len(pts)), np.empty(2 * len(pts))
+    pos[copy], pos[copy + n] = base + at, base + perimeter[ring_of] + at
+    turns[copy], turns[copy + n] = turn, turn
+    end = np.searchsorted(pos, base + at + _CORNER_ARC_MM, side="right")
+    turned = np.r_[0.0, np.cumsum(turns)]
+    sharp = (perimeter[ring_of] > 2.0 * _CORNER_ARC_MM) & (
+        turned[end] - turned[copy] >= math.radians(_SHARP_CORNER_TURN_DEG)
+    )
+    if not sharp.any():
+        return 0
+    # Each sharp stretch names the point in it that turns most; points closer
+    # together than the stretch are one corner, read round the ring.
+    ring = ring_of[sharp]
+    peak = first[ring] + (_first_largest(turns, copy[sharp], end[sharp]) - 2 * first[ring]) % sizes[ring]
+    peak = np.unique(peak)  # in ring order, and along each ring
+    ring, where = ring_of[peak], at[peak]
+    rings_here, lead = np.unique(ring, return_index=True)
+    same = np.r_[ring[1:] == ring[:-1], False]
+    gap = np.where(
+        same,
+        np.r_[where[1:], 0.0] - where,
+        where[lead[np.searchsorted(rings_here, ring)]] + perimeter[ring] - where,
+    )
+    apart = np.bincount(ring[gap >= _CORNER_ARC_MM], minlength=len(sizes))
+    return int(np.maximum(apart[rings_here], 1).sum())
+
+
+def _footprint_sharp_corners(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    z_min: float,
+    *,
+    layer_height: float = 0.2,
+) -> int:
+    """How many sharp outside corners the part's footprint has: the outline of
+    its bed contact (the triangles within one layer of the bottom, the contact
+    the bed-adhesion grade reads), read by :func:`_sharp_corners_of_rings`.
+    Each patch of contact is its own rings, since patches share no point.  It
+    counts the shape, not how the file cut it into triangles; a part with no
+    contact, a cone on its tip, has none."""
+    threshold = z_min + layer_height
+    contact = [
+        (tri[0][:2], tri[1][:2], tri[2][:2])
+        for tri in triangles
+        if tri[0][2] <= threshold and tri[1][2] <= threshold and tri[2][2] <= threshold
+    ]
+    if not contact:
+        return 0
+    tris = np.asarray(contact, dtype=np.float64)
+    e1, e2 = tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0]
+    # A wall shorter than a layer lies flat on the bed as a line: no area, no outline.
+    tris = tris[np.abs(e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]) / 2.0 > 1e-12]
+    if not len(tris):
+        return 0
+    ids = _corner_ids(tris.reshape(-1, 2)).reshape(-1, 3)
+    return _sharp_corners_of_rings(_outline_rings(*_patch_outline(tris, ids)))
+
+
 def _analyze_warping(
     triangles: list[tuple[tuple[float, ...], ...]],
     vertices: list[tuple[float, ...]],
@@ -3863,6 +4166,8 @@ def _analyze_warping(
     *,
     material: str = "pla",
     overlay: dict[str, Any] | None = None,
+    bed_z: float | None = None,
+    layer_height: float = 0.2,
 ) -> WarpingAnalysis:
     """Assess warping risk based on geometry and material properties.
 
@@ -3878,6 +4183,10 @@ def _analyze_warping(
     tier conservative; Pro tier curated) gives warp-prone materials a
     risk floor that compact geometry alone doesn't surface, while
     keeping low-warp materials (default 0.0) at zero-baseline behavior.
+
+    The base's corners are read on the bed contact within *layer_height* of
+    *bed_z*, the plate the part rests on (the bounding box's bottom when it
+    is not given).
     """
     cfg = (overlay or {}).get("warping") or _WARPING_PUBLIC_DEFAULTS
 
@@ -3909,30 +4218,9 @@ def _analyze_warping(
     )
     large_flat_surfaces = large_flat_surfaces[:10]
 
-    base_threshold = z_min + 5.0
-    _sharp_verts_seen: set[tuple[float, float, float]] = set()
-    for tri in triangles:
-        centroid = _triangle_centroid(tri[0], tri[1], tri[2])
-        if centroid[2] > base_threshold:
-            continue
-        verts = [tri[0], tri[1], tri[2]]
-        for i in range(3):
-            v0 = verts[i]
-            v1 = verts[(i + 1) % 3]
-            v2 = verts[(i + 2) % 3]
-            e1 = (v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2])
-            e2 = (v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2])
-            dot = e1[0] * e2[0] + e1[1] * e2[1] + e1[2] * e2[2]
-            len1 = math.sqrt(e1[0] ** 2 + e1[1] ** 2 + e1[2] ** 2)
-            len2 = math.sqrt(e2[0] ** 2 + e2[1] ** 2 + e2[2] ** 2)
-            if len1 < 1e-12 or len2 < 1e-12:
-                continue
-            cos_angle = max(-1.0, min(1.0, dot / (len1 * len2)))
-            angle_deg = math.degrees(math.acos(cos_angle))
-            if angle_deg < 90.0:
-                rounded = (round(v0[0], 4), round(v0[1], 4), round(v0[2], 4))
-                _sharp_verts_seen.add(rounded)
-    sharp_corners_at_base = len(_sharp_verts_seen)
+    sharp_corners_at_base = _footprint_sharp_corners(
+        triangles, z_min if bed_z is None else bed_z, layer_height=layer_height,
+    )
 
     base_dim = max(0.1, min(x_span, y_span))
     height_to_base_ratio = z_span / base_dim
@@ -3983,6 +4271,15 @@ def _analyze_warping(
         risk_level = "low"
 
     score_deduction = int(cfg.get("score_deductions", {}).get(risk_level, 0))
+    # Read after the verdict, so a rule about corners can speak only for a
+    # part at risk of warping and still be one metric against one threshold,
+    # the shape every rule in the public list and the overlay has.
+    metrics["sharp_corners_at_risk"] = (
+        sharp_corners_at_base if risk_level in _CORNERS_WORTH_SAYING else 0
+    )
+    metrics["sharp_corners_phrase"] = (
+        f"{sharp_corners_at_base} sharp outside corner{'' if sharp_corners_at_base == 1 else 's'}"
+    )
     recommendations = _apply_recommendation_rules(
         cfg.get("recommendation_rules", []), metrics,
     )
@@ -5251,6 +5548,20 @@ def _unvouched_on_a_standard_bed(material: str | None) -> str | None:
         if token.startswith("pa") and token[2:].isdigit():
             return _UNVOUCHED_ON_A_STANDARD_BED["pa"]
     return None
+#: What needing supports costs, by the share of the underside they hold up:
+#: nothing for the first tenth, then in a straight line to 30 points for the
+#: whole underside.  30 was the cap of the triangle-count charge alone, and
+#: half the 60 that charge, the bridge charge and the support-volume charge
+#: once added up to for one underside.  So a ceiling over 60 % of the
+#: underside costs 16 points and a cap on a stem (nearly all of it) 29-30.
+#: The first tenth is free because the old charges let a small overhang go
+#: for nothing (a share of the faces under 2 % rounded to 0 points, and a
+#: support volume under 5 % of the part's cost none), and charging it now
+#: would lower scores that this way of charging exists only to correct
+#: upward (measured 2026-10-24: a 64-sided cylinder lying on its side, 9.5 %
+#: of its underside held up, was charged nothing before).
+_SUPPORT_FREE_PCT = 10.0
+_SUPPORT_MAX_POINTS = 30
 
 
 def _score_terms(
@@ -5273,68 +5584,72 @@ def _score_terms(
     nothing else.  Anyone reading a report -- a person, an agent, or code
     that re-scores the part from its blocks -- can account for every point.
 
-    ``overhang_scoring_pct`` overrides the overhang percentage used
-    for the deduction — the caller passes the percentage of overhangs
-    that genuinely need supports when part of the reported set is
-    self-supporting (small bridgeable / lateral-reach regions).
+    Needing supports is charged once, on the ``supports`` block, by the
+    share of the underside supports hold up
+    (``supports.support_area_percentage``).  The overhangs block finds those
+    faces and charges nothing itself.  A block built without the mesh
+    carries no area, and is charged by its overhang share of the triangles
+    instead: ``overhang_scoring_pct`` when given (the share left once the
+    undersides a slicer prints unaided are set aside), else
+    ``overhangs.overhang_percentage``.
 
     ``thin_wall_scoring_pct`` is the share of measured points thinner
     than the nozzle.  The thin-wall block may report against a material's
     higher floor; the score deducts only for walls a nozzle cannot lay
     at all, so naming more thin walls never lowers anyone's score.
     """
-    overhang_pct = (
-        overhang_scoring_pct
-        if overhang_scoring_pct is not None
-        else overhangs.overhang_percentage
-    )
+    held_up = supports.support_area_percentage
+    if held_up is None:
+        held_up = (
+            overhang_scoring_pct
+            if overhang_scoring_pct is not None
+            else overhangs.overhang_percentage
+        )
     thin_pct = (
         thin_wall_scoring_pct
         if thin_wall_scoring_pct is not None
         else thin_walls.thin_wall_percentage if thin_walls.thin_wall_count > 0
         else 0.0
     )
+    span = bridging.max_bridge_length_mm
     terms = {
-        # Overhangs (max -30)
-        "overhangs": -min(30, int(overhang_pct * 0.5)) if overhangs.needs_supports else 0,
         # Thin walls (max -25)
         "thin_walls": -min(25, int(thin_pct * 0.5)) if thin_pct > 0 else 0,
-        # Bridging (max -15) — only when the bridges actually need
-        # support.  ``bridge_count`` alone counts every short, self-supporting
-        # span too: a decorative surface texture's grooves register as 1000+
-        # sub-millimetre "bridges" (each well under the 10 mm self-support
-        # limit, so ``needs_supports_for_bridges`` is False) and used to max
-        # this deduction out, dropping a perfectly printable textured part two
-        # whole grades for relief that prints fine with no supports.  Gate on
-        # ``needs_supports_for_bridges`` — the same > 10 mm span test the
-        # "Long bridges detected" recommendation already uses below — so the
-        # score and the advice finally agree.
-        # How MUCH it charges goes by the longest span, in millimetres,
-        # not by how many flat triangles the mesh happens to have: the
-        # same 30 mm arch scored 71, 65 and 63 at three mesh resolutions
-        # (2026-10-20).  5 points at the self-support limit, 10 at twice
-        # it, 15 at three times or more.
+        # Needing supports (max -30), once, by how much of the underside
+        # they hold up.  A count of triangles moved with the mesh (one
+        # mushroom cap cost 4 points at one resolution and 8 at another);
+        # an area does not.
+        "supports": (
+            -min(_SUPPORT_MAX_POINTS, int(
+                _SUPPORT_MAX_POINTS * max(0.0, held_up - _SUPPORT_FREE_PCT) / (100.0 - _SUPPORT_FREE_PCT)
+            ))
+            if overhangs.needs_supports
+            else 0
+        ),
+        # A bridge too long to span unaided (max -15), by how far it runs
+        # past the self-support limit: 5 points just past it, 10 at twice
+        # it, 15 at three times or more.  Only a bridge the supports charge
+        # has not already paid for: a bridge deck that needs supports is a
+        # face the overhang check counts, so when the overhangs are charged
+        # its area is in theirs.  That leaves the bridge whose overhang
+        # verdict was lifted because a slicer will likely bridge the whole
+        # span, but which is longer than the limit.  A span at or under the
+        # limit costs nothing: ``needs_supports_for_bridges`` is also set by
+        # a short region too far from a supported edge to be reached
+        # sideways, which is an overhang and not a long bridge.
+        # The span, not the count of flat triangles: the same 30 mm arch
+        # once scored 71, 65 and 63 at three mesh resolutions (2026-10-20).
         "bridging": (
             -min(15, 5 + max(0, int(round(
-                5.0 * (bridging.max_bridge_length_mm / _MAX_SELF_SUPPORTING_BRIDGE_MM - 1.0)
+                5.0 * (span / _MAX_SELF_SUPPORTING_BRIDGE_MM - 1.0)
             ))))
-            if bridging.bridge_count > 0 and bridging.needs_supports_for_bridges
+            if bridging.needs_supports_for_bridges
+            and not overhangs.needs_supports
+            and span > _MAX_SELF_SUPPORTING_BRIDGE_MM
             else 0
         ),
         # Bed adhesion (max -15)
         "bed_adhesion": {"high": -15, "medium": -7}.get(bed_adhesion.adhesion_risk, 0),
-        # Support volume (max -15), charged only when the part needs
-        # supports at all (the same two verdicts support_verdict() reads).
-        # The volume estimate is naive and clamps to 100% on arches the
-        # report itself calls self-supporting, so a part judged to need no
-        # supports was losing 15 points for supports nobody would add.
-        "supports": (
-            0 if not (overhangs.needs_supports or bridging.needs_supports_for_bridges)
-            else -15 if supports.support_percentage > 50
-            else -10 if supports.support_percentage > 20
-            else -5 if supports.support_percentage > 5
-            else 0
-        ),
     }
     # The verdicts that grade themselves carry their deduction already.
     for key, verdict in (
@@ -6203,6 +6518,42 @@ def _gap_to_model_below(tris: np.ndarray, point: np.ndarray, *, exclude: np.ndar
     return float(pz - below.max())
 
 
+def _support_area(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    z_min: float,
+    *,
+    threshold_deg: float,
+    layer_height: float,
+    exempt: set[int],
+) -> tuple[float, float]:
+    """``(underside, held_up)``: the part's underside and the part of it
+    supports must hold, in mm2, each face's area projected onto the plate.
+
+    The faces held up are the ones :func:`_analyze_overhangs` counts (facing
+    down at or past *threshold_deg*, not resting on the plate) less *exempt*,
+    the faces of undersides a slicer bridges or reaches sideways.  Measured
+    by area because a count of triangles moves with the mesh: the same
+    mushroom cap read 8 % and 17 % of its faces at two resolutions.  The
+    underside includes the faces the part stands on, so a small lip on a
+    part standing flat is a small share and a cap on a stem nearly all of it.
+    """
+    if not triangles:
+        return 0.0, 0.0
+    tris = np.asarray(triangles, dtype=np.float64)
+    normals = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
+    twice_area = np.linalg.norm(normals, axis=1)
+    downward = normals[:, 2] < 0
+    seen_from_below = np.where(downward, -normals[:, 2] / 2.0, 0.0)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        unit_nz = np.where(twice_area > 0, normals[:, 2] / twice_area, 0.0)
+    overhang_deg = np.maximum(0.0, 90.0 - np.degrees(np.arccos(np.clip(-unit_nz, -1.0, 1.0))))
+    on_plate = (tris[:, :, 2] <= _bed_threshold_z(z_min, layer_height)).all(axis=1)
+    held = downward & ~on_plate & (overhang_deg + _OVERHANG_LIMIT_SLACK_DEG >= threshold_deg)
+    if exempt:
+        held[np.fromiter(exempt, dtype=np.int64, count=len(exempt))] = False
+    return float(seen_from_below.sum()), float(seen_from_below[held].sum())
+
+
 def _judge_supports(
     triangles: list[tuple[tuple[float, ...], ...]],
     z_min: float,
@@ -6367,6 +6718,16 @@ def _judge_supports(
     from dataclasses import replace as _dc_replace
     overhangs = _dc_replace(
         overhangs, max_free_air_overhang_deg=round(_free_air_max_deg, 1),
+    )
+    underside, held_up = _support_area(
+        triangles, z_min, threshold_deg=resolved_threshold,
+        layer_height=layer_height, exempt=_exempt_overhang_tris,
+    )
+    supports = _dc_replace(
+        supports,
+        underside_area_mm2=round(underside, 2),
+        support_area_mm2=round(held_up, 2),
+        support_area_percentage=round(100.0 * held_up / underside, 1) if underside > 0 else 0.0,
     )
     return SupportJudgement(
         overhangs=overhangs,
@@ -6729,6 +7090,7 @@ def _analyze_printability_here(
 
     warping = _analyze_warping(
         triangles, vertices, bbox, material=material, overlay=judgment_overlay,
+        bed_z=z_min, layer_height=layer_height,
     )
     thermal_stress = _analyze_thermal_stress(
         triangles, bbox, material=material, layer_height=layer_height,
@@ -6749,7 +7111,7 @@ def _analyze_printability_here(
         thin_wall_scoring_pct=sub_nozzle_wall_pct,
     )
     for key, block in (
-        ("overhangs", overhangs), ("thin_walls", thin_walls), ("bridging", bridging),
+        ("thin_walls", thin_walls), ("bridging", bridging),
         ("bed_adhesion", bed_adhesion), ("supports", supports),
     ):
         block.score_deduction = score_terms[key]
@@ -7325,6 +7687,18 @@ def verdict_of(report: PrintabilityReport | BundlePrintabilityFindings) -> tuple
         if getattr(report, "printable", False):
             return "ready", "Ready to print."
         return "check", "Check before printing: see the report."
+
+
+def verdict_block(report: PrintabilityReport | BundlePrintabilityFindings) -> dict[str, str]:
+    """The two keys every door that judges a part carries in its reply.
+
+    ``printability_verdict`` is the key (``ready``, ``prints_with_supports``,
+    ``wont_print`` or ``check``) and ``printability_verdict_text`` the
+    sentence that says it, both from :func:`verdict_of`, so every door
+    names the same verdict in the same words.  Never raises.
+    """
+    key, text = verdict_of(report)
+    return {"printability_verdict": key, "printability_verdict_text": text}
 
 
 #: The verdicts a part passes a printability gate with: it prints as it is,

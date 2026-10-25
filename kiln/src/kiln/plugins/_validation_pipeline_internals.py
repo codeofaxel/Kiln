@@ -1254,14 +1254,21 @@ def _step_support_assessment(
 
         # Determine severity
         if assessment.trapped_regions:
+            # Said, never refused.  Until 2026-10-24 this was an error that
+            # refused the part, and the test behind it refused open parts it
+            # misread while passing every real hollow, so no part was ever
+            # refused for a real one.  Whether a sealed hollow that needs
+            # supports should refuse is not decided yet; until it is, it
+            # stays advisory, like the hard-removal warning below.
             report.checks.append(_CheckResult(
                 name="support_assessment",
                 passed=False,
                 details=(
-                    f"Enclosed cavity detected — {len(assessment.trapped_regions)} "
-                    f"support region(s) would be trapped and irremovable"
+                    f"Sealed hollow inside the part: {len(assessment.trapped_regions)} "
+                    f"support region(s) would print inside it. Supports inside a sealed "
+                    f"hollow can't be removed; they stay inside the part."
                 ),
-                severity="error",
+                severity="warning",
             ))
         elif assessment.needs_supports and assessment.removal_difficulty == "hard":
             report.checks.append(_CheckResult(

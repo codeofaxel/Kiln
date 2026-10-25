@@ -167,11 +167,14 @@ class _MeshToolsPlugin:
 
         @mcp.tool()
         def validate_generated_mesh(file_path: str) -> dict:
-            """Validate a 3D mesh file for printing readiness.
+            """Validate a 3D mesh file's geometry.
 
             Checks that the file is a valid STL, OBJ, GLB, or 3MF, has reasonable
             dimensions, an acceptable polygon count, and is manifold
-            (watertight).
+            (watertight).  It does not judge whether the part PRINTS (a sound
+            mesh can still rest on a point): ``analyze_printability`` gives
+            that verdict, and ``validate_and_prepare`` runs the whole
+            pre-print check.
 
             Args:
                 file_path: Path to an STL, OBJ, GLB, or 3MF file.

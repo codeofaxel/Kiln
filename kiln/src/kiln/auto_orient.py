@@ -88,9 +88,42 @@ class SupportEstimate:
     overhang_triangle_count: int
     overhang_percentage: float
     needs_supports: bool
+    #: Why the part needs supports (kiln.printability.support_verdict),
+    #: ``None`` when it needs none.
+    support_reason: str | None = None
+    #: The part's printability verdict and its sentence
+    #: (kiln.printability.verdict_block).
+    printability_verdict: str | None = None
+    printability_verdict_text: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    @property
+    def message(self) -> str:
+        """The verdict, then the estimated volume."""
+        return support_estimate_message(
+            self.printability_verdict, self.printability_verdict_text, self.support_reason,
+            f"Estimated support volume: {self.estimated_support_volume_mm3:.1f} mm3 "
+            f"({self.support_percentage:.1f}% of model).",
+        )
+
+
+def support_estimate_message(
+    verdict_key: str | None, verdict_text: str | None, support_reason: str | None, volume: str,
+) -> str:
+    """What a support estimate says: the part's verdict first, then *volume*.
+
+    A verdict that says the part prints has already said whether it needs
+    supports; any other verdict is followed by whether it does.
+    """
+    from kiln.printability import PRINTS
+
+    parts = [verdict_text] if verdict_text else []
+    parts.append(volume)
+    if verdict_key not in PRINTS:
+        parts.append(f"Supports needed ({support_reason})." if support_reason else "No supports needed.")
+    return " ".join(parts)
 
 
 @dataclass
@@ -604,17 +637,20 @@ def estimate_supports(
     # The report's own numbers and its verdict -- the one every door gives
     # (kiln.printability.support_verdict) -- rather than a second pass over
     # the raw faces that counted a bridged underside as needing supports.
-    from kiln.printability import analyze_printability, support_verdict
+    from kiln.printability import analyze_printability, support_verdict, verdict_block
 
     report = analyze_printability(
         file_path, max_overhang_angle=max_overhang_angle, include_hole_detection=False,
     )
+    reason = support_verdict(report)
     return SupportEstimate(
         estimated_support_volume_mm3=report.supports.estimated_support_volume_mm3,
         support_percentage=report.supports.support_percentage,
         overhang_triangle_count=report.overhangs.overhang_triangle_count,
         overhang_percentage=report.overhangs.overhang_percentage,
-        needs_supports=support_verdict(report) is not None,
+        needs_supports=reason is not None,
+        support_reason=reason,
+        **verdict_block(report),
     )
 
 

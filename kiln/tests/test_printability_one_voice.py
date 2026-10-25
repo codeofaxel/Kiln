@@ -326,11 +326,24 @@ def _speaks_of_brim(line: str) -> bool:
     return "brim" in line.lower() or "mouse-ear" in line.lower() or "mouse ear" in line.lower()
 
 
+#: A flat plate whose footprint alone is past the free floor's widest
+#: flat-area rule, so its warping risk comes from its area and its material.
+#: The enclosure above earned its risk from the old count of triangle corners
+#: at its base (967 of them, for a box with four); the plate keeps the
+#: verdicts these tests need on any honest count of the shape.
+_WARPING_PLATE_MM = (150.0, 140.0, 4.0)
+
+
+@pytest.fixture
+def warping_plate(tmp_path) -> str:
+    return _box_stl(tmp_path / "plate.stl", *_WARPING_PLATE_MM)
+
+
 class TestOneBrimDecision:
-    def test_no_other_block_prescribes_a_brim_the_decision_declined(self, enclosure, free_tier):
+    def test_no_other_block_prescribes_a_brim_the_decision_declined(self, warping_plate, free_tier):
         from kiln.printability import analyze_printability
 
-        report = analyze_printability(enclosure, material="petg", printer_id=_OPEN_FRAME)
+        report = analyze_printability(warping_plate, material="petg", printer_id=_OPEN_FRAME)
 
         assert report.warping is not None and report.warping.risk_level == "moderate"
         decision = report.adhesion
@@ -339,10 +352,10 @@ class TestOneBrimDecision:
         stray = [line for line in _all_advice(report) if _speaks_of_brim(line)]
         assert stray == [], f"brim advice beside a no-brim decision: {stray}"
 
-    def test_a_high_warping_verdict_reaches_the_decision(self, enclosure, free_tier):
+    def test_a_high_warping_verdict_reaches_the_decision(self, warping_plate, free_tier):
         from kiln.printability import analyze_printability
 
-        report = analyze_printability(enclosure, material="abs", printer_id=_OPEN_FRAME)
+        report = analyze_printability(warping_plate, material="abs", printer_id=_OPEN_FRAME)
 
         assert report.warping.risk_level in ("high", "critical")
         assert report.adhesion.brim_width_mm >= 5

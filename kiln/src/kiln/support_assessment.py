@@ -4,9 +4,9 @@ Analyses mesh geometry to determine whether a model needs supports,
 how difficult they would be to remove, and what type of support
 strategy is optimal for the material.
 
-Includes overhang detection, bridge estimation, enclosed cavity
-detection (ray-cast), orientation suggestions, and material-specific
-support recommendations.
+Includes overhang detection, bridge estimation, sealed hollow detection
+(from how the part's closed shells nest), orientation suggestions, and
+material-specific support recommendations.
 
 Usage::
 
@@ -37,8 +37,21 @@ _DATA_FILE = Path(__file__).resolve().parent / "data" / "support_profiles.json"
 # Module-level cached profiles
 _PROFILES: dict[str, Any] = {}
 
-# Ray-cast budget — cap total intersection tests for performance
-_MAX_RAY_TESTS = 10_000
+# Asking whether a hollow lies inside a shell costs one look at every
+# outward shell's bounding box and, for each box it fits in, one ray against
+# every triangle of that shell.  Both are charged here, one unit per pair
+# looked at and one per triangle tested, so a part made of thousands of
+# pieces cannot turn the question into shells squared of work: past the
+# budget the hollows not reached are left unchecked, and the assessment says
+# so.  It is about 125 hollows inside a 400,000-triangle body, or 7,000
+# inward shells against 7,000 outward ones that never nest.
+_MAX_CONTAINMENT_TESTS = 50_000_000
+
+# The direction of that ray.  Any direction answers "inside or outside",
+# so this one leans off every axis: a ray along an axis can run straight
+# down the edges of a box's or a cylinder's triangles and count one
+# crossing twice, or not at all.
+_PROBE_RAY = (0.2588, 0.1736, 0.9502)
 
 # Thresholds
 _TALL_SUPPORT_MM = 50.0  # supports taller than this are stability risks
@@ -112,7 +125,7 @@ class OverhangRegion:
     max_angle_deg: float
     estimated_bridge_mm: float
     support_height_mm: float
-    accessible: bool  # ray-cast result
+    accessible: bool  # False when the region lies on a sealed hollow's shell
     triangle_count: int
 
     def to_dict(self) -> dict[str, Any]:
@@ -147,7 +160,18 @@ class OrientationCandidate:
 
 @dataclass
 class SupportAssessment:
-    """Complete support feasibility report."""
+    """Complete support feasibility report.
+
+    ``trapped_regions`` holds the support regions whose triangles lie on the
+    shell of a sealed hollow: a closed shell facing inward, inside a closed
+    shell facing outward.  Supports printed there can never be removed.
+    Until 2026-10-24 it held the regions where a point 0.1 mm under the
+    overhang read odd/odd under an up and a down ray, which is the test for
+    a point inside plastic: it missed real hollows and flagged open parts
+    with a few triangles wound the wrong way.  The key and its shape are
+    unchanged; ``removal_difficulty`` is still ``"impossible"`` when it is
+    not empty.
+    """
 
     needs_supports: bool
     overhang_percentage: float
@@ -276,10 +300,6 @@ def _sub(a: _Vec3, b: _Vec3) -> _Vec3:
     return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
 
 
-def _dot(a: _Vec3, b: _Vec3) -> float:
-    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-
-
 def _length(v: _Vec3) -> float:
     return math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
 
@@ -384,88 +404,194 @@ def _parse_stl_triangles(stl_path: str) -> list[_Triangle]:
 
 
 # ---------------------------------------------------------------------------
-# Ray-triangle intersection (Moller-Trumbore)
+# Sealed hollows: how the part's closed shells nest
 # ---------------------------------------------------------------------------
 
-_EPSILON = 1e-7
 
+@dataclass(frozen=True)
+class _Shells:
+    """What the part's closed shells say about sealed hollows.
 
-def _ray_intersects_triangle(
-    origin: _Vec3,
-    direction: _Vec3,
-    tri: _Triangle,
-) -> bool:
-    """Moller-Trumbore ray-triangle intersection test.
-
-    :param origin: Ray origin point.
-    :param direction: Ray direction (does not need to be normalized).
-    :param tri: Triangle as (v0, v1, v2).
-    :returns: True if ray intersects triangle in the positive direction.
+    ``on_hollow[i]`` is True when triangle *i* lies on the shell of a sealed
+    hollow.  ``misfaced`` counts triangles wound the opposite way to the
+    surface around them.  ``unchecked`` counts closed shells that face
+    inward but were never asked whether they lie inside the part, because
+    the containment budget ran out.
     """
-    v0, v1, v2 = tri
-    edge1 = _sub(v1, v0)
-    edge2 = _sub(v2, v0)
-    h = _cross(direction, edge2)
-    a = _dot(edge1, h)
 
-    if -_EPSILON < a < _EPSILON:
-        return False  # Ray parallel to triangle
-
-    f = 1.0 / a
-    s = _sub(origin, v0)
-    u = f * _dot(s, h)
-    if u < 0.0 or u > 1.0:
-        return False
-
-    q = _cross(s, edge1)
-    v = f * _dot(direction, q)
-    if v < 0.0 or u + v > 1.0:
-        return False
-
-    t = f * _dot(edge2, q)
-    return t > _EPSILON
+    on_hollow: Any  # numpy bool array, one entry per triangle
+    misfaced: int
+    unchecked: int
 
 
-def _count_ray_intersections(
-    origin: _Vec3,
-    direction: _Vec3,
-    all_triangles: list[_Triangle],
-) -> int:
-    """Count how many triangles a ray from origin intersects."""
-    count = 0
-    for tri in all_triangles:
-        if _ray_intersects_triangle(origin, direction, tri):
-            count += 1
-    return count
-
-
-def _is_enclosed_cavity(
-    origin: _Vec3,
-    all_triangles: list[_Triangle],
-) -> bool:
-    """Determine if a point is inside an enclosed cavity using ray casting.
-
-    A point is enclosed if rays cast in BOTH +Z and -Z directions each
-    pass through at least one surface.  A simple overhang above an open
-    floor will only have hits going down, not up.
-
-    The origin should be slightly offset from the overhang surface to
-    avoid self-intersection.
+def _crossings(point: Any, triangles: Any) -> int:
+    """How many of *triangles* (an ``(m, 3, 3)`` array) a ray from *point*
+    crosses, cast along :data:`_PROBE_RAY`.  Odd means the point is inside
+    the closed surface those triangles make, whichever way they are wound.
     """
-    # Offset slightly inward (downward from an overhang surface)
-    test_point = (origin[0], origin[1], origin[2] - 0.1)
+    import numpy as np
 
-    down_hits = _count_ray_intersections(test_point, (0.0, 0.0, -1.0), all_triangles)
-    if down_hits == 0:
-        return False
+    ray = np.asarray(_PROBE_RAY) / np.linalg.norm(_PROBE_RAY)
+    origin = triangles[:, 0]
+    edge1 = triangles[:, 1] - origin
+    edge2 = triangles[:, 2] - origin
+    h = np.cross(ray, edge2)
+    det = np.einsum("ij,ij->i", edge1, h)
+    usable = np.abs(det) > 1e-12  # a triangle edge-on to the ray is never crossed
+    inv = np.divide(1.0, det, out=np.zeros_like(det), where=usable)
+    s = point - origin
+    u = inv * np.einsum("ij,ij->i", s, h)
+    q = np.cross(s, edge1)
+    v = inv * (q @ ray)
+    t = inv * np.einsum("ij,ij->i", edge2, q)
+    hit = usable & (u >= 0.0) & (u <= 1.0) & (v >= 0.0) & (u + v <= 1.0) & (t > 1e-9)
+    return int(np.count_nonzero(hit))
 
-    up_hits = _count_ray_intersections(test_point, (0.0, 0.0, 1.0), all_triangles)
-    if up_hits == 0:
-        return False
 
-    # Both directions have hits — point is enclosed
-    # Check parity: if both are odd, point is inside a volume
-    return down_hits % 2 == 1 and up_hits % 2 == 1
+def _read_shells(tris: list[_Triangle]) -> _Shells:
+    """Split the part into closed shells and find the sealed hollows.
+
+    A shell is the triangles joined edge to edge.  Its winding is read the
+    way most of its surface area faces, so a few triangles wound backwards
+    cannot turn the whole shell inside out, and they are counted as a mesh
+    fault instead.  A closed shell that then faces inward (its signed volume
+    is negative) and lies inside a closed shell that faces outward is a
+    sealed hollow: the plastic wraps all the way round it.  An open part,
+    however it is wound, has nothing around it, so it is never one.
+
+    Everything here is whole-array numpy work; nothing walks the triangles
+    one at a time.
+    """
+    import itertools
+
+    import numpy as np
+
+    count = len(tris)
+    flat = itertools.chain.from_iterable(itertools.chain.from_iterable(tris))
+    corners = np.fromiter(flat, dtype=np.float64, count=9 * count).reshape(count, 3, 3)
+
+    # Weld corners that are the same point.  An STL stores each corner in
+    # every triangle that uses it, as the same 32-bit floats, so their bit
+    # patterns are the key (adding 0.0 turns -0.0 into 0.0 first).
+    bits = (corners.reshape(-1, 3).astype(np.float32) + np.float32(0.0)).view(np.uint32).astype(np.uint64)
+    xy = (bits[:, 0] << np.uint64(32)) | bits[:, 1]
+    order = np.lexsort((bits[:, 2], xy))
+    new_point = np.ones(len(order), dtype=bool)
+    new_point[1:] = (xy[order][1:] != xy[order][:-1]) | (bits[order, 2][1:] != bits[order, 2][:-1])
+    point_id = np.empty(len(order), dtype=np.int64)
+    point_id[order] = np.cumsum(new_point) - 1
+    faces = point_id.reshape(count, 3)
+    real = (faces[:, 0] != faces[:, 1]) & (faces[:, 1] != faces[:, 2]) & (faces[:, 0] != faces[:, 2])
+
+    # Edges two triangles share.  An edge used once is an opening; one used
+    # three or more times joins nothing here.
+    face_of_edge = np.repeat(np.nonzero(real)[0], 3)
+    edges = faces[real][:, [0, 1, 1, 2, 2, 0]].reshape(-1, 2)
+    key = np.minimum(edges[:, 0], edges[:, 1]) * (int(point_id.max()) + 1) + np.maximum(edges[:, 0], edges[:, 1])
+    by_key = np.argsort(key)
+    sorted_key = key[by_key]
+    run_start = np.ones(len(sorted_key), dtype=bool)
+    run_start[1:] = sorted_key[1:] != sorted_key[:-1]
+    starts = np.nonzero(run_start)[0]
+    run_length = np.diff(np.append(starts, len(sorted_key)))
+    twins = starts[run_length == 2]
+    first, second = by_key[twins], by_key[twins + 1]
+    face_a, face_b = face_of_edge[first], face_of_edge[second]
+    # Two neighbours wound alike traverse their shared edge in opposite
+    # directions; the same direction means one of them is the wrong way round.
+    unlike = edges[first, 0] == edges[second, 0]
+    shared = np.zeros(len(edges), dtype=bool)
+    shared[first] = shared[second] = True
+    closed_face = np.zeros(count, dtype=bool)
+    closed_face[real] = shared.reshape(-1, 3).all(axis=1)
+
+    # Join neighbours into shells, keeping for each triangle whether it is
+    # wound like its shell's root ("flip" False) or opposite to it.  Each
+    # pass hangs every root that touches a lower root under it, then follows
+    # parents to the root, so a shell of any size settles in a few passes.
+    parent = np.arange(count)
+    flip = np.zeros(count, dtype=bool)
+    while True:
+        while True:
+            grand = parent[parent]
+            if np.array_equal(grand, parent):
+                break
+            flip = flip ^ flip[parent]
+            parent = grand
+        root_a, root_b = parent[face_a], parent[face_b]
+        apart = root_a != root_b
+        if not apart.any():
+            break
+        relation = (flip[face_a] ^ flip[face_b] ^ unlike)[apart]
+        high = np.maximum(root_a[apart], root_b[apart])
+        low = np.minimum(root_a[apart], root_b[apart])
+        hung, pick = np.unique(high, return_index=True)
+        parent[hung] = low[pick]
+        flip[hung] = relation[pick]
+    shell = parent
+    # A shell whose windings cannot all be made to agree (a one-sided
+    # surface, or edges glued crosswise) has no inside to speak of.
+    clash = (flip[face_a] ^ flip[face_b]) != unlike
+    tangled = np.zeros(count, dtype=bool)
+    tangled[shell[face_a[clash]]] = True
+
+    v0, v1, v2 = corners[:, 0], corners[:, 1], corners[:, 2]
+    area = 0.5 * np.linalg.norm(np.cross(v1 - v0, v2 - v0), axis=1) * real
+    flipped_area = np.bincount(shell, weights=area * flip, minlength=count)
+    shell_area = np.bincount(shell, weights=area, minlength=count)
+    # The winding most of the shell's surface has is the one it means.
+    meant = flipped_area > shell_area - flipped_area
+    against = (flip != meant[shell]) & real & ~tangled[shell]
+    signed = np.einsum("ij,ij->i", v0, np.cross(v1, v2)) / 6.0
+    volume = np.bincount(shell, weights=np.where(against, -signed, signed) * real, minlength=count)
+
+    open_faces = np.bincount(shell, weights=(~closed_face).astype(np.float64), minlength=count)
+    size = np.bincount(shell, minlength=count)
+    closed = (size >= 4) & (open_faces == 0) & ~tangled
+    hollows = np.nonzero(closed & (volume < 0))[0]
+    bodies = np.nonzero(closed & (volume > 0))[0]
+
+    on_hollow = np.zeros(count, dtype=bool)
+    unchecked = 0
+    if len(hollows) and len(bodies):
+        members_order = np.argsort(shell, kind="stable")
+        first_member = np.searchsorted(shell[members_order], np.arange(count))
+        low_corner = np.full((count, 3), np.inf)
+        high_corner = np.full((count, 3), -np.inf)
+        np.minimum.at(low_corner, shell, corners.min(axis=1))
+        np.maximum.at(high_corner, shell, corners.max(axis=1))
+
+        def members(root: int) -> Any:
+            return members_order[first_member[root]:first_member[root] + size[root]]
+
+        sealed: list[int] = []
+        budget = _MAX_CONTAINMENT_TESTS
+        body_low, body_high = low_corner[bodies], high_corner[bodies]
+        # The largest hollows first, so a budget that runs out spends itself
+        # on the voids that matter most to a print.
+        for hollow in hollows[np.argsort(volume[hollows], kind="stable")]:
+            if budget <= 0:
+                unchecked += 1
+                continue
+            # Every outward shell is looked at once, as one array: only one
+            # whose box holds the hollow's box can hold the hollow.
+            budget -= len(bodies)
+            fits = (body_low <= low_corner[hollow]).all(axis=1) & (body_high >= high_corner[hollow]).all(axis=1)
+            if not fits.any():
+                continue
+            own = members(hollow)
+            # A point on the hollow's largest triangle, which lies on no
+            # other shell unless the two touch.
+            probe = corners[own[np.argmax(area[own])]].mean(axis=0)
+            for body in bodies[fits]:
+                around = members(body)
+                budget -= len(around)
+                if _crossings(probe, corners[around]) % 2 == 1:
+                    sealed.append(int(hollow))
+                    break
+        on_hollow = np.isin(shell, sealed) & real
+
+    return _Shells(on_hollow=on_hollow, misfaced=int(against.sum()), unchecked=unchecked)
 
 
 # ---------------------------------------------------------------------------
@@ -652,11 +778,12 @@ def _assess_removal_difficulty(
     :returns: (difficulty, notes) where difficulty is one of
         "easy", "medium", "hard", "impossible".
     """
-    # Enclosed cavities → impossible to remove
+    # Supports inside a sealed hollow can never come out.
     if trapped_regions:
         return (
             "impossible",
-            f"{len(trapped_regions)} enclosed cavity region(s) with trapped supports. "
+            f"{len(trapped_regions)} support region(s) inside a sealed hollow: supports "
+            f"printed there can't be removed and stay inside the part. "
             f"{profile.get('support_notes', '')}",
         )
 
@@ -683,6 +810,28 @@ def _assess_removal_difficulty(
     if base_difficulty <= 4:
         return "hard", notes
     return "hard", notes
+
+
+def _region(cluster: list[tuple[_Triangle, float, float]], *, accessible: bool = True) -> OverhangRegion:
+    """One support region from a cluster of (triangle, angle, area) overhangs."""
+    centroids = [_triangle_centroid(tri) for tri, _, _ in cluster]
+    xs = [c[0] for c in centroids]
+    ys = [c[1] for c in centroids]
+    return OverhangRegion(
+        centroid=(
+            sum(xs) / len(centroids),
+            sum(ys) / len(centroids),
+            sum(c[2] for c in centroids) / len(centroids),
+        ),
+        area_mm2=sum(ar for _, _, ar in cluster),
+        max_angle_deg=max(ang for _, ang, _ in cluster),
+        # Bridge width: the cluster's extent in XY.
+        estimated_bridge_mm=max(max(xs) - min(xs), max(ys) - min(ys)),
+        # Support height: the lowest point of the cluster.
+        support_height_mm=max(0.0, min(c[2] for c in centroids)),
+        accessible=accessible,
+        triangle_count=len(cluster),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -749,6 +898,30 @@ def assess_support_feasibility(
             warnings=["No triangles available for analysis"],
         )
 
+    warnings: list[str] = []
+
+    # Which triangles lie on a sealed hollow, read once from the shells.
+    on_hollow: Any = None
+    try:
+        shells = _read_shells(tris)
+    except Exception as exc:  # noqa: BLE001 -- the rest of the assessment stands without it
+        logger.debug("Sealed hollow check failed", exc_info=True)
+        warnings.append(f"Sealed hollows were not looked for: {exc}")
+    else:
+        on_hollow = shells.on_hollow
+        if shells.misfaced:
+            noun = "triangle" if shells.misfaced == 1 else "triangles"
+            warnings.append(
+                f"Mesh defect: {shells.misfaced} {noun} face the opposite way to the "
+                f"surface around them (inconsistent winding). They do not make the part "
+                f"a sealed hollow; repairing the mesh fixes the file itself."
+            )
+        if shells.unchecked:
+            warnings.append(
+                f"{shells.unchecked} inward-facing shell(s) were not checked for a sealed "
+                f"hollow: the part has too many for one assessment."
+            )
+
     # ---------------------------------------------------------------
     # a) Overhang analysis
     # ---------------------------------------------------------------
@@ -758,11 +931,16 @@ def assess_support_feasibility(
 
     # (triangle, angle_deg, area_mm2) for overhangs
     overhang_tris: list[tuple[_Triangle, float, float]] = []
+    # The same overhangs, split by whether they lie on a sealed hollow, so
+    # a hollow's ceiling and an outside overhang above or below it are never
+    # one region.
+    open_overhangs: list[tuple[_Triangle, float, float]] = []
+    sealed_overhangs: list[tuple[_Triangle, float, float]] = []
 
     # The plate the model rests on — its own lowest point, not z=0.
     bed_z = _mesh_bed_z(tris)
 
-    for tri in tris:
+    for index, tri in enumerate(tris):
         area = _triangle_area(tri)
         total_area += area
 
@@ -780,6 +958,10 @@ def assess_support_feasibility(
         else:
             overhang_area += area
             overhang_tris.append((tri, angle, area))
+            if on_hollow is not None and on_hollow[index]:
+                sealed_overhangs.append((tri, angle, area))
+            else:
+                open_overhangs.append((tri, angle, area))
 
     total_overhang_area = overhang_area
     overhang_pct = (total_overhang_area / total_area * 100.0) if total_area > 0 else 0.0
@@ -792,69 +974,19 @@ def assess_support_feasibility(
         for tri, ang, ar in overhang_tris
         if ang > _BRIDGE_NEAR_VERTICAL_DEG
     ]
-    clusters = _cluster_overhang_triangles(bridge_tris)
-
-    bridge_regions: list[OverhangRegion] = []
-    for cluster in clusters:
-        if not cluster:
-            continue
-        cluster_area = sum(ar for _, _, ar in cluster)
-        max_angle = max(ang for _, ang, _ in cluster)
-        centroids = [_triangle_centroid(tri) for tri, _, _ in cluster]
-        cx = sum(c[0] for c in centroids) / len(centroids)
-        cy = sum(c[1] for c in centroids) / len(centroids)
-        cz = sum(c[2] for c in centroids) / len(centroids)
-
-        # Bridge width: bounding box of cluster in XY
-        xs = [c[0] for c in centroids]
-        ys = [c[1] for c in centroids]
-        bridge_width = max(max(xs) - min(xs), max(ys) - min(ys))
-
-        # Support height: min Z of cluster centroids
-        min_z = min(c[2] for c in centroids)
-
-        bridge_regions.append(OverhangRegion(
-            centroid=(cx, cy, cz),
-            area_mm2=cluster_area,
-            max_angle_deg=max_angle,
-            estimated_bridge_mm=bridge_width,
-            support_height_mm=max(0.0, min_z),
-            accessible=True,  # updated by ray-cast below
-            triangle_count=len(cluster),
-        ))
+    bridge_regions = [_region(cluster) for cluster in _cluster_overhang_triangles(bridge_tris) if cluster]
 
     # ---------------------------------------------------------------
-    # c) Support height — also build regions from all overhang clusters
+    # c) Support regions, and the ones sealed inside a hollow
     # ---------------------------------------------------------------
-    all_overhang_clusters = _cluster_overhang_triangles(overhang_tris)
-    all_regions: list[OverhangRegion] = []
-    for cluster in all_overhang_clusters:
-        if not cluster:
-            continue
-        cluster_area = sum(ar for _, _, ar in cluster)
-        max_angle = max(ang for _, ang, _ in cluster)
-        centroids = [_triangle_centroid(tri) for tri, _, _ in cluster]
-        cx = sum(c[0] for c in centroids) / len(centroids)
-        cy = sum(c[1] for c in centroids) / len(centroids)
-        cz = sum(c[2] for c in centroids) / len(centroids)
+    all_regions = [_region(cluster) for cluster in _cluster_overhang_triangles(open_overhangs) if cluster]
+    trapped_regions = [
+        _region(cluster, accessible=False)
+        for cluster in _cluster_overhang_triangles(sealed_overhangs)
+        if cluster
+    ]
+    all_regions.extend(trapped_regions)
 
-        xs = [c[0] for c in centroids]
-        ys = [c[1] for c in centroids]
-        bridge_width = max(max(xs) - min(xs), max(ys) - min(ys))
-
-        min_z = min(c[2] for c in centroids)
-
-        all_regions.append(OverhangRegion(
-            centroid=(cx, cy, cz),
-            area_mm2=cluster_area,
-            max_angle_deg=max_angle,
-            estimated_bridge_mm=bridge_width,
-            support_height_mm=max(0.0, min_z),
-            accessible=True,
-            triangle_count=len(cluster),
-        ))
-
-    warnings: list[str] = []
     tall_regions = [r for r in all_regions if r.support_height_mm > _TALL_SUPPORT_MM]
     if tall_regions:
         warnings.append(
@@ -863,24 +995,7 @@ def assess_support_feasibility(
         )
 
     # ---------------------------------------------------------------
-    # d) Enclosed cavity detection (ray casting)
-    # ---------------------------------------------------------------
-    trapped_regions: list[OverhangRegion] = []
-    ray_tests_done = 0
-
-    for region in all_regions:
-        if ray_tests_done >= _MAX_RAY_TESTS:
-            break
-        centroid = region.centroid
-        enclosed = _is_enclosed_cavity(centroid, tris)
-        ray_tests_done += 2 * len(tris)  # two rays per test
-
-        if enclosed:
-            region.accessible = False
-            trapped_regions.append(region)
-
-    # ---------------------------------------------------------------
-    # e) Removal difficulty
+    # d) Removal difficulty
     # ---------------------------------------------------------------
     difficulty, removal_notes = _assess_removal_difficulty(
         profile,
@@ -891,7 +1006,7 @@ def assess_support_feasibility(
     )
 
     # ---------------------------------------------------------------
-    # f) Orientation suggestions
+    # e) Orientation suggestions
     # ---------------------------------------------------------------
     current_orient = _analyze_orientation(
         tris, "none", _ROTATIONS["none"], safe_deg, layer_height_mm
@@ -917,7 +1032,7 @@ def assess_support_feasibility(
         orientation_suggestions.sort(key=lambda c: c.overhang_area_mm2)
 
     # ---------------------------------------------------------------
-    # g) Support type recommendation
+    # f) Support type recommendation
     # ---------------------------------------------------------------
     support_type = _recommend_support_type(
         bridge_regions, trapped_regions,

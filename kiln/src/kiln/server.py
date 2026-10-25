@@ -11591,6 +11591,9 @@ def preflight_check(
     - (Optional) Material loaded matches expected material
     - (Optional) Local G-code file is valid and readable
     - (Optional) Remote file exists on the printer
+    - (Optional) For a model file (STL, OBJ, 3MF, STEP, GLB), whether the
+      part prints: this fails exactly where the print door would refuse the
+      file, and passes wherever the door would print it.
     - Multi-material: what unit the printer carries (AMS, a Klipper MMU)
       and, with ``file_path``, whether the file's filaments are loaded.
       Advisory for a unit Kiln drives (the print gate decides at start);
@@ -11630,6 +11633,10 @@ def preflight_check(
         _pf_model = (
             _resolve_printer_model_live(printer_name) if printer_name else _PRINTER_MODEL
         )
+        # The name as the caller gave it: ``printer_name`` is reused for the
+        # material store's name further down, and the part check has to aim
+        # at the machine the print door would.
+        _pf_named = printer_name
 
         # -- Printer state checks ------------------------------------------
         state = adapter.get_state()
@@ -12380,6 +12387,17 @@ def preflight_check(
                         )
         except Exception as exc:  # noqa: BLE001
             logger.debug("Blade check skipped: %s", exc)
+
+        # -- The part itself -----------------------------------------------
+        # The print door's own pre-print check on a model file.  It fails
+        # here exactly where the door would refuse the file, so the
+        # pre-flight never calls a part ready that the next call refuses,
+        # and it is never stricter than the door either.
+        model_row = _preflight_model_row(file_path, printer_name=_pf_named, material=expected_material) if file_path else None
+        if model_row is not None:
+            checks.append(model_row)
+            if not model_row["passed"]:
+                errors.append(model_row["message"])
 
         # -- Summary -------------------------------------------------------
         ready = all(c["passed"] for c in checks)
@@ -15469,6 +15487,74 @@ def list_plugins() -> dict:
 
 _GCODE_EXTENSIONS = {".gcode", ".gco", ".g", ".3mf"}
 _MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB
+
+
+def _preflight_model_row(
+    file_path: str, *, printer_name: str | None, material: str | None,
+) -> dict[str, Any] | None:
+    """The pre-flight row saying whether the part in *file_path* prints.
+
+    It is the print door's own pre-print check (``gate_for_print``), run for
+    the machine the door would slice for, so the two cannot disagree: the
+    row fails exactly where the door would refuse the file, with the door's
+    reason as its message, and passes where the door would print it, with
+    the printability verdict's sentence (a part that prints with supports
+    passes, as it does at the door).  It carries ``printability_verdict``
+    and ``printability_verdict_text`` whenever the check reached a verdict.
+    ``None`` for G-code or a sliced project, which hold no part left to
+    judge, and for a file that is not there.  Never raises: a check that
+    could not run at all (the check itself breaking) is listed as not
+    checked and fails nothing, because that is Kiln's gap and not a reading
+    of the part.  A file the door refuses because it could not be READ (a
+    bad 3MF, a STEP file no converter accepts) fails the row with the door's
+    reason: the door would refuse it, and the row never disagrees with the
+    door (2026-10-24: both passed the row as "could not check").
+    """
+    try:
+        import zipfile
+
+        from kiln.gcode_metadata import sliced_gcode_member
+        from kiln.plugins._validation_pipeline_internals import _SUPPORTED_FORMATS
+        from kiln.plugins.validation_pipeline_tools import gate_for_print
+
+        path = Path(file_path)
+        if path.suffix.lower() not in _SUPPORTED_FORMATS or not path.is_file():
+            return None
+        if path.suffix.lower() == ".3mf":
+            # A sliced project holds no part to judge.  A 3MF that will not
+            # open is left to the door, which refuses it with the reason.
+            with contextlib.suppress(zipfile.BadZipFile), zipfile.ZipFile(path) as zf:
+                if sliced_gcode_member(zf) is not None:
+                    return None
+        # Resolved the way slice_and_print resolves its printer when none is
+        # named, so the bed the part is checked against is the door's bed.
+        # The door reads and converts the file itself (a STEP file included).
+        door_printer = _resolve_printer_profile_id(None, printer_name) or ""
+        gate = gate_for_print(str(path), printer_id=door_printer, material=material or "")
+        if gate.report is None:
+            # The door has no report only when its check could not run.
+            raise RuntimeError(gate.reason or "the pre-print check did not run")
+    except Exception as exc:  # noqa: BLE001 -- the pre-flight stands without this row
+        logger.debug("Pre-flight model check skipped: %s", exc)
+        return {
+            "name": "model_printable",
+            "passed": True,
+            "advisory": True,
+            "checked": False,
+            "message": "Kiln could not check whether the part prints.",
+        }
+    report = gate.report
+    row: dict[str, Any] = {
+        "name": "model_printable",
+        "passed": gate.reason is None,
+        "message": gate.reason or report.get("printability_verdict_text") or report.get("summary") or "",
+    }
+    row.update({
+        key: report[key]
+        for key in ("printability_verdict", "printability_verdict_text")
+        if report.get(key)
+    })
+    return row
 
 
 def _validate_local_file(file_path: str) -> dict[str, Any]:

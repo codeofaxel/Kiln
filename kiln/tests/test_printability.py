@@ -2570,9 +2570,16 @@ class TestPlacementIsStructuredNotOnlyProse:
     def test_a_part_that_is_ALSO_badly_shaped_does_not_claim_otherwise(self):
         """The mirror case, and the one that keeps this honest: a part
         whose shape would fail on its own must not report that placement
-        was its only problem just because placement is also wrong."""
+        was its only problem just because placement is also wrong.
+
+        The part is a plate with a 0.2 mm fin, a wall no 0.4 mm nozzle
+        lays.  A wedge whose sides lean 70 degrees stood in until
+        2026-10-24, failing seated at 47 / F only because one underside was
+        charged three times for needing supports; charged once it reads
+        71 / C and prints with supports, so it no longer fails on its own
+        shape and cannot test this."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = _write_stl(tmpdir, _make_slope_wedge_triangles(70.0))
+            path = _write_stl(tmpdir, _plate_with_fin_triangles(0.2))
             report = analyze_printability(path, build_volume=(1.0, 1.0, 1.0))
 
             assert report.placement.exceeds_bed is True
@@ -2585,10 +2592,11 @@ class TestPlacementIsStructuredNotOnlyProse:
             assert report.placement.printable_if_placed == (
                 report.placement.score_if_placed >= _PRINTABLE_SCORE_MIN
             )
-            # The wedge IS badly shaped: its seated verdict is a fail on
+            # The fin IS badly shaped: its seated verdict is a fail on
             # its own, so nothing here can claim placement was the only
             # problem.  That is the whole point of the mirror case.
             assert report.placement.grade_if_placed == "F"
+            assert report.placement.printable_if_placed is False
 
     def test_a_placed_part_reports_the_same_verdict_either_way(self):
         """No faults, no divergence: the two views agree exactly, so a

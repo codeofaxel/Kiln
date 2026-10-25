@@ -59,6 +59,23 @@ class TestFitVerdict:
         assert r.get("overridden") is True
 
 
+    def test_the_gate_does_not_judge_whether_the_part_prints(self, tmp_path):
+        """The print gate is fit and temperature only.  The printability
+        verdict reaches the print door's reply through the pre-print check
+        (gate_for_print's ``validation`` block), and a second reading at
+        start would be a second place for the two to drift."""
+        import numpy as np
+
+        cone = trimesh.creation.cone(radius=10, height=20, sections=48)
+        cone.apply_transform(trimesh.transformations.rotation_matrix(np.pi, [1, 0, 0]))
+        cone.apply_translation((50, 50, 20))  # on the bed: the gate's fit is not the question
+        path = str(tmp_path / "cone.stl")
+        cone.export(path)
+        r = G(path, "kilntest_open")
+        assert r["blocked"] is False, r
+        assert not [k for k in r if k.startswith("printability")], r
+
+
 class TestNeverFalseBlocks:
     def test_unknown_printer_soft_passes(self, big):
         # build volume unknown -> we cannot prove impossibility -> allow

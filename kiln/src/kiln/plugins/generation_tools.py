@@ -463,6 +463,11 @@ class _GenerationToolsPlugin:
                     "success": True,
                     "passed": result.passed,
                     "verdict": result.verdict,
+                    # The two keys every door that judges a part carries
+                    # (kiln.printability.verdict_block), from the pipeline's
+                    # own reading of the report.
+                    "printability_verdict": result.verdict or None,
+                    "printability_verdict_text": result.verdict_text or None,
                     "result": result.to_dict(),
                     "message": result.summary,
                     **({"step_conversion": step_note} if step_note else {}),

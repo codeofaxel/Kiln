@@ -192,3 +192,42 @@ class TestPrinterHealthSaysWhatThePrintsDid:
         assert alert["message"].startswith("This printer needs attention: only 0% of its 10 prints in the last "), alert
         assert alert["message"].endswith("Inspect it for maintenance before the next long print."), alert
         assert report["health_score"] == 0.0
+
+
+from tests.test_preflight_says_the_verdict import _as_3mf, preflight  # noqa: E402,F401 -- fixture
+from tests.test_the_verdict_is_the_answer import (  # noqa: E402,F401 -- fixtures
+    _EXPECTED,
+    _fake_slice,
+    block,
+    cone_on_its_tip,
+    mushroom,
+)
+
+
+class TestTheVerdictDoorsSayNoScore:
+    """Every door that names the printability verdict says it as a sentence
+    and never the score: the print door's validation block, the check doors,
+    the support estimates, the readiness check and the pre-flight."""
+
+    @pytest.mark.parametrize("part", sorted(_EXPECTED))
+    def test_no_verdict_door_says_a_score(self, part, request, tmp_path, preflight):
+        from kiln.plugins.validation_pipeline_tools import gate_for_print
+
+        path = request.getfixturevalue(part)
+        with patch("kiln.slicer.slice_file", _fake_slice(tmp_path)):
+            estimate = _call("slice_and_estimate", input_path=path, material="PLA")
+        replies = {
+            "validation block": {"validation": gate_for_print(path).summary},
+            "validate_and_prepare": _call("validate_and_prepare", input_path=path),
+            "validate_and_prepare_mesh": _call("validate_and_prepare_mesh", file_path=path,
+                                               build_volume_x=256, build_volume_y=256, build_volume_z=256),
+            "slice_and_estimate": estimate,
+            "estimate_supports": _call("estimate_supports", file_path=path),
+            "estimate_support_material": _call("estimate_support_material", file_path=path),
+            "check_print_readiness": _call("check_print_readiness", file_path=path),
+            "preflight_check": preflight(file_path=_as_3mf(path)),
+        }
+        for door, reply in replies.items():
+            assert rx.scores_said(reply) == [], (door, rx.scores_said(reply))
+            assert any(v == _EXPECTED[part] for _p, v in rx.walk(reply)
+                       if _p.endswith("printability_verdict")), (door, reply)

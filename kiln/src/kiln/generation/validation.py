@@ -2559,11 +2559,10 @@ def estimate_support_volume(file_path: str) -> dict[str, Any]:
     # (kiln.printability.support_verdict), never this estimate's own
     # count of downward faces: a face a slicer bridges is counted above
     # and needs nothing.
-    from kiln.printability import analyze_printability, support_verdict
+    from kiln.printability import analyze_printability, support_verdict, verdict_block
 
-    needs_supports = support_verdict(
-        analyze_printability(str(path), include_hole_detection=False)
-    ) is not None
+    report = analyze_printability(str(path), include_hole_detection=False)
+    support_reason = support_verdict(report)
 
     return {
         "support_volume_mm3": round(support_volume, 1),
@@ -2573,7 +2572,9 @@ def estimate_support_volume(file_path: str) -> dict[str, Any]:
         "overhang_triangle_count": overhang_count,
         "total_triangles": total_count,
         "overhang_percentage": round(overhang_count / total_count * 100, 1) if total_count else 0.0,
-        "needs_supports": needs_supports,
+        "needs_supports": support_reason is not None,
+        "support_reason": support_reason,
+        **verdict_block(report),
     }
 
 
@@ -3488,10 +3489,13 @@ def _printability_factor(
     check's ``mesh_check_score``, which once sat in this slot as a second
     "printability" number that disagreed with the first on the same part.
     """
-    from kiln.printability import analyze_printability
+    from kiln.printability import analyze_printability, verdict_block
 
     report = analyze_printability(mesh_path, material=material, printer_id=printer_id)
     return {
+        # The verdict the score and grade were read from, in the two keys
+        # every door carries: a letter alone is not an answer about printing.
+        **verdict_block(report),
         "score": report.score,
         "grade": report.grade,
         "material": material,
@@ -3586,6 +3590,10 @@ def design_scorecard(
     return {
         "overall_score": overall,
         "grade": grade,
+        # The printability verdict at the top as well, where every door
+        # names it; the overall grade beside it is the scorecard's own.
+        "printability_verdict": printability_factor.get("printability_verdict"),
+        "printability_verdict_text": printability_factor.get("printability_verdict_text"),
         "printability": printability_factor,
         "structural": {"score": structural, "notes": structural_notes},
         "efficiency": {"score": efficiency, "notes": efficiency_notes},
@@ -4179,15 +4187,27 @@ def can_print_now(
 ) -> dict[str, Any]:
     """Single-call print readiness check with optional auto-repair.
 
-    Runs the full validation battery:
-    1. Mesh parseable and non-empty
-    2. Manifold (watertight)
-    3. No floating regions
-    4. Supports — :func:`kiln.printability.analyze_printability`'s own
-       verdict for ``material`` and ``printer_id``, which knows a short
-       ceiling bridges; its score and grade ride along
-    5. Fits on build plate
-    6. No degenerate triangles
+    Checks that the mesh is sound -- parseable and non-empty, manifold, no
+    floating regions, no degenerate triangles, fits the build plate -- and
+    reads :func:`kiln.printability.analyze_printability`'s verdict for
+    ``material`` and ``printer_id`` (which knows a short ceiling bridges).
+    ``can_print`` is true only when the mesh is sound and that verdict lets
+    the part print, the same verdict the print pipeline refuses on.
+
+    ``verdict`` is one of:
+
+    - ``ready_to_print``: sound, and the verdict says it prints as it is.
+    - ``printable_with_supports``: sound, and it prints with the supports a
+      slicer adds, which is a normal print.
+    - ``check_before_printing``: sound, but the verdict asks for a check
+      (under the printable line, no single cause to name).  The print
+      pipeline prints such a part with a warning, so ``can_print`` is true.
+    - ``wont_print``: sound, but the verdict says it won't print as it is
+      (it rests on a point, a wall is thinner than the nozzle lays, ...).
+    - ``needs_fixes``: the mesh has a fault to fix first; ``issues`` says
+      which.
+    - ``unprintable`` / ``unknown_printer_bed``: there is no part to judge,
+      or no bed to judge it against.
 
     When ``auto_fix=True``, attempts to fix issues in-place:
     - Removes degenerate triangles
@@ -4315,7 +4335,13 @@ def can_print_now(
     # supports, so a part whose only overhangs are short ceilings a slicer
     # bridges came back "printable_with_supports" while analyze_printability
     # said it needed none.
-    from kiln.printability import analyze_printability, support_verdict
+    from kiln.printability import (
+        analyze_printability,
+        passes,
+        support_verdict,
+        verdict_block,
+        verdict_of,
+    )
 
     report = analyze_printability(working_path, material=material, printer_id=printer_id)
     support_reason = support_verdict(report)
@@ -4349,15 +4375,36 @@ def can_print_now(
                 "fix": "Use rescale_model() to fit the build plate",
             })
 
-    if len(issues) == 0:
-        verdict = "ready_to_print"
+    # The mesh checks say whether the file is sound; the verdict says whether
+    # the part prints.  Both have to hold, and the verdict is read the way
+    # the print pipeline reads it (its own bar, never a copy of the number),
+    # so this check never tells an agent to print what a print door refuses.
+    from kiln.plugins._validation_pipeline_internals import _MIN_PASS_SCORE
+
+    verdict_key, verdict_text = verdict_of(report)
+    faults = [i for i in issues if i["type"] != "needs_supports"]
+    if faults:
+        verdict = "needs_fixes"
+        can_print = False
+    elif verdict_key == "wont_print":
+        verdict = "wont_print"
+        can_print = False
+        issues.append({
+            "type": "wont_print",
+            "detail": verdict_text,
+            "fix": "Change the part, or how it sits on the plate, as the verdict says",
+        })
+    elif not passes(verdict_key, report.score, bar=_MIN_PASS_SCORE):
+        # The pipeline fails this part's printability check with a warning
+        # and prints it, so it prints here too; the word says a check is due.
+        verdict = "check_before_printing"
         can_print = True
-    elif all(i["type"] == "needs_supports" for i in issues):
+    elif issues:
         verdict = "printable_with_supports"
         can_print = True  # printable — just needs support enabled in slicer
     else:
-        verdict = "needs_fixes"
-        can_print = False
+        verdict = "ready_to_print"
+        can_print = True
 
     result: dict[str, Any] = {
         "can_print": can_print,
@@ -4365,6 +4412,10 @@ def can_print_now(
         "issues": issues,
         "issue_count": len(issues),
         "actions_taken": actions_taken,
+        # The part's printability verdict and its sentence, the answer every
+        # door gives; ``verdict`` above is this check's word for the mesh and
+        # that verdict together, and the score is for comparing versions.
+        **verdict_block(report),
         "printability_score": report.score,
         "printability_grade": report.grade,
         "printability_material": material,

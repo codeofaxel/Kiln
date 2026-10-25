@@ -353,11 +353,9 @@ class _PrintabilityToolsPlugin:
                 return {
                     "success": True,
                     "estimate": estimate.to_dict(),
-                    "message": (
-                        f"Estimated support volume: {estimate.estimated_support_volume_mm3:.1f} mm3 "
-                        f"({estimate.support_percentage:.1f}% of model).  "
-                        f"{'Supports needed.' if estimate.needs_supports else 'No supports needed.'}"
-                    ),
+                    "printability_verdict": estimate.printability_verdict,
+                    "printability_verdict_text": estimate.printability_verdict_text,
+                    "message": estimate.message,
                 }
             except ValueError as exc:
                 return _srv._error_dict(
