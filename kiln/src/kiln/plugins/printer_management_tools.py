@@ -327,6 +327,63 @@ class _PrinterManagementToolsPlugin:
                 )
 
         # ------------------------------------------------------------------
+        # set_printer_repair
+        # ------------------------------------------------------------------
+
+        @mcp.tool()
+        def set_printer_repair(
+            printer_name: str,
+            status: str,
+            kind: str | None = None,
+            note: str | None = None,
+            when: str | None = None,
+        ) -> dict:
+            """Tell Kiln a printer needs repair, or that you have repaired it.
+
+            Kiln judges a printer by its own prints.  Mark it ``needed`` when
+            you are taking it out of service: routing stops choosing it, and
+            a print you start on it yourself still runs, with a warning.
+            Mark it ``done`` once it is fixed: from that moment it is judged
+            by what it prints next, and its earlier prints stop counting
+            against it.  Nothing is deleted, and the record stays yours.
+
+            Args:
+                printer_name: The printer, by its name here.
+                status: ``needed`` (out of service until repaired), ``done``
+                    (repaired; ``kind`` required), or ``clear`` (take back
+                    the latest mark).
+                kind: What was repaired: nozzle, hotend, extruder, bed,
+                    belts, or other.  Required for ``done``; optional for
+                    ``needed``.
+                note: What you did, in your own words (optional).
+                when: When it happened, ISO 8601 (``2026-10-20T14:00``).
+                    Left out, now.  A repair may be dated up to 30 days
+                    back; never ahead.
+
+            Returns ``recorded``, the printer, ``status``, ``kind``,
+            ``marked_at``, the printer's ``condition`` now, ``next`` (one
+            sentence), and for ``done`` a ``reset`` block saying how many
+            earlier prints no longer count.  Refuses, by name, a printer
+            Kiln cannot tell apart from another, a time ahead or too far
+            back, and the hosted server, where the record is not kept.
+            """
+            if err := _srv._check_auth("write"):
+                return err
+
+            from kiln.printer_repairs import RepairRefused, mark
+
+            try:
+                result = mark(printer_name, status, kind=kind, note=note, when=when)
+                return {"success": True, **result}
+            except RepairRefused as exc:
+                return _srv._error_dict(exc.message, code=exc.code)
+            except Exception as exc:
+                _logger.exception("Error in set_printer_repair")
+                return _srv._error_dict(
+                    f"Failed to record the printer's repair: {exc}", code="INTERNAL_ERROR",
+                )
+
+        # ------------------------------------------------------------------
         # release_printer_lock
         # ------------------------------------------------------------------
 

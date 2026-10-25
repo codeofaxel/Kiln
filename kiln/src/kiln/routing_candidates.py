@@ -83,6 +83,24 @@ def version_results_by_machine(db: Any, version_id: str | None) -> dict[str, dic
         return {}
 
 
+def repair_block_by_machine(db: Any, fingerprint: str | None) -> dict[str, Any] | None:
+    """The ``repair`` block for one machine (:func:`kiln.printer_repairs.routing_block`):
+    ``{"status": "needed", "since"}`` for a machine marked out of service,
+    ``{"status": "done", "at", "kind"}`` for a repaired one, ``None`` for a
+    machine with nothing on record, no store, or no stable identity.  Never
+    raises: a record that cannot be read leaves the candidate without the
+    block, which the router reads as nothing said."""
+    if not fingerprint or db is None:
+        return None
+    try:
+        from kiln.printer_repairs import condition_summary, routing_block
+
+        return routing_block(condition_summary(db.printer_condition(fingerprint)))
+    except Exception:  # noqa: BLE001 -- a condition is a refinement, never a blocker
+        logger.debug("repair record for a candidate not read", exc_info=True)
+        return None
+
+
 def collect_routing_candidates(
     *,
     adapters: dict[str, Any],
@@ -200,10 +218,17 @@ def collect_routing_candidates(
         # This machine's own settled prints of the version: looked up by the
         # fingerprint the print row was keyed on, carried as counts under the
         # registry NAME.  The fingerprint stays on this computer.
+        fingerprint = stable_machine_fingerprint(adapter)
         if by_machine:
-            results = by_machine.get(stable_machine_fingerprint(adapter) or "")
+            results = by_machine.get(fingerprint or "")
             if results:
                 candidate["version_results"] = dict(results)
+        # What the person said about the machine's condition, keyed the same
+        # way: a machine marked needs repair is not a choice, and a repaired
+        # one is judged by its prints since.  Status and time only.
+        repair = repair_block_by_machine(tracker_db, fingerprint)
+        if repair:
+            candidate["repair"] = repair
         candidates.append(candidate)
 
     # Plain machine code runs anywhere, so an empty result here means

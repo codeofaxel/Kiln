@@ -1297,6 +1297,20 @@ class KilnDB:
                     created_at      REAL NOT NULL,
                     updated_at      REAL NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS printer_repairs (
+                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    machine_fingerprint TEXT NOT NULL,
+                    printer_name        TEXT NOT NULL,
+                    status              TEXT NOT NULL,
+                    kind                TEXT,
+                    note                TEXT,
+                    marked_at           REAL NOT NULL,
+                    created_at          REAL NOT NULL,
+                    determined_by       TEXT NOT NULL DEFAULT 'user_reported'
+                );
+                CREATE INDEX IF NOT EXISTS idx_printer_repairs_machine
+                    ON printer_repairs(machine_fingerprint);
                 """
             )
 
@@ -3199,6 +3213,12 @@ class KilnDB:
         version, so a machine failing everything can be read as a machine
         problem rather than blamed on the version.
 
+        A machine's repair record (:meth:`printer_condition`) draws a line
+        at its latest repair: a print that STARTED before it weighs 0 in
+        ``faded`` (it ran on the machine as it was) and is left out of
+        ``machine_recent``, while the counts stay whole so a reader can still
+        say what happened before the repair.
+
         *machine_fingerprint* keeps one machine.  A row with no fingerprint
         belongs to no machine and is left out.  Empty when the version was
         never printed here.  This is the one reader behind every door that
@@ -3214,7 +3234,7 @@ class KilnDB:
             clauses.append("p.machine_fingerprint = ?")
             params.append(machine_fingerprint)
         rows = self._conn.execute(
-            "SELECT p.machine_fingerprint, p.outcome, "
+            "SELECT p.machine_fingerprint, p.outcome, p.created_at, "
             "  (SELECT COUNT(*) FROM print_outcomes q "
             "    WHERE q.machine_fingerprint = p.machine_fingerprint AND q.id > p.id "
             f"      AND q.{self._DECIDED}) "
@@ -3223,28 +3243,39 @@ class KilnDB:
         ).fetchall()
         word = {"success": "completed", "failed": "failed", "partial": "partial"}
         out: dict[str, dict[str, Any]] = {}
-        for fingerprint, outcome, later in rows:
+        repaired_at: dict[str, float | None] = {}
+        for fingerprint, outcome, started_at, later in rows:
             key = word.get(str(outcome))
             if key is None:
                 continue
-            entry = out.setdefault(str(fingerprint), {
+            fingerprint = str(fingerprint)
+            entry = out.setdefault(fingerprint, {
                 "completed": 0, "failed": 0, "partial": 0,
                 "faded": {"completed": 0.0, "failed": 0.0, "partial": 0.0},
             })
             entry[key] += 1
-            entry["faded"][key] += 0.5 ** (int(later or 0) / FADE_HALF_LIFE_PRINTS)
+            if fingerprint not in repaired_at:
+                repaired_at[fingerprint] = self._latest_repair_time(fingerprint)
+            if not self._before_repair(started_at, repaired_at[fingerprint]):
+                entry["faded"][key] += 0.5 ** (int(later or 0) / FADE_HALF_LIFE_PRINTS)
         for fingerprint, entry in out.items():
             entry["faded"] = {k: round(v, 4) for k, v in entry["faded"].items()}
-            entry["machine_recent"] = self._machine_recent_results(fingerprint)
+            entry["machine_recent"] = self._machine_recent_results(fingerprint, since=repaired_at.get(fingerprint))
         return out
 
-    def _machine_recent_results(self, machine_fingerprint: str) -> dict[str, int]:
+    def _machine_recent_results(self, machine_fingerprint: str, since: float | None = None) -> dict[str, int]:
         """The machine's last :data:`RECENT_PRINTS` settled prints of any
-        version, counted by ending."""
+        version, counted by ending; only prints started at or after *since*
+        (the machine's latest repair) when one is given."""
+        clauses = ["machine_fingerprint = ?", self._SETTLED]
+        params: list[Any] = [machine_fingerprint]
+        if since is not None:
+            clauses.append("created_at >= ?")
+            params.append(float(since))
+        params.append(RECENT_PRINTS)
         rows = self._conn.execute(
-            f"SELECT outcome FROM print_outcomes WHERE machine_fingerprint = ? AND {self._SETTLED} "
-            "ORDER BY id DESC LIMIT ?",
-            (machine_fingerprint, RECENT_PRINTS),
+            f"SELECT outcome FROM print_outcomes WHERE {' AND '.join(clauses)} ORDER BY id DESC LIMIT ?",
+            params,
         ).fetchall()
         recent = {"completed": 0, "failed": 0, "partial": 0}
         for (outcome,) in rows:
@@ -3252,6 +3283,112 @@ class KilnDB:
             if key:
                 recent[key] += 1
         return recent
+
+    @staticmethod
+    def _before_repair(started_at: Any, repaired_at: float | None) -> bool:
+        """A print that started before the machine's latest repair ran on the
+        machine as it was; one with no start time on record is read as
+        after, so a blank never wipes a result."""
+        if repaired_at is None or started_at is None:
+            return False
+        try:
+            return float(started_at) < float(repaired_at)
+        except (TypeError, ValueError):
+            return False
+
+    # ------------------------------------------------------------------
+    # Printer repairs: what a person said about a machine's condition
+    # ------------------------------------------------------------------
+
+    def add_printer_repair(
+        self, machine_fingerprint: str, printer_name: str, status: str,
+        *, kind: str | None = None, note: str | None = None, marked_at: float | None = None,
+    ) -> int:
+        """Append one mark to a machine's repair record and return its row id.
+        The engine (:mod:`kiln.printer_repairs`) decides what a mark may say;
+        this only writes it.  Nothing here is ever updated or deleted: a
+        retraction is itself a row (``status = 'clear'``)."""
+        now = time.time()
+        with self._write_lock:
+            cur = self._conn.execute(
+                "INSERT INTO printer_repairs "
+                "(machine_fingerprint, printer_name, status, kind, note, marked_at, created_at, determined_by) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 'user_reported')",
+                (machine_fingerprint, printer_name, status, kind, note,
+                 float(now if marked_at is None else marked_at), now),
+            )
+            self._conn.commit()
+            return int(cur.lastrowid)
+
+    def printer_repair_marks(self, machine_fingerprint: str) -> list[dict[str, Any]]:
+        """Every mark on a machine's repair record, oldest first, as written."""
+        rows = self._conn.execute(
+            "SELECT id, printer_name, status, kind, note, marked_at, created_at, determined_by "
+            "FROM printer_repairs WHERE machine_fingerprint = ? ORDER BY id ASC",
+            (machine_fingerprint,),
+        ).fetchall()
+        return [
+            {"id": int(r[0]), "printer_name": r[1], "status": r[2], "kind": r[3], "note": r[4],
+             "marked_at": float(r[5]), "created_at": float(r[6]), "determined_by": r[7]}
+            for r in rows
+        ]
+
+    def printer_condition(self, machine_fingerprint: str) -> dict[str, Any]:
+        """A machine's condition from its repair record.
+
+        Marks are read in order; a ``clear`` retracts the latest mark still
+        standing.  The condition is the latest standing mark: none ->
+        ``ok``; ``needed`` -> ``needs_repair`` (``since``); ``done`` ->
+        ``repaired`` (``repaired_at``, ``kind``).  ``repaired_at`` is the
+        latest standing ``done`` whatever came after it, because that is
+        the line the version readers draw: a machine marked needs repair
+        again keeps the reset its last repair earned.  Times are epoch
+        seconds; ``marks`` is the whole record, retractions included.
+        """
+        marks = self.printer_repair_marks(machine_fingerprint)
+        standing: list[dict[str, Any]] = []
+        for mark in marks:
+            if mark["status"] == "clear":
+                if standing:
+                    standing.pop()
+                continue
+            standing.append(mark)
+        dones = [m for m in standing if m["status"] == "done"]
+        latest_done = max(dones, key=lambda m: m["marked_at"]) if dones else None
+        current = standing[-1] if standing else None
+        out: dict[str, Any] = {
+            "state": "ok",
+            "since": None,
+            "repaired_at": latest_done["marked_at"] if latest_done else None,
+            "kind": latest_done["kind"] if latest_done else None,
+            "marks": marks,
+        }
+        if current is not None and current["status"] == "needed":
+            out["state"] = "needs_repair"
+            out["since"] = current["marked_at"]
+            out["kind"] = current["kind"]
+        elif current is not None:
+            out["state"] = "repaired"
+        return out
+
+    def _latest_repair_time(self, machine_fingerprint: str) -> float | None:
+        try:
+            return self.printer_condition(machine_fingerprint)["repaired_at"]
+        except Exception:  # noqa: BLE001 -- a record that cannot be read resets nothing
+            logger.debug("repair record for a machine not read", exc_info=True)
+            return None
+
+    def prints_before_repair(self, machine_fingerprint: str, repaired_at: float) -> dict[str, int]:
+        """How much of a machine's settled record a repair at *repaired_at*
+        sets aside: ``{"prints_before": n, "versions_affected": n}`` --
+        settled prints of any version that started before it, and how many
+        kept versions those prints were of."""
+        row = self._conn.execute(
+            "SELECT COUNT(*), COUNT(DISTINCT version_id) FROM print_outcomes "
+            f"WHERE machine_fingerprint = ? AND created_at < ? AND {self._SETTLED}",
+            (machine_fingerprint, float(repaired_at)),
+        ).fetchone()
+        return {"prints_before": int(row[0] or 0), "versions_affected": int(row[1] or 0)}
 
     def get_file_outcomes(self, file_hash: str) -> dict[str, Any]:
         """Return outcome data for a specific file across all printers."""

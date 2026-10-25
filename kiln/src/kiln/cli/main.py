@@ -55,6 +55,8 @@ except ImportError:
     GenerationError = Exception  # type: ignore[misc,assignment]
 
 from kiln.cli.auth_commands import register_auth_cli
+from kiln.printer_repairs import KINDS as _REPAIR_KINDS
+from kiln.printer_repairs import STATUSES as _REPAIR_STATUSES
 from kiln.cli.bridge_commands import register_bridge_cli
 from kiln.cli.config import (
     PrinterNameTaken,
@@ -4205,6 +4207,45 @@ def repair_guide_cmd(topic, hms_code, step, plan_only, power_off_confirmed, prin
         raise
     except Exception as exc:
         click.echo(format_error(f"Failed to read the repair guide: {exc}", json_mode=json_mode))
+        sys.exit(1)
+
+
+@machine.command("repair")
+@click.argument("printer_name")
+@click.argument("status", type=click.Choice(list(_REPAIR_STATUSES), case_sensitive=False))
+@click.option("--kind", default=None, type=click.Choice(list(_REPAIR_KINDS), case_sensitive=False),
+              help="What was repaired. Required for done; optional for needed.")
+@click.option("--note", default=None, help="What you did, in your own words.")
+@click.option("--when", default=None, help="When it happened, ISO 8601 (2026-10-20T14:00). Default: now. A repair may be dated up to 30 days back, never ahead.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def machine_repair_cmd(printer_name: str, status: str, kind: str | None, note: str | None, when: str | None, json_mode: bool) -> None:
+    """Mark a printer as needing repair, or as repaired.
+
+    Runs the same tool the MCP server exposes (set_printer_repair). NEEDED
+    takes the printer out of routing until it is marked DONE; a print you
+    start on it yourself still runs, with a warning. DONE records the
+    repair (--kind says what was done) and from then on Kiln judges the
+    printer by its next prints; earlier ones stop counting against it,
+    and nothing is deleted. CLEAR takes back the latest mark.
+    """
+    from kiln.server import ensure_runtime_config
+
+    ensure_runtime_config()
+    try:
+        from kiln.printer_repairs import RepairRefused, mark
+
+        try:
+            result = mark(printer_name, status, kind=kind, note=note, when=when)
+        except RepairRefused as exc:
+            click.echo(format_error(exc.message, code=exc.code, json_mode=json_mode))
+            sys.exit(1)
+        click.echo(format_response("success", data=result, json_mode=json_mode))
+    except click.ClickException:
+        raise
+    except SystemExit:
+        raise
+    except Exception as exc:
+        click.echo(format_error(f"Failed to record the printer's repair: {exc}", json_mode=json_mode))
         sys.exit(1)
 
 
