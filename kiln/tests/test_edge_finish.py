@@ -636,7 +636,23 @@ def test_a_round_on_the_bed_is_made_and_said_to_droop():
     assert plan.treatments[0]["kind"] == FILLET and plan.treatments[0]["size_mm"] == 1.0
     caution = plan.cautions[0]
     assert caution["kind"] == "on_the_bed" and caution["edges"] == [1]
-    assert "0.29 mm" in caution["message"] and "45 degrees" in caution["message"]
+    assert "0.29 mm" in caution["message"] and "further than prints without support" in caution["message"]
+
+
+def test_a_plan_never_quotes_the_overhang_limit_it_was_judged_by():
+    """The limit that decides whether a finish hangs stays in the math: with
+    Kiln Pro it is the tuning for the material, so a reply says what hangs
+    and how far, never the angle it was judged against."""
+    from kiln.edge_finish import print_frame
+
+    plan = _plan(_survey(_edge(1, **BED), _edge(2, **UNDER)), size=1.0, frame=PrintFrame(0.4, 0.2, 52.5))
+    assert {c["kind"] for c in plan.cautions} == {"on_the_bed", "overhang"}
+    for caution in plan.cautions:
+        assert "52.5" not in caution["message"] and "degree" not in caution["message"], caution
+        assert "without support" in caution["message"], caution
+    _frame, said = print_frame(nozzle_mm=0.4, material="PLA")
+    assert "overhang_limit_deg" not in said, said
+    assert "degree" not in said["note"] and "without support" in said["note"], said
 
 
 def test_a_round_facing_down_off_the_bed_is_said_to_need_support():
@@ -776,7 +792,7 @@ def test_a_step_part_comes_back_rounded_as_a_mesh_and_as_cad(tmp_path):
     assert len(reply["edges"]["finished"]) == 12
     assert [c["kind"] for c in reply["edges"]["cautions"]] == ["on_the_bed"] * 4
     assert reply["nozzle"]["diameter_mm"] == 0.4 and reply["nozzle"]["source"] == "stated"
-    assert reply["sized_for"]["layer_height_mm"] == 0.2 and reply["sized_for"]["overhang_limit_deg"] == 45.0
+    assert reply["sized_for"]["layer_height_mm"] == 0.2 and "overhang_limit_deg" not in reply["sized_for"]
     assert "12 edge chains rounded" in reply["note"] and "block_filleted.step" in reply["note"]
 
 

@@ -514,7 +514,7 @@ def _caution(plan: EdgePlan, entry: dict[str, Any], size: float, frame: PrintFra
         plan.cautions.append({
             "kind": "on_the_bed", "edges": entry["edges"],
             "message": (
-                f"This {what} is on the bed. Its lowest {band:.2f} mm leans out more than {frame.overhang_deg:g} degrees, "
+                f"This {what} is on the bed. Its lowest {band:.2f} mm leans out further than prints without support, "
                 f"so those layers print over air and droop."
             ),
         })
@@ -522,7 +522,7 @@ def _caution(plan: EdgePlan, entry: dict[str, Any], size: float, frame: PrintFra
         plan.cautions.append({
             "kind": "overhang", "edges": entry["edges"],
             "message": (
-                f"This {what} faces down: {band:.2f} mm of it leans out more than {frame.overhang_deg:g} degrees "
+                f"This {what} faces down: {band:.2f} mm of it leans out further than prints without support "
                 "and needs support under it to print cleanly."
             ),
         })
