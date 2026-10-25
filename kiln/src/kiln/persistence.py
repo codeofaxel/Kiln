@@ -3153,6 +3153,50 @@ class KilnDB:
             "material_stats": material_stats,
         }
 
+    #: A print whose ending is SETTLED: it ended one of the three ways a print
+    #: can end and something said so (``determined_by``).  Routing by a
+    #: version's results reads only these rows: a pending, unknown or
+    #: cancelled print says nothing about how a machine prints that version,
+    #: and neither does a decided word nobody stands behind.
+    _SETTLED = f"{_DECIDED} AND determined_by IS NOT NULL"
+
+    def settled_version_results(
+        self, version_id: str, machine_fingerprint: str | None = None,
+    ) -> dict[str, dict[str, int]]:
+        """Each machine's SETTLED results printing *version_id*, off this
+        computer's own print rows.
+
+        ``{machine_fingerprint: {"completed": n, "failed": n, "partial": n}}``,
+        one entry per machine that has a settled print of this version
+        (:attr:`_SETTLED`; ``success`` here is ``completed`` in the account's
+        words).  *machine_fingerprint* keeps one machine.  A row with no
+        fingerprint belongs to no machine and is left out.  Empty when the
+        version was never printed here.  This is the one reader behind every
+        door that routes a print by the version's results: the candidate
+        builder (:func:`kiln.routing_candidates.collect_routing_candidates`)
+        keys each machine's entry back to its registry name.
+        """
+        if not isinstance(version_id, str) or not version_id.strip():
+            return {}
+        clauses = ["version_id = ?", "machine_fingerprint IS NOT NULL", self._SETTLED]
+        params: list[Any] = [version_id.strip()]
+        if machine_fingerprint:
+            clauses.append("machine_fingerprint = ?")
+            params.append(machine_fingerprint)
+        rows = self._conn.execute(
+            "SELECT machine_fingerprint, "
+            "  SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END), "
+            "  SUM(CASE WHEN outcome = 'failed' THEN 1 ELSE 0 END), "
+            "  SUM(CASE WHEN outcome = 'partial' THEN 1 ELSE 0 END) "
+            f"FROM print_outcomes WHERE {' AND '.join(clauses)} "
+            "GROUP BY machine_fingerprint",
+            params,
+        ).fetchall()
+        return {
+            str(row[0]): {"completed": int(row[1] or 0), "failed": int(row[2] or 0), "partial": int(row[3] or 0)}
+            for row in rows
+        }
+
     def get_file_outcomes(self, file_hash: str) -> dict[str, Any]:
         """Return outcome data for a specific file across all printers."""
         rows = self._conn.execute(

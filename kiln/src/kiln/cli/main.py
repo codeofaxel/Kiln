@@ -910,8 +910,14 @@ def _route_printer_for_job(
     *,
     material: str,
     candidates: list[dict[str, Any]],
+    version_id: str | None = None,
 ) -> tuple[str | None, dict[str, Any] | None, str | None]:
-    """Return (printer_name, routing_data, error_message)."""
+    """Return (printer_name, routing_data, error_message).
+
+    *version_id* is the kept design version being printed, when the door
+    knows it; the router then scores each candidate's own settled results
+    with that version (the counts ``collect_routing_candidates`` attached).
+    """
     if not candidates:
         return None, None, "No eligible printers available for this file/material."
 
@@ -919,8 +925,15 @@ def _route_printer_for_job(
 
     try:
         router = get_job_router()
+        # The version only when the installed router takes one: a kiln-pro
+        # older than this release still reads the criteria.
+        extra = (
+            {"version_id": version_id}
+            if version_id and "version_id" in getattr(RoutingCriteria, "__dataclass_fields__", {})
+            else {}
+        )
         result = router.route_job(
-            RoutingCriteria(material=material),
+            RoutingCriteria(material=material, **extra),
             available_printers=candidates,
         )
         chosen = result.recommended_printer.printer_id
@@ -6869,15 +6882,22 @@ def ingest_watch_cmd(
 
             file_ext = path.suffix.lower()
             pending_counts = {name: len(items) for name, items in pending.items()}
+            # A dropped file that is a print of a kept version is routed by
+            # each machine's results with it, the same way route_print_job is.
+            from kiln.auto_record_hook import version_of_print_file
+
+            version_id = version_of_print_file(str(path))
             candidates = _collect_routing_candidates(
                 adapters=adapters,
                 material=material_type,
                 pending_counts=pending_counts,
                 file_extension=file_ext,
+                version_id=version_id,
             )
             chosen, routing_data, route_error = _route_printer_for_job(
                 material=material_type,
                 candidates=candidates,
+                version_id=version_id,
             )
             if route_error or not chosen:
                 errors.append(f"{path.name}: {route_error or 'no routing candidate'}")

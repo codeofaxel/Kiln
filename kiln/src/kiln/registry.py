@@ -105,6 +105,25 @@ def machine_fingerprint(adapter: PrinterAdapter) -> str:
     return f"{family}:object:{id(adapter):x}"
 
 
+def stable_machine_fingerprint(adapter: PrinterAdapter) -> str | None:
+    """:func:`machine_fingerprint` when it names the MACHINE, else ``None``.
+
+    An adapter with neither serial nor address fingerprints as its own object
+    id -- distinct per process, meaningless across them.  A print row keyed on
+    that would split one machine's history per restart, and a routing read
+    keyed on it would never find the rows.  One rule, read by the print row's
+    start (:func:`kiln.auto_record_hook.print_identity_at_start`) and by the
+    routing candidate builder, so what is written is what is read back.
+    """
+    try:
+        fp = machine_fingerprint(adapter)
+    except Exception:  # noqa: BLE001 -- identity never blocks a print or a route
+        return None
+    if not fp or ":object:" in fp:
+        return None
+    return fp
+
+
 def _disconnect_adapter(adapter: PrinterAdapter, name: str = "") -> None:
     """Safely disconnect an adapter if it supports it.
 

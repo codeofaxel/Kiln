@@ -56,19 +56,21 @@ _ROUTE_TOOL = "plan_fleet_route"
 
 def _served_route(
     file_path: str, material: str, candidates: list[dict[str, Any]], adapters: dict[str, Any],
-    *, quality_priority: int, speed_priority: int,
+    *, quality_priority: int, speed_priority: int, version_id: str | None = None,
 ) -> dict[str, Any]:
     """Route through Kiln's servers when the router is not installed here.
 
     The question is the same one the local engine answers; the facts it
     needs are read HERE and sent: the candidates as the registry reads them
     (``collect_routing_candidates`` -- model, state, queue depth, materials,
-    never an address or a credential), one plate reading per machine
-    (:func:`kiln._pro_placement_bridge.fleet_readings`), and the job's own
-    sliced file once.  The server judges the plates, scores the machines
-    and answers the plan or the refusal in this door's own shape, and it
-    is relayed as it is.  A call that got no answer is said in the shared
-    voice (:mod:`kiln.served_answer`), and nothing is routed.
+    each machine's settled results with the version as COUNTS, never an
+    address, a credential or a machine fingerprint), one plate reading per
+    machine (:func:`kiln._pro_placement_bridge.fleet_readings`), the job's
+    own sliced file once, and the version being printed when it is known.
+    The server judges the plates, scores the machines and answers the plan
+    or the refusal in this door's own shape, and it is relayed as it is.  A
+    call that got no answer is said in the shared voice
+    (:mod:`kiln.served_answer`), and nothing is routed.
     """
     import kiln.server as _srv
     from kiln import _pro_placement_bridge as bridge
@@ -80,6 +82,9 @@ def _served_route(
     sliced = job.get("sliced_gcode_path")
     sliced_wire = bridge.hosted_form({"sliced_gcode": {"path": sliced}})["sliced_gcode"] if sliced else None
     try:
+        # ``version_id`` rides only when known: an older server reads the
+        # request without it exactly as before.
+        extra = {"version_id": version_id} if version_id else {}
         answer = _srv._pro_api_call(
             _ROUTE_TOOL,
             material=material,
@@ -88,6 +93,7 @@ def _served_route(
             sliced_gcode=sliced_wire,
             quality_priority=quality_priority,
             speed_priority=speed_priority,
+            **extra,
         )
     except Exception as exc:  # noqa: BLE001 -- the network is a miss to word, never a traceback
         _logger.debug("%s request failed", _ROUTE_TOOL, exc_info=True)
@@ -104,6 +110,14 @@ def _served_route(
         return answer
     miss = served_answer.classify_answer(answer)
     return _route_miss(miss or served_answer.Miss("unanswered", detail="no plan in the answer"))
+
+
+def _version_criteria(criteria_cls: Any, version_id: str | None) -> dict[str, Any]:
+    """``{"version_id": ...}`` for the router's criteria when the version is
+    known and the installed router takes one; ``{}`` otherwise, so a kiln-pro
+    older than this release is still handed criteria it can read."""
+    fields = getattr(criteria_cls, "__dataclass_fields__", {})
+    return {"version_id": version_id} if version_id and "version_id" in fields else {}
 
 
 def _route_miss(miss: Any) -> dict[str, Any]:
@@ -390,12 +404,20 @@ class _FleetToolsPlugin:
             material: str,
             quality: str | None = None,
             priority: str | None = None,
+            version_id: str | None = None,
         ) -> dict:
             """Route a print job to the best available printer in the fleet.
 
             Scores each registered printer on material match, availability,
             queue depth, and historical success rate, then recommends the
-            best assignment with scored alternatives.  Every candidate also
+            best assignment with scored alternatives.  When the file is a
+            print of a kept design version -- named in ``version_id``, or
+            resolved from the file the way the print's own record resolves
+            it -- each printer is also scored by its own settled results
+            printing THAT version on this computer, and the recommendation
+            carries those counts as ``version_results``.  A printer that
+            never printed the version is scored as having no history with
+            it, never as a bad one.  Every candidate also
             carries a ``plate`` block -- whether the plate as it stands has
             room for this part and how a print there would start.  A machine
             with no room, or a plate Kiln has no record of, is never
@@ -409,6 +431,10 @@ class _FleetToolsPlugin:
                 material: Required filament material (e.g. "PLA", "PETG").
                 quality: Quality preference — "draft", "standard", or "fine".
                 priority: Job urgency — "low", "normal", or "high".
+                version_id: The kept design version this file is a print of,
+                    when the caller knows it.  Left out, Kiln resolves it
+                    from the file itself (a file it sliced here, or a kept
+                    model's own bytes) or routes without one.
             """
             if err := _srv._check_auth("print"):
                 return err
@@ -464,6 +490,12 @@ class _FleetToolsPlugin:
                     if job.printer_name:
                         pending[job.printer_name] = pending.get(job.printer_name, 0) + 1
 
+                # The version being printed: the caller's word, else the
+                # same resolution the print's own row gets at its start.
+                from kiln.auto_record_hook import version_of_print_file
+
+                version = (version_id or "").strip() or version_of_print_file(file_path)
+
                 # Same candidate builder the CLI's routing path uses —
                 # one engine, two doors — fed from the live registry
                 # instead of on-disk printer configs.
@@ -473,6 +505,7 @@ class _FleetToolsPlugin:
                     material=material,
                     pending_counts=pending,
                     file_extension=os.path.splitext(file_path)[1],
+                    version_id=version,
                 )
                 if not candidates:
                     return _srv._error_dict(
@@ -495,6 +528,7 @@ class _FleetToolsPlugin:
                     return _served_route(
                         file_path, material.strip(), candidates, adapters,
                         quality_priority=quality_priority, speed_priority=speed_priority,
+                        version_id=version,
                     )
 
                 # Each candidate's plate, as it stands: the fleet survey is
@@ -511,6 +545,7 @@ class _FleetToolsPlugin:
                     material=material.strip(),
                     quality_priority=quality_priority,
                     speed_priority=speed_priority,
+                    **_version_criteria(RoutingCriteria, version),
                 )
                 result = get_job_router().route_job(criteria, candidates)
                 return {"success": True, "routing": result.to_dict()}
