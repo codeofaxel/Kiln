@@ -23,9 +23,23 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **A CAD assembly now arrives as its parts.** Each part keeps its name, where it sits in the assembly, and its color, so you can print them together or one at a time.
 
+- **Text on a part no longer reads as walls too thin to print.**
+
+- **A part that could come off the bed is told how to hold it down.**
+
+- **Slippery plastics like nylon, PP and PC are never called secure on a standard build plate.**
+
 ### Fixed
 
 - **The Terms prompt tells you when your sign-in has expired**, instead of acting like you have no account.
+
+- **A deboss never cuts through the part.** Text is fitted to a thin part and the reply says how deep it went; a cut that can't keep a floor is refused, with the deepest one that fits.
+
+- **Multicolour prints now slice when you're signed out or offline.**
+
+- **The brim Kiln sets is the brim your slicer prints.**
+
+- **When the slicer can't slice a file, Kiln tells you why instead of erroring out.**
 
 ## [1.5.0] - 2026-10-20
 
