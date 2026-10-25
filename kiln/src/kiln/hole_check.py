@@ -16,6 +16,8 @@ import os
 import sys
 from typing import Any
 
+from kiln.child_interpreter import MEMORY, TIME_LIMIT
+
 #: The allowance, in MB.  Unset or not a positive number: no limit.
 ALLOWANCE_ENV = "KILN_HOLE_CHECK_MAX_MB"
 
@@ -29,12 +31,32 @@ _CHILD_TIMEOUT_S = 60
 
 
 class HoleCheckStopped(Exception):
-    """The check did not finish, so nothing is known about the model's holes."""
+    """The check did not finish, so nothing is known about the model's holes.
 
-    def __init__(self, reason: str, *, held_mb: float | None = None, allowed_mb: float | None = None) -> None:
+    ``cause`` is why, in :mod:`kiln.child_interpreter`'s words: ``MEMORY``
+    (past the allowance; ``held_mb`` and ``allowed_mb`` say by how much),
+    ``TIME_LIMIT`` (past ``time_limit_s``), ``CRASHED`` (the check's process
+    ended with no answer) or ``REFUSED``.  Only a memory stop has memory
+    numbers.
+    """
+
+    def __init__(
+        self,
+        reason: str,
+        *,
+        cause: str | None = None,
+        held_mb: float | None = None,
+        allowed_mb: float | None = None,
+    ) -> None:
         super().__init__(reason)
+        self.cause = cause
         self.held_mb = held_mb
         self.allowed_mb = allowed_mb
+
+    @property
+    def time_limit_s(self) -> int | None:
+        """The time the check was given, when that is what stopped it."""
+        return _CHILD_TIMEOUT_S if self.cause == TIME_LIMIT else None
 
 
 def allowance_mb() -> float | None:
@@ -61,38 +83,45 @@ RUN_HERE_BELOW_TRIANGLES = 150_000
 _MB_PER_TRIANGLE = 0.004
 
 
-def _small_enough_to_run_here(file_path: str, allowed_mb: float) -> bool:
-    """Whether *file_path* is a binary STL small enough to check in-process
-    under *allowed_mb*.
+def stated_triangles(file_path: str) -> int | None:
+    """The triangle count *file_path* states, or ``None`` when it states none worth believing.
 
     Only a binary STL says its triangle count up front (bytes 80-84), and the
     count is believed only when the file is exactly the size that count
-    implies -- a header is cheap to forge, a file is not.  The estimated peak
-    must fit in half the allowance, so a small allowance is never bypassed by
-    the fixed ceiling.  Anything else is answered ``False`` and gets the
-    child, as before.
+    implies -- a header is cheap to forge, a file is not.  A 3MF, an OBJ, a
+    text STL or a file whose size disagrees answers ``None``: its count is
+    known only by reading every triangle.
     """
     try:
         size = os.path.getsize(file_path)
         with open(file_path, "rb") as fh:
             head = fh.read(84)
-        if len(head) < 84 or head[:5].lower() == b"solid":
-            return False
-        count = int.from_bytes(head[80:84], "little")
-        if not 0 < count <= RUN_HERE_BELOW_TRIANGLES:
-            return False
-        if size != 84 + 50 * count:
-            return False
-        return count * _MB_PER_TRIANGLE <= allowed_mb / 2
     except OSError:
-        return False
+        return None
+    if len(head) < 84 or head[:5].lower() == b"solid":
+        return None
+    count = int.from_bytes(head[80:84], "little")
+    return count if count > 0 and size == 84 + 50 * count else None
+
+
+def _small_enough_to_run_here(file_path: str, allowed_mb: float) -> bool:
+    """Whether *file_path* states a triangle count small enough to check
+    in-process under *allowed_mb*.
+
+    The estimated peak must fit in half the allowance, so a small allowance is
+    never bypassed by the fixed ceiling.  A file that states no count is
+    answered ``False`` and gets the child, as before.
+    """
+    count = stated_triangles(file_path)
+    return count is not None and count <= RUN_HERE_BELOW_TRIANGLES and count * _MB_PER_TRIANGLE <= allowed_mb / 2
 
 
 def find_holes(file_path: str, *, diagnostics: dict[str, int] | None = None) -> list[dict[str, Any]]:
     """The holes in *file_path*, as :func:`detect_holes` reports them.
 
-    Raises :class:`HoleCheckStopped` when the machine's allowance stopped the
-    check; ``ValueError`` / ``OSError`` as ``detect_holes`` does.
+    Raises :class:`HoleCheckStopped`, carrying its ``cause``, when the check
+    run under the machine's allowance did not finish; ``ValueError`` /
+    ``OSError`` as ``detect_holes`` does.
     """
     allowed = allowance_mb()
     if allowed is None or _small_enough_to_run_here(file_path, allowed):
@@ -112,7 +141,9 @@ def find_holes(file_path: str, *, diagnostics: dict[str, int] | None = None) -> 
             max_memory_mb=allowed,
         )
     except ChildOverMemory as exc:
-        raise HoleCheckStopped(str(exc), held_mb=exc.held_mb, allowed_mb=exc.allowed_mb) from exc
+        raise HoleCheckStopped(str(exc), cause=MEMORY, held_mb=exc.held_mb, allowed_mb=exc.allowed_mb) from exc
+    # A time limit, a crash or a refusal arrives as HoleCheckStopped already,
+    # its cause set where run_in_child raised it.
     if "error" in answer:
         kinds = {"ValueError": ValueError, "FileNotFoundError": FileNotFoundError}
         raise kinds.get(answer["error"], OSError)(answer["message"])

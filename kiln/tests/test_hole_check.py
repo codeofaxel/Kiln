@@ -106,17 +106,13 @@ def test_this_process_can_be_weighed():
     assert held is not None and 5 < held < 20_000
 
 
-def test_an_analysis_whose_hole_check_was_stopped_says_so_and_tells_the_operator(two_bores, monkeypatch):
-    # The child path, which a part this small would otherwise skip.
-    monkeypatch.setattr(hole_check, "RUN_HERE_BELOW_TRIANGLES", 0)
-    """Holes not checked is said in words, the rest of the report stands, and the machine's operator hears."""
+def _operator(monkeypatch) -> list[tuple[str, dict]]:
+    """Every alert the machine's operator is sent, from a paid package that
+    offers the operator's alert and nothing else."""
     told: list[tuple[str, dict]] = []
     bridge = types.ModuleType("kiln_pro.bridge")
 
-
     class _OnlyAnAlert:
-        """A paid package that offers the operator's alert and nothing else."""
-
         def is_available(self, *_a, **_k) -> bool:
             return False
 
@@ -129,6 +125,14 @@ def test_an_analysis_whose_hole_check_was_stopped_says_so_and_tells_the_operator
     bridge.pro_features = _OnlyAnAlert()
     monkeypatch.setitem(sys.modules, "kiln_pro", types.ModuleType("kiln_pro"))
     monkeypatch.setitem(sys.modules, "kiln_pro.bridge", bridge)
+    return told
+
+
+def test_an_analysis_whose_hole_check_was_stopped_says_so_and_tells_the_operator(two_bores, monkeypatch):
+    # The child path, which a part this small would otherwise skip.
+    monkeypatch.setattr(hole_check, "RUN_HERE_BELOW_TRIANGLES", 0)
+    """Holes not checked is said in words, the rest of the report stands, and the machine's operator hears."""
+    told = _operator(monkeypatch)
 
     monkeypatch.delenv(hole_check.ALLOWANCE_ENV, raising=False)
     sound = analyze_printability(two_bores)
@@ -144,3 +148,86 @@ def test_an_analysis_whose_hole_check_was_stopped_says_so_and_tells_the_operator
     assert len(said) == 1 and "96 triangles" in said[0] and "no limit" in said[0]
     assert [kind for kind, _ in told] == ["hole_check_stopped"]
     assert told[0][1]["triangles"] == 96 and told[0][1]["allowed_mb"] == 5
+    assert told[0][1]["cause"] == child_interpreter.MEMORY
+
+
+def test_a_check_past_its_time_limit_is_said_as_time_and_never_as_memory(two_bores, monkeypatch):
+    """2026-10-25: a check stopped at its time limit reached the operator as
+    "held an unread amount; the check is allowed its allowance", a memory
+    problem with no memory in it, and the person was told their model was too
+    big for the machine."""
+    monkeypatch.setattr(hole_check, "RUN_HERE_BELOW_TRIANGLES", 0)
+    monkeypatch.setenv(hole_check.ALLOWANCE_ENV, "20000")  # memory is never what stops it
+    monkeypatch.setattr(hole_check, "_CHILD_TIMEOUT_S", 0.3)
+    # A check that is slow for whatever reason; a warm child can finish this one inside 0.3 s.
+    monkeypatch.setattr(child_interpreter, "_BOOTSTRAP", "import time; time.sleep(30); " + child_interpreter._BOOTSTRAP)
+    with pytest.raises(hole_check.HoleCheckStopped) as stopped:
+        hole_check.find_holes(two_bores)
+    assert stopped.value.cause == child_interpreter.TIME_LIMIT
+    assert stopped.value.held_mb is None and stopped.value.allowed_mb is None
+    assert stopped.value.time_limit_s == 0.3
+
+    told = _operator(monkeypatch)
+    report = analyze_printability(two_bores)
+    facts = told[0][1]
+    assert facts["cause"] == child_interpreter.TIME_LIMIT and facts["time_limit_s"] == 0.3
+    assert facts["held_mb"] is None and facts["allowed_mb"] is None
+    said = [r for r in report.recommendations if "did not check this model's holes" in r]
+    assert len(said) == 1 and "ran past the time" in said[0] and "triangles" not in said[0]
+
+
+def test_a_check_that_crashed_is_not_blamed_on_the_model(two_bores, monkeypatch):
+    def crashed(*_a, **_k):
+        raise hole_check.HoleCheckStopped("the hole check exited with -9", cause=child_interpreter.CRASHED)
+
+    monkeypatch.setattr(hole_check, "find_holes", crashed)
+    told = _operator(monkeypatch)
+    report = analyze_printability(two_bores)
+    assert told[0][1]["cause"] == child_interpreter.CRASHED
+    assert told[0][1]["held_mb"] is None and told[0][1]["time_limit_s"] is None
+    said = [r for r in report.recommendations if "did not check this model's holes" in r]
+    assert len(said) == 1 and "stopped before it finished" in said[0]
+    assert "triangles" not in said[0] and "no limit" not in said[0]
+
+
+def _obj(path: Path, tris: list) -> str:
+    lines, index = [], {}
+    for tri in tris:
+        for v in tri:
+            if v not in index:
+                index[v] = len(index) + 1
+                lines.append("v {} {} {}".format(*v))
+    lines += ["f {} {} {}".format(*(index[v] for v in tri)) for tri in tris]
+    path.write_text("\n".join(lines) + "\n")
+    return str(path)
+
+
+def _ascii_stl(path: Path, tris: list) -> str:
+    rows = ["solid bores"]
+    for tri in tris:
+        rows += ["facet normal 0 0 0", "outer loop", *("vertex {} {} {}".format(*v) for v in tri), "endloop", "endfacet"]
+    path.write_text("\n".join(rows + ["endsolid bores"]) + "\n")
+    return str(path)
+
+
+@pytest.mark.parametrize(("write", "name", "kind"), [(_obj, "bores.obj", "OBJ"), (_ascii_stl, "bores.stl", "STL")])
+def test_the_operator_hears_a_triangle_count_only_from_a_file_that_states_one(write, name, kind, tmp_path, monkeypatch):
+    """A count worked out from the file's size is a binary STL's arithmetic;
+    for any other file it is a number nobody measured."""
+    path = write(tmp_path / name, _bore(5, 5, 1.5, 6) + _bore(20, 20, 0.25, 6))
+    monkeypatch.setenv(hole_check.ALLOWANCE_ENV, "5")
+    monkeypatch.setattr(child_interpreter, "_MEMORY_LOOK_S", 0.01)
+    told = _operator(monkeypatch)
+    analyze_printability(path)
+    facts = told[0][1]
+    assert "triangles" not in facts
+    assert facts["format"] == kind
+    assert facts["size_mb"] == round(os.path.getsize(path) / 2**20, 1)
+
+
+def test_a_binary_stl_header_is_believed_only_when_the_file_agrees(two_bores, tmp_path):
+    assert hole_check.stated_triangles(two_bores) == 96
+    lying = tmp_path / "lying.stl"
+    lying.write_bytes(Path(two_bores).read_bytes()[:80] + struct.pack("<I", 1000) + Path(two_bores).read_bytes()[84:])
+    assert hole_check.stated_triangles(str(lying)) is None
+    assert hole_check.stated_triangles(str(tmp_path / "missing.stl")) is None

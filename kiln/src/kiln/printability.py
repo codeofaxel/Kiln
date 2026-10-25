@@ -5896,21 +5896,31 @@ def _tell_whoever_runs_this_machine(file_path: str, stopped: Exception) -> None:
 
     A machine with an allowance is someone's server; they need to hear that
     a model went past it, or the allowance quietly becomes a size limit
-    nobody chose.  Never raises: an alert that fails changes no answer.
+    nobody chose.  The alert carries why the check stopped, since memory,
+    time and a crash are tuned in different places, and the model's triangle
+    count only when the file states one; any other file is described by its
+    format and size.  Never raises: an alert that fails changes no answer.
     """
     try:
         from kiln_pro.bridge import pro_features  # type: ignore[import-not-found]
 
         tell = getattr(pro_features, "ops_alert", None)
         if tell is not None:
-            tell(
-                "hole_check_stopped",
-                {
-                    "triangles": max(0, (Path(file_path).stat().st_size - 84) // 50),
-                    "held_mb": getattr(stopped, "held_mb", None),
-                    "allowed_mb": getattr(stopped, "allowed_mb", None),
-                },
-            )
+            from kiln.hole_check import stated_triangles
+
+            facts: dict[str, Any] = {
+                "cause": getattr(stopped, "cause", None),
+                "held_mb": getattr(stopped, "held_mb", None),
+                "allowed_mb": getattr(stopped, "allowed_mb", None),
+                "time_limit_s": getattr(stopped, "time_limit_s", None),
+            }
+            triangles = stated_triangles(file_path)
+            if triangles is not None:
+                facts["triangles"] = triangles
+            else:
+                facts["format"] = Path(file_path).suffix.lstrip(".").upper() or None
+                facts["size_mb"] = round(Path(file_path).stat().st_size / 2**20, 1)
+            tell("hole_check_stopped", facts)
     except Exception:  # noqa: BLE001 -- see the docstring
         logger.debug("no operator alert for a stopped hole check", exc_info=True)
 
@@ -6586,7 +6596,7 @@ def _analyze_printability_here(
     # machine stopped is a different thing from no holes, and is said.
     holes: list[dict[str, Any]] = []
     hole_diagnostics: dict[str, int] = {}
-    holes_not_checked: str | None = None
+    holes_not_checked: str | None = None  # why the check stopped, when it did
     if include_hole_detection:
         from kiln.hole_check import HoleCheckStopped, find_holes
 
@@ -6596,7 +6606,7 @@ def _analyze_printability_here(
             # A path that cannot be read is the parser's to refuse, just below.
             logger.debug("detect_holes failed silently on %s: %s", file_path, exc)
         except HoleCheckStopped as exc:
-            holes_not_checked = str(exc)
+            holes_not_checked = exc.cause or ""
             logger.warning("hole check stopped on %s: %s", Path(file_path).name, exc)
             _tell_whoever_runs_this_machine(file_path, exc)
 
@@ -6792,11 +6802,22 @@ def _analyze_printability_here(
         )
 
     if holes_not_checked is not None:
+        from kiln.child_interpreter import MEMORY, TIME_LIMIT
+
+        # Only a memory stop is about the model's size; a check past its
+        # time limit is often a busy machine, and a crash is neither.
+        if holes_not_checked == MEMORY:
+            why = f"{len(triangles):,} triangles is more than the hole check is given on this machine"
+            remedy = "run it with Kiln installed on your own computer, where the check has no limit"
+        elif holes_not_checked == TIME_LIMIT:
+            why = "the check ran past the time this machine gives it"
+            remedy = "try again, or run it with Kiln installed on your own computer, where the check has no limit"
+        else:
+            why = "the check stopped before it finished"
+            remedy = "try again, or run it with Kiln installed on your own computer"
         recommendations.append(
-            f"Kiln did not check this model's holes: {len(triangles):,} triangles is more than the "
-            "hole check is given on this machine, so no hole here has been counted or sized. "
-            "Everything else in this report stands. To have the holes checked, run it with Kiln "
-            "installed on your own computer, where the check has no limit."
+            f"Kiln did not check this model's holes: {why}, so no hole here has been counted or sized. "
+            f"Everything else in this report stands. To have the holes checked, {remedy}."
         )
 
     # Hole-detection diagnostic notices: surface features the detector
