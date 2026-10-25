@@ -38,7 +38,7 @@ from typing import Any
 
 import pytest
 
-from kiln.persistence import KilnDB
+from kiln.persistence import FADE_HALF_LIFE_PRINTS, RECENT_PRINTS, KilnDB
 from kiln.registry import machine_fingerprint
 
 HOST, ACCESS_CODE = "192.168.7.42", "s3cret-access-code"
@@ -50,6 +50,10 @@ def _machine(name: str) -> SimpleNamespace:
         name=name, serial=f"01P00A0000000{name}", host=HOST, access_code=ACCESS_CODE, _printer_model="bambu_a1",
         get_state=lambda: SimpleNamespace(state=SimpleNamespace(value="idle")),
     )
+
+
+def _counts(block: dict) -> dict:
+    return {k: block[k] for k in ("completed", "failed", "partial")}
 
 
 def _row(db: KilnDB, job: str, printer: str, outcome: str, *, version: str | None = V1,
@@ -84,14 +88,47 @@ class TestSettledResultsOffThePrintRow:
         _row(db, "a7", "shop-a", "pending", fingerprint="fp-a", determined_by=None)
         _row(db, "a8", "shop-a", "unknown", fingerprint="fp-a")
 
-        assert db.settled_version_results(V1) == {
-            "fp-a": {"completed": 1, "failed": 1, "partial": 1},
-            "fp-b": {"completed": 0, "failed": 2, "partial": 0},
-        }
-        assert db.settled_version_results(V1, machine_fingerprint="fp-b") == {
-            "fp-b": {"completed": 0, "failed": 2, "partial": 0},
-        }
-        assert db.settled_version_results(V2) == {"fp-a": {"completed": 1, "failed": 0, "partial": 0}}
+        results = db.settled_version_results(V1)
+        assert set(results) == {"fp-a", "fp-b"}
+        assert _counts(results["fp-a"]) == {"completed": 1, "failed": 1, "partial": 1}
+        assert _counts(results["fp-b"]) == {"completed": 0, "failed": 2, "partial": 0}
+        only_b = db.settled_version_results(V1, machine_fingerprint="fp-b")
+        assert set(only_b) == {"fp-b"} and _counts(only_b["fp-b"]) == {"completed": 0, "failed": 2, "partial": 0}
+        assert _counts(db.settled_version_results(V2)["fp-a"]) == {"completed": 1, "failed": 0, "partial": 0}
+
+    def test_a_result_fades_as_the_machine_prints_more_and_a_rested_machine_keeps_its_history(self, db):
+        """Age is measured in the machine's own prints, never in days: a
+        failure followed by 20 more prints of anything on that machine weighs
+        half; the same failure on a machine that has not printed since
+        weighs whole, however long ago it was."""
+        _row(db, "busy-fail", "busy", "failed", fingerprint="fp-busy")
+        for i in range(FADE_HALF_LIFE_PRINTS):
+            _row(db, f"busy-later-{i}", "busy", "success", fingerprint="fp-busy", version=V2)
+        _row(db, "rested-fail", "rested", "failed", fingerprint="fp-rested")
+        _row(db, "other-machine", "elsewhere", "success", fingerprint="fp-elsewhere", version=V2)
+
+        results = db.settled_version_results(V1)
+        assert results["fp-busy"]["faded"]["failed"] == pytest.approx(0.5)
+        assert results["fp-rested"]["faded"]["failed"] == pytest.approx(1.0)
+        assert _counts(results["fp-busy"]) == {"completed": 0, "failed": 1, "partial": 0}  # the count itself never fades
+
+    def test_an_unsettled_or_cancelled_print_does_not_age_a_result(self, db):
+        _row(db, "f", "m", "failed", fingerprint="fp")
+        _row(db, "c", "m", "cancelled", fingerprint="fp", version=V2)
+        _row(db, "u", "m", "unknown", fingerprint="fp", version=V2)
+        _row(db, "p", "m", "pending", fingerprint="fp", version=V2, determined_by=None)
+        assert db.settled_version_results(V1)["fp"]["faded"]["failed"] == pytest.approx(1.0)
+
+    def test_the_machines_recent_prints_of_anything_ride_beside_the_versions(self, db):
+        """The last RECENT_PRINTS settled prints of the machine, whatever
+        version, so a machine failing everything is read as a machine
+        problem and not blamed on the version."""
+        _row(db, "v1", "m", "success", fingerprint="fp")
+        for i in range(RECENT_PRINTS + 2):
+            _row(db, f"any-{i}", "m", "failed", fingerprint="fp", version=V2)
+        _row(db, "open", "m", "unknown", fingerprint="fp", version=V2)
+        recent = db.settled_version_results(V1)["fp"]["machine_recent"]
+        assert recent == {"completed": 0, "failed": RECENT_PRINTS, "partial": 0}
 
     def test_a_version_never_printed_here_and_no_version_read_as_nothing(self, db):
         _row(db, "a1", "shop-a", "success", fingerprint="fp-a")
@@ -319,7 +356,10 @@ class TestRoutePrintJobPassesTheVersion:
         body = sent[0]
         assert body["tool"] == "plan_fleet_route" and body["version_id"] == V1
         by_name = {c["printer_id"]: c for c in body["candidates"]}
-        assert by_name["a"]["version_results"] == {"completed": 1, "failed": 1, "partial": 0}
+        block = by_name["a"]["version_results"]
+        assert _counts(block) == {"completed": 1, "failed": 1, "partial": 0}
+        assert set(block["faded"]) == {"completed", "failed", "partial"}
+        assert block["machine_recent"] == {"completed": 1, "failed": 1, "partial": 0}
         assert "version_results" not in by_name["b"]
         wire = json.dumps(body)
         assert machine_fingerprint(a) not in wire and HOST not in wire and ACCESS_CODE not in wire
@@ -353,4 +393,4 @@ class TestRoutePrintJobPassesTheVersion:
         assert seen == [path]
         body = sent[0]
         assert body["version_id"] == V2
-        assert body["candidates"][0]["version_results"] == {"completed": 0, "failed": 1, "partial": 0}
+        assert _counts(body["candidates"][0]["version_results"]) == {"completed": 0, "failed": 1, "partial": 0}

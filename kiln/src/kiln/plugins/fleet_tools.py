@@ -415,9 +415,14 @@ class _FleetToolsPlugin:
             resolved from the file the way the print's own record resolves
             it -- each printer is also scored by its own settled results
             printing THAT version on this computer, and the recommendation
-            carries those counts as ``version_results``.  A printer that
-            never printed the version is scored as having no history with
-            it, never as a bad one.  Every candidate also
+            carries those counts as ``version_results``.  A result counts
+            less the more the printer has printed since it (a fixed printer
+            earns its way back; a rested one keeps its history), a printer
+            failing most of its recent prints is read as a printer problem
+            and named as one, and the answer's ``reason`` says in one line
+            why the print went where it did.  A printer that never printed
+            the version is scored as having no history with it, never as a
+            bad one.  Every candidate also
             carries a ``plate`` block -- whether the plate as it stands has
             room for this part and how a print there would start.  A machine
             with no room, or a plate Kiln has no record of, is never

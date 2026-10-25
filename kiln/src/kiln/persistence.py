@@ -525,6 +525,19 @@ class PostgresBackend:
         return _PgDictCursor(self._conn.cursor())
 
 
+#: How a machine's print results age, in that machine's OWN prints: a result
+#: weighs half once the machine has run this many more decided prints of
+#: anything.  Measured in prints, never days, so a farm printing ten times a
+#: week forgets a bad day within the week and a maker printing ten times a
+#: year keeps the year.  A starting figure (2026-10-25): no fleet has been
+#: measured yet; tune it against real routing outcomes, not by feel.
+FADE_HALF_LIFE_PRINTS = 20
+
+#: How many of a machine's most recent settled prints, of any version, say
+#: how it is doing right now (``machine_recent``).
+RECENT_PRINTS = 10
+
+
 class KilnDB:
     """Thread-safe persistence wrapper for Kiln.
 
@@ -3162,40 +3175,83 @@ class KilnDB:
 
     def settled_version_results(
         self, version_id: str, machine_fingerprint: str | None = None,
-    ) -> dict[str, dict[str, int]]:
+    ) -> dict[str, dict[str, Any]]:
         """Each machine's SETTLED results printing *version_id*, off this
-        computer's own print rows.
+        computer's own print rows, with their age and the machine's recent form.
 
-        ``{machine_fingerprint: {"completed": n, "failed": n, "partial": n}}``,
-        one entry per machine that has a settled print of this version
+        One entry per machine that has a settled print of this version
         (:attr:`_SETTLED`; ``success`` here is ``completed`` in the account's
-        words).  *machine_fingerprint* keeps one machine.  A row with no
-        fingerprint belongs to no machine and is left out.  Empty when the
-        version was never printed here.  This is the one reader behind every
-        door that routes a print by the version's results: the candidate
-        builder (:func:`kiln.routing_candidates.collect_routing_candidates`)
-        keys each machine's entry back to its registry name.
+        words), keyed by fingerprint::
+
+            {"completed": n, "failed": n, "partial": n,       # the counts
+             "faded": {"completed": x, "failed": x, "partial": x},
+             "machine_recent": {"completed": n, "failed": n, "partial": n}}
+
+        ``faded`` is the same evidence aged by what the machine has printed
+        SINCE each print, never by the calendar: a result weighs
+        ``0.5 ** (later / FADE_HALF_LIFE_PRINTS)`` where ``later`` is how
+        many decided prints of anything that machine ran after it.  So a
+        failure on a machine that prints ten times a week fades within days
+        and a fixed machine earns its way back, while a machine that prints
+        ten times a year keeps a year of history whole.  A print nobody
+        settled, or a stop someone chose, ages nothing.  ``machine_recent``
+        is that machine's last :data:`RECENT_PRINTS` settled prints of ANY
+        version, so a machine failing everything can be read as a machine
+        problem rather than blamed on the version.
+
+        *machine_fingerprint* keeps one machine.  A row with no fingerprint
+        belongs to no machine and is left out.  Empty when the version was
+        never printed here.  This is the one reader behind every door that
+        routes a print by the version's results: the candidate builder
+        (:func:`kiln.routing_candidates.collect_routing_candidates`) keys each
+        machine's entry back to its registry name; the fingerprint stays here.
         """
         if not isinstance(version_id, str) or not version_id.strip():
             return {}
-        clauses = ["version_id = ?", "machine_fingerprint IS NOT NULL", self._SETTLED]
+        clauses = ["p.version_id = ?", "p.machine_fingerprint IS NOT NULL", self._SETTLED.replace("outcome", "p.outcome").replace("determined_by", "p.determined_by")]
         params: list[Any] = [version_id.strip()]
         if machine_fingerprint:
-            clauses.append("machine_fingerprint = ?")
+            clauses.append("p.machine_fingerprint = ?")
             params.append(machine_fingerprint)
         rows = self._conn.execute(
-            "SELECT machine_fingerprint, "
-            "  SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END), "
-            "  SUM(CASE WHEN outcome = 'failed' THEN 1 ELSE 0 END), "
-            "  SUM(CASE WHEN outcome = 'partial' THEN 1 ELSE 0 END) "
-            f"FROM print_outcomes WHERE {' AND '.join(clauses)} "
-            "GROUP BY machine_fingerprint",
+            "SELECT p.machine_fingerprint, p.outcome, "
+            "  (SELECT COUNT(*) FROM print_outcomes q "
+            "    WHERE q.machine_fingerprint = p.machine_fingerprint AND q.id > p.id "
+            f"      AND q.{self._DECIDED}) "
+            f"FROM print_outcomes p WHERE {' AND '.join(clauses)}",
             params,
         ).fetchall()
-        return {
-            str(row[0]): {"completed": int(row[1] or 0), "failed": int(row[2] or 0), "partial": int(row[3] or 0)}
-            for row in rows
-        }
+        word = {"success": "completed", "failed": "failed", "partial": "partial"}
+        out: dict[str, dict[str, Any]] = {}
+        for fingerprint, outcome, later in rows:
+            key = word.get(str(outcome))
+            if key is None:
+                continue
+            entry = out.setdefault(str(fingerprint), {
+                "completed": 0, "failed": 0, "partial": 0,
+                "faded": {"completed": 0.0, "failed": 0.0, "partial": 0.0},
+            })
+            entry[key] += 1
+            entry["faded"][key] += 0.5 ** (int(later or 0) / FADE_HALF_LIFE_PRINTS)
+        for fingerprint, entry in out.items():
+            entry["faded"] = {k: round(v, 4) for k, v in entry["faded"].items()}
+            entry["machine_recent"] = self._machine_recent_results(fingerprint)
+        return out
+
+    def _machine_recent_results(self, machine_fingerprint: str) -> dict[str, int]:
+        """The machine's last :data:`RECENT_PRINTS` settled prints of any
+        version, counted by ending."""
+        rows = self._conn.execute(
+            f"SELECT outcome FROM print_outcomes WHERE machine_fingerprint = ? AND {self._SETTLED} "
+            "ORDER BY id DESC LIMIT ?",
+            (machine_fingerprint, RECENT_PRINTS),
+        ).fetchall()
+        recent = {"completed": 0, "failed": 0, "partial": 0}
+        for (outcome,) in rows:
+            key = {"success": "completed", "failed": "failed", "partial": "partial"}.get(str(outcome))
+            if key:
+                recent[key] += 1
+        return recent
 
     def get_file_outcomes(self, file_hash: str) -> dict[str, Any]:
         """Return outcome data for a specific file across all printers."""
