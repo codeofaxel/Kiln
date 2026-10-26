@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-26T00:29:14.166805+00:00",
+  "generated": "2026-10-26T02:06:07.805039+00:00",
   "tool_count": 395,
   "categories": {
     "product_generators": {
@@ -5113,7 +5113,7 @@
     },
     {
       "name": "design_version_health",
-      "description": "Full health report for a design across all its versions.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Full health report for a design across all its versions. On a Business or Enterprise plan it also shows how each version printed on each of your printers.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "design_versioning",
