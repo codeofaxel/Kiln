@@ -604,6 +604,26 @@ def test_a_fleet_resume_never_starts_heating_a_stopped_machine():
     assert ("tool", 220.0) not in workshop.sent
 
 
+def test_a_nozzle_heated_ahead_for_a_resume_that_never_comes_is_switched_off_again():
+    """The fleet's head start heats a nozzle before its resume is sent.  If
+    that resume is refused or never sent, the hold switches the nozzle off
+    on its own clock instead of leaving it hot over the part."""
+    _garage, workshop = _bench()
+    _pause(workshop, "workshop")
+    _age_the_pause(workshop)
+    _round(workshop)  # the printer kept it hot: switched off
+    workshop.tool_actual = 40.0
+    workshop.sent.clear()
+
+    server._begin_resume_reheat(workshop)
+    assert workshop.sent == [("tool", 220.0)]
+    _age_the_pause(workshop)
+    workshop.sent.clear()
+    _round(workshop)
+
+    assert ("tool", 0.0) in workshop.sent
+
+
 def test_a_fault_auto_pause_holds_no_heat():
     """A health-monitor pause on a thermal fault (or any fault but a runout or
     a clog) must not keep a heater on.  Before the auto-pause went through the

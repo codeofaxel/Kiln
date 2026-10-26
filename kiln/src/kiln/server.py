@@ -5088,6 +5088,24 @@ class _PauseKeepAlive:
         described["active"] = self.is_running(adapter)
         return described
 
+    def heating_ahead(self, adapter: PrinterAdapter) -> float | None:
+        """The nozzle target to start heating to ahead of a resume not yet sent.
+
+        Unlike :meth:`nozzle_for_resume` this does not hand the nozzle over:
+        the hold goes back to deciding it, from now, so a nozzle heated for a
+        resume that never comes (refused, stopped, the caller gone) is
+        switched off again on the hold's own clock.
+        """
+        import time
+
+        with self._lock:
+            key = self._key(adapter)
+            entry = self._entries.get(key)
+            if entry is not None and entry["nozzle"] != _NOZZLE_PERSONS:
+                entry["nozzle"] = _NOZZLE_WATCHING
+                entry["paused_at"] = time.monotonic()
+            return self._resume_nozzle.get(key)
+
     def nozzle_for_resume(self, adapter: PrinterAdapter) -> float | None:
         """The nozzle target to reheat to before *adapter* resumes, if Kiln paused it.
 
@@ -5299,12 +5317,13 @@ def _begin_resume_reheat(adapter: PrinterAdapter) -> None:
 
     For a resume across many machines: heat them all at once, then let each
     resume wait on its own (:func:`_reheat_before_resume` finds the heat
-    already on its way).  Best-effort; the wait is what decides.
+    already on its way).  Best-effort; the wait is what decides.  A nozzle
+    heated here whose resume never comes is switched off again by the hold.
     """
-    target = _pause_keepalive.nozzle_for_resume(adapter)
-    if not target or target <= 0 or not _sets_temperatures(adapter):
-        return
     if _machine_is_latched(adapter, _lifecycle_printer_name(adapter)):
+        return
+    target = _pause_keepalive.heating_ahead(adapter)
+    if not target or target <= 0 or not _sets_temperatures(adapter):
         return
     try:
         state = adapter.get_state()
