@@ -2308,7 +2308,7 @@ def status(ctx: click.Context, json_mode: bool) -> None:
                     if active_name is None:
                         active_name = raw_cfg.get("active_printer") or "default"
                     if active_name in missing:
-                        entry = (raw_cfg.get("machines") or {}).get(active_name, {})
+                        entry = (raw_cfg.get("printers") or {}).get(active_name, {})
                         suggestion = None
                         if entry.get("type") == "bambu" and entry.get("serial"):
                             suggestion = suggest_bambu_model(entry["serial"])
@@ -8956,7 +8956,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
             from kiln.cli.config import _read_config_file, _write_config_file
 
             raw = _read_config_file(config_path)
-            raw["machines"] = {}
+            raw["printers"] = {}
             raw.pop("active_printer", None)
             _write_config_file(config_path, raw)
             click.echo("  Cleared existing printer config.\n")
@@ -9323,7 +9323,7 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
         discovered = discover_printers(timeout=discovery_timeout)
         results["discover"] = {
             "count": len(discovered),
-            "machines": [{"name": p.name, "host": p.host, "type": p.printer_type} for p in discovered],
+            "printers": [{"name": p.name, "host": p.host, "type": p.printer_type} for p in discovered],
         }
     except OSError as exc:
         results["discover"] = {"count": 0, "error": str(exc)}

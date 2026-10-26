@@ -598,7 +598,7 @@ def _reload_env_config() -> None:
 
         _yaml_full = _read_yaml(_get_cfg_path()) or {}
         _active = _yaml_full.get("active_printer") or "default"
-        _printers = _yaml_full.get("machines") or {}
+        _printers = _yaml_full.get("printers") or {}
         _yaml_cfg = _printers.get(_active, {}) or _printers.get("default", {}) or {}
     except Exception:  # noqa: BLE001
         _yaml_cfg = {}
@@ -2365,7 +2365,7 @@ def _read_config_printers() -> dict[str, dict[str, Any]]:
         from kiln.cli.config import _read_config_file, get_config_path
 
         cfg = _read_config_file(get_config_path()) or {}
-        printers = cfg.get("machines") or {}
+        printers = cfg.get("printers") or {}
         return {name: entry for name, entry in printers.items() if isinstance(entry, dict)}
     except Exception as exc:  # noqa: BLE001 — YAML is best-effort
         logger.debug("Could not read config.yaml printers: %s", exc)
@@ -12976,7 +12976,7 @@ def fleet_status() -> dict:
         if _get_registry().count == 0:
             return {
                 "success": True,
-                "machines": [],
+                "printers": [],
                 "count": 0,
                 "message": "No printers registered.",
             }
@@ -13011,7 +13011,7 @@ def fleet_status() -> dict:
         ]
         return {
             "success": True,
-            "machines": status,
+            "printers": status,
             "count": len(status),
             "idle_printers": idle,
             "connected_count": connected_count,
@@ -16358,7 +16358,7 @@ def resource_status() -> str:
 
     return json.dumps(
         {
-            "machines": printers,
+            "printers": printers,
             "printer_count": len(printers),
             "queue": {
                 "counts": q_summary,
@@ -16389,7 +16389,7 @@ def resource_printers() -> str:
 
     return json.dumps(
         {
-            "machines": printers,
+            "printers": printers,
             "count": len(printers),
             "idle_printers": idle,
         },
@@ -20488,7 +20488,7 @@ def _start() -> None:
 
             _yaml = _read_yaml(_get_cfg_path()) or {}
             _active = _yaml.get("active_printer") or "default"
-            _printers = _yaml.get("machines") or {}
+            _printers = _yaml.get("printers") or {}
             _yaml_printer = (
                 _printers.get(_active, {}) or _printers.get("default", {}) or {}
             )

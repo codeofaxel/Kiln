@@ -82,7 +82,7 @@ class _PrinterManagementToolsPlugin:
                     printers.append(entry)
                 return {
                     "success": True,
-                    "machines": printers,
+                    "printers": printers,
                     "count": len(results),
                     "message": f"Found {len(results)} printer(s) on the network.",
                 }
