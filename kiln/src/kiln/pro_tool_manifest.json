@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-26T07:54:36.602148+00:00",
-  "tool_count": 396,
+  "generated": "2026-10-26T20:36:57.208702+00:00",
+  "tool_count": 398,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -131,6 +131,101 @@
     }
   },
   "tools": [
+    {
+      "name": "get_creator_credit",
+      "description": "Show the signed creator credit settings for your Kiln account.",
+      "tier": "free",
+      "access": "free",
+      "category": "account_management",
+      "parameters": {
+        "properties": {},
+        "title": "get_creator_creditArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
+      }
+    },
+    {
+      "name": "set_creator_credit",
+      "description": "Save Pro+ creator credit, external links, and optional license terms.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "access": "pro",
+      "category": "account_management",
+      "parameters": {
+        "properties": {
+          "handle": {
+            "title": "Handle",
+            "type": "string"
+          },
+          "show_on_artifacts": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Show On Artifacts"
+          },
+          "links": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Links"
+          },
+          "default_license": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Default License"
+          },
+          "show_license_on_artifacts": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Show License On Artifacts"
+          }
+        },
+        "required": [
+          "handle"
+        ],
+        "title": "set_creator_creditArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
+      }
+    },
     {
       "name": "auto_generate_manual_for_print",
       "description": "Fire the automatic manual trigger for a multi-part print (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
@@ -1143,7 +1238,7 @@
             "title": "License Key"
           },
           "return_url": {
-            "default": "https://kiln3d.com/account",
+            "default": "https://app.kiln3d.com/settings/billing",
             "title": "Return Url",
             "type": "string"
           }
@@ -2020,7 +2115,6 @@
         "schema_version": 1,
         "kind": "sync"
       },
-      "served": false,
       "history": {
         "schema_version": 1,
         "mode": "release_push"
@@ -5047,6 +5141,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
