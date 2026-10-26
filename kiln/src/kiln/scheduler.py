@@ -15,12 +15,13 @@ import logging
 import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from kiln.events import EventBus, EventType
 from kiln.print_signoff import grant_from_record, record_refusal
 from kiln.print_start_verdict import resolve_print_start
-from kiln.printers.base import PrinterError, PrinterStatus, status_is_unreachable
+from kiln.printers.base import PrinterEngagementError, PrinterError, PrinterStatus, status_is_unreachable
 from kiln.printers.progress_motion import (
     WATCHED_ENDING_MAX_GAP_S,
     Motion,
@@ -129,6 +130,170 @@ def _no_contact_note(printer_name: str, silent_seconds: float, cause: str) -> st
     )
 
 
+# ---------------------------------------------------------------------------
+# A job that waits, and what it waits for
+# ---------------------------------------------------------------------------
+#
+# A queued job does not start just because a printer went idle.  Two things
+# hold it, and both are a person's or the plan's to settle, never a clock's:
+#
+# THE PLATE.  The last print is still on it.  The file the next job starts
+# from carries the maker's own start sequence, which drives the head across
+# the plate a few millimetres up, so starting it is a collision.  Every door
+# a person starts a print from asks the plate record first
+# (``plate_state.start_refusal``); the queue starts prints with nobody there
+# to ask, and asks the same record before every start.  The job keeps its
+# place until the record changes -- a person says the plate is clear, or a
+# camera look does -- and then starts on the next pass.  A file sliced to
+# start beside what is on the plate (a quiet start for this very plate)
+# starts as it would from any door.
+#
+# THE TURN.  Below Kiln Business, Kiln runs one printer at a time.  A job for
+# a second printer while the first is printing is not refused and not
+# failed: it keeps its place and starts once the first is done.  The start
+# template's gates say so in a code (``TIER_CONCURRENT_PRINT_LIMIT``, or the
+# engagement rule's ``TIER_SINGLE_PRINTER_LIMIT``); nothing was sent, so
+# asking again is harmless, and the queue asks again when a printer that was
+# busy goes idle, or after :data:`TURN_RECHECK_S` in case the answer changed
+# some other way (a plan upgraded, a print started outside Kiln ended).
+#
+# Neither spends a retry.  A retry is for a start that went wrong; this is a
+# start that was right not to happen yet.  Each wait is announced once
+# (``JOB_WAITING``) and written on the job (``metadata["waiting"]``) so every
+# reader -- the running server, the command line, a server restarted since --
+# says the same sentence and the same way through it.
+
+#: How long a job waiting its turn goes before the queue asks the start
+#: gate again even though no printer it watched went idle.  The gate refuses
+#: before anything is sent, so asking costs one peer check, never a print.
+TURN_RECHECK_S = 300.0
+
+#: The start-gate codes that mean "not yet, it is another printer's turn".
+_TURN_CODES = frozenset({"TIER_CONCURRENT_PRINT_LIMIT", "TIER_SINGLE_PRINTER_LIMIT"})
+
+WAIT_PLATE = "plate"
+WAIT_TURN = "turn"
+
+
+@dataclass
+class TurnWait:
+    """The queue is waiting for another printer's print, one at a time."""
+
+    busy: frozenset[str]        # the printers not idle when the wait began
+    started: float              # the scheduler's clock then
+    note: dict[str, Any]        # what the waiting jobs say
+
+
+def _listed(names: list[str]) -> str:
+    names = [n for n in names if n]
+    if len(names) <= 1:
+        return names[0] if names else "another printer"
+    return ", ".join(names[:-1]) + f" and {names[-1]}"
+
+
+def _file_label(file_name: str) -> str:
+    from kiln.plate_state import pretty_job_name
+
+    return pretty_job_name(file_name) or "the next job"
+
+
+def plate_wait_sentence(file_name: str, printers: list[str], state: Any, *, code: str, camera: bool) -> str:
+    """What a job waiting for a plate says, in one breath: what is there,
+    that this file is next, and the one thing that starts it."""
+    name = _file_label(file_name)
+    from kiln.plate_state import PLATE_CHANGED_CODE
+
+    if code == PLATE_CHANGED_CODE:
+        where = printers[0] if printers else "the printer"
+        return (
+            f"{name} was sliced to start beside what was on {where}'s plate, and the plate has changed since, so it "
+            f"waits rather than start there. Slice it again for the plate as it is now, or clear the plate and say so."
+        )
+    look = " Kiln can also look through the printer's camera (look_at_plate)." if camera else ""
+    if len(printers) > 1:
+        return (
+            f"{name} is waiting for a printer with a clear plate: {_listed(printers)} each still hold their last "
+            f"print. Take the part off any one of them and say so (tell your assistant the plate is clear, or run "
+            f"`kiln plate clear`), and Kiln starts {name} there.{look}"
+        )
+    where = printers[0] if printers else "the printer"
+    holds = state.holds_sentence() if state is not None else "The last print is still on the plate."
+    return (
+        f"{name} is next on {where}. {holds} Take it off and say so (tell your assistant the plate is clear, or run "
+        f"`kiln plate clear`), and Kiln starts {name} on its own.{look}"
+    )
+
+
+def turn_wait_sentence(file_name: str, printer_name: str | None, busy: list[str]) -> str:
+    """What a job waiting its turn says: whose print it waits for, and that
+    it keeps its place.  The plan that runs printers side by side is
+    :data:`TURN_UPGRADE`, said once by whoever shows the wait, never inside
+    every job's sentence."""
+    name = _file_label(file_name)
+    other = _listed(busy)
+    on = f" on {printer_name}" if printer_name else ""
+    return (
+        f"Kiln runs one printer at a time on this plan, and {other} is printing. {name} keeps its place in line and "
+        f"starts{on} once {other} is done."
+    )
+
+
+#: Said once beside a turn wait: what lifts it, as a fact.
+TURN_UPGRADE = "Kiln Business runs your printers side by side: https://kiln3d.com/pricing"
+
+
+def describe_wait(
+    job: Any, queue: Any, *, running: dict[str, str] | None = None, idle: frozenset[str] | None = None,
+    retry_at: float | None = None,
+) -> dict[str, Any] | None:
+    """Why a QUEUED job has not started yet, for a person: ``{"kind",
+    "sentence", "ahead"}`` plus whatever the wait on the job carries, or
+    ``None`` for a job that is not queued.
+
+    The wait written on the job (the plate, the turn) comes first: it is the
+    one a person has to act on.  Otherwise the reason is read from what the
+    running queue knows -- *running* (printer -> job printing there), *idle*
+    (printers last read idle) and *retry_at* -- each ``None`` where no queue
+    is running in this process (the command line), and then only the place
+    in line is said.  ``ahead`` counts the queued jobs that go first.
+    """
+    from kiln.queue import JobStatus
+
+    if getattr(job, "status", None) != JobStatus.QUEUED:
+        return None
+    try:
+        line = [j.id for j in queue.queued_for(job.printer_name)]
+        ahead = line.index(job.id) if job.id in line else 0
+    except Exception:  # noqa: BLE001
+        ahead = 0
+    name = _file_label(job.file_name)
+    place = "next in line" if ahead == 0 else f"in line behind {ahead} other job{'s' if ahead != 1 else ''}"
+    written = (job.metadata or {}).get("waiting")
+    if isinstance(written, dict) and written.get("sentence"):
+        return {**written, "ahead": ahead}
+    if retry_at is not None and retry_at > time.time():
+        when = time.strftime("%H:%M", time.localtime(retry_at))
+        return {"kind": "retry", "ahead": ahead,
+                "sentence": f"{name} did not start on the last try; Kiln tries it again at {when}."}
+    target = job.printer_name
+    if target and running is not None and target in running:
+        current = None
+        try:
+            current = _file_label(queue.get_job(running[target]).file_name)
+        except Exception:  # noqa: BLE001
+            current = None
+        doing = f"is printing {current}" if current else "is printing"
+        return {"kind": "printing", "ahead": ahead, "printers": [target],
+                "sentence": f"{target} {doing}. {name} is {place} and starts when it finishes and the plate is clear."}
+    if target and idle is not None and target not in idle:
+        return {"kind": "busy", "ahead": ahead, "printers": [target],
+                "sentence": f"{target} is busy or not answering right now. {name} is {place} and starts when it is free."}
+    if not target and idle is not None and not idle:
+        return {"kind": "busy", "ahead": ahead,
+                "sentence": f"Every printer is busy or not answering right now. {name} is {place} for the first one free."}
+    return {"kind": "in_line", "ahead": ahead, "sentence": f"{name} is {place}."}
+
+
 class JobScheduler:
     """Background scheduler that dispatches print jobs to printers.
 
@@ -184,6 +349,16 @@ class JobScheduler:
         # Monotonic clock, overridable so tests can drive hours in a second.
         self._clock = time.monotonic
         self._lock = threading.Lock()
+        # printer -> the plate record version whose wait was announced, so a
+        # finished part on the plate is announced once, not every pass.
+        self._plate_announced: dict[str, tuple[str, str]] = {}
+        # (job_id, printer) -> (plate version, start_hold answer): a job's
+        # file is read for its start contract once per plate, not per pass.
+        self._plate_answers: dict[tuple[str, str], tuple[tuple[str, str], Any]] = {}
+        # One printer at a time: the wait for another printer's print.
+        self._turn_wait: TurnWait | None = None
+        # The printers last read as idle, for a reader asking why a job waits.
+        self._last_idle: frozenset[str] = frozenset()
 
     @property
     def is_running(self) -> bool:
@@ -615,6 +790,199 @@ class JobScheduler:
             )
         return "Emergency latch is active; operator acknowledgement + clear required."
 
+    # ------------------------------------------------------------------
+    # Waiting: the plate, and the turn (see the module comment above)
+    # ------------------------------------------------------------------
+
+    def _startable_job(
+        self, printer_name: str, waits: dict[str, dict[str, Any]], plate_blocks: dict[str, dict[str, Any]],
+    ) -> Any | None:
+        """The first queued job *printer_name* may start as its plate stands,
+        or ``None``.  Jobs the plate holds back are written into *waits*.
+
+        A clear or unrecorded plate starts the first job in line, as every
+        door does.  An occupied one starts only a file sliced to start
+        beside exactly what is there; every other job keeps its place.
+        """
+        candidates = self._queue.queued_for(printer_name)
+        if not candidates:
+            return None
+        from kiln import plate_state
+
+        try:
+            adapter = self._registry.get(printer_name)
+            state = plate_state.read(adapter)
+        except Exception:  # noqa: BLE001 -- the dispatch below says what is wrong with the printer
+            return candidates[0]
+        if not state.occupied:
+            return candidates[0]
+        version = (str(state.since or ""), plate_state.fingerprint(state))
+        startable = None
+        held: list[str] = []
+        for job in candidates:
+            code = self._plate_answer(job, printer_name, adapter, version)
+            if code is None:
+                startable = job
+                break
+            held.append(job.id)
+            wait = waits.setdefault(job.id, {"kind": WAIT_PLATE, "code": code, "printers": []})
+            if wait.get("kind") == WAIT_PLATE and printer_name not in wait["printers"]:
+                wait["printers"].append(printer_name)
+                wait.setdefault("_state", state)
+        if held:
+            plate_blocks[printer_name] = {
+                "state": state, "version": version, "jobs": held,
+                "camera": bool(plate_state.knows_a_camera(adapter)),
+            }
+        return startable
+
+    def _plate_answer(self, job: Any, printer_name: str, adapter: Any, version: tuple[str, str]) -> str | None:
+        """``start_hold``'s code for *job* on this plate, or ``None`` when it may
+        start.  Read once per plate: the answer turns only on the record and
+        the file, and the file does not change while the job waits."""
+        from kiln import plate_state
+
+        key = (job.id, printer_name)
+        cached = self._plate_answers.get(key)
+        if cached is not None and cached[0] == version:
+            return cached[1]
+        held = plate_state.start_hold(adapter, file_name=job.file_name)
+        code = None if held is None else held[0]
+        self._plate_answers[key] = (version, code)
+        return code
+
+    def _wait_turn(
+        self, job: Any, printer_name: str, idle_printers: list[str], code: str, waits: dict[str, dict[str, Any]],
+    ) -> None:
+        """*job* was turned away because another printer holds the turn: put
+        it back in line, untouched, and wait for that printer."""
+        self._queue.requeue(job.id)
+        idle = set(idle_printers)
+        try:
+            registered = list(self._registry.list_names())
+        except Exception:  # noqa: BLE001
+            registered = []
+        with self._lock:
+            running = set(self._active_jobs.values())
+        busy = frozenset(n for n in registered if n not in idle and n != printer_name) | (running - {printer_name})
+        sentence = turn_wait_sentence(job.file_name, printer_name, sorted(busy))
+        note = {
+            "kind": WAIT_TURN, "code": code, "printers": [printer_name], "waiting_for": sorted(busy),
+            "sentence": sentence, "upgrade": TURN_UPGRADE,
+        }
+        announce = self._turn_wait is None
+        self._turn_wait = TurnWait(busy=busy, started=self._clock(), note=note)
+        waits[job.id] = note
+        if announce:
+            self._event_bus.publish(
+                EventType.JOB_WAITING,
+                {
+                    "job_id": job.id, "file_name": job.file_name, "printer_name": printer_name,
+                    "kind": WAIT_TURN, "waiting_for": sorted(busy), "message": f"{sentence} {TURN_UPGRADE}",
+                },
+                source="scheduler",
+            )
+        logger.info("Job %s waits its turn for %s (%s)", job.id, ", ".join(sorted(busy)) or "another printer", code)
+
+    def _turn_over(self, idle_printers: list[str]) -> bool:
+        """Whether the turn wait has ended: a printer it waited for is idle,
+        none of them is registered any more, or it is time to ask the gate
+        again (:data:`TURN_RECHECK_S`)."""
+        wait = self._turn_wait
+        if wait is None:
+            return True
+        over = any(name in idle_printers for name in wait.busy)
+        if not over and wait.busy:
+            try:
+                over = not (wait.busy & set(self._registry.list_names()))
+            except Exception:  # noqa: BLE001
+                over = False
+        if not over:
+            over = self._clock() - wait.started >= TURN_RECHECK_S
+        if over:
+            self._turn_wait = None
+        return over
+
+    def _settle_waits(
+        self, waits: dict[str, dict[str, Any]], plate_blocks: dict[str, dict[str, Any]],
+        turn_ready: set[str] | frozenset[str] = frozenset(),
+    ) -> None:
+        """Write each queued job's wait on the job, announce each plate that
+        is holding the line once, and forget what no queued job needs.
+
+        A job some printer could start now but for the turn (*turn_ready*)
+        waits for the turn, even where another printer's plate also holds a
+        part: clearing that plate would not start it, so saying so would be
+        a promise the queue does not keep."""
+        queued = self._queue.queued_for(None)
+        queued_ids = {job.id for job in queued}
+        for printer_name, block in plate_blocks.items():
+            still = [job for job in queued if job.id in block["jobs"]]
+            if not still or self._plate_announced.get(printer_name) == block["version"]:
+                continue
+            self._plate_announced[printer_name] = block["version"]
+            first = still[0]
+            code = waits.get(first.id, {}).get("code", "")
+            self._event_bus.publish(
+                EventType.JOB_WAITING,
+                {
+                    "job_id": first.id, "file_name": first.file_name, "printer_name": printer_name,
+                    "kind": WAIT_PLATE, "waiting_jobs": [job.id for job in still],
+                    "message": plate_wait_sentence(
+                        first.file_name, [printer_name], block["state"], code=code, camera=block["camera"],
+                    ),
+                },
+                source="scheduler",
+            )
+        turn = self._turn_wait
+        for job in queued:
+            wait = waits.get(job.id)
+            if turn is not None and (job.id in turn_ready or (
+                wait is None and (job.printer_name is None or job.printer_name not in turn.busy)
+            )):
+                wait = {
+                    **turn.note,
+                    "sentence": turn_wait_sentence(job.file_name, job.printer_name, sorted(turn.busy)),
+                }
+            self._queue.note_waiting(job.id, self._written_wait(job, wait, plate_blocks))
+        for key in [k for k in self._plate_answers if k[0] not in queued_ids]:
+            del self._plate_answers[key]
+
+    @staticmethod
+    def _written_wait(job: Any, wait: dict[str, Any] | None, plate_blocks: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+        """The note a job carries: its kind, the printers, the sentence, and
+        when the wait began -- kept from the note already on the job while
+        it is the same wait, so the clock does not restart every pass."""
+        if wait is None:
+            return None
+        printers = list(wait.get("printers") or [])
+        note = {k: v for k, v in wait.items() if not k.startswith("_")}
+        if note.get("kind") == WAIT_PLATE:
+            camera = any(plate_blocks.get(p, {}).get("camera") for p in printers)
+            note["sentence"] = plate_wait_sentence(
+                job.file_name, printers, wait.get("_state"), code=str(wait.get("code") or ""), camera=camera,
+            )
+        before = (job.metadata or {}).get("waiting")
+        same = isinstance(before, dict) and before.get("kind") == note.get("kind") and before.get("printers") == printers
+        note["since"] = before.get("since") if same and before.get("since") else (
+            datetime.now(timezone.utc).isoformat(timespec="seconds")
+        )
+        return note
+
+    def waiting_for(self, job_id: str) -> dict[str, Any] | None:
+        """Why a queued job has not started, in a sentence, or ``None`` for a
+        job that is not waiting in line.  See :func:`describe_wait`."""
+        try:
+            job = self._queue.get_job(job_id)
+        except Exception:  # noqa: BLE001
+            return None
+        with self._lock:
+            running = {printer: jid for jid, printer in self._active_jobs.items()}
+        return describe_wait(
+            job, self._queue, running=running, idle=self._last_idle,
+            retry_at=self._retry_not_before.get(job_id),
+        )
+
     def tick(self) -> dict[str, Any]:
         """Run one scheduling cycle.  Can be called manually for testing.
 
@@ -853,6 +1221,22 @@ class JobScheduler:
         with self._lock:
             busy_printers = set(self._active_jobs.values())
         available = [p for p in idle_printers if p not in busy_printers]
+        if self._queue.pending_count() > 0:
+            self._last_idle = frozenset(idle_printers)
+
+        # One printer at a time: while another printer's print holds the
+        # turn, nothing starts on a second machine -- every such start would
+        # be turned away the same way -- so no printer is asked anything.
+        # The plates are still read (the record is on this computer, not the
+        # printer), so a job that also waits for its plate says so.
+        turn_held = self._turn_wait is not None and not self._turn_over(idle_printers)
+
+        # Why each job that could not start is waiting, gathered as the
+        # printers are walked and settled once at the end, so a job that
+        # waits on one printer and starts on another this same pass is never
+        # announced as waiting.
+        waits: dict[str, dict[str, Any]] = {}
+        plate_blocks: dict[str, dict[str, Any]] = {}
 
         # Smart routing: rank printers by historical success rate for the
         # next queued unassigned job.  This ensures the best-performing
@@ -862,9 +1246,15 @@ class JobScheduler:
             if queued:
                 available = self._rank_printers(available, queued[0])
 
+        # Jobs a printer could start right now but for the turn: their wait
+        # is the turn, whatever another printer's plate says.
+        turn_ready: set[str] = set()
         for printer_name in available:
-            next_job = self._queue.next_job(printer_name=printer_name)
+            next_job = self._startable_job(printer_name, waits, plate_blocks)
             if next_job is None:
+                continue
+            if turn_held:
+                turn_ready.add(next_job.id)
                 continue
 
             estop_reason = self._emergency_block_reason(printer_name)
@@ -944,11 +1334,18 @@ class JobScheduler:
                     and next_job.metadata[k].strip()
                 }
                 result = adapter.start_print(next_job.file_name, **_ids)
+                if getattr(result, "code", "") in _TURN_CODES:
+                    # Another printer's turn.  Nothing was sent; the job
+                    # keeps its place, and no other printer is tried this
+                    # pass -- each would be turned away the same way.
+                    self._wait_turn(next_job, printer_name, idle_printers, str(result.code), waits)
+                    break
                 verdict = resolve_print_start(
                     adapter, result, sent_at=sent_at,
                     file_name=next_job.file_name,
                 )
                 if verdict.ok:
+                    self._queue.note_waiting(next_job.id, None)
                     self._queue.mark_printing(next_job.id)
                     with self._lock:
                         self._active_jobs[next_job.id] = printer_name
@@ -974,6 +1371,12 @@ class JobScheduler:
                     # the adapter returned none — no local fallback needed.
                     self._requeue_or_fail(next_job.id, verdict.message, failed)
 
+            except PrinterEngagementError as exc:
+                code = str((exc.verdict or {}).get("code") or "")
+                if code in _TURN_CODES:
+                    self._wait_turn(next_job, printer_name, idle_printers, code, waits)
+                    break
+                self._requeue_or_fail(next_job.id, f"Failed to start print on {printer_name}: {exc}", failed)
             except PrinterError as exc:
                 error_msg = f"Failed to start print on {printer_name}: {exc}"
                 self._requeue_or_fail(next_job.id, error_msg, failed)
@@ -982,6 +1385,9 @@ class JobScheduler:
                 self._requeue_or_fail(next_job.id, str(exc), failed)
             finally:
                 printer_mutex.release()
+
+        if self._queue.pending_count() > 0:
+            self._settle_waits(waits, plate_blocks, turn_ready)
 
         return {
             "dispatched": dispatched,

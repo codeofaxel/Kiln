@@ -992,6 +992,8 @@ def format_queue_summary(
 
         if next_job:
             parts.append(f"[bold]Next up:[/bold] {next_job.get('file_name', '?')} (job {next_job.get('id', '?')[:8]})")
+        for line in _waiting_lines(data):
+            parts.append(line)
 
         content = "\n".join(parts)
         result = _render(Panel(content, title="Queue Summary", border_style="blue"))
@@ -1009,10 +1011,28 @@ def format_queue_summary(
         lines.append(f"Breakdown: {breakdown}")
     if next_job:
         lines.append(f"Next up: {next_job.get('file_name', '?')} (job {next_job.get('id', '?')[:8]})")
+    lines.extend(_waiting_lines(data))
     if recent:
         lines.append("")
         lines.append(format_history(recent, json_mode=False))
     return "\n".join(lines)
+
+
+def _waiting_lines(data: dict[str, Any]) -> list[str]:
+    """Why the queued jobs have not started, one line each, then the plates
+    holding the line and, once, the plan that runs printers side by side."""
+    lines: list[str] = []
+    for wait in data.get("waiting") or []:
+        sentence = str(wait.get("sentence") or "").strip()
+        if sentence and wait.get("kind") != "in_line":
+            lines.append(f"Waiting: {sentence}")
+    plates = data.get("plates_to_clear") or []
+    if plates:
+        how = "; ".join(f"kiln plate clear --printer {name}" for name in plates)
+        lines.append(f"Clear the plate on: {', '.join(plates)} ({how})")
+    if data.get("upgrade"):
+        lines.append(str(data["upgrade"]))
+    return lines
 
 
 # ---------------------------------------------------------------------------
@@ -1058,6 +1078,9 @@ def format_job_detail(
 
         if job.get("printer_name"):
             table.add_row("Printer", job["printer_name"])
+        waiting = (job.get("metadata") or {}).get("waiting") if status == "queued" else None
+        if isinstance(waiting, dict) and waiting.get("sentence"):
+            table.add_row("Waiting", str(waiting["sentence"]))
         if job.get("submitted_by"):
             table.add_row("Submitted by", job["submitted_by"])
         if job.get("submitted_at"):
@@ -1092,6 +1115,9 @@ def format_job_detail(
     ]
     if job.get("printer_name"):
         lines.append(f"Printer:  {job['printer_name']}")
+    waiting = (job.get("metadata") or {}).get("waiting") if status == "queued" else None
+    if isinstance(waiting, dict) and waiting.get("sentence"):
+        lines.append(f"Waiting:  {waiting['sentence']}")
     if job.get("submitted_by"):
         lines.append(f"By:       {job['submitted_by']}")
     if job.get("error"):

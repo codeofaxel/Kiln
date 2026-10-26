@@ -3507,11 +3507,15 @@ class PrinterAdapter(ABC):
             _discard_copies(kept)
             hint = blocked.get("override_hint", "")
             reason = blocked.get("reason", "Print blocked by the pre-print safety gate.")
-            return PrintResult(
-                success=False,
-                message=reason + (" " + hint if hint else ""),
-                refused_before_send=True,
-            )
+            # The gate's code rides the result when it has one, so a caller
+            # that must tell "not now" from "never" -- the queue, holding a
+            # job for its turn rather than failing it -- reads the code, not
+            # the sentence.
+            message = reason + (" " + hint if hint else "")
+            code = str(blocked.get("code") or "")
+            if code:
+                return CodedPrintResult(success=False, message=message, refused_before_send=True, code=code)
+            return PrintResult(success=False, message=message, refused_before_send=True)
         # The consent backstop.  An adapter a door handed out (a printer
         # registry, the CLI) starts nothing no clearance covers: the gate
         # every door calls grants one, and a door that forgot to call it

@@ -595,6 +595,37 @@ def read(adapter: Any) -> PlateState:
         return PlateState(machine=machine)
 
 
+def start_hold(
+    adapter: Any, *, resume: bool = False, file_name: str | None = None, local_path: str | None = None,
+) -> tuple[str, PlateState] | None:
+    """Whether the plate as recorded stops a start: ``(code, state)``, or ``None``.
+
+    The decision :func:`start_refusal` makes, without the look it hands a
+    person: :data:`START_NOT_YET_CODE` when the plate holds a part, or
+    :data:`PLATE_CHANGED_CODE` when the file was planned to start beside a
+    plate that has changed since.  For a caller that asks again and again
+    -- the queue, every few seconds while a job waits -- and must not take a
+    camera frame each time.  Reads the record and the file's header only;
+    never raises.
+    """
+    if resume:
+        return None
+    try:
+        state = read(adapter)
+    except Exception:  # noqa: BLE001 -- an unreadable record reads as unknown, which passes
+        return None
+    if not state.occupied:
+        return None
+    contract = quiet_start_contract_for(file_name, local_path=local_path)
+    if contract is not None:
+        planned_plate = str(contract.get("planned_for_plate") or "")
+        planned_machine = str(contract.get("planned_for_machine") or "")
+        if planned_plate == fingerprint(state) and planned_machine and planned_machine == _machine_contract_id(adapter):
+            return None
+        return PLATE_CHANGED_CODE, state
+    return START_NOT_YET_CODE, state
+
+
 def start_refusal(
     adapter: Any, *, resume: bool = False, file_name: str | None = None, local_path: str | None = None,
 ) -> dict[str, Any] | None:
@@ -622,20 +653,11 @@ def start_refusal(
     the printer itself.  A header for a plate that has changed since the
     plan refuses with :data:`PLATE_CHANGED_CODE`.  Never raises.
     """
-    if resume:
+    held = start_hold(adapter, resume=resume, file_name=file_name, local_path=local_path)
+    if held is None:
         return None
-    try:
-        state = read(adapter)
-    except Exception:  # noqa: BLE001 -- an unreadable record reads as unknown, which passes
-        return None
-    if not state.occupied:
-        return None
-    contract = quiet_start_contract_for(file_name, local_path=local_path)
-    if contract is not None:
-        planned_plate = str(contract.get("planned_for_plate") or "")
-        planned_machine = str(contract.get("planned_for_machine") or "")
-        if planned_plate == fingerprint(state) and planned_machine and planned_machine == _machine_contract_id(adapter):
-            return None
+    code, state = held
+    if code == PLATE_CHANGED_CODE:
         # Planned beside a part and the plate has changed since: the remedy
         # is the plan's, not a look.
         return {

@@ -616,17 +616,68 @@ class PrintQueue:
         Returns:
             The next job to execute, or ``None`` if the queue is empty.
         """
+        candidates = self.queued_for(printer_name)
+        return candidates[0] if candidates else None
+
+    def queued_for(self, printer_name: str | None = None) -> list[PrintJob]:
+        """Every QUEUED job *printer_name* could take, in the order the queue
+        runs them: highest priority first, then oldest.
+
+        A job naming no printer may go to any; a job naming one goes only
+        there.  ``None`` lists every queued job.
+        """
         with self._lock:
             candidates = [j for j in self._jobs.values() if j.status == JobStatus.QUEUED]
 
         if printer_name is not None:
             candidates = [j for j in candidates if j.printer_name is None or j.printer_name == printer_name]
 
-        if not candidates:
-            return None
-
         candidates.sort(key=lambda j: (-j.priority, j.created_at))
-        return candidates[0]
+        return candidates
+
+    def requeue(self, job_id: str) -> PrintJob:
+        """Put a job Kiln tried to start back in line, untouched.
+
+        For a start Kiln turned away before sending anything -- it is not
+        this job's turn yet -- so the job has not printed, has not failed,
+        and keeps its place.  A STARTING job only; anything else is
+        returned as it is.
+        """
+        with self._lock:
+            job = self._get(job_id)
+            if job.status != JobStatus.STARTING:
+                return job
+            job.status = JobStatus.QUEUED
+            job.started_at = None
+            job.error = None
+        self._update_job_db(job)
+        return job
+
+    def note_waiting(self, job_id: str, waiting: dict[str, Any] | None) -> None:
+        """Record why a queued job has not started, or clear it (``None``).
+
+        Kept in the job's metadata under ``waiting`` and written to the
+        store, so every reader -- the running server, the command line in
+        another process, a server restarted since -- says the same thing.
+        Writes only when the note changes.  Never raises.
+        """
+        try:
+            with self._lock:
+                job = self._jobs.get(job_id)
+                if job is None:
+                    return
+                current = job.metadata.get("waiting")
+                if current == waiting:
+                    return
+                metadata = dict(job.metadata)
+                if waiting is None:
+                    metadata.pop("waiting", None)
+                else:
+                    metadata["waiting"] = dict(waiting)
+                job.metadata = metadata
+            self._update_metadata_db(job)
+        except Exception:  # noqa: BLE001 -- a note never breaks the queue
+            logger.debug("waiting note for %s not recorded", job_id, exc_info=True)
 
     def pending_count(self) -> int:
         """Number of jobs in QUEUED state."""
@@ -865,6 +916,16 @@ class PrintQueue:
             self._db.commit()
         except Exception:
             logger.exception("Failed to update job %s in SQLite", job.id)
+
+    def _update_metadata_db(self, job: PrintJob) -> None:
+        """Write a job's metadata to SQLite."""
+        if self._db is None:
+            return
+        try:
+            self._db.execute("UPDATE jobs SET metadata=? WHERE id=?", (json.dumps(job.metadata), job.id))
+            self._db.commit()
+        except Exception:
+            logger.exception("Failed to update metadata for job %s in SQLite", job.id)
 
     def _reload_from_db(self) -> None:
         """Reload non-terminal jobs from SQLite on startup."""

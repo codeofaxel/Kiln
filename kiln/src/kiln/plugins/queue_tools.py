@@ -266,6 +266,58 @@ def _watch_alerts() -> list[dict]:
         return []
 
 
+def _waiting(job: Any) -> dict | None:
+    """Why a queued job has not started, from the running queue when this
+    process has one and from the job's own note otherwise (the command
+    line).  ``None`` for a job that is not waiting in line."""
+    import kiln.server as _srv
+    from kiln.scheduler import describe_wait
+
+    scheduler = getattr(_srv, "_scheduler", None)
+    try:
+        if scheduler is not None:
+            return scheduler.waiting_for(job.id)
+        return describe_wait(job, _srv._get_queue())
+    except Exception:
+        _logger.debug("waiting reason unavailable for %s", getattr(job, "id", "?"), exc_info=True)
+        return None
+
+
+def next_up_after_clear(printer_name: str | None) -> dict | None:
+    """The queued job a cleared plate on *printer_name* lets start next, said
+    so the person who cleared it is not surprised when the printer moves.
+
+    Only a job held for this plate's part counts; a file sliced to start
+    beside a part that is gone will not start on an empty plate, so it is
+    never named here.  ``None`` when nothing in the queue waits for it.
+    Never raises.
+    """
+    if not printer_name:
+        return None
+    try:
+        import kiln.server as _srv
+        from kiln.plate_state import START_NOT_YET_CODE, pretty_job_name
+
+        for job in _srv._get_queue().queued_for(printer_name):
+            wait = (job.metadata or {}).get("waiting")
+            if (
+                isinstance(wait, dict) and wait.get("kind") == "plate"
+                and wait.get("code") == START_NOT_YET_CODE and printer_name in (wait.get("printers") or [])
+            ):
+                name = pretty_job_name(job.file_name) or job.file_name
+                return {
+                    "job_id": job.id,
+                    "file_name": job.file_name,
+                    "sentence": (
+                        f"Next on {printer_name}: {name}, which was waiting for this plate. Kiln's queue starts it "
+                        "on its next pass; cancel_queued_job stops that."
+                    ),
+                }
+    except Exception:
+        _logger.debug("next-up lookup failed for %s", printer_name, exc_info=True)
+    return None
+
+
 def job_status(job_id: str) -> dict:
     """Get the status of a queued or completed print job.
 
@@ -273,7 +325,11 @@ def job_status(job_id: str) -> dict:
         job_id: The job ID returned by ``submit_job``.
 
     Returns the full job record including status, timing, and metadata,
-    plus ``watch`` when the scheduler is watching it: ``state`` is
+    plus ``waiting`` while it is queued -- ``kind`` (``plate``: the last
+    print is still on the plate; ``turn``: one printer at a time and
+    another is printing; ``printing``, ``busy``, ``retry`` or ``in_line``),
+    ``sentence`` to show the person, and ``ahead``, how many jobs go first
+    -- and ``watch`` when the scheduler is watching it: ``state`` is
     ``moving`` / ``stalled`` / ``no_contact`` / ``watching`` and ``note``
     is the sentence to show a person when it is not moving.
     """
@@ -286,6 +342,12 @@ def job_status(job_id: str) -> dict:
             "success": True,
             "job": job.to_dict(),
         }
+        waiting = _waiting(job)
+        if waiting is not None:
+            # Why a queued job has not started: the last print still on the
+            # plate, another printer's turn, a printer that is busy, or its
+            # place in line -- and, where a person must act, what to do.
+            response["waiting"] = waiting
         watch = _watch_note(job_id)
         if watch is not None:
             # What the scheduler has seen of this print: moving, stalled,
@@ -305,10 +367,15 @@ def job_status(job_id: str) -> dict:
 def queue_summary() -> dict:
     """Get an overview of the print job queue.
 
-    Returns counts by status, next job to execute, recent jobs, and
+    Returns counts by status, next job to execute, recent jobs,
     ``watch_alerts``: watched prints that have stalled or stopped answering
     and need a person (they stay active until the printer ends them or
-    someone cancels).
+    someone cancels), ``waiting``: every queued job with why it has not
+    started and a sentence to show (see ``job_status``), and
+    ``plates_to_clear``: the printers whose last print is still on the plate
+    and holding the line.  A finished part is never printed onto: the queue
+    waits for the person to clear the plate and say so, then starts the next
+    job by itself.
     """
     import kiln.server as _srv
 
@@ -360,6 +427,17 @@ def queue_summary() -> dict:
         # line below, a post-restart summary reads "completed: 0" to a
         # user whose machine has printed for months.
         finished_on_record = queue.count_finished_on_disk()
+        waiting: list[dict] = []
+        for job in queue.queued_for(None):
+            why = _waiting(job)
+            if why is not None:
+                waiting.append({"job_id": job.id, "file_name": job.file_name, **why})
+        plates_to_clear = sorted({
+            p for w in waiting if w.get("kind") == "plate" for p in (w.get("printers") or [])
+        })
+        upgrade = next((w["upgrade"] for w in waiting if w.get("kind") == "turn" and w.get("upgrade")), None)
+        for w in waiting:
+            w.pop("upgrade", None)
         response = {
             "success": True,
             "counts": summary,
@@ -375,7 +453,16 @@ def queue_summary() -> dict:
             # Watched prints that currently need a person: stalled, or out
             # of contact.  They are counted as active above on purpose.
             "watch_alerts": _watch_alerts(),
+            # Every queued job and why it has not started, in the order the
+            # queue runs them, and the plates a person has to clear for the
+            # line to move.
+            "waiting": waiting,
+            "plates_to_clear": plates_to_clear,
         }
+        if upgrade:
+            # One printer at a time is the plan, said once for the whole
+            # queue, never inside every job's line.
+            response["upgrade"] = upgrade
         if finished_on_record is not None:
             response["finished_jobs_on_record"] = finished_on_record
             in_memory_finished = sum(
