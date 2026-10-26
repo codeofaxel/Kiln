@@ -600,6 +600,7 @@ class KilnDB:
         self._migrate_print_outcomes()
         self._migrate_printer_materials()
         self._migrate_spools()
+        self._migrate_printer_repairs()
         self._enforce_permissions()
 
     # ------------------------------------------------------------------
@@ -725,6 +726,47 @@ class KilnDB:
             self._conn.execute(
                 "ALTER TABLE printer_materials ADD COLUMN determined_by TEXT DEFAULT NULL"
             )
+        self._conn.commit()
+
+    #: The columns the account half of a printer's repair record added
+    #: (2026-10-25): where a mark came from, its id on the account, and
+    #: whether the account has taken it.  Bookkeeping, never identity.
+    PRINTER_REPAIR_ACCOUNT_COLUMNS = {
+        "origin": "TEXT",
+        "account_source_id": "TEXT",
+        "account_pushed": "INTEGER",
+    }
+
+    def _migrate_printer_repairs(self) -> None:
+        """Add the account columns to an existing printer_repairs table.
+
+        ``origin`` is ``here`` for a mark made on this computer and
+        ``account`` for one brought down from the person's account (made on
+        another computer, or on the web); ``account_source_id`` is the
+        mark's id on the account, minted here once for a mark made here and
+        carried as given for one brought down, so a mark is never absorbed
+        twice; ``account_pushed`` says the account has taken a mark made
+        here.  NULL ``origin`` predates the columns and reads as ``here``.
+        """
+        if self._is_postgres:
+            rows = self._conn.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'printer_repairs'",
+            ).fetchall()
+            columns = {row[0] for row in rows}
+        else:
+            columns = {
+                row[1] for row in self._conn.execute("PRAGMA table_info(printer_repairs)").fetchall()
+            }
+        for name, sql_type in self.PRINTER_REPAIR_ACCOUNT_COLUMNS.items():
+            if name not in columns:
+                self._conn.execute(
+                    f"ALTER TABLE printer_repairs ADD COLUMN {name} {sql_type} DEFAULT NULL"
+                )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_printer_repairs_account "
+            "ON printer_repairs(account_source_id)"
+        )
         self._conn.commit()
 
     def _migrate_spools(self) -> None:
@@ -3303,56 +3345,83 @@ class KilnDB:
     def add_printer_repair(
         self, machine_fingerprint: str, printer_name: str, status: str,
         *, kind: str | None = None, note: str | None = None, marked_at: float | None = None,
+        origin: str = "here", account_source_id: str | None = None,
     ) -> int:
         """Append one mark to a machine's repair record and return its row id.
         The engine (:mod:`kiln.printer_repairs`) decides what a mark may say;
         this only writes it.  Nothing here is ever updated or deleted: a
-        retraction is itself a row (``status = 'clear'``)."""
+        retraction is itself a row (``status = 'clear'``).  *origin* is
+        ``here`` for a mark made on this computer (its account id is minted
+        when it goes up) and ``account`` for one brought down from the
+        person's account, which carries the id it already has there."""
         now = time.time()
         with self._write_lock:
             cur = self._conn.execute(
                 "INSERT INTO printer_repairs "
-                "(machine_fingerprint, printer_name, status, kind, note, marked_at, created_at, determined_by) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, 'user_reported')",
+                "(machine_fingerprint, printer_name, status, kind, note, marked_at, created_at, "
+                "determined_by, origin, account_source_id, account_pushed) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 'user_reported', ?, ?, ?)",
                 (machine_fingerprint, printer_name, status, kind, note,
-                 float(now if marked_at is None else marked_at), now),
+                 float(now if marked_at is None else marked_at), now,
+                 origin, account_source_id, 1 if origin == "account" else 0),
             )
             self._conn.commit()
             return int(cur.lastrowid)
 
     def printer_repair_marks(self, machine_fingerprint: str) -> list[dict[str, Any]]:
-        """Every mark on a machine's repair record, oldest first, as written."""
+        """Every mark on a machine's repair record, as written, in the order
+        of the moments they are FOR (``marked_at``, then the row): a mark
+        brought down from the account was made elsewhere, so the order it
+        arrived in here says nothing."""
         rows = self._conn.execute(
-            "SELECT id, printer_name, status, kind, note, marked_at, created_at, determined_by "
-            "FROM printer_repairs WHERE machine_fingerprint = ? ORDER BY id ASC",
+            "SELECT id, printer_name, status, kind, note, marked_at, created_at, determined_by, "
+            "origin, account_source_id "
+            "FROM printer_repairs WHERE machine_fingerprint = ? ORDER BY marked_at ASC, id ASC",
             (machine_fingerprint,),
         ).fetchall()
         return [
             {"id": int(r[0]), "printer_name": r[1], "status": r[2], "kind": r[3], "note": r[4],
-             "marked_at": float(r[5]), "created_at": float(r[6]), "determined_by": r[7]}
+             "marked_at": float(r[5]), "created_at": float(r[6]), "determined_by": r[7],
+             "origin": r[8] or "here", "account_source_id": r[9]}
             for r in rows
         ]
+
+    @staticmethod
+    def standing_repair_marks(marks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """The marks of a record still standing, from *marks* in the order
+        :meth:`printer_repair_marks` gives them.  A ``clear`` retracts the
+        latest standing mark that was WRITTEN before it (``created_at``):
+        a repair dated back to last week, recorded after a clear, is not
+        what that clear took back.  One rule for this computer's record and
+        for the account's (``kiln_pro.cloud.machine_repairs``)."""
+        standing: list[dict[str, Any]] = []
+        for mark in marks:
+            if mark["status"] != "clear":
+                standing.append(mark)
+                continue
+            written = mark.get("created_at") or 0.0
+            for i in range(len(standing) - 1, -1, -1):
+                if (standing[i].get("created_at") or 0.0) <= written:
+                    del standing[i]
+                    break
+        return standing
 
     def printer_condition(self, machine_fingerprint: str) -> dict[str, Any]:
         """A machine's condition from its repair record.
 
-        Marks are read in order; a ``clear`` retracts the latest mark still
-        standing.  The condition is the latest standing mark: none ->
-        ``ok``; ``needed`` -> ``needs_repair`` (``since``); ``done`` ->
-        ``repaired`` (``repaired_at``, ``kind``).  ``repaired_at`` is the
-        latest standing ``done`` whatever came after it, because that is
-        the line the version readers draw: a machine marked needs repair
-        again keeps the reset its last repair earned.  Times are epoch
-        seconds; ``marks`` is the whole record, retractions included.
+        Marks are read in the order of their moments; a ``clear`` retracts
+        the latest mark still standing that was written before it
+        (:meth:`standing_repair_marks`).  The condition is the latest
+        standing mark: none -> ``ok``; ``needed`` -> ``needs_repair``
+        (``since``); ``done`` -> ``repaired`` (``repaired_at``, ``kind``).
+        ``repaired_at`` is the latest standing ``done`` whatever came after
+        it, because that is the line the version readers draw: a machine
+        marked needs repair again keeps the reset its last repair earned.
+        Times are epoch seconds; ``marks`` is the whole record, retractions
+        included.
         """
         marks = self.printer_repair_marks(machine_fingerprint)
-        standing: list[dict[str, Any]] = []
-        for mark in marks:
-            if mark["status"] == "clear":
-                if standing:
-                    standing.pop()
-                continue
-            standing.append(mark)
+        standing = self.standing_repair_marks(marks)
         dones = [m for m in standing if m["status"] == "done"]
         latest_done = max(dones, key=lambda m: m["marked_at"]) if dones else None
         current = standing[-1] if standing else None
@@ -3370,6 +3439,81 @@ class KilnDB:
         elif current is not None:
             out["state"] = "repaired"
         return out
+
+    # The account's copy of a repair mark (kiln.machine_repair_courier)
+
+    def repairs_owed_to_account(self, limit: int = 200) -> list[dict[str, Any]]:
+        """Marks made on this computer the account has not taken yet, oldest
+        first, each with its ``machine_fingerprint``."""
+        rows = self._conn.execute(
+            "SELECT id, machine_fingerprint, printer_name, status, kind, marked_at, created_at, "
+            "account_source_id FROM printer_repairs "
+            "WHERE COALESCE(origin, 'here') = 'here' AND COALESCE(account_pushed, 0) = 0 "
+            "ORDER BY id ASC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [
+            {"id": int(r[0]), "machine_fingerprint": r[1], "printer_name": r[2], "status": r[3],
+             "kind": r[4], "marked_at": float(r[5]), "created_at": float(r[6]), "account_source_id": r[7]}
+            for r in rows
+        ]
+
+    def claim_repair_sync_id(self, row_id: int) -> str:
+        """The mark's id on the account: minted once, never changed after."""
+        import uuid
+
+        with self._write_lock:
+            row = self._conn.execute(
+                "SELECT account_source_id FROM printer_repairs WHERE id = ?", (row_id,)
+            ).fetchone()
+            if row is not None and row[0]:
+                return str(row[0])
+            sync_id = uuid.uuid4().hex
+            self._conn.execute(
+                "UPDATE printer_repairs SET account_source_id = ? "
+                "WHERE id = ? AND account_source_id IS NULL",
+                (sync_id, row_id),
+            )
+            self._conn.commit()
+            got = self._conn.execute(
+                "SELECT account_source_id FROM printer_repairs WHERE id = ?", (row_id,)
+            ).fetchone()
+            return str(got[0]) if got and got[0] else sync_id
+
+    def mark_repair_pushed(self, row_id: int) -> None:
+        """Record that the account took the mark *row_id*."""
+        with self._write_lock:
+            self._conn.execute(
+                "UPDATE printer_repairs SET account_pushed = 1 WHERE id = ?", (row_id,)
+            )
+            self._conn.commit()
+
+    def absorb_account_repair(
+        self, machine_fingerprint: str, printer_name: str, *, account_source_id: str,
+        status: str, kind: str | None, marked_at: float, created_at: float | None = None,
+    ) -> bool:
+        """Keep a mark from the person's account on this computer's record
+        of the machine, unless a row with that account id is already here
+        (this computer's own mark gone up and come back, or one absorbed
+        before).  ``True`` when a row was written."""
+        with self._write_lock:
+            seen = self._conn.execute(
+                "SELECT 1 FROM printer_repairs WHERE account_source_id = ? LIMIT 1",
+                (account_source_id,),
+            ).fetchone()
+            if seen is not None:
+                return False
+            now = time.time()
+            self._conn.execute(
+                "INSERT INTO printer_repairs "
+                "(machine_fingerprint, printer_name, status, kind, note, marked_at, created_at, "
+                "determined_by, origin, account_source_id, account_pushed) "
+                "VALUES (?, ?, ?, ?, NULL, ?, ?, 'user_reported', 'account', ?, 1)",
+                (machine_fingerprint, printer_name, status, kind, float(marked_at),
+                 float(created_at if created_at is not None else now), account_source_id),
+            )
+            self._conn.commit()
+            return True
 
     def _latest_repair_time(self, machine_fingerprint: str) -> float | None:
         try:

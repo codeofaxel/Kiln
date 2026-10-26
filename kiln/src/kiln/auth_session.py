@@ -732,3 +732,37 @@ def resolve_api_bearer(
     return ApiBearer(
         token=session.token, state=session.state, detail=session.detail
     )
+
+
+def _jwt_claims(token: str) -> dict:
+    """The claims of a JWT-shaped bearer, read without verification; ``{}``
+    for anything else.  Trust stays with the server, as for :func:`_jwt_exp`."""
+    try:
+        payload_b64 = token.split(".")[1]
+        payload_b64 += "=" * (-len(payload_b64) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(payload_b64))
+        return claims if isinstance(claims, dict) else {}
+    except (IndexError, ValueError, TypeError, binascii.Error):
+        return {}
+
+
+def signed_in_account_id() -> str | None:
+    """The id Kiln's servers know this computer's sign-in by, or ``None``.
+
+    It is the same id the server keys the account's rows on: the ``sub``
+    claim of a session or machine credential (the account's auth uid), or
+    the ``jti`` of an operator's license key -- read off the bearer this
+    computer already holds, never asked for.  ``None`` when nobody is
+    signed in or the bearer carries no such claim, so a caller that salts
+    something with it has nothing weaker to fall back on.  Never raises.
+    """
+    try:
+        resolved = resolve_api_bearer()
+    except Exception:  # noqa: BLE001 -- no bearer, no id
+        return None
+    if not resolved.token:
+        return None
+    claims = _jwt_claims(resolved.token)
+    claim = "jti" if resolved.state == "license" else "sub"
+    value = str(claims.get(claim) or "").strip()
+    return value or None

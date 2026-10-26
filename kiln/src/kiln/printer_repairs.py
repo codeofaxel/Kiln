@@ -22,11 +22,23 @@ routing.
 A ``done`` may be backdated up to :data:`BACKDATE_LIMIT_S` (the person fixed
 it last week and forgot); nothing may be dated in the future.  ``clear``
 retracts the latest mark still standing, as a row of its own.
+
+When the person is signed in, a mark made here follows the printer to their
+account and to every other computer of theirs
+(:mod:`kiln.machine_repair_courier`), and marks made elsewhere -- another
+computer, the web -- come down into this record.  The account tells two
+computers' records of one machine apart by a shared code
+(:func:`shared_code`, a printer whose own secret both computers hold) or by
+asking the person once; a question is answered with
+:func:`answer_identity`.
 """
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
+import threading
 from datetime import datetime, timezone
 from typing import Any
 
@@ -185,7 +197,8 @@ def mark(
         raise RepairRefused(
             CODE_LOCAL_ONLY,
             "A printer's repair record is kept on the computer your printer is connected to, so this runs "
-            "there, not on Kiln's servers (https://kiln3d.com/install). Keeping it on your account too is coming.",
+            "there, not on Kiln's servers (https://kiln3d.com/install). On the web, the fleet view's buttons "
+            "mark a printer on your account, and a signed-in computer picks the mark up.",
         )
     status_word = str(status or "").strip().lower()
     if status_word not in STATUSES:
@@ -211,7 +224,7 @@ def mark(
     out: dict[str, Any] = {"recorded": True, "printer": name, "status": status_word}
 
     if status_word == "clear":
-        standing = _standing(before["marks"])
+        standing = store.standing_repair_marks(before["marks"])
         if not standing:
             raise RepairRefused(CODE_NOTHING_TO_CLEAR, f"{name} has no repair mark to clear.")
         last = standing[-1]
@@ -229,18 +242,91 @@ def mark(
     after = store.printer_condition(fingerprint)
     out["condition"] = condition_summary(after)
     out["next"] = _next_sentence(name, status_word, out)
+    try:
+        from kiln.machine_repair_courier import push_soon
+
+        push_soon()
+    except Exception:  # noqa: BLE001 -- the record is written; the account is told when it can be
+        logger.debug("printer repair courier not started", exc_info=True)
     return out
 
 
-def _standing(marks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    standing: list[dict[str, Any]] = []
-    for m in marks:
-        if m["status"] == "clear":
-            if standing:
-                standing.pop()
-        else:
-            standing.append(m)
-    return standing
+#: The shared-code recipe's version word, part of its salt.
+SHARED_CODE_SALT = "kiln-printer-code-v1"
+#: PBKDF2 rounds for the shared code: slow enough that a code never helps
+#: anyone guess an access code, cached so each printer pays it once.
+SHARED_CODE_ROUNDS = 200_000
+_shared_codes: dict[str, str] = {}
+_shared_lock = threading.Lock()
+
+
+def shared_code(adapter: Any, *, account_id: str | None = None) -> str | None:
+    """One code for one physical printer, the same on every computer of the
+    signed-in person's that holds the printer's own secret, and nothing the
+    account could turn back into a serial or an access code.
+
+    Today that is a printer set up with a serial and a LAN access code (a
+    Bambu printer): ``"pc:"`` and 24 hex digits of
+    ``HMAC(PBKDF2-SHA256(access_code, salt), "machine")`` where the salt
+    is ``kiln-printer-code-v1|<account id>|<serial>``.  The account id is in
+    the salt so two accounts that share a printer never produce the same
+    code; the access code is the password, so a changed code is a new
+    printer to the account (the person is then asked once, and links the
+    two).  ``None`` for a printer with no such secret, or when nobody is
+    signed in -- never a code made from something weaker.
+    """
+    serial = str(getattr(adapter, "serial", None) or getattr(adapter, "_serial", None) or "").strip().lower()
+    access = str(getattr(adapter, "access_code", None) or getattr(adapter, "_access_code", None) or "").strip()
+    if not serial or not access:
+        return None
+    if account_id is None:
+        from kiln.auth_session import signed_in_account_id
+
+        account_id = signed_in_account_id()
+    account = str(account_id or "").strip()
+    if not account:
+        return None
+    cache_key = hashlib.sha256(f"{account}|{serial}|{access}".encode("utf-8")).hexdigest()
+    with _shared_lock:
+        cached = _shared_codes.get(cache_key)
+    if cached:
+        return cached
+    salt = f"{SHARED_CODE_SALT}|{account}|{serial}".encode("utf-8")
+    key = hashlib.pbkdf2_hmac("sha256", access.encode("utf-8"), salt, SHARED_CODE_ROUNDS)
+    code = "pc:" + hmac.new(key, b"machine", hashlib.sha256).hexdigest()[:24]
+    with _shared_lock:
+        _shared_codes[cache_key] = code
+    return code
+
+
+def answer_identity(adapter_or_name: Any, question_id: str, *, same: bool, db: Any = None) -> dict[str, Any]:
+    """Answer the account's question whether a printer here is the one
+    marked from another computer: *same* links the two records on the
+    account (the mark made there now stands here too), a no is remembered
+    so the pair is never asked again.  Refuses the hosted server like
+    :func:`mark`, and a printer Kiln cannot tell apart."""
+    from kiln.machine_repair_courier import answer_question
+    from kiln.runtime_env import is_hosted_multitenant
+
+    if is_hosted_multitenant():
+        raise RepairRefused(
+            CODE_LOCAL_ONLY,
+            "Which computer's printer this is can only be answered from that computer, or on the web "
+            "(https://kiln3d.com/install).",
+        )
+    adapter, name = _resolve(adapter_or_name)
+    _fingerprint(adapter, name)
+    answer = answer_question(question_id, same=same, db=db)
+    if answer.get("success") is False or answer.get("status") == "error":
+        raise RepairRefused(str(answer.get("code") or "ACCOUNT_NOT_ANSWERED"), str(answer.get("error") or ""))
+    out = {"recorded": True, "printer": name, "question_id": answer.get("question_id"),
+           "answer": answer.get("answer"), "linked": answer.get("linked"), "account": answer.get("account")}
+    out["condition"] = condition(adapter, db=db)
+    out["next"] = (
+        f"{name} and the printer marked from the other computer are one record now; its marks stand here too."
+        if same else f"{name} keeps its own record; you will not be asked about that pair again."
+    )
+    return out
 
 
 def _next_sentence(name: str, status: str, out: dict[str, Any]) -> str:
@@ -324,10 +410,12 @@ __all__ = [
     "KINDS",
     "STATUSES",
     "RepairRefused",
+    "answer_identity",
     "condition",
     "condition_summary",
     "day_word",
     "mark",
     "routing_block",
+    "shared_code",
     "start_warning",
 ]

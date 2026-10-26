@@ -2308,7 +2308,7 @@ def status(ctx: click.Context, json_mode: bool) -> None:
                     if active_name is None:
                         active_name = raw_cfg.get("active_printer") or "default"
                     if active_name in missing:
-                        entry = (raw_cfg.get("printers") or {}).get(active_name, {})
+                        entry = (raw_cfg.get("machines") or {}).get(active_name, {})
                         suggestion = None
                         if entry.get("type") == "bambu" and entry.get("serial"):
                             suggestion = suggest_bambu_model(entry["serial"])
@@ -4212,13 +4212,19 @@ def repair_guide_cmd(topic, hms_code, step, plan_only, power_off_confirmed, prin
 
 @machine.command("repair")
 @click.argument("printer_name")
-@click.argument("status", type=click.Choice(list(_REPAIR_STATUSES), case_sensitive=False))
+@click.argument("status", required=False, default=None,
+                type=click.Choice(list(_REPAIR_STATUSES), case_sensitive=False))
 @click.option("--kind", default=None, type=click.Choice(list(_REPAIR_KINDS), case_sensitive=False),
               help="What was repaired. Required for done; optional for needed.")
-@click.option("--note", default=None, help="What you did, in your own words.")
+@click.option("--note", default=None, help="What you did, in your own words (kept on this computer).")
 @click.option("--when", default=None, help="When it happened, ISO 8601 (2026-10-20T14:00). Default: now. A repair may be dated up to 30 days back, never ahead.")
+@click.option("--same-as", "same_as", default=None, metavar="QUESTION_ID",
+              help="Answer your account's question: this printer IS the one marked from another computer.")
+@click.option("--different-from", "different_from", default=None, metavar="QUESTION_ID",
+              help="Answer your account's question: this printer is NOT that one (never asked again).")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def machine_repair_cmd(printer_name: str, status: str, kind: str | None, note: str | None, when: str | None, json_mode: bool) -> None:
+def machine_repair_cmd(printer_name: str, status: str | None, kind: str | None, note: str | None,
+                       when: str | None, same_as: str | None, different_from: str | None, json_mode: bool) -> None:
     """Mark a printer as needing repair, or as repaired.
 
     Runs the same tool the MCP server exposes (set_printer_repair). NEEDED
@@ -4227,15 +4233,45 @@ def machine_repair_cmd(printer_name: str, status: str, kind: str | None, note: s
     repair (--kind says what was done) and from then on Kiln judges the
     printer by its next prints; earlier ones stop counting against it,
     and nothing is deleted. CLEAR takes back the latest mark.
+
+    Signed in, a mark follows the printer to your Kiln account and your
+    other computers. When the account asks whether a printer marked from
+    another computer is this one, answer with --same-as or
+    --different-from and the question's id, with no status.
     """
     from kiln.server import ensure_runtime_config
 
     ensure_runtime_config()
     try:
-        from kiln.printer_repairs import RepairRefused, mark
+        from kiln.printer_repairs import RepairRefused, answer_identity, mark
 
         try:
-            result = mark(printer_name, status, kind=kind, note=note, when=when)
+            if same_as or different_from:
+                if (same_as and different_from) or status:
+                    click.echo(format_error(
+                        "Answer one question at a time, with no status: --same-as or --different-from.",
+                        code="REPAIR_ANSWER_AMBIGUOUS", json_mode=json_mode))
+                    sys.exit(1)
+                result = answer_identity(printer_name, same_as or different_from, same=bool(same_as))
+            elif not status:
+                click.echo(format_error(
+                    "STATUS is needed, done or clear; or answer a question with --same-as / --different-from.",
+                    code="REPAIR_STATUS_UNKNOWN", json_mode=json_mode))
+                sys.exit(1)
+            else:
+                result = mark(printer_name, status, kind=kind, note=note, when=when)
+                try:
+                    from kiln.auth_session import resolve_api_bearer
+
+                    if resolve_api_bearer().token:
+                        from kiln.machine_repair_courier import _ACCOUNT_REPLY_WAIT_S, sync
+
+                        synced = sync(timeout=_ACCOUNT_REPLY_WAIT_S)
+                        result["account"] = {k: v for k, v in synced.items() if k != "questions"}
+                        if synced.get("questions"):
+                            result["questions"] = synced["questions"]
+                except Exception as exc:  # noqa: BLE001 -- the account is a copy; the record is here
+                    result["account"] = {"synced": False, "why": "not_reached", "error": str(exc)}
         except RepairRefused as exc:
             click.echo(format_error(exc.message, code=exc.code, json_mode=json_mode))
             sys.exit(1)
@@ -8920,7 +8956,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
             from kiln.cli.config import _read_config_file, _write_config_file
 
             raw = _read_config_file(config_path)
-            raw["printers"] = {}
+            raw["machines"] = {}
             raw.pop("active_printer", None)
             _write_config_file(config_path, raw)
             click.echo("  Cleared existing printer config.\n")
@@ -9287,7 +9323,7 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
         discovered = discover_printers(timeout=discovery_timeout)
         results["discover"] = {
             "count": len(discovered),
-            "printers": [{"name": p.name, "host": p.host, "type": p.printer_type} for p in discovered],
+            "machines": [{"name": p.name, "host": p.host, "type": p.printer_type} for p in discovered],
         }
     except OSError as exc:
         results["discover"] = {"count": 0, "error": str(exc)}

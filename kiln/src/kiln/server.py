@@ -598,7 +598,7 @@ def _reload_env_config() -> None:
 
         _yaml_full = _read_yaml(_get_cfg_path()) or {}
         _active = _yaml_full.get("active_printer") or "default"
-        _printers = _yaml_full.get("printers") or {}
+        _printers = _yaml_full.get("machines") or {}
         _yaml_cfg = _printers.get(_active, {}) or _printers.get("default", {}) or {}
     except Exception:  # noqa: BLE001
         _yaml_cfg = {}
@@ -1510,6 +1510,9 @@ def _install_mcp_request_context_capture() -> None:
             # A person's word that the bed is clear, typed in a chat: where
             # this app can draw a dialog, the person is asked directly.
             await _ask_the_person_about_the_bed(name, arguments, context)
+            # A printer marked from another computer that may be this one:
+            # where this app can draw a dialog, the person is asked directly.
+            await _ask_the_person_about_the_machine(name, arguments, context)
             # ``null`` for a non-Optional field and a bare string for a list
             # field are coerced here, once, for every tool — see
             # kiln.tool_args.  Everything else pydantic still judges.
@@ -2362,7 +2365,7 @@ def _read_config_printers() -> dict[str, dict[str, Any]]:
         from kiln.cli.config import _read_config_file, get_config_path
 
         cfg = _read_config_file(get_config_path()) or {}
-        printers = cfg.get("printers") or {}
+        printers = cfg.get("machines") or {}
         return {name: entry for name, entry in printers.items() if isinstance(entry, dict)}
     except Exception as exc:  # noqa: BLE001 — YAML is best-effort
         logger.debug("Could not read config.yaml printers: %s", exc)
@@ -2857,6 +2860,57 @@ async def _ask_the_person_about_the_bed(tool_name: str, arguments: dict | None, 
     elif answer == ASKED_NO:
         plate_state.note_plate_word_answer(plate_state.WORD_DECLINED)
     _audit("look_at_plate", "bed_question_answered", details={"printer": target_name, "answer": answer})
+
+
+async def _ask_the_person_about_the_machine(tool_name: str, arguments: dict | None, ctx: Any) -> None:
+    """``set_printer_repair`` on a signed-in computer: when the account has
+    an open question about the printer named -- a printer of the same model
+    was marked from another computer, and nothing says whether it is this
+    one -- and the connected app can draw a dialog, the person is asked
+    before the mark, in a dialog the assistant does not hold.  A yes links
+    the two records on the account; a no is remembered, so the pair is
+    never asked again; a question that could not be put is left in the
+    tool's own reply (``questions``), where ``same_as`` / ``different_from``
+    answer it.  Never asked for a call that is itself an answer, on the
+    hosted server, or where no dialog can be drawn.  Never raises.
+    """
+    args = arguments if isinstance(arguments, dict) else {}
+    if tool_name != "set_printer_repair" or ctx is None or args.get("same_as") or args.get("different_from"):
+        return
+    try:
+        if _hosted_now():
+            return
+        if not host_can_ask_the_user(mcp, ctx) or screen_code.host_dialog_hook(_host_client_name(ctx)):
+            return
+        from kiln import machine_repair_courier as courier
+        from kiln.auth_session import resolve_api_bearer
+        from kiln.mcp_compat import ASKED_NO, ASKED_YES, ask_user_yes_or_no
+        from kiln.printer_repairs import _resolve
+
+        if not resolve_api_bearer().token:
+            return
+        adapter, printer_name = _resolve(str(args.get("printer_name") or ""))
+        await asyncio.to_thread(courier.sync, timeout=courier._ACCOUNT_REPLY_WAIT_S)
+        questions = courier.open_questions(adapter)
+        if not questions:
+            return
+        question = questions[0]
+        answer = await ask_user_yes_or_no(
+            ctx, question["words"] or f"Is the printer marked from your other computer this one ({printer_name})?",
+            title="IsThisThePrinter", yes="Yes, the same printer", no="No, a different printer",
+        )
+    except Exception:  # noqa: BLE001 -- a question that could not be put is not an answer
+        logger.debug("the person could not be asked about the printer", exc_info=True)
+        return
+    if answer not in (ASKED_YES, ASKED_NO):
+        return
+    try:
+        await asyncio.to_thread(courier.answer_question, question["id"], same=answer == ASKED_YES)
+    except Exception:  # noqa: BLE001 -- the account did not take the answer; the reply still carries the question
+        logger.debug("the printer question's answer did not reach the account", exc_info=True)
+        return
+    _audit("set_printer_repair", "printer_question_answered",
+           details={"printer": printer_name, "answer": answer, "question_id": question["id"]})
 
 
 def _host_client_name(ctx: Any) -> str:
@@ -12922,7 +12976,7 @@ def fleet_status() -> dict:
         if _get_registry().count == 0:
             return {
                 "success": True,
-                "printers": [],
+                "machines": [],
                 "count": 0,
                 "message": "No printers registered.",
             }
@@ -12957,7 +13011,7 @@ def fleet_status() -> dict:
         ]
         return {
             "success": True,
-            "printers": status,
+            "machines": status,
             "count": len(status),
             "idle_printers": idle,
             "connected_count": connected_count,
@@ -16304,7 +16358,7 @@ def resource_status() -> str:
 
     return json.dumps(
         {
-            "printers": printers,
+            "machines": printers,
             "printer_count": len(printers),
             "queue": {
                 "counts": q_summary,
@@ -16335,7 +16389,7 @@ def resource_printers() -> str:
 
     return json.dumps(
         {
-            "printers": printers,
+            "machines": printers,
             "count": len(printers),
             "idle_printers": idle,
         },
@@ -20434,7 +20488,7 @@ def _start() -> None:
 
             _yaml = _read_yaml(_get_cfg_path()) or {}
             _active = _yaml.get("active_printer") or "default"
-            _printers = _yaml.get("printers") or {}
+            _printers = _yaml.get("machines") or {}
             _yaml_printer = (
                 _printers.get(_active, {}) or _printers.get("default", {}) or {}
             )
