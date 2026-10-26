@@ -327,12 +327,12 @@ class _PrinterManagementToolsPlugin:
                 )
 
         # ------------------------------------------------------------------
-        # set_printer_repair
+        # set_machine_repair
         # ------------------------------------------------------------------
 
         @mcp.tool()
-        def set_printer_repair(
-            printer_name: str,
+        def set_machine_repair(
+            machine_name: str,
             status: str = "",
             kind: str | None = None,
             note: str | None = None,
@@ -358,7 +358,7 @@ class _PrinterManagementToolsPlugin:
             not), passing the question's id and no status.
 
             Args:
-                printer_name: The printer, by its name here.
+                machine_name: The printer, by its name here.
                 status: ``needed`` (out of service until repaired), ``done``
                     (repaired; ``kind`` required), or ``clear`` (take back
                     the latest mark).  Left out only to answer a question.
@@ -387,7 +387,7 @@ class _PrinterManagementToolsPlugin:
             if err := _srv._check_auth("write"):
                 return err
 
-            from kiln.printer_repairs import RepairRefused, answer_identity, mark
+            from kiln.machine_repairs import RepairRefused, answer_identity, mark
 
             try:
                 if same_as or different_from:
@@ -401,20 +401,20 @@ class _PrinterManagementToolsPlugin:
                             "Answering a question takes no status; mark the printer in a second call.",
                             code="REPAIR_ANSWER_AMBIGUOUS",
                         )
-                    result = answer_identity(printer_name, same_as or different_from, same=bool(same_as))
+                    result = answer_identity(machine_name, same_as or different_from, same=bool(same_as))
                     return {"success": True, **result}
                 if not status:
                     return _srv._error_dict(
                         "status is needed, done or clear; or answer a question with same_as / different_from.",
                         code="REPAIR_STATUS_UNKNOWN",
                     )
-                result = mark(printer_name, status, kind=kind, note=note, when=when)
+                result = mark(machine_name, status, kind=kind, note=note, when=when)
                 result.update(_account_after_mark())
                 return {"success": True, **result}
             except RepairRefused as exc:
                 return _srv._error_dict(exc.message, code=exc.code)
             except Exception as exc:
-                _logger.exception("Error in set_printer_repair")
+                _logger.exception("Error in set_machine_repair")
                 return _srv._error_dict(
                     f"Failed to record the printer's repair: {exc}", code="INTERNAL_ERROR",
                 )
@@ -432,7 +432,7 @@ class _PrinterManagementToolsPlugin:
 
                 synced = sync(timeout=_ACCOUNT_REPLY_WAIT_S)
             except Exception as exc:  # noqa: BLE001 -- the account is a copy; the record is here
-                _logger.debug("set_printer_repair: account not reached", exc_info=True)
+                _logger.debug("set_machine_repair: account not reached", exc_info=True)
                 return {"account": {"synced": False, "why": "not_reached", "error": str(exc)}}
             out: dict = {"account": {k: v for k, v in synced.items() if k != "questions"}}
             if synced.get("questions"):

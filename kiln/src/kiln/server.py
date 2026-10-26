@@ -2863,7 +2863,7 @@ async def _ask_the_person_about_the_bed(tool_name: str, arguments: dict | None, 
 
 
 async def _ask_the_person_about_the_machine(tool_name: str, arguments: dict | None, ctx: Any) -> None:
-    """``set_printer_repair`` on a signed-in computer: when the account has
+    """``set_machine_repair`` on a signed-in computer: when the account has
     an open question about the printer named -- a printer of the same model
     was marked from another computer, and nothing says whether it is this
     one -- and the connected app can draw a dialog, the person is asked
@@ -2875,7 +2875,7 @@ async def _ask_the_person_about_the_machine(tool_name: str, arguments: dict | No
     hosted server, or where no dialog can be drawn.  Never raises.
     """
     args = arguments if isinstance(arguments, dict) else {}
-    if tool_name != "set_printer_repair" or ctx is None or args.get("same_as") or args.get("different_from"):
+    if tool_name != "set_machine_repair" or ctx is None or args.get("same_as") or args.get("different_from"):
         return
     try:
         if _hosted_now():
@@ -2885,11 +2885,11 @@ async def _ask_the_person_about_the_machine(tool_name: str, arguments: dict | No
         from kiln import machine_repair_courier as courier
         from kiln.auth_session import resolve_api_bearer
         from kiln.mcp_compat import ASKED_NO, ASKED_YES, ask_user_yes_or_no
-        from kiln.printer_repairs import _resolve
+        from kiln.machine_repairs import _resolve
 
         if not resolve_api_bearer().token:
             return
-        adapter, printer_name = _resolve(str(args.get("printer_name") or ""))
+        adapter, printer_name = _resolve(str(args.get("machine_name") or ""))
         await asyncio.to_thread(courier.sync, timeout=courier._ACCOUNT_REPLY_WAIT_S)
         questions = courier.open_questions(adapter)
         if not questions:
@@ -2909,7 +2909,7 @@ async def _ask_the_person_about_the_machine(tool_name: str, arguments: dict | No
     except Exception:  # noqa: BLE001 -- the account did not take the answer; the reply still carries the question
         logger.debug("the printer question's answer did not reach the account", exc_info=True)
         return
-    _audit("set_printer_repair", "printer_question_answered",
+    _audit("set_machine_repair", "printer_question_answered",
            details={"printer": printer_name, "answer": answer, "question_id": question["id"]})
 
 

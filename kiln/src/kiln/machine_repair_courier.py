@@ -1,11 +1,11 @@
 """Carries a printer's repair marks to the person's Kiln account, and back.
 
-A mark on a printer's repair record (:mod:`kiln.printer_repairs`) is made on
+A mark on a printer's repair record (:mod:`kiln.machine_repairs`) is made on
 the computer the printer is connected to.  A person with two computers, or
 one who marks a printer from the web, wants that mark to follow the printer
 everywhere: when the person is signed in, this courier sends every mark made
 here up to their account and brings down the marks made elsewhere for the
-same printers, so routing, the start warning and ``set_printer_repair``'s
+same printers, so routing, the start warning and ``set_machine_repair``'s
 ``condition`` read one record wherever the mark was made.
 
 What goes up, and nothing else: for each mark, its own account id (random,
@@ -16,7 +16,7 @@ it was made -- never the note (a note can name a serial or a place) and never
 the printer's name.  Beside the marks, one announcement per printer this
 computer has set up: its code, its model word, and, for a printer whose own
 secret both computers already hold, a shared code
-(:func:`kiln.printer_repairs.shared_code`) that lets the account tell two
+(:func:`kiln.machine_repairs.shared_code`) that lets the account tell two
 computers are looking at one machine without either serial leaving.
 
 What comes down: the account's marks for this computer's printers, resolved
@@ -25,13 +25,13 @@ ids they already carry (so a mark is never taken twice, and this computer's
 own marks come back as themselves); and the questions the account cannot
 answer alone -- a printer marked from another computer that may be one of
 this computer's unlinked printers of the same model.  Those are answered
-through :func:`answer_question` (``set_printer_repair(same_as=...)`` /
+through :func:`answer_question` (``set_machine_repair(same_as=...)`` /
 ``different_from=...``), or on the web, or in the host's own dialog.
 
 Not sent: anything at all when nobody is signed in, and anything on Kiln's
 own servers.  Switched off with ``KILN_REPAIR_COURIER=0``; quiet under a
 test run or a sandbox unless ``KILN_REPAIR_COURIER_IN_TESTS=1``.
-:func:`push_soon` is called by :func:`kiln.printer_repairs.mark` after every
+:func:`push_soon` is called by :func:`kiln.machine_repairs.mark` after every
 mark, so every door that writes one is covered without knowing this module
 exists; it never raises and never waits.
 """
@@ -162,7 +162,7 @@ def announcements(registry: Any = None) -> list[dict[str, Any]]:
     ``{"fingerprint", "name", "machine_code", "model", "shared_code"}``.
     The fingerprint and name never leave; they key what comes back."""
     from kiln.outbound_guard import machine_code
-    from kiln.printer_repairs import shared_code
+    from kiln.machine_repairs import shared_code
     from kiln.registry import stable_machine_fingerprint
 
     if registry is None:
@@ -271,6 +271,12 @@ def sync(*, db: Any = None, registry: Any = None, limit: int = MAX_ROWS,
     from kiln.auth_session import resolve_api_bearer
 
     _cancel_pending()
+    # The one switch every door reaches: off by the person, off under a test
+    # or a sandbox, off on the hosted process -- nothing is read and nothing
+    # is sent.  push_soon checks it too, but a caller that syncs directly
+    # (the tool's reply, the command, the host's dialog) lands here.
+    if not _enabled():
+        return {"synced": False, "why": "switched_off"}
     if not resolve_api_bearer().token:
         return {"synced": False, "why": "signed_out"}
     if db is None:
@@ -333,7 +339,11 @@ def answer_question(question_id: str, *, same: bool, db: Any = None, registry: A
     qid = str(question_id or "").strip()
     if not _QUESTION_ID.match(qid):
         return {"status": "error", "success": False, "code": "QUESTION_UNKNOWN",
-                "error": "That is not one of the questions your account asked; set_printer_repair lists them."}
+                "error": "That is not one of the questions your account asked; set_machine_repair lists them."}
+    if not _enabled():
+        return {"status": "error", "success": False, "code": "REPAIR_COURIER_OFF", "why": "switched_off",
+                "error": "Syncing a printer's repair record with your account is switched off here "
+                         f"({SWITCH_ENV}=0, a test or sandbox run, or Kiln's own servers); nothing was sent."}
     if not resolve_api_bearer().token:
         return {"status": "error", "success": False, "code": "KILN_ACCOUNT_NOT_PAIRED", "why": "signed_out",
                 "error": "Answering needs this computer signed in to your Kiln account."}

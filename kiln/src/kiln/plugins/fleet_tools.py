@@ -418,7 +418,7 @@ class _FleetToolsPlugin:
             settled results printing THAT version on this computer, which
             ``why`` says in counts; a printer that never printed the version
             has no history with it, never a bad one, and a printer marked
-            needs repair (``set_printer_repair``) is not a choice.  Every
+            needs repair (``set_machine_repair``) is not a choice.  Every
             candidate carries the facts Kiln read about it and a ``plate``
             block -- whether the plate as it stands has room for this part
             and how a print there would start.  A machine with no room, or a

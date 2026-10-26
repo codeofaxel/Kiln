@@ -1,10 +1,10 @@
 """A printer's condition, as the person says it, and what it does at every door.
 
-``set_printer_repair`` records two states on a machine's own record --
+``set_machine_repair`` records two states on a machine's own record --
 ``needed`` (out of routing until repaired; a start still runs, with a
 warning) and ``done`` (repaired; prints before it stop counting against the
 machine) -- and ``clear`` takes the latest mark back.  One engine
-(:mod:`kiln.printer_repairs`) behind every door, keyed by the same machine
+(:mod:`kiln.machine_repairs`) behind every door, keyed by the same machine
 fingerprint the print row carries.  Pinned here:
 
 * the engine: the two-state record, what each status needs, what is
@@ -41,7 +41,7 @@ from typing import Any
 import pytest
 
 from kiln import persistence as persistence_mod
-from kiln import printer_repairs as pr
+from kiln import machine_repairs as pr
 from kiln.persistence import KilnDB
 from kiln.registry import machine_fingerprint
 
@@ -111,7 +111,7 @@ class TestTheRecord:
         assert cleared["status"] == "clear" and cleared["cleared"]["status"] == "done" and cleared["cleared"]["kind"] == "belts"
         assert cleared["condition"]["state"] == "needs_repair"  # the mark before it stands again
 
-        marks = db.printer_repair_marks(machine_fingerprint(a))
+        marks = db.machine_repair_marks(machine_fingerprint(a))
         assert [m["status"] for m in marks] == ["needed", "done", "clear"]
         assert all(m["determined_by"] == "user_reported" for m in marks)
         assert marks[0]["note"] == "clicking on the X axis" and marks[0]["printer_name"] == "a"
@@ -149,7 +149,7 @@ class TestTheRecord:
         with pytest.raises(pr.RepairRefused) as refused:
             pr.mark(a, db=db, **kwargs)
         assert refused.value.code == code and refused.value.message
-        assert db.printer_repair_marks(machine_fingerprint(a)) == []
+        assert db.machine_repair_marks(machine_fingerprint(a)) == []
 
     def test_the_word_lists_are_the_decided_ones(self):
         assert pr.STATUSES == ("needed", "done", "clear")
@@ -184,8 +184,8 @@ class TestTheRecord:
     def test_the_record_is_keyed_by_the_machine_the_print_row_is_keyed_by(self, db):
         a = _machine("a")
         pr.mark(a, "needed", db=db)
-        assert db.printer_condition(machine_fingerprint(a))["state"] == "needs_repair"
-        assert db.printer_condition(machine_fingerprint(_machine("b")))["state"] == "ok"
+        assert db.machine_condition(machine_fingerprint(a))["state"] == "needs_repair"
+        assert db.machine_condition(machine_fingerprint(_machine("b")))["state"] == "ok"
 
     def test_the_hosted_server_keeps_no_record_and_says_where_it_lives(self, db, monkeypatch):
         monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
@@ -285,7 +285,7 @@ class _Store:
     def get_printer_learning_insights(self, name: str):
         return {"success_rate": None}
 
-    def printer_condition(self, fingerprint: str):
+    def machine_condition(self, fingerprint: str):
         if self.raise_on_read:
             raise RuntimeError("store locked")
         return self.conditions.get(fingerprint) or {"state": "ok", "since": None, "repaired_at": None, "kind": None, "marks": []}
@@ -375,7 +375,7 @@ def doors(monkeypatch, db):
     monkeypatch.setattr(srv, "ensure_runtime_config", lambda: None)
     mcp = _FakeMCP()
     printer_management_tools.plugin.register(mcp)
-    return mcp.tools["set_printer_repair"], a, b
+    return mcp.tools["set_machine_repair"], a, b
 
 
 class TestTheToolDoor:
@@ -393,7 +393,7 @@ class TestTheToolDoor:
         assert answer["next"] == "1 earlier print no longer counts against it; its next prints decide its standing."
         for word in ("tier", "Pro", "Business", "upgrade"):
             assert word not in json.dumps(answer)
-        assert db.printer_condition(fp)["state"] == "repaired"
+        assert db.machine_condition(fp)["state"] == "repaired"
 
     def test_the_tool_refuses_by_name_and_writes_nothing(self, doors, db):
         tool, a, _ = doors
@@ -402,7 +402,7 @@ class TestTheToolDoor:
         assert tool("a", "needed", when="2099-01-01")["error"]["code"] == pr.CODE_BAD_WHEN
         missing = tool("nobody", "needed")
         assert missing["error"]["code"] == pr.CODE_NOT_FOUND and "nobody" in missing["error"]["message"]
-        assert db.printer_repair_marks(machine_fingerprint(a)) == []
+        assert db.machine_repair_marks(machine_fingerprint(a)) == []
 
     def test_the_tool_is_refused_on_the_hosted_server_in_plain_words(self, doors, monkeypatch):
         tool, _, _ = doors
@@ -431,7 +431,7 @@ class TestTheCommandDoor:
         body = json.loads(result.output[result.output.index("{"):])
         assert body["status"] == "success" and body["data"]["status"] == "needed" and body["data"]["printer"] == "a"
         assert body["data"]["condition"]["state"] == "needs_repair"
-        assert db.printer_repair_marks(machine_fingerprint(a))[0]["note"] == "belt slipping"
+        assert db.machine_repair_marks(machine_fingerprint(a))[0]["note"] == "belt slipping"
         done = self._run(["a", "done", "--kind", "belts", "--json"])
         assert done.exit_code == 0, done.output
         assert json.loads(done.output[done.output.index("{"):])["data"]["reset"] == {"prints_before": 0, "versions_affected": 0}
@@ -547,7 +547,7 @@ class TestTheStartDoor:
         assert result.message.startswith("started ")
         warning = result.message[len("started "):]
         assert warning.startswith("a1 is marked needs repair since ")
-        assert "started as asked" in warning and "set_printer_repair" in warning
+        assert "started as asked" in warning and "set_machine_repair" in warning
         assert warning.count(". ") == 1  # one sentence of warning, one of what to do next
 
     def test_a_start_on_a_printer_in_good_standing_says_nothing_about_repairs(self, printer, db):

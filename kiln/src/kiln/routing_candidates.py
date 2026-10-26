@@ -84,7 +84,7 @@ def version_results_by_machine(db: Any, version_id: str | None) -> dict[str, dic
 
 
 def repair_block_by_machine(db: Any, fingerprint: str | None) -> dict[str, Any] | None:
-    """The ``repair`` block for one machine (:func:`kiln.printer_repairs.routing_block`):
+    """The ``repair`` block for one machine (:func:`kiln.machine_repairs.routing_block`):
     ``{"status": "needed", "since"}`` for a machine marked out of service,
     ``{"status": "done", "at", "kind"}`` for a repaired one, ``None`` for a
     machine with nothing on record, no store, or no stable identity.  Never
@@ -93,9 +93,9 @@ def repair_block_by_machine(db: Any, fingerprint: str | None) -> dict[str, Any] 
     if not fingerprint or db is None:
         return None
     try:
-        from kiln.printer_repairs import condition_summary, routing_block
+        from kiln.machine_repairs import condition_summary, routing_block
 
-        return routing_block(condition_summary(db.printer_condition(fingerprint)))
+        return routing_block(condition_summary(db.machine_condition(fingerprint)))
     except Exception:  # noqa: BLE001 -- a condition is a refinement, never a blocker
         logger.debug("repair record for a candidate not read", exc_info=True)
         return None

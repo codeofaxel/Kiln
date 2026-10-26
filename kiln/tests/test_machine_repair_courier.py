@@ -33,13 +33,14 @@ from __future__ import annotations
 import base64
 import json
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from kiln import auth_session, outbound_guard
 from kiln import machine_repair_courier as courier
-from kiln import printer_repairs as pr
+from kiln import machine_repairs as pr
 from kiln.persistence import KilnDB
 from kiln.registry import machine_fingerprint
 
@@ -240,7 +241,7 @@ class TestWhatGoesUp:
         pr.mark(registry.get("a"), "needed", db=db)
         assert courier.sync(db=db, registry=registry) == {"synced": False, "why": "signed_out"}
         assert account["calls"] == []
-        assert db.printer_condition(machine_fingerprint(registry.get("a")))["state"] == "needs_repair"
+        assert db.machine_condition(machine_fingerprint(registry.get("a")))["state"] == "needs_repair"
         assert len(db.repairs_owed_to_account()) == 1  # still owed, for when they sign in
 
     def test_a_refused_sync_leaves_the_marks_owed(self, db, signed_in, registry, monkeypatch):
@@ -278,17 +279,17 @@ class TestWhatComesDown:
         code, row = self._held(registry, "a")
         account["held"][code] = [row]
         a = registry.get("a")
-        assert db.printer_condition(machine_fingerprint(a))["state"] == "ok"
+        assert db.machine_condition(machine_fingerprint(a))["state"] == "ok"
         out = courier.sync(db=db, registry=registry)
         assert out["absorbed"] == 1
-        cond = db.printer_condition(machine_fingerprint(a))
+        cond = db.machine_condition(machine_fingerprint(a))
         assert cond["state"] == "needs_repair" and abs(cond["since"] - row["marked_at"]) < 1
         (mark,) = cond["marks"]
         assert mark["origin"] == "account" and mark["account_source_id"] == row["source_id"]
         assert mark["printer_name"] == "a" and mark["note"] is None
         # Brought down again: nothing doubles.
         assert courier.sync(db=db, registry=registry)["absorbed"] == 0
-        assert len(db.printer_condition(machine_fingerprint(a))["marks"]) == 1
+        assert len(db.machine_condition(machine_fingerprint(a))["marks"]) == 1
         # The absorbed mark is the account's; it is never owed back up.
         assert db.repairs_owed_to_account() == []
 
@@ -300,7 +301,7 @@ class TestWhatComesDown:
         code = outbound_guard.machine_code(machine_fingerprint(a))
         account["held"][code] = [sent]
         assert courier.sync(db=db, registry=registry)["absorbed"] == 0
-        assert len(db.printer_condition(machine_fingerprint(a))["marks"]) == 1
+        assert len(db.machine_condition(machine_fingerprint(a))["marks"]) == 1
 
     def test_the_two_records_merge_by_the_moment_of_each_mark(self, db, signed_in, registry, account):
         a = registry.get("a")
@@ -310,7 +311,7 @@ class TestWhatComesDown:
                                marked_at=time.time() + 30, created_at=time.time() + 30)  # elsewhere, after
         account["held"][code] = [row]
         courier.sync(db=db, registry=registry)
-        cond = db.printer_condition(fp)
+        cond = db.machine_condition(fp)
         assert cond["state"] == "repaired" and cond["kind"] == "nozzle"
         assert [m["status"] for m in cond["marks"]] == ["needed", "done"]
 
@@ -387,9 +388,9 @@ class TestTheClearRule:
         fp = machine_fingerprint(a)
         pr.mark(a, "needed", when=time.time() - 10 * DAY, db=db)
         pr.mark(a, "clear", db=db)
-        assert db.printer_condition(fp)["state"] == "ok"
+        assert db.machine_condition(fp)["state"] == "ok"
         pr.mark(a, "done", kind="bed", when=time.time() - 5 * DAY, db=db)   # dated between the two
-        cond = db.printer_condition(fp)
+        cond = db.machine_condition(fp)
         assert cond["state"] == "repaired" and cond["kind"] == "bed"
         assert [m["status"] for m in cond["marks"]] == ["needed", "done", "clear"]  # by moment
 
@@ -429,7 +430,7 @@ def tool(monkeypatch, db, registry):
     monkeypatch.setattr(srv, "ensure_runtime_config", lambda: None)
     mcp = _FakeMCP()
     printer_management_tools.plugin.register(mcp)
-    return mcp.tools["set_printer_repair"]
+    return mcp.tools["set_machine_repair"]
 
 
 class TestTheToolDoor:
@@ -459,7 +460,7 @@ class TestTheToolDoor:
         assert tool("a", same_as="q:" + "1" * 16, different_from="q:" + "1" * 16)["error"]["code"] == "REPAIR_ANSWER_AMBIGUOUS"
         assert tool("a")["error"]["code"] == pr.CODE_BAD_STATUS
         assert account["calls"] == []
-        assert db.printer_condition(machine_fingerprint(registry.get("a")))["marks"] == []
+        assert db.machine_condition(machine_fingerprint(registry.get("a")))["marks"] == []
 
 
 class TestTheCommandDoor:
@@ -512,7 +513,7 @@ class TestTheHostDialogDoor:
         code_a = outbound_guard.machine_code(machine_fingerprint(registry.get("a")))
         account["asks"] = [{"id": "q:" + "7" * 16, "this_code": code_a, "words": "Is it this one (a)?"}]
         asyncio.run(srv._ask_the_person_about_the_machine(
-            "set_printer_repair", arguments if arguments is not None else {"printer_name": "a", "status": "needed"},
+            "set_machine_repair", arguments if arguments is not None else {"machine_name": "a", "status": "needed"},
             ctx=object(),
         ))
         return asked
@@ -537,7 +538,7 @@ class TestTheHostDialogDoor:
     def test_a_call_that_is_itself_an_answer_is_never_asked(self, monkeypatch, signed_in, account, registry, db):
         monkeypatch.setattr("kiln.persistence.get_db", lambda: db)
         asked = self._ask(monkeypatch, registry, account, picked="yes",
-                          arguments={"printer_name": "a", "same_as": "q:" + "7" * 16})
+                          arguments={"machine_name": "a", "same_as": "q:" + "7" * 16})
         assert asked == [] and account["calls"] == []
 
     def test_signed_out_nobody_is_asked(self, monkeypatch, account, registry, db):
@@ -545,3 +546,50 @@ class TestTheHostDialogDoor:
                             lambda *a, **k: auth_session.ApiBearer(token="", state="signed_out"))
         monkeypatch.setattr("kiln.persistence.get_db", lambda: db)
         assert self._ask(monkeypatch, registry, account, picked="yes") == [] and account["calls"] == []
+
+
+class TestTheSwitchIsOneDoor:
+    """``sync`` and ``answer_question`` are what every caller reaches -- the
+    tool's reply, the command, the host's dialog, ``answer_identity`` -- so
+    the switch is read THERE, before any bearer or request.  (Found by a
+    security review of public 33449de5, where only ``push_soon`` read it.)"""
+
+    @pytest.fixture
+    def never_sent(self, monkeypatch):
+        import kiln.history_courier as hc
+
+        calls: list = []
+        monkeypatch.setattr(hc, "_request", lambda *a, **k: calls.append(a) or {"status": "success", "success": True})
+        return calls
+
+    def test_switched_off_nothing_is_sent_by_either_door(self, db, signed_in, registry, never_sent, monkeypatch):
+        monkeypatch.setenv(courier.SWITCH_ENV, "0")
+        pr.mark(registry.get("a"), "needed", db=db)
+        assert courier.sync(db=db, registry=registry) == {"synced": False, "why": "switched_off"}
+        out = courier.answer_question("q:" + "1" * 16, same=True, db=db, registry=registry)
+        assert out["success"] is False and out["code"] == "REPAIR_COURIER_OFF"
+        assert never_sent == []
+        assert len(db.repairs_owed_to_account()) == 1  # still owed, for when it is on
+
+    def test_a_sandbox_or_test_run_sends_nothing_unless_opted_in(self, db, signed_in, registry, never_sent, monkeypatch):
+        monkeypatch.delenv(courier.TEST_OPT_IN_ENV, raising=False)
+        monkeypatch.setenv("KILN_SANDBOX", "1")
+        pr.mark(registry.get("a"), "needed", db=db)
+        assert courier.sync(db=db, registry=registry)["why"] == "switched_off"
+        assert courier.answer_question("q:" + "1" * 16, same=True, db=db, registry=registry)["code"] == "REPAIR_COURIER_OFF"
+        assert never_sent == []
+
+    def test_the_hosted_process_sends_nothing(self, db, signed_in, registry, never_sent, monkeypatch):
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+        assert courier.sync(db=db, registry=registry)["why"] == "switched_off"
+        assert never_sent == []
+
+    def test_every_caller_goes_through_the_two_doors(self):
+        """No module sends to the account's repair routes except the courier."""
+        import subprocess
+
+        from kiln import machine_repair_courier as mod
+
+        root = Path(mod.__file__).resolve().parents[1]
+        hits = subprocess.run(["grep", "-rl", "api/cloud/machines/", str(root)], capture_output=True, text=True).stdout.split()
+        assert [Path(h).name for h in hits] == ["machine_repair_courier.py"], hits

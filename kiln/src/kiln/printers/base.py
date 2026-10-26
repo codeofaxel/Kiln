@@ -3546,7 +3546,7 @@ class PrinterAdapter(ABC):
             # here, so every door that starts a print says it.  Never a
             # refusal, and never a reason not to report the start.
             try:
-                from kiln.printer_repairs import start_warning
+                from kiln.machine_repairs import start_warning
 
                 warning = start_warning(self)
                 if warning:

@@ -55,8 +55,8 @@ except ImportError:
     GenerationError = Exception  # type: ignore[misc,assignment]
 
 from kiln.cli.auth_commands import register_auth_cli
-from kiln.printer_repairs import KINDS as _REPAIR_KINDS
-from kiln.printer_repairs import STATUSES as _REPAIR_STATUSES
+from kiln.machine_repairs import KINDS as _REPAIR_KINDS
+from kiln.machine_repairs import STATUSES as _REPAIR_STATUSES
 from kiln.cli.bridge_commands import register_bridge_cli
 from kiln.cli.config import (
     PrinterNameTaken,
@@ -4211,7 +4211,7 @@ def repair_guide_cmd(topic, hms_code, step, plan_only, power_off_confirmed, prin
 
 
 @machine.command("repair")
-@click.argument("printer_name")
+@click.argument("machine_name")
 @click.argument("status", required=False, default=None,
                 type=click.Choice(list(_REPAIR_STATUSES), case_sensitive=False))
 @click.option("--kind", default=None, type=click.Choice(list(_REPAIR_KINDS), case_sensitive=False),
@@ -4223,11 +4223,11 @@ def repair_guide_cmd(topic, hms_code, step, plan_only, power_off_confirmed, prin
 @click.option("--different-from", "different_from", default=None, metavar="QUESTION_ID",
               help="Answer your account's question: this printer is NOT that one (never asked again).")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def machine_repair_cmd(printer_name: str, status: str | None, kind: str | None, note: str | None,
+def machine_repair_cmd(machine_name: str, status: str | None, kind: str | None, note: str | None,
                        when: str | None, same_as: str | None, different_from: str | None, json_mode: bool) -> None:
     """Mark a printer as needing repair, or as repaired.
 
-    Runs the same tool the MCP server exposes (set_printer_repair). NEEDED
+    Runs the same tool the MCP server exposes (set_machine_repair). NEEDED
     takes the printer out of routing until it is marked DONE; a print you
     start on it yourself still runs, with a warning. DONE records the
     repair (--kind says what was done) and from then on Kiln judges the
@@ -4243,7 +4243,7 @@ def machine_repair_cmd(printer_name: str, status: str | None, kind: str | None, 
 
     ensure_runtime_config()
     try:
-        from kiln.printer_repairs import RepairRefused, answer_identity, mark
+        from kiln.machine_repairs import RepairRefused, answer_identity, mark
 
         try:
             if same_as or different_from:
@@ -4252,14 +4252,14 @@ def machine_repair_cmd(printer_name: str, status: str | None, kind: str | None, 
                         "Answer one question at a time, with no status: --same-as or --different-from.",
                         code="REPAIR_ANSWER_AMBIGUOUS", json_mode=json_mode))
                     sys.exit(1)
-                result = answer_identity(printer_name, same_as or different_from, same=bool(same_as))
+                result = answer_identity(machine_name, same_as or different_from, same=bool(same_as))
             elif not status:
                 click.echo(format_error(
                     "STATUS is needed, done or clear; or answer a question with --same-as / --different-from.",
                     code="REPAIR_STATUS_UNKNOWN", json_mode=json_mode))
                 sys.exit(1)
             else:
-                result = mark(printer_name, status, kind=kind, note=note, when=when)
+                result = mark(machine_name, status, kind=kind, note=note, when=when)
                 try:
                     from kiln.auth_session import resolve_api_bearer
 

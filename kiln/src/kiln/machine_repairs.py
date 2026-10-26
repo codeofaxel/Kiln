@@ -12,7 +12,7 @@ fingerprint its print rows carry, :func:`kiln.registry.stable_machine_fingerprin
 
     ok --[needed]--> needs_repair --[done]--> ok (older prints stop counting)
 
-Every door -- the ``set_printer_repair`` tool, ``kiln machine repair``, the
+Every door -- the ``set_machine_repair`` tool, ``kiln machine repair``, the
 routing candidates, the start-print warning -- reads and writes through the
 two functions here, :func:`mark` and :func:`condition`.  Kiln never sets a
 state itself: the record is the person's own claim (``user_reported``),
@@ -132,7 +132,7 @@ def _resolve(adapter_or_name: Any) -> tuple[Any, str]:
     if isinstance(adapter_or_name, str):
         name = adapter_or_name.strip()
         if not name:
-            raise RepairRefused(CODE_NOT_FOUND, "printer_name is required.")
+            raise RepairRefused(CODE_NOT_FOUND, "machine_name is required.")
         import kiln.server as _srv
 
         try:
@@ -220,7 +220,7 @@ def mark(
     import time as _time
 
     now = _time.time()
-    before = store.printer_condition(fingerprint)
+    before = store.machine_condition(fingerprint)
     out: dict[str, Any] = {"recorded": True, "printer": name, "status": status_word}
 
     if status_word == "clear":
@@ -228,18 +228,18 @@ def mark(
         if not standing:
             raise RepairRefused(CODE_NOTHING_TO_CLEAR, f"{name} has no repair mark to clear.")
         last = standing[-1]
-        store.add_printer_repair(fingerprint, name, "clear", marked_at=now)
+        store.add_machine_repair(fingerprint, name, "clear", marked_at=now)
         out["cleared"] = {"status": last["status"], "kind": last["kind"], "marked_at": _iso(last["marked_at"])}
         out["marked_at"] = _iso(now)
     else:
         ts = _parse_when(when, status_word, now)
-        store.add_printer_repair(fingerprint, name, status_word, kind=kind_word, note=note_text, marked_at=ts)
+        store.add_machine_repair(fingerprint, name, status_word, kind=kind_word, note=note_text, marked_at=ts)
         out["kind"] = kind_word
         out["marked_at"] = _iso(ts)
         if status_word == "done":
             out["reset"] = store.prints_before_repair(fingerprint, ts)
 
-    after = store.printer_condition(fingerprint)
+    after = store.machine_condition(fingerprint)
     out["condition"] = condition_summary(after)
     out["next"] = _next_sentence(name, status_word, out)
     try:
@@ -356,7 +356,7 @@ def condition(adapter_or_name: Any, *, db: Any = None) -> dict[str, Any]:
         fp = stable_machine_fingerprint(adapter)
         if not fp:
             return {"state": "ok", "since": None, "repaired_at": None, "kind": None, "known": False}
-        return condition_summary(_db(db).printer_condition(fp))
+        return condition_summary(_db(db).machine_condition(fp))
     except Exception:  # noqa: BLE001 -- a condition that cannot be read is unknown, never a mark
         logger.debug("printer condition not read", exc_info=True)
         return {"state": "ok", "since": None, "repaired_at": None, "kind": None, "known": False}
@@ -401,7 +401,7 @@ def start_warning(adapter: Any, *, db: Any = None) -> str | None:
         since_ts = None
     return (
         f"{name} is marked needs repair since {day_word(since_ts)}; it was started as asked, and Kiln will "
-        "judge it by how this print goes. Mark it repaired with set_printer_repair once it is fixed."
+        "judge it by how this print goes. Mark it repaired with set_machine_repair once it is fixed."
     )
 
 
