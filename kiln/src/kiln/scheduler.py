@@ -103,6 +103,11 @@ class JobWatch:
     #: a reading that did not arrive), so the queue announces it -- once per
     #: episode, not once per poll.
     no_contact_announced: bool = False
+    #: Why an ending is doubted because Kiln was not running while it
+    #: happened (a restart).  Unlike ``ending_doubt`` it is not judged from
+    #: the gap before a reading -- the first reading after a restart has no
+    #: gap -- and only a reading of the printer at work clears it.
+    restart_doubt: str | None = None
 
     def stalled(self) -> bool:
         return self.last_verdict is not None and self.last_verdict.stalled
@@ -163,6 +168,31 @@ def _no_contact_note(printer_name: str, silent_seconds: float, cause: str) -> st
 # reader -- the running server, the command line, a server restarted since --
 # says the same sentence and the same way through it.
 
+# AFTER A RESTART.  A job Kiln was starting or printing when it stopped
+# comes back as it was (``PrintQueue._reload_from_db``) and is settled here,
+# once, from what the printer and the plate record say -- never put back in
+# line on a guess, because a print that finished while Kiln was away would
+# start again the moment its printer went idle:
+#
+#   * the printer is still printing or paused on it: watched again, as if
+#     Kiln had never stopped;
+#   * the printer is idle and the print had started (it was PRINTING, or the
+#     plate record holds its part from after it was sent): watched for one
+#     reading, which closes it with whatever ending the printer names --
+#     and when it names none, ``unknown``, which asks the person how it went
+#     the way every unwatched ending does;
+#   * the printer is busy with a different file: it ended while Kiln was
+#     away; closed as ``unknown`` the same way;
+#   * it was STARTING and nothing shows a printer took it: back in line,
+#     where the plate gate still stands in front of its start;
+#   * the printer is not answering: it waits, and says so, until it does.
+#
+# Only one case asks the person directly: a job from before Kiln recorded
+# where a start was sent, that named no printer, was printing, and left no
+# part on any plate record.  Kiln cannot tell where it ran or whether it
+# finished, so it is not printed again; the job ends saying so and how to
+# queue it again.
+
 #: How long a job waiting its turn goes before the queue asks the start
 #: gate again even though no printer it watched went idle.  The gate refuses
 #: before anything is sent, so asking costs one peer check, never a print.
@@ -173,6 +203,10 @@ _TURN_CODES = frozenset({"TIER_CONCURRENT_PRINT_LIMIT", "TIER_SINGLE_PRINTER_LIM
 
 WAIT_PLATE = "plate"
 WAIT_TURN = "turn"
+WAIT_RECOVERING = "recovering"
+
+#: Slack between the queue stamping a start and the plate record writing it.
+_START_RECORD_SLACK_S = 120.0
 
 
 @dataclass
@@ -195,6 +229,21 @@ def _file_label(file_name: str) -> str:
     from kiln.plate_state import pretty_job_name
 
     return pretty_job_name(file_name) or "the next job"
+
+
+def _same_file(a: str | None, b: str | None) -> bool:
+    """Whether two names a printer and the queue use are one file: compared
+    by base name, then by the name a person reads (a printer may drop the
+    folder or the ``.gcode.3mf`` the queue kept)."""
+    import os
+
+    from kiln.plate_state import pretty_job_name
+
+    if not a or not b:
+        return False
+    if os.path.basename(str(a)) == os.path.basename(str(b)):
+        return True
+    return bool(pretty_job_name(str(a))) and pretty_job_name(str(a)) == pretty_job_name(str(b))
 
 
 def plate_wait_sentence(file_name: str, printers: list[str], state: Any, *, code: str, camera: bool) -> str:
@@ -244,7 +293,7 @@ TURN_UPGRADE = "Kiln Business runs your printers side by side: https://kiln3d.co
 
 def describe_wait(
     job: Any, queue: Any, *, running: dict[str, str] | None = None, idle: frozenset[str] | None = None,
-    retry_at: float | None = None,
+    retry_at: float | None = None, registered: frozenset[str] | None = None,
 ) -> dict[str, Any] | None:
     """Why a QUEUED job has not started yet, for a person: ``{"kind",
     "sentence", "ahead"}`` plus whatever the wait on the job carries, or
@@ -259,7 +308,11 @@ def describe_wait(
     """
     from kiln.queue import JobStatus
 
+    written = (job.metadata or {}).get("waiting")
     if getattr(job, "status", None) != JobStatus.QUEUED:
+        # A job a restart left mid-print, waiting for its printer to answer.
+        if isinstance(written, dict) and written.get("kind") == WAIT_RECOVERING:
+            return {**written, "ahead": 0}
         return None
     try:
         line = [j.id for j in queue.queued_for(job.printer_name)]
@@ -268,7 +321,6 @@ def describe_wait(
         ahead = 0
     name = _file_label(job.file_name)
     place = "next in line" if ahead == 0 else f"in line behind {ahead} other job{'s' if ahead != 1 else ''}"
-    written = (job.metadata or {}).get("waiting")
     if isinstance(written, dict) and written.get("sentence"):
         return {**written, "ahead": ahead}
     if retry_at is not None and retry_at > time.time():
@@ -276,6 +328,10 @@ def describe_wait(
         return {"kind": "retry", "ahead": ahead,
                 "sentence": f"{name} did not start on the last try; Kiln tries it again at {when}."}
     target = job.printer_name
+    if target and registered is not None and target not in registered:
+        return {"kind": "no_printer", "ahead": ahead, "printers": [target],
+                "sentence": f"{name} is for {target}, which is not set up in Kiln. It waits until {target} is "
+                            f"added, or cancel it and queue it for another printer."}
     if target and running is not None and target in running:
         current = None
         try:
@@ -594,6 +650,9 @@ class JobScheduler:
         else:
             watch.ending_doubt = None
 
+        if getattr(state, "is_occupied", False) is True:
+            # Seen at work since the restart: its ending will be watched.
+            watch.restart_doubt = None
         if watch.no_contact_announced:
             logger.info("Job %s: %s is answering again", job_id, printer_name)
             watch.no_contact_announced = False
@@ -627,7 +686,7 @@ class JobScheduler:
 
     def _ending_doubt(self, job_id: str) -> str | None:
         watch = self._watch.get(job_id)
-        return watch.ending_doubt if watch else None
+        return (watch.restart_doubt or watch.ending_doubt) if watch else None
 
     def _rank_printers(self, available: list[str], job) -> list[str]:
         """Reorder available printers by historical success rate for this job.
@@ -789,6 +848,182 @@ class JobScheduler:
                 + ", ".join(str(x) for x in blockers)
             )
         return "Emergency latch is active; operator acknowledgement + clear required."
+
+    # ------------------------------------------------------------------
+    # After a restart (see the module comment above)
+    # ------------------------------------------------------------------
+
+    def _settle_unfinished(self, failed: list[dict[str, str]]) -> None:
+        """Settle every job left starting, printing or paused with nothing
+        watching it.  Cheap when there are none, which is every pass but the
+        first after a restart."""
+        with self._lock:
+            watched = set(self._active_jobs)
+        try:
+            orphans = [j for j in self._queue.unfinished() if j.id not in watched]
+        except Exception:  # noqa: BLE001
+            return
+        for job in orphans:
+            try:
+                self._settle_one(job, failed)
+            except Exception:  # noqa: BLE001 -- one job's fault never stops the queue
+                logger.warning("Could not settle job %s after a restart", job.id, exc_info=True)
+
+    def _settle_one(self, job: Any, failed: list[dict[str, str]]) -> None:
+        name = _file_label(job.file_name)
+        was = getattr(job.status, "value", "")
+        printer_name = job.printer_name or (job.metadata or {}).get("dispatched_to") or self._where_it_ran(job)
+        if not printer_name:
+            if was == "starting":
+                # No printer named, none recorded, no part anywhere: nothing
+                # took it.  Back in line; the plate gate still guards it.
+                self._queue.requeue(job.id)
+                logger.info("Job %s: no printer took it before the restart; back in line", job.id)
+                return
+            self._queue.note_waiting(job.id, None)
+            self._queue.mark_failed(
+                job.id,
+                f"Kiln was restarted while {name} was printing, and it cannot tell on which printer or whether it "
+                f"finished, so it will not print it again. If it did not print, queue it again.",
+            )
+            failed.append({"job_id": job.id, "error": "unsettled after restart"})
+            self._event_bus.publish(
+                EventType.JOB_FAILED,
+                {"job_id": job.id, "reason": "unsettled_after_restart", "file_name": job.file_name},
+                source="scheduler",
+            )
+            return
+        try:
+            adapter = self._registry.get(printer_name)
+        except PrinterNotFoundError:
+            self._queue.note_waiting(job.id, None)
+            self._queue.mark_failed(
+                job.id,
+                f"Kiln was restarted while {name} was on {printer_name}, and {printer_name} is no longer set up in "
+                f"Kiln, so how it ended cannot be read. It will not print again; queue it again if it did not print.",
+            )
+            failed.append({"job_id": job.id, "error": "printer no longer registered"})
+            return
+        from kiln.printers.engagement import internal_read
+
+        try:
+            with internal_read():
+                state = adapter.get_state()
+                progress = adapter.get_job()
+        except Exception:  # noqa: BLE001 -- not answering: wait, and say so
+            state, progress = None, None
+        headline = getattr(state, "state", None)
+        if (
+            state is None or not getattr(state, "connected", False)
+            or status_is_unreachable(headline) or headline is PrinterStatus.STALE
+        ):
+            self._queue.note_waiting(job.id, {
+                "kind": WAIT_RECOVERING, "printers": [printer_name],
+                "sentence": (
+                    f"Kiln was restarted while {name} was {'starting' if was == 'starting' else 'printing'} on "
+                    f"{printer_name}, and {printer_name} is not answering yet. Kiln picks it back up as soon as it "
+                    "does; nothing is started again in the meantime."
+                ),
+            })
+            return
+        running = getattr(state, "effective_state", headline)
+        current = getattr(progress, "file_name", None)
+        same_file = not current or _same_file(current, job.file_name)
+        if running in (PrinterStatus.PRINTING, PrinterStatus.PAUSED) and same_file:
+            self._adopt(job, printer_name, doubt=None)
+            # The queue's state follows the printer's: a pause resumed at the
+            # machine while Kiln was away is printing again, and a start the
+            # printer took is printing.
+            if running is PrinterStatus.PRINTING and was in ("starting", "paused"):
+                self._queue.mark_printing(job.id)
+            elif running is PrinterStatus.PAUSED and was in ("starting", "printing"):
+                if was == "starting":
+                    self._queue.mark_printing(job.id)
+                self._queue.mark_paused(job.id)
+            logger.info("Job %s: still on %s after the restart; watching it again", job.id, printer_name)
+            return
+        if running in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
+            # Busy with something else: this one ended while Kiln was away.
+            self._queue.note_waiting(job.id, None)
+            if was == "starting" and not self._started_on(job, adapter):
+                self._queue.requeue(job.id)
+                return
+            self._close_unwatched(
+                job, printer_name,
+                f"Kiln was restarted while {name} was on {printer_name}, and {printer_name} has since started "
+                f"{_file_label(current)}; how {name} ended was not seen.",
+            )
+            return
+        if was == "starting" and not self._started_on(job, adapter):
+            self._queue.note_waiting(job.id, None)
+            self._queue.requeue(job.id)
+            logger.info("Job %s: %s never took it before the restart; back in line", job.id, printer_name)
+            return
+        # It ran, and the printer is idle now: one watched reading closes it
+        # with the ending the printer names, or ``unknown`` if it names none.
+        # The queue's states only end from PRINTING, so it is put there first.
+        if was in ("starting", "paused"):
+            self._queue.mark_printing(job.id)
+        self._adopt(job, printer_name, doubt="Kiln was restarted while it printed, so it did not see it end")
+
+    def _adopt(self, job: Any, printer_name: str, *, doubt: str | None) -> None:
+        """Watch *job* on *printer_name* as if this run had dispatched it."""
+        self._queue.note_waiting(job.id, None)
+        with self._lock:
+            self._active_jobs[job.id] = printer_name
+        self._seen_printing.add(job.id)
+        self._watch[job.id] = JobWatch(printer_name, last_contact=self._clock(), restart_doubt=doubt)
+
+    def _close_unwatched(self, job: Any, printer_name: str, why: str) -> None:
+        """End a job whose ending nobody saw: completed in the queue, its
+        outcome ``unknown`` (the person is asked how it went, the way every
+        unwatched ending is)."""
+        if getattr(job.status, "value", "") in ("starting", "paused"):
+            self._queue.mark_printing(job.id)
+        self._queue.mark_completed(job.id)
+        self._event_bus.publish(
+            EventType.JOB_COMPLETED, {"job_id": job.id, "printer_name": printer_name, "ending": "not_seen"},
+            source="scheduler",
+        )
+        self._auto_record_outcome(job.id, printer_name, "unknown", error_msg=why, determined_by="inferred")
+
+    def _started_on(self, job: Any, adapter: Any) -> bool:
+        """Whether the plate record shows *job*'s part was put on this
+        printer's plate by a start at or after the job's own."""
+        from kiln import plate_state
+
+        try:
+            state = plate_state.read(adapter)
+        except Exception:  # noqa: BLE001
+            return False
+        if not any(_same_file(j.file, job.file_name) for j in state.jobs):
+            return False
+        started = getattr(job, "started_at", None)
+        if not started or not state.since:
+            return True
+        try:
+            written = datetime.fromisoformat(state.since)
+            if written.tzinfo is None:
+                written = written.replace(tzinfo=timezone.utc)
+            return written.timestamp() >= float(started) - _START_RECORD_SLACK_S
+        except (TypeError, ValueError):
+            return True
+
+    def _where_it_ran(self, job: Any) -> str | None:
+        """The printer whose plate record holds *job*'s part from a start at
+        or after the job's own, for a job that named no printer and predates
+        Kiln recording where a start went.  ``None`` when no plate says."""
+        try:
+            names = list(self._registry.list_names())
+        except Exception:  # noqa: BLE001
+            return None
+        for name in names:
+            try:
+                if self._started_on(job, self._registry.get(name)):
+                    return name
+            except Exception:  # noqa: BLE001
+                continue
+        return None
 
     # ------------------------------------------------------------------
     # Waiting: the plate, and the turn (see the module comment above)
@@ -978,9 +1213,13 @@ class JobScheduler:
             return None
         with self._lock:
             running = {printer: jid for jid, printer in self._active_jobs.items()}
+        try:
+            registered: frozenset[str] | None = frozenset(self._registry.list_names())
+        except Exception:  # noqa: BLE001
+            registered = None
         return describe_wait(
             job, self._queue, running=running, idle=self._last_idle,
-            retry_at=self._retry_not_before.get(job_id),
+            retry_at=self._retry_not_before.get(job_id), registered=registered,
         )
 
     def tick(self) -> dict[str, Any]:
@@ -996,6 +1235,11 @@ class JobScheduler:
         completed: list[str] = []
         failed: list[dict[str, str]] = []
         checked = 0
+
+        # Phase 0: jobs a previous run of Kiln was starting or printing when
+        # it stopped.  Settled from the printer before anything else, so a
+        # print that finished while Kiln was away is never started again.
+        self._settle_unfinished(failed)
 
         # Phase 1: Check active jobs for completion / failure
         with self._lock:
@@ -1068,6 +1312,11 @@ class JobScheduler:
                     # completing it would raise, and the cancel path
                     # already published its own event when it happened.
                     if not queue_cancelled:
+                        if pre_idle_job is not None and pre_idle_job.status == JobStatus.PAUSED:
+                            # Paused in the queue, idle at the printer (cancelled at
+                            # its screen, or ended while the queue still read
+                            # paused): the queue's states end only from PRINTING.
+                            self._queue.mark_printing(job_id)
                         self._queue.mark_completed(job_id)
                     with self._lock:
                         self._active_jobs.pop(job_id, None)
@@ -1212,7 +1461,8 @@ class JobScheduler:
         # every server's connection alive and the printer's rationed LAN slots
         # full (measured 2026-09-15: four idle servers, all four slots, 10-14
         # hours).  An empty queue has nothing a free printer could take.
-        if self._queue.pending_count() == 0:
+        has_pending = self._queue.pending_count() != 0
+        if not has_pending:
             idle_printers: list[str] = []
         else:
             idle_printers = self._registry.get_idle_printers()
@@ -1221,7 +1471,7 @@ class JobScheduler:
         with self._lock:
             busy_printers = set(self._active_jobs.values())
         available = [p for p in idle_printers if p not in busy_printers]
-        if self._queue.pending_count() > 0:
+        if has_pending:
             self._last_idle = frozenset(idle_printers)
 
         # One printer at a time: while another printer's print holds the
@@ -1295,7 +1545,7 @@ class JobScheduler:
                 continue
             try:
                 adapter = self._registry.get(printer_name)
-                self._queue.mark_starting(next_job.id)
+                self._queue.mark_starting(next_job.id, printer_name=printer_name)
 
                 # An unconfirmed start must not be read as a failure here:
                 # requeuing a job the printer actually took dispatches the
@@ -1386,7 +1636,7 @@ class JobScheduler:
             finally:
                 printer_mutex.release()
 
-        if self._queue.pending_count() > 0:
+        if has_pending:
             self._settle_waits(waits, plate_blocks, turn_ready)
 
         return {
