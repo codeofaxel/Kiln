@@ -990,7 +990,7 @@ class _GenerationAIToolsPlugin:
                         _attach_placement(block, place_info)
                         return block
                     # Mandatory pre-flight safety gate before starting print.
-                    pf = unwrap_tool_result(_srv.preflight_check(printer_name=printer_name))
+                    pf = unwrap_tool_result(_srv.preflight_check(printer_name=printer_name, start_door_gates_plate=True))
                     if not pf.get("ready", False):
                         _srv._audit(
                             "generate_and_print",

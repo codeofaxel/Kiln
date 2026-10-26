@@ -905,7 +905,12 @@ class _RecoveryToolsPlugin:
                 )
 
         @mcp.tool()
-        def start_print_recovery(plan_id: str, failure_id: str) -> dict:
+        def start_print_recovery(
+            plan_id: str,
+            failure_id: str,
+            part_attached: bool | None = None,
+            try_untested_resume: bool = False,
+        ) -> dict:
             """Begin executing a recovery plan.
 
             Creates a recovery session that tracks the recovery lifecycle.
@@ -913,6 +918,10 @@ class _RecoveryToolsPlugin:
             Args:
                 plan_id: The plan_id from a plan_failure_recovery result.
                 failure_id: The failure_id this recovery addresses.
+                part_attached: The same answer given to plan_failure_recovery,
+                    so the session runs the plan that was approved.
+                try_untested_resume: The same answer given to
+                    plan_failure_recovery.
             """
             import kiln.server as _srv
             from kiln.print_recovery import get_recovery_engine
@@ -931,7 +940,9 @@ class _RecoveryToolsPlugin:
                         f"Failure report not found: {failure_id!r}",
                         code="NOT_FOUND",
                     )
-                plan = engine.plan_recovery(failure)
+                plan = engine.plan_recovery(
+                    failure, part_attached=part_attached, try_untested_resume=try_untested_resume,
+                )
                 plan.plan_id = plan_id
                 # Best-effort PROVEN park route for aborts.  Every fact is
                 # asked, none assumed: home position from the machine's own

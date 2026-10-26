@@ -111,23 +111,27 @@ class TestThePreFlightAsksAboutThePlate:
 
         occupied = MagicMock()
         occupied.occupied, occupied.clear = True, False
-        occupied.start_refusal_sentence.return_value = "A part from bracket.gcode is on the plate."
         occupied.to_dict.return_value = {"status": "occupied"}
         monkeypatch.setattr(plate_state, "read", lambda adapter: occupied)
-        offer = MagicMock()
-        offer.sentence = "Here is the plate now: /tmp/plate.jpg"
-        offer.fields.return_value = {"snapshot_path": "/tmp/plate.jpg", "look": {"camera": "own"}}
-        monkeypatch.setattr(plate_state, "offer_look", lambda adapter, state: offer)
+        seen: list = []
 
+        def refusal(adapter, *, resume=False, file_name=None, local_path=None):
+            seen.append((resume, file_name, local_path))
+            return {
+                "success": False,
+                "error": {"code": plate_state.START_NOT_YET_CODE, "message": "A part from bracket.gcode is on the plate. Here is the plate now: /tmp/plate.jpg"},
+                "plate": {"status": "occupied"}, "snapshot_path": "/tmp/plate.jpg",
+            }
+
+        monkeypatch.setattr(plate_state, "start_refusal", refusal)
         from kiln.server import preflight_check
 
-        result = preflight_check()
+        result = preflight_check(remote_file="next.gcode")
         check = next(c for c in result["checks"] if c["name"] == "plate_clear")
-        assert check["passed"] is False
-        assert "bracket.gcode" in check["message"] and "/tmp/plate.jpg" in check["message"]
+        assert check["passed"] is False and "bracket.gcode" in check["message"]
         assert check["snapshot_path"] == "/tmp/plate.jpg"
         assert result["ready"] is False
-        assert any("plate" in e.lower() for e in result["errors"])
+        assert seen == [(False, "next.gcode", None)], "the pre-flight asks the start door's own gate"
 
     def test_an_unrecorded_plate_passes_and_says_a_look_would_settle_it(self, quiet_preflight, monkeypatch):
         from kiln import plate_state
@@ -136,7 +140,7 @@ class TestThePreFlightAsksAboutThePlate:
         unknown.occupied, unknown.clear = False, False
         unknown.to_dict.return_value = {"status": "unknown"}
         monkeypatch.setattr(plate_state, "read", lambda adapter: unknown)
-
+        monkeypatch.setattr(plate_state, "start_refusal", lambda adapter, **kw: None)
         from kiln.server import preflight_check
 
         result = preflight_check()
@@ -144,15 +148,62 @@ class TestThePreFlightAsksAboutThePlate:
         assert check["passed"] is True and "look_at_plate" in check["message"]
         assert result["ready"] is True
 
-    def test_a_recorded_clear_plate_passes(self, quiet_preflight, monkeypatch):
+
+# --- defects a lap found (2026-10-25; each fails at aa6e2bf9) ---
+
+
+class TestLapFindings:
+    """The first cut judged the plate on its own: an occupied record failed
+    the pre-flight.  But every start door runs the pre-flight AFTER its own
+    plate gate, and that gate deliberately passes two starts onto an occupied
+    plate -- a resume of the paused job, and a file planned beside the part --
+    so the pre-flight inside the door refused exactly those starts.  Its tests
+    mocked the record and never ran a door; an independent review and the lap
+    both caught it."""
+
+    def _occupied(self, monkeypatch):
         from kiln import plate_state
 
-        clear = MagicMock()
-        clear.occupied, clear.clear = False, True
-        clear.to_dict.return_value = {"status": "clear"}
-        monkeypatch.setattr(plate_state, "read", lambda adapter: clear)
+        occupied = MagicMock()
+        occupied.occupied, occupied.clear = True, False
+        occupied.to_dict.return_value = {"status": "occupied"}
+        monkeypatch.setattr(plate_state, "read", lambda adapter: occupied)
+        monkeypatch.setattr(plate_state, "offer_look", lambda adapter, state=None, **kw: MagicMock(sentence="", fields=lambda: {}))
+        return plate_state
 
+    def test_inside_a_start_door_the_door_owns_the_plate_gate(self, quiet_preflight, monkeypatch):
+        self._occupied(monkeypatch)
         from kiln.server import preflight_check
 
-        check = next(c for c in preflight_check()["checks"] if c["name"] == "plate_clear")
-        assert check["passed"] is True and "clear" in check["message"]
+        result = preflight_check(start_door_gates_plate=True)
+        check = next(c for c in result["checks"] if c["name"] == "plate_clear")
+        assert check["passed"] is True and result["ready"] is True
+
+    def test_a_resume_onto_the_part_passes_a_standalone_pre_flight(self, quiet_preflight, monkeypatch):
+        self._occupied(monkeypatch)
+        from kiln.server import preflight_check
+
+        check = next(c for c in preflight_check(accept_paused=True)["checks"] if c["name"] == "plate_clear")
+        assert check["passed"] is True
+
+    def test_every_start_door_says_it_owns_the_plate_gate(self):
+        """Structural pin: every call to ``preflight_check`` in Kiln's own
+        code is a start door (the plate gate ran first), so each says so.  A
+        new door that forgets would refuse the starts its own gate let through."""
+        import ast
+        from pathlib import Path
+
+        src = Path(__file__).resolve().parents[1] / "src" / "kiln"
+        missing = []
+        for path in src.rglob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call):
+                    fn = node.func
+                    name = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", "")
+                    if name == "preflight_check":
+                        kws = {k.arg: k.value for k in node.keywords}
+                        flag = kws.get("start_door_gates_plate")
+                        if not (isinstance(flag, ast.Constant) and flag.value is True):
+                            missing.append(f"{path.relative_to(src)}:{node.lineno}")
+        assert not missing, f"start doors that run the pre-flight without saying they gate the plate: {missing}"
