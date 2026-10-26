@@ -176,7 +176,7 @@ class SkillManifest:
                 "generate_<product>(...) — the result carries `decorate_next`: the decorate_surface face and settings for that product's canvas",
                 "decorate_surface(model_path=<output_stl>, content=<logo.svg | line-art PNG | 'text:...'>, face=<decorate_next.face>) — THE tool that carves a logo, wordmark, text or image into any mesh",
                 "visualize_model(file_path) — show the carve (MANDATORY)",
-                "Look-alikes: generate_decorated_product / generate_wall_plaque are PHOTO-relief pipelines (a picture as coin relief), not logo tools; apply_decoration replays a decoration you SAVED earlier and carves nothing new; resolve_template_decoration(template_id) resolves the same face/settings as decorate_next",
+                "Look-alikes: generate_wall_plaque is a PHOTO-relief pipeline (a picture as coin relief), not a logo tool; apply_decoration replays a decoration you SAVED earlier and carves nothing new; resolve_template_decoration(template_id) resolves the same face/settings as decorate_next",
             ],
             "flat_part_from_relationships": [
                 "solve_sketch(sketch=\"...\") — describe a flat part by the relationships between its points and edges (lengths, angles, parallel, symmetric); returns solved coordinates as OpenSCAD (served by kiln-pro, free)",

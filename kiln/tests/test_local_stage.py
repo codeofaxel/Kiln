@@ -1089,7 +1089,7 @@ class TestASliceShowsItself:
         """The paid half and the upload door are untouched: N stages is
         spam, and the start token stays the only wall."""
         for name in (
-            "batch_generate_products", "fleet_submit_job", "multi_copy_print",
+            "fleet_submit_job", "multi_copy_print",
             "multi_color_copies", "route_print_job", "upload_file",
         ):
             assert name not in local_stage.VIEWER_TOOLS, name

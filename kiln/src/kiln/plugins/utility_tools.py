@@ -621,7 +621,6 @@ class _UtilityToolsPlugin:
                         "install_command": _install_cmd,
                         "required_for": [
                             "compile_scad",
-                            "generate_product_base",
                             "decorate_surface",
                             "visualize_model",
                         ],
@@ -639,7 +638,6 @@ class _UtilityToolsPlugin:
                         "install_command": _install_cmd,
                         "required_for": [
                             "compile_scad",
-                            "generate_product_base",
                             "decorate_surface",
                             "visualize_model",
                         ],
@@ -913,9 +911,9 @@ class _UtilityToolsPlugin:
                         "generator's result carries `decorate_next` (the "
                         "face and settings for its canvas) and "
                         "resolve_template_decoration(template_id) resolves "
-                        "the same. Look-alikes: generate_decorated_product "
-                        "and generate_wall_plaque are PHOTO-relief pipelines "
-                        "(a picture as coin relief), not logo tools; "
+                        "the same. Look-alikes: generate_wall_plaque is a "
+                        "PHOTO-relief pipeline (a picture as coin relief), "
+                        "not a logo tool; "
                         "apply_decoration replays a decoration you SAVED "
                         "earlier and carves nothing new."
                     ),

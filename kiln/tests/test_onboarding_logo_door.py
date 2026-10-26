@@ -1,8 +1,7 @@
 """The first things an agent reads name the tool that carves a logo.
 
 Putting a logo on a generated product took an agent sixteen calls: the
-photo-relief generators (``generate_decorated_product``,
-``generate_wall_plaque``) and the saved-recipe replay
+photo-relief generator (``generate_wall_plaque``) and the saved-recipe replay
 (``apply_decoration``) all read as "the decoration tool" from their
 names, and nothing in ``get_started`` or the skill manifest said which
 one carves fresh content.  Both now carry a workflow that names
@@ -17,7 +16,7 @@ from unittest.mock import patch
 from kiln.server import get_started
 from kiln.skill_manifest import SkillManifest
 
-_LOOK_ALIKES = ("generate_decorated_product", "generate_wall_plaque", "apply_decoration")
+_LOOK_ALIKES = ("generate_wall_plaque", "apply_decoration")
 _HEALTHY_SIBLINGS = {"count": 1, "pids": [111], "oldest_age": "05:44", "warning": None}
 
 

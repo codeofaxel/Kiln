@@ -122,7 +122,6 @@ MAKE_DOOR_TOOLS: frozenset[str] = frozenset(
         "generate_ashtray",
         "generate_bookmark",
         "generate_coaster",
-        "generate_decorated_product",
         "generate_fridge_magnet",
         "generate_frisbee",
         "generate_jewelry_tray",
@@ -133,11 +132,9 @@ MAKE_DOOR_TOOLS: frozenset[str] = frozenset(
         "generate_pen_cup",
         "generate_pet_bowl",
         "generate_pet_tag",
-        "generate_product_base",
         "generate_rolling_tray",
         "generate_soap_dish",
         "generate_wall_plaque",
-        "batch_generate_products",
         # --- kiln-pro: organic recipes and the import birth methods
         "build_organic_mesh",
         "import_external_mesh",
@@ -218,11 +215,6 @@ GOAL_NAMED_ELSEWHERE: dict[str, str] = {
     "generate_template_variations": (
         "This makes a batch of variants, so it names no goal; make the one "
         "the person keeps through `generate_from_template` with "
-        f"`{GOAL_PARAM}` set to the goal_id."
-    ),
-    "batch_generate_products": (
-        "This makes a batch of products, so it names no goal; make the one "
-        "the person keeps through its own generator with "
         f"`{GOAL_PARAM}` set to the goal_id."
     ),
 }
