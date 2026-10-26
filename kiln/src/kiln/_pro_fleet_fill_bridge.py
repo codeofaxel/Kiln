@@ -46,6 +46,7 @@ def ask(
         extra = {"version_id": version_id} if version_id else {}
         answer = _srv._pro_api_call(
             TOOL,
+            _asked_by_user=True,  # the plan is exactly what the person asked for
             material=material,
             copies=int(copies),
             candidates=candidates,

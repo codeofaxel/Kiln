@@ -228,12 +228,12 @@ class TestTheRun:
         assert out["cancelled"] == 3
         assert world.q.get_job(later.id).status == JobStatus.CANCELLED
 
-    def test_cancelling_a_spread_plan_cancels_its_jobs(self, world):
+    def test_cancelling_a_spread_plan_cancels_its_jobs(self, world, monkeypatch):
         """A/B: with the old ``from kiln.queue import get_queue`` back, every
         part reports "Failed to cancel" and nothing is cancelled -- "assert (0 == 2)"."""
         from kiln.job_splitter import SplitJob, SplitPlan, cancel_split_plan, submit_split_plan
 
-        world.srv._preview_gate_error = lambda *a, **k: None
+        monkeypatch.setattr(world.srv, "_preview_gate_error", lambda *a, **k: None)
         parts = [SplitJob(part_id=f"p{i}", file_path="x.gcode", printer_name=n, printer_model="", estimated_time_seconds=0,
                           material="PLA", settings={}, status="pending") for i, n in enumerate(("A", "B"))]
         plan = SplitPlan(original_file="x.gcode", split_type="multi_copy", parts=parts, total_printers=2,
@@ -307,3 +307,26 @@ def test_the_picture_puts_the_printers_that_need_the_person_first():
     from PIL import Image
 
     assert Image.open(path).size[0] >= 300
+
+
+class TestTheGoIsForThePartSeen:
+    def test_another_part_cannot_be_queued_under_this_plan(self, world, monkeypatch, tmp_path):
+        """A/B: with the ``_same_file`` check removed, the jobs are queued
+        for the kept part on a yes given for another -- "assert 2 == 0"."""
+        plan = _plan(world)
+        other = _cube(tmp_path / "other.stl", w=12.0)
+        monkeypatch.setattr(world.srv, "_preview_gate_error", lambda *a, **k: None)
+        out = world.tools["plan_multi_copy_split"](other, 40, plan_id=plan["plan_id"], submit=True)
+        assert out["success"] is False and out["error"]["code"] == "PLAN_PART_MISMATCH"
+        assert len(world.q.list_jobs()) == 0
+
+    def test_a_yes_for_one_printer_queues_nothing(self, world, monkeypatch):
+        from kiln import print_signoff
+
+        plan = _plan(world)
+        monkeypatch.setattr(world.srv, "_preview_gate_error", lambda *a, **k: None)
+        monkeypatch.setattr(print_signoff, "record_for", lambda current: {"scope": "printer", "printer_name": "A"})
+        out = world.tools["plan_multi_copy_split"](world.part, 40, plan_id=plan["plan_id"], submit=True)
+        assert out["success"] is False and out["error"]["code"] == "CONSENT_SCOPE", out
+        assert "not started on B" in out["error"]["message"]
+        assert world.q.list_jobs() == []

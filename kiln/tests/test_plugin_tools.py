@@ -466,18 +466,13 @@ class TestPlanMultiCopySplit:
         assert "error" in result
 
     @patch("kiln.server._check_auth", return_value=None)
-    def test_valid_split_plan(self, _mock_auth, recovery_tools) -> None:
-        mock_plan = MagicMock()
-        mock_plan.to_dict.return_value = {"printers": ["p1"], "copies_per_printer": [3]}
-        mock_plan.total_printers = 1
-        mock_plan.time_savings_percentage = 0.0
-
-        with patch("kiln.job_splitter.plan_multi_copy_split", return_value=mock_plan):
-            result = recovery_tools["plan_multi_copy_split"](
-                file_path="/tmp/test.gcode", copies=3,
-            )
-        assert result["success"] is True
-        assert "plan" in result
+    def test_a_sliced_file_is_refused(self, _mock_auth, recovery_tools) -> None:
+        """Copies are laid out from the part's mesh (the plan itself is
+        pinned in tests/test_fleet_fill_door.py)."""
+        result = recovery_tools["plan_multi_copy_split"](
+            file_path="/tmp/test.gcode", copies=3,
+        )
+        assert result.get("success") is False
 
 
 class TestPlanAssemblySplit:

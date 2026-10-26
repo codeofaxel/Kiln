@@ -168,8 +168,28 @@ def _draw_fill(plan: dict, file_path: str, adapters: dict, placement: Any) -> st
     return draw(plan, part_size_mm=part, beds=beds, on_plate=on_plate, models=models, title=title)
 
 
+def _same_file(a: str, b: str) -> bool:
+    """Whether two paths hold the same bytes."""
+    import hashlib
+
+    def digest(path: str) -> str | None:
+        try:
+            h = hashlib.sha256()
+            with open(path, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    h.update(chunk)
+            return h.hexdigest()
+        except OSError:
+            return None
+
+    first = digest(a)
+    return first is not None and first == digest(b)
+
+
 def _submit_fill(file_path: str, plan_id: str | None, preview_token: str | None) -> dict:
     """Queue a kept copies plan, after the person's yes for the part."""
+    import os
+
     import kiln.server as _srv
     from kiln import print_signoff
     from kiln.job_splitter import _fill_record, submit_fill_plan
@@ -179,9 +199,25 @@ def _submit_fill(file_path: str, plan_id: str | None, preview_token: str | None)
     found = _fill_record(plan_id)
     if found is None:
         return _srv._error_dict(f"No copies plan {plan_id!r} on this computer; plan the copies first.", code="NOT_FOUND")
+    kept, record, _status = found
+    # The yes is asked for the part given here, and the plan prints the part
+    # it kept: they must be the same part, byte for byte.
+    if not _same_file(file_path, kept):
+        return _srv._error_dict(
+            f"{os.path.basename(file_path)} is not the part plan {plan_id} was made for; plan this part first.",
+            code="PLAN_PART_MISMATCH",
+        )
     if block := _srv._preview_gate_error("plan_multi_copy_split", file_path, preview_token):
         return block
     signoff = print_signoff.record_for(print_signoff.current())
+    # Every printer the plan queues to must be one the yes covers: refused
+    # here, whole, rather than job by job at the printer.
+    refusals = [
+        why for row in (record.get("fill") or {}).get("printers") or []
+        if (why := print_signoff.record_refusal(signoff, str(row.get("printer"))))
+    ]
+    if refusals:
+        return _srv._error_dict("Nothing was queued: " + " ".join(refusals), code="CONSENT_SCOPE")
     out = submit_fill_plan(plan_id, signoff)
     if out.get("already"):
         out["message"] = f"This plan was already {out['already']}; nothing was queued again."
