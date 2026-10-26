@@ -15,6 +15,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **A free account, offered once, when it would help.** Not signed in? Kiln now says what a free account adds at the moment it matters, like setting up a printer or saving a design, and your AI app can sign you in from the chat.
 
+- **Record nozzle swaps from anywhere.** Tell your agent; Kiln saves it to your account and marks the printer repaired. Kiln Pro.
+
 ### Changed
 
 - **`kiln cloud push --make-room` answers a full free account.** It names the design to archive, and the push says which one moved.
