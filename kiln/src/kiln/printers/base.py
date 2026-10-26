@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 from abc import ABC, abstractmethod
@@ -3027,6 +3028,21 @@ def apply_external_camera(adapter: PrinterAdapter, entry: Any) -> None:
         adapter.set_external_camera(snapshot_url=snapshot, stream_url=stream)
 
 
+def reheat_before_resume(adapter: Any) -> tuple[PrintResult | None, bool]:
+    """The pause hold's nozzle reheat, for a resume about to be sent.
+
+    The hold lives in :mod:`kiln.server` (``_reheat_before_resume``), which
+    pauses through it.  A process that never loaded that module never paused
+    anything through it, so there is nothing to reheat to: ``(None, False)``.
+    Every resume template calls this, so no door can skip the reheat.
+    """
+    server = sys.modules.get("kiln.server")
+    reheat = getattr(server, "_reheat_before_resume", None)
+    if reheat is None:
+        return None, False
+    return reheat(adapter)
+
+
 class PrinterAdapter(ABC):
     """Abstract base for all printer backend adapters.
 
@@ -3936,6 +3952,15 @@ class PrinterAdapter(ABC):
 
             return HardwareStopRefusal(success=False, message=refusal_message(waiting), hardware=waiting)
         if not force:
+            refusal = self._not_paused_refusal()
+            if refusal is not None:
+                return refusal
+        refusal, reheated = reheat_before_resume(self)
+        if refusal is not None:
+            return refusal
+        # The reheat took time; a print resumed or cancelled at the machine
+        # meanwhile is not Kiln's to resume.
+        if reheated and not force:
             refusal = self._not_paused_refusal()
             if refusal is not None:
                 return refusal

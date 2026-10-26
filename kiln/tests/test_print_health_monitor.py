@@ -349,16 +349,14 @@ class TestAutoPauseHonoring:
         return session
 
     def _patched_registry(self, monkeypatch, adapter):
-        """Make ``from kiln.registry import get_printer_registry`` return our fake."""
+        """Make ``from kiln.registry import get_printer_registry`` return our fake.
+
+        Patches the one function, not the module: the auto-pause runs the
+        shared pause engine, which needs the rest of ``kiln.registry``.
+        """
         fake_registry = MagicMock()
         fake_registry.get.return_value = adapter
-
-        import sys
-        import types
-
-        fake_module = types.ModuleType("kiln.registry")
-        fake_module.get_printer_registry = lambda: fake_registry  # type: ignore[attr-defined]
-        monkeypatch.setitem(sys.modules, "kiln.registry", fake_module)
+        monkeypatch.setattr("kiln.registry.get_printer_registry", lambda: fake_registry)
         return fake_registry
 
     def _make_adapter(self, *, is_paused: bool = False):
@@ -1564,16 +1562,14 @@ class TestAutoCancel:
         return session
 
     def _patched_registry(self, monkeypatch, adapter):
-        """Make ``from kiln.registry import get_printer_registry`` return our fake."""
+        """Make ``from kiln.registry import get_printer_registry`` return our fake.
+
+        Patches the one function, not the module: the auto-pause runs the
+        shared pause engine, which needs the rest of ``kiln.registry``.
+        """
         fake_registry = MagicMock()
         fake_registry.get.return_value = adapter
-
-        import sys
-        import types
-
-        fake_module = types.ModuleType("kiln.registry")
-        fake_module.get_printer_registry = lambda: fake_registry  # type: ignore[attr-defined]
-        monkeypatch.setitem(sys.modules, "kiln.registry", fake_module)
+        monkeypatch.setattr("kiln.registry.get_printer_registry", lambda: fake_registry)
         return fake_registry
 
     def _thermal_critical_report(self, *, session_id, printer="voron"):

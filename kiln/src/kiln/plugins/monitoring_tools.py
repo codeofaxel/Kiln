@@ -1022,7 +1022,11 @@ class _MonitoringToolsPlugin:
                     }
                     if _auto_pause and failure_confidence >= 0.8 and is_printing:
                         try:
-                            adapter.pause_print()
+                            # The shared pause engine, so the auto-pause gets
+                            # the bed hold and the nozzle rule every pause does.
+                            from kiln.server import _pause_print_on
+
+                            _pause_print_on(adapter, printer_name or "default")
                             auto_paused = True
                             result["failure_detection"]["auto_paused"] = True
                             result["failure_detection"]["message"] = (

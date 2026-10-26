@@ -49,6 +49,7 @@ from kiln.printers.base import (
     WaitingForUser,
     canonical_model_key,
     hardware_stop_waiting,
+    reheat_before_resume,
 )
 from kiln.printers.command_verdict import CommandVerdict
 from kiln.printers.safe_motion import build_firmware_resume_positioning
@@ -1013,6 +1014,9 @@ class SerialPrinterAdapter(PrinterAdapter):
                 return still_waiting
         if not (self._paused or force):
             return self._no_paused_print_result()
+        refusal, _reheated = reheat_before_resume(self)
+        if refusal is not None:
+            return refusal
         result = self._resume_print_impl()
         if waiting is not None and result.success:
             from kiln.hardware_stops import note_resumed
