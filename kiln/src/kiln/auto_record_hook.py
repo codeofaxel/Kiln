@@ -323,6 +323,15 @@ class _HookState:
             self._cancel_intents.pop(printer, None)
         _consume_durable_cancel_intent(printer)
 
+    def forget_recorded(self, printer: str) -> None:
+        """A new print began on *printer*: its earlier endings are no reason to
+        refuse the next one.  The mark exists for replays of ONE ending, and a
+        replay never has a print between it and the ending it repeats; a job
+        label is the file's name, so without this a reprint's ending was
+        refused as a replay of the first print's (2026-10-26)."""
+        with self._lock:
+            self._recorded = {key for key in self._recorded if key[0] != printer}
+
     def mark_recorded(self, printer: str, job_id: str) -> bool:
         """Return True if this is the first recording for (printer,
         job_id); False if we've already recorded this terminal event.
@@ -511,6 +520,13 @@ def _infer_outcome(
     return None
 
 
+def ending_is_a_finish(new_state: Any) -> bool:
+    """Whether the printer itself said the job finished: a finish word, never
+    the bare idle a success is only guessed from (a cancel from the screen on
+    firmware that skips the finish word reads the same)."""
+    return str(getattr(new_state, "value", new_state) or "").lower().strip() in _FINISH_STATES
+
+
 def is_terminal_transition(prev_state: str | None, new_state: str | None) -> bool:
     """Cheap predicate: could this edge produce an outcome record?
 
@@ -687,6 +703,7 @@ def observe_state(
         and (prev or "").lower().strip() not in _ACTIVE_STATES
     ):
         clear_cancel_intent(printer_name)
+        _HOOK_STATE.forget_recorded(printer_name)
     if is_terminal_transition(prev, current_state):
         _announce_print_ended(printer_name)
     return prev

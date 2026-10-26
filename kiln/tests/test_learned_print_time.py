@@ -417,3 +417,123 @@ def test_the_copies_plan_says_where_its_times_came_from():
         "by the slicer's estimate for each printer model, corrected by how long prints really take: "
         "for a by its own past prints; for b by past prints on other printers of the same model"
     )
+
+
+# --- defects a lap found (2026-10-26; each fails at d971384f) ---
+
+
+def test_every_reprint_of_a_file_is_settled_with_its_own_length(kiln_env):
+    """A printer names a job by its file, so the second print of
+    ``bracket.gcode`` ended under the label the first print's row already
+    held.  The hook's in-memory mark refused it as a replay, and the store
+    refused it as already recorded: every reprint stayed pending and was lost,
+    and with it the print's length.  Nothing caught it because every test
+    printed a file once.  Reprints are what a pace is mostly made of."""
+    adapter = _Adapter()
+    path = _gcode(kiln_env, seconds=3600)
+    for real in (4000, 4100, 4200):
+        adapter.status, adapter.job_result = PrinterStatus.IDLE, None
+        adapter.start_print(path)
+        _watch_to_the_end(adapter, elapsed=real)
+
+    rows = _rows()
+    assert sorted((r["outcome"], r["print_seconds"]) for r in rows) == [
+        ("success", 4000), ("success", 4100), ("success", 4200),
+    ]
+    assert lpt.pace_for("voron").prints == 3
+
+
+def test_a_print_open_from_before_an_ending_is_not_settled_by_it(kiln_env):
+    """The reprint's ending settles a row opened AFTER the earlier print
+    ended, never one that was already open."""
+    from kiln.persistence import get_db
+
+    db = get_db()
+    db.save_print_outcome({"job_id": "bracket.gcode", "printer_name": "voron", "outcome": "success",
+                           "agent_id": "auto", "determined_by": "observed", "created_at": 2000.0, "ended_at": 3000.0})
+    db.save_print_outcome({"job_id": "start:voron:1", "printer_name": "voron", "file_name": "bracket.gcode",
+                           "outcome": "pending", "agent_id": "auto", "created_at": 1000.0})
+
+    with pytest.raises(ValueError):
+        db.save_print_outcome({"job_id": "bracket.gcode", "printer_name": "voron", "file_name": "bracket.gcode",
+                               "outcome": "success", "agent_id": "auto", "determined_by": "observed"})
+    assert db.get_print_outcome("start:voron:1")["outcome"] == "pending"
+
+
+def test_an_ending_the_printer_did_not_call_a_finish_teaches_no_length(kiln_env):
+    """Asked mid-lap: does it learn only from prints that ended because the
+    part was done?  The outcome word said yes, but on firmware that goes from
+    printing straight to idle with no finish word, a success is a guess, and a
+    cancel from the printer's own screen reads the same.  A print stopped at
+    60% kept a length 0.6 of its estimate, inside the outlier range.  Now a
+    length is learned only from an ending the printer itself called a finish."""
+    adapter = _Adapter()
+    adapter.start_print(_gcode(kiln_env, seconds=3600))
+    adapter.get_state()
+    pm._last_looks[pm.observation_key(adapter)] = time.monotonic() - 5
+    adapter.elapsed_seconds = 2200  # stopped from the screen at ~60%
+    adapter.status, adapter.job_result = PrinterStatus.IDLE, None  # idle, no finish word
+    adapter.get_state()
+
+    row = _row()
+    assert row["outcome"] == "success"  # the outcome guess is the hook's, unchanged
+    assert row["print_seconds"] is None
+
+
+def test_the_cost_estimate_says_the_real_time(kiln_env, estimate_tools, monkeypatch):
+    monkeypatch.setattr("kiln.assumed_nozzle._registered_machines", lambda: ["voron"])
+    monkeypatch.setattr("kiln._pro_cost_bridge.attach_cost_intelligence", lambda *a, **k: None)
+    _seed("voron", [(3600, 3960, "success")] * 3)
+
+    out = estimate_tools["estimate_cost"](file_path=_gcode(kiln_env, seconds=7200))
+
+    assert out["success"] is True, out
+    assert out["estimate"]["learned_time"]["seconds"] == 7920
+
+
+def test_the_cli_status_says_the_learned_finish(monkeypatch):
+    from kiln.cli import output
+
+    monkeypatch.setattr(output, "RICH_AVAILABLE", False)
+    text = output.format_status(
+        {"state": "printing", "connected": True},
+        {"file_name": "a.gcode", "print_time_left_seconds": 1800,
+         "learned_time_left": {"seconds_left": 2520, "prints": 3, "said": "About 42m left, from your last 3 prints on voron."}},
+    )
+    assert "Time left:" in text  # the printer's countdown, as it said it
+    assert "Kiln:      About 42m left, from your last 3 prints on voron." in text
+
+
+def test_the_health_check_says_the_learned_finish(kiln_env, monkeypatch):
+    import kiln.server as _srv
+    from kiln.plugins.material_tools import plugin
+
+    captured: dict[str, Any] = {}
+
+    class _MCP:
+        def tool(self, **_kwargs):
+            def decorator(fn):
+                captured[fn.__name__] = fn
+                return fn
+
+            return decorator
+
+    plugin.register(_MCP())
+    _seed("voron", [(3600, 4320, "success")] * 3)
+    adapter = _running(kiln_env, slicer=3600, elapsed=1800)
+    monkeypatch.setattr(_srv, "_resolve_adapter", lambda name: adapter)
+
+    out = captured["check_print_health"](printer_name="voron")
+
+    assert "Kiln expects: About 42m left, from your last 3 prints on voron." in out["checks"]["progress"]["detail"]
+
+
+def test_the_local_vs_service_comparison_says_the_real_time(kiln_env, monkeypatch):
+    monkeypatch.setattr("kiln.assumed_nozzle._registered_machines", lambda: ["voron"])
+    monkeypatch.setattr("kiln._pro_cost_bridge.attach_cost_intelligence", lambda *a, **k: None)
+    _seed("voron", [(3600, 3960, "success")] * 3)
+    from kiln.server import compare_print_options
+
+    out = compare_print_options(file_path=_gcode(kiln_env, seconds=7200), printer_id="voron")
+
+    assert out["local"]["estimate"]["learned_time"]["seconds"] == 7920

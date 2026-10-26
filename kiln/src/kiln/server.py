@@ -16687,6 +16687,10 @@ def compare_print_options(
         from kiln._pro_cost_bridge import attach_cost_intelligence
 
         attach_cost_intelligence(local_estimate, file_path, printer_id=printer_id or "")
+        # The slicer's time as the printer really prints it.
+        from kiln.learned_print_time import attach_learned_time
+
+        attach_learned_time(local_estimate, printer_id or None)
     except FileNotFoundError:
         local_error = "G-code file not found"
     except Exception as exc:
@@ -16747,8 +16751,11 @@ def compare_print_options(
         fulfillment_total = fulfillment_cost + (cheapest_shipping.get("price", 0) if cheapest_shipping else 0)
 
         local_time_h = None
-        if local_estimate.get("estimated_time_seconds"):
-            local_time_h = round(local_estimate["estimated_time_seconds"] / 3600, 1)
+        local_seconds = (local_estimate.get("learned_time") or {}).get("seconds") or local_estimate.get(
+            "estimated_time_seconds"
+        )
+        if local_seconds:
+            local_time_h = round(local_seconds / 3600, 1)
 
         fulfillment_days = fulfillment_quote_data.get("lead_time_days")
         if cheapest_shipping and cheapest_shipping.get("estimated_days"):

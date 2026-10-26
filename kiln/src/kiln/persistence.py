@@ -2775,6 +2775,18 @@ class KilnDB:
                 if existing_outcome in self.UNRESOLVED_OUTCOMES or not incoming_is_auto:
                     self._resolve_row_locked(existing_id, outcome)
                     return existing_id
+                # A decided row already carries this label.  A printer names
+                # a job by its file, so a LATER print of the same file ends
+                # under the same label: its ending belongs to the print still
+                # open on this printer, opened after that row ended.  Without
+                # this every reprint stayed pending and was lost to the
+                # record (2026-10-26).
+                if outcome_val not in self.UNRESOLVED_OUTCOMES and outcome.get("printer_name"):
+                    later = self._later_print_of_same_file_locked(existing_id, outcome)
+                    if later is not None:
+                        # Keeps its own job id: the label is the earlier print's.
+                        self._resolve_row_locked(later["id"], outcome)
+                        return later["id"]
                 # Auto-record vs an already-decided row: the decided row
                 # wins (a human or agent verdict outranks the hook).
                 raise ValueError(
@@ -2838,6 +2850,24 @@ class KilnDB:
                 if "integrity" in type(exc).__name__.lower() or isinstance(exc, sqlite3.IntegrityError):
                     raise ValueError(f"Outcome for job_id {outcome['job_id']!r} already recorded") from exc
                 raise
+
+    def _later_print_of_same_file_locked(
+        self, decided_id: int, outcome: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """The pending row a reprint's ending belongs to, or ``None``.  Caller
+        holds the lock.  Only a row opened after the decided row ended: a
+        print still open from before that ending is not the one that just
+        finished."""
+        row = self._conn.execute(
+            "SELECT ended_at, created_at FROM print_outcomes WHERE id = ?", (decided_id,)
+        ).fetchone()
+        ended = (row[0] or row[1]) if row is not None else None
+        match = self._match_pending_locked(
+            outcome["printer_name"], outcome.get("file_name") or outcome.get("job_id"),
+        )
+        if match is None or ended is None or float(match.get("created_at") or 0) <= float(ended):
+            return None
+        return match
 
     def _match_pending_locked(
         self,
@@ -3039,14 +3069,39 @@ class KilnDB:
         """
         return self._set_print_time("estimated_seconds", job_id, seconds)
 
-    def record_print_seconds(self, job_id: str, seconds: float) -> bool:
-        """Write how long the print *job_id* names really printed, once.
+    def record_print_seconds(
+        self, job_id: str, seconds: float, printer_names: list[str] | None = None,
+    ) -> bool:
+        """Write how long the print that just ended under *job_id* really printed.
 
-        Called only with a duration Kiln can vouch for (see
+        *job_id* is the printer's job label, which is the file's name, so a
+        reprint of a file ends under the label its first print's row holds.
+        The row written is the newest settled one, without a length yet, that
+        is that label's or (on one of *printer_names*) that file's.  Called
+        only with a duration Kiln can vouch for (see
         ``kiln.printers.base._record_print_duration``); the first one wins,
         so a second door witnessing the same ending changes nothing.
         """
-        return self._set_print_time("print_seconds", job_id, seconds)
+        if not job_id or isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not 0 < seconds < 1e7:
+            return False
+        names = [n for n in (printer_names or []) if n]
+        where = "job_id = ?" + (f" OR printer_name IN ({', '.join('?' for _ in names)})" if names else "")
+        target = _file_stem_token(job_id)
+        with self._write_lock:
+            rows = self._conn.execute(
+                "SELECT id, job_id, file_name FROM print_outcomes "
+                f"WHERE ({where}) AND print_seconds IS NULL AND outcome NOT IN ('pending', 'unknown') "
+                "ORDER BY COALESCE(ended_at, created_at) DESC LIMIT 10",
+                (job_id, *names),
+            ).fetchall()
+            for row in rows:
+                if row[1] == job_id or (target and _file_stem_token(row[2]) == target):
+                    self._conn.execute(
+                        "UPDATE print_outcomes SET print_seconds = ? WHERE id = ?", (float(seconds), row[0])
+                    )
+                    self._conn.commit()
+                    return True
+        return False
 
     def _set_print_time(self, column: str, job_id: str, seconds: float) -> bool:
         if column not in self.PRINT_TIME_COLUMNS or not job_id:

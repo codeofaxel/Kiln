@@ -7100,6 +7100,8 @@ def _record_print_duration(
     observation_gap_seconds: float | None,
     duration_semantics: str,
     stale_after_seconds: float | None = None,
+    printer_name: str | None = None,
+    finished: bool = False,
 ) -> None:
     """Bank this print's duration — if this reading can be TRUSTED.
 
@@ -7203,11 +7205,14 @@ def _record_print_duration(
     # stop naming the same job.
     record_print_hours_for_job(job_label, hours, reported=not watched)
     # The same trusted length goes on the print's own row, where it is laid
-    # against the slicer's time to learn this printer's pace.  The hook that
-    # just ran settled that row under this very label.
-    from kiln.learned_print_time import note_print_seconds
+    # against the slicer's time to learn this printer's pace -- only when the
+    # printer itself said the job FINISHED (*finished*).  A success guessed
+    # from a bare idle can be a cancel from the screen, and its length is
+    # part of a print.
+    if finished:
+        from kiln.learned_print_time import note_print_seconds
 
-    note_print_seconds(job_label, hours * 3600.0)
+        note_print_seconds(job_label, hours * 3600.0, printer_name)
 
 
 #: How long after Kiln's own load / unload / cancel a slot change still
@@ -7337,6 +7342,7 @@ def _feed_outcome_lifecycle(
         return
 
     from kiln.auto_record_hook import (
+        ending_is_a_finish,
         fire_terminal_state_hook,
         is_terminal_transition,
         observe_state,
@@ -7409,6 +7415,8 @@ def _feed_outcome_lifecycle(
                 ),
                 observation_gap_seconds=read_gap_seconds,
                 duration_semantics=adapter._DURATION_SEMANTICS,
+                printer_name=name,
+                finished=ending_is_a_finish(value),
             )
         # Stop the elapsed clock: the job it was measuring is over.  This is
         # the first caller ``forget_job_start`` has ever had, and without it

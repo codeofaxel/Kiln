@@ -2810,6 +2810,7 @@ class BambuAdapter(PrinterAdapter):
             if prev_gcode_state and new_gcode_state and job_id_for_hook:
                 try:
                     from kiln.auto_record_hook import (
+                        ending_is_a_finish,
                         fire_terminal_state_hook,
                         is_terminal_transition,
                         observe_state,
@@ -2890,6 +2891,8 @@ class BambuAdapter(PrinterAdapter):
                             state_age_seconds=0.0,
                             observation_gap_seconds=push_gap_seconds,
                             duration_semantics=self._DURATION_SEMANTICS,
+                            printer_name=lifecycle_name,
+                            finished=ending_is_a_finish(new_gcode_state),
                         )
                 except Exception as exc:  # pragma: no cover
                     logger.debug(

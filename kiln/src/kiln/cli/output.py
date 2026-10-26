@@ -237,6 +237,7 @@ def format_status(
     completion = job.get("completion")
     time_left = job.get("print_time_left_seconds")
     time_elapsed = job.get("print_time_seconds")
+    learned_left = job.get("learned_time_left") if isinstance(job.get("learned_time_left"), dict) else None
 
     if RICH_AVAILABLE:
         table = Table(show_header=False, box=None, padding=(0, 2))
@@ -267,6 +268,8 @@ def format_status(
             table.add_row("Progress", progress_bar(completion))
         if time_left is not None:
             table.add_row("Time left", format_time(time_left))
+        if learned_left:
+            table.add_row("Kiln expects", learned_left["said"])
         if time_elapsed is not None:
             table.add_row("Elapsed", format_time(time_elapsed))
         if time_left is not None and time_elapsed is not None:
@@ -295,6 +298,8 @@ def format_status(
         lines.append(f"Progress:  {progress_bar(completion)}")
     if time_left is not None:
         lines.append(f"Time left: {format_time(time_left)}")
+    if learned_left:
+        lines.append(f"Kiln:      {learned_left['said']}")
     if time_elapsed is not None:
         lines.append(f"Elapsed:   {format_time(time_elapsed)}")
     if time_left is not None and time_elapsed is not None:

@@ -499,11 +499,18 @@ class _MaterialToolsPlugin:
                         progress_parts.append(f"~{mins_left}m remaining")
                 if job.file_name:
                     progress_parts.append(f"file: {job.file_name}")
+                # When it should really end, by this printer's own record.
+                from kiln.learned_print_time import attach_time_left
+
+                learned_left = attach_time_left(job_dict, adapter)
 
                 checks["progress"] = {
                     "status": "ok",
                     "detail": ", ".join(progress_parts) if progress_parts else "No active job.",
                 }
+                if learned_left:
+                    checks["progress"]["detail"] += f". Kiln expects: {learned_left['said']}"
+                    checks["progress"]["learned_time_left"] = learned_left
 
             except PrinterError as exc:
                 checks["progress"] = {

@@ -76,11 +76,9 @@ def _with_learned_time(response: dict[str, Any], printer_id: str | None) -> dict
     """*response* with ``learned_time`` when the only printer Kiln knows of
     (of *printer_id*'s model, when one was named) has timed prints: the
     slicer's time as that printer really prints it."""
-    from kiln.learned_print_time import learned_time
+    from kiln.learned_print_time import attach_learned_time
 
-    learned = learned_time(response.get("estimated_time_seconds"), None, printer_model=printer_id or None)
-    if learned:
-        response["learned_time"] = learned
+    attach_learned_time(response, printer_model=printer_id or None)
     return response
 
 
@@ -516,6 +514,10 @@ class _EstimateToolsPlugin:
                 from kiln._pro_cost_bridge import attach_cost_intelligence
 
                 attach_cost_intelligence(data, file_path, printer_id=printer_id or "")
+                # The slicer's time as the printer really prints it.
+                from kiln.learned_print_time import attach_learned_time
+
+                attach_learned_time(data, printer_id or None)
                 return {"success": True, "estimate": data}
             except FileNotFoundError as exc:
                 return _srv._error_dict(f"Failed to estimate cost: {exc}", code="FILE_NOT_FOUND")

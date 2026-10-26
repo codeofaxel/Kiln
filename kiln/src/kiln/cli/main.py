@@ -2307,7 +2307,7 @@ def status(ctx: click.Context, json_mode: bool) -> None:
         hardware = _observe_hardware(adapter, state, job)
         if hardware:
             extra["hardware"] = hardware
-        click.echo(format_status(state.to_dict(), job.to_dict(), json_mode=json_mode, extra=extra))
+        click.echo(format_status(state.to_dict(), _job_with_learned_time(job, adapter), json_mode=json_mode, extra=extra))
         if cooldown and not json_mode:
             click.echo(f"  {cooldown['note']}")
         if hardware and not json_mode:
@@ -2420,6 +2420,16 @@ def _estimate_print_cost_cli(
     }
 
 
+def _job_with_learned_time(job: Any, adapter: Any) -> dict[str, Any]:
+    """*job* as a dict, with when it should really end by this printer's own
+    record beside the printer's countdown (kiln.learned_print_time)."""
+    from kiln.learned_print_time import attach_time_left
+
+    jd = job.to_dict()
+    attach_time_left(jd, adapter)
+    return jd
+
+
 def _format_duration_cli(seconds: int | float | None) -> str:
     """Format seconds as a human-readable duration string."""
     if seconds is None or seconds < 0:
@@ -2517,6 +2527,9 @@ def report(
             total_layers = jd.get("total_layers")
             elapsed_s = jd.get("print_time_seconds")
             remaining_s = jd.get("print_time_left_seconds")
+            from kiln.learned_print_time import attach_time_left
+
+            learned_left = attach_time_left(jd, adapter)
             tool_actual = sd.get("tool_temp_actual")
             tool_target = sd.get("tool_temp_target")
             bed_actual = sd.get("bed_temp_actual")
@@ -2606,6 +2619,7 @@ def report(
                     f"- File: {file_name}",
                     f"- Layer: {layer_str}",
                     f"- Time elapsed: {_format_duration_cli(elapsed_s)} | Remaining: {_format_duration_cli(remaining_s)}",
+                    *([f"- Kiln expects: {learned_left['said']}"] if learned_left else []),
                     f"- Nozzle: {nozzle_str}",
                     f"- Bed: {bed_str}",
                 ]
@@ -3068,7 +3082,7 @@ def print_cmd(
         if show_status or not files:
             state = adapter.get_state()
             job = adapter.get_job()
-            click.echo(format_status(state.to_dict(), job.to_dict(), json_mode=json_mode))
+            click.echo(format_status(state.to_dict(), _job_with_learned_time(job, adapter), json_mode=json_mode))
             return
 
         # Expand globs in file list
@@ -7731,8 +7745,10 @@ def cost(
         )
         data = estimate.to_dict()
         from kiln._pro_cost_bridge import attach_cost_intelligence
+        from kiln.learned_print_time import attach_learned_time
 
         attach_cost_intelligence(data, file_path)
+        learned = attach_learned_time(data)
 
         if json_mode:
             click.echo(
@@ -7752,6 +7768,8 @@ def cost(
             if estimate.estimated_time_seconds:
                 hours = estimate.estimated_time_seconds / 3600
                 click.echo(f"Est. time:  {hours:.1f} hours")
+                if learned and learned["learned"]:
+                    click.echo(f"Kiln:       {learned['said']}")
                 click.echo(f"Elec. $:    ${estimate.electricity_cost_usd:.2f}")
             click.echo(f"Total $:    ${estimate.total_cost_usd:.2f}")
             answer = data.get("cost_intelligence")
@@ -7975,8 +7993,10 @@ def compare_cost(
         )
         local = estimate.to_dict()
         from kiln._pro_cost_bridge import attach_cost_intelligence
+        from kiln.learned_print_time import attach_learned_time
 
         attach_cost_intelligence(local, file_path)
+        attach_learned_time(local)
         result["local"] = {"available": True, "estimate": local}
     except ValueError as exc:
         result["local"] = {"available": False, "error": str(exc)}
@@ -8064,6 +8084,8 @@ def compare_cost(
             click.echo(f"  Total:      ${est['total_cost_usd']:.2f}")
             if est.get("estimated_time_seconds"):
                 click.echo(f"  Time:       {est['estimated_time_seconds'] / 3600:.1f} hours")
+                if (est.get("learned_time") or {}).get("learned"):
+                    click.echo(f"  Kiln:       {est['learned_time']['said']}")
         else:
             click.echo(f"  Error: {result['local'].get('error', 'unavailable')}")
 

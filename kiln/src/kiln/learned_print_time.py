@@ -119,18 +119,20 @@ def note_start_estimate(job_id: str | None, file_name: str | None) -> None:
         logger.debug("slicer time not written for %s", job_id, exc_info=True)
 
 
-def note_print_seconds(job_id: str | None, seconds: float) -> None:
+def note_print_seconds(job_id: str | None, seconds: float, printer_name: str | None = None) -> None:
     """Write how long a print really took, from an ending Kiln can vouch for.
 
     Called from ``kiln.printers.base._record_print_duration`` after its
-    watched-or-frozen rule passed.  Never raises.
+    watched-or-frozen rule passed, with the printer the ending was filed
+    under, so a reprint's length lands on the reprint's row.  Never raises.
     """
     if not job_id or _hosted():
         return
     try:
         from kiln.persistence import get_db
 
-        get_db().record_print_seconds(job_id, seconds)
+        names = _machine(printer_name)[0] if printer_name else None
+        get_db().record_print_seconds(job_id, seconds, names)
     except Exception:  # noqa: BLE001 -- bookkeeping never affects a print
         logger.debug("print length not written for %s", job_id, exc_info=True)
 
@@ -250,6 +252,30 @@ def learned_time(
             f"(the slicer says {_duration(slicer_seconds)})."
         ),
     }
+
+
+def attach_learned_time(
+    block: dict[str, Any] | None,
+    printer_name: str | None = None,
+    *,
+    printer_model: str | None = None,
+) -> dict[str, Any] | None:
+    """Put :func:`learned_time` on an estimate's dict, as ``learned_time``,
+    from its ``estimated_time_seconds`` (the slicer's time).
+
+    The one call every estimate door makes.  Returns what it attached.
+    Never raises.
+    """
+    if not isinstance(block, dict):
+        return None
+    try:
+        learned = learned_time(block.get("estimated_time_seconds"), printer_name or None, printer_model=printer_model)
+    except Exception:  # noqa: BLE001 -- an estimate never fails on its forecast
+        logger.debug("learned time not attached", exc_info=True)
+        return None
+    if learned:
+        block["learned_time"] = learned
+    return learned
 
 
 def learned_time_left(printer_name: str | None, elapsed_seconds: float | None = None) -> dict[str, Any] | None:
