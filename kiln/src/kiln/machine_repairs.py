@@ -390,7 +390,7 @@ def attach_repairs(statuses: list[dict[str, Any]], *, db: Any = None) -> list[st
     """Put each printer's ``repair`` block (:func:`routing_block`) on its row
     of a fleet listing, by the row's ``name``, and return the names marked
     needs repair, in listing order.  The one reader every fleet listing
-    uses (``fleet_status``, ``fleet_status_by_site``), so a printer out of
+    uses (``fleet_status``, flat and grouped by site), so a printer out of
     service is never idle in one view and out of service in another."""
     needs_repair: list[str] = []
     for row in statuses:

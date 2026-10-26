@@ -13402,7 +13402,7 @@ def confirm_action(token: str) -> dict:
 
 @mcp.tool()
 @requires_tier(LicenseTier.BUSINESS)
-def fleet_status() -> dict:
+def fleet_status(by_site: bool = False) -> dict:
     """Get live status of all fleet printers (state, temps, connection — current snapshot).
 
     The multi-machine view is a fleet feature.  For ONE printer — which is
@@ -13413,7 +13413,6 @@ def fleet_status() -> dict:
     whatever your licence.
 
     For historical analytics (success rates, throughput), use ``fleet_analytics``.
-    For grouping by physical location, use ``fleet_status_by_site``.
     Returns a list of printer snapshots including name, backend type,
     connection status, operational state, and temperatures.  Printers
     that fail to respond are reported as offline rather than raising.
@@ -13421,6 +13420,18 @@ def fleet_status() -> dict:
     ``repair`` block (needs repair since, or repaired at and what), and
     ``needs_repair_printers`` lists the ones out of service: routing does
     not choose them, though they may read as idle.
+
+    Args:
+        by_site: Also group the same printers by the site each one is at
+            (``update_printer_site``; printers with no site are grouped
+            under ``"unassigned"``).  Grouping by site is a Kiln Enterprise
+            feature (https://kiln3d.com/pricing): on that plan the answer
+            adds ``sites`` — per site its ``printers``, ``count``, ``idle``,
+            ``busy`` and ``needs_repair`` — and ``site_count``.  On Kiln
+            Business the flat answer comes back as usual, with one ``note``
+            saying which plan groups it; never a refusal.  This is the one
+            fleet view: the retired ``fleet_status_by_site`` now only points
+            here.
 
     If no printers are registered yet, the current adapter (from env config)
     is auto-registered as "default".
@@ -13435,12 +13446,15 @@ def fleet_status() -> dict:
                 pass  # No adapter configured
 
         if _get_registry().count == 0:
-            return {
+            empty: dict[str, Any] = {
                 "success": True,
                 "printers": [],
                 "count": 0,
                 "message": "No printers registered.",
             }
+            if by_site:
+                _attach_sites(empty, [])
+            return empty
 
         status = _get_registry().get_fleet_status()
         idle = _get_registry().get_idle_printers()
@@ -13476,7 +13490,7 @@ def fleet_status() -> dict:
         from kiln.machine_repairs import attach_repairs
 
         needs_repair_printers = attach_repairs(status)
-        return {
+        result = {
             "success": True,
             "printers": status,
             "count": len(status),
@@ -13488,9 +13502,67 @@ def fleet_status() -> dict:
             "busy_printers": [n for n in busy_printers if n],
             "needs_repair_printers": needs_repair_printers,
         }
+        if by_site:
+            _attach_sites(result, status)
+        return result
     except Exception as exc:
         logger.exception("Unexpected error in fleet_status")
         return _error_dict(f"Unexpected error in fleet_status: {exc}", code="INTERNAL_ERROR")
+
+
+def _attach_sites(result: dict[str, Any], status: list[dict[str, Any]]) -> None:
+    """Add the by-site grouping to a ``fleet_status`` answer, or the one
+    line saying which plan has it.
+
+    The CALLER's plan, read through ``kiln.licensing`` at call time: on
+    Kiln's servers that is the person asking, never the server's own
+    sign-in.  Below Enterprise the flat answer above is left exactly as it
+    is -- nothing withheld that the Business view had -- and the grouping is
+    named once, as a fact with the pricing link.  The rows are already read
+    (and already carry their ``repair`` block), so grouping is a sort, not a
+    second round of printer calls.
+    """
+    from kiln.licensing import LicenseTier as _Tier
+    from kiln.licensing import check_tier as _check_tier
+
+    enterprise, _ = _check_tier(_Tier.ENTERPRISE)
+    if not enterprise:
+        note = (
+            "Grouped by site, each site would list its own printers with "
+            "their idle, busy and needs-repair names; that view is part of "
+            "Kiln Enterprise. Here is the whole fleet in one list."
+        )
+        result["note"] = note
+        result["upgrade_url"] = upgrade_link("fleet_status")
+        result["upgrade_nudge"] = upgrade_nudge_block(
+            variant="fleet_by_site",
+            tier="enterprise",
+            feature="Fleet view grouped by site",
+            headline="See each site's printers at a glance.",
+            outcome_preview=note,
+            free_included="Every printer stays in this one flat fleet view.",
+            moment="resource_threshold",
+        )
+        return
+    from kiln.printers.base import row_run_state, status_is_occupied
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in status:
+        grouped.setdefault(row.get("site") or "unassigned", []).append(row)
+    result["sites"] = {
+        site: {
+            "needs_repair": [p["name"] for p in rows if (p.get("repair") or {}).get("status") == "needed"],
+            "printers": rows,
+            "count": len(rows),
+            "idle": [p["name"] for p in rows if str(p.get("state", "")).lower() == "idle"],
+            # Through the shared classifier, so this grouping cannot drift
+            # from the flat list beside it about which states mean "not
+            # free to take work" -- a "stale" machine is busy here too.
+            "busy": [p["name"] for p in rows if status_is_occupied(row_run_state(p))],
+        }
+        for site, rows in grouped.items()
+    }
+    result["site_count"] = len(grouped)
 
 
 # fleet_analytics — extracted to plugins/fleet_tools.py
@@ -14072,8 +14144,8 @@ def register_printer(
 # discover_printers — extracted to plugins/printer_management_tools.py
 
 
-# list_fleet_sites, fleet_status_by_site, update_printer_site
-# — extracted to plugins/fleet_tools.py
+# list_fleet_sites, update_printer_site — extracted to plugins/fleet_tools.py
+# (fleet_status_by_site is retired there: it points at fleet_status(by_site=True))
 
 
 @mcp.tool()

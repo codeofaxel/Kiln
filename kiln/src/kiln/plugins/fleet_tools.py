@@ -198,7 +198,7 @@ class _FleetToolsPlugin:
     Tools:
         - fleet_analytics
         - list_fleet_sites
-        - fleet_status_by_site
+        - fleet_status_by_site (retired: points at fleet_status(by_site=True))
         - update_printer_site
         - route_print_job
         - fleet_submit_job
@@ -310,55 +310,20 @@ class _FleetToolsPlugin:
         # ------------------------------------------------------------------
 
         @mcp.tool()
-        @_srv.requires_tier(_srv.LicenseTier.ENTERPRISE)
         def fleet_status_by_site() -> dict:
-            """Get fleet status grouped by physical site/location.
+            """Retired: the fleet grouped by site is ``fleet_status(by_site=True)``.
 
-            Returns printer statuses organized by site, making it easy to see
-            which printers are idle, busy, or offline at each location.
-            Printers without a site are grouped under ``"unassigned"``.
-            As in ``fleet_status``, a printer the person marked with
-            ``set_machine_repair`` carries a ``repair`` block, each site
-            lists its ``needs_repair`` printers and ``needs_repair_printers``
-            lists them all: routing does not choose them, though they may
-            read as idle.
-
-            Requires Enterprise license.
+            There is one fleet view.  ``fleet_status`` lists every printer;
+            with ``by_site=True`` the same answer is also grouped by site,
+            with each site's idle, busy and needs-repair printers.  This name
+            answers nothing any more: it only points there, so an old guide
+            or habit still leads somewhere.  It reads no printer.
             """
-            try:
-                from kiln.machine_repairs import attach_repairs
-                from kiln.printers.base import row_run_state, status_is_occupied
-
-                grouped = _srv._get_registry().get_fleet_status_by_site()
-                result = {}
-                needs_repair_printers: list[str] = []
-                for site, statuses in grouped.items():
-                    needs_repair = attach_repairs(statuses)
-                    needs_repair_printers.extend(needs_repair)
-                    result[site] = {
-                        "needs_repair": needs_repair,
-                        "printers": statuses,
-                        "count": len(statuses),
-                        "idle": [p["name"] for p in statuses if str(p.get("state", "")).lower() == "idle"],
-                        # Through the shared classifier, so this listing
-                        # cannot drift from the rest of the product about
-                        # which states mean "not free to take work" — a
-                        # "stale" machine is busy here, not idle.
-                        "busy": [
-                            p["name"]
-                            for p in statuses
-                            if status_is_occupied(row_run_state(p))
-                        ],
-                    }
-                return {
-                    "success": True,
-                    "sites": result,
-                    "site_count": len(result),
-                    "needs_repair_printers": needs_repair_printers,
-                }
-            except Exception as exc:
-                _logger.exception("Unexpected error in fleet_status_by_site")
-                return _srv._error_dict(f"Unexpected error in fleet_status_by_site: {exc}", code="INTERNAL_ERROR")
+            return _srv._error_dict(
+                "It was retired: the fleet grouped by site is "
+                "fleet_status(by_site=True), the one fleet view. Nothing was changed.",
+                code="RETIRED",
+            )
 
         # ------------------------------------------------------------------
         # update_printer_site
