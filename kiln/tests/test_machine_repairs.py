@@ -623,3 +623,57 @@ class TestTheWire:
         assert "repair" not in by_name["b"]
         wire = json.dumps(sent[0])
         assert "back of the shop" not in wire and machine_fingerprint(a) not in wire and HOST not in wire
+
+
+# --- defects a lap found (2026-10-25; each fails at 3ce7748a) ---
+
+
+class TestTheFleetView:
+    """The repair record's design (2026-10-25, Adam: one tool, two states)
+    named ``fleet_status`` among the places that say "needs repair since":
+    the twenty-machine view is where a person looks for which printers are
+    out of service.  The branch wired routing, the start warning and the web
+    grid, and left fleet_status saying nothing -- so a printer taken out of
+    service read as idle and free for work in the one listing a fleet owner
+    reads first."""
+
+    @pytest.fixture
+    def fleet(self, monkeypatch, db):
+        from unittest.mock import MagicMock
+
+        import kiln.server as srv
+        from kiln.printers.base import PrinterState, PrinterStatus
+        from kiln.printers.octoprint import OctoPrintAdapter
+        from kiln.registry import PrinterRegistry
+
+        monkeypatch.setattr("kiln.licensing.check_tier", lambda _tier: (True, None))
+        monkeypatch.setattr("kiln.account_plan._covers", lambda _required: True)
+        monkeypatch.setattr(persistence_mod, "get_db", lambda: db)
+        registry = PrinterRegistry()
+        for name, host in (("a", "10.0.0.5"), ("b", "10.0.0.6")):
+            adapter = MagicMock(spec=OctoPrintAdapter)
+            adapter.name, adapter.host, adapter.serial = "OctoPrint", host, None
+            adapter.get_state.return_value = PrinterState(
+                connected=True, state=PrinterStatus.IDLE, tool_temp_actual=24.0, tool_temp_target=0.0,
+                bed_temp_actual=22.0, bed_temp_target=0.0,
+            )
+            registry.register(name, adapter)
+        monkeypatch.setattr(srv, "_registry", registry)
+        return srv.fleet_status
+
+    def test_a_printer_marked_needs_repair_is_listed_with_its_mark(self, fleet, db):
+        pr.mark("a", "needed", db=db)
+        pr.mark("b", "done", kind="belts", db=db)
+        out = fleet()
+        assert out["success"] is True
+        assert out["needs_repair_printers"] == ["a"]
+        rows = {row["name"]: row for row in out["printers"]}
+        assert rows["a"]["repair"]["status"] == "needed" and rows["a"]["repair"]["since"]
+        assert rows["b"]["repair"] == {"status": "done", "at": rows["b"]["repair"]["at"], "kind": "belts"}
+        # Status and time only: never the note, never a code.
+        assert set(rows["a"]["repair"]) == {"status", "since"}
+
+    def test_a_fleet_with_nothing_on_record_says_nothing(self, fleet):
+        out = fleet()
+        assert out["needs_repair_printers"] == []
+        assert all("repair" not in row for row in out["printers"])

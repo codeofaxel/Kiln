@@ -12960,6 +12960,10 @@ def fleet_status() -> dict:
     Returns a list of printer snapshots including name, backend type,
     connection status, operational state, and temperatures.  Printers
     that fail to respond are reported as offline rather than raising.
+    A printer the person marked with ``set_machine_repair`` carries a
+    ``repair`` block (needs repair since, or repaired at and what), and
+    ``needs_repair_printers`` lists the ones out of service: routing does
+    not choose them, though they may read as idle.
 
     If no printers are registered yet, the current adapter (from env config)
     is auto-registered as "default".
@@ -13009,6 +13013,21 @@ def fleet_status() -> dict:
             if status_is_occupied(row_run_state(p))
             or str(p.get("state", "")).lower() == "starting"
         ]
+        # What the person said about each machine (set_machine_repair), read
+        # through the one engine routing reads: status and time only.
+        from kiln.machine_repairs import condition as _repair_condition
+        from kiln.machine_repairs import routing_block as _repair_block
+
+        needs_repair_printers: list[str] = []
+        for p in status:
+            name = p.get("name") or ""
+            if not name:
+                continue
+            block = _repair_block(_repair_condition(name))
+            if block:
+                p["repair"] = block
+                if block["status"] == "needed":
+                    needs_repair_printers.append(name)
         return {
             "success": True,
             "printers": status,
@@ -13019,6 +13038,7 @@ def fleet_status() -> dict:
             "state_counts": state_counts,
             "offline_printers": [n for n in offline_printers if n],
             "busy_printers": [n for n in busy_printers if n],
+            "needs_repair_printers": needs_repair_printers,
         }
     except Exception as exc:
         logger.exception("Unexpected error in fleet_status")
