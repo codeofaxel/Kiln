@@ -20260,6 +20260,43 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
     )
 
 
+class _StubCatcher:
+    """Takes the stubs :func:`_register_pro_tool_stubs` builds, by name, without a server."""
+
+    def __init__(self) -> None:
+        self.tools: dict[str, Callable[..., Any]] = {}
+
+    def tool(self, *args: Any, **kwargs: Any) -> Any:
+        def keep(fn: Callable[..., Any]) -> Callable[..., Any]:
+            self.tools[kwargs.get("name") or fn.__name__] = fn
+            return fn
+
+        if len(args) == 1 and callable(args[0]) and not kwargs:
+            return keep(args[0])
+        return keep
+
+
+_SERVED_STUBS: dict[str, Callable[..., Any]] | None = None
+
+
+def served_tool(name: str) -> Callable[..., Any] | None:
+    """The stub an agent on this install calls for the served tool *name*.
+
+    For a door of this install's own that is not an agent, the command line:
+    it calls the very function the agent's call runs, built by the same
+    registration, so the files a call names go up, the design history it is
+    about rides along and comes back, a printer reading is taken here, and a
+    miss is worded the same way.  ``None`` when the manifest serves no tool of
+    that name (a tool Kiln's servers refuse gets no stub, so no door either).
+    """
+    global _SERVED_STUBS
+    if _SERVED_STUBS is None:
+        catcher = _StubCatcher()
+        _register_pro_tool_stubs(catcher)
+        _SERVED_STUBS = catcher.tools
+    return _SERVED_STUBS.get(name)
+
+
 def _register_keep_design(mcp_instance) -> None:
     """The keep verb for makes built on Kiln's servers.
 

@@ -13830,8 +13830,12 @@ except ImportError:
     # kiln-pro not installed: the design-history commands are couriers that
     # send this computer's own history to Kiln's servers and keep the change.
     from kiln.cli.history_commands import register_history_cli
+    from kiln.cli.served_commands import register_served_cli
 
     register_history_cli(cli)
+    # The rest of the paid commands: each calls the tool Kiln's servers run,
+    # the same way this install's agent does.
+    register_served_cli(cli)
 
 # `kiln design lock / unlock`: keep a design on this computer, never saved to
 # the person's Kiln account.  On every install, onto kiln-pro's `design`
