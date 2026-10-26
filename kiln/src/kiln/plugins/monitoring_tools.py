@@ -1022,11 +1022,12 @@ class _MonitoringToolsPlugin:
                     }
                     if _auto_pause and failure_confidence >= 0.8 and is_printing:
                         try:
-                            # The shared pause engine, so the auto-pause gets
-                            # the bed hold and the nozzle rule every pause does.
+                            # The shared pause engine.  A pause the camera
+                            # triggered on a failure holds no heat: spaghetti,
+                            # a shift or a warp is not one to keep heaters on for.
                             from kiln.server import _pause_print_on
 
-                            _pause_print_on(adapter, printer_name or "default")
+                            _pause_print_on(adapter, printer_name or "default", keep_temps=False)
                             auto_paused = True
                             result["failure_detection"]["auto_paused"] = True
                             result["failure_detection"]["message"] = (

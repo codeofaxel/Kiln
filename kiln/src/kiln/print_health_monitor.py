@@ -1162,13 +1162,16 @@ class PrintHealthMonitor:
             return
 
         try:
-            # The shared pause engine, so the auto-pause gets the bed hold and
-            # the nozzle rule every pause does.  A runout pause is one where
-            # the person loads filament, so the nozzle is left to them.
+            # The shared pause engine.  A pause a fault triggered holds no
+            # heat: a thermal fault, a crash or a mess on the plate is not one
+            # to keep a heater on for.  A runout or a clog is the exception,
+            # since the person fixes it and resumes: the bed is held and the
+            # nozzle is left to them.
             from kiln.server import _pause_print_on
 
+            filament_work = _works_the_filament(issue_type)
             _pause_print_on(
-                adapter, session.printer_name, leave_nozzle=_works_the_filament(issue_type),
+                adapter, session.printer_name, keep_temps=filament_work, leave_nozzle=filament_work,
             )
         except Exception as exc:
             issue["auto_pause_error"] = repr(exc)

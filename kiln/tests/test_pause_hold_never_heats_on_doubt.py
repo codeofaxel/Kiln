@@ -568,6 +568,58 @@ def test_an_emergency_stop_during_the_reheat_stops_the_resume():
     assert out.success is False
     assert out.code == "E_STOP_LATCHED"
     assert workshop.events == []
+    assert workshop.tool_target == 0.0, "a stopped machine was left heating"
+
+
+def test_a_stopped_machine_is_never_heated_by_a_resume_door_that_skips_the_latch():
+    """``adapter.resume_print`` is reached by doors that ask no latch of their
+    own (the CLI, a script); the reheat asks before it heats anything."""
+    _garage, workshop = _bench()
+    _pause(workshop, "workshop")
+    workshop.tool_actual = 40.0
+    coordinator = emergency.get_emergency_coordinator()
+    with coordinator._lock:
+        coordinator._stopped_printers.add("workshop")
+
+    out = workshop.resume_print()
+
+    assert out.success is False and out.code == "E_STOP_LATCHED"
+    assert ("tool", 220.0) not in workshop.sent
+    assert workshop.events == []
+
+
+def test_a_fleet_resume_never_starts_heating_a_stopped_machine():
+    garage, workshop = _bench()
+    _pause(garage, "garage")
+    _pause(workshop, "workshop")
+    garage.tool_actual = workshop.tool_actual = 40.0
+    coordinator = emergency.get_emergency_coordinator()
+    with coordinator._lock:
+        coordinator._stopped_printers.add("workshop")
+
+    server._begin_resume_reheat(garage)
+    server._begin_resume_reheat(workshop)
+
+    assert ("tool", 220.0) in garage.sent
+    assert ("tool", 220.0) not in workshop.sent
+
+
+def test_a_fault_auto_pause_holds_no_heat():
+    """A health-monitor pause on a thermal fault (or any fault but a runout or
+    a clog) must not keep a heater on.  Before the auto-pause went through the
+    shared engine it held nothing; the engine's hold is not for faults."""
+    from kiln.print_health_monitor import PrintHealthMonitor
+
+    _garage, workshop = _bench()
+    monitor = PrintHealthMonitor.__new__(PrintHealthMonitor)
+    monitor._pause_kill_switch_enabled = lambda: False
+    session = SimpleNamespace(session_id="s1", printer_name="workshop")
+
+    monitor._honor_auto_pause(session, {}, "detect_failure_thermal_runaway")
+
+    assert workshop.status is PrinterStatus.PAUSED
+    assert not server._pause_keepalive.is_running(workshop)
+    assert workshop.sent == []
 
 
 def test_a_printer_kiln_cannot_set_temperatures_on_is_left_to_its_own_pause():

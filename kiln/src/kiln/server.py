@@ -5304,8 +5304,13 @@ def _begin_resume_reheat(adapter: PrinterAdapter) -> None:
     target = _pause_keepalive.nozzle_for_resume(adapter)
     if not target or target <= 0 or not _sets_temperatures(adapter):
         return
+    if _machine_is_latched(adapter, _lifecycle_printer_name(adapter)):
+        return
     try:
-        actual = adapter.get_state().tool_temp_actual
+        state = adapter.get_state()
+        if state.confirmed_state != PrinterStatus.PAUSED:
+            return
+        actual = state.tool_temp_actual
         if actual is None or actual < target - _REHEAT_REACHED_C:
             adapter.set_tool_temp(target)
     except Exception as exc:
@@ -5323,7 +5328,8 @@ def _reheat_before_resume(adapter: PrinterAdapter) -> tuple[PrintResult | None, 
     pause this print (it knows no target) or the nozzle is already there.
     The refusals, with nothing resumed:
 
-    * the machine was emergency-stopped while it heated;
+    * the machine is, or becomes while it heats, emergency-stopped (the
+      nozzle is switched off);
     * the nozzle could not be read, so Kiln cannot know it is hot — a resume
       onto a cold nozzle grinds the filament or prints nothing;
     * it did not heat, by Marlin's own test (under 2 °C of rise in 40 s while
@@ -5367,6 +5373,13 @@ def _reheat_before_resume(adapter: PrinterAdapter) -> tuple[PrintResult | None, 
             logger.warning("Resume reheat: could not switch %s's nozzle off: %s", label, exc)
         return refuse(message + "  Kiln switched the nozzle off and did not resume.", code)
 
+    def stopped() -> CodedPrintResult:
+        return give_up(f"{label} is emergency-stopped.", "E_STOP_LATCHED")
+
+    # Asked before the first heat, not only while waiting: a door that resumes
+    # without its own latch check must not heat a stopped machine.
+    if _machine_is_latched(adapter, label):
+        return stopped(), False
     actual = read()
     if actual is not None and actual >= target - _REHEAT_REACHED_C:
         return None, False
@@ -5384,10 +5397,7 @@ def _reheat_before_resume(adapter: PrinterAdapter) -> tuple[PrintResult | None, 
     watch_since, watch_from = started, actual
     while True:
         if _machine_is_latched(adapter, label):
-            return refuse(
-                f"{label} was emergency-stopped while its nozzle reheated; Kiln did not resume it.",
-                "E_STOP_LATCHED",
-            ), True
+            return stopped(), True
         time.sleep(_REHEAT_POLL_S)
         now = time.monotonic()
         actual = read()
