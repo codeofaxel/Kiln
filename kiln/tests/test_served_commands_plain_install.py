@@ -56,8 +56,6 @@ CASES: list[tuple[list[str], str, dict[str, Any]]] = [
      {"version_ids": ["v1", "v2"], "material": "PETG"}),
     (["manual", "list-history", "mug"], "list_manual_history", {"design_id": "mug", "include_retired": False}),
     (["manual", "get-revision", "m1"], "get_manual_revision", {"manual_id": "m1"}),
-    (["manual", "retire", "m1", "--reason", "old box"], "retire_manual_revision",
-     {"manual_id": "m1", "reason": "old box"}),
     (["manual", "diff", "--old", "m1", "--new", "m2"], "diff_assembly_manuals",
      {"manual_id_old": "m1", "manual_id_new": "m2"}),
 ]
@@ -199,6 +197,12 @@ def test_signed_out_is_told_to_sign_in(monkeypatch, tmp_path):
     answer = json.loads(out.output[: out.output.rindex("}") + 1])
     assert answer["why"] == "signed_out"
     assert answer["code"] in ("KILN_ACCOUNT_NOT_PAIRED", "KILN_SESSION_EXPIRED")
+
+
+def test_no_command_on_a_tool_the_server_refuses_inside():
+    """retire_manual_revision is listed as served but keeps no account copy, so
+    Kiln's servers refuse it for everyone; a command on it would always say no."""
+    assert "retire" not in _root().commands["manual"].commands
 
 
 def test_every_command_names_a_tool_the_manifest_serves():

@@ -533,16 +533,6 @@ def manual_diff(old_id: str | None, new_id: str | None, spec_old_path: str | Non
     _finish(answer, json_mode, say)
 
 
-@manual_group.command("retire")
-@click.argument("manual_id")
-@click.option("--reason", required=True, help="Why this revision is retired.")
-@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def manual_retire(manual_id: str, reason: str, json_mode: bool) -> None:
-    """Retire a manual revision.  The record is kept."""
-    _finish(_ask("retire_manual_revision", manual_id=manual_id, reason=reason),
-            json_mode, lambda a: f"Retired {_shown(manual_id)[:8]}: {_shown(reason)}")
-
-
 # ---------------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------------
