@@ -1265,14 +1265,13 @@ class TestEveryCallerOfTheSlicer:
 
 #: The names a function may call to take the start gate: the gate itself,
 #: the pipelines' step wrapper, the CLI's exit-non-zero wrapper.
-_START_GATES = frozenset({"start_refusal", "_start_refused_step", "_cli_start_refusal"})
-#: Doors that start prints from a QUEUE, named here with the reason they
-#: are not gated: the ingest watcher and the scheduler are batch doors,
-#: out of this change's scope, and an unnamed exemption would be a hole.
+_START_GATES = frozenset({"start_refusal", "_start_refused_step", "_cli_start_refusal", "start_hold"})
+#: Doors that start prints from a QUEUE without calling a gate in their own
+#: body, named here with the reason: an unnamed exemption would be a hole.
 _QUEUE_DOORS = {
-    ("cli/main.py", "_dispatch_pending"): "the ingest watcher's queue — a batch door, out of scope",
-    ("cli/main.py", "ingest_watch_cmd"): "encloses _dispatch_pending — the same batch door",
-    ("scheduler.py", "tick"): "the print queue — a batch door, out of scope",
+    ("scheduler.py", "tick"): (
+        "the print queue reads every job's plate through start_hold in _startable_job, one call down"
+    ),
 }
 
 

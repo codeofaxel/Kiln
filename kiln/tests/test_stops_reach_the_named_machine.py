@@ -410,7 +410,7 @@ def test_a_pause_keeps_its_own_machine_warm_and_no_other(monkeypatch):
 
     server.pause_print(printer_name="workshop")
     try:
-        assert _wait_for(lambda: len(workshop.tool_temps) >= 2)
+        assert _wait_for(lambda: len(workshop.bed_temps) >= 2)
         assert garage.tool_temps == []
         assert garage.bed_temps == []
     finally:
@@ -431,7 +431,8 @@ def test_the_keep_alive_asserts_immediately_not_one_interval_later(monkeypatch):
     window. The thread was alive the whole time and never called
     ``set_tool_temp`` once, while the firmware's own 90°C standby target pulled
     the nozzle from 220°C to 139°C. Every pause shorter than the interval was
-    unprotected, which is most pauses a person takes.
+    unprotected, which is most pauses a person takes.  The hold keeps the bed
+    now (the nozzle is settled separately), and the bed is what it re-sends.
 
     So the interval here is deliberately LONGER than the test could ever wait.
     If the first assert is ever scheduled rather than immediate, this fails.
@@ -441,7 +442,7 @@ def test_the_keep_alive_asserts_immediately_not_one_interval_later(monkeypatch):
 
     server.pause_print(printer_name="workshop")
     try:
-        assert _wait_for(lambda: len(workshop.tool_temps) >= 1), (
+        assert _wait_for(lambda: len(workshop.bed_temps) >= 1), (
             "keep-alive asserted no temperature within the wait — the first "
             "re-assert is scheduled an interval away instead of happening now"
         )

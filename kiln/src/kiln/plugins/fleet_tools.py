@@ -132,38 +132,17 @@ def _route_miss(miss: Any) -> dict[str, Any]:
         on_the_line="Routing picks which of your printers takes this print",
         cannot="ask Kiln's servers which machine should take it",
         wont="won't route it anywhere",
-        safe_remedy="name the printer yourself with start_print or fleet_submit_job",
+        safe_remedy="name the printer yourself with start_print or submit_job",
     )
     out = _srv._error_dict(text, code="ROUTING_UNAVAILABLE", retryable=miss.cause != "refused")
     out.update(served_answer.fields(miss))
     return out
 
 
-def _no_room_refusal(plates: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
-    """The refusal when no surveyed plate has room, with each machine's own
-    sentences; ``None`` when at least one does."""
-    import kiln.server as _srv
-
-    if not plates or any(isinstance(b, dict) and b.get("has_room") for b in plates.values()):
-        return None
-    per_machine = {
-        name: list(block.get("refusals") or []) or ["no room for this part on the plate as it stands"]
-        for name, block in plates.items() if isinstance(block, dict)
-    }
-    rows = "; ".join(f"{name}: {' '.join(why)}" for name, why in per_machine.items())
-    resp = _srv._error_dict(
-        f"No printer in the fleet can take this print as the plates stand -- {rows}. Nothing was queued.",
-        code="NO_ROOM",
-    )
-    resp["per_machine"] = per_machine
-    resp["plates"] = {name: dict(block) for name, block in plates.items() if isinstance(block, dict)}
-    return resp
-
-
-def _printer_utilization(registry: Any) -> dict[str, Any]:
-    """How busy the fleet is, read from the registry alone: the counts the
-    orchestrator's own report carries for printers, with no job figures,
-    said as such.  The same state buckets, so the two answers agree."""
+def _printer_utilization(registry: Any, queue: Any = None) -> dict[str, Any]:
+    """How busy the fleet is: each printer's state from this install's
+    registry, and the job figures from its own print queue (queued, running,
+    completed, failed), the queue the scheduler runs."""
     from kiln.printers.base import PrinterStatus
 
     counts = {"total_printers": 0, "idle_printers": 0, "busy_printers": 0,
@@ -183,13 +162,25 @@ def _printer_utilization(registry: Any) -> dict[str, Any]:
             counts["busy_printers"] += 1
     reachable = counts["total_printers"] - counts["offline_printers"]
     counts["utilization_pct"] = round(100.0 * counts["busy_printers"] / reachable, 1) if reachable else 0.0
-    counts["job_metrics"] = None
-    counts["note"] = (
-        "Printer counts from this install's own registry. Job figures (queued, "
-        "running, completed, failed) come with kiln-pro's fleet orchestrator, "
-        "which is not installed here."
-    )
+    counts["job_metrics"] = _queue_figures(queue) if queue is not None else None
     return counts
+
+
+def _queue_figures(queue: Any) -> dict[str, int] | None:
+    """Jobs in this install's print queue by state, or ``None`` when it cannot be read."""
+    from kiln.queue import JobStatus
+
+    try:
+        jobs = queue.list_jobs()
+    except Exception:  # noqa: BLE001 -- the printer counts stand on their own
+        return None
+    running = (JobStatus.STARTING, JobStatus.PRINTING, JobStatus.PAUSED)
+    return {
+        "queued": sum(1 for j in jobs if j.status == JobStatus.QUEUED),
+        "running": sum(1 for j in jobs if j.status in running),
+        "completed": sum(1 for j in jobs if j.status == JobStatus.COMPLETED),
+        "failed": sum(1 for j in jobs if j.status == JobStatus.FAILED),
+    }
 
 
 class _FleetToolsPlugin:
@@ -198,11 +189,11 @@ class _FleetToolsPlugin:
     Tools:
         - fleet_analytics
         - list_fleet_sites
-        - fleet_status_by_site
+        - fleet_status_by_site (retired: points at fleet_status(by_site=True))
         - update_printer_site
         - route_print_job
-        - fleet_submit_job
-        - fleet_job_status
+        - fleet_submit_job (retired: points at plan_multi_copy_split)
+        - fleet_job_status (retired: points at split_plan_status)
         - fleet_utilization
     """
 
@@ -310,40 +301,20 @@ class _FleetToolsPlugin:
         # ------------------------------------------------------------------
 
         @mcp.tool()
-        @_srv.requires_tier(_srv.LicenseTier.ENTERPRISE)
         def fleet_status_by_site() -> dict:
-            """Get fleet status grouped by physical site/location.
+            """Retired: the fleet grouped by site is ``fleet_status(by_site=True)``.
 
-            Returns printer statuses organized by site, making it easy to see
-            which printers are idle, busy, or offline at each location.
-            Printers without a site are grouped under ``"unassigned"``.
-
-            Requires Enterprise license.
+            There is one fleet view.  ``fleet_status`` lists every printer;
+            with ``by_site=True`` the same answer is also grouped by site,
+            with each site's idle, busy and needs-repair printers.  This name
+            answers nothing any more: it only points there, so an old guide
+            or habit still leads somewhere.  It reads no printer.
             """
-            try:
-                from kiln.printers.base import row_run_state, status_is_occupied
-
-                grouped = _srv._get_registry().get_fleet_status_by_site()
-                result = {}
-                for site, statuses in grouped.items():
-                    result[site] = {
-                        "printers": statuses,
-                        "count": len(statuses),
-                        "idle": [p["name"] for p in statuses if str(p.get("state", "")).lower() == "idle"],
-                        # Through the shared classifier, so this listing
-                        # cannot drift from the rest of the product about
-                        # which states mean "not free to take work" — a
-                        # "stale" machine is busy here, not idle.
-                        "busy": [
-                            p["name"]
-                            for p in statuses
-                            if status_is_occupied(row_run_state(p))
-                        ],
-                    }
-                return {"success": True, "sites": result, "site_count": len(result)}
-            except Exception as exc:
-                _logger.exception("Unexpected error in fleet_status_by_site")
-                return _srv._error_dict(f"Unexpected error in fleet_status_by_site: {exc}", code="INTERNAL_ERROR")
+            return _srv._error_dict(
+                "It was retired: the fleet grouped by site is "
+                "fleet_status(by_site=True), the one fleet view. Nothing was changed.",
+                code="RETIRED",
+            )
 
         # ------------------------------------------------------------------
         # update_printer_site
@@ -574,7 +545,6 @@ class _FleetToolsPlugin:
         # ------------------------------------------------------------------
 
         @mcp.tool()
-        @_srv.requires_tier(_srv.LicenseTier.BUSINESS)
         def fleet_submit_job(
             file_path: str,
             *,
@@ -584,153 +554,34 @@ class _FleetToolsPlugin:
             idempotency_key: str | None = None,
             preview_token: str | None = None,
         ) -> dict:
-            """Submit a print job to the fleet orchestrator.
+            """Retired: sending prints across the fleet is ``plan_multi_copy_split``.
 
-            If no printer is specified, the orchestrator auto-assigns to the best
-            available printer. Tracks the job through completion.
-
-            Before anything is queued, every candidate plate is surveyed as it
-            stands (the named printer's, or the whole fleet's): a job no plate
-            has room for is refused here, with each machine's own sentence
-            (``NO_ROOM``), never queued to be refused at the printer later.
-
-            Args:
-                file_path: Path to the file to print.
-                printer_name: Specific printer to assign to (auto-routes if None).
-                material: Required filament material.
-                priority: Job priority (low, normal, high).
-                idempotency_key: Optional opaque key (e.g. a UUID you
-                    generate) naming this one submission.  If the call
-                    fails in a way where you cannot tell whether the job
-                    was queued, retry with the SAME key to get the
-                    original job back (``submission: "replayed"``)
-                    instead of queuing a duplicate print.  Use a new key
-                    for each job you genuinely want printed.
+            One copy or many, ``plan_multi_copy_split`` reads every printer's
+            plate, plans which printers take the part and where, and queues it
+            on the person's go, the printers running side by side.  For one
+            print on one named printer, ``submit_job`` with ``printer_name``.
+            This name queues nothing any more: it only points there, so an old
+            guide or habit still leads somewhere.  It reads no printer.
             """
-            if err := _srv._check_auth("print"):
-                return err
-
-            # Import outside the try: this is public Kiln's own module,
-            # and the handler below must be resolvable even when the
-            # kiln-pro import inside the try fails.
-            from kiln.queue import IdempotencyConflict
-
-            # The orchestrator starts this print unattended, so the gate
-            # is here, at the door, and the sign-off rides the job for the
-            # orchestrator to re-grant at dispatch.
-            if block := _srv._preview_gate_error(
-                "fleet_submit_job", file_path, preview_token, printer_name=printer_name,
-            ):
-                return block
-
-            # The plates, before the sign-off is spent: a refusal here leaves
-            # the person's yes standing for the retry that clears a plate.
-            try:
-                registry = _srv._get_registry()
-                names = [printer_name] if printer_name else list(registry.list_names())
-                adapters: dict[str, Any] = {}
-                for name in names:
-                    try:
-                        adapters[name] = registry.get(name)
-                    except Exception:  # noqa: BLE001 -- the survey says "not registered" in its own row
-                        continue
-            except Exception:  # noqa: BLE001
-                names, adapters = ([printer_name] if printer_name else []), {}
-            if names:
-                plates, plate_err = _survey_plates(file_path, names, adapters)
-                if plate_err is not None:
-                    return plate_err
-                if refusal := _no_room_refusal(plates or {}):
-                    return refusal
-
-            from kiln import print_signoff
-
-            signoff = print_signoff.record_for(print_signoff.current())
-            print_signoff.clear()
-            try:
-                from kiln.fleet_orchestrator import get_fleet_orchestrator
-
-                orch = get_fleet_orchestrator()
-                # The orchestrator schedules on an integer priority
-                # (higher = more urgent); this tool speaks the
-                # low/normal/high vocabulary the apps present.
-                priority_rank = {"low": -1, "normal": 0, "high": 1}.get(
-                    (priority or "normal").lower(), 0
-                )
-                metadata: dict = {}
-                if material:
-                    metadata["material"] = material
-                if signoff:
-                    metadata["preview_signoff"] = signoff
-                job, replayed = orch.submit_job_result(
-                    file_path,
-                    submitted_by="mcp-agent",
-                    priority=priority_rank,
-                    preferred_printer=printer_name,
-                    metadata=metadata or None,
-                    idempotency_key=idempotency_key,
-                )
-                return {
-                    "success": True,
-                    "job": job.to_dict(),
-                    "submission": "replayed" if replayed else "queued",
-                    "plates": plates if names else {},
-                    **(
-                        {
-                            "message": (
-                                f"Job {job.job_id} was already submitted with "
-                                "this idempotency key. No duplicate was queued."
-                            )
-                        }
-                        if replayed
-                        else {}
-                    ),
-                }
-            except AttributeError:
-                # An older kiln-pro build predates submit_job_result.
-                # Refuse honestly rather than guessing at its contract.
-                _logger.exception("fleet orchestrator is older than this Kiln release")
-                return _srv._error_dict(
-                    "The installed kiln-pro is older than this Kiln release "
-                    "and cannot accept fleet submissions from it. Upgrade "
-                    "kiln-pro to matching versions.",
-                    code="FLEET_VERSION_MISMATCH",
-                )
-            except IdempotencyConflict as exc:
-                return _srv._error_dict(
-                    f"Idempotency key already used by job {exc.existing_job_id!r} "
-                    "with different parameters (file, printer, or priority). "
-                    "Retries must repeat the original submission exactly; a new "
-                    "job needs a new key.",
-                    code="IDEMPOTENCY_CONFLICT",
-                )
-            except Exception as exc:
-                _logger.exception("Error in fleet_submit_job")
-                return _srv._error_dict(f"Failed to submit fleet job: {exc}", code="FLEET_ERROR")
-
-        # ------------------------------------------------------------------
-        # fleet_job_status
-        # ------------------------------------------------------------------
+            return _srv._error_dict(
+                "It was retired: plan_multi_copy_split sends a part to your printers (one copy or "
+                "many), and submit_job with printer_name queues one print on one printer. "
+                "Nothing was queued.",
+                code="RETIRED",
+            )
 
         @mcp.tool()
-        @_srv.requires_tier(_srv.LicenseTier.BUSINESS)
         def fleet_job_status(job_id: str) -> dict:
-            """Get the status of a fleet-managed print job.
+            """Retired with ``fleet_submit_job``: a run across the fleet is followed with
+            ``split_plan_status``, and one queued print with ``job_status``.
 
-            Args:
-                job_id: The orchestrated job's identifier.
+            This name reads nothing any more: it only points there.
             """
-            try:
-                from kiln.fleet_orchestrator import get_fleet_orchestrator
-
-                orch = get_fleet_orchestrator()
-                job = orch.get_job_status(job_id)
-                if job is None:
-                    return _srv._error_dict(f"Job {job_id!r} not found", code="NOT_FOUND")
-                return {"success": True, "job": job.to_dict()}
-            except Exception as exc:
-                _logger.exception("Error in fleet_job_status")
-                return _srv._error_dict(f"Failed to get fleet job status: {exc}", code="FLEET_ERROR")
+            return _srv._error_dict(
+                "It was retired: split_plan_status follows a run across your printers, and "
+                "job_status follows one queued print.",
+                code="RETIRED",
+            )
 
         # ------------------------------------------------------------------
         # fleet_utilization
@@ -744,19 +595,11 @@ class _FleetToolsPlugin:
             Lightweight overview of fleet capacity. For full printer details, use
             ``fleet_status``. For historical analytics, use ``fleet_analytics``.
             """
-            # kiln-pro's orchestrator adds the job figures (queued, running,
-            # completed, failed) on top of the printer counts.  Without it the
-            # printer half is read here, from this install's own registry,
-            # and says so: a plain install still learns how busy its fleet is.
             try:
-                from kiln.fleet_orchestrator import get_fleet_orchestrator
-            except ImportError:
-                get_fleet_orchestrator = None
-            try:
-                if get_fleet_orchestrator is not None:
-                    util = get_fleet_orchestrator().get_fleet_utilization()
-                    return {"success": True, "utilization": util}
-                return {"success": True, "utilization": _printer_utilization(_srv._get_registry())}
+                return {
+                    "success": True,
+                    "utilization": _printer_utilization(_srv._get_registry(), _srv._get_queue()),
+                }
             except Exception as exc:
                 _logger.exception("Error in fleet_utilization")
                 return _srv._error_dict(f"Failed to get fleet utilization: {exc}", code="FLEET_ERROR")

@@ -354,6 +354,8 @@ def engage(adapter: Any, job: Any = None, *, reason: str, label: str = "") -> No
         previous = Engagement.from_dict(store.get("engaged"))
         if previous is not None and previous.machine != machine:
             _record_hand_back(store, previous)
+        if reason == "started":
+            _follow_with_the_queue(store, machine, label or _label_for(adapter))
         store["engaged"] = Engagement(
             machine=machine,
             label=label or _label_for(adapter) or "your printer",
@@ -401,9 +403,18 @@ def hand_back(adapter: Any) -> dict[str, Any]:
         machine = machine_id(adapter)
         store = _read_store()
         engagement = Engagement.from_dict(store.get("engaged"))
-        if engagement is None:
-            return {"released": False, "reason": "Kiln is not working with a printer right now."}
-        if machine and engagement.machine != machine:
+        queue_released = _release_queue_in(store, machine)
+        if engagement is None or (machine and engagement.machine != machine):
+            if queue_released:
+                # The print ended but the queue was still on this printer:
+                # handing it back is how a person moves the queue on.
+                _write_store(store)
+                return {
+                    "released": True, "printer": queue_released, "queue_released": True, "queue_only": True,
+                    "returns_left": 0,
+                }
+            if engagement is None:
+                return {"released": False, "reason": "Kiln is not working with a printer right now."}
             return {
                 "released": False,
                 "reason": f"Kiln is working with {engagement.label}, not this printer.",
@@ -417,11 +428,92 @@ def hand_back(adapter: Any) -> dict[str, Any]:
         return {
             "released": True,
             "printer": engagement.label,
+            "queue_released": bool(queue_released),
             "returns_left": max(0, _RETURNS_PER_JOB - _returns_used(store, engagement.machine)),
         }
     except Exception:  # noqa: BLE001
         logger.debug("hand-back failed", exc_info=True)
         return {"released": False, "reason": "Could not update the printer record."}
+
+
+# ---------------------------------------------------------------------------
+# The queue's printer
+#
+# Below the fleet tier the queue works on ONE printer and stays there.  The
+# engagement above ends when its print ends, so on its own it let the queue
+# start the next job on whichever printer it was pinned to: queue jobs for
+# ten printers, walk away, and each started onto a fresh plate as the last
+# ended -- an unattended farm one machine at a time, which is the fleet
+# tier's value without its parallelism.  A PERSON moving from one printer to
+# the next stays free; the queue moving on its own does not.
+#
+# The record names the machine the queue last started a job on.  It moves
+# only when a person moves Kiln: a print they start on another printer
+# (``engage`` with reason "started" -- the queue only ever starts on its own
+# printer, so a start anywhere else is a person's), or handing the printer
+# back (``hand_back``).  It is dropped when the queue has nothing left, so a
+# job submitted to an empty queue starts wherever it was sent.
+# ---------------------------------------------------------------------------
+
+
+def queue_printer() -> dict[str, Any] | None:
+    """``{"machine", "label", "since"}`` for the printer the queue is on, or ``None``."""
+    entry = _read_store().get("queue")
+    if not isinstance(entry, dict) or not isinstance(entry.get("machine"), str) or not entry["machine"]:
+        return None
+    return entry
+
+
+def hold_queue(adapter: Any) -> None:
+    """Put the queue on *adapter* if it is on no printer yet.  Called by the
+    queue after it starts a job.  Never raises."""
+    try:
+        machine = machine_id(adapter)
+        if not machine:
+            return
+        store = _read_store()
+        if queue_printer_in(store) is None:
+            store["queue"] = {"machine": machine, "label": _label_for(adapter) or "your printer", "since": time.time()}
+            _write_store(store)
+    except Exception:  # noqa: BLE001 -- bookkeeping never blocks the queue
+        logger.debug("could not record the queue's printer", exc_info=True)
+
+
+def release_queue() -> None:
+    """The queue has nothing left: it is on no printer.  Never raises."""
+    try:
+        store = _read_store()
+        if store.get("queue") is not None:
+            store["queue"] = None
+            _write_store(store)
+    except Exception:  # noqa: BLE001
+        logger.debug("could not release the queue's printer", exc_info=True)
+
+
+def queue_printer_in(store: dict[str, Any]) -> dict[str, Any] | None:
+    entry = store.get("queue")
+    return entry if isinstance(entry, dict) and entry.get("machine") else None
+
+
+def _follow_with_the_queue(store: dict[str, Any], machine: str, label: str) -> None:
+    """A person started a print on *machine*: a queue on another printer follows."""
+    entry = queue_printer_in(store)
+    if entry is not None and entry["machine"] != machine:
+        store["queue"] = {"machine": machine, "label": label or "your printer", "since": time.time()}
+
+
+def _release_queue_in(store: dict[str, Any], machine: str) -> str:
+    """Take the queue off *machine*; the label it was on, or ``""``."""
+    entry = queue_printer_in(store)
+    if entry is None or not machine or entry["machine"] != machine:
+        return ""
+    store["queue"] = None
+    return str(entry.get("label") or "your printer")
+
+
+def multi_machine_tier() -> bool:
+    """Whether this caller's plan runs printers side by side (the fleet tier)."""
+    return _multi_machine_tier()
 
 
 def _forget_unknown_machines(store: dict[str, Any]) -> bool:

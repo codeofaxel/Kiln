@@ -875,7 +875,7 @@ def test_every_adapter_start_is_cleared_in_the_function_that_makes_it():
 
 
 def test_every_gated_tool_names_its_file_argument():
-    for tool in ("run_quick_print", "run_reslice_and_print", "submit_job", "fleet_submit_job"):
+    for tool in ("run_quick_print", "run_reslice_and_print", "submit_job", "plan_multi_copy_split"):
         assert tool in server._CONSENT_FILE_ARG, tool
 
 

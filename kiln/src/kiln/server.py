@@ -284,7 +284,7 @@ from kiln.printers import (
     stuck_job_note,
 )
 from kiln.printers import engagement as _engagement
-from kiln.printers.base import PrinterEngagementError, read_machine_identity_bounded
+from kiln.printers.base import PrinterEngagementError, PrintResult, read_machine_identity_bounded
 from kiln.printers.command_verdict import CommandVerdict
 from kiln.printers.engagement import refusal_in_flight as engagement_refusal_in_flight
 from kiln.printers.engagement import refusal_words as engagement_refusal_words
@@ -2595,7 +2595,9 @@ _CONSENT_FILE_ARG: dict[str, str] = {
     "run_quick_print": "model_path",
     "run_reslice_and_print": "model_path",
     "submit_job": "file_name",
-    "fleet_submit_job": "file_path",
+    # The go of a copies plan across the printers: asked as a RUN
+    # (:func:`_ask_for_a_run`), and only when it is the go.
+    "plan_multi_copy_split": "file_path",
     "reprint_with_material": "file_path",
     "multi_copy_print": "model_path",
     "multi_color_copies": "model_path",
@@ -2696,6 +2698,8 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
     arg_name = _CONSENT_FILE_ARG.get(tool_name)
     if arg_name is None or ctx is None:
         return None
+    if tool_name in _RUN_TOOLS:
+        return await _ask_for_a_run(tool_name, arguments, ctx)
     if os.environ.get("KILN_SKIP_PREVIEW_GATE", "").strip() in ("1", "true", "yes"):
         return None  # one switch turns off consent prompts, as it always did
     file_value = str(arguments.get(arg_name) or "")
@@ -2807,6 +2811,66 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
     return await _offer_screen_code(
         tool_name, file_value, aimed, ctx, hook_path=None, fallback=f"unavailable:{answer.detail}",
     )
+
+
+#: Tools whose go starts a run across several printers: the person is asked
+#: about the run itself, every time, and a standing window for one printer
+#: never stands in for it.  Their plan step asks nothing.
+_RUN_TOOLS = frozenset({"plan_multi_copy_split"})
+
+
+async def _ask_for_a_run(tool_name: str, arguments: dict[str, Any], ctx: Any):
+    """Ask the person about a copies run across their printers before it is
+    queued: the part, how many copies, and which printers.  ``None`` when
+    this is not the go, or nobody can be asked (the go then needs a preview
+    token, and says so); raises when the person says no."""
+    if not arguments.get("submit"):
+        return None
+    if os.environ.get("KILN_SKIP_PREVIEW_GATE", "").strip() in ("1", "true", "yes"):
+        return None
+    file_value = str(arguments.get("file_path") or "")
+    try:
+        from kiln.job_splitter import _fill_record
+
+        found = _fill_record(str(arguments.get("plan_id") or ""))
+    except Exception:  # noqa: BLE001 -- no plan: the tool refuses on its own
+        found = None
+    if found is None:
+        return None
+    fill = found[1].get("fill") or {}
+    names = [str(p.get("printer")) for p in fill.get("printers") or [] if p.get("now") or p.get("later")]
+    try:
+        can_ask = bool(host_can_ask_the_user(mcp, ctx)) and not screen_code.host_dialog_hook(_host_client_name(ctx))
+    except Exception:  # noqa: BLE001 -- cannot ask is not approved
+        can_ask = False
+    if not can_ask or not names:
+        return None
+    shown = ", ".join(names[:6]) + (f" and {len(names) - 6} more" if len(names) > 6 else "")
+    message = describe_print_request(
+        tool_name,
+        file_name=os.path.basename(file_value) or file_value,
+        printer_name=f"{len(names)} printer{'s' if len(names) != 1 else ''} ({shown})",
+        extra={
+            "copies": (
+                f"{fill.get('wanted')} in all: {fill.get('now')} now, "
+                f"{fill.get('later')} later as each plate is cleared"
+            ),
+        },
+        terminal_available=not _hosted_now(),
+    )
+    answer = await ask_user_to_confirm(ctx, message, offer_window=False, offer_fleet=False)
+    if answer.accepted:
+        # No printer named: the yes covers the printers of this run, which
+        # the go checks against the plan before anything is queued.
+        return consent_from_dialog_answer(tool_name, file_value, None, answer, aimed="")
+    _audit(tool_name, "consent_refused", details={"file": file_value, "action": answer.action})
+    if answer.action in ("decline", "cancel"):
+        raise RuntimeError(
+            f"{tool_name} was not started: the run was "
+            + ("declined" if answer.action == "decline" else "dismissed without an answer")
+            + ". Nothing was queued."
+        )
+    return None
 
 
 def bed_question(printer: str) -> str:
@@ -4847,39 +4911,105 @@ _CONFIRM_TOKEN_TTL: float = 300.0  # 5 minutes
 
 
 # ---------------------------------------------------------------------------
-# Pause keep-alive — fights firmware idle-cooldown during long pauses
+# Pause hold — the bed stays warm, the nozzle does not sit hot
 # ---------------------------------------------------------------------------
-# Bambu A1 firmware (and several other FDM firmwares) drops the hotend
-# heater after a few minutes of pause regardless of the slicer's targets.
-# When the agent plans a mid-print decoration swap that takes 5+ minutes
-# (sign-off, planning, slicing, upload), the printer is stone-cold by the
-# time we resume.  This re-asserts the captured pre-pause targets every
-# ``_PAUSE_KEEPALIVE_INTERVAL_S`` seconds via the existing adapter API.
+# A paused print can only be resumed while it is still stuck to the bed, so
+# the bed is held at its pre-pause target for the whole pause.  The nozzle is
+# the other way round: a hot nozzle sitting over a part nobody is watching is
+# the risk.  A printer that lowers it itself when it pauses (a Bambu A1 sets
+# about 90 °C) keeps its own choice; one that would keep it at full heat has
+# it switched off once the pause has lasted Marlin's own park timeout.  A
+# pause where someone will work the filament (a runout, a clog) leaves the
+# nozzle to them.  Resume heats the nozzle back to its pre-pause target and
+# waits for it (:func:`_reheat_before_resume`), on every printer.
 #
 # Design:
 #   - One daemon thread per PAUSED MACHINE, keyed by machine fingerprint.
 #     Idempotent ``start`` so repeat pauses don't compound threads.
-#   - ``stop(adapter)`` is called from resume/cancel/error paths.
-#   - All adapter calls are best-effort; a failed re-assert is logged
-#     once at INFO level and the loop keeps trying.
+#   - ``stop(adapter)`` is called from resume/cancel/error paths, and from
+#     every emergency stop (``kiln.emergency``, the print watchdog).
+#   - Doubt never heats: an emergency latch ends the hold, an unreadable
+#     printer skips the round, and a target someone else set is followed.
 #
 # Every entry point takes the adapter it is actually driving, and the
-# thread re-asserts on THAT adapter.  A process-wide singleton bound to
+# thread acts on THAT adapter.  A process-wide singleton bound to
 # ``_get_adapter()`` was the earlier shape, and on two machines it meant
 # pausing the second one spawned a thread that pushed the second one's
 # targets onto the FIRST — reheating an idle printer, or fighting a
 # running print's own temperatures, for as long as the pause lasted.
-_PAUSE_KEEPALIVE_INTERVAL_S: float = 120.0  # 2 min — well under firmware idle threshold
+
+# Two minutes between bed re-sends.  On Klipper each one also restarts the
+# printer's own 600 s idle timeout, which would otherwise switch the heaters
+# and motors off and leave the print unable to resume.
+_PAUSE_KEEPALIVE_INTERVAL_S: float = 120.0
+
+# A target read back within this of what the hold last asked for is the
+# hold's own request: some firmware stores targets in whole degrees.  Any
+# further off, someone else set it.
+_HOLD_READBACK_TOLERANCE_C: float = 1.0
+
+# Marlin's own shipped defaults (2.1.2.5), used where the printer decides
+# nothing:
+#   PAUSE_PARK_NOZZLE_TIMEOUT: the nozzle goes off this long into a parked
+#   pause.  A quick look-and-resume costs no reheat.
+_NOZZLE_OFF_AFTER_S: float = 45.0
+#   TEMP_WINDOW: how close M109 calls a target reached.  Klipper's own
+#   settle band is the same.
+_REHEAT_REACHED_C: float = 1.0
+#   TEMP_HYSTERESIS: Marlin's "close enough" to a target.
+_REHEAT_CLOSE_ENOUGH_C: float = 3.0
+#   WATCH_TEMP_PERIOD / WATCH_TEMP_INCREASE: less than this rise in this
+#   long is Marlin's "heating failed".
+_REHEAT_WATCH_PERIOD_S: float = 40.0
+_REHEAT_WATCH_RISE_C: float = 2.0
+# How often the reheat reads the nozzle while it waits.
+_REHEAT_POLL_S: float = 1.0
+
+# The nozzle's state during a hold.
+_NOZZLE_WATCHING = "watching"  # deciding: has the printer lowered it itself?
+_NOZZLE_PRINTERS = "printer"  # the printer lowered it; Kiln leaves it
+_NOZZLE_OFF = "off"  # the printer kept it hot, so Kiln switched it off
+_NOZZLE_PERSONS = "person"  # someone is working it; Kiln never touches it
+
+
+def _sets_temperatures(adapter: PrinterAdapter) -> bool:
+    """Can Kiln set heater targets on this backend at all?  (Prusa Link cannot.)"""
+    try:
+        return bool(adapter.capabilities.can_set_temp)
+    except Exception:
+        return True
+
+
+def _machine_is_latched(adapter: PrinterAdapter, label: str | None) -> bool:
+    """Is *adapter*'s machine emergency-stopped, under any name it answers to?
+
+    A latch is filed under the name the stop was aimed at, and one machine
+    answers to two (``default`` and its config.yaml name), so the question
+    is asked under every one.  A latch Kiln cannot read counts as set: the
+    only consumers are the pause hold and the resume reheat, deciding
+    whether to heat.
+    """
+    from kiln.emergency import get_emergency_coordinator
+
+    names = {label} if label else set()
+    try:
+        names.update(_get_registry().names_for(adapter))
+    except Exception as exc:
+        logger.debug("Pause hold: registry names unavailable (%s)", exc)
+    try:
+        coordinator = get_emergency_coordinator()
+        return any(coordinator.is_stopped(name) for name in names)
+    except Exception as exc:
+        logger.warning("Pause hold: emergency latch unreadable (%s); heating nothing", exc)
+        return True
 
 
 class _PauseKeepAlive:
-    """Daemon threads that re-assert heater targets across long pauses.
+    """Daemon threads that hold a paused machine's bed and settle its nozzle.
 
     One instance lives in the module and holds one thread per paused
-    machine.  ``start`` is idempotent per machine; calling it twice
-    while that machine's thread is running just refreshes its stored
-    targets.  ``stop`` is fast and side-effect free if the named
-    machine has no thread.
+    machine.  ``start`` is idempotent per machine.  ``stop`` is fast and
+    side-effect free if the named machine has no thread.
 
     Keyed by :func:`~kiln.registry.machine_fingerprint`, not by printer
     name: the server registers the active printer as ``"default"`` AND
@@ -4892,8 +5022,13 @@ class _PauseKeepAlive:
     def __init__(self) -> None:
         import threading
         self._lock = threading.Lock()
-        # fingerprint -> {"thread", "stop_event", "targets", "adapter", "label"}
+        # fingerprint -> {"thread", "stop_event", "adapter", "label", "bed",
+        #                 "pushed_bed", "nozzle", "paused_at"}
         self._entries: dict[str, dict[str, Any]] = {}
+        # fingerprint -> the nozzle target the print was paused at.  Kept
+        # apart from the thread: a hold that ends because both heaters were
+        # switched off leaves a print that still needs that heat to resume.
+        self._resume_nozzle: dict[str, float] = {}
 
     @staticmethod
     def _key(adapter: PrinterAdapter) -> str:
@@ -4903,27 +5038,36 @@ class _PauseKeepAlive:
 
     def start(
         self, adapter: PrinterAdapter, tool_target: float, bed_target: float,
+        *, leave_nozzle: bool = False,
     ) -> bool:
-        """Begin re-asserting the targets on *adapter* every 2 min.
+        """Hold *adapter*'s bed at *bed_target* and settle its nozzle.
 
-        If a thread for this machine is already running, just update its
-        stored targets.  Returns ``True`` if a new thread was spawned,
-        ``False`` if an existing one was refreshed.
+        *tool_target* is the nozzle target the print was running at, which
+        resume heats back to.  *leave_nozzle*: someone will work the filament
+        during this pause, so the hold never touches the nozzle.
+
+        A second pause of a machine already held refreshes only the adapter
+        and the nozzle hand-off: its targets are read from a printer that is
+        already paused, so they are the standby, not the print's.  Returns
+        ``True`` if a new thread was spawned.
         """
         import threading
+        import time
 
         key = self._key(adapter)
         label = _lifecycle_printer_name(adapter)
-        targets = {"tool": float(tool_target or 0.0), "bed": float(bed_target or 0.0)}
+        nozzle = float(tool_target or 0.0)
         with self._lock:
             entry = self._entries.get(key)
             if entry is not None and entry["thread"].is_alive():
-                # Refreshed in place, no new thread.  The adapter is
-                # refreshed too: a lazily-rebuilt adapter for the same
-                # machine must not leave the thread holding a stale one.
-                entry["targets"] = targets
+                # A lazily-rebuilt adapter for the same machine must not
+                # leave the thread holding a stale one.
                 entry["adapter"] = adapter
+                if leave_nozzle:
+                    entry["nozzle"] = _NOZZLE_PERSONS
                 return False
+            if nozzle > 0:
+                self._resume_nozzle[key] = nozzle
             stop_event = threading.Event()
             thread = threading.Thread(
                 target=self._loop,
@@ -4934,21 +5078,29 @@ class _PauseKeepAlive:
             self._entries[key] = {
                 "thread": thread,
                 "stop_event": stop_event,
-                "targets": targets,
                 "adapter": adapter,
                 "label": label,
+                "bed": float(bed_target or 0.0),
+                # What the hold last sent the bed, so a target someone else
+                # set can be told from the hold's own.
+                "pushed_bed": None,
+                "nozzle_before": nozzle,
+                "nozzle": _NOZZLE_PERSONS if leave_nozzle else _NOZZLE_WATCHING,
+                "paused_at": time.monotonic(),
             }
             thread.start()
             return True
 
     def stop(self, adapter: PrinterAdapter) -> None:
-        """Signal *adapter*'s thread to exit.  Safe when none is running.
+        """End *adapter*'s hold and forget its print.  Safe when none is running.
 
-        Only this machine's thread is stopped — a fleet's other pauses
-        are none of this cancel's business.
+        Only this machine's hold is ended: a fleet's other pauses are none of
+        this resume's or cancel's business.
         """
+        key = self._key(adapter)
         with self._lock:
-            entry = self._entries.pop(self._key(adapter), None)
+            entry = self._entries.pop(key, None)
+            self._resume_nozzle.pop(key, None)
         if entry is not None:
             entry["stop_event"].set()
 
@@ -4957,42 +5109,150 @@ class _PauseKeepAlive:
             entry = self._entries.get(self._key(adapter))
             return entry is not None and entry["thread"].is_alive()
 
-    def _loop(self, key: str, stop_event: threading.Event) -> None:
-        """Re-assert targets until stopped or the printer leaves PAUSED.
+    def describe(self, adapter: PrinterAdapter) -> dict[str, Any] | None:
+        """What the hold is doing on *adapter*'s machine, or ``None``."""
+        with self._lock:
+            entry = self._entries.get(self._key(adapter))
+            return None if entry is None else self._described(entry)
 
-        ACT FIRST, then wait. This loop used to open with
+    @staticmethod
+    def _described(entry: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "active": entry["thread"].is_alive() if "thread" in entry else False,
+            "bed_target": entry["bed"],
+            "nozzle": entry["nozzle"],
+            "nozzle_on_resume": entry.get("nozzle_before", 0.0),
+        }
+
+    def retarget(
+        self, adapter: PrinterAdapter, *, tool: float | None = None, bed: float | None = None,
+    ) -> dict[str, Any] | None:
+        """Take a target a person just set on a held machine.
+
+        Without this a heater switched off during a pause came back on at the
+        next round.  A bed target becomes the one held; any nozzle target
+        means the person has the nozzle, and the hold leaves it to them.
+        Returns what the hold does from now on, or ``None`` when this machine
+        has no hold.  A hold left with nothing to do ends.
+        """
+        with self._lock:
+            key = self._key(adapter)
+            entry = self._entries.get(key)
+            if entry is None:
+                return None
+            if bed is not None:
+                entry["bed"] = max(float(bed), 0.0)
+                entry["pushed_bed"] = entry["bed"]
+            if tool is not None:
+                entry["nozzle"] = _NOZZLE_PERSONS
+            if self._nothing_left(entry):
+                del self._entries[key]
+                entry["stop_event"].set()
+            described = self._described(entry)
+        described["active"] = self.is_running(adapter)
+        return described
+
+    def heating_ahead(self, adapter: PrinterAdapter) -> float | None:
+        """The nozzle target to start heating to ahead of a resume not yet sent.
+
+        Unlike :meth:`nozzle_for_resume` this does not hand the nozzle over:
+        the hold goes back to deciding it, from now, so a nozzle heated for a
+        resume that never comes (refused, stopped, the caller gone) is
+        switched off again on the hold's own clock.
+        """
+        import time
+
+        with self._lock:
+            key = self._key(adapter)
+            entry = self._entries.get(key)
+            if entry is not None and entry["nozzle"] != _NOZZLE_PERSONS:
+                entry["nozzle"] = _NOZZLE_WATCHING
+                entry["paused_at"] = time.monotonic()
+            return self._resume_nozzle.get(key)
+
+    def nozzle_for_resume(self, adapter: PrinterAdapter) -> float | None:
+        """The nozzle target to reheat to before *adapter* resumes, if Kiln paused it.
+
+        Hands the nozzle back to Kiln for the reheat: from here the hold will
+        not switch it off, whatever its own clock says.
+        """
+        with self._lock:
+            key = self._key(adapter)
+            entry = self._entries.get(key)
+            if entry is not None:
+                entry["nozzle"] = _NOZZLE_PERSONS
+            return self._resume_nozzle.get(key)
+
+    @staticmethod
+    def _nothing_left(entry: dict[str, Any]) -> bool:
+        return entry["bed"] <= 0 and entry["nozzle"] != _NOZZLE_WATCHING
+
+    def _drop(self, key: str, entry: dict[str, Any], *, print_over: bool) -> None:
+        """End this thread's hold.  *print_over*: the pause itself is over
+        (resumed elsewhere, cancelled, stopped), so forget its nozzle too."""
+        with self._lock:
+            if self._entries.get(key) is entry:
+                del self._entries[key]
+                if print_over:
+                    self._resume_nozzle.pop(key, None)
+
+    def _next_wait(self, key: str) -> float:
+        """Seconds to the next round: the interval, or sooner when the nozzle
+        decision falls due first."""
+        import time
+
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is None or entry["nozzle"] != _NOZZLE_WATCHING:
+                return _PAUSE_KEEPALIVE_INTERVAL_S
+            due = entry["paused_at"] + _NOZZLE_OFF_AFTER_S - time.monotonic()
+        return max(0.0, min(_PAUSE_KEEPALIVE_INTERVAL_S, due))
+
+    def _loop(self, key: str, stop_event: threading.Event) -> None:
+        """Hold until stopped, the printer leaves PAUSED, or nothing is left.
+
+        ACT FIRST, then wait.  This loop used to open with
         ``stop_event.wait(INTERVAL)``, on the stated premise that the
         firmware keeps the slicer's targets for the first few minutes and
         cooldown "kicks in later" — so nothing was asserted until t=120s.
 
         Measured on a real A1 on 2026-08-14, that premise is false. The
         printer set a 90°C standby target in the SAME telemetry sample as the
-        pause — second one, not minute three — and the hotend fell 220°C to
-        139°C in the 114 seconds before the user resumed. The keep-alive
-        thread was alive for that entire pause and never asserted anything:
-        it was still inside its first ``wait`` when resume set the event, so
-        the loop body never ran once. Every pause shorter than the interval
-        got no protection at all, which is most of them.
+        pause, and the hotend fell 220°C to 139°C in the 114 seconds before
+        the user resumed.  The thread never ran once before resume set the
+        event, so every pause shorter than the interval got no protection.
+        The bed is what is held now, and it is held from the first second.
 
-        The whole suite stayed green because every keep-alive test drives the
+        The whole suite stayed green because every keep-alive test drove the
         interval to ~0.01s, which makes an interval-shaped dead window
         impossible to observe. The regression test for this pins the FIRST
         assert against a LARGE interval instead.
         """
         if not self._reassert(key, stop_event):
             return
-        while not stop_event.wait(_PAUSE_KEEPALIVE_INTERVAL_S):
+        while not stop_event.wait(self._next_wait(key)):
             if not self._reassert(key, stop_event):
                 return
 
     def _reassert(self, key: str, stop_event: threading.Event) -> bool:
-        """Push the captured targets once. ``False`` means stop looping.
+        """One round: hold the bed, settle the nozzle.  ``False`` stops the loop.
 
-        Split out of :meth:`_loop` so the first assert and every later one are
+        Split out of :meth:`_loop` so the first round and every later one are
         the SAME code — a separate "do it once up front" branch would be a
         second implementation of the only thing this class does, free to drift
         from the one the tests exercise.
+
+        Every doubt resolves to heating nothing.  An emergency stop on this
+        machine ends the hold, whichever door raised it.  A printer Kiln
+        cannot read is not heated that round (this used to say "continuing"
+        and heat anyway, so an e-stopped machine whose reading failed came
+        back on).  A bed target the printer reports that is not the one the
+        hold last sent was set by someone else — at the printer's screen,
+        with ``kiln temp`` from another terminal, in the maker's app — so the
+        hold takes it, and a bed switched off stays off.
         """
+        import time
+
         try:
             from kiln.printers.base import PrinterStatus
 
@@ -5004,50 +5264,256 @@ class _PauseKeepAlive:
                 if entry is None or entry["stop_event"] is not stop_event:
                     return False
                 adapter = entry["adapter"]
-                targets = dict(entry["targets"])
+                label = entry.get("label")
 
-            # Stop if the printer left PAUSED on its own (resume,
-            # cancel, error, or operator pressed buttons on the printer).
+            if _machine_is_latched(adapter, label):
+                logger.warning("Pause hold: %s is emergency-stopped; the hold ends", label)
+                self._drop(key, entry, print_over=True)
+                return False
+
             try:
                 state = adapter.get_state()
-                # ``confirmed_state``: it looks through a FAULT headline, so a
-                # fault raised while the machine kept working still matches here,
-                # and it is as strict about staleness as the bare state word was:
-                # an expired reading is not evidence that anything ended.
-                if state.confirmed_state != PrinterStatus.PAUSED:
-                    logger.debug(
-                        "Pause keep-alive: printer state is %s, not paused — exiting loop",
-                        state.state,
-                    )
-                    with self._lock:
-                        if self._entries.get(key) is entry:
-                            del self._entries[key]
-                    return False
             except Exception as exc:
-                logger.debug("Pause keep-alive: state read failed (%s); continuing", exc)
+                logger.info(
+                    "Pause hold: could not read %s (%s); heating nothing this round", label, exc,
+                )
+                return True
+            # Stop if the printer left PAUSED on its own (resume, cancel,
+            # error, or operator pressed buttons on the printer).
+            # ``confirmed_state``: it looks through a FAULT headline, so a
+            # fault raised while the machine kept working still matches here,
+            # and it is as strict about staleness as the bare state word was:
+            # an expired reading is not evidence that anything ended.
+            if state.confirmed_state != PrinterStatus.PAUSED:
+                logger.debug(
+                    "Pause hold: printer state is %s, not paused — exiting loop", state.state,
+                )
+                self._drop(key, entry, print_over=True)
+                return False
 
-            if targets.get("tool", 0) > 0:
+            with self._lock:
+                if self._entries.get(key) is not entry:
+                    return False
+                self._follow_outside_bed_change(entry, state)
+                switch_nozzle_off = self._settle_nozzle(entry, state, time.monotonic())
+                bed = entry["bed"]
+                done = self._nothing_left(entry) and not switch_nozzle_off
+
+            sends: list[tuple[str, Any, float]] = []
+            if bed > 0:
+                sends.append(("bed", adapter.set_bed_temp, bed))
+            if switch_nozzle_off:
+                sends.append(("nozzle", adapter.set_tool_temp, 0.0))
+            for heater, setter, target in sends:
+                # Asked again right before each send: a stop or an emergency
+                # stop that landed since the checks above ends the hold here.
+                with self._lock:
+                    if self._entries.get(key) is not entry:
+                        return False
                 try:
-                    adapter.set_tool_temp(targets["tool"])
+                    setter(target)
                 except Exception as exc:
-                    logger.info(
-                        "Pause keep-alive: set_tool_temp(%s) failed: %s",
-                        targets["tool"], exc,
-                    )
-            if targets.get("bed", 0) > 0:
-                try:
-                    adapter.set_bed_temp(targets["bed"])
-                except Exception as exc:
-                    logger.info(
-                        "Pause keep-alive: set_bed_temp(%s) failed: %s",
-                        targets["bed"], exc,
-                    )
+                    logger.info("Pause hold: %s target %s failed: %s", heater, target, exc)
+                    continue
+                if heater == "bed":
+                    with self._lock:
+                        entry["pushed_bed"] = target
+            if done:
+                self._drop(key, entry, print_over=False)
+                return False
         except Exception as exc:  # noqa: BLE001 — never let a daemon die silently
-            logger.warning("Pause keep-alive loop error (continuing): %s", exc)
+            logger.warning("Pause hold loop error (continuing): %s", exc)
+        return True
+
+    @staticmethod
+    def _follow_outside_bed_change(entry: dict[str, Any], state: Any) -> None:
+        """Take a bed target someone else set.  Caller holds the lock."""
+        asked, reading = entry.get("pushed_bed"), state.bed_temp_target
+        if asked is None or reading is None:
+            return
+        if abs(float(reading) - asked) > _HOLD_READBACK_TOLERANCE_C:
+            logger.info(
+                "Pause hold: %s bed target is now %s, set outside the hold; the hold follows it",
+                entry.get("label"), reading,
+            )
+            entry["bed"] = entry["pushed_bed"] = max(float(reading), 0.0)
+
+    @staticmethod
+    def _settle_nozzle(entry: dict[str, Any], state: Any, now: float) -> bool:
+        """Decide the nozzle once the pause is old enough.  ``True``: switch it off.
+
+        The printer's own target answers it.  Below what the print ran at, the
+        printer lowered it itself and its choice stands.  Still there, the
+        printer would keep it hot all pause, so Kiln switches it off.  A target
+        Kiln cannot read counts as kept hot: off is the side a wrong guess
+        should fall on.  Once off, a target someone sets again is theirs.
+        Caller holds the lock.
+        """
+        reading = state.tool_temp_target
+        if entry["nozzle"] == _NOZZLE_OFF:
+            if reading is not None and reading > _HOLD_READBACK_TOLERANCE_C:
+                entry["nozzle"] = _NOZZLE_PERSONS
+            return False
+        if entry["nozzle"] != _NOZZLE_WATCHING:
+            return False
+        if now - entry["paused_at"] < _NOZZLE_OFF_AFTER_S:
+            return False
+        before = entry.get("nozzle_before", 0.0)
+        if reading is not None and reading < before - _HOLD_READBACK_TOLERANCE_C:
+            entry["nozzle"] = _NOZZLE_PRINTERS
+            return False
+        if reading is not None and reading <= 0:
+            entry["nozzle"] = _NOZZLE_PRINTERS
+            return False
+        entry["nozzle"] = _NOZZLE_OFF
+        logger.info(
+            "Pause hold: %s kept the nozzle at %s after %.0f s paused; switching it off",
+            entry.get("label"), reading, _NOZZLE_OFF_AFTER_S,
+        )
         return True
 
 
 _pause_keepalive = _PauseKeepAlive()
+
+
+def _begin_resume_reheat(adapter: PrinterAdapter) -> None:
+    """Start *adapter*'s nozzle heating back to the print's target, without waiting.
+
+    For a resume across many machines: heat them all at once, then let each
+    resume wait on its own (:func:`_reheat_before_resume` finds the heat
+    already on its way).  Best-effort; the wait is what decides.  A nozzle
+    heated here whose resume never comes is switched off again by the hold.
+    """
+    if _machine_is_latched(adapter, _lifecycle_printer_name(adapter)):
+        return
+    target = _pause_keepalive.heating_ahead(adapter)
+    if not target or target <= 0 or not _sets_temperatures(adapter):
+        return
+    try:
+        state = adapter.get_state()
+        if state.confirmed_state != PrinterStatus.PAUSED:
+            return
+        actual = state.tool_temp_actual
+        if actual is None or actual < target - _REHEAT_REACHED_C:
+            adapter.set_tool_temp(target)
+    except Exception as exc:
+        logger.info("Resume reheat: could not start heating %s: %s", _lifecycle_printer_name(adapter), exc)
+
+
+def _reheat_before_resume(adapter: PrinterAdapter) -> tuple[PrintResult | None, bool]:
+    """Bring a paused nozzle back to the print's target and wait, before a resume.
+
+    Called by the resume template (:meth:`PrinterAdapter.resume_print`)
+    after its gates and before the resume is sent, so every door that
+    resumes a printer gets it.  Returns ``(refusal, reheated)``: no refusal
+    means go ahead; *reheated* says time passed, so the template asks again
+    whether the printer is still paused.  Nothing to do when Kiln did not
+    pause this print (it knows no target) or the nozzle is already there.
+    The refusals, with nothing resumed:
+
+    * the machine is, or becomes while it heats, emergency-stopped (the
+      nozzle is switched off);
+    * the nozzle could not be read, so Kiln cannot know it is hot — a resume
+      onto a cold nozzle grinds the filament or prints nothing;
+    * it did not heat, by Marlin's own test (under 2 °C of rise in 40 s while
+      still well short).  This also ends a wait the printer's own cancel cut
+      short, since a cancel switches the heater off.
+
+    Waits on the nozzle's READING, never its target: a target reached is a
+    request accepted, not a hot nozzle.  Close to the target the rise slows,
+    so, as in Marlin, the rise test applies only while the nozzle is well
+    short; within that band it gets one more period to come within Marlin's
+    "close enough".  The state word is not consulted: a serial printer
+    cannot report a pause, and the template asks about it afterwards.
+    """
+    import time
+
+    from kiln.printers.base import CodedPrintResult
+
+    target = _pause_keepalive.nozzle_for_resume(adapter)
+    if not target or target <= 0 or not _sets_temperatures(adapter):
+        return None, False
+    label = _lifecycle_printer_name(adapter)
+
+    def refuse(message: str, code: str) -> CodedPrintResult:
+        return CodedPrintResult(success=False, message=message, code=code, refused_before_send=True)
+
+    def read() -> float | None:
+        try:
+            state = adapter.get_state()
+        except Exception as exc:
+            logger.info("Resume reheat: could not read %s (%s)", label, exc)
+            return None
+        # An expired reading carries no temperatures.
+        if state.confirmed_state is PrinterStatus.STALE:
+            return None
+        return state.tool_temp_actual
+
+    def give_up(message: str, code: str) -> CodedPrintResult:
+        try:
+            adapter.set_tool_temp(0)
+        except Exception as exc:
+            logger.warning("Resume reheat: could not switch %s's nozzle off: %s", label, exc)
+        return refuse(message + "  Kiln switched the nozzle off and did not resume.", code)
+
+    def stopped() -> CodedPrintResult:
+        return give_up(f"{label} is emergency-stopped.", "E_STOP_LATCHED")
+
+    # Asked before the first heat, not only while waiting: a door that resumes
+    # without its own latch check must not heat a stopped machine.
+    if _machine_is_latched(adapter, label):
+        return stopped(), False
+    actual = read()
+    if actual is not None and actual >= target - _REHEAT_REACHED_C:
+        return None, False
+    try:
+        adapter.set_tool_temp(target)
+    except Exception as exc:
+        return refuse(
+            f"Kiln could not heat {label}'s nozzle back to {target:.0f}°C ({exc}), so it did not "
+            "resume: a resume onto a cooled nozzle grinds the filament or prints nothing.",
+            "RESUME_REHEAT_FAILED",
+        ), False
+
+    started = time.monotonic()
+    last_read_at = started if actual is not None else None
+    watch_since, watch_from = started, actual
+    while True:
+        if _machine_is_latched(adapter, label):
+            return stopped(), True
+        time.sleep(_REHEAT_POLL_S)
+        now = time.monotonic()
+        actual = read()
+        if actual is None:
+            if now - (last_read_at or started) >= _REHEAT_WATCH_PERIOD_S:
+                return give_up(
+                    f"Kiln could not read {label}'s nozzle for {_REHEAT_WATCH_PERIOD_S:.0f} "
+                    "seconds while reheating it, so it cannot know it is hot.  Check the "
+                    "printer's connection, then resume again.",
+                    "RESUME_REHEAT_UNREAD",
+                ), True
+            continue
+        if actual >= target - _REHEAT_REACHED_C:
+            return None, True
+        last_read_at = now
+        if watch_from is None:
+            watch_since, watch_from = now, actual
+            continue
+        if now - watch_since < _REHEAT_WATCH_PERIOD_S:
+            continue
+        # Marlin's HeaterWatch.restart: the rise test is armed only while
+        # the next step up still lands short of "close enough".
+        armed = watch_from + _REHEAT_WATCH_RISE_C < target - _REHEAT_CLOSE_ENOUGH_C - 1
+        if armed and actual - watch_from >= _REHEAT_WATCH_RISE_C:
+            watch_since, watch_from = now, actual
+            continue
+        if not armed and actual >= target - _REHEAT_CLOSE_ENOUGH_C:
+            return None, True
+        return give_up(
+            f"{label}'s nozzle is not heating: it reads {actual:.0f}°C of {target:.0f}°C after "
+            f"{now - started:.0f} seconds.  Check the heater and its cable before trying again.",
+            "RESUME_REHEAT_FAILED",
+        ), True
 
 
 def _check_confirmation(tool_name: str, args: dict[str, Any]) -> dict | None:
@@ -10252,13 +10718,17 @@ def emergency_trip_input(
 
 def _pause_print_on(
     adapter: PrinterAdapter, target_name: str, *, keep_temps: bool = True,
+    leave_nozzle: bool = False,
 ) -> dict:
-    """Pause the print on *adapter* and start its keep-alive thread.
+    """Pause the print on *adapter* and start its pause hold.
 
-    THE pause engine — shared by the ``pause_print`` tool and kiln-pro's
-    fleet fan-out, so the temperature keep-alive can never be wired into
-    one door and forgotten in the other.  Callers resolve the target via
-    :func:`_resolve_control_target` and own auth / rate-limit policy.
+    THE pause engine — shared by the ``pause_print`` tool, kiln-pro's fleet
+    fan-out, the camera auto-pause and the health monitor's auto-pause, so
+    the hold can never be wired into one door and forgotten in another.
+    Callers resolve the target via :func:`_resolve_control_target` (or hold
+    the adapter already) and own auth / rate-limit policy.  *leave_nozzle*:
+    someone will work the filament during this pause (a runout, a clog), so
+    the hold never switches the nozzle off.
 
     Raises :class:`PrinterError` / :class:`RuntimeError` on adapter
     failure — callers convert to their own error dicts.
@@ -10267,6 +10737,7 @@ def _pause_print_on(
     # some firmwares clear them within seconds of the pause being
     # accepted.
     snapshot: dict[str, float] | None = None
+    keep_temps = keep_temps and _sets_temperatures(adapter)
     if keep_temps:
         try:
             state = adapter.get_state()
@@ -10290,6 +10761,7 @@ def _pause_print_on(
                 adapter,
                 tool_target=snapshot["tool"],
                 bed_target=snapshot["bed"],
+                leave_nozzle=leave_nozzle,
             )
         except Exception as exc:
             logger.warning("pause_print: failed to start keep-alive: %s", exc)
@@ -10304,60 +10776,51 @@ def _pause_print_on(
             "started_new_thread": keepalive_started,
             "interval_seconds": _PAUSE_KEEPALIVE_INTERVAL_S,
             "targets": snapshot,
+            **(_pause_keepalive.describe(adapter) or {}),
         }
     return out
 
 
 @mcp.tool()
-def pause_print(keep_temps: bool = True, printer_name: str | None = None) -> dict:
+def pause_print(
+    keep_temps: bool = True, printer_name: str | None = None, leave_nozzle: bool = False,
+) -> dict:
     """Pause the currently running print job.
 
-    What happens next is decided by the printer's own firmware, not by
-    Kiln, and it differs a lot between machines.  Some lift the nozzle
-    and park the head; others leave it resting on the part.  Many lower
-    or switch off the nozzle heater while paused, and some switch the
-    heaters and motors off after a timeout, after which the print may
-    not be able to resume.  Do not tell the person the head will park or
-    that temperatures will hold; check ``printer_status`` instead.
+    What happens next is decided partly by the printer's own firmware, and
+    it differs a lot between machines: some lift the nozzle and park the
+    head, others leave it resting on the part.  Do not tell the person the
+    head will park; check ``printer_status`` instead.
 
-    One measured case:
+    While the print is paused Kiln holds the temperatures that matter:
 
-      - Bambu A1 / A1 mini: the firmware sets a ~90°C hotend standby
-        target IMMEDIATELY on pause, regardless of slicer settings (the
-        bed target survives).  Measured 2026-08-14 on a real A1: the
-        target moved 220°C -> 90°C in the same telemetry sample as the
-        pause, and the nozzle fell to 139°C within 114 seconds — about
-        0.7°C per second.  This docstring previously said the drop came
-        "3-5 minutes into a pause", and the keep-alive was built to wait
-        two minutes before its first assert on the strength of that; the
-        measurement says the damage starts at once.  A resume onto a
-        cooled nozzle can't extrude until it re-heats — and bed adhesion
-        can fail in the meantime.
+      - The bed stays at its pre-pause target for the whole pause, so the
+        part stays stuck down and can be resumed.
+      - The nozzle is not left sitting hot over the part.  If the printer
+        lowers it by itself (a Bambu A1 sets about 90°C at once), Kiln leaves
+        that alone.  If the printer would keep it at full heat, Kiln switches
+        it off 45 seconds into the pause, so a quick look costs nothing.
+      - ``resume_print`` heats the nozzle back to the print's temperature and
+        waits for it before the print continues, so a resume never pushes
+        plastic through a cold nozzle.
 
-    To fight this, ``pause_print`` spawns a best-effort daemon thread
-    that re-asserts the pre-pause hotend + bed targets immediately, and
-    then every 2 minutes until the printer leaves the PAUSED state
-    (resume, cancel, error, or manual button press).  This is enabled by
-    default.  The immediate assert is the part that matters on an A1:
-    without it, a pause shorter than the interval got no protection at
-    all, which is most pauses a person actually takes.  It can only help
-    on a printer Kiln can set temperatures on: Prusa Link offers no way
-    to, so on a Prusa the keep-alive does nothing.
+    A temperature the person sets during the pause is the one kept.  An
+    emergency stop ends the hold.  On a printer Kiln cannot set temperatures
+    on (Prusa Link) the printer's own pause behaviour applies.
 
     Args:
-        keep_temps: When ``True`` (default), capture the pre-pause tool
-            and bed targets and re-assert them every ~2 minutes via a
-            background daemon thread.  Set ``False`` to skip the
-            keep-alive (legacy behaviour — printer may cool during long
-            pauses).  The keep-alive thread is idempotent: repeat
-            pause/resume cycles do not compound threads.
+        keep_temps: When ``True`` (default), hold the bed and settle the
+            nozzle as above.  ``False`` leaves both heaters to the printer.
         printer_name: Which printer to pause.  Omit for the default
-            printer.  Each paused machine gets its own keep-alive thread,
-            re-asserting its own targets on its own adapter.
+            printer.  Each paused machine gets its own hold.
+        leave_nozzle: The person will work the filament during this pause:
+            load new filament after a runout, clear a clog.  Kiln then never
+            switches the nozzle off, and leaves it to them and the printer.
+            The bed is still held.
 
     Use ``resume_print()`` to continue from where the print left off — pass
-    the same ``printer_name`` you paused with.  The keep-alive thread is
-    automatically stopped on that printer's resume or cancel.
+    the same ``printer_name`` you paused with.  The hold ends on that
+    printer's resume or cancel.
     """
     if err := _check_auth("print"):
         return err
@@ -10368,7 +10831,9 @@ def pause_print(keep_temps: bool = True, printer_name: str | None = None) -> dic
             adapter, target_name = _resolve_control_target(printer_name)
         except PrinterNotFoundError:
             return _unknown_printer_error(printer_name, "pause a print on")
-        return _pause_print_on(adapter, target_name, keep_temps=keep_temps)
+        return _pause_print_on(
+            adapter, target_name, keep_temps=keep_temps, leave_nozzle=leave_nozzle,
+        )
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to pause print: {exc}. Check that a print is currently active.")
     except Exception as exc:
@@ -10519,10 +10984,12 @@ def _resume_print_on(
     # The person's word on a hardware stop rides only when given, so an
     # adapter written before the stop existed keeps its two-argument resume.
     confirmed = {"hardware_confirmed": True} if hardware_confirmed else {}
+    # The adapter's resume template reheats the nozzle first, when this
+    # process paused the print (_reheat_before_resume).
     result = adapter.resume_print(force=force, **confirmed)
-    # Stop this printer's pause keep-alive thread if one was running —
-    # the print is back under firmware control and re-asserting targets
-    # here would race with the resume preamble gcode.
+    # End this printer's pause hold if one was running — the print is back
+    # under firmware control and re-asserting the bed here would race with
+    # the resume preamble gcode.
     try:
         _pause_keepalive.stop(adapter)
     except Exception as exc:
@@ -10779,6 +11246,13 @@ def set_temperature(
                 results["success"] = False
         if unconfirmed:
             rate_warnings.extend(unconfirmed)
+
+        # A paused machine's hold now keeps what was just asked for, so a
+        # heater switched off stays off instead of coming back at the next
+        # round.  Taken whether or not the printer confirmed the change.
+        held = _pause_keepalive.retarget(adapter, tool=tool_temp, bed=bed_temp)
+        if held is not None:
+            results["pause_hold"] = held
 
         # -- Heater-off safety net ----------------------------------------
         # Some OctoPrint setups don't reliably turn off heaters at 0 deg C.
@@ -12993,7 +13467,7 @@ def confirm_action(token: str) -> dict:
 
 @mcp.tool()
 @requires_tier(LicenseTier.BUSINESS)
-def fleet_status() -> dict:
+def fleet_status(by_site: bool = False) -> dict:
     """Get live status of all fleet printers (state, temps, connection — current snapshot).
 
     The multi-machine view is a fleet feature.  For ONE printer — which is
@@ -13004,7 +13478,6 @@ def fleet_status() -> dict:
     whatever your licence.
 
     For historical analytics (success rates, throughput), use ``fleet_analytics``.
-    For grouping by physical location, use ``fleet_status_by_site``.
     Returns a list of printer snapshots including name, backend type,
     connection status, operational state, and temperatures.  Printers
     that fail to respond are reported as offline rather than raising.
@@ -13012,6 +13485,18 @@ def fleet_status() -> dict:
     ``repair`` block (needs repair since, or repaired at and what), and
     ``needs_repair_printers`` lists the ones out of service: routing does
     not choose them, though they may read as idle.
+
+    Args:
+        by_site: Also group the same printers by the site each one is at
+            (``update_printer_site``; printers with no site are grouped
+            under ``"unassigned"``).  Grouping by site is a Kiln Enterprise
+            feature (https://kiln3d.com/pricing): on that plan the answer
+            adds ``sites`` — per site its ``printers``, ``count``, ``idle``,
+            ``busy`` and ``needs_repair`` — and ``site_count``.  On Kiln
+            Business the flat answer comes back as usual, with one ``note``
+            saying which plan groups it; never a refusal.  This is the one
+            fleet view: the retired ``fleet_status_by_site`` now only points
+            here.
 
     If no printers are registered yet, the current adapter (from env config)
     is auto-registered as "default".
@@ -13026,12 +13511,15 @@ def fleet_status() -> dict:
                 pass  # No adapter configured
 
         if _get_registry().count == 0:
-            return {
+            empty: dict[str, Any] = {
                 "success": True,
                 "printers": [],
                 "count": 0,
                 "message": "No printers registered.",
             }
+            if by_site:
+                _attach_sites(empty, [])
+            return empty
 
         status = _get_registry().get_fleet_status()
         idle = _get_registry().get_idle_printers()
@@ -13062,21 +13550,12 @@ def fleet_status() -> dict:
             or str(p.get("state", "")).lower() == "starting"
         ]
         # What the person said about each machine (set_machine_repair), read
-        # through the one engine routing reads: status and time only.
-        from kiln.machine_repairs import condition as _repair_condition
-        from kiln.machine_repairs import routing_block as _repair_block
+        # through the one reader every fleet listing shares: status and time
+        # only.
+        from kiln.machine_repairs import attach_repairs
 
-        needs_repair_printers: list[str] = []
-        for p in status:
-            name = p.get("name") or ""
-            if not name:
-                continue
-            block = _repair_block(_repair_condition(name))
-            if block:
-                p["repair"] = block
-                if block["status"] == "needed":
-                    needs_repair_printers.append(name)
-        return {
+        needs_repair_printers = attach_repairs(status)
+        result = {
             "success": True,
             "printers": status,
             "count": len(status),
@@ -13088,9 +13567,67 @@ def fleet_status() -> dict:
             "busy_printers": [n for n in busy_printers if n],
             "needs_repair_printers": needs_repair_printers,
         }
+        if by_site:
+            _attach_sites(result, status)
+        return result
     except Exception as exc:
         logger.exception("Unexpected error in fleet_status")
         return _error_dict(f"Unexpected error in fleet_status: {exc}", code="INTERNAL_ERROR")
+
+
+def _attach_sites(result: dict[str, Any], status: list[dict[str, Any]]) -> None:
+    """Add the by-site grouping to a ``fleet_status`` answer, or the one
+    line saying which plan has it.
+
+    The CALLER's plan, read through ``kiln.licensing`` at call time: on
+    Kiln's servers that is the person asking, never the server's own
+    sign-in.  Below Enterprise the flat answer above is left exactly as it
+    is -- nothing withheld that the Business view had -- and the grouping is
+    named once, as a fact with the pricing link.  The rows are already read
+    (and already carry their ``repair`` block), so grouping is a sort, not a
+    second round of printer calls.
+    """
+    from kiln.licensing import LicenseTier as _Tier
+    from kiln.licensing import check_tier as _check_tier
+
+    enterprise, _ = _check_tier(_Tier.ENTERPRISE)
+    if not enterprise:
+        note = (
+            "Grouped by site, each site would list its own printers with "
+            "their idle, busy and needs-repair names; that view is part of "
+            "Kiln Enterprise. Here is the whole fleet in one list."
+        )
+        result["note"] = note
+        result["upgrade_url"] = upgrade_link("fleet_status")
+        result["upgrade_nudge"] = upgrade_nudge_block(
+            variant="fleet_by_site",
+            tier="enterprise",
+            feature="Fleet view grouped by site",
+            headline="See each site's printers at a glance.",
+            outcome_preview=note,
+            free_included="Every printer stays in this one flat fleet view.",
+            moment="resource_threshold",
+        )
+        return
+    from kiln.printers.base import row_run_state, status_is_occupied
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in status:
+        grouped.setdefault(row.get("site") or "unassigned", []).append(row)
+    result["sites"] = {
+        site: {
+            "needs_repair": [p["name"] for p in rows if (p.get("repair") or {}).get("status") == "needed"],
+            "printers": rows,
+            "count": len(rows),
+            "idle": [p["name"] for p in rows if str(p.get("state", "")).lower() == "idle"],
+            # Through the shared classifier, so this grouping cannot drift
+            # from the flat list beside it about which states mean "not
+            # free to take work" -- a "stale" machine is busy here too.
+            "busy": [p["name"] for p in rows if status_is_occupied(row_run_state(p))],
+        }
+        for site, rows in grouped.items()
+    }
+    result["site_count"] = len(grouped)
 
 
 # fleet_analytics — extracted to plugins/fleet_tools.py
@@ -13672,8 +14209,8 @@ def register_printer(
 # discover_printers — extracted to plugins/printer_management_tools.py
 
 
-# list_fleet_sites, fleet_status_by_site, update_printer_site
-# — extracted to plugins/fleet_tools.py
+# list_fleet_sites, update_printer_site — extracted to plugins/fleet_tools.py
+# (fleet_status_by_site is retired there: it points at fleet_status(by_site=True))
 
 
 @mcp.tool()
@@ -18912,6 +19449,73 @@ def run_reslice_and_print(
         return _error_dict(f"Unexpected error in run_reslice_and_print: {exc}", code="INTERNAL_ERROR")
 
 
+def _queue_fill_rest(
+    model_path: str,
+    copies: int,
+    *,
+    printer_name: str | None,
+    printer_id: str | None,
+    overrides: dict[str, Any] | None,
+    slicer_path: str | None,
+    spacing_mm: float,
+    signoff: dict[str, Any] | None,
+    run: dict[str, Any] | None = None,
+    beside_plate: str | None = None,
+) -> dict[str, Any]:
+    """Queue the copies a fill left as one job for the next plate.
+
+    The job remembers the part, not a sliced file: the next plate is laid
+    out and sliced when its turn comes, for the plate as it is then
+    (:meth:`kiln.scheduler.JobScheduler._start_fill_job`), and whatever
+    still does not fit is queued again the same way.  It goes to the
+    printer that took this plate and carries the person's yes for this run.
+    The part is copied into Kiln's own folder first, so tidying the folder
+    it came from does not lose the rest of the run.  *run* is metadata the
+    run carries on every plate (a fleet plan's ``split_plan_id``).
+    *beside_plate* is the plate record's fingerprint when the person was
+    shown this plate's copies laid out beside what is on it: the job may
+    then be laid out beside those parts at its turn, and only while the
+    plate still holds exactly them (the queue checks).  ``{"job_id",
+    "printer_name"}``, or ``{"why"}`` when it could not be queued.  Never
+    raises.
+    """
+    try:
+        from kiln.asset_store import kiln_root, persist_asset
+
+        _adapter, target = _resolve_control_target(printer_name)
+        kept = persist_asset(model_path, os.path.join(kiln_root(), "queued_parts"), prefix="part") or model_path
+        job_id = _get_queue().submit(
+            file_name=os.path.basename(model_path),
+            printer_name=target,
+            submitted_by="multi_copy_print",
+            metadata={
+                "fill": {
+                    "model_path": kept,
+                    "copies": int(copies),
+                    "spacing_mm": float(spacing_mm),
+                    "printer_id": printer_id,
+                    "overrides": dict(overrides) if overrides else None,
+                    "slicer_path": slicer_path,
+                    **({"beside_plate": beside_plate} if beside_plate else {}),
+                },
+                **({"preview_signoff": signoff} if signoff else {}),
+                **(dict(run) if run else {}),
+            },
+        )
+        _get_event_bus().publish(
+            Event(
+                type=EventType.JOB_QUEUED,
+                data={"job_id": job_id, "file_name": os.path.basename(model_path), "printer_name": target,
+                      "copies": int(copies)},
+                source="mcp",
+            )
+        )
+        return {"job_id": job_id, "printer_name": target}
+    except Exception as exc:  # noqa: BLE001 -- the plate that started stands; the rest is said, not lost silently
+        logger.warning("Could not queue the rest of a fill: %s", exc, exc_info=True)
+        return {"why": str(exc) or exc.__class__.__name__}
+
+
 @mcp.tool()
 def multi_copy_print(
     model_path: str,
@@ -18922,6 +19526,7 @@ def multi_copy_print(
     overrides: str | dict[str, Any] | None = None,
     slicer_path: str | None = None,
     preview_token: str | None = None,
+    fill: bool = False,
 ) -> dict:
     """Print multiple copies of a model arranged on one build plate.
 
@@ -18933,17 +19538,29 @@ def multi_copy_print(
     duplication for OrcaSlicer or when fine control is needed.  Copies that do
     not all fit the bed are refused, saying so, never sliced short.
 
+    With ``fill=True`` (an STL, 1 to 50 copies) Kiln places as many copies
+    as fit on the plate as it stands, up to ``copies``, beside anything
+    already there, and never refuses because fewer fit: the result says how
+    many it placed (``copies_placed``).  The copies that did not fit are
+    queued on the same printer (``queued_job_id``) and print as the next
+    plate once this one is taken off and the plate is said to be clear,
+    plate after plate until all are done; ``cancel_queued_job`` stops the
+    rest.  How many fit is answered on every tier; placing copies beside a
+    part still on the plate is a kiln-pro feature (https://kiln3d.com/pricing).
+
     Requires a slicer (PrusaSlicer or OrcaSlicer) installed locally.
     The printer must be idle and connected.
 
     Args:
         model_path: Path to input model (STL, OBJ).
-        copies: Number of copies to print (2-20).
+        copies: Number of copies to print (2-20; with ``fill``, at most
+            this many, 1-50).
         printer_name: Registered printer name in fleet.
         printer_id: Printer model ID for auto-profile selection.
         spacing_mm: Gap between copies in mm (default 10).
         overrides: JSON string of slicer parameter overrides.
         slicer_path: Explicit path to the slicer binary.
+        fill: Place as many copies as fit on the plate as it stands.
     """
     if err := _check_auth("print"):
         return err
@@ -18956,10 +19573,11 @@ def multi_copy_print(
     signoff = print_signoff.record_for(print_signoff.current())
 
     # --- Validation ---
-    if copies < 2:
-        return _error_dict("copies must be >= 2.", code="VALIDATION_ERROR")
-    if copies > 20:
-        return _error_dict("copies must be <= 20.", code="VALIDATION_ERROR")
+    min_copies, max_copies = (1, 50) if fill else (2, 20)
+    if copies < min_copies:
+        return _error_dict(f"copies must be >= {min_copies}.", code="VALIDATION_ERROR")
+    if copies > max_copies:
+        return _error_dict(f"copies must be <= {max_copies}.", code="VALIDATION_ERROR")
     if spacing_mm < 0:
         return _error_dict("spacing_mm must be >= 0.", code="VALIDATION_ERROR")
 
@@ -18978,6 +19596,60 @@ def multi_copy_print(
         parsed_overrides, _arg_err = parse_json_object(overrides, "overrides")
         if _arg_err is not None:
             return _arg_err
+
+        if fill:
+            # The plate gate lays the copies (as many as fit, beside anything
+            # already there) and the slicer gets one merged part: no
+            # --duplicate, which would centre a grid on whatever is there.
+            result = _pipeline_reslice_and_print(
+                model_path=model_path,
+                printer_name=printer_name,
+                printer_id=printer_id,
+                overrides=parsed_overrides,
+                slicer_path=slicer_path,
+                copies=copies,
+                spacing_mm=spacing_mm,
+                signoff=signoff,
+            )
+            placed = None
+            limited_by = None
+            for step in getattr(result, "steps", None) or []:
+                if getattr(step, "name", None) == "slice":
+                    block = (getattr(step, "data", None) or {}).get("copies")
+                    placed = block.get("placed") if isinstance(block, dict) else None
+                    limited_by = block.get("limited_by") if isinstance(block, dict) else None
+            summary = {"success": result.success, **result.to_dict()}
+            summary["copies"] = copies
+            summary["copies_requested"] = copies
+            summary["copies_placed"] = placed
+            if limited_by:
+                summary["limited_by"] = limited_by
+            if result.success and isinstance(placed, int) and 0 < placed < copies:
+                # The rest is the next plate: queued now, on the printer that
+                # took this one, and started by the queue once the plate is
+                # cleared (the queue never starts onto a part).
+                rest = copies - placed
+                summary["copies_remaining"] = rest
+                queued = _queue_fill_rest(
+                    model_path, rest, printer_name=printer_name, printer_id=printer_id,
+                    overrides=parsed_overrides, slicer_path=slicer_path, spacing_mm=spacing_mm, signoff=signoff,
+                )
+                if queued.get("job_id"):
+                    summary["queued_job_id"] = queued["job_id"]
+                    summary["next"] = (
+                        f"{placed} of {copies} copies fit on the plate as it stands and are printing. The other "
+                        f"{rest} are queued on {queued['printer_name']}: when these are done, take them off and "
+                        "say the plate is clear, and Kiln prints the next plate of them on its own. "
+                        "cancel_queued_job stops that."
+                    )
+                else:
+                    summary["next"] = (
+                        f"{placed} of {copies} copies fit on the plate as it stands and are printing. The other "
+                        f"{rest} could not be queued ({queued.get('why')}); when these are done, clear the plate "
+                        f"and ask for them."
+                    )
+            summary["strategy"] = "fill"
+            return summary
 
         # --- Detect slicer and choose strategy ---
         from kiln.slicer import find_slicer, supports_duplicate_flag
@@ -23306,8 +23978,8 @@ def stop_printer_health_monitoring(printer_name: str) -> dict:
 
 # estimate_print_progress — moved to plugins/estimate_tools.py
 
-# route_print_job, fleet_submit_job, fleet_job_status, fleet_utilization
-# — extracted to plugins/fleet_tools.py
+# route_print_job, fleet_utilization (and the retired fleet_submit_job,
+# fleet_job_status) — in plugins/fleet_tools.py
 
 
 # cache_design, list_cached_designs, get_cached_design
@@ -23638,18 +24310,18 @@ def decorate_surface(
 
     **Image styles** for raster images:
 
-    - ``"auto"`` — detects the image kind: a logo/wordmark/line-art
-      image routes to ``"stencil"`` (crisp traced strokes); a
-      continuous-tone photo routes to ``"coin"``
-    - ``"coin"`` — histogram-equalized posterize, best for FDM coin-relief
-    - ``"portrait"`` — edge-detected line art
-    - ``"composite"`` — posterize base + edge overlay hybrid
-    - ``"medallion"`` — coin + raised border ring (premium look)
-    - ``"photo"`` — simple 3-level posterize
-    - ``"stencil"`` (alias ``"logo"``) — the mark's ink is traced into
+    - "auto" — a logo/wordmark/line-art image routes to "stencil"
+      (crisp traced strokes); a photo is sculpted and Kiln picks the look
+      from the photo and the part, saying why in relief.chosen_because
+    - "coin" — a sunk relief, the subject rising to the rim plane
+    - "cameo" — the same relief raised on the face (emboss)
+    - "etched" — edges first, for a small part
+    - "sketch" — engraved contour lines, one layer deep (was "portrait")
+    - "medallion" — a coin with a rim ring; "photo" and
+      "composite" mean "coin"
+    - "stencil" (alias "logo") — the mark's ink is traced into
       vector strokes and carved directly: crisp edges, no background
       tile, correct orientation.  The right choice for brand logos.
-    - ``"lithophane"`` — full gradient for backlit prints
 
     **Examples**::
 
@@ -24195,7 +24867,25 @@ def decorate_surface(
         elif ctype == "image":
             from kiln.image_to_surface import prepare_image_for_emboss
 
-            effective_style = image_style
+            from kiln.emboss_generator import get_default_depth as _relief_default_depth
+            from kiln.image_to_surface import accepted_styles, resolve_style
+
+            effective_style = (image_style or "auto").strip().lower()
+            if effective_style != "auto":
+                # The caller's style reaches the engine; an unknown one is
+                # refused naming the accepted list, never quietly carved as
+                # something else.
+                try:
+                    effective_style = resolve_style(effective_style)
+                except ValueError as exc:
+                    _refund_decoration_quota(quota_consumed)
+                    return {
+                        "success": False,
+                        "status": "error",
+                        "code": "IMAGE_STYLE_UNKNOWN",
+                        "error": f"{exc}; 'auto' lets Kiln pick.",
+                        "accepted_styles": ["auto", *accepted_styles()],
+                    }
             if effective_style == "auto":
                 # Bi-level marks (logos, wordmarks, line art) carve as
                 # traced vector strokes; continuous-tone photos keep the
@@ -24204,10 +24894,10 @@ def decorate_surface(
                     from kiln.mark_geometry import is_bilevel_image
 
                     effective_style = (
-                        "stencil" if is_bilevel_image(content) else "coin"
+                        "stencil" if is_bilevel_image(content) else "auto"
                     )
                 except Exception:  # noqa: BLE001 — detector never blocks a decorate
-                    effective_style = "coin"
+                    effective_style = "auto"
 
             if effective_style in ("stencil", "logo"):
                 # Crisp mark path: trace the ink into native polygon()
@@ -24232,17 +24922,29 @@ def decorate_surface(
                         flip_rows=True,
                     )
             else:
-                coin_like = effective_style in ("coin", "medallion")
+                # The pool a photo sits in follows the FACE, never the
+                # bitmap: a square photo's rounded rectangle on a round
+                # coaster carved clean through the rim (2026-10-25).  A disc
+                # fills ~78.5% of its bounding box; anything under 0.9 is
+                # round enough to want a circle.
+                _fw = float(face_info.get("width_mm", 0) or 0)
+                _fh = float(face_info.get("height_mm", 0) or 0) or _fw
+                _fa = float(face_info.get("area_mm2", 0) or 0)
+                _round_face = _fw > 0 and _fh > 0 and _fa > 0 and _fa / (_fw * _fh) < 0.9
                 content_info = prepare_image_for_emboss(
                     content,
                     work_dir,
-                    max_resolution=250 if coin_like else 200,
+                    max_resolution=600,
                     invert=(mode == "deboss"),
                     style=effective_style,
                     # surface() reads rows bottom-to-top; EVERY heightmap
                     # style needs the row flip or the relief renders
                     # upside-down (only the coin path had this right).
                     flip_rows=True,
+                    mask="circle" if _round_face else "rounded_rectangle",
+                    canvas_mm=(_fw * scale) if _fw > 0 else None,
+                    depth_mm=depth_mm if depth_mm > 0 else _relief_default_depth(material),
+                    mode=mode,
                 )
 
         elif ctype == "text":
@@ -24387,6 +25089,19 @@ def decorate_surface(
         _treatment = content_info.get("treatment") or (
             "mark" if content_info.get("type") == "svg" else None
         )
+        # What the relief was made for, said beside the carve: its layers, a
+        # lit preview of it as it prints, and where it was made (the
+        # engine, the servers, or the basic relief here, with the one
+        # sentence on why).
+        _relief = None
+        if content_info.get("levels"):
+            _relief = {
+                k: content_info.get(k)
+                for k in (
+                    "levels", "layer_mm", "depth_mm", "nozzle", "base", "relief_source",
+                    "chosen_because", "preview_png", "notes",
+                )
+            }
         _face_meta = {
             "mode": mode,
             "depth_mm": effective_depth,
@@ -24569,6 +25284,7 @@ def decorate_surface(
                 "image_style": image_style,
                 "image_style_applied": _style_applied,
                 "treatment": _treatment,
+                "relief": _relief,
             },
             "compile_time_seconds": compile_result.get("compile_time_seconds"),
             "scad_path": scad_result["scad_path"],
@@ -24594,6 +25310,10 @@ def decorate_surface(
             result_dict["provenance"] = _provenance_info
         if warnings:
             result_dict["warnings"] = warnings
+        if content_info.get("signin_offer"):
+            from kiln.signin_offer import FIELD as _OFFER_FIELD
+
+            result_dict[_OFFER_FIELD] = content_info["signin_offer"]
 
         # Telemetry: count decoration with type detail
         try:

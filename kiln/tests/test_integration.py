@@ -1215,8 +1215,13 @@ class TestFleetRegistryScheduling:
         dispatched_printer = result["dispatched"][0]["printer_name"]
         assert dispatched_printer in ("voron-350", "ender-3")
 
-    def test_multi_printer_parallel_dispatch(self, event_bus, registry):
-        """Multiple idle printers should each receive a job in a single tick."""
+    def test_multi_printer_parallel_dispatch(self, event_bus, registry, monkeypatch):
+        """Multiple idle printers should each receive a job in a single tick,
+        on the fleet tier; below it the queue stays on one printer
+        (tests/test_queue_stays_on_one_printer.py)."""
+        from kiln import licensing
+
+        monkeypatch.setattr(licensing, "get_tier", lambda: licensing.LicenseTier.BUSINESS)
         queue = PrintQueue()
 
         printers = {}

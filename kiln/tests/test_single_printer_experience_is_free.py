@@ -58,9 +58,10 @@ FLEET_TOOLS_REQUIRING_BUSINESS = [
     "fleet_status",
     "fleet_analytics",
     "route_print_job",
-    "fleet_submit_job",
-    "fleet_job_status",
     "fleet_utilization",
+    # fleet_submit_job and fleet_job_status were retired 2026-10-26 into
+    # plan_multi_copy_split (Business; pinned in test_fleet_fill_door.py):
+    # they point there and run nothing, so they have nothing to gate.
 ]
 
 

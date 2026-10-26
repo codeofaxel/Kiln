@@ -632,8 +632,10 @@ class TestTheLastLoops:
         keeper = _PauseKeepAlive()
         stop = threading.Event()
         adapter = _adapter(_state(PrinterStatus.PAUSED, fault=True))
+        # A real hold always has something to heat: one with nothing left
+        # ends on that ground alone, which would pass this for the wrong reason.
         keeper._entries = {
-            "k": {"adapter": adapter, "targets": {}, "stop_event": stop}
+            "k": {"adapter": adapter, "targets": {"bed": 60.0}, "stop_event": stop}
         }
 
         assert keeper._reassert("k", stop) is True

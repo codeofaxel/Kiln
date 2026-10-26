@@ -53,6 +53,7 @@ Request (``schema: "placement_request/1"``)::
               "colour_changes_at_mm": [...], "skirt_mm"} | null,
      "sliced_gcode": {"path"} | {"name", "gz_b64"} | null,
      "placement": [x, y] | "keep" | "auto",
+     "copies": int | null,          # 1..100, with "auto": as many as fit, up to this
      "keep_at_mm": [x, y] | null,
      "placed_by": "auto"|"human"|"agent"|"keep",
      "suppress": [str] | null,
@@ -98,6 +99,12 @@ only when it is true, and reads a verdict without it as false.
 
 ``at_mm`` is where the part's own footprint origin (its min corner) goes,
 the same corner ``keep_at_mm`` names; ``footprint_mm`` is the placed rect.
+A request with ``copies`` is answered with the first copy's verdict and a
+``copies`` block, ``{"wanted", "fits", "placed": [{"at_mm", "footprint_mm",
+"clearance_mm", "fault_risks"}]}``: ``fits`` is the count on every tier,
+``placed`` the places where the plan's tier holds them (``[]`` otherwise),
+and ``occupancy.copies`` their rects.  A request that carries
+``sliced_gcode`` is judged as the whole sliced file, ``copies`` ignored.
 A response carrying ``error`` / ``status: "error"``, or without the schema,
 reads as "no verdict".  Every function here returns without raising.
 """
@@ -332,6 +339,7 @@ def request_for(
     keep_at: list[float] | None = None,
     placed_by: str | None = None,
     suppress: list[str] | None = None,
+    copies: int | None = None,
 ) -> dict[str, Any]:
     """The request document for *adapter*'s plate as it stands now.
 
@@ -339,7 +347,9 @@ def request_for(
     occupant's G-code comes from the slice ledger when Kiln has it.
     *placement* is ``[x, y]``, ``"keep"`` or ``"auto"``; *placed_by* says
     who chose it and defaults from the placement itself (an exact spot is
-    an agent's, ``"keep"`` and ``"auto"`` are their own).  Never raises.
+    an agent's, ``"keep"`` and ``"auto"`` are their own).  *copies* asks
+    how many of the part fit, up to that many (``None`` for one part).
+    Never raises.
     """
     from kiln import plate_state
     from kiln.bench import observations_for_request
@@ -389,6 +399,7 @@ def request_for(
         "part": dict(part) if isinstance(part, dict) else None,
         "sliced_gcode": {"path": str(sliced_gcode_path)} if sliced_gcode_path else None,
         "placement": placement_value,
+        "copies": int(copies) if copies is not None else None,
         "keep_at_mm": [float(keep_at[0]), float(keep_at[1])] if keep_at else None,
         "placed_by": who,
         "suppress": list(suppress) if suppress else None,
@@ -497,7 +508,8 @@ def plate_reading(name: str, adapter: Any, job: Mapping[str, Any] | None) -> dic
          "unknowns": [str]}
 
     ``request`` is :func:`request_for` with ``placement="auto"`` -- the plate
-    record, the occupant's file, the part's size or the sliced file.
+    record, the occupant's file, the part's size or the sliced file, and
+    ``copies`` when *job* asks how many of a mesh this plate takes.
     ``camera`` says which camera could settle an unknown plate and
     ``camera_clause`` is the sentence that offers it.  A sliced file's
     quiet-start ``contract`` names the plate it was sliced beside, and
@@ -512,6 +524,11 @@ def plate_reading(name: str, adapter: Any, job: Mapping[str, Any] | None) -> dic
     job = dict(job or {})
     part = job.get("part") if isinstance(job.get("part"), dict) else None
     sliced = job.get("sliced_gcode_path") if isinstance(job.get("sliced_gcode_path"), str) else None
+    # Copies of a mesh: how many of them this plate takes is asked with the
+    # plate.  A sliced file is one fixed print and is never filled.
+    copies = job.get("copies") if isinstance(job.get("copies"), int) and not isinstance(job.get("copies"), bool) else None
+    if sliced or part is None or (copies is not None and copies < 1):
+        copies = None
     file_name = str(job.get("file") or (os.path.basename(sliced) if sliced else "") or "the file")
     reading: dict[str, Any] = {
         "schema": READING_SCHEMA, "request": None, "file_name": file_name, "camera": None,
@@ -533,7 +550,7 @@ def plate_reading(name: str, adapter: Any, job: Mapping[str, Any] | None) -> dic
             reading["camera_clause"] = plate_state.camera_could_settle(adapter)
             printer_id = plate_state.declared_model_of(adapter)
             reading["request"] = request_for(
-                adapter, printer_id, placement="auto", part=part, sliced_gcode_path=sliced,
+                adapter, printer_id, placement="auto", part=part, sliced_gcode_path=sliced, copies=copies,
             )
             if sliced:
                 contract = plate_state.quiet_start_contract_for(file_name, local_path=sliced)
@@ -563,7 +580,8 @@ def fleet_readings(
     form the hosted service takes: each request through :func:`hosted_form`
     with the job's own sliced file left OUT of every request -- the job is
     one file and travels once, beside the readings, so twenty machines do
-    not carry twenty copies of it.
+    not carry twenty copies of it, and each machine's serial as a one-way
+    code.
     """
     out: dict[str, dict[str, Any]] = {}
     for raw in names:
@@ -571,6 +589,12 @@ def fleet_readings(
         reading = plate_reading(name, (adapters or {}).get(name), job)
         if wire and isinstance(reading.get("request"), dict):
             reading["request"] = hosted_form({**reading["request"], "sliced_gcode": None})
+            # The fleet doors are asks a person made, so the served door
+            # passes their arguments as given: the machine's serial is coded
+            # here, one way, before it leaves (kiln.outbound_guard).
+            from kiln.outbound_guard import machine_code
+
+            reading["request"]["serial"] = machine_code(reading["request"].get("serial")) or ""
         out[name] = reading
     return out
 

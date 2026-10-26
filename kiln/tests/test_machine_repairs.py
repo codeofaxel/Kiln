@@ -677,3 +677,25 @@ class TestTheFleetView:
         out = fleet()
         assert out["needs_repair_printers"] == []
         assert all("repair" not in row for row in out["printers"])
+
+    def test_the_by_site_view_reads_the_same_record(self, fleet, db):
+        """The by-site grouping (``fleet_status(by_site=True)``, once a
+        second tool) is the same listing grouped by place, and it carried no
+        repair at all (found 2026-10-25, after the fleet view was wired): a
+        printer out of service at one site read as idle there.  The grouping
+        is made from the flat rows, so the two views cannot disagree."""
+        import kiln.server as srv
+
+        srv._get_registry().update_printer_metadata("a", site="shop")
+        srv._get_registry().update_printer_metadata("b", site="bench")
+        pr.mark("a", "needed", db=db)
+        pr.mark("b", "done", kind="belts", db=db)
+        out = fleet(by_site=True)
+        assert out["success"] is True
+        assert out["needs_repair_printers"] == ["a"]
+        shop, bench = out["sites"]["shop"], out["sites"]["bench"]
+        assert shop["needs_repair"] == ["a"] and bench["needs_repair"] == []
+        (a,), (b,) = shop["printers"], bench["printers"]
+        assert a["repair"] == fleet()["printers"][0]["repair"]
+        assert set(a["repair"]) == {"status", "since"}
+        assert b["repair"]["status"] == "done" and b["repair"]["kind"] == "belts"

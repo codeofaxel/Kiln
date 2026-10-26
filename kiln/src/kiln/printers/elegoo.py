@@ -366,6 +366,10 @@ class ElegooAdapter(PrinterAdapter):
     _IDLE_RELEASE_ENV = _IDLE_DISCONNECT_ENV
     _IDLE_RELEASE_DEFAULT_S = _DEFAULT_IDLE_DISCONNECT_S
 
+    #: How Kiln learns this printer's own pause and cancel moves.
+    head_position = ("Kiln reads no head position from an Elegoo SDCP printer, so its owner teaches "
+                     "Kiln the moves through the guided session's questions")
+
     def __init__(
         self,
         host: str,

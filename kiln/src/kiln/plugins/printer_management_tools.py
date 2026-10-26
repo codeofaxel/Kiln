@@ -235,6 +235,12 @@ class _PrinterManagementToolsPlugin:
             with, without changing anything, so you can always find out where
             its attention is before moving it.
 
+            It moves the queue too.  Below the fleet tier the queue works on
+            one printer and stays there; a queued job for another printer
+            waits until the person moves Kiln to it.  When they say they are
+            done with a printer, or ask for the queue to move on, hand that
+            printer back: the next job in line then starts on its own printer.
+
             One thing worth knowing before you do it: Kiln will come back to
             this print once if you need it to, and after that it stays with
             whatever machine it moved to until this print finishes.  Going
@@ -251,25 +257,35 @@ class _PrinterManagementToolsPlugin:
                 from kiln.printers.engagement import (
                     current,
                     hand_back,
+                    multi_machine_tier,
+                    queue_printer,
                     reason_in_english,
                 )
 
                 engagement = current()
                 if printer_name is None:
+                    on = queue_printer() if not multi_machine_tier() else None
+                    queue_line = (
+                        f" Kiln's queue is on {on['label']}; hand it back to move the queue to the next job's printer."
+                        if on else ""
+                    )
                     if engagement is None:
                         return {
                             "success": True,
                             "engaged_with": None,
-                            "message": "Kiln is not working with a printer right now.",
+                            "queue_on": on["label"] if on else None,
+                            "message": "Kiln is not working with a printer right now." + queue_line,
                         }
                     return {
                         "success": True,
                         "engaged_with": engagement.label,
                         "since": engagement.since,
                         "because": reason_in_english(engagement.reason),
+                        "queue_on": on["label"] if on else None,
                         "message": (
                             f"Kiln is working with {engagement.label}. "
                             f"Hand it back to move Kiln to another printer."
+                            + ("" if on and on["label"] == engagement.label else queue_line)
                         ),
                     }
 
@@ -302,6 +318,18 @@ class _PrinterManagementToolsPlugin:
                         code="NOT_ENGAGED",
                     )
                 name = report.get("printer", printer_name)
+                if report.get("queue_only"):
+                    return {
+                        "success": True,
+                        "printer": name,
+                        "stopped_watches": stopped_watches,
+                        "queue_released": True,
+                        "message": (
+                            f"Kiln's queue has moved off {name}. The next job in line starts on its own "
+                            "printer once that plate is clear."
+                        ),
+                        "returns_left": 0,
+                    }
                 left = report.get("returns_left", 0)
                 # State the consequence HERE, not when they discover it.
                 consequence = (
@@ -317,7 +345,10 @@ class _PrinterManagementToolsPlugin:
                     "message": (
                         f"Kiln has stepped off {name}. The print carries on exactly "
                         f"as it was, and Kiln is free for another printer. {consequence}"
+                        + (" The queue moves on with it: the next job in line starts on its own printer."
+                           if report.get("queue_released") else "")
                     ),
+                    "queue_released": bool(report.get("queue_released")),
                     "returns_left": left,
                 }
             except Exception as exc:

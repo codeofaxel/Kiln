@@ -1230,6 +1230,9 @@ class PrintWatchdog:
 
     def _command_stop(self) -> tuple[bool, str | None]:
         """Send one emergency stop: ``(confirmed, what it said)``.  Never raises."""
+        from kiln.emergency import end_pause_hold
+
+        end_pause_hold(self._adapter)
         try:
             result = self._adapter.emergency_stop()
         except Exception as exc:

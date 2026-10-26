@@ -523,6 +523,10 @@ class OctoPrintAdapter(PrinterAdapter):
     # ending — a late reading is merely late and still correct.
     _DURATION_SEMANTICS: ClassVar[str] = "frozen"
 
+    #: How Kiln learns this printer's own pause and cancel moves.
+    head_position = ("OctoPrint's API reports no head position, so its owner teaches Kiln the "
+                     "printer's moves through the guided session's questions")
+
     def __init__(
         self,
         host: str,

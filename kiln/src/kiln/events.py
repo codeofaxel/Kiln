@@ -90,6 +90,11 @@ class EventType(enum.Enum):
     # reading from.  Published once per episode by the scheduler; the job
     # stays PRINTING until the printer ends it or a person cancels it.
     JOB_NO_CONTACT = "job.no_contact"
+    # A queued job is waiting for something a person or the plan decides:
+    # the last print still on the plate, or (one printer at a time) another
+    # printer's print.  Published once when the wait begins, never repeated
+    # while it lasts; the job stays QUEUED and keeps its place in line.
+    JOB_WAITING = "job.waiting"
 
     # Printer state
     PRINTER_CONNECTED = "printer.connected"

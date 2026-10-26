@@ -8,8 +8,11 @@ Agents submit print jobs to the queue rather than directly calling
 - Failed jobs are tracked and can be retried.
 - The full history of submitted, running, and completed jobs is queryable.
 - Jobs are persisted to SQLite for crash recovery.  On startup, jobs that
-  were in QUEUED or STARTING/PRINTING state are reloaded (active jobs are
-  reset to QUEUED since the printer state is unknown after a crash).
+  were QUEUED come back in line, and jobs that were STARTING, PRINTING or
+  PAUSED come back as they were: the queue does not know how they went
+  while Kiln was stopped, and putting them back in line would print them
+  twice.  The scheduler settles each one from the printer and the plate
+  record (``JobScheduler._settle_unfinished``).
 
 Example::
 
@@ -488,8 +491,12 @@ class PrintQueue:
     # Status transitions
     # ------------------------------------------------------------------
 
-    def mark_starting(self, job_id: str) -> PrintJob:
+    def mark_starting(self, job_id: str, printer_name: str | None = None) -> PrintJob:
         """Mark a job as starting (being sent to the printer).
+
+        *printer_name* is the printer it is being sent to, kept on the job
+        (``metadata["dispatched_to"]``) so a Kiln restarted mid-start knows
+        which machine to ask about a job that named none.
 
         Raises:
             InvalidStateTransition: If the job is not in QUEUED state.
@@ -499,7 +506,11 @@ class PrintQueue:
             JobStateMachine.validate(job.id, job.status, JobStatus.STARTING)
             job.status = JobStatus.STARTING
             job.started_at = time.time()
+            if printer_name:
+                job.metadata = {**job.metadata, "dispatched_to": printer_name}
         self._update_job_db(job)
+        if printer_name:
+            self._update_metadata_db(job)
         return job
 
     def mark_printing(self, job_id: str) -> PrintJob:
@@ -616,17 +627,89 @@ class PrintQueue:
         Returns:
             The next job to execute, or ``None`` if the queue is empty.
         """
+        candidates = self.queued_for(printer_name)
+        return candidates[0] if candidates else None
+
+    def queued_for(self, printer_name: str | None = None) -> list[PrintJob]:
+        """Every QUEUED job *printer_name* could take, in the order the queue
+        runs them: highest priority first, then oldest.
+
+        A job naming no printer may go to any; a job naming one goes only
+        there.  ``None`` lists every queued job.
+        """
         with self._lock:
             candidates = [j for j in self._jobs.values() if j.status == JobStatus.QUEUED]
 
         if printer_name is not None:
             candidates = [j for j in candidates if j.printer_name is None or j.printer_name == printer_name]
 
-        if not candidates:
-            return None
-
         candidates.sort(key=lambda j: (-j.priority, j.created_at))
-        return candidates[0]
+        return candidates
+
+    def unfinished(self) -> list[PrintJob]:
+        """Every job a printer may be working on: STARTING, PRINTING or
+        PAUSED.  Unsorted, and read without copying the finished history, so
+        the scheduler can ask it on every pass."""
+        live = (JobStatus.STARTING, JobStatus.PRINTING, JobStatus.PAUSED)
+        with self._lock:
+            return [j for j in self._jobs.values() if j.status in live]
+
+    def requeue(self, job_id: str) -> PrintJob:
+        """Put a job Kiln tried to start back in line, untouched.
+
+        For a start Kiln turned away before sending anything -- it is not
+        this job's turn yet -- or one a restart interrupted before any
+        printer took it: the job has not printed, has not failed, and keeps
+        its place.  A STARTING job only; anything else is returned as it is.
+        """
+        with self._lock:
+            job = self._get(job_id)
+            if job.status != JobStatus.STARTING:
+                return job
+            job.status = JobStatus.QUEUED
+            job.started_at = None
+            job.error = None
+        self._update_job_db(job)
+        return job
+
+    def update_metadata(self, job_id: str, updates: dict[str, Any]) -> None:
+        """Merge *updates* into a job's metadata and write it to the store.
+        Never raises."""
+        try:
+            with self._lock:
+                job = self._jobs.get(job_id)
+                if job is None:
+                    return
+                job.metadata = {**job.metadata, **updates}
+            self._update_metadata_db(job)
+        except Exception:  # noqa: BLE001 -- bookkeeping never breaks the queue
+            logger.debug("metadata for %s not recorded", job_id, exc_info=True)
+
+    def note_waiting(self, job_id: str, waiting: dict[str, Any] | None) -> None:
+        """Record why a queued job has not started, or clear it (``None``).
+
+        Kept in the job's metadata under ``waiting`` and written to the
+        store, so every reader -- the running server, the command line in
+        another process, a server restarted since -- says the same thing.
+        Writes only when the note changes.  Never raises.
+        """
+        try:
+            with self._lock:
+                job = self._jobs.get(job_id)
+                if job is None:
+                    return
+                current = job.metadata.get("waiting")
+                if current == waiting:
+                    return
+                metadata = dict(job.metadata)
+                if waiting is None:
+                    metadata.pop("waiting", None)
+                else:
+                    metadata["waiting"] = dict(waiting)
+                job.metadata = metadata
+            self._update_metadata_db(job)
+        except Exception:  # noqa: BLE001 -- a note never breaks the queue
+            logger.debug("waiting note for %s not recorded", job_id, exc_info=True)
 
     def pending_count(self) -> int:
         """Number of jobs in QUEUED state."""
@@ -866,6 +949,16 @@ class PrintQueue:
         except Exception:
             logger.exception("Failed to update job %s in SQLite", job.id)
 
+    def _update_metadata_db(self, job: PrintJob) -> None:
+        """Write a job's metadata to SQLite."""
+        if self._db is None:
+            return
+        try:
+            self._db.execute("UPDATE jobs SET metadata=? WHERE id=?", (json.dumps(job.metadata), job.id))
+            self._db.commit()
+        except Exception:
+            logger.exception("Failed to update metadata for job %s in SQLite", job.id)
+
     def _reload_from_db(self) -> None:
         """Reload non-terminal jobs from SQLite on startup."""
         if self._db is None:
@@ -879,19 +972,20 @@ class PrintQueue:
         )
         recovered = 0
         for row in cursor.fetchall():
-            status_str = row[3]
-            # Reset in-flight jobs to QUEUED — printer state unknown after crash
-            if status_str in ("starting", "printing", "paused"):
-                status_str = "queued"
+            # A job that was starting, printing or paused comes back as it
+            # was, never back in line: whether it printed is the printer's
+            # to say, and the scheduler asks it (_settle_unfinished).  Put
+            # back in line, a print that finished while Kiln was stopped
+            # started again the moment its printer went idle.
             job = PrintJob(
                 id=row[0],
                 file_name=row[1],
                 printer_name=row[2],
-                status=JobStatus(status_str),
+                status=JobStatus(row[3]),
                 submitted_by=row[4],
                 priority=row[5],
                 created_at=row[6],
-                started_at=None,  # reset since we're requeuing
+                started_at=row[7],
                 completed_at=row[8],
                 error=row[9],
                 metadata=json.loads(row[10]) if row[10] else {},
@@ -900,8 +994,6 @@ class PrintQueue:
             self._jobs[job.id] = job
             if job.idempotency_key:
                 self._idem_index[job.idempotency_key] = job.id
-            # Update DB to reflect the reset
-            self._update_job_db(job)
             recovered += 1
         if recovered:
             logger.info("Recovered %d job(s) from SQLite after restart", recovered)

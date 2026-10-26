@@ -420,6 +420,24 @@ class TestThePrintersOwnWord:
         monkeypatch.setenv("KILN_TELEMETRY", "true")
         assert bench.send_after_heartbeat("https://x.supabase.co", "anon") == 1 and posted[1][1]["p_block"] == "head"
 
+    def test_community_sharing_off_keeps_every_observation_on_this_machine(self, monkeypatch):
+        """What one printer teaches Kiln is counted across owners, so the
+        person's community-sharing switch governs it as it does every shared
+        row, beside telemetry -- either off keeps it home, and a placement
+        request still carries it, nameless, for the person's own verdict."""
+        machine = _Adapter()
+        bench.keep_observation(machine, bench.observation(
+            "bambu_a1", "pause", "owner_zone", bed_mm=BED, layer_z_mm=1.0, zones=[24], lift_mm=10.0,
+            unit=bench.unit_of(machine), firmware="01.04.00.00"))
+        import urllib.request
+
+        sent: list = []
+        monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=None: sent.append(req))
+        monkeypatch.setenv("KILN_COMMUNITY_OPT_IN", "false")
+        assert bench.send_pending("https://x.supabase.co", "anon") == 0 and sent == []
+        carried = bench.observations_for_request(machine)
+        assert carried[0]["share"] is False and carried[0]["unit"] is None and carried[0]["zones"] == [24]
+
 
 # ---------------------------------------------------------------------------
 # The conversation
@@ -637,6 +655,51 @@ class TestTheConversation:
         doc = bench.observations_of(m)[0]
         assert doc["how"] == "position_log" and doc["returns"] is True and doc["layer_z_mm"] == 1.0
         assert doc["points"][0] == [30.0, 30.0, 1.0] and doc["points"][-1] == [-48.0, 180.0, 11.0]
+
+    def test_a_printer_that_reports_its_extruder_is_read_from_where_the_head_stopped(self, server, monkeypatch):
+        """The square's last lines, printed after the pause went out, are not
+        the pause: kept, they read as the head crossing the plate at the
+        layer before it ever rose -- the worst case, whatever the printer
+        does.  With the extruder in the log the session leaves them out."""
+        from kiln import plate_state
+
+        m = server.machine
+        m._position = True
+        monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: (["pause"], _verdict(ok=True, blanks=["pause"])))
+        pause = [(120.0, 120.0, 1.0, 5.0), (136.0, 120.0, 1.0, 5.4), (136.0, 136.0, 1.0, 5.8),
+                 (130.0, 136.0, 1.0, 5.0), (130.0, 136.0, 2.5, 5.0), (130.0, 136.0, 11.0, 5.0), (-48.0, 180.0, 11.0, 5.0)]
+        back = [(-48.0, 180.0, 11.0, 5.0), (130.0, 136.0, 11.0, 5.0), (130.0, 136.0, 1.0, 5.0),
+                (130.0, 136.0, 1.0, 5.8), (124.0, 136.0, 1.0, 6.0)]
+        logs = iter([pause, back])
+
+        class _InstantLog:
+            def __init__(self, adapter, **kw):
+                walked = next(logs)
+                self.points = [r[:3] for r in walked]
+                self.extruder = [r[3] for r in walked]
+                self.moved = True
+                self.complete = True
+
+            def start(self):
+                pass
+
+            def is_alive(self):
+                return False
+
+        monkeypatch.setattr(bench, "PositionLog", _InstantLog)
+        _step(server); _step(server, "yes"); _step(server, "yes")
+        # The square, started the way the session tells the agent to: Kiln
+        # records it on the plate with its footprint.
+        plate_state.mark_occupied(m, plate_state.PlateJob(file="kiln_bench_square.gcode",
+                                                          footprint_mm=[118.0, 118.0, 138.0, 138.0], max_z_mm=2.0))
+        m.state, m.layer = "printing", 5
+        _step(server, "started")
+        _step(server)
+        _step(server, "yes")
+        doc = bench.observations_of(m)[0]
+        assert doc["how"] == "position_log" and doc["returns"] is True and doc["layer_z_mm"] == 1.0
+        assert doc["points"][0] == [130.0, 136.0, 1.0] and doc["points"][-1] == [130.0, 136.0, 1.0]
+        assert [120.0, 120.0, 1.0] not in doc["points"] and [124.0, 136.0, 1.0] not in doc["points"]
 
     def test_a_model_with_nothing_to_teach_is_told_so_and_never_offered(self, server, monkeypatch):
         monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: ([], _verdict(ok=True, blanks=[])))

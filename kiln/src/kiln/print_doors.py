@@ -105,6 +105,15 @@ EXEMPT: dict[tuple[str, str], str] = {
     ("emergency.py", "_send_emergency_gcode"): (
         "raw send of the emergency stop sequence; nothing here starts a print"
     ),
+    ("server.py", "_queue_fill_rest"): (
+        "queues copies for a printer's next plate; its callers, multi_copy_print and "
+        "plan_multi_copy_split's go (job_splitter.submit_fill_plan), take the gate first and the job "
+        "carries that yes, which the scheduler checks and re-grants at its turn"
+    ),
+    ("scheduler.py", "_queue_rest"): (
+        "re-queues the copies a queued plate could not take, carrying that job's own yes; "
+        "not a new submission"
+    ),
 }
 
 

@@ -295,6 +295,8 @@ READ_ONLY_TOOLS: set[str] = {
     "fleet_analytics",
     "fleet_job_status",
     "fleet_status_by_site",
+    # Retired 2026-10-26: points at plan_multi_copy_split, queues nothing.
+    "fleet_submit_job",
     "fleet_utilization",
     "list_fleet_sites",
 

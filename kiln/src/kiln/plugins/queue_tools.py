@@ -266,6 +266,60 @@ def _watch_alerts() -> list[dict]:
         return []
 
 
+def _waiting(job: Any) -> dict | None:
+    """Why a queued job has not started, from the running queue when this
+    process has one and from the job's own note otherwise (the command
+    line).  ``None`` for a job that is not waiting in line."""
+    import kiln.server as _srv
+    from kiln.scheduler import describe_wait
+
+    scheduler = getattr(_srv, "_scheduler", None)
+    try:
+        if scheduler is not None:
+            return scheduler.waiting_for(job.id)
+        return describe_wait(job, _srv._get_queue())
+    except Exception:
+        _logger.debug("waiting reason unavailable for %s", getattr(job, "id", "?"), exc_info=True)
+        return None
+
+
+def next_up_after_clear(printer_name: str | None) -> dict | None:
+    """The queued job a cleared plate on *printer_name* lets start next, said
+    so the person who cleared it is not surprised when the printer moves.
+
+    Only a job held for this plate's part counts; a file sliced to start
+    beside a part that is gone will not start on an empty plate, so it is
+    never named here.  ``None`` when nothing in the queue waits for it.
+    Never raises.
+    """
+    if not printer_name:
+        return None
+    try:
+        import kiln.server as _srv
+        from kiln.plate_state import START_NOT_YET_CODE
+        from kiln.scheduler import _job_label, _verb
+
+        for job in _srv._get_queue().queued_for(printer_name):
+            wait = (job.metadata or {}).get("waiting")
+            if (
+                isinstance(wait, dict) and wait.get("kind") == "plate"
+                and wait.get("code") == START_NOT_YET_CODE and printer_name in (wait.get("printers") or [])
+            ):
+                name = _job_label(job)
+                return {
+                    "job_id": job.id,
+                    "file_name": job.file_name,
+                    "sentence": (
+                        f"Next on {printer_name}: {name}, which {_verb(name, 'was', 'were')} waiting for this plate. "
+                        f"Kiln's queue starts {_verb(name, 'it', 'them')} on its next pass; cancel_queued_job stops "
+                        "that."
+                    ),
+                }
+    except Exception:
+        _logger.debug("next-up lookup failed for %s", printer_name, exc_info=True)
+    return None
+
+
 def job_status(job_id: str) -> dict:
     """Get the status of a queued or completed print job.
 
@@ -273,7 +327,13 @@ def job_status(job_id: str) -> dict:
         job_id: The job ID returned by ``submit_job``.
 
     Returns the full job record including status, timing, and metadata,
-    plus ``watch`` when the scheduler is watching it: ``state`` is
+    plus ``waiting`` while it is queued -- ``kind`` (``plate``: the last
+    print is still on the plate; ``turn``: one printer at a time and
+    another is printing; ``switch``: below Kiln Business the queue stays on
+    one printer, and this job waits for the person to move Kiln to its
+    printer; ``printing``, ``busy``, ``retry`` or ``in_line``),
+    ``sentence`` to show the person, and ``ahead``, how many jobs go first
+    -- and ``watch`` when the scheduler is watching it: ``state`` is
     ``moving`` / ``stalled`` / ``no_contact`` / ``watching`` and ``note``
     is the sentence to show a person when it is not moving.
     """
@@ -286,6 +346,12 @@ def job_status(job_id: str) -> dict:
             "success": True,
             "job": job.to_dict(),
         }
+        waiting = _waiting(job)
+        if waiting is not None:
+            # Why a queued job has not started: the last print still on the
+            # plate, another printer's turn, a printer that is busy, or its
+            # place in line -- and, where a person must act, what to do.
+            response["waiting"] = waiting
         watch = _watch_note(job_id)
         if watch is not None:
             # What the scheduler has seen of this print: moving, stalled,
@@ -305,10 +371,15 @@ def job_status(job_id: str) -> dict:
 def queue_summary() -> dict:
     """Get an overview of the print job queue.
 
-    Returns counts by status, next job to execute, recent jobs, and
+    Returns counts by status, next job to execute, recent jobs,
     ``watch_alerts``: watched prints that have stalled or stopped answering
     and need a person (they stay active until the printer ends them or
-    someone cancels).
+    someone cancels), ``waiting``: every queued job with why it has not
+    started and a sentence to show (see ``job_status``), and
+    ``plates_to_clear``: the printers whose last print is still on the plate
+    and holding the line.  A finished part is never printed onto: the queue
+    waits for the person to clear the plate and say so, then starts the next
+    job by itself.
     """
     import kiln.server as _srv
 
@@ -360,6 +431,19 @@ def queue_summary() -> dict:
         # line below, a post-restart summary reads "completed: 0" to a
         # user whose machine has printed for months.
         finished_on_record = queue.count_finished_on_disk()
+        waiting: list[dict] = []
+        for job in queue.queued_for(None):
+            why = _waiting(job)
+            if why is not None:
+                waiting.append({"job_id": job.id, "file_name": job.file_name, **why})
+        plates_to_clear = sorted({
+            p for w in waiting if w.get("kind") == "plate" for p in (w.get("printers") or [])
+        })
+        upgrade = next(
+            (w["upgrade"] for w in waiting if w.get("kind") in ("turn", "switch") and w.get("upgrade")), None,
+        )
+        for w in waiting:
+            w.pop("upgrade", None)
         response = {
             "success": True,
             "counts": summary,
@@ -375,7 +459,16 @@ def queue_summary() -> dict:
             # Watched prints that currently need a person: stalled, or out
             # of contact.  They are counted as active above on purpose.
             "watch_alerts": _watch_alerts(),
+            # Every queued job and why it has not started, in the order the
+            # queue runs them, and the plates a person has to clear for the
+            # line to move.
+            "waiting": waiting,
+            "plates_to_clear": plates_to_clear,
         }
+        if upgrade:
+            # One printer at a time is the plan, said once for the whole
+            # queue, never inside every job's line.
+            response["upgrade"] = upgrade
         if finished_on_record is not None:
             response["finished_jobs_on_record"] = finished_on_record
             in_memory_finished = sum(
@@ -391,6 +484,18 @@ def queue_summary() -> dict:
     except Exception as exc:
         _logger.exception("Unexpected error in queue_summary")
         return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+def _being_prepared(job_id: str) -> bool:
+    """Whether the running queue is still laying out this job's plate
+    (``JobScheduler._preparing``): nothing has reached the printer yet."""
+    import kiln.server as _srv
+
+    scheduler = getattr(_srv, "_scheduler", None)
+    try:
+        return scheduler is not None and job_id in scheduler._preparing
+    except Exception:
+        return False
 
 
 def cancel_queued_job(job_id: str) -> dict:
@@ -420,7 +525,8 @@ def cancel_queued_job(job_id: str) -> dict:
         # allows QUEUED/STARTING/PRINTING/PAUSED -> CANCELLED, so without
         # this the row and the machine disagree about reality.
         current = _srv._get_queue().get_job(job_id)
-        if current.status.value in _ON_THE_MACHINE:
+        was_being_prepared = current.status.value in _ON_THE_MACHINE and _being_prepared(job_id)
+        if current.status.value in _ON_THE_MACHINE and not was_being_prepared:
             return _srv._error_dict(
                 f"Job {job_id!r} is already at the printer (status: "
                 f"{current.status.value}), so removing it from the queue "
@@ -436,6 +542,17 @@ def cancel_queued_job(job_id: str) -> dict:
                 source="mcp",
             )
         )
+        if was_being_prepared:
+            # A plate of copies being laid out: the slice is stopped from
+            # going further, and the queue says so if the printer took it.
+            return {
+                "success": True,
+                "job": job.to_dict(),
+                "message": (
+                    f"Job {job_id!r} was being laid out for the printer; nothing more of this run is queued. If "
+                    "the printer has already started that plate, cancel_print() stops it."
+                ),
+            }
         return {
             "success": True,
             "job": job.to_dict(),

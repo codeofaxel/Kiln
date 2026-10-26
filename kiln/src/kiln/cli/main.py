@@ -881,6 +881,31 @@ def _list_configured_printer_names() -> list[str]:
     return names
 
 
+def _refuse_a_watcher_over_every_printer(names: list[str], json_mode: bool) -> None:
+    """Below the fleet tier, a folder watcher sends to ONE printer.
+
+    Nothing automated moves itself from one printer to the next below Kiln
+    Business (see "The queue's printer" in :mod:`kiln.printers.engagement`);
+    a watcher over every printer would, starting each dropped file on
+    whichever one is free.  Exits with the one-line refusal; returns when
+    the watcher is allowed.
+    """
+    from kiln.printers.engagement import multi_machine_tier
+
+    if len(names) <= 1 or multi_machine_tier():
+        return
+    click.echo(
+        format_error(
+            "On this plan the watcher sends files to one printer: add --printer NAME "
+            f"(one of {', '.join(sorted(names))}). Kiln Business sends them to every printer: "
+            "https://kiln3d.com/pricing",
+            code="ONE_PRINTER_WATCHER",
+            json_mode=json_mode,
+        )
+    )
+    sys.exit(1)
+
+
 def _load_fleet_adapters(printer_filter: str | None = None) -> tuple[dict[str, Any], list[str]]:
     """Load adapters for configured printers, optionally narrowed to one printer."""
     errors: list[str] = []
@@ -3708,9 +3733,23 @@ def temp(
         # its own path, and it refused a legitimate 350°C on the machines rated
         # for it.  A false "safe" is the error direction that damages hardware,
         # so the copy had to go rather than be corrected to a better constant.
-        from kiln.server import _get_temp_limits
+        from kiln.printers.base import outcome_printer_name
+        from kiln.server import (
+            _emergency_latch_error,
+            _get_temp_limits,
+            _resolve_effective_printer_name,
+        )
 
         max_tool, max_bed = _get_temp_limits(printer_name)
+
+        # Heat stays off on an emergency-stopped machine, the rule
+        # set_temperature keeps; turning a heater off is always allowed.
+        # Asked under both names one machine answers to.
+        if (tool_temp or 0) > 0 or (bed_temp or 0) > 0:
+            for name in (_resolve_effective_printer_name(printer_name), outcome_printer_name(adapter)):
+                if block := _emergency_latch_error("kiln temp", name):
+                    click.echo(format_error(block["error"]["message"], json_mode=json_mode))
+                    sys.exit(1)
 
         results: dict[str, Any] = {}
         if tool_temp is not None:
@@ -4510,8 +4549,18 @@ def remove(name: str) -> None:
     "--preview-token", "preview_token", default=None,
     help="Preview sign-off token from issue_preview_token for INPUT_FILE. Required with --print-after.",
 )
-@click.option("--copies", "-c", default=1, type=click.IntRange(1, 20), help="Number of copies to arrange on the plate (1-20, default 1).")
+@click.option(
+    "--copies", "-c", default=1, type=click.IntRange(1, 50),
+    help="Number of copies to arrange on the plate (1-20, default 1; up to 50 with --fill).",
+)
 @click.option("--spacing", default=10.0, type=float, help="Gap between copies in mm (default 10).")
+@click.option(
+    "--fill", is_flag=True,
+    help=(
+        "With --copies N: place as many copies as fit on the plate as it stands, up to N, "
+        "beside anything already there."
+    ),
+)
 @click.option("--use-ams/--no-ams", default=None, help="Enable AMS filament feeding (Bambu). Default: auto-detect.")
 @click.option(
     "--ams-mapping",
@@ -4549,6 +4598,7 @@ def slice(
     preview_token: str | None,
     copies: int,
     spacing: float,
+    fill: bool,
     use_ams: bool | None,
     ams_mapping: str | None,
     placement: str | None,
@@ -4564,6 +4614,11 @@ def slice(
     PrusaSlicer's --duplicate flag (or STL mesh duplication as fallback).
 
     \b
+    \b
+    With --copies N --fill, places as many copies of an STL as fit on the
+    plate as it stands, up to N, beside anything already there.
+
+    \b
     With --copies N --ams-mapping A,B,C (N values), each copy prints in a
     different AMS color.  Kiln builds a multi-body 3MF, slices with multi-
     material settings, and wraps tool changes for Bambu AMS compatibility.
@@ -4571,6 +4626,12 @@ def slice(
     With --print-after, the sliced G-code is uploaded and printing starts
     immediately.
     """
+    if fill and copies < 2:
+        raise click.UsageError("--fill needs --copies N")
+    if fill and ams_mapping is not None:
+        raise click.UsageError("--fill does not combine with --ams-mapping")
+    if copies > 20 and not fill:
+        raise click.UsageError("--copies above 20 needs --fill")
     if print_after:
         # Gated on the model the person can preview, before the slicer
         # runs; the clearance covers the slice made from it by lineage.
@@ -4649,6 +4710,10 @@ def slice(
             )
             copy_strategy = "multicolor_merge"
 
+        elif copies > 1 and fill:
+            # The plate gate lays the copies (as many as fit, beside anything
+            # already there); the slicer is handed one merged part.
+            copy_strategy = "fill"
         elif copies > 1:
             from kiln.slicer import find_slicer, supports_duplicate_flag
 
@@ -4672,8 +4737,10 @@ def slice(
             # The plate may still hold the last print: same shared step as
             # the slice tools, same sentence, and the sliced file is checked
             # once more before it is reported or uploaded.
+            fill_kwargs: dict[str, Any] = {"copies": copies, "spacing_mm": spacing} if fill else {}
             result, placement_info = _cli_placed_slice(
                 ctx, actual_input, plan=plan, placement=placement, json_mode=json_mode,
+                **fill_kwargs,
                 output_dir=output_dir,
                 output_name=output_name,
                 slicer_path=slicer,
@@ -4703,7 +4770,9 @@ def slice(
                 if support_reason:
                     payload["support_reason"] = support_reason
                 if copies > 1:
-                    payload["copies"] = copies
+                    # A fill's own count (wanted / placed) rides as ``copies``
+                    # from the placement info; otherwise the number asked for.
+                    payload.setdefault("copies", copies)
                     payload["spacing_mm"] = spacing
                     payload["copy_strategy"] = copy_strategy
                 click.echo(_json.dumps({"status": "success", "data": payload}, indent=2))
@@ -4717,7 +4786,10 @@ def slice(
                     click.echo(f"Weighed as: {result.filament.note}")
                 if getattr(result, "nozzle", None):
                     click.echo(f"Nozzle: {result.nozzle['note']}")
-                if copies > 1:
+                filled = placement_info.get("fill") if isinstance(placement_info, dict) else None
+                if isinstance(filled, dict):
+                    click.echo(f"Placed {filled.get('placed')} of {filled.get('wanted')} copies")
+                elif copies > 1:
                     click.echo(f"Copies: {copies} (strategy: {copy_strategy}, spacing: {spacing}mm)")
                 if plan["printer_id"]:
                     click.echo(f"Profile: {plan['printer_id']}")
@@ -4746,6 +4818,19 @@ def slice(
             sys.exit(1)
         if not json_mode:
             click.echo(result.message)
+            filled = placement_info.get("fill") if isinstance(placement_info, dict) else None
+            if isinstance(filled, dict):
+                click.echo(f"Placed {filled.get('placed')} of {filled.get('wanted')} copies")
+                rest = int(filled.get("wanted") or 0) - int(filled.get("placed") or 0)
+                if rest > 0:
+                    # This command prints one plate and exits; the queue that
+                    # prints plate after plate is the running Kiln's
+                    # (multi_copy_print), so the way on is said, not implied.
+                    click.echo(
+                        f"The other {rest}: when these are done, clear the plate (kiln plate clear) and run this "
+                        f"again with --copies {rest}, or ask your assistant to print them and Kiln queues them "
+                        "plate by plate."
+                    )
 
         # Bambu printers need gcode wrapped in a 3MF with proprietary
         # start/end sequences.  For multi-color, this also wraps T commands
@@ -4860,6 +4945,13 @@ def slice(
                             "slice": result.to_dict(),
                             "upload": upload_result.to_dict(),
                             "print": _with_window(print_result.to_dict(), window),
+                            # How many copies went on the plate, beside the
+                            # print, as the slice-only output says it.
+                            **(
+                                {"copies": placement_info["fill"]}
+                                if isinstance(placement_info, dict) and isinstance(placement_info.get("fill"), dict)
+                                else {}
+                            ),
                         },
                     },
                     indent=2,
@@ -6778,7 +6870,7 @@ def ingest() -> None:
 @click.option(
     "--printer",
     default=None,
-    help="Optional fixed printer name. Omit to auto-route across configured printers.",
+    help="Printer to send files to. Omit to route across every configured printer (Kiln Business).",
 )
 @click.option(
     "--material",
@@ -6862,6 +6954,7 @@ def ingest_watch_cmd(
                 )
             )
             sys.exit(1)
+        _refuse_a_watcher_over_every_printer(list(adapters), json_mode)
         pending = {name: deque() for name in adapters}
         # The watcher exists to start prints nobody previews.  The flag is
         # not the consent — an agent can type a flag — so the person is
@@ -6877,6 +6970,12 @@ def ingest_watch_cmd(
             ),
             json_mode=json_mode,
         )
+
+    from kiln import plate_state
+    from kiln.scheduler import plate_wait_sentence
+
+    waiting: list[dict[str, Any]] = []
+    plate_said: dict[str, tuple[str, str, str]] = {}
 
     def _dispatch_pending() -> None:
         if not auto_queue:
@@ -6903,6 +7002,26 @@ def ingest_watch_cmd(
             if not local_path.exists():
                 queue_items.popleft()
                 errors.append(f"{printer_name}: file disappeared before dispatch ({local_path})")
+                continue
+
+            # The plate, before anything is sent.  A dropped file starts with
+            # the maker's own start sequence, which drives the head across the
+            # plate at a few millimetres, so a part the last print left there
+            # is hit.  The file keeps its place and is asked about again every
+            # cycle; the wait is said once per plate.
+            held = plate_state.start_hold(adapter, file_name=local_path.name, local_path=str(local_path))
+            if held is not None:
+                code, plate = held
+                said = (code, plate_state.fingerprint(plate), str(plate.since or ""))
+                if plate_said.get(printer_name) != said:
+                    plate_said[printer_name] = said
+                    sentence = plate_wait_sentence(
+                        local_path.name, [printer_name], plate, code=code,
+                        camera=bool(plate_state.knows_a_camera(adapter)),
+                    )
+                    waiting.append({"printer": printer_name, "file": str(local_path), "code": code, "sentence": sentence})
+                    if not json_mode:
+                        click.echo(f"Waiting: {sentence}")
                 continue
 
             try:
@@ -7050,6 +7169,7 @@ def ingest_watch_cmd(
             "detected": detected_all,
             "queued": queued,
             "dispatched": dispatched,
+            "waiting": waiting,
             "errors": errors,
             "pending": {name: [str(p) for p in items] for name, items in pending.items()},
         }
@@ -7078,7 +7198,7 @@ def ingest_service_group() -> None:
 @click.option(
     "--printer",
     default=None,
-    help="Optional fixed printer name. Omit to auto-route across configured printers.",
+    help="Printer to send files to. Omit to route across every configured printer (Kiln Business).",
 )
 @click.option(
     "--material",
@@ -7139,6 +7259,9 @@ def ingest_service_install_cmd(
             )
         )
         sys.exit(1)
+
+    if auto_queue and not printer:
+        _refuse_a_watcher_over_every_printer(_list_configured_printer_names(), json_mode)
 
     cfg_path = _resolve_service_config_path(config_path)
     cfg_path.parent.mkdir(parents=True, exist_ok=True)

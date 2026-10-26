@@ -38,6 +38,19 @@ from kiln.auto_record_hook import note_cancel_requested
 logger = logging.getLogger(__name__)
 
 
+def _works_the_filament(issue_type: str) -> bool:
+    """Is this an issue the person fixes by working the filament (reload, cold pull)?
+
+    Read off the detector's own failure kinds (:class:`kiln.print_recovery.
+    FailureType`), plus ``filament_out``, the word this monitor's
+    ``report_issue`` documents for a caller reporting one itself.
+    """
+    from kiln.print_recovery import FailureType
+
+    kinds = (FailureType.FILAMENT_RUNOUT, FailureType.NOZZLE_CLOG)
+    return issue_type == "filament_out" or issue_type in {f"detect_failure_{k.value}" for k in kinds}
+
+
 # ---------------------------------------------------------------------------
 # FDM print phase definitions
 # ---------------------------------------------------------------------------
@@ -1149,7 +1162,17 @@ class PrintHealthMonitor:
             return
 
         try:
-            adapter.pause_print()
+            # The shared pause engine.  A pause a fault triggered holds no
+            # heat: a thermal fault, a crash or a mess on the plate is not one
+            # to keep a heater on for.  A runout or a clog is the exception,
+            # since the person fixes it and resumes: the bed is held and the
+            # nozzle is left to them.
+            from kiln.server import _pause_print_on
+
+            filament_work = _works_the_filament(issue_type)
+            _pause_print_on(
+                adapter, session.printer_name, keep_temps=filament_work, leave_nozzle=filament_work,
+            )
         except Exception as exc:
             issue["auto_pause_error"] = repr(exc)
             logger.warning(

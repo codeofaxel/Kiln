@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 from abc import ABC, abstractmethod
@@ -2565,6 +2566,43 @@ def _wrap_cancel_gives_back(cls: type) -> None:
     cls.cancel_print = _cancel_and_give_back
 
 
+def _wrap_head_moves(cls: type) -> None:
+    """Wrap *cls*'s own ``pause_print`` and ``cancel_print`` so a printer that
+    says where its head is teaches Kiln what it does with it on a pause or a
+    cancel (:func:`kiln.head_moves.around`).
+
+    Called from ``PrinterAdapter.__init_subclass__``, before the engagement
+    gate, so a command the gate refuses is never watched.  The command goes
+    out at once and its result comes back untouched; the resume half sits in
+    the resume template, which no adapter overrides.
+    """
+    import functools
+
+    for action in ("pause_print", "cancel_print"):
+        original = cls.__dict__.get(action)
+        if (
+            original is None
+            or not callable(original)
+            or getattr(original, "_kiln_head_moves_wrapped", False)
+            or getattr(original, "__isabstractmethod__", False)
+        ):
+            continue
+
+        def _make(block: str, send):
+            @functools.wraps(send)
+            def _watched(self, *args, **kwargs):
+                try:
+                    from kiln.head_moves import around
+                except Exception:  # noqa: BLE001 — learning never touches a command
+                    return send(self, *args, **kwargs)
+                return around(self, block, lambda: send(self, *args, **kwargs))
+
+            _watched._kiln_head_moves_wrapped = True  # type: ignore[attr-defined]
+            return _watched
+
+        setattr(cls, action, _make(action.split("_")[0], original))
+
+
 def _wrap_emergency_reads_nothing(cls: type) -> None:
     """Wrap *cls*'s own ``emergency_stop`` so no spool bookkeeping sits in front of it.
 
@@ -2990,6 +3028,21 @@ def apply_external_camera(adapter: PrinterAdapter, entry: Any) -> None:
         adapter.set_external_camera(snapshot_url=snapshot, stream_url=stream)
 
 
+def reheat_before_resume(adapter: Any) -> tuple[PrintResult | None, bool]:
+    """The pause hold's nozzle reheat, for a resume about to be sent.
+
+    The hold lives in :mod:`kiln.server` (``_reheat_before_resume``), which
+    pauses through it.  A process that never loaded that module never paused
+    anything through it, so there is nothing to reheat to: ``(None, False)``.
+    Every resume template calls this, so no door can skip the reheat.
+    """
+    server = sys.modules.get("kiln.server")
+    reheat = getattr(server, "_reheat_before_resume", None)
+    if reheat is None:
+        return None, False
+    return reheat(adapter)
+
+
 class PrinterAdapter(ABC):
     """Abstract base for all printer backend adapters.
 
@@ -3019,6 +3072,18 @@ class PrinterAdapter(ABC):
     # -- safety profile --------------------------------------------------
 
     _safety_profile_id: str | None = None
+
+    # -- the head's own moves ---------------------------------------------
+
+    #: Whether this backend says where the head is while it moves, and so
+    #: how Kiln learns the printer's own pause and cancel moves from real
+    #: use: ``"head_and_extruder"`` when :meth:`get_tool_position` answers
+    #: ``x``, ``y``, ``z`` and ``e`` as the head moves (:mod:`kiln.head_moves`
+    #: logs the pauses and cancels Kiln sends), or a sentence saying why not,
+    #: for a printer whose owner teaches Kiln through the guided session
+    #: (:mod:`kiln.bench`) instead.  Every backend states its own; a new one
+    #: does not inherit an answer (``tests/test_head_position_decisions.py``).
+    head_position: str = ""
 
     # ------------------------------------------------------------------
     # Safety interposition: wrap every concrete subclass's upload_file
@@ -3107,6 +3172,10 @@ class PrinterAdapter(ABC):
         # ------------------------------------------------------------------
         _wrap_cancel_gives_back(cls)
         _wrap_emergency_reads_nothing(cls)
+        # A pause or cancel Kiln sends to a printer that says where its head
+        # is teaches Kiln that printer's own moves (kiln.head_moves).  Same
+        # shape again: every door that pauses or cancels calls the adapter.
+        _wrap_head_moves(cls)
 
         # ------------------------------------------------------------------
         # Single-printer engagement: every printer-directed command asks
@@ -3507,11 +3576,15 @@ class PrinterAdapter(ABC):
             _discard_copies(kept)
             hint = blocked.get("override_hint", "")
             reason = blocked.get("reason", "Print blocked by the pre-print safety gate.")
-            return PrintResult(
-                success=False,
-                message=reason + (" " + hint if hint else ""),
-                refused_before_send=True,
-            )
+            # The gate's code rides the result when it has one, so a caller
+            # that must tell "not now" from "never" -- the queue, holding a
+            # job for its turn rather than failing it -- reads the code, not
+            # the sentence.
+            message = reason + (" " + hint if hint else "")
+            code = str(blocked.get("code") or "")
+            if code:
+                return CodedPrintResult(success=False, message=message, refused_before_send=True, code=code)
+            return PrintResult(success=False, message=message, refused_before_send=True)
         # The consent backstop.  An adapter a door handed out (a printer
         # registry, the CLI) starts nothing no clearance covers: the gate
         # every door calls grants one, and a door that forgot to call it
@@ -3882,7 +3955,21 @@ class PrinterAdapter(ABC):
             refusal = self._not_paused_refusal()
             if refusal is not None:
                 return refusal
-        result = self._verify_resume_took(self._resume_print_impl())
+        refusal, reheated = reheat_before_resume(self)
+        if refusal is not None:
+            return refusal
+        # The reheat took time; a print resumed or cancelled at the machine
+        # meanwhile is not Kiln's to resume.
+        if reheated and not force:
+            refusal = self._not_paused_refusal()
+            if refusal is not None:
+                return refusal
+        try:
+            from kiln.head_moves import around
+        except Exception:  # noqa: BLE001 — learning never touches a resume
+            result = self._verify_resume_took(self._resume_print_impl())
+        else:
+            result = around(self, "resume", lambda: self._verify_resume_took(self._resume_print_impl()))
         if waiting is not None and result.success:
             from kiln.hardware_stops import note_resumed
 

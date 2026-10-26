@@ -247,6 +247,17 @@ def park_head(
     return run_home(printer_name=printer_name, action="park", **kwargs)
 
 
+def _next_up(printer_name: str | None) -> dict[str, Any] | None:
+    """The queued job a cleared plate lets start next (see
+    :func:`kiln.plugins.queue_tools.next_up_after_clear`)."""
+    try:
+        from kiln.plugins.queue_tools import next_up_after_clear
+
+        return next_up_after_clear(printer_name)
+    except Exception:  # noqa: BLE001 -- a courtesy line; the clear stands without it
+        return None
+
+
 def run_plate(*, printer_name: str | None = None, action: str = "status", note: str = "") -> dict[str, Any]:
     """The plate record's one door, for the tool and the CLI alike.
 
@@ -273,13 +284,16 @@ def run_plate(*, printer_name: str | None = None, action: str = "status", note: 
             )
         from kiln.plate_state import camera_of
 
-        return {
+        answer = {
             "success": True, "printer_name": target_name, "plate": state.to_dict(),
             # Whether this machine could settle an unknown plate by itself.
             # A refusal that has a camera to offer should never tell someone
             # to walk to the printer.
             "camera": camera_of(adapter),
         }
+        if action == "clear" and (up := _next_up(target_name)) is not None:
+            answer["next_up"] = up
+        return answer
     except Exception as exc:
         _logger.exception("Unexpected error in plate %s", action)
         return _srv._error_dict(f"Unexpected error reading the plate record: {exc}", code="INTERNAL_ERROR")
@@ -466,6 +480,8 @@ def look_at_plate(
                 code="PLATE_RECORD_FAILED", extra={"plate": state.to_dict()},
             )
         answer: dict[str, Any] = {"success": True, "printer_name": target_name, "plate": state.to_dict()}
+        if seen == "clear" and (up := _next_up(target_name)) is not None:
+            answer["next_up"] = up
         if seen == "occupied":
             answer["next"] = (
                 "A print will not start onto this bed. If the person tells you the bed is clear, pass "
@@ -527,7 +543,7 @@ def _record_persons_word(adapter: Any, target_name: str, words: str) -> dict[str
         "look_at_plate", "plate_cleared_by_persons_word",
         details={"printer": target_name, "words": words, "through": "dialog" if direct else "assistant"},
     )
-    return {
+    answer = {
         "success": True, "printer_name": target_name, "plate": state.to_dict(),
         "recorded_as": (
             "the person's own answer, in a dialog this app showed them" if direct
@@ -535,6 +551,12 @@ def _record_persons_word(adapter: Any, target_name: str, words: str) -> dict[str
         ),
         "next": "The bed is on record as clear for the next few minutes. Start the print again.",
     }
+    if (up := _next_up(target_name)) is not None:
+        # A queued job was waiting for this plate and starts by itself; a
+        # second start from here would race it.
+        answer["next_up"] = up
+        answer["next"] = f"The bed is on record as clear. {up['sentence']} Tell the person; do not start it again."
+    return answer
 
 
 def _picture(found: Any) -> Any:

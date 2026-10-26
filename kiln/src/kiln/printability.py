@@ -1322,6 +1322,11 @@ def _bbox_volume(
 # regimes without false-positive-ing thin or hollow geometry.
 _WINDING_CONSISTENCY_THRESHOLD = 0.05
 
+#: Triangle tests one membrane check may spend asking whether sheets whose
+#: edges touch nothing lie inside the part (two rays per sheet, each against
+#: every untwinned face).
+_MEMBRANE_PROBE_WORK = 40_000_000
+
 
 #: Two triangles with the same three corners to 0.1 um have corner sums
 #: within three times that on every axis; the pre-filter below allows
@@ -1378,10 +1383,93 @@ def _membrane_candidates(
     return np.flatnonzero(near).tolist()
 
 
+def _face_keys(tri: tuple[tuple[float, ...], ...]) -> list[tuple[float, ...]]:
+    """The corners of *tri* rounded to 0.1 um: how faces are matched."""
+    return [tuple(round(c, 4) for c in v) for v in tri]
+
+
+def _rows_as_keys(rows: np.ndarray) -> np.ndarray:
+    """*rows* ``(n, 3)`` of non-negative int64 as one value per row, for one
+    flat ``np.unique`` instead of a row-wise one: the three packed into one
+    integer at 21 bits each where they fit (a part under 210 mm at 0.1 um,
+    or ids under two million), else an opaque 24-byte view of the row."""
+    rows = np.ascontiguousarray(rows, dtype=np.int64)
+    if rows.size and int(rows.max()) < (1 << 21):
+        return (rows[:, 0] << 42) | (rows[:, 1] << 21) | rows[:, 2]
+    return rows.view(np.dtype((np.void, rows.dtype.itemsize * rows.shape[1]))).reshape(-1)
+
+
+def _repeated_faces(
+    triangles: list[tuple[tuple[float, ...], ...]],
+) -> tuple[set[int], list[tuple[int, int]]]:
+    """``(drop, twins)`` for *triangles*: the indexes of every face that is a
+    further copy of an earlier face over the same three corners facing the
+    same way (one of each facing is kept), and for each face kept with a
+    copy facing the other way, the pair ``(face, turned copy)``.  A face a
+    file states more than once is one face; every reading is of the shape,
+    never of how many times the file wrote it.
+
+    Whole-array: corners are matched to 0.1 um as point ids, a face is its
+    three ids sorted, and two faces over the same ids face the same way
+    when their corners run round in the same order (the sorting is an even
+    permutation for both, or odd for both).  Only the few faces with a
+    match are looked at one by one.
+    """
+    drop: set[int] = set()
+    twins: list[tuple[int, int]] = []
+    if len(triangles) < 2:
+        return drop, twins
+    # Only a face whose corner sums have another within the gap can repeat
+    # (:func:`_membrane_candidates`, a superset, never a miss); on nearly
+    # every mesh that spares nearly every face the matching below.
+    candidates = _membrane_candidates(triangles)
+    if len(candidates) < len(triangles):
+        if len(candidates) < 2:
+            return drop, twins
+        sub_drop, sub_twins = _repeated_faces([triangles[i] for i in candidates])
+        index = list(candidates)
+        return {index[i] for i in sub_drop}, [(index[a], index[b]) for a, b in sub_twins]
+    corners = np.asarray(triangles, dtype=np.float64).reshape(len(triangles), 3, 3)
+    grid = np.round(corners.reshape(-1, 3) * 1e4).astype(np.int64)
+    grid -= grid.min(axis=0)
+    # Each row of three integers is matched as one value, so each matching
+    # is one sort of a flat array.
+    _, point = np.unique(_rows_as_keys(grid), return_inverse=True)
+    point = point.reshape(-1, 3).astype(np.int64)
+    real = (point[:, 0] != point[:, 1]) & (point[:, 1] != point[:, 2]) & (point[:, 0] != point[:, 2])
+    order = np.argsort(point, axis=1)
+    sorted_ids = np.take_along_axis(point, order, axis=1)
+    # Sorting three corners is an even permutation exactly when it is a
+    # turn of the cycle (0, 1, 2).
+    odd = (order[:, 1] != (order[:, 0] + 1) % 3)
+    _, group, count = np.unique(_rows_as_keys(sorted_ids), return_inverse=True, return_counts=True)
+    group = group.reshape(-1)
+    repeated = np.flatnonzero(real & (count[group] > 1))
+    if not len(repeated):
+        return drop, twins
+    seen: dict[int, list[int | None]] = {}  # group -> [first same-way face, first turned face]
+    for idx in repeated.tolist():
+        g = int(group[idx])
+        slot = seen.setdefault(g, [None, None])
+        way = int(odd[idx]) ^ (int(odd[slot[0]]) if slot[0] is not None else int(odd[idx]))
+        if slot[0] is None:
+            slot[0] = idx
+        elif way == 0:
+            drop.add(idx)
+        elif slot[1] is None:
+            slot[1] = idx
+        else:
+            drop.add(idx)
+    twins = [(first, turned) for first, turned in seen.values() if first is not None and turned is not None]
+    return drop, twins
+
+
 def _drop_membrane_pairs(
     triangles: list[tuple[tuple[float, ...], ...]],
+    repeated: tuple[set[int], list[tuple[int, int]]] | None = None,
 ) -> list[tuple[tuple[float, ...], ...]]:
-    """Remove zero-thickness membrane artifacts from a triangle soup.
+    """Remove zero-thickness membrane artifacts and repeated faces from a
+    triangle soup, so every reading below sees each face once, facing one way.
 
     Exactly-coincident stacked solids sometimes survive OpenSCAD's
     union unfused: the shared plane is exported as two coplanar faces
@@ -1391,40 +1479,167 @@ def _drop_membrane_pairs(
     verdicts (2026-08-25: a barbed hose adapter graded C on 480 such
     phantom faces).
 
-    A pair is dropped only when two triangles share the same three
-    vertices (to 0.1 um) with opposing normals; a same-winding exact
-    duplicate keeps one copy.  Genuine geometry never loses faces.
-    """
-    groups: dict[frozenset, list[int]] = {}
-    for idx in _membrane_candidates(triangles):
-        tri = triangles[idx]
-        key = frozenset(tuple(round(c, 4) for c in v) for v in tri)
-        if len(key) == 3:
-            groups.setdefault(key, []).append(idx)
+    Faces over the same three corners (to 0.1 um) are one face
+    (:func:`_repeated_faces`).  The faces left with a twin facing the
+    other way are grouped into sheets, twinned faces joined edge to edge,
+    and each sheet is judged whole:
 
-    drop: set[int] = set()
-    for idxs in groups.values():
-        if len(idxs) < 2:
-            continue
-        pool = [i for i in idxs]
-        while len(pool) >= 2:
-            base = pool.pop(0)
-            n_base = _normalize(_triangle_normal(*triangles[base]))
-            mate = None
-            for other in pool:
-                n_other = _normalize(_triangle_normal(*triangles[other]))
-                dot = sum(a * b for a, b in zip(n_base, n_other, strict=True))
-                if dot < -0.999:      # opposing membrane pair
-                    mate = other
-                    drop.add(base)
-                    drop.add(other)
+    * A sheet is a membrane when dropping both its sides leaves every edge
+      it touches used an even number of times, as a closed mesh's edges
+      are, and it sits inside the part: some edge of it is used by a face
+      that was not twinned, or, where its edges touch nothing (the shared
+      plane of two stacked solids cut into different triangles), the
+      points just above and below it both lie inside the untwinned faces.
+      Then both sides go.  A doubled surface that sits inside nothing, a
+      box or an open cup exported with every face both ways, is no
+      membrane: one side is kept (read as a membrane, it went to nothing
+      and "rests on a point", 2026-10-25).
+    * Otherwise the sheet is a surface the file wrote twice with the copy
+      turned round, and one side is kept.  WHICH side is decided for the
+      whole sheet, never face by face: the kept faces are wound to agree
+      with one another across every edge they share, and the sheet is then
+      turned to agree with the faces around it that were not twinned (the
+      stem a double-sided cap sits on), by vote over their shared edges.
+      Kept face by face, the side kept was whichever the file listed
+      first, a patchwork of facings whose signed volume cancelled, so the
+      winding fell to the centroid guess and a double-sided cap's overhangs
+      vanished: "Ready to print." for a mushroom (2026-10-25, found by
+      review).
+
+    Genuine geometry never loses faces, and a closed part never gains an
+    opening.  A membrane inside a mesh that is open elsewhere cannot be
+    told from a surface written twice and keeps one side: a phantom face
+    that at worst asks for supports it does not need, never the reverse.
+    """
+    drop, twins = _repeated_faces(triangles) if repeated is None else (set(repeated[0]), list(repeated[1]))
+    if twins:
+        twinned = {i for pair in twins for i in pair}
+        # Edges of the faces that stay as they are, undirected for the
+        # parity test and directed for the orientation vote.
+        uses: dict[frozenset, int] = {}
+        heading: dict[tuple, int] = {}
+        for idx, tri in enumerate(triangles):
+            if idx in drop or idx in twinned:
+                continue
+            keys = _face_keys(tri)
+            for a, b in ((0, 1), (1, 2), (2, 0)):
+                uses[frozenset((keys[a], keys[b]))] = uses.get(frozenset((keys[a], keys[b])), 0) + 1
+                heading[(keys[a], keys[b])] = heading.get((keys[a], keys[b]), 0) + 1
+
+        # The sheets: twins that share an edge are one sheet.
+        sheet = list(range(len(twins)))
+
+        def root(i: int) -> int:
+            while sheet[i] != i:
+                sheet[i] = sheet[sheet[i]]
+                i = sheet[i]
+            return i
+
+        directed: list[list[tuple]] = []  # the first copy's directed edges
+        on_edge: dict[frozenset, list[int]] = {}
+        for i, (first, _turned) in enumerate(twins):
+            keys = _face_keys(triangles[first])
+            edges = [(keys[a], keys[b]) for a, b in ((0, 1), (1, 2), (2, 0))]
+            directed.append(edges)
+            for edge in edges:
+                mates = on_edge.setdefault(frozenset(edge), [])
+                # Joined to the edge's first twin only: the same sheet, and
+                # a crowded edge (thousands of twins round one edge) is not
+                # walked once per twin.
+                if mates:
+                    sheet[root(i)] = root(mates[0])
+                mates.append(i)
+
+        members: dict[int, list[int]] = {}
+        for i in range(len(twins)):
+            members.setdefault(root(i), []).append(i)
+
+        # Which sheets are membranes.  Every edge used an even number of
+        # times once both sides are gone (the sheet's own two uses of each
+        # edge count too), and the sheet inside the part: by a shared edge,
+        # else by the points just above and below it lying inside the
+        # untwinned faces, asked in one ray cast per sheet.
+        membrane: set[int] = set()
+        unsure: list[int] = []
+        for key_root, group in members.items():
+            even, inside = True, False
+            for i in group:
+                for edge in directed[i]:
+                    around = uses.get(frozenset(edge), 0)
+                    inside = inside or around > 0
+                    if (around + 2 * len(on_edge[frozenset(edge)])) % 2:
+                        even = False
+                        break
+                if not even:
                     break
-                if dot > 0.999:       # exact duplicate face
-                    mate = other
-                    drop.add(other)
-                    break
-            if mate is not None:
-                pool.remove(mate)
+            if even and inside:
+                membrane.add(key_root)
+            elif even:
+                unsure.append(key_root)
+        if unsure:
+            around_faces = [
+                triangles[idx] for idx in range(len(triangles)) if idx not in drop and idx not in twinned
+            ]
+            # One ray per probe against every untwinned face: past the
+            # budget the sheets left are read as surfaces, one side kept,
+            # the cautious side (a phantom face asks for supports; a
+            # dropped real face loses a base).
+            unsure = unsure[: max(1, _MEMBRANE_PROBE_WORK // (2 * max(1, len(around_faces))))]
+            if around_faces:
+                solid = np.asarray(around_faces, dtype=np.float64)
+                probes = []
+                for key_root in unsure:
+                    face = np.asarray(triangles[twins[members[key_root][0]][0]], dtype=np.float64)
+                    centre = face.mean(axis=0)
+                    normal = np.asarray(_normalize(_triangle_normal(*face.tolist())), dtype=np.float64)
+                    probes.append(centre + 0.05 * normal)
+                    probes.append(centre - 0.05 * normal)
+                verdicts = np.concatenate([
+                    _points_inside_mesh(np.asarray(probes[k:k + 128]), solid)
+                    for k in range(0, len(probes), 128)
+                ])
+                for n, key_root in enumerate(unsure):
+                    if verdicts[2 * n] and verdicts[2 * n + 1]:
+                        membrane.add(key_root)
+
+        for key_root, group in members.items():
+            if key_root in membrane:
+                for i in group:
+                    drop.add(twins[i][0])
+                    drop.add(twins[i][1])
+                continue
+            # A surface written twice: keep one side, wound as one.  flip[i]
+            # True keeps the turned copy.  Walk the sheet from its first
+            # face: neighbours across an edge must run it opposite ways.
+            # Each edge's twins are settled the first time it is reached.
+            flip: dict[int, bool] = {group[0]: False}
+            queue = [group[0]]
+            settled: set[frozenset] = set()
+            while queue:
+                i = queue.pop()
+                for edge in directed[i]:
+                    key = frozenset(edge)
+                    if key in settled:
+                        continue
+                    settled.add(key)
+                    for j in on_edge[key]:
+                        if j in flip:
+                            continue
+                        same_way = edge in directed[j]  # both first copies run it alike
+                        flip[j] = flip[i] if not same_way else not flip[i]
+                        queue.append(j)
+            # The vote: a kept face agrees with an untwinned neighbour when
+            # they run their shared edge opposite ways.
+            agree = disagree = 0
+            for i in group:
+                for a, b in directed[i]:
+                    fwd, back = ((a, b), (b, a)) if not flip[i] else ((b, a), (a, b))
+                    agree += heading.get(back, 0)
+                    disagree += heading.get(fwd, 0)
+            turn_all = disagree > agree
+            for i in group:
+                first, turned = twins[i]
+                drop.add(first if (flip[i] != turn_all) else turned)
 
     if not drop:
         return triangles
@@ -3657,6 +3872,186 @@ def graded_contact(bed: BedAdhesionAnalysis) -> float:
 _OUTLINE_HOLD_MM2 = 6.0
 
 
+#: Cells across the longer side of the bed contact when its union is
+#: measured on a grid, and the (triangle, row) pairs one measurement may
+#: spend.  1,500 cells put the grid under 0.2 mm on a plate-sized contact and
+#: under 5 um on a 6 mm one.  Past the budget the union goes unmeasured and
+#: the contact is trusted as drawn: the budget bounds the work, it is not a
+#: verdict on the file (a 50,000-sliver wall is a hostile outline, not an
+#: overlapping one).
+_CONTACT_RASTER_CELLS = 1_500
+_CONTACT_RASTER_PAIRS = 4_000_000
+#: (triangle, row) pairs held in memory at once while measuring.
+_CONTACT_RASTER_RUN = 250_000
+
+
+@dataclass(frozen=True)
+class _ContactUnion:
+    """The union of a bed contact's triangles, as cells of *cell* mm on a
+    grid from *lo*: ``mask`` is the covered cells, ``area`` their area, and
+    ``slack`` how far the grid can misread a non-overlapping contact (a
+    cell along every triangle's outline)."""
+
+    mask: Any
+    cell: float
+    lo: Any
+    area: float
+    slack: float
+
+    def modulus(self) -> float:
+        """The weakest section modulus (mm^3) of the covered ground about
+        the axis it tips over most easily, as :func:`_patch_hold` reads a
+        patch: the ground's own second moments over its reach."""
+        ys, xs = np.nonzero(self.mask)
+        if len(xs) < 3:
+            return 0.0
+        pts = np.stack([self.lo[0] + (xs + 0.5) * self.cell, self.lo[1] + (ys + 0.5) * self.cell], axis=1)
+        each = self.cell * self.cell
+        centre = pts.mean(axis=0)
+        q = pts - centre
+        own = each * each / 12.0  # a cell's moment about its own centre
+        ixx = float(each * (q[:, 0] * q[:, 0]).sum() + len(xs) * own)
+        iyy = float(each * (q[:, 1] * q[:, 1]).sum() + len(xs) * own)
+        ixy = float(each * (q[:, 0] * q[:, 1]).sum())
+        corners = _outline_corners(pts)
+        angles = np.radians(np.arange(0.0, 180.0, 5.0))
+        c, s = np.cos(angles), np.sin(angles)
+        reach = np.abs((corners - centre) @ np.vstack([c, s])).max(axis=0)
+        second = c * c * ixx + 2 * c * s * ixy + s * s * iyy
+        held = reach > 0.0
+        return float((second[held] / reach[held]).min()) if held.any() else 0.0
+
+
+@dataclass(frozen=True)
+class _BedContact:
+    """The part's bed contact as every footing reader takes it.
+
+    ``tris`` are the contact triangles ``(T, 3, 3)``, one per face the file
+    stated; ``area`` is the bed they cover, measured as a UNION, so a
+    contact that overlaps itself is the ground it covers and not the sum of
+    what was drawn over it; ``overlaps`` says the two differed, and then
+    the footing's strength is read on ``union``, the ground itself, or as
+    nothing when the union could not be measured.
+    """
+
+    tris: Any
+    area: float
+    overlaps: bool
+    union: _ContactUnion | None = None
+
+    @property
+    def xy(self) -> Any:
+        return self.tris[:, :, :2]
+
+
+def _contact_union_area(xy: np.ndarray) -> _ContactUnion | None:
+    """The union of the ``(T, 3, 2)`` triangles *xy* (:class:`_ContactUnion`),
+    measured on a grid of :data:`_CONTACT_RASTER_CELLS` across the longer
+    side (a cell counts where its centre lies in a triangle).  ``None``
+    when the measurement would spend more than :data:`_CONTACT_RASTER_PAIRS`
+    (triangle, row) pairs.  Whole-array work: each triangle's rows are cut
+    into the span its edges cross at the row's centre, and the spans are
+    summed into a coverage count by a difference array, so a triangle
+    costs its rows and not its bounding box."""
+    flat = xy.reshape(-1, 2)
+    lo, hi = flat.min(axis=0), flat.max(axis=0)
+    extent = hi - lo
+    cell = max(float(extent.max()) / _CONTACT_RASTER_CELLS, 1e-4)
+    width = int(math.ceil(extent[0] / cell)) + 1
+    height = int(math.ceil(extent[1] / cell)) + 1
+    y_min, y_max = xy[:, :, 1].min(axis=1), xy[:, :, 1].max(axis=1)
+    row_lo = np.ceil((y_min - lo[1]) / cell - 0.5).astype(np.int64)
+    row_hi = np.floor((y_max - lo[1]) / cell - 0.5).astype(np.int64)
+    rows = np.maximum(row_hi - row_lo + 1, 0)
+    if int(rows.sum()) > _CONTACT_RASTER_PAIRS:
+        return None
+    perimeter = float(np.linalg.norm(np.diff(np.concatenate([xy, xy[:, :1]], axis=1), axis=1), axis=2).sum())
+    if not rows.any():
+        return _ContactUnion(np.zeros((height, width), dtype=bool), cell, lo, 0.0, perimeter * cell)
+    steps = np.zeros((height, width + 1), dtype=np.int32)
+    # In runs of triangles whose pairs fit a fixed working set, so the
+    # memory is the grid and one run, whatever the triangle count.
+    ends = np.cumsum(rows)
+    cut = 0
+    while cut < len(xy):
+        stop = int(np.searchsorted(ends, ends[cut] - rows[cut] + _CONTACT_RASTER_RUN, side="right"))
+        stop = max(stop, cut + 1)
+        part = np.arange(cut, stop)
+        tri = np.repeat(part, rows[part])
+        first = np.cumsum(rows[part]) - rows[part]
+        row = row_lo[tri] + (np.arange(len(tri)) - np.repeat(first, rows[part]))
+        yc = (row + 0.5) * cell + lo[1]
+        xa = np.full(len(tri), np.inf)
+        xb = np.full(len(tri), -np.inf)
+        for a, b in ((0, 1), (1, 2), (2, 0)):
+            pa, pb = xy[tri, a], xy[tri, b]
+            dy = pb[:, 1] - pa[:, 1]
+            crosses = ((pa[:, 1] - yc) * (pb[:, 1] - yc) <= 0.0) & (dy != 0.0)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                x = pa[:, 0] + (yc - pa[:, 1]) * (pb[:, 0] - pa[:, 0]) / dy
+            xa = np.where(crosses, np.minimum(xa, x), xa)
+            xb = np.where(crosses, np.maximum(xb, x), xb)
+        ca = np.ceil((xa - lo[0]) / cell - 0.5).astype(np.int64)
+        cb = np.floor((xb - lo[0]) / cell - 0.5).astype(np.int64)
+        span = np.isfinite(xa) & (cb >= ca)
+        ca, cb, row = np.clip(ca[span], 0, width - 1), np.clip(cb[span], 0, width - 1), row[span]
+        np.add.at(steps, (row, ca), 1)
+        np.add.at(steps, (row, cb + 1), -1)
+        cut = stop
+    mask = np.cumsum(steps, axis=1)[:, :width] > 0
+    return _ContactUnion(mask, cell, lo, float(mask.sum()) * cell * cell, perimeter * cell)
+
+
+def _bed_contact(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    z_min: float,
+    *,
+    layer_height: float = 0.2,
+) -> _BedContact:
+    """The part's bed contact (:class:`_BedContact`): the triangles whose
+    three corners lie within one layer of the bottom.  The adhesion grade,
+    the base's corners and the footing's strength all read this one
+    contact.
+
+    A triangle the file states more than once, either way round, is one
+    triangle of it (matched corner to corner on the bed, :func:`_corner_ids`).
+    Beyond exact copies, the contact is checked for overlapping itself,
+    two ways: its drawn area may not exceed the area of its convex hull
+    (exact, and on a convex base that alone catches any overlap at all),
+    and where it does not, the union of its triangles is measured on a
+    grid and compared with what was drawn.  A base written fifty more times
+    as fans no two alike covers the same ground once (2026-10-25: it read
+    5,100 % contact and bought a pillar "Ready to print." with no brim,
+    found by review).  An overlapping contact is read as the ground it
+    covers, and its footing's strength as nothing."""
+    threshold = z_min + layer_height
+    contact = [
+        (tri[0][:3], tri[1][:3], tri[2][:3])
+        for tri in triangles
+        if tri[0][2] <= threshold and tri[1][2] <= threshold and tri[2][2] <= threshold
+    ]
+    if not contact:
+        return _BedContact(np.empty((0, 3, 3), dtype=np.float64), 0.0, False)
+    tris = np.asarray(contact, dtype=np.float64)
+    ids = _corner_ids(tris[:, :, :2].reshape(-1, 2)).reshape(-1, 3)
+    _, first = np.unique(np.sort(ids, axis=1), axis=0, return_index=True)
+    tris = tris[np.sort(first)]
+    xy = tris[:, :, :2]
+    e1, e2 = xy[:, 1] - xy[:, 0], xy[:, 2] - xy[:, 0]
+    drawn = float((np.abs(e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]) / 2.0).sum())
+    if drawn <= 0.0:
+        return _BedContact(tris, 0.0, False)
+    hull = _hull_area(_outline_corners(xy.reshape(-1, 2)))
+    measured = _contact_union_area(xy)
+    if hull > 0.0 and drawn > hull * (1.0 + 1e-6) + 1e-9:
+        return _BedContact(tris, min(hull, measured.area) if measured else hull, True, measured)
+    if measured is None:
+        return _BedContact(tris, drawn, False)
+    if drawn - measured.area > measured.slack + 0.02 * drawn:
+        return _BedContact(tris, measured.area, True, measured)
+    return _BedContact(tris, drawn, False)
+
+
 def _contact_patches(tris: np.ndarray) -> list[np.ndarray]:
     """*tris*, the bed contact as ``(n, 3, 2)`` XY triangles, split into the
     patches whose triangles share a corner."""
@@ -3816,30 +4211,23 @@ def _analyze_bed_adhesion(
     footprint it holds down (:func:`graded_contact`), which is what the
     adhesion band is read from.
     """
-    contact_threshold = z_min + layer_height
-    contact_area = 0.0
-    x_lo = y_lo = math.inf
-    x_hi = y_hi = -math.inf
-    contact_xy: list[tuple[tuple[float, float], ...]] = []
-
-    for tri in triangles:
-        # All three vertices must be near Z_min.
-        if tri[0][2] <= contact_threshold and tri[1][2] <= contact_threshold and tri[2][2] <= contact_threshold:
-            contact_area += _triangle_area(tri[0], tri[1], tri[2])
-            contact_xy.append(tuple((v[0], v[1]) for v in tri))
-            for vx, vy, *_ in tri:
-                x_lo, x_hi = min(x_lo, vx), max(x_hi, vx)
-                y_lo, y_hi = min(y_lo, vy), max(y_hi, vy)
+    contact = _bed_contact(triangles, z_min, layer_height=layer_height)
+    contact_area = contact.area
 
     # Bounding box footprint (XY projection).
     footprint = (bbox["x_max"] - bbox["x_min"]) * (bbox["y_max"] - bbox["y_min"])
-    contact_pct = (contact_area / footprint * 100.0) if footprint > 0 else 0.0
-    span = (x_hi - x_lo) * (y_hi - y_lo) if x_hi >= x_lo else 0.0
+    contact_pct = min(100.0, contact_area / footprint * 100.0) if footprint > 0 else 0.0
+    if len(contact.tris):
+        lo, hi = contact.xy.reshape(-1, 2).min(axis=0), contact.xy.reshape(-1, 2).max(axis=0)
+        span = float((hi[0] - lo[0]) * (hi[1] - lo[1]))
+    else:
+        span = 0.0
     span_pct = min(100.0, span / footprint * 100.0) if footprint > 0 else 0.0
     graded_pct = contact_pct
-    # A contact that already reads as good needs no outline to say so.
-    if contact_xy and footprint > 0 and _adhesion_risk_for_contact(contact_pct) != "low":
-        held = _held_area(np.asarray(contact_xy, dtype=float), bbox["z_max"] - bbox["z_min"])
+    # A contact that already reads as good needs no outline to say so; one
+    # that overlaps itself has no outline to read, and holds what it covers.
+    if len(contact.tris) and footprint > 0 and not contact.overlaps and _adhesion_risk_for_contact(contact_pct) != "low":
+        held = _held_area(contact.xy, bbox["z_max"] - bbox["z_min"])
         graded_pct = min(100.0, max(contact_pct, held / footprint * 100.0))
 
     return BedAdhesionAnalysis(
@@ -4195,6 +4583,11 @@ def _outline_rings(edges: np.ndarray, ids: np.ndarray) -> list[np.ndarray]:
     the way straight back: one binary search, for every edge at once.  A
     point the whole outline runs through (thousands of thin triangles meeting
     at one corner) costs its share of the sort, not a scan on every visit.
+    Where the outline runs over itself and that edge is already taken, the
+    next free one is found through a skip list over the sorted edges that
+    jumps the taken ones, so no edge is passed over again and again
+    (2026-10-25: a scan from the pick took 2.4 s for one triangle a file
+    stated 4,000 times, and grew with the square of the count).
     """
     run = edges[:, 1] - edges[:, 0]
     heading = np.arctan2(run[:, 1], run[:, 0])  # in (-pi, pi]
@@ -4211,6 +4604,24 @@ def _outline_rings(edges: np.ndarray, ids: np.ndarray) -> list[np.ndarray]:
     pick = np.searchsorted(key, at + (back + np.pi), side="right") - 1
     pick = np.where(pick >= lo, pick, hi - 1)  # nothing below the way back: round to the top
     after = np.where(lo < hi, order[np.clip(pick, 0, len(order) - 1)], -1).tolist()
+    sorted_at = np.empty(len(order), dtype=np.int64)
+    sorted_at[order] = np.arange(len(order))
+    sorted_at_l, order_l = sorted_at.tolist(), order.tolist()
+    lo_l, hi_l, pick_l = lo.tolist(), hi.tolist(), pick.tolist()
+    # below[p] is a place at or before p in the sorted edges that may still be
+    # free: p itself while its edge is free, the place before it once taken.
+    below = list(range(len(order)))
+
+    def free_at_or_below(p: int) -> int:
+        """The last place at or before *p* whose edge is free, or -1, with
+        every place passed on the way pointed straight at it."""
+        root = p
+        while root >= 0 and below[root] != root:
+            root = below[root]
+        while p != root:
+            below[p], p = root, below[p]
+        return root
+
     used = [False] * len(edges)
     rings: list[np.ndarray] = []
     for start in range(len(edges)):
@@ -4219,6 +4630,7 @@ def _outline_rings(edges: np.ndarray, ids: np.ndarray) -> list[np.ndarray]:
         walk, k = [], start
         while k >= 0 and not used[k]:
             used[k] = True
+            below[sorted_at_l[k]] = sorted_at_l[k] - 1
             walk.append(k)
             k = after[k]
             if k >= 0 and used[k] and k != start:
@@ -4226,11 +4638,17 @@ def _outline_rings(edges: np.ndarray, ids: np.ndarray) -> list[np.ndarray]:
                 # leaving it only where the outline runs over itself (two faces
                 # lying on the bed one over the other, a part thinner than a
                 # layer).  The second takes the sharpest left turn still free
-                # there, the next one down that point's list: a scan of the
-                # edges leaving that one point, and only for a repeated edge.
-                lo_k, hi_k, j = int(lo[walk[-1]]), int(hi[walk[-1]]), int(pick[walk[-1]])
-                free = (int(order[lo_k + (j - lo_k - q) % (hi_k - lo_k)]) for q in range(hi_k - lo_k))
-                k = next((e for e in free if not used[e]), -1)
+                # there, the next one down that point's list and round from its
+                # top: the last free place at or below the pick, else the last
+                # free place above it.
+                w = walk[-1]
+                lo_k, hi_k, j = lo_l[w], hi_l[w], pick_l[w]
+                r = free_at_or_below(j)
+                if r < lo_k:
+                    r = free_at_or_below(hi_k - 1)
+                    if r <= j:
+                        r = -1
+                k = order_l[r] if r >= 0 else -1
         if len(walk) >= 3:
             rings.append(edges[walk, 0])
     return rings
@@ -4339,15 +4757,9 @@ def _footprint_sharp_corners(
     Each patch of contact is its own rings, since patches share no point.  It
     counts the shape, not how the file cut it into triangles; a part with no
     contact, a cone on its tip, has none."""
-    threshold = z_min + layer_height
-    contact = [
-        (tri[0][:2], tri[1][:2], tri[2][:2])
-        for tri in triangles
-        if tri[0][2] <= threshold and tri[1][2] <= threshold and tri[2][2] <= threshold
-    ]
-    if not contact:
+    tris = _bed_contact(triangles, z_min, layer_height=layer_height).xy
+    if not len(tris):
         return 0
-    tris = np.asarray(contact, dtype=np.float64)
     e1, e2 = tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0]
     # A wall shorter than a layer lies flat on the bed as a line: no area, no outline.
     tris = tris[np.abs(e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]) / 2.0 > 1e-12]
@@ -5502,15 +5914,17 @@ def _footing_section_modulus(
     and up, so a part on more patches than the budget can read, or whose
     patches spend it, is read as holding nothing, never as secure.
     """
-    threshold = z_min + layer_height
-    contact = [
-        (tri[0][:2], tri[1][:2], tri[2][:2])
-        for tri in triangles
-        if tri[0][2] <= threshold and tri[1][2] <= threshold and tri[2][2] <= threshold
-    ]
-    if not contact:
+    contact = _bed_contact(triangles, z_min, layer_height=layer_height)
+    if not len(contact.tris):
         return 0.0
-    pts = np.asarray(contact, dtype=np.float64)  # (T, 3, 2)
+    if contact.overlaps:
+        # A contact that overlaps itself (bodies left overlapping, a base
+        # drawn over itself) is read on the ground it covers, whole: the
+        # union's own section modulus.  The per-patch readings below need
+        # an outline the drawn triangles do not give.  A union that could
+        # not be measured holds nothing: never secure on a file's say-so.
+        return contact.union.modulus() if contact.union is not None else 0.0
+    pts = contact.xy  # (T, 3, 2)
     height = float(height) if height is not None and height > 0.0 else 0.0
     modulus, spent = _contact_modulus(pts, height, _HELD_STRETCH_WORK)
     if height <= 0.0 or modulus <= 0.0:
@@ -7108,11 +7522,14 @@ def _load_mesh_for_analysis(
 def _prepare_parsed(
     triangles: list[tuple[tuple[float, ...], ...]],
     vertices: list[tuple[float, ...]],
+    *,
+    repeated: tuple[set[int], list[tuple[int, int]]] | None = None,
 ) -> tuple[list[tuple[tuple[float, ...], ...]], list[tuple[float, ...]], dict[str, float], float]:
-    """:func:`_load_mesh_for_analysis` on a mesh already parsed."""
+    """:func:`_load_mesh_for_analysis` on a mesh already parsed; *repeated*
+    is :func:`_repeated_faces` of *triangles* when the caller has it."""
     # Membranes must go BEFORE winding normalization: a zero-thickness
     # pair has no meaningful outward orientation to normalize.
-    triangles = _drop_membrane_pairs(triangles)
+    triangles = _drop_membrane_pairs(triangles, repeated)
     triangles = _normalize_triangle_winding(triangles)
 
     # Bounding box.
@@ -7199,11 +7616,19 @@ def _analyze_printability_here(
     if parsed:
         from kiln.mesh_bodies import read_triangles
 
+        # A face the file states twice is one face here as well: read as
+        # written, fifty copies of a base were fifty pieces (2026-10-25).
+        # Membranes stay, since they are the contact that tells two
+        # stacked pieces apart.
+        repeated = _repeated_faces(parsed)
+        once = [t for i, t in enumerate(parsed) if i not in repeated[0]] if repeated[0] else parsed
         with contextlib.suppress(ValueError, IndexError, MemoryError):
-            pieces = read_triangles(parsed)
+            pieces = read_triangles(once)
+    else:
+        repeated = None
     # Which separate parts those pieces print as, and which float.
     parts = _judge_pieces(parsed, pieces)
-    triangles, vertices, bbox, z_min = _prepare_parsed(parsed, parsed_vertices)
+    triangles, vertices, bbox, z_min = _prepare_parsed(parsed, parsed_vertices, repeated=repeated)
     del parsed, parsed_vertices
 
     # Soft tier seam: load the printability_judgment overlay once and

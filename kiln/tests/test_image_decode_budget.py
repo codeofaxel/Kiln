@@ -166,7 +166,8 @@ def test_a_phone_photo_carves_the_same_relief(tmp_path):
     12 M-pixel photograph's heightmap, before and after.
 
     Compared through the engine's own entry point at its real working
-    size.  A few levels out of 255 is resampling noise on a surface that is
+    size, on the plain tone path (no posterising, so every level counts;
+    the retired lithophane style used to stand in here).  A few levels out of 255 is resampling noise on a surface that is
     then carved a millimetre deep; anything more would be a different
     relief and this change would be wrong.
     """
@@ -180,13 +181,13 @@ def test_a_phone_photo_carves_the_same_relief(tmp_path):
             its._open_reduced = lambda p: Image.open(p)
             try:
                 info = its.prepare_image_for_emboss(
-                    path, str(work), max_resolution=200, style="lithophane",
+                    path, str(work), max_resolution=200, style="default",
                 )
             finally:
                 its._open_reduced = original
         else:
             info = its.prepare_image_for_emboss(
-                path, str(work), max_resolution=200, style="lithophane",
+                path, str(work), max_resolution=200, style="default",
             )
         with open(info["dat_path"]) as fh:
             return [

@@ -257,6 +257,10 @@ class DuetAdapter(PrinterAdapter):
     # ending — a late reading is merely late and still correct.
     _DURATION_SEMANTICS: ClassVar[str] = "frozen"
 
+    #: RepRapFirmware 3's object model gives each axis's position and the
+    #: extruder's (:meth:`get_tool_position`); an RRF 2 board answers none.
+    head_position = "head_and_extruder"
+
     def __init__(
         self,
         host: str,
@@ -644,6 +648,35 @@ class DuetAdapter(PrinterAdapter):
         """
         body = self._get_json("/rr_model", params={"key": key, "flags": flags})
         return body.get("result")
+
+    def get_tool_position(self) -> dict[str, float] | None:
+        """Where the head is and the first extruder's position, from the
+        RRF 3 object model: each axis's ``machinePosition`` (the move being
+        made, or the last one when the head is still) and
+        ``extruders[0].position``.  ``None`` on RRF 2, which has no object
+        model, or when the board does not answer."""
+        try:
+            if self._generation() != 3:
+                return None
+            move = self._model("move")
+        except PrinterError:
+            return None
+        if not isinstance(move, dict):
+            return None
+        out: dict[str, float] = {}
+        for axis in move.get("axes") or []:
+            if not isinstance(axis, dict):
+                continue
+            letter = str(axis.get("letter") or "").lower()
+            value = axis.get("machinePosition")
+            if letter in ("x", "y", "z") and isinstance(value, (int, float)) and not isinstance(value, bool):
+                out[letter] = float(value)
+        extruders = move.get("extruders") or []
+        first = extruders[0] if extruders and isinstance(extruders[0], dict) else {}
+        e = first.get("position")
+        if isinstance(e, (int, float)) and not isinstance(e, bool):
+            out["e"] = float(e)
+        return out if all(k in out for k in ("x", "y", "z")) else None
 
     def read_machine_identity(self) -> MachineIdentity | None:
         """The main board's unique id, from the RRF 3 object model.

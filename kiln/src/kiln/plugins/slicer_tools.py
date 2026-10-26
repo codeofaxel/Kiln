@@ -797,6 +797,8 @@ def _apply_plate_placement(
     placement: Any,
     profile_path: str | None = None,
     adapter: Any | None = None,
+    copies: int | None = None,
+    spacing_mm: float = 10.0,
 ) -> tuple[str, dict | None, dict]:
     """Pre-slice gate for a plate that still holds the last print.
 
@@ -832,6 +834,11 @@ def _apply_plate_placement(
       The plate holds a part and Kiln cannot check clearance, so nothing is
       sliced onto it; the sentence says why and what to do.
 
+    With *copies* of 2 or more the gate FILLS the plate instead of placing
+    one part: as many copies as fit, up to *copies*, merged into one STL
+    that is the effective input, and ``info["fill"]`` says how many
+    (:func:`_fill_plate_placement`).  ``copies=1`` is the one-part path.
+
     The caller runs :func:`_verify_plate_placement` on the sliced file and
     :func:`_attach_placement` on its success response.
     """
@@ -842,6 +849,17 @@ def _apply_plate_placement(
     kind, value, problem = _parse_placement(placement)
     if problem:
         return input_path, _srv._error_dict(problem, code="PLACEMENT_INVALID"), {"plate": "unknown"}
+    if copies is not None and (isinstance(copies, bool) or not isinstance(copies, int) or copies < 1):
+        return input_path, _srv._error_dict(
+            f"copies {copies!r} is not a number of copies; give a whole number of 1 or more.", code="PLACEMENT_INVALID",
+        ), {"plate": "unknown"}
+    fill = copies is not None and copies > 1
+    if fill and kind != "auto":
+        return input_path, _srv._error_dict(
+            "Copies go wherever they fit on the plate, so they take no spot, region or keep; "
+            "leave placement out, or ask for one copy at that spot.",
+            code="PLACEMENT_INVALID",
+        ), {"plate": "unknown"}
     try:
         from kiln.runtime_env import is_hosted_multitenant
 
@@ -854,6 +872,11 @@ def _apply_plate_placement(
             adapter = _srv._resolve_adapter(printer_name)
         except Exception:  # noqa: BLE001 -- no printer means no plate record
             adapter = None
+    if fill:
+        return _fill_plate_placement(
+            input_path, copies=int(copies or 0), spacing_mm=spacing_mm,
+            effective_printer_id=effective_printer_id, profile_path=profile_path, adapter=adapter,
+        )
     if adapter is None:
         return input_path, None, {"plate": "unknown", "gate": "skipped_no_printer"}
     state = plate_state.read(adapter)
@@ -986,6 +1009,227 @@ def _apply_plate_placement(
     return placed, None, info
 
 
+#: The bed a clear-plate grid is laid out on when the printer's is unknown:
+#: the same default the grid itself has always used.
+_FILL_DEFAULT_BED_MM = 256.0
+
+
+def _copy_corners(verdict: Any) -> list[list[float]]:
+    """Where the verdict places each copy (its footprint minimum corner),
+    in order; ``[]`` when it names none -- no copies block, or the places
+    withheld below the plan's tier.  A malformed entry is dropped, never
+    guessed at: a copy Kiln cannot place is a copy not printed."""
+    block = verdict.get("copies") if isinstance(verdict, dict) else None
+    out: list[list[float]] = []
+    for entry in (block.get("placed") or []) if isinstance(block, dict) else []:
+        at = entry.get("at_mm") if isinstance(entry, dict) else None
+        if isinstance(at, (list, tuple)) and len(at) == 2:
+            try:
+                out.append([float(at[0]), float(at[1])])
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
+def _copies_fit(verdict: Any) -> int | None:
+    """How many copies the verdict counts (``copies.fits``, said on every
+    tier); ``None`` when it does not say."""
+    block = verdict.get("copies") if isinstance(verdict, dict) else None
+    fits = block.get("fits") if isinstance(block, dict) else None
+    return fits if isinstance(fits, int) and not isinstance(fits, bool) else None
+
+
+def _no_room_code(verdict: dict[str, Any]) -> str:
+    codes = {str(r.get("code")) for r in (verdict.get("refusals") or []) if isinstance(r, dict)}
+    return "PLACEMENT_NO_ROOM" if "PLACEMENT_NO_ROOM" in codes or _copies_fit(verdict) == 0 else "PLACEMENT_REFUSED"
+
+
+def _fill_plate_placement(
+    input_path: str,
+    *,
+    copies: int,
+    spacing_mm: float,
+    effective_printer_id: str | None,
+    profile_path: str | None,
+    adapter: Any | None,
+) -> tuple[str, dict | None, dict]:
+    """The fill branch of :func:`_apply_plate_placement`: as many copies as
+    fit on the plate as it stands, up to *copies*.
+
+    Same return shape; ``info["fill"]`` is ``{"wanted", "placed", "basis"}``
+    with *basis* ``"engine"`` (the verdict's own places) or ``"grid"`` (a
+    centred grid on a clear bed).  STL only.
+
+    * plate ``occupied``: the engine is asked for the copies beside what is
+      there.  No verdict refuses, fail closed; a refusing verdict refuses
+      in its own sentences; an ok verdict with places merges a copy at each
+      and is checked again on the sliced file, exactly as one placed part
+      is; an ok verdict whose places are withheld refuses with the count.
+    * plate ``clear`` or ``unknown``: the engine is asked when there is a
+      printer, and its places are used when it gives them.  Otherwise --
+      places withheld, no answer, no printer -- a clear plate is the free
+      floor and never fails closed: a centred grid of as many copies as
+      both the bed and any count the verdict gave allow.
+    """
+    import kiln.server as _srv
+    from kiln import _pro_placement_bridge as bridge
+    from kiln import plate_state
+    from kiln.auto_orient import (
+        copies_within_size,
+        duplicate_stl_at,
+        duplicate_stl_on_plate,
+        grid_capacity,
+        stl_triangle_count,
+    )
+    from kiln.printers.bed_fit import get_build_volume
+
+    ext = os.path.splitext(input_path)[1].lower()
+    if ext != ".stl":
+        return input_path, _srv._error_dict(
+            f"Kiln can fill a plate with copies of an STL, not {ext or 'this format'}; "
+            "convert it first (import_external_mesh), or ask for one copy.",
+            code="PLACEMENT_UNPLACEABLE",
+        ), {"plate": "unknown"}
+
+    # One plate file holds every copy in memory while it is written; a
+    # detailed part caps the count before anything is asked or laid out,
+    # and the result says so (auto_orient.MAX_MERGED_TRIANGLES).
+    wanted = copies
+    triangles = stl_triangle_count(input_path)
+    limit_note: str | None = None
+    if triangles:
+        most = copies_within_size(triangles)
+        if most < 1:
+            return input_path, _srv._error_dict(
+                f"This part has {triangles:,} triangles, more than Kiln writes into one plate file; simplify it "
+                "first, then ask for copies.",
+                code="PLACEMENT_UNPLACEABLE",
+            ), {"plate": "unknown"}
+        if most < copies:
+            copies = most
+            limit_note = (
+                f"A {triangles:,}-triangle part fits at most {most} to a plate file, so Kiln asked for {most} of "
+                f"the {wanted}; simplify the part to fit more."
+            )
+
+    def _fill_info(placed: int, basis: str) -> dict[str, Any]:
+        info: dict[str, Any] = {"wanted": wanted, "placed": placed, "basis": basis}
+        if limit_note:
+            info["limited_by"] = limit_note
+        return info
+
+    state = plate_state.read(adapter) if adapter is not None else None
+    status = state.status if state is not None else "unknown"
+    volume = get_build_volume(effective_printer_id)
+    bed = [float(volume[0]), float(volume[1])] if volume else None
+    part, _bbox = _part_envelope(input_path, profile_path)
+    pid = (effective_printer_id or plate_state.declared_model_of(adapter) or "") if adapter is not None else ""
+
+    def _merged_at(corners: list[list[float]]) -> str:
+        merged = duplicate_stl_at(input_path, corners)
+        _logger.info("Filled the plate with %d copies of %s -> %s", len(corners), os.path.basename(input_path), merged)
+        return merged
+
+    if state is not None and state.occupied:
+        holds = _plate_holds_sentence(state)
+        occupied_info: dict[str, Any] = {"plate": "occupied"}
+        request = bridge.request_for(adapter, pid, placement="auto", part=part, copies=copies)
+        verdict, reason = bridge.ask(request)
+        if verdict is None:
+            return input_path, _placement_refusal(
+                _no_verdict_sentence(state, reason), "PLACEMENT_NO_VERDICT", state=state, bed=bed, miss=reason,
+            ), occupied_info
+        if not verdict.get("ok"):
+            message = f"Kiln won't fill this plate: {_refusal_sentences(verdict)}"
+            return input_path, _placement_refusal(
+                message, _no_room_code(verdict), state=state, bed=bed, verdict=verdict,
+            ), occupied_info
+        corners = _copy_corners(verdict)
+        if not corners:
+            # The count is said on every tier; the places are the plan's
+            # tier's, named only where paying would start the print
+            # (the same rule as _spots_clause).
+            fits = _copies_fit(verdict) or 0
+            noun = "copy" if fits == 1 else "copies"
+            if _quiet_start_would_stand(verdict):
+                tail = (
+                    "; printing around what is on the plate is a kiln-pro feature (https://kiln3d.com/pricing). "
+                    "Or clear the plate and say so, and Kiln fills the empty plate."
+                )
+            else:
+                tail = ", but Kiln has no way to start a print there; clear the plate and say so."
+            return input_path, _placement_refusal(
+                f"{holds} {fits} {noun} would fit beside it{tail}",
+                "PLACEMENT_COPIES_WITHHELD", state=state, bed=bed, verdict=verdict,
+            ), occupied_info
+        try:
+            placed = _merged_at(corners)
+        except Exception as exc:  # noqa: BLE001 -- copies that could not be written stay unplaced
+            _logger.warning("Fill copy failed for %s: %s", input_path, exc)
+            return input_path, _placement_refusal(
+                f"{holds} Kiln could not lay the copies at the spots the check approved ({exc}), "
+                "so it won't slice onto this plate.",
+                "PLACEMENT_UNPLACEABLE", state=state, bed=bed, verdict=verdict,
+            ), occupied_info
+        job_name = _pretty_job_name(state.job.file if state.job else "")
+        return placed, None, {
+            "plate": "occupied",
+            "placement": verdict,
+            "placed_input_path": placed,
+            "approval_carries": False,
+            "approval_note": (
+                f"{len(corners)} copies placed beside {job_name}, which is still on the plate, so a yes given on "
+                "the design mesh does not carry; the stage on this result shows the plate as it will print, "
+                "so approve from here"
+            ),
+            "fill": _fill_info(len(corners), "engine"),
+            "_verify": {"request": request, "state": state, "bed": bed},
+            "_state": state,
+            "_machine": _contract_machine_id(adapter),
+        }
+
+    # A clear or unrecorded plate: the engine's places when it gives them,
+    # else the free floor -- a centred grid, bounded by any count it gave.
+    verdict = None
+    if adapter is not None:
+        verdict, _reason = bridge.ask(bridge.request_for(adapter, pid, placement="auto", part=part, copies=copies))
+    if isinstance(verdict, dict) and not verdict.get("ok"):
+        return input_path, _srv._error_dict(
+            f"Kiln won't fill this plate: {_refusal_sentences(verdict)}", code=_no_room_code(verdict),
+        ), {"plate": status, "placement": verdict}
+    corners = _copy_corners(verdict)
+    if corners:
+        try:
+            merged = _merged_at(corners)
+        except Exception as exc:  # noqa: BLE001 -- copies that could not be written are not sliced
+            _logger.warning("Fill copy failed for %s: %s", input_path, exc)
+            return input_path, _srv._error_dict(
+                f"Kiln could not lay the copies out ({exc}), so nothing was sliced.", code="PLACEMENT_UNPLACEABLE",
+            ), {"plate": status}
+        return merged, None, {"plate": status, "fill": _fill_info(len(corners), "engine")}
+    bed_w, bed_d = (bed[0], bed[1]) if bed else (_FILL_DEFAULT_BED_MM, _FILL_DEFAULT_BED_MM)
+    capacity = grid_capacity(input_path, spacing_mm=spacing_mm, bed_width_mm=bed_w, bed_depth_mm=bed_d)
+    fits = _copies_fit(verdict) if isinstance(verdict, dict) else None
+    count = min(copies, capacity, fits if fits is not None else copies)
+    if count < 1:
+        size = part.get("size_mm") if isinstance(part, dict) else None
+        what = f"this part ({float(size[0]):g} x {float(size[1]):g} mm)" if size else "this part"
+        return input_path, _srv._error_dict(
+            f"Not one copy of {what} fits on the {bed_w:g} x {bed_d:g} mm bed with "
+            f"{spacing_mm:g} mm between copies.",
+            code="PLACEMENT_NO_ROOM",
+        ), {"plate": status}
+    try:
+        placed = input_path if count == 1 else duplicate_stl_on_plate(
+            input_path, count, spacing_mm=spacing_mm, bed_width_mm=bed_w, bed_depth_mm=bed_d,
+        )
+    except ValueError as exc:
+        return input_path, _srv._error_dict(
+            f"Kiln could not lay the copies out ({exc}), so nothing was sliced.", code="PLACEMENT_UNPLACEABLE",
+        ), {"plate": status}
+    return placed, None, {"plate": status, "fill": _fill_info(count, "grid")}
+
+
 def _contract_machine_id(adapter: Any) -> str:
     """The identity a quiet-start file is bound to: the same one the
     pre-print gate reads back (:func:`kiln.printers.print_gate.same_bed_machine_id`)."""
@@ -1062,7 +1306,10 @@ def _verify_plate_placement(gcode_path: str | None, info: dict | None) -> tuple[
 def _attach_placement(response: dict, info: dict | None) -> None:
     """Stamp a success response with the verdict and the approval note, on an
     occupied plate only.  The bed-fit gate's own ``approval_carries`` inside
-    ``bed_fit`` stays as it is for the clear-plate case."""
+    ``bed_fit`` stays as it is for the clear-plate case.  A fill's count
+    (``info["fill"]``) rides as ``response["copies"]`` on any plate."""
+    if isinstance(info, dict) and isinstance(info.get("fill"), dict):
+        response["copies"] = dict(info["fill"])
     if not isinstance(info, dict) or info.get("plate") != "occupied":
         return
     info.pop("_verify", None)
@@ -1561,6 +1808,8 @@ def _placed_slice(
     material_id: str | None = None,
     slicer: Any | None = None,
     plate_gate: bool = True,
+    copies: int | None = None,
+    spacing_mm: float = 10.0,
     **slice_kwargs: Any,
 ) -> tuple[Any | None, dict | None, dict[str, Any]]:
     """The slice every door shares: plate gate, bed-fit gate, slicer, second verdict.
@@ -1587,6 +1836,9 @@ def _placed_slice(
     height every lift in the file rises to).  Raises whatever the slicer
     raises; each door words that.
 
+    *copies* and *spacing_mm* go to the plate gate, never the slicer: with
+    two or more copies it fills the plate (:func:`_fill_plate_placement`).
+
     Whenever the target printer's bed is known, a sliced file whose skirt
     or brim prints past its edge is settled here, before the second
     verdict: the skirt is dropped and the part sliced once more, or the
@@ -1600,6 +1852,7 @@ def _placed_slice(
         placed, err, place_info = _apply_plate_placement(
             input_path, effective_printer_id=effective_printer_id, printer_name=printer_name,
             placement=placement, profile_path=profile_path, adapter=adapter,
+            copies=copies, spacing_mm=spacing_mm,
         )
     else:
         placed, err, place_info = input_path, None, {"plate": "not_checked"}

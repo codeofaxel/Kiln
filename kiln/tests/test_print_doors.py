@@ -44,7 +44,6 @@ def test_the_walk_sees_the_doors_it_was_written_for():
         "scheduler.py::tick",
         "job_splitter.py::submit_split_plan",
         "plugins/queue_tools.py::submit_job",
-        "plugins/fleet_tools.py::fleet_submit_job",
         "cli/main.py::print_cmd",
         "cli/main.py::slice",
         "cli/main.py::generate_and_print_cmd",
@@ -71,14 +70,17 @@ def test_every_exemption_names_a_door_that_still_exists():
 def test_the_exemptions_are_the_named_few():
     """Exemptions are reported, not hidden.  Standing opt-ins and the
     scheduler grant their clearance explicitly, so they are not here; what
-    is here is the event mirror and three raw sends of fixed commands the
-    walk cannot read as literals."""
+    is here is the event mirror, three raw sends of fixed commands the
+    walk cannot read as literals, and the two that queue the rest of a
+    copies run carrying the yes its first plate was given."""
     exempt = {d.label for d in print_doors.enumerate_print_doors() if d.exempt}
     assert exempt == {
         "server.py::_persist_event",
         "server.py::set_temperature",
         "bed_leveling.py::trigger_level",
         "emergency.py::_send_emergency_gcode",
+        "server.py::_queue_fill_rest",
+        "scheduler.py::_queue_rest",
     }
 
 

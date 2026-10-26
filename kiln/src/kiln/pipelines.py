@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING, Any
 
 from kiln.print_signoff import grant_from_record
 from kiln.print_start_verdict import resolve_print_start
+from kiln.printers.base import PrinterEngagementError
 
 if TYPE_CHECKING:
     from kiln.plugins.validation_pipeline_tools import PrintGate
@@ -498,11 +499,16 @@ def _slice_step(
     placement: Any,
     profile: str | None,
     step_start: float,
+    copies: int | None = None,
+    spacing_mm: float = 10.0,
     **slice_kwargs: Any,
 ) -> tuple[PipelineStep, str | None]:
     """The slice step every pipeline shares, on the same step every slice
     tool uses (:func:`kiln.plugins.slicer_tools._placed_slice`): the plate
     gate, the slicer, the second verdict on the sliced file.
+
+    *copies* and *spacing_mm* go to the plate gate (two or more fill the
+    plate; the step's data then carries ``copies``), never the slicer.
 
     Returns ``(step, gcode_path)``; a refused step carries no G-code and,
     being fatal, stops the pipeline.  Raises whatever the slicer raises,
@@ -512,7 +518,8 @@ def _slice_step(
 
     result, err, info = _placed_slice(
         model_path, effective_printer_id=effective_pid, printer_name=printer_name,
-        placement=placement, profile_path=profile, adapter=adapter, **slice_kwargs,
+        placement=placement, profile_path=profile, adapter=adapter,
+        copies=copies, spacing_mm=spacing_mm, **slice_kwargs,
     )
     if err is not None:
         return _refused_step("slice", err, step_start), None
@@ -1021,13 +1028,24 @@ def reslice_and_print(
     skip_validation: bool = False,
     signoff: dict[str, Any] | None = None,
     placement: str | list[float] | None = None,
+    copies: int | None = None,
+    spacing_mm: float = 10.0,
+    still_wanted: Callable[[], str | None] | None = None,
 ) -> PipelineResult:
     """Reslice a model with parameter overrides, then upload and print.
+
+    ``still_wanted``, when given, is asked right before the upload and again
+    right before the start; a sentence back means the print is no longer
+    wanted (a queued job cancelled while it was being prepared) and the
+    pipeline stops there, sending nothing more to the printer.
 
     ``placement`` is where the part goes when the plate still holds the
     last print (``[x, y]`` in mm, a named region, or ``"keep"``); omitted,
     an occupied plate refuses at the slice step.  Same gate as
-    ``reslice_with_overrides``.
+    ``reslice_with_overrides``.  ``copies`` (two or more) fills the plate
+    with as many copies of the model as fit, up to that many, *spacing_mm*
+    apart on a clear plate; the slice step's data says how many in
+    ``copies``.
 
     Steps:
         1. validate_mesh — Pre-print printability gate (manifold, walls,
@@ -1159,6 +1177,8 @@ def reslice_and_print(
                 placement=placement,
                 profile=ctx["effective_profile"],
                 step_start=step_start,
+                copies=copies,
+                spacing_mm=spacing_mm,
                 slicer_path=slicer_path,
                 extra_args=extra_args,
                 material=material,
@@ -1211,6 +1231,13 @@ def reslice_and_print(
 
     def _upload() -> PipelineStep:
         step_start = time.time()
+        if still_wanted is not None:
+            why = still_wanted()
+            if why:
+                return PipelineStep(
+                    name="upload", success=False, message=f"Not sent: {why}",
+                    data={"stopped": True}, duration_seconds=0.0,
+                )
         try:
             adapter = _resolve_pipeline_adapter(printer_name)
             ctx["adapter"] = adapter
@@ -1242,6 +1269,15 @@ def reslice_and_print(
                 message=f"Uploaded {remote_name}"
                 + (" (Bambu 3MF wrapped)" if wrapped_3mf else ""),
                 data={"remote_name": remote_name, "wrapped_3mf": wrapped_3mf},
+                duration_seconds=time.time() - step_start,
+            )
+        except PrinterEngagementError as exc:
+            # Another printer's turn on this plan, met at the upload, the
+            # first gated command: said with its code, so a caller that
+            # waits rather than retries (the queue) can tell.
+            return PipelineStep(
+                name="upload", success=False, message=f"Upload failed: {exc}",
+                data={"code": str((exc.verdict or {}).get("code") or "")},
                 duration_seconds=time.time() - step_start,
             )
         except Exception as exc:
@@ -1282,6 +1318,13 @@ def reslice_and_print(
 
     def _start_print() -> PipelineStep:
         step_start = time.time()
+        if still_wanted is not None:
+            why = still_wanted()
+            if why:
+                return PipelineStep(
+                    name="start_print", success=False, message=f"Not sent: {why}",
+                    data={"stopped": True}, duration_seconds=0.0,
+                )
         try:
             adapter = ctx["adapter"]
             remote_name = ctx["remote_name"]
@@ -1370,7 +1413,16 @@ def reslice_and_print(
                 ctx.get("signoff"), tool="pipeline", file_name=remote_name, printer_name=printer_name,
             )
             sent_at = time.monotonic()
-            print_result = adapter.start_print(remote_name, **start_kwargs)
+            try:
+                print_result = adapter.start_print(remote_name, **start_kwargs)
+            except PrinterEngagementError as exc:
+                # Another printer's turn on this plan: said with its code, so
+                # a caller that waits rather than retries (the queue) can tell.
+                return PipelineStep(
+                    name="start_print", success=False, message=f"Failed to start print: {exc}",
+                    data={"code": str((exc.verdict or {}).get("code") or "")},
+                    duration_seconds=time.time() - step_start,
+                )
             verdict = resolve_print_start(
                 adapter, print_result, sent_at=sent_at, file_name=remote_name,
                 vendor_start_block=ctx.get("quiet_start") is None,
@@ -1380,6 +1432,9 @@ def reslice_and_print(
                 "print_start": verdict.state,
                 "print": verdict.to_dict(),
             }
+            if getattr(print_result, "code", ""):
+                # The start gate's code (a refusal before anything was sent).
+                step_data["code"] = str(print_result.code)
             # Beside the AMS selection, at the step's top level, so the
             # one-shot doors can hoist it the same way: what the machine
             # is about to do is as much part of "it started" as which

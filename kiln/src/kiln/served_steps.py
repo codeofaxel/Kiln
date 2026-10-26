@@ -773,7 +773,7 @@ ACT_TOOLS: dict[str, dict[str, Any]] = {
         "vibration_cali": bool,
         "plate_number": "small_int",
     },
-    "pause_print": {"printer_name": "name", "keep_temps": bool},
+    "pause_print": {"printer_name": "name", "keep_temps": bool, "leave_nozzle": bool},
     "cancel_print": {"printer_name": "name", "preserve_temperatures": bool},
     "skip_print_objects": {"object_ids": "object_ids", "printer_name": "name", "plate_number": "small_int"},
     "resume_print": {"printer_name": "name", "force": bool},
