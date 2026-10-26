@@ -787,3 +787,105 @@ class TestTheWords:
         q = PrintQueue()
         job = q.submit("the other half.stl")
         assert describe_wait(q.get_job(job), q)["sentence"] == "the other half is next in line."
+
+
+# --- defects a lap found (2026-10-26; each fails at f5affd68) ---
+
+
+class TestDefectsTheSecondLapFound:
+    def test_the_turn_met_at_the_upload_is_still_the_turn(self, k, fake):
+        """The one-printer rule gates the upload, which comes before the
+        start, so a queued plate for the second printer met it there and
+        spent its retries as "the plate did not start".  A turn code on any
+        failed step is the turn: no retry, no failure, the printer freed."""
+        k.registry.register("B", _printer("B", "SER-B", PrinterStatus.PRINTING))
+
+        def answer(kw: dict[str, Any]) -> SimpleNamespace:
+            steps = [
+                SimpleNamespace(name="slice", success=True, data={"copies": {"wanted": kw["copies"], "placed": 6}}),
+                SimpleNamespace(name="upload", success=False,
+                                data={"code": "TIER_SINGLE_PRINTER_LIMIT"}, message="Upload failed: Kiln is working with B."),
+            ]
+            return SimpleNamespace(success=False, message="Upload failed", steps=steps, to_dict=lambda: {})
+
+        fake.answer = answer
+        job = _fill_job(k.queue, 14)
+        k.sched.tick()
+        assert k.sched._retry_counts.get(job, 0) == 0
+        assert k.status(job) == JobStatus.QUEUED and k.sched.active_jobs == {}
+        assert _note(k, job)["kind"] == "turn"
+
+    def test_a_cancel_while_the_plate_is_prepared_watches_what_started_and_queues_no_more(self, k, fake):
+        """Laying out a plate takes a slice, long enough for a person to cancel
+        the job.  The printer takes the plate anyway: the job stays cancelled
+        (its ending recorded as such), the running print is watched, and the
+        run queues nothing more.  Before, the success path raised on the
+        cancelled job and the print ran unwatched."""
+        later: list[Any] = []
+        k.sched._spawn = later.append
+        job = _fill_job(k.queue, 14)
+        k.sched.tick()
+        k.queue.cancel(job)
+        later.pop()()
+        assert k.status(job) == JobStatus.CANCELLED
+        assert k.sched.active_jobs == {job: "A"} and job in k.sched._watch, "the print that started is watched"
+        assert [j.id for j in k.queue.list_jobs()] == [job], "no rest queued for a cancelled run"
+        _idle(k.registry.get("A"))
+        k.sched.tick()
+        assert k.sched.active_jobs == {}
+        assert [o["outcome"] for o in k.outcomes] == ["cancelled"]
+
+    def test_a_cancel_while_the_plate_is_prepared_and_nothing_started_is_simply_done(self, k, fake):
+        later: list[Any] = []
+        k.sched._spawn = later.append
+        fake.answer = _raise(RuntimeError("slicer missing"))
+        job = _fill_job(k.queue, 14)
+        k.sched.tick()
+        k.queue.cancel(job)
+        later.pop()()
+        assert k.status(job) == JobStatus.CANCELLED
+        assert k.sched._retry_counts.get(job, 0) == 0 and k.sched.active_jobs == {}
+
+    def test_the_engagement_rule_met_at_the_upload_carries_its_code_on_that_step(self):
+        """The upload is the first gated command, so the rule is met there
+        before any start.  Same harness as the start-step tests, with the
+        adapter refusing at upload_file."""
+        from kiln.pipelines import reslice_and_print
+
+        sliced = MagicMock(output_path="/tmp/out.gcode", message="Sliced OK", slicer="prusaslicer")
+        scan = MagicMock(valid=True, commands=["G28"], blocked_commands=[], warnings=[], errors=[])
+        adapter = MagicMock(spec=["upload_file", "get_state", "start_print"])
+        adapter.upload_file.side_effect = PrinterEngagementError(
+            {"code": "TIER_SINGLE_PRINTER_LIMIT", "reason": "Kiln is working with B."}
+        )
+        with (
+            patch("kiln.slicer_profiles.resolve_slicer_profile", return_value="/tmp/profile.ini"),
+            patch("kiln.slicer.slice_file", return_value=sliced),
+            patch("kiln.gcode.scan_gcode_file", return_value=scan),
+            patch("kiln.server._resolve_adapter", return_value=adapter),
+        ):
+            result = reslice_and_print(model_path="/tmp/model.stl", printer_name="A", skip_validation=True)
+        (step,) = [s for s in result.steps if s.name == "upload"]
+        assert result.success is False and step.success is False
+        assert step.data == {"code": "TIER_SINGLE_PRINTER_LIMIT"}
+        adapter.start_print.assert_not_called()
+
+    def test_cancel_queued_job_cancels_a_plate_still_being_laid_out(self, k, fake, monkeypatch):
+        """``cancel_queued_job`` refused a STARTING job as "already at the
+        printer"; a plate being laid out has reached no printer yet."""
+        import kiln.server as srv
+        from kiln.plugins.queue_tools import cancel_queued_job
+
+        monkeypatch.setattr(srv, "_scheduler", k.sched)
+        monkeypatch.setattr(srv, "_get_queue", lambda: k.queue)
+        monkeypatch.setattr(srv, "_get_event_bus", lambda: k.bus)
+        monkeypatch.setattr(srv, "_check_auth", lambda *_a, **_k: None)
+        later: list[Any] = []
+        k.sched._spawn = later.append
+        job = _fill_job(k.queue, 14)
+        k.sched.tick()
+        answer = cancel_queued_job(job)
+        assert answer["success"] is True and "being laid out" in answer["message"]
+        assert k.status(job) == JobStatus.CANCELLED
+        later.pop()()
+        assert [j.id for j in k.queue.list_jobs()] == [job]

@@ -963,6 +963,13 @@ class JobScheduler:
         start = steps.get("start_print")
         sliced = steps.get("slice")
         start_data = (getattr(start, "data", None) or {}) if start is not None else {}
+        # The one-printer rule meets the upload before the start, so a
+        # turn code on any failed step is the turn.
+        turn_code = next(
+            (str((getattr(st, "data", None) or {}).get("code") or "") for st in steps.values()
+             if not getattr(st, "success", True) and (getattr(st, "data", None) or {}).get("code") in _TURN_CODES),
+            "",
+        )
         block = ((getattr(sliced, "data", None) or {}).get("copies") or {}) if sliced is not None else {}
         placed = block.get("placed") if isinstance(block.get("placed"), int) else None
         with self._lock:
@@ -971,6 +978,21 @@ class JobScheduler:
             started_file = start_data.get("file_name")
             if started_file:
                 self._queue.update_metadata(job.id, {"started_file": started_file})
+            try:
+                cancelled = self._queue.get_job(job.id).status == JobStatus.CANCELLED
+            except Exception:  # noqa: BLE001
+                cancelled = False
+            if cancelled:
+                # Cancelled in the queue while the plate was being laid out,
+                # and the printer took it anyway: the print is running, so it
+                # is watched to its end (recorded as cancelled) and no more
+                # of the run is queued.  Stopping the machine is cancel_print.
+                logger.warning(
+                    "Job %s was cancelled while its plate was being prepared, and %s has started it; "
+                    "watching it, queueing no more", job.id, printer_name,
+                )
+                self._watch[job.id] = JobWatch(printer_name, last_contact=self._clock())
+                return
             self._queue.mark_printing(job.id)
             self._watch[job.id] = JobWatch(printer_name, last_contact=self._clock())
             self._event_bus.publish(
@@ -985,12 +1007,17 @@ class JobScheduler:
             return
         with self._lock:
             self._active_jobs.pop(job.id, None)
-        code = str(start_data.get("code") or "")
+        code = turn_code or str(start_data.get("code") or "")
         if code in _TURN_CODES:
             # Turned away at the start for another printer's turn: nothing
             # printed, the job keeps its place and waits for that printer.
             self._wait_turn(job, printer_name, sorted(self._last_idle), code, {})
             return
+        try:
+            if self._queue.get_job(job.id).status == JobStatus.CANCELLED:
+                return      # cancelled while it was being prepared, and nothing started: done
+        except Exception:  # noqa: BLE001
+            pass
         why = str(error) if error is not None else str(getattr(result, "message", "") or "the plate did not start")
         self._requeue_or_fail(job.id, f"The next plate of copies did not start on {printer_name}: {why}", [])
 

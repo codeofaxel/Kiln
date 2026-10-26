@@ -482,6 +482,18 @@ def queue_summary() -> dict:
         return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
+def _being_prepared(job_id: str) -> bool:
+    """Whether the running queue is still laying out this job's plate
+    (``JobScheduler._preparing``): nothing has reached the printer yet."""
+    import kiln.server as _srv
+
+    scheduler = getattr(_srv, "_scheduler", None)
+    try:
+        return scheduler is not None and job_id in scheduler._preparing
+    except Exception:
+        return False
+
+
 def cancel_queued_job(job_id: str) -> dict:
     """Remove one job from the print queue while it is still WAITING.
 
@@ -509,7 +521,8 @@ def cancel_queued_job(job_id: str) -> dict:
         # allows QUEUED/STARTING/PRINTING/PAUSED -> CANCELLED, so without
         # this the row and the machine disagree about reality.
         current = _srv._get_queue().get_job(job_id)
-        if current.status.value in _ON_THE_MACHINE:
+        was_being_prepared = current.status.value in _ON_THE_MACHINE and _being_prepared(job_id)
+        if current.status.value in _ON_THE_MACHINE and not was_being_prepared:
             return _srv._error_dict(
                 f"Job {job_id!r} is already at the printer (status: "
                 f"{current.status.value}), so removing it from the queue "
@@ -525,6 +538,17 @@ def cancel_queued_job(job_id: str) -> dict:
                 source="mcp",
             )
         )
+        if was_being_prepared:
+            # A plate of copies being laid out: the slice is stopped from
+            # going further, and the queue says so if the printer took it.
+            return {
+                "success": True,
+                "job": job.to_dict(),
+                "message": (
+                    f"Job {job_id!r} was being laid out for the printer; nothing more of this run is queued. If "
+                    "the printer has already started that plate, cancel_print() stops it."
+                ),
+            }
         return {
             "success": True,
             "job": job.to_dict(),

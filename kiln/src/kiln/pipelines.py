@@ -1258,6 +1258,15 @@ def reslice_and_print(
                 data={"remote_name": remote_name, "wrapped_3mf": wrapped_3mf},
                 duration_seconds=time.time() - step_start,
             )
+        except PrinterEngagementError as exc:
+            # Another printer's turn on this plan, met at the upload, the
+            # first gated command: said with its code, so a caller that
+            # waits rather than retries (the queue) can tell.
+            return PipelineStep(
+                name="upload", success=False, message=f"Upload failed: {exc}",
+                data={"code": str((exc.verdict or {}).get("code") or "")},
+                duration_seconds=time.time() - step_start,
+            )
         except Exception as exc:
             return PipelineStep(
                 name="upload",
