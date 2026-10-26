@@ -457,6 +457,14 @@ class MeshyProvider(GenerationProvider):
             for chunk in resp.iter_content(chunk_size=65536):
                 fh.write(chunk)
 
+        if ext == "obj":
+            # Meshy writes its OBJ in glTF's frame (+Y up), so read as
+            # written every model lies on its back.  Its GLB is turned by
+            # load_mesh; the OBJ is turned here, as it lands.
+            from kiln.mesh_frame import stand_up_gltf_frame_obj
+
+            stand_up_gltf_frame_obj(out_path)
+
         file_size = os.path.getsize(out_path)
         prompt = self._prompts.get(job_id, "")
 

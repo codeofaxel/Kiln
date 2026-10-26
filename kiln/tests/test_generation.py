@@ -392,6 +392,46 @@ class TestMeshyProvider:
             p.generate("a vase")
 
     @responses.activate
+    def test_download_stands_an_obj_upright(self, tmp_path):
+        # Meshy writes its OBJ in glTF's frame: up is +Y, the front faces +Z.
+        # A 10 x 10 mm footprint, 40 mm tall, written that way, must reach
+        # Kiln standing 40 mm tall on Z, its UVs and faces untouched.
+        obj = (
+            b"mtllib model.mtl\n"
+            b"v 0 0 0\nv 10 0 0\nv 10 0 10\nv 0 0 10\n"
+            b"v 0 40 0\nv 10 40 0\nv 10 40 10\nv 0 40 10\n"
+            b"vt 0.25 0.75\nvn 0 1 0\n"
+            b"f 1 2 3\nf 1 3 4\nf 5 7 6\nf 5 8 7\n"
+            b"f 1 5 6\nf 1 6 2\nf 2 6 7\nf 2 7 3\n"
+            b"f 3 7 8\nf 3 8 4\nf 4 8 5\nf 4 5 1\n"
+        )
+        responses.add(
+            responses.GET,
+            f"{_BASE_URL}/text-to-3d/task-up",
+            json={"status": "SUCCEEDED", "progress": 100,
+                  "model_urls": {"obj": "https://cdn.meshy.ai/up.obj"}},
+            status=200,
+        )
+        responses.add(responses.GET, "https://cdn.meshy.ai/up.obj", body=obj, status=200)
+
+        p = MeshyProvider(api_key="test-key")
+        p.get_job_status("task-up")
+        result = p.download_result("task-up", output_dir=str(tmp_path))
+
+        from kiln.mesh_frame import load_mesh
+
+        mesh = load_mesh(result.local_path, force="mesh", process=False)
+        extents = mesh.extents
+        assert extents[2] == pytest.approx(40.0)
+        assert extents[0] == pytest.approx(10.0)
+        assert extents[1] == pytest.approx(10.0)
+        text = open(result.local_path, "rb").read()
+        assert b"vt 0.25 0.75" in text
+        assert b"mtllib model.mtl" in text
+        assert b"f 1 2 3" in text
+        assert b"vn 0.0 -0.0 1.0" in text
+
+    @responses.activate
     def test_download_no_urls_raises(self):
         # Poll returns no model_urls.
         responses.add(

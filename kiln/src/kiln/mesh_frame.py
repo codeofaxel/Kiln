@@ -542,6 +542,37 @@ def load_mesh(source: Any, **kwargs: Any) -> Any:
     return scene.to_mesh() if force == "mesh" else scene
 
 
+def stand_up_gltf_frame_obj(path: str) -> None:
+    """Rewrite, in place, an OBJ written in glTF's frame into Kiln's.
+
+    An OBJ names no up axis, so :func:`load_mesh` reads it as written.  Some
+    makers write theirs in glTF's frame anyway (+Y up, front toward +Z), and
+    read as written such a model lies on its back.  A door that knows its OBJ
+    came from one of them calls this as the file lands, so every later read
+    gets the part standing.  The same turn as :data:`GLTF_TO_KILN`, applied
+    to positions (``v``) and normals (``vn``) only: faces, texture
+    coordinates, groups and the MTL reference are copied untouched, so the
+    textures still map.
+    """
+    tmp = f"{path}.turning"
+    with open(path, "rb") as src, open(tmp, "wb") as dst:
+        for line in src:
+            parts = line.split()
+            if len(parts) >= 4 and parts[0] in (b"v", b"vn"):
+                try:
+                    x, y, z = (float(p) for p in parts[1:4])
+                except ValueError:
+                    dst.write(line)
+                    continue
+                # (x, y, z) -> (x, -z, y); any trailing values (vertex
+                # colours) ride along unchanged.
+                turned = [parts[0], repr(x).encode(), repr(-z).encode(), repr(y).encode()]
+                dst.write(b" ".join(turned + parts[4:]) + b"\n")
+            else:
+                dst.write(line)
+    os.replace(tmp, path)
+
+
 #: trimesh's file readers.  Calling one directly skips the turn above.
 _READERS = frozenset({"load", "load_mesh", "load_scene"})
 
