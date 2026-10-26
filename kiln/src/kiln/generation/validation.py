@@ -6201,8 +6201,10 @@ def detect_holes(
     # not the order the file wrote its triangles in.
     triangles = in_geometric_order(triangles)
 
-    # Per-triangle: unit face normal + centroid.
-    tri_normals, tri_centroids = _hole_normals_and_centroids(triangles)
+    # Per-triangle: unit face normal + centroid, read from one corner array
+    # that the edge keys and edge directions below are read from too.
+    corners = _finite_corner_array(triangles)
+    tri_normals, tri_centroids = _hole_normals_and_centroids(triangles, corners)
 
     # Drop degenerate triangles (zero normal) — they'd otherwise match
     # everything in the cohesion BFS.
@@ -6245,8 +6247,8 @@ def detect_holes(
     # Each candidate's three snapped edge keys and each triangle's three
     # edge directions, read once here and handed to the clustering and the
     # wall search, which both key and fold along the same edges.
-    edge_keys = _snapped_edge_keys(triangles, candidate_idx)
-    edge_dirs = _edge_directions(triangles)
+    edge_keys = _snapped_edge_keys(triangles, candidate_idx, corners)
+    edge_dirs = _edge_directions(triangles, corners)
     edge_table: dict[Any, list[int]] = {}
     raw_clusters = _bfs_cluster_by_normal_cohesion(
         candidate_idx,
@@ -6321,17 +6323,19 @@ def _snap_vertex(
 
 def _hole_normals_and_centroids(
     triangles: list[tuple[tuple[float, ...], ...]],
+    corners: numpy.ndarray | None = None,
 ) -> tuple[list[tuple[float, float, float]], list[tuple[float, float, float]]]:
     """Each triangle's unit face normal (zero for a degenerate one) and
     centroid, as the hole detector reads them.
 
-    Read from one array when every triangle has three finite corners, by
+    Read from one array (*corners*, :func:`_finite_corner_array`, built
+    here when not given) when every triangle has three finite corners, by
     the same arithmetic in the same order as the per-triangle loop below,
     so the two agree to the bit; by that loop otherwise.
     """
     import numpy as np
 
-    arr = _finite_corner_array(triangles)
+    arr = _finite_corner_array(triangles) if corners is None else corners
     if arr is not None:
         v0, v1, v2 = arr[:, 0, :], arr[:, 1, :], arr[:, 2, :]
         e1 = v1 - v0
@@ -6397,22 +6401,25 @@ _EdgeKeys = tuple[Any, Any, Any]  # three edge keys, each a pair of snapped corn
 def _snapped_edge_keys(
     triangles: list[tuple[tuple[float, ...], ...]],
     indices: list[int],
+    corners: numpy.ndarray | None = None,
 ) -> list[_EdgeKeys | None]:
     """For each triangle in *indices*, its three edges keyed as the
     clustering keys them -- the two snapped corners, lower first -- in a
     list indexed by triangle (``None`` for a triangle not asked about).
 
-    The corners are snapped in one array round when they can be held
+    The corners (*corners*, :func:`_finite_corner_array`, built here when
+    not given) are snapped in one array round when they can be held
     exactly; otherwise one at a time, by :func:`_snap_vertex`.
     """
     import numpy as np
 
     keys: list[_EdgeKeys | None] = [None] * len(triangles)
-    arr = _finite_corner_array(triangles)
+    arr = _finite_corner_array(triangles) if corners is None else corners
     if arr is not None and float(np.abs(arr).max()) / _HOLE_EDGE_SNAP_TOL_MM < 2.0**62:
-        snapped = np.rint(arr / _HOLE_EDGE_SNAP_TOL_MM).astype(np.int64).tolist()
+        snapped = list(map(tuple, np.rint(arr / _HOLE_EDGE_SNAP_TOL_MM).astype(np.int64).reshape(-1, 3).tolist()))
         for ti in indices:
-            a, b, c = (tuple(v) for v in snapped[ti])
+            at = 3 * ti
+            a, b, c = snapped[at], snapped[at + 1], snapped[at + 2]
             keys[ti] = ((a, b) if a <= b else (b, a), (b, c) if b <= c else (c, b), (c, a) if c <= a else (a, c))
         return keys
     for ti in indices:
@@ -6434,13 +6441,16 @@ def _edge_direction(
 
 def _edge_directions(
     triangles: list[tuple[tuple[float, ...], ...]],
+    corners: numpy.ndarray | None = None,
 ) -> list[list[tuple[float, float, float]]] | None:
     """:func:`_edge_direction` for every edge of every triangle, read in
-    one array pass by the same arithmetic; ``None`` when the triangles
-    cannot be held as one array, and the caller reads each edge itself."""
+    one array pass by the same arithmetic from *corners*
+    (:func:`_finite_corner_array`, built here when not given); ``None``
+    when the triangles cannot be held as one array, and the caller reads
+    each edge itself."""
     import numpy as np
 
-    arr = _finite_corner_array(triangles)
+    arr = _finite_corner_array(triangles) if corners is None else corners
     if arr is None:
         return None
     pa = arr
@@ -6922,47 +6932,53 @@ def _prismatic_walls(
     :returns: ``(axis, triangle indices)`` per wall.
     """
 
-    def is_fold(cos_ab: float) -> bool:
-        return cos_threshold <= cos_ab < _FLAT_COS
-
+    # A fold is ``cos_threshold <= cos < _FLAT_COS``; an edge folds along
+    # the axis when ``|direction . axis| >= _PARALLEL_COS``.  Both are
+    # written out below, in the loop that asks them a few million times on
+    # a large cluster.
+    flat_cos, parallel_cos = _FLAT_COS, _PARALLEL_COS
+    dirs: dict[int, list[tuple[float, float, float]]] | list[list[tuple[float, float, float]]]
     if edge_dirs is None:
-        def direction(ti: int, i: int) -> tuple[float, float, float]:
-            return _edge_direction(triangles, ti, i)
+        dirs = {ti: [_edge_direction(triangles, ti, i) for i in range(3)] for ti in cluster}
     else:
-        def direction(ti: int, i: int) -> tuple[float, float, float]:
-            return edge_dirs[ti][i]
-
-    def folds_along(ti: int, i: int, axis: tuple[float, float, float]) -> bool:
-        d = direction(ti, i)
-        return abs(d[0] * axis[0] + d[1] * axis[1] + d[2] * axis[2]) >= _PARALLEL_COS
+        dirs = edge_dirs
 
     tried: set[tuple[int, int]] = set()
     walls: list[tuple[tuple[float, float, float], list[int]]] = []
     for seed in cluster:
         for i, (other, cos_ab) in enumerate(across[seed]):
-            if other is None or other not in across or not is_fold(cos_ab):
+            if other is None or other not in across or not (cos_threshold <= cos_ab < flat_cos):
                 continue
             crease = (seed, other) if seed < other else (other, seed)
             if crease in tried:
                 continue
             tried.add(crease)
-            axis = direction(seed, i)
+            axis = dirs[seed][i]
+            ax, ay, az = axis
             wall = {seed, other}
             stack = [seed, other]
             while stack:
                 at = stack.pop()
+                at_dirs = dirs[at]
                 for j, (nxt, cos_n) in enumerate(across[at]):
                     if nxt is None or nxt not in across:
                         continue
-                    if is_fold(cos_n):
-                        if not folds_along(at, j, axis):
+                    if cos_threshold <= cos_n < flat_cos:
+                        d = at_dirs[j]
+                        if abs(d[0] * ax + d[1] * ay + d[2] * az) < parallel_cos:
                             continue
                         tried.add((at, nxt) if at < nxt else (nxt, at))
-                    elif cos_n < _FLAT_COS or not any(
-                        o is not None and is_fold(c) and folds_along(nxt, k, axis)
-                        for k, (o, c) in enumerate(across[nxt])
-                    ):
+                    elif cos_n < flat_cos:
                         continue
+                    else:
+                        nxt_dirs = dirs[nxt]
+                        for k, (o, c) in enumerate(across[nxt]):
+                            if o is not None and cos_threshold <= c < flat_cos:
+                                d = nxt_dirs[k]
+                                if abs(d[0] * ax + d[1] * ay + d[2] * az) >= parallel_cos:
+                                    break
+                        else:
+                            continue
                     if nxt not in wall:
                         wall.add(nxt)
                         stack.append(nxt)
