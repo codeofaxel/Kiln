@@ -11,6 +11,7 @@ no manual imports needed.
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any
 
 _logger = logging.getLogger(__name__)
@@ -113,7 +114,7 @@ def _plan_fill(
     )
     if not candidates:
         return _srv._error_dict("No registered printer can accept this file type.", code="NO_ELIGIBLE_PRINTERS")
-    times, per_model, untimed_models = _printer_times(
+    times, per_model, model_of = _printer_times(
         file_path, [str(c["printer_id"]) for c in candidates], adapters, str(material).strip(),
     )
     answer = fleet_fill.ask(
@@ -125,7 +126,7 @@ def _plan_fill(
     if answer.get("success") is not True:
         return answer
     plan = answer["fill"]
-    finish = _finish_estimate(plan, per_model, untimed_models)
+    finish = _finish_estimate(plan, per_model, model_of, set(times), asked=share)
     from kiln import plate_state
 
     seen: dict[str, str] = {}
@@ -150,51 +151,62 @@ def _plan_fill(
         "plan": plan,
         "finish": finish,
         "picture": picture,
-        "message": f"{plan.get('summary')} {finish['sentence'] if finish else ''} {go}".replace("  ", " "),
+        "message": " ".join(
+            part for part in (
+                str(plan.get("summary") or ""),
+                finish["sentence"] if finish else _untimed_sentence(plan, model_of, set(times), asked=share),
+                go,
+            ) if part
+        ),
     }
 
 
 def _printer_times(
     file_path: str, names: list[str], adapters: dict, material: str | None,
-) -> tuple[dict[str, dict[str, float]], dict[str, tuple[float, float]], list[str]]:
+) -> tuple[dict[str, dict[str, float]], dict[str, tuple[float, float]], dict[str, str]]:
     """Each printer's time for the part, from the slicer, for the plan.
 
     One copy and two copies of the part are sliced once per printer MODEL,
     with that model's own profile (:func:`_model_times`), which splits the
     slicer's time into what each copy adds and what each plate costs once;
     each printer adds the print it is still finishing (its own countdown).
-    Returns ``(times per printer, times per model, models with no time)``;
-    a printer whose model could not be sliced here has no time.
+    Returns ``(times per printer, times per model, each printer's model)``;
+    a printer whose model could not be sliced here, or that has no model
+    set, has no time.
     """
     from kiln import plate_state
 
-    by_model: dict[str, list[str]] = {}
+    model_of: dict[str, str] = {}
     for name in names:
         try:
-            model = plate_state.declared_model_of(adapters[name]) or ""
+            model_of[name] = plate_state.declared_model_of(adapters[name]) or ""
         except Exception:  # noqa: BLE001 -- a printer whose model is unknown gets no time
-            model = ""
-        by_model.setdefault(model, []).append(name)
-    per_model = _model_times(file_path, {m: group[0] for m, group in by_model.items() if m}, material)
+            model_of[name] = ""
+    first_of = {}
+    for name, model in model_of.items():
+        if model:
+            first_of.setdefault(model, name)
+    per_model = _model_times(file_path, first_of, material)
     times: dict[str, dict[str, float]] = {}
-    for model, group in by_model.items():
+    for name, model in model_of.items():
         if model not in per_model:
             continue
         per_copy, per_plate = per_model[model]
-        for name in group:
-            try:
-                left = adapters[name].get_job().print_time_left_seconds
-                busy = float(left) if left else 0.0
-            except Exception:  # noqa: BLE001 -- a printer that says nothing adds nothing
-                busy = 0.0
-            times[name] = {
-                "per_copy_seconds": round(per_copy, 1), "per_plate_seconds": round(per_plate, 1), "busy_seconds": busy,
-            }
-    untimed = sorted(m or "a printer with no model set" for m in by_model if m not in per_model)
-    return times, per_model, untimed
+        try:
+            left = adapters[name].get_job().print_time_left_seconds
+            busy = float(left) if left else 0.0
+        except Exception:  # noqa: BLE001 -- a printer that says nothing adds nothing
+            busy = 0.0
+        times[name] = {
+            "per_copy_seconds": round(per_copy, 1), "per_plate_seconds": round(per_plate, 1), "busy_seconds": busy,
+        }
+    return times, per_model, model_of
 
 
-def _finish_estimate(plan: dict, per_model: dict[str, tuple[float, float]], untimed_models: list[str]) -> dict | None:
+def _finish_estimate(
+    plan: dict, per_model: dict[str, tuple[float, float]], model_of: dict[str, str], timed: set[str],
+    *, asked: str = "soonest",
+) -> dict | None:
     """When the run ends, in words, from the plan's own finish: the busiest
     printer's printing time, then the other share's, so the person sees the
     trade.  The time to clear a plate between is the person's and is not
@@ -216,11 +228,8 @@ def _finish_estimate(plan: dict, per_model: dict[str, tuple[float, float]], unti
         f"About {_human_duration(seconds)} of printing on the {which} ({busiest}){between}, by the slicer's own "
         f"estimate for each printer model.{_share_trade(plan, finish)}"
     )
-    if untimed_models:
-        sentence += (
-            f" No time for {', '.join(untimed_models)}: Kiln could not slice the part for it here, so the copies "
-            "are shared evenly."
-        )
+    untimed = _untimed_sentence(plan, model_of, timed, asked=asked)
+    untimed_printers = [str(p) for p in plan.get("untimed") or []]
     return {
         "per_model": {m: {"per_copy_seconds": round(t[0], 1), "per_plate_seconds": round(t[1], 1)} for m, t in per_model.items()},
         "printers_seconds": dict(finish.get("printers_seconds") or {}),
@@ -228,9 +237,37 @@ def _finish_estimate(plan: dict, per_model: dict[str, tuple[float, float]], unti
         "seconds": seconds,
         "share": plan.get("share"),
         "other": finish.get("other"),
-        "untimed_models": untimed_models,
-        "sentence": sentence,
+        "untimed_models": sorted({model_of.get(p, "") for p in untimed_printers if p not in timed} - {""}),
+        "no_model_printers": [p for p in untimed_printers if not model_of.get(p)],
+        "sentence": f"{sentence} {untimed}" if untimed else sentence,
     }
+
+
+def _untimed_sentence(plan: dict, model_of: dict[str, str], timed: set[str], *, asked: str = "soonest") -> str:
+    """Which printers the plan has no time for and why (a model the slicer
+    could not do here, no model set, or a time-left reading Kiln's servers
+    could not use, for a printer *timed* here), and what that changed: an
+    even share when the soonest was asked for, or a finish that leaves them
+    out."""
+    from kiln.fleet_fill_picture import model_words
+
+    untimed = [str(p) for p in plan.get("untimed") or []]
+    if not untimed:
+        return ""
+    if not plan.get("finish"):
+        return (
+            "Kiln could not slice the part here for any of these printers, so the copies are shared evenly "
+            "and no finish time is given."
+        )
+    models = sorted({model_of.get(p, "") for p in untimed if p not in timed} - {""})
+    named = (
+        [model_words(m) for m in models]
+        + [f"{p} (no printer model set)" for p in untimed if not model_of.get(p)]
+        + [f"{p} (its time left could not be read)" for p in untimed if p in timed]
+    )
+    listed = named[0] if len(named) == 1 else f"{', '.join(named[:-1])} or {named[-1]}"
+    then = "the copies are shared evenly" if asked == "soonest" else "the time above leaves them out"
+    return f"Kiln has no time for {listed}, so {then}."
 
 
 def _share_trade(plan: dict, finish: dict) -> str:
@@ -257,37 +294,66 @@ def _share_trade(plan: dict, finish: dict) -> str:
 #: How many printer models are sliced at once while a plan is made.
 _SLICE_WORKERS = 4
 
+#: Slicer times already worked out, keyed by the part's own bytes, the model,
+#: the printer whose profile sliced it and the material, so asking again for
+#: the same run (shared the other way, say) does not slice it again.  Kept for
+#: ten minutes, so a profile changed since is read afresh; the oldest go first.
+_TIMES_KEPT_SECONDS = 600
+_TIMES_KEPT_MAX = 64
+_model_time_cache: dict[tuple[str, str, str, str], tuple[float, tuple[float, float] | None]] = {}
+_model_time_lock = threading.Lock()
+
 
 def _model_times(file_path: str, model_printer: dict[str, str], material: str | None) -> dict[str, tuple[float, float]]:
     """``{model: (seconds each copy adds, seconds each plate costs once)}``
     from the slicer: one copy, then two side by side, sliced with the
     model's own profile for one printer of that model.  A model that could
     not be sliced is left out."""
+    import time
     from concurrent.futures import ThreadPoolExecutor
+
+    digest = _file_digest(file_path)
 
     def one(item: tuple[str, str]) -> tuple[str, tuple[float, float] | None]:
         model, printer = item
-        single = _sliced_seconds(file_path, model, printer, material)
-        if single is None:
-            return model, None
-        pair = None
-        try:
-            from kiln.auto_orient import duplicate_stl_on_plate
-            from kiln.printers.bed_fit import get_build_volume
-
-            bed = get_build_volume(model)
-            if bed:
-                pair_path = duplicate_stl_on_plate(file_path, 2, bed_width_mm=float(bed[0]), bed_depth_mm=float(bed[1]))
-                pair = _sliced_seconds(pair_path, model, printer, material)
-        except Exception:  # noqa: BLE001 -- two copies that will not lay out leave the one-copy time
-            pair = None
-        if pair is not None and pair > single:
-            per_copy = pair - single
-            return model, (per_copy, max(0.0, single - per_copy))
-        return model, (single, 0.0)
+        key = (digest or "", model, printer, material or "")
+        with _model_time_lock:
+            kept = _model_time_cache.get(key)
+        if digest and kept and time.monotonic() - kept[0] < _TIMES_KEPT_SECONDS:
+            return model, kept[1]
+        result = _sliced_model_time(file_path, model, printer, material)
+        if digest:
+            with _model_time_lock:
+                _model_time_cache[key] = (time.monotonic(), result)
+                while len(_model_time_cache) > _TIMES_KEPT_MAX:
+                    _model_time_cache.pop(next(iter(_model_time_cache)))
+        return model, result
 
     with ThreadPoolExecutor(max_workers=_SLICE_WORKERS) as pool:
         return {model: t for model, t in pool.map(one, model_printer.items()) if t is not None}
+
+
+def _sliced_model_time(file_path: str, model: str, printer: str, material: str | None) -> tuple[float, float] | None:
+    """``(seconds each copy adds, seconds each plate costs once)`` for one
+    model, or ``None`` when the slicer could not do the part for it."""
+    single = _sliced_seconds(file_path, model, printer, material)
+    if single is None:
+        return None
+    pair = None
+    try:
+        from kiln.auto_orient import duplicate_stl_on_plate
+        from kiln.printers.bed_fit import get_build_volume
+
+        bed = get_build_volume(model)
+        if bed:
+            pair_path = duplicate_stl_on_plate(file_path, 2, bed_width_mm=float(bed[0]), bed_depth_mm=float(bed[1]))
+            pair = _sliced_seconds(pair_path, model, printer, material)
+    except Exception:  # noqa: BLE001 -- two copies that will not lay out leave the one-copy time
+        pair = None
+    if pair is not None and pair > single:
+        per_copy = pair - single
+        return per_copy, max(0.0, single - per_copy)
+    return single, 0.0
 
 
 def _sliced_seconds(file_path: str, model: str, printer: str, material: str | None) -> float | None:
@@ -343,22 +409,24 @@ def _draw_fill(plan: dict, file_path: str, adapters: dict, placement: Any, finis
     )
 
 
-def _same_file(a: str, b: str) -> bool:
-    """Whether two paths hold the same bytes."""
+def _file_digest(path: str) -> str | None:
+    """The SHA-256 of the file's bytes, or ``None`` when it cannot be read."""
     import hashlib
 
-    def digest(path: str) -> str | None:
-        try:
-            h = hashlib.sha256()
-            with open(path, "rb") as fh:
-                for chunk in iter(lambda: fh.read(1 << 20), b""):
-                    h.update(chunk)
-            return h.hexdigest()
-        except OSError:
-            return None
+    try:
+        h = hashlib.sha256()
+        with open(path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except OSError:
+        return None
 
-    first = digest(a)
-    return first is not None and first == digest(b)
+
+def _same_file(a: str, b: str) -> bool:
+    """Whether two paths hold the same bytes."""
+    first = _file_digest(a)
+    return first is not None and first == _file_digest(b)
 
 
 def _submit_fill(file_path: str, plan_id: str) -> dict:
@@ -740,6 +808,8 @@ class _RecoveryToolsPlugin:
                 priority: "low", "normal" or "high".
                 share: "soonest" (the default) or "even".
             """
+            import os
+
             import kiln.server as _srv
 
             if err := _srv._check_auth("queue"):
@@ -748,6 +818,11 @@ class _RecoveryToolsPlugin:
                 return _srv._error_dict("copies must be a whole number of at least 1", code="VALIDATION_ERROR")
             if share not in ("soonest", "even"):
                 return _srv._error_dict('share must be "soonest" or "even"', code="VALIDATION_ERROR")
+            if not os.path.isfile(file_path):
+                return _srv._error_dict(
+                    f"There is no part at {file_path}. Check the path; nothing was planned or queued.",
+                    code="FILE_NOT_FOUND",
+                )
             if submit:
                 if not plan_id:
                     return _srv._error_dict("submit needs the plan_id the plan answered.", code="VALIDATION_ERROR")

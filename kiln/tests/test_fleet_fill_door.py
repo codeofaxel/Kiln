@@ -133,6 +133,9 @@ def world(tmp_path, monkeypatch):
     # The slicer is stood in for unless a test says otherwise: a plan's
     # times are pinned in TestHowLongTheRunTakes, and once for real below.
     monkeypatch.setattr(recovery_tools, "_sliced_seconds", lambda *a, **k: None)
+    # Each test's stand-in slicer is its own world: times kept from another
+    # test's stand-in are not this one's.
+    monkeypatch.setattr(recovery_tools, "_model_time_cache", {}, raising=False)
     printers = {n: _printer(n) for n in ("A", "B", "C")}
     for n, a in printers.items():
         reg.register(n, a)
@@ -328,6 +331,28 @@ def test_the_picture_puts_the_printers_that_need_the_person_first():
     from PIL import Image
 
     assert Image.open(path).size[0] >= 300
+
+
+# --- defects a lap found (2026-10-26; each fails at 27a834df) ---
+
+
+def test_the_picture_never_strands_a_date_s_day_on_its_own_line():
+    """The lap saw "since Oct" end one line of a printer's note and "26"
+    open the next; the suite only checked the picture was drawn."""
+    from PIL import Image, ImageDraw
+
+    from kiln._fonts import load_font
+    from kiln.fleet_fill_picture import _wrap
+
+    d, font = ImageDraw.Draw(Image.new("RGB", (1, 1))), load_font(15)
+    text = "A1-06 is marked needs repair since Oct 26"
+    width = d.textlength("A1-06 is marked needs repair since Oct", font=font) + 2
+    lines = _wrap(d, text, font, width)
+    assert lines[-1].endswith("Oct 26") and " ".join(lines) == text, lines
+    text = "Kiln found no spot on this plate for a 30 mm by 30 mm part beside vase"
+    width = d.textlength("Kiln found no spot on this plate for a 30", font=font) + 2
+    lines = _wrap(d, text, font, width)
+    assert not any(line.split()[-1].isdigit() for line in lines) and " ".join(lines) == text, lines
 
 
 class TestTheGoIsForThePartSeen:
@@ -542,8 +567,7 @@ class TestHowLongTheRunTakes:
         assert "B" not in world.sent[-1]["times"] and out["finish"]["untimed_models"] == ["bambu_p1s"]
         assert out["finish"]["sentence"] == (
             "About 1h 46m of printing on the busiest printer Kiln could time (A), by the slicer's own estimate for "
-            "each printer model. No time for bambu_p1s: Kiln could not slice the part for it here, so the copies "
-            "are shared evenly."
+            "each printer model. Kiln has no time for Bambu P1S, so the copies are shared evenly."
         )
 
     def test_with_no_slicer_the_plan_carries_no_time(self, world, monkeypatch):
@@ -557,6 +581,90 @@ class TestHowLongTheRunTakes:
         out = world.tools["plan_multi_copy_split"](world.part, 40, material="PLA", share="fastest")
         assert out["success"] is False and out["error"]["code"] == "VALIDATION_ERROR"
         assert sliced == [] and world.sent == []
+
+
+    def test_a_part_changed_since_is_sliced_again(self, world, monkeypatch):
+        """Times are kept for the part's own bytes: a part changed since is
+        timed afresh, never given the old part's times."""
+        sliced = self._fake_slicer(monkeypatch, {("bambu_a1", False): 1000.0, ("bambu_a1", True): 1600.0})
+        _plan(world, 40)
+        _cube(world.part, w=40.0)
+        _plan(world, 40)
+        assert len(sliced) == 4
+
+    # --- defects a lap found (2026-10-26; each fails at 27a834df) ---
+
+    def test_a_part_that_is_not_there_is_said_plainly_and_nothing_is_asked(self, world, monkeypatch, tmp_path):
+        """The lap found a missing STL answered "send the part, not a sliced
+        file": the servers read no part and took it for G-code."""
+        sliced = self._fake_slicer(monkeypatch, {})
+        out = world.tools["plan_multi_copy_split"](str(tmp_path / "gone.stl"), 40, material="PLA")
+        assert out["success"] is False and out["error"]["code"] == "FILE_NOT_FOUND"
+        assert "no part at" in out["error"]["message"] and "sliced" not in out["error"]["message"]
+        assert world.sent == [] and sliced == []
+        plan_id = _plan(world)["plan_id"]
+        gone = world.tools["plan_multi_copy_split"](str(tmp_path / "gone.stl"), 40, plan_id=plan_id, submit=True)
+        assert gone["error"]["code"] == "FILE_NOT_FOUND" and world.q.list_jobs() == []
+
+    def test_asking_again_for_the_other_share_does_not_slice_again(self, world, monkeypatch):
+        """The lap found every plan sliced every model afresh, so switching
+        to share="even" right after seeing the plan paid the whole slicing
+        time again.  The suite missed it because each test planned once."""
+        sliced = self._fake_slicer(monkeypatch, {("bambu_a1", False): 1000.0, ("bambu_a1", True): 1600.0})
+        _plan(world, 40, A=(10, 0, 0, "clear"), B=(6, 4, 1, "occupied"))
+        _plan(world, 40, share="even", A=(10, 0, 0, "clear"), B=(6, 4, 1, "occupied"))
+        assert sorted(sliced) == [("bambu_a1", "one"), ("bambu_a1", "pair")], "sliced once for both asks"
+        assert world.sent[-1]["times"] == world.sent[-2]["times"] and world.sent[-1]["share"] == "even"
+
+    def test_with_no_slicer_the_plan_says_why_it_shared_evenly(self, world, monkeypatch):
+        """The lap found a plan with no slicer time at all shared the copies
+        evenly and said nothing about it, though the soonest was asked for."""
+        self._fake_slicer(monkeypatch, {})
+        out = _plan(world, 40, None, "even", ("A", "B"))
+        assert out["finish"] is None
+        assert (
+            "Kiln could not slice the part here for any of these printers, so the copies are shared evenly "
+            "and no finish time is given." in out["message"]
+        )
+
+    def test_the_no_time_sentence_names_models_as_people_say_them_and_printers_with_none(self, world, monkeypatch):
+        """The lap found the sentence naming raw model ids (``bambu_p1s``) and
+        "a printer with no model set" without saying which printer."""
+        world.printers["B"].declared_printer_model.return_value = "bambu_p1s"
+        world.printers["B"]._printer_model = "bambu_p1s"
+        world.printers["C"].declared_printer_model.return_value = None
+        world.printers["C"]._printer_model = None
+        self._fake_slicer(monkeypatch, {("bambu_a1", False): 1000.0, ("bambu_a1", True): 1600.0})
+        finish = {"seconds": 6400.0, "busiest": "A", "printers_seconds": {"A": 6400.0}, "plates": 2, "other": None}
+        out = _plan(world, 40, finish, "even", ("B", "C"), A=(10, 0, 0, "clear"), B=(6, 4, 1, "occupied"))
+        assert out["finish"]["sentence"].endswith(
+            "Kiln has no time for Bambu P1S or C (no printer model set), so the copies are shared evenly."
+        )
+        assert out["finish"]["no_model_printers"] == ["C"]
+
+    def test_a_printer_whose_time_left_could_not_be_used_is_named_for_that(self, world, monkeypatch):
+        """The lap found a printer the servers left untimed for an odd
+        time-left reading would have been named as a model the slicer could
+        not do, though its model sliced fine."""
+        self._fake_slicer(monkeypatch, {("bambu_a1", False): 1000.0, ("bambu_a1", True): 1600.0})
+        world.printers["B"].get_job.return_value = JobProgress(print_time_left_seconds=-5)
+        finish = {"seconds": 6400.0, "busiest": "A", "printers_seconds": {"A": 6400.0}, "plates": 2, "other": None}
+        out = _plan(world, 40, finish, "even", ("B",), A=(10, 0, 0, "clear"), B=(6, 4, 1, "occupied"))
+        assert out["finish"]["sentence"].endswith(
+            "Kiln has no time for B (its time left could not be read), so the copies are shared evenly."
+        )
+        assert out["finish"]["untimed_models"] == []
+
+    def test_a_model_only_on_printers_the_plan_does_not_use_is_not_named(self, world, monkeypatch):
+        """The lap found the sentence naming every registered model the slicer
+        could not do, including ones on printers the plan left out entirely."""
+        world.printers["C"].declared_printer_model.return_value = "bambu_p1s"
+        world.printers["C"]._printer_model = "bambu_p1s"
+        self._fake_slicer(monkeypatch, {("bambu_a1", False): 1000.0, ("bambu_a1", True): 1600.0})
+        finish = {"seconds": 6400.0, "busiest": "A", "printers_seconds": {"A": 6400.0, "B": 3600.0}, "plates": 2,
+                  "other": {"share": "even", "seconds": 7000.0, "plates": 2}}
+        out = _plan(world, 40, finish, "soonest", A=(10, 0, 0, "clear"), B=(6, 0, 0, "occupied"))
+        assert "p1s" not in out["message"].lower() and out["finish"]["untimed_models"] == []
 
 
 @pytest.mark.skipif(not __import__("shutil").which("prusa-slicer") and not os.path.exists(

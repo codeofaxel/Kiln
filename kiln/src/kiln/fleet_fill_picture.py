@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import tempfile
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -144,7 +145,7 @@ def _tile(
 ) -> None:
     name = str(row.get("printer") or "")
     d.text((x0, y0), _fit(d, name, mid, _TILE_W), font=mid, fill=_TEXT)
-    d.text((x0, y0 + 22), _fit(d, _model_words(models.get(name) or ""), small, _TILE_W), font=small, fill=_TEXT_DIM)
+    d.text((x0, y0 + 22), _fit(d, model_words(models.get(name) or ""), small, _TILE_W), font=small, fill=_TEXT_DIM)
 
     bed = beds.get(name)
     bw, bd = (float(bed[0]), float(bed[1])) if bed and len(bed) >= 2 and bed[0] and bed[1] else (1.0, 1.0)
@@ -192,8 +193,20 @@ def _tile(
         d.text((x0, note_y + i * 18), line, font=small, fill=colour)
 
 
+_NUMBER = re.compile(r"^\d+(?:[.,]\d+)?[.,;:]?$")
+
+
 def _wrap(d: Any, text: str, font: Any, width: float, max_lines: int = _NOTE_LINES) -> list[str]:
-    words, lines, line = text.split(), [], ""
+    # A number stays with the word before it and the word after it ("since
+    # Oct 26", "a 30 mm part"), so no line ends on a number or opens on its unit.
+    words, lines, line, glue = [], [], "", False
+    for word in text.split():
+        number = bool(_NUMBER.match(word))
+        if words and (number or glue):
+            words[-1] = f"{words[-1]} {word}"
+        else:
+            words.append(word)
+        glue = number
     for word in words:
         trial = f"{line} {word}".strip()
         if d.textlength(trial, font=font) <= width or not line:
@@ -216,7 +229,7 @@ def _hours(seconds: float) -> str:
     return _human_duration(seconds)
 
 
-def _model_words(model: str) -> str:
+def model_words(model: str) -> str:
     """``bambu_p1s`` as a person reads it: ``Bambu P1S``."""
     return " ".join(w.upper() if any(c.isdigit() for c in w) else w.capitalize() for w in model.split("_") if w)
 
