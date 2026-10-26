@@ -304,12 +304,9 @@ def auth_login(no_browser: bool, timeout: int, provider: str | None) -> None:
     """Sign in to your Kiln account via OAuth (Google / Apple / GitHub).
 
     This is KILN ACCOUNT AUTHENTICATION — use this to log in to the
-    Kiln REST API + workshop as yourself.  Completely distinct from
-    ``kiln identity link``, which attaches a provider identity (e.g.
-    GitHub) to your tenant for design-release signing.  If you want
-    to "log in to Kiln", this is the command.  If you want to
-    "connect my GitHub account so I can sign design releases with my
-    GitHub identity", that's ``kiln identity link``.
+    Kiln REST API + workshop as yourself.  If you want to "log in to
+    Kiln", this is the command.  Connecting a GitHub identity for
+    signing design releases is a different thing, and is not this.
 
     Launches the device-code flow: opens your browser to a small
     provider-picker page, polls until you finish signing in, then
