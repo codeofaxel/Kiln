@@ -286,6 +286,14 @@ _EXACT_ENGINE_FLAG = "--backend=cgal"
 EXACT_ENGINE_TIMEOUT_S = 60.0
 #: Files above this are not loaded to check; the cost is memory, not time.
 _CLOSURE_CHECK_MAX_BYTES = 256 * 1024 * 1024
+#: How far the exact engine's part may differ from the fast engine's and still
+#: be the same part: its volume as a share of the fast one's (judged only when
+#: the open file has a volume to judge; a file missing a whole face has none),
+#: and its outer size as a share of the fast one's diagonal.  A closing seam moves these by far
+#: less; a dropped feature moves them by far more (2026-10-26: OpenSCAD
+#: 2026.08.09's exact engine returned a photo-relief coaster without its
+#: relief, 12% more volume, and the closed result was taken).
+_SAME_PART_SHARE = 0.01
 
 
 def _is_open_mesh(path: str) -> bool:
@@ -308,6 +316,32 @@ def _is_open_mesh(path: str) -> bool:
         return False
 
 
+def _same_part(fast_path: str, exact_path: str) -> bool:
+    """True when the exact engine's file is the fast engine's part, closed.
+
+    Anything it cannot judge counts as the same part, as before this check.
+    """
+    try:
+        import numpy as np
+        import trimesh
+
+        # The fast file is set aside as "<name>.stl.fast": name the type.
+        fast = trimesh.load(fast_path, file_type="stl", force="mesh")
+        exact = trimesh.load(exact_path, file_type="stl", force="mesh")
+        if not len(fast.faces) or not len(exact.faces):
+            return len(fast.faces) == len(exact.faces)
+        diag = float(np.linalg.norm(fast.extents)) or 1.0
+        if float(np.abs(fast.bounds - exact.bounds).max()) > _SAME_PART_SHARE * diag:
+            return False
+        fast_volume = abs(float(fast.volume))
+        if not np.isfinite(fast_volume) or fast_volume <= _SAME_PART_SHARE * float(np.prod(fast.extents)):
+            return True  # no volume to compare against; the outer size agreed
+        return abs(abs(float(exact.volume)) - fast_volume) <= _SAME_PART_SHARE * fast_volume
+    except Exception:  # noqa: BLE001 — an unreadable file leaves the old behaviour
+        logger.debug("same-part check could not read %s / %s", fast_path, exact_path, exc_info=True)
+        return True
+
+
 def _closed_by_the_exact_engine(
     argv: list[str],
     fast: subprocess.CompletedProcess,
@@ -318,7 +352,8 @@ def _closed_by_the_exact_engine(
     output_path: str | None,
     attempts: int,
 ) -> subprocess.CompletedProcess:
-    """The exact engine's file when the fast one wrote an open mesh and it closes it."""
+    """The exact engine's file when the fast one wrote an open mesh and it
+    closes it into the same part; the fast file otherwise."""
     if not output_path:
         return fast
     path = os.path.join(cwd, output_path) if cwd and not os.path.isabs(output_path) else output_path
@@ -335,7 +370,14 @@ def _closed_by_the_exact_engine(
                                 output_path=output_path, attempts=attempts)
     except subprocess.TimeoutExpired:
         exact = None
-    if exact is not None and exact.returncode == 0 and os.path.isfile(path) and not _is_open_mesh(path):
+    closed = exact is not None and exact.returncode == 0 and os.path.isfile(path) and not _is_open_mesh(path)
+    if closed and not _same_part(kept, path):
+        logger.warning("OpenSCAD's exact engine closed %s but changed the part (it lost or added "
+                       "geometry the fast engine made); keeping the fast engine's file.",
+                       os.path.basename(path))
+        os.replace(kept, path)
+        return fast
+    if closed:
         os.remove(kept)
         logger.info("OpenSCAD's fast engine left %s open; the exact engine closed it.",
                     os.path.basename(path))

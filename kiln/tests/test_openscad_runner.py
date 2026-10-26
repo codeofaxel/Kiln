@@ -710,3 +710,46 @@ class TestOpenFastCompilesAreClosedByTheExactEngine:
         assert mesh.is_watertight
         assert len(mesh.split(only_watertight=False)) == 1
         assert float(mesh.volume) == pytest.approx(738.0, abs=1e-3)
+
+
+class TestTheExactEngineMustKeepThePart:
+    """A closed file is not enough: it must be the part the fast engine made.
+
+    OpenSCAD 2026.08.09's exact engine closed a photo-relief coaster by
+    returning the plain coaster, and the carve vanished (2026-10-26, live).
+    """
+
+    @staticmethod
+    def _stl(mesh) -> str:
+        return mesh.export(file_type="stl_ascii")
+
+    @staticmethod
+    def _parts():
+        trimesh = pytest.importorskip("trimesh")
+        pytest.importorskip("manifold3d")
+        plain = trimesh.creation.box(extents=(40, 40, 7))
+        pocket = trimesh.creation.box(extents=(20, 20, 4)).apply_translation((0, 0, 2.0))
+        carved = plain.difference(pocket)
+        opened = carved.copy()
+        smallest = int(opened.area_faces.argmin())
+        opened.update_faces([i for i in range(len(opened.faces)) if i != smallest])
+        assert not opened.is_watertight
+        return plain, carved, opened
+
+    def test_an_exact_engine_that_drops_the_carve_leaves_the_fast_file(self, monkeypatch, tmp_path):
+        plain, _carved, opened = self._parts()
+        out = tmp_path / "out.stl"
+        fake = _EngineFake(out, [self._stl(opened), self._stl(plain)])
+        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", fake)
+        result = run_openscad(_fast(out), output_path=str(out))
+        assert result.returncode == 0 and len(fake.argvs) == 2
+        assert out.read_text() == self._stl(opened), "the carve must not be traded for a closed file"
+        assert not Path(f"{out}.fast").exists()
+
+    def test_an_exact_engine_that_closes_the_same_part_is_taken(self, monkeypatch, tmp_path):
+        _plain, carved, opened = self._parts()
+        out = tmp_path / "out.stl"
+        fake = _EngineFake(out, [self._stl(opened), self._stl(carved)])
+        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", fake)
+        run_openscad(_fast(out), output_path=str(out))
+        assert out.read_text() == self._stl(carved)
