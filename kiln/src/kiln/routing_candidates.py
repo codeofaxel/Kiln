@@ -68,12 +68,46 @@ def adapter_supports_extension(adapter: Any, extension: str) -> bool:
         return True
 
 
+def version_results_by_machine(db: Any, version_id: str | None) -> dict[str, dict[str, int]]:
+    """Each machine's settled results printing *version_id*, keyed by machine
+    fingerprint (:meth:`kiln.persistence.KilnDB.settled_version_results`);
+    ``{}`` for no version, no store, or a version never printed here.  Never
+    raises: a read that fails leaves every candidate without the block,
+    which the router reads as no history, never as a bad one."""
+    if not version_id or db is None:
+        return {}
+    try:
+        return dict(db.settled_version_results(version_id))
+    except Exception:  # noqa: BLE001 -- history is a refinement, never a blocker
+        logger.debug("settled results for version %s not read", version_id, exc_info=True)
+        return {}
+
+
+def repair_block_by_machine(db: Any, fingerprint: str | None) -> dict[str, Any] | None:
+    """The ``repair`` block for one machine (:func:`kiln.machine_repairs.routing_block`):
+    ``{"status": "needed", "since"}`` for a machine marked out of service,
+    ``{"status": "done", "at", "kind"}`` for a repaired one, ``None`` for a
+    machine with nothing on record, no store, or no stable identity.  Never
+    raises: a record that cannot be read leaves the candidate without the
+    block, which the router reads as nothing said."""
+    if not fingerprint or db is None:
+        return None
+    try:
+        from kiln.machine_repairs import condition_summary, routing_block
+
+        return routing_block(condition_summary(db.machine_condition(fingerprint)))
+    except Exception:  # noqa: BLE001 -- a condition is a refinement, never a blocker
+        logger.debug("repair record for a candidate not read", exc_info=True)
+        return None
+
+
 def collect_routing_candidates(
     *,
     adapters: dict[str, Any],
     material: str,
     pending_counts: dict[str, int] | None = None,
     file_extension: str | None = None,
+    version_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Build router candidate dicts from *adapters*.
 
@@ -86,9 +120,18 @@ def collect_routing_candidates(
         estimates.  Missing entries count as zero.
     :param file_extension: Restrict to adapters that accept this
         extension, e.g. ``".3mf"``.
+    :param version_id: The kept design version being printed, when the
+        door knows it.  Each candidate that has SETTLED prints of that
+        version on this computer then carries ``version_results``:
+        ``{"completed", "failed", "partial"}`` counts for that machine
+        (:func:`version_results_by_machine`, the machine known by its
+        fingerprint, never sent), and the router scores it by them.  A
+        candidate with no settled print of the version carries no block,
+        and the router reads that as no history.
     :returns: Candidate dicts shaped for ``JobRouter.route_job``.
     """
     from kiln.persistence import get_db
+    from kiln.registry import stable_machine_fingerprint
 
     pending = pending_counts or {}
     file_ext = (file_extension or "").lower().strip()
@@ -98,6 +141,8 @@ def collect_routing_candidates(
         tracker_db = get_db()
     except Exception:
         tracker_db = None
+
+    by_machine = version_results_by_machine(tracker_db, version_id)
 
     tracker = None
     if tracker_db is not None:
@@ -160,18 +205,31 @@ def collect_routing_candidates(
         if status in _BUSY_STATES:
             estimated_wait_s = max(estimated_wait_s, _ASSUMED_SECONDS_PER_QUEUED_JOB)
 
-        candidates.append(
-            {
-                "printer_id": name,
-                "printer_model": name,
-                "status": status,
-                "queue_depth": queue_depth,
-                "supported_materials": supported_materials,
-                "success_rate": success_rate,
-                "estimated_wait_s": estimated_wait_s,
-                "print_speed_factor": 1.0,
-            }
-        )
+        candidate: dict[str, Any] = {
+            "printer_id": name,
+            "printer_model": name,
+            "status": status,
+            "queue_depth": queue_depth,
+            "supported_materials": supported_materials,
+            "success_rate": success_rate,
+            "estimated_wait_s": estimated_wait_s,
+            "print_speed_factor": 1.0,
+        }
+        # This machine's own settled prints of the version: looked up by the
+        # fingerprint the print row was keyed on, carried as counts under the
+        # registry NAME.  The fingerprint stays on this computer.
+        fingerprint = stable_machine_fingerprint(adapter)
+        if by_machine:
+            results = by_machine.get(fingerprint or "")
+            if results:
+                candidate["version_results"] = dict(results)
+        # What the person said about the machine's condition, keyed the same
+        # way: a machine marked needs repair is not a choice, and a repaired
+        # one is judged by its prints since.  Status and time only.
+        repair = repair_block_by_machine(tracker_db, fingerprint)
+        if repair:
+            candidate["repair"] = repair
+        candidates.append(candidate)
 
     # Plain machine code runs anywhere, so an empty result here means
     # capability metadata excluded every printer rather than the fleet

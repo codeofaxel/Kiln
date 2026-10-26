@@ -291,6 +291,44 @@ def _step_block(guide: dict[str, Any], n: int, *, maker: str, source_url: str | 
     return block
 
 
+#: What a guide's topic suggests was repaired, in the repair record's own
+#: words (:data:`kiln.machine_repairs.KINDS`).  Only topics that fix or
+#: replace a part: routine care (lubrication, a bed level) and firmware are
+#: not repairs, and a guide on them offers no mark.  A suggestion only --
+#: a "nozzle" guide may be a clean, so the agent asks the person first.
+REPAIR_KIND_OF_TOPIC: dict[str, str] = {
+    "nozzle": "nozzle",
+    "hotend": "hotend",
+    "extruder_gears": "extruder",
+    "belts": "belts",
+    "cutter": "other",
+    "ptfe_tube": "other",
+    "filament_sensor": "other",
+}
+
+
+def _record_the_repair(topic: Any, printer_name: str | None) -> dict[str, Any] | None:
+    """The last step's pointer to the printer's repair record, or ``None``
+    for a topic that is not a repair."""
+    kind = REPAIR_KIND_OF_TOPIC.get(str(topic or ""))
+    if kind is None:
+        return None
+    import shlex
+
+    return {
+        "tool": "set_machine_repair",
+        "status": "done",
+        "kind": kind,
+        "machine_name": printer_name or None,
+        "command": f"kiln machine repair {shlex.quote(printer_name) if printer_name else '<printer>'} done --kind {kind}",
+        "agent_note": (
+            "If this replaced or fixed a part (not a clean or a check), ask the person whether to mark "
+            "the printer repaired; with their yes, set_machine_repair(machine_name, status=\"done\", "
+            f"kind=\"{kind}\") makes Kiln judge it by its next prints, not the ones before the repair."
+        ),
+    }
+
+
 def run_repair_guide(
     *,
     printer_id: str = "",
@@ -453,6 +491,10 @@ def run_repair_guide(
     if block is None:
         return _srv._error_dict(f"Step {n} is not in this guide.", code="INVALID_INPUT")
     answer = {"success": True, **header, **block}
+    if block.get("done"):
+        record = _record_the_repair(header.get("topic"), printer_name)
+        if record is not None:
+            answer["record_the_repair"] = record
     if not header["printer_must_be_off"]:
         # No power-off gate to pass through, so step 0 rides with every step:
         # the maker's cautions are read before the step, not instead of it.
@@ -489,7 +531,11 @@ def repair_guide(
     printer is off and unplugged; without it the call is refused with
     ``POWER_OFF_REQUIRED`` and the warning itself.  Never set it on a
     person's behalf.  A person who is already partway in (the screw is out)
-    skips ahead with ``step``; Kiln never assumes where they are.
+    skips ahead with ``step``; Kiln never assumes where they are.  The last
+    step of a guide that fixes or replaces a part carries
+    ``record_the_repair``: once the person says it is done, ask whether to
+    mark the printer repaired (``set_machine_repair``), so Kiln judges it by
+    its next prints.
 
     Where Kiln has no guide for the topic it says so: the maker's own
     maintenance index for this model where Kiln knows it (``maker_index_url``),

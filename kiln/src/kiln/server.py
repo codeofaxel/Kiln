@@ -1510,6 +1510,9 @@ def _install_mcp_request_context_capture() -> None:
             # A person's word that the bed is clear, typed in a chat: where
             # this app can draw a dialog, the person is asked directly.
             await _ask_the_person_about_the_bed(name, arguments, context)
+            # A printer marked from another computer that may be this one:
+            # where this app can draw a dialog, the person is asked directly.
+            await _ask_the_person_about_the_machine(name, arguments, context)
             # ``null`` for a non-Optional field and a bare string for a list
             # field are coerced here, once, for every tool — see
             # kiln.tool_args.  Everything else pydantic still judges.
@@ -2857,6 +2860,57 @@ async def _ask_the_person_about_the_bed(tool_name: str, arguments: dict | None, 
     elif answer == ASKED_NO:
         plate_state.note_plate_word_answer(plate_state.WORD_DECLINED)
     _audit("look_at_plate", "bed_question_answered", details={"printer": target_name, "answer": answer})
+
+
+async def _ask_the_person_about_the_machine(tool_name: str, arguments: dict | None, ctx: Any) -> None:
+    """``set_machine_repair`` on a signed-in computer: when the account has
+    an open question about the printer named -- a printer of the same model
+    was marked from another computer, and nothing says whether it is this
+    one -- and the connected app can draw a dialog, the person is asked
+    before the mark, in a dialog the assistant does not hold.  A yes links
+    the two records on the account; a no is remembered, so the pair is
+    never asked again; a question that could not be put is left in the
+    tool's own reply (``questions``), where ``same_as`` / ``different_from``
+    answer it.  Never asked for a call that is itself an answer, on the
+    hosted server, or where no dialog can be drawn.  Never raises.
+    """
+    args = arguments if isinstance(arguments, dict) else {}
+    if tool_name != "set_machine_repair" or ctx is None or args.get("same_as") or args.get("different_from"):
+        return
+    try:
+        if _hosted_now():
+            return
+        if not host_can_ask_the_user(mcp, ctx) or screen_code.host_dialog_hook(_host_client_name(ctx)):
+            return
+        from kiln import machine_repair_courier as courier
+        from kiln.auth_session import resolve_api_bearer
+        from kiln.mcp_compat import ASKED_NO, ASKED_YES, ask_user_yes_or_no
+        from kiln.machine_repairs import _resolve
+
+        if not resolve_api_bearer().token:
+            return
+        adapter, printer_name = _resolve(str(args.get("machine_name") or ""))
+        await asyncio.to_thread(courier.sync, timeout=courier._ACCOUNT_REPLY_WAIT_S)
+        questions = courier.open_questions(adapter)
+        if not questions:
+            return
+        question = questions[0]
+        answer = await ask_user_yes_or_no(
+            ctx, question["words"] or f"Is the printer marked from your other computer this one ({printer_name})?",
+            title="IsThisThePrinter", yes="Yes, the same printer", no="No, a different printer",
+        )
+    except Exception:  # noqa: BLE001 -- a question that could not be put is not an answer
+        logger.debug("the person could not be asked about the printer", exc_info=True)
+        return
+    if answer not in (ASKED_YES, ASKED_NO):
+        return
+    try:
+        await asyncio.to_thread(courier.answer_question, question["id"], same=answer == ASKED_YES)
+    except Exception:  # noqa: BLE001 -- the account did not take the answer; the reply still carries the question
+        logger.debug("the printer question's answer did not reach the account", exc_info=True)
+        return
+    _audit("set_machine_repair", "printer_question_answered",
+           details={"printer": printer_name, "answer": answer, "question_id": question["id"]})
 
 
 def _host_client_name(ctx: Any) -> str:
@@ -12953,6 +13007,10 @@ def fleet_status() -> dict:
     Returns a list of printer snapshots including name, backend type,
     connection status, operational state, and temperatures.  Printers
     that fail to respond are reported as offline rather than raising.
+    A printer the person marked with ``set_machine_repair`` carries a
+    ``repair`` block (needs repair since, or repaired at and what), and
+    ``needs_repair_printers`` lists the ones out of service: routing does
+    not choose them, though they may read as idle.
 
     If no printers are registered yet, the current adapter (from env config)
     is auto-registered as "default".
@@ -13002,6 +13060,21 @@ def fleet_status() -> dict:
             if status_is_occupied(row_run_state(p))
             or str(p.get("state", "")).lower() == "starting"
         ]
+        # What the person said about each machine (set_machine_repair), read
+        # through the one engine routing reads: status and time only.
+        from kiln.machine_repairs import condition as _repair_condition
+        from kiln.machine_repairs import routing_block as _repair_block
+
+        needs_repair_printers: list[str] = []
+        for p in status:
+            name = p.get("name") or ""
+            if not name:
+                continue
+            block = _repair_block(_repair_condition(name))
+            if block:
+                p["repair"] = block
+                if block["status"] == "needed":
+                    needs_repair_printers.append(name)
         return {
             "success": True,
             "printers": status,
@@ -13012,6 +13085,7 @@ def fleet_status() -> dict:
             "state_counts": state_counts,
             "offline_printers": [n for n in offline_printers if n],
             "busy_printers": [n for n in busy_printers if n],
+            "needs_repair_printers": needs_repair_printers,
         }
     except Exception as exc:
         logger.exception("Unexpected error in fleet_status")
@@ -20221,6 +20295,12 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                     from kiln._pro_nozzle_bridge import forget_recorded_nozzle
 
                     forget_recorded_nozzle()
+                if _name == "record_nozzle_replacement":
+                    # A recorded swap is a repair of the printer, which is
+                    # here, not on the servers that recorded it.
+                    from kiln.machine_repairs import after_served_swap
+
+                    answer = after_served_swap(answer, call)
                 # A make was built on the servers: its paths are there, not
                 # here.  Say so, and fetch its look for the stage.
                 return served_makes.arrive(

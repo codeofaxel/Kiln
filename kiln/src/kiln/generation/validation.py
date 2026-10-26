@@ -639,6 +639,10 @@ def in_geometric_order(
     of the order a file or a mesh library wrote it in.  Only for readings:
     a door that writes per-triangle results back beside the file keeps the
     file's own order.
+
+    The corners of the list returned are the caller's own corner tuples,
+    turned and reordered, never copies: a corner several triangles share
+    stays one object, as the parsers hand it over.
     """
     import numpy as np
 
@@ -658,7 +662,11 @@ def in_geometric_order(
         first = np.where(lower, corner, first)
     turned = np.stack([tris[rows, (first + k) % 3] for k in range(3)], axis=1)
     order = np.lexsort(turned.reshape(len(tris), 9).T[::-1])
-    return [tuple(map(tuple, tri)) for tri in turned[order].tolist()]
+    starts = first.tolist()
+    return [
+        (triangles[i][f], triangles[i][(f + 1) % 3], triangles[i][(f + 2) % 3])
+        for i, f in ((i, starts[i]) for i in order.tolist())
+    ]
 
 
 def _mesh_bed_z(triangles: list[tuple[tuple[float, ...], ...]]) -> float:
@@ -6193,31 +6201,10 @@ def detect_holes(
     # not the order the file wrote its triangles in.
     triangles = in_geometric_order(triangles)
 
-    # Per-triangle: unit face normal + centroid.
-    tri_normals: list[tuple[float, float, float]] = []
-    tri_centroids: list[tuple[float, float, float]] = []
-    for tri in triangles:
-        v0, v1, v2 = tri
-        e1 = (v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2])
-        e2 = (v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2])
-        nx = e1[1] * e2[2] - e1[2] * e2[1]
-        ny = e1[2] * e2[0] - e1[0] * e2[2]
-        nz = e1[0] * e2[1] - e1[1] * e2[0]
-        length = math.sqrt(nx * nx + ny * ny + nz * nz)
-        if length < 1e-12:
-            tri_normals.append((0.0, 0.0, 0.0))
-            tri_centroids.append((
-                (v0[0] + v1[0] + v2[0]) / 3.0,
-                (v0[1] + v1[1] + v2[1]) / 3.0,
-                (v0[2] + v1[2] + v2[2]) / 3.0,
-            ))
-            continue
-        tri_normals.append((nx / length, ny / length, nz / length))
-        tri_centroids.append((
-            (v0[0] + v1[0] + v2[0]) / 3.0,
-            (v0[1] + v1[1] + v2[1]) / 3.0,
-            (v0[2] + v1[2] + v2[2]) / 3.0,
-        ))
+    # Per-triangle: unit face normal + centroid, read from one corner array
+    # that the edge keys and edge directions below are read from too.
+    corners = _finite_corner_array(triangles)
+    tri_normals, tri_centroids = _hole_normals_and_centroids(triangles, corners)
 
     # Drop degenerate triangles (zero normal) — they'd otherwise match
     # everything in the cohesion BFS.
@@ -6257,6 +6244,11 @@ def detect_holes(
     # adjacent flat face has cos 0.5), which would re-introduce the
     # cluster-contamination problem we solve via the per-cluster
     # axis-perpendicularity filter inside ``_cluster_circular_holes``.
+    # Each candidate's three snapped edge keys and each triangle's three
+    # edge directions, read once here and handed to the clustering and the
+    # wall search, which both key and fold along the same edges.
+    edge_keys = _snapped_edge_keys(triangles, candidate_idx, corners)
+    edge_dirs = _edge_directions(triangles, corners)
     edge_table: dict[Any, list[int]] = {}
     raw_clusters = _bfs_cluster_by_normal_cohesion(
         candidate_idx,
@@ -6264,6 +6256,7 @@ def detect_holes(
         tri_normals,
         cos_threshold=_HOLE_COHESION_COS,
         edge_table=edge_table,
+        edge_keys=edge_keys,
     )
 
     holes: list[dict[str, Any]] = []
@@ -6285,6 +6278,8 @@ def detect_holes(
             mesh_extent_xyz=mesh_extent_xyz,
             diagnostics=diagnostics,
             edge_table=edge_table,
+            edge_keys=edge_keys,
+            edge_dirs=edge_dirs,
         ))
 
     return holes
@@ -6326,6 +6321,148 @@ def _snap_vertex(
     )
 
 
+def _hole_normals_and_centroids(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    corners: numpy.ndarray | None = None,
+) -> tuple[list[tuple[float, float, float]], list[tuple[float, float, float]]]:
+    """Each triangle's unit face normal (zero for a degenerate one) and
+    centroid, as the hole detector reads them.
+
+    Read from one array (*corners*, :func:`_finite_corner_array`, built
+    here when not given) when every triangle has three finite corners, by
+    the same arithmetic in the same order as the per-triangle loop below,
+    so the two agree to the bit; by that loop otherwise.
+    """
+    import numpy as np
+
+    arr = _finite_corner_array(triangles) if corners is None else corners
+    if arr is not None:
+        v0, v1, v2 = arr[:, 0, :], arr[:, 1, :], arr[:, 2, :]
+        e1 = v1 - v0
+        e2 = v2 - v0
+        nx = e1[:, 1] * e2[:, 2] - e1[:, 2] * e2[:, 1]
+        ny = e1[:, 2] * e2[:, 0] - e1[:, 0] * e2[:, 2]
+        nz = e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]
+        length = np.sqrt(nx * nx + ny * ny + nz * nz)
+        short = length < 1e-12
+        safe = np.where(short, 1.0, length)
+        normals = np.where(short[:, None], 0.0, np.stack([nx / safe, ny / safe, nz / safe], axis=1))
+        centroids = (v0 + v1 + v2) / 3.0
+        return [tuple(n) for n in normals.tolist()], [tuple(c) for c in centroids.tolist()]
+
+    tri_normals: list[tuple[float, float, float]] = []
+    tri_centroids: list[tuple[float, float, float]] = []
+    for tri in triangles:
+        v0, v1, v2 = tri
+        e1 = (v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2])
+        e2 = (v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2])
+        nx = e1[1] * e2[2] - e1[2] * e2[1]
+        ny = e1[2] * e2[0] - e1[0] * e2[2]
+        nz = e1[0] * e2[1] - e1[1] * e2[0]
+        length = math.sqrt(nx * nx + ny * ny + nz * nz)
+        if length < 1e-12:
+            tri_normals.append((0.0, 0.0, 0.0))
+            tri_centroids.append((
+                (v0[0] + v1[0] + v2[0]) / 3.0,
+                (v0[1] + v1[1] + v2[1]) / 3.0,
+                (v0[2] + v1[2] + v2[2]) / 3.0,
+            ))
+            continue
+        tri_normals.append((nx / length, ny / length, nz / length))
+        tri_centroids.append((
+            (v0[0] + v1[0] + v2[0]) / 3.0,
+            (v0[1] + v1[1] + v2[1]) / 3.0,
+            (v0[2] + v1[2] + v2[2]) / 3.0,
+        ))
+    return tri_normals, tri_centroids
+
+
+def _finite_corner_array(
+    triangles: list[tuple[tuple[float, ...], ...]],
+) -> numpy.ndarray | None:
+    """*triangles* as a ``(T, 3, 3)`` float array, or ``None`` when they
+    are not all three finite three-coordinate corners."""
+    import numpy as np
+
+    if not triangles:
+        return None
+    try:
+        arr = np.asarray(triangles, dtype=np.float64)
+    except (ValueError, TypeError):
+        return None
+    if arr.ndim != 3 or arr.shape[1:] != (3, 3) or not np.isfinite(arr).all():
+        return None
+    return arr
+
+
+_EdgeKeys = tuple[Any, Any, Any]  # three edge keys, each a pair of snapped corners
+
+
+def _snapped_edge_keys(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    indices: list[int],
+    corners: numpy.ndarray | None = None,
+) -> list[_EdgeKeys | None]:
+    """For each triangle in *indices*, its three edges keyed as the
+    clustering keys them -- the two snapped corners, lower first -- in a
+    list indexed by triangle (``None`` for a triangle not asked about).
+
+    The corners (*corners*, :func:`_finite_corner_array`, built here when
+    not given) are snapped in one array round when they can be held
+    exactly; otherwise one at a time, by :func:`_snap_vertex`.
+    """
+    import numpy as np
+
+    keys: list[_EdgeKeys | None] = [None] * len(triangles)
+    arr = _finite_corner_array(triangles) if corners is None else corners
+    if arr is not None and float(np.abs(arr).max()) / _HOLE_EDGE_SNAP_TOL_MM < 2.0**62:
+        snapped = list(map(tuple, np.rint(arr / _HOLE_EDGE_SNAP_TOL_MM).astype(np.int64).reshape(-1, 3).tolist()))
+        for ti in indices:
+            at = 3 * ti
+            a, b, c = snapped[at], snapped[at + 1], snapped[at + 2]
+            keys[ti] = ((a, b) if a <= b else (b, a), (b, c) if b <= c else (c, b), (c, a) if c <= a else (a, c))
+        return keys
+    for ti in indices:
+        a, b, c = (_snap_vertex(v) for v in triangles[ti])
+        keys[ti] = ((a, b) if a <= b else (b, a), (b, c) if b <= c else (c, b), (c, a) if c <= a else (a, c))
+    return keys
+
+
+def _edge_direction(
+    triangles: list[tuple[tuple[float, ...], ...]], ti: int, i: int,
+) -> tuple[float, float, float]:
+    """The unit direction of triangle *ti*'s edge *i* (corner *i* to the
+    next), zero for an edge of no length."""
+    pa, pb = triangles[ti][i], triangles[ti][(i + 1) % 3]
+    dx, dy, dz = pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]
+    length = math.sqrt(dx * dx + dy * dy + dz * dz)
+    return (dx / length, dy / length, dz / length) if length > 0.0 else (0.0, 0.0, 0.0)
+
+
+def _edge_directions(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    corners: numpy.ndarray | None = None,
+) -> list[list[tuple[float, float, float]]] | None:
+    """:func:`_edge_direction` for every edge of every triangle, read in
+    one array pass by the same arithmetic from *corners*
+    (:func:`_finite_corner_array`, built here when not given); ``None``
+    when the triangles cannot be held as one array, and the caller reads
+    each edge itself."""
+    import numpy as np
+
+    arr = _finite_corner_array(triangles) if corners is None else corners
+    if arr is None:
+        return None
+    pa = arr
+    pb = arr[:, [1, 2, 0], :]
+    dx, dy, dz = pb[:, :, 0] - pa[:, :, 0], pb[:, :, 1] - pa[:, :, 1], pb[:, :, 2] - pa[:, :, 2]
+    length = np.sqrt(dx * dx + dy * dy + dz * dz)
+    some = length > 0.0
+    safe = np.where(some, length, 1.0)
+    dirs = np.where(some[:, :, None], np.stack([dx / safe, dy / safe, dz / safe], axis=2), 0.0)
+    return [[tuple(d) for d in tri] for tri in dirs.tolist()]
+
+
 def _bfs_cluster_by_normal_cohesion(
     candidate_idx: list[int],
     triangles: list[tuple[tuple[float, ...], ...]],
@@ -6333,11 +6470,14 @@ def _bfs_cluster_by_normal_cohesion(
     *,
     cos_threshold: float,
     edge_table: dict[Any, list[int]] | None = None,
+    edge_keys: list[_EdgeKeys | None] | None = None,
 ) -> list[list[int]]:
     """Edge-adjacency flood fill with a normal-cohesion gate.
 
     *edge_table*, when given, is filled with the triangles on each
     snapped edge, for a caller that needs the same adjacency afterwards.
+    *edge_keys*, when given, holds each candidate's three edge keys
+    (:func:`_snapped_edge_keys`); they are read here otherwise.
 
     Two adjacent candidate triangles join the same cluster only when
     the cosine between their (unit) face normals is ≥
@@ -6349,13 +6489,11 @@ def _bfs_cluster_by_normal_cohesion(
     — no per-axis filter required.
     """
     candidate_set = set(candidate_idx)
+    if edge_keys is None:
+        edge_keys = _snapped_edge_keys(triangles, candidate_idx)
     edge_to_tris: dict[Any, list[int]] = {} if edge_table is None else edge_table
     for ti in candidate_idx:
-        tri = triangles[ti]
-        for i in range(3):
-            va = _snap_vertex(tri[i])
-            vb = _snap_vertex(tri[(i + 1) % 3])
-            edge = (min(va, vb), max(va, vb))
+        for edge in edge_keys[ti]:  # type: ignore[union-attr]
             edge_to_tris.setdefault(edge, []).append(ti)
 
     visited: set[int] = set()
@@ -6372,11 +6510,7 @@ def _bfs_cluster_by_normal_cohesion(
             visited.add(ti)
             cluster.append(ti)
             n_a = tri_normals[ti]
-            tri = triangles[ti]
-            for i in range(3):
-                va = _snap_vertex(tri[i])
-                vb = _snap_vertex(tri[(i + 1) % 3])
-                edge = (min(va, vb), max(va, vb))
+            for edge in edge_keys[ti]:  # type: ignore[union-attr]
                 for neighbor in edge_to_tris.get(edge, []):
                     if neighbor in visited or neighbor not in candidate_set:
                         continue
@@ -6563,6 +6697,8 @@ def _cluster_circular_holes(
     mesh_extent_xyz: tuple[float, float, float],
     diagnostics: dict[str, int] | None = None,
     edge_table: dict[Any, list[int]] | None = None,
+    edge_keys: list[_EdgeKeys | None] | None = None,
+    edge_dirs: list[list[tuple[float, float, float]]] | None = None,
 ) -> list[dict[str, Any]]:
     """The cylindrical holes in one cohesion-BFS cluster.
 
@@ -6672,6 +6808,8 @@ def _cluster_circular_holes(
         mesh_extent_xyz=mesh_extent_xyz,
         said=said,
         edge_table=edge_table,
+        edge_keys=edge_keys,
+        edge_dirs=edge_dirs,
     )
     if diagnostics is not None:
         # What the walls said stands in for the whole-cluster verdict;
@@ -6738,28 +6876,29 @@ def _what_lies_across(
     triangles: list[tuple[tuple[float, ...], ...]],
     tri_normals: list[tuple[float, float, float]],
     edge_table: dict[Any, list[int]] | None = None,
+    edge_keys: list[_EdgeKeys | None] | None = None,
 ) -> dict[int, _Across]:
     """For each triangle of the cluster, what lies across each of its edges.
 
     *edge_table* is the adjacency the clustering built; without it one is
-    built here for the cluster alone.
+    built here for the cluster alone.  *edge_keys* holds each cluster
+    triangle's three edge keys (:func:`_snapped_edge_keys`); they are read
+    here otherwise.
     """
-
-    def edge_keys(ti: int) -> tuple[Any, Any, Any]:
-        a, b, c = (_snap_vertex(v) for v in triangles[ti])
-        return ((a, b) if a <= b else (b, a), (b, c) if b <= c else (c, b), (c, a) if c <= a else (a, c))
+    if edge_keys is None:
+        edge_keys = _snapped_edge_keys(triangles, cluster)
 
     if edge_table is None:
         edge_table = {}
         for ti in cluster:
-            for key in edge_keys(ti):
+            for key in edge_keys[ti]:  # type: ignore[union-attr]
                 edge_table.setdefault(key, []).append(ti)
 
     across: dict[int, _Across] = {}
     for ti in cluster:
         n_a = tri_normals[ti]
         entries = []
-        for key in edge_keys(ti):
+        for key in edge_keys[ti]:  # type: ignore[union-attr]
             pair = edge_table[key]
             if len(pair) != 2:
                 entries.append(_NOTHING_ACROSS)
@@ -6777,6 +6916,7 @@ def _prismatic_walls(
     triangles: list[tuple[tuple[float, ...], ...]],
     *,
     cos_threshold: float,
+    edge_dirs: list[list[tuple[float, float, float]]] | None = None,
 ) -> list[tuple[tuple[float, float, float], list[int]]]:
     """Every wall in the cluster whose facets fold along one direction.
 
@@ -6786,49 +6926,59 @@ def _prismatic_walls(
     of a wall facet, never the open face beyond a mouth.  Walls too
     small to be a hole are dropped here.
 
+    *edge_dirs* holds every edge's unit direction (:func:`_edge_directions`),
+    read once for every crease tried; each is read as it is met otherwise.
+
     :returns: ``(axis, triangle indices)`` per wall.
     """
 
-    def is_fold(cos_ab: float) -> bool:
-        return cos_threshold <= cos_ab < _FLAT_COS
-
-    def direction(ti: int, i: int) -> tuple[float, float, float]:
-        pa, pb = triangles[ti][i], triangles[ti][(i + 1) % 3]
-        dx, dy, dz = pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]
-        length = math.sqrt(dx * dx + dy * dy + dz * dz)
-        return (dx / length, dy / length, dz / length) if length > 0.0 else (0.0, 0.0, 0.0)
-
-    def folds_along(ti: int, i: int, axis: tuple[float, float, float]) -> bool:
-        d = direction(ti, i)
-        return abs(d[0] * axis[0] + d[1] * axis[1] + d[2] * axis[2]) >= _PARALLEL_COS
+    # A fold is ``cos_threshold <= cos < _FLAT_COS``; an edge folds along
+    # the axis when ``|direction . axis| >= _PARALLEL_COS``.  Both are
+    # written out below, in the loop that asks them a few million times on
+    # a large cluster.
+    flat_cos, parallel_cos = _FLAT_COS, _PARALLEL_COS
+    dirs: dict[int, list[tuple[float, float, float]]] | list[list[tuple[float, float, float]]]
+    if edge_dirs is None:
+        dirs = {ti: [_edge_direction(triangles, ti, i) for i in range(3)] for ti in cluster}
+    else:
+        dirs = edge_dirs
 
     tried: set[tuple[int, int]] = set()
     walls: list[tuple[tuple[float, float, float], list[int]]] = []
     for seed in cluster:
         for i, (other, cos_ab) in enumerate(across[seed]):
-            if other is None or other not in across or not is_fold(cos_ab):
+            if other is None or other not in across or not (cos_threshold <= cos_ab < flat_cos):
                 continue
             crease = (seed, other) if seed < other else (other, seed)
             if crease in tried:
                 continue
             tried.add(crease)
-            axis = direction(seed, i)
+            axis = dirs[seed][i]
+            ax, ay, az = axis
             wall = {seed, other}
             stack = [seed, other]
             while stack:
                 at = stack.pop()
+                at_dirs = dirs[at]
                 for j, (nxt, cos_n) in enumerate(across[at]):
                     if nxt is None or nxt not in across:
                         continue
-                    if is_fold(cos_n):
-                        if not folds_along(at, j, axis):
+                    if cos_threshold <= cos_n < flat_cos:
+                        d = at_dirs[j]
+                        if abs(d[0] * ax + d[1] * ay + d[2] * az) < parallel_cos:
                             continue
                         tried.add((at, nxt) if at < nxt else (nxt, at))
-                    elif cos_n < _FLAT_COS or not any(
-                        o is not None and is_fold(c) and folds_along(nxt, k, axis)
-                        for k, (o, c) in enumerate(across[nxt])
-                    ):
+                    elif cos_n < flat_cos:
                         continue
+                    else:
+                        nxt_dirs = dirs[nxt]
+                        for k, (o, c) in enumerate(across[nxt]):
+                            if o is not None and cos_threshold <= c < flat_cos:
+                                d = nxt_dirs[k]
+                                if abs(d[0] * ax + d[1] * ay + d[2] * az) >= parallel_cos:
+                                    break
+                        else:
+                            continue
                     if nxt not in wall:
                         wall.add(nxt)
                         stack.append(nxt)
@@ -6912,6 +7062,8 @@ def _holes_among_walls(
     mesh_extent_xyz: tuple[float, float, float],
     said: dict[str, int],
     edge_table: dict[Any, list[int]] | None = None,
+    edge_keys: list[_EdgeKeys | None] | None = None,
+    edge_dirs: list[list[tuple[float, float, float]]] | None = None,
 ) -> list[dict[str, Any]]:
     """The holes among the walls of a cluster that is not one hole itself.
 
@@ -6921,7 +7073,7 @@ def _holes_among_walls(
     away, so the caller hears of a bore too small to print, or a slot,
     as it would had the feature stood alone.
     """
-    across = _what_lies_across(cluster, triangles, tri_normals, edge_table)
+    across = _what_lies_across(cluster, triangles, tri_normals, edge_table, edge_keys)
 
     def judged(wall: list[int], axis: tuple[float, float, float], why: dict[str, int] | None, **relaxed: float) -> dict[str, Any] | None:
         gates = {"min_radius": min_radius, "circular_tol": circular_tol, **relaxed}
@@ -6942,7 +7094,9 @@ def _holes_among_walls(
     # The cohesion threshold the cluster was grown with: a crease the
     # BFS would not cross is not one a wall folds along.
     found: list[dict[str, Any]] = []
-    for axis, wall in _prismatic_walls(cluster, across, triangles, cos_threshold=_HOLE_COHESION_COS):
+    for axis, wall in _prismatic_walls(
+        cluster, across, triangles, cos_threshold=_HOLE_COHESION_COS, edge_dirs=edge_dirs,
+    ):
         if not _goes_all_the_way_round(wall, axis, tri_normals):
             continue
         why: dict[str, int] = {}

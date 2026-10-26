@@ -16,7 +16,7 @@ import contextlib
 import json
 import logging
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field, fields
 from functools import lru_cache
 from pathlib import Path
@@ -1323,6 +1323,61 @@ def _bbox_volume(
 _WINDING_CONSISTENCY_THRESHOLD = 0.05
 
 
+#: Two triangles with the same three corners to 0.1 um have corner sums
+#: within three times that on every axis; the pre-filter below allows
+#: twice as much.
+_MEMBRANE_SUM_GAP: float = 6e-4
+
+
+def _membrane_candidates(
+    triangles: list[tuple[tuple[float, ...], ...]],
+) -> Iterable[int]:
+    """The indices of every triangle that could share its three corners
+    with another, in ascending order -- a superset, never a miss.
+
+    Two corner sums within :data:`_MEMBRANE_SUM_GAP` of each other on
+    every axis fall in one cell of at least one of eight grids of twice
+    that size, each shifted by half a cell on a different set of axes, so
+    a triangle alone in its cell on all eight grids cannot be one of a
+    membrane pair, and the exact grouping in :func:`_drop_membrane_pairs`
+    is spared it.  On a mesh with no such pair, which is nearly every
+    mesh, that is nearly every triangle.  Any input the array test cannot
+    read, or whose extent the cell keys cannot hold, is handed over whole.
+    """
+    n = len(triangles)
+    if n < 2:
+        return range(n)
+    try:
+        tris = np.asarray(triangles, dtype=np.float64)
+    except (ValueError, TypeError):
+        return range(n)
+    if tris.ndim != 3 or tris.shape[1:] != (3, 3) or not np.isfinite(tris).all():
+        return range(n)
+    sums = tris.sum(axis=1)  # (T, 3); a common factor of three changes no gap test
+    cell = 2.0 * _MEMBRANE_SUM_GAP
+    near = np.zeros(n, dtype=bool)
+    for shifted in range(8):
+        shift = np.array([(shifted >> axis) & 1 for axis in range(3)], dtype=np.float64) * (cell / 2.0)
+        cells = np.floor((sums + shift) / cell)
+        if np.abs(cells).max() >= 2**31:
+            return range(n)  # the keys below could not hold the extent
+        cells = cells.astype(np.int64)
+        cells -= cells.min(axis=0)
+        spans = cells.max(axis=0) + 1
+        if int(spans[0]) * int(spans[1]) * int(spans[2]) >= 2**62:
+            return range(n)
+        keys = (cells[:, 0] * spans[1] + cells[:, 1]) * spans[2] + cells[:, 2]
+        order = np.argsort(keys, kind="stable")
+        sorted_keys = keys[order]
+        same_prev = np.empty(n, dtype=bool)
+        same_prev[0] = False
+        same_prev[1:] = sorted_keys[1:] == sorted_keys[:-1]
+        shared = same_prev.copy()
+        shared[:-1] |= same_prev[1:]
+        near[order] |= shared
+    return np.flatnonzero(near).tolist()
+
+
 def _drop_membrane_pairs(
     triangles: list[tuple[tuple[float, ...], ...]],
 ) -> list[tuple[tuple[float, ...], ...]]:
@@ -1341,7 +1396,8 @@ def _drop_membrane_pairs(
     duplicate keeps one copy.  Genuine geometry never loses faces.
     """
     groups: dict[frozenset, list[int]] = {}
-    for idx, tri in enumerate(triangles):
+    for idx in _membrane_candidates(triangles):
+        tri = triangles[idx]
         key = frozenset(tuple(round(c, 4) for c in v) for v in tri)
         if len(key) == 3:
             groups.setdefault(key, []).append(idx)
@@ -2509,6 +2565,8 @@ def _measure_thin_walls(
     nozzle_diameter: float = 0.4,
     thin_below_mm: float | None = None,
     corner_budget: _CornerBudget | None = None,
+    tris: np.ndarray | None = None,
+    comp_ids: np.ndarray | None = None,
 ) -> tuple[ThinWallAnalysis, float]:
     """Measure thin walls via per-component vectorized inward ray-casting.
 
@@ -2553,6 +2611,9 @@ def _measure_thin_walls(
     corners are read within *corner_budget*, which one analysis shares
     between its walls and its gaps (a fresh :class:`_CornerBudget` when none
     is given).
+    *tris* is the same triangles as a ``(T, 3, 3)`` float array and *comp_ids*
+    their component labels, when the caller already holds them; each is
+    built here otherwise.  Either way the measurement reads the same numbers.
     """
     threshold = max(nozzle_diameter, thin_below_mm or 0.0)
     basis = "material" if threshold > nozzle_diameter else "nozzle"
@@ -2565,7 +2626,8 @@ def _measure_thin_walls(
         # Degenerate input — no closed surface to measure walls on.
         return unmeasured()
 
-    tris = np.asarray(triangles, dtype=np.float64)  # (T, 3, 3)
+    if tris is None:
+        tris = np.asarray(triangles, dtype=np.float64)  # (T, 3, 3)
     if tris.ndim != 3 or tris.shape[1] != 3 or tris.shape[2] != 3:
         return unmeasured()
 
@@ -2610,7 +2672,8 @@ def _measure_thin_walls(
     # Component labelling: identify which connected piece of the mesh
     # each triangle belongs to.  Single-body meshes return all-zeros and
     # behaviour reduces to the prior global ray-cast.
-    comp_ids = _label_mesh_components(tris)  # (T,)
+    if comp_ids is None:
+        comp_ids = _label_mesh_components(tris)  # (T,)
     origin_comps = comp_ids[valid_indices[sample_idx]]  # one per ray
     valid_face_comps = comp_ids[valid_indices]          # one per valid target
 
@@ -2713,6 +2776,8 @@ def _analyze_cavity_widths(
     *,
     nozzle_diameter: float = 0.4,
     corner_budget: _CornerBudget | None = None,
+    tris: np.ndarray | None = None,
+    comp_ids: np.ndarray | None = None,
 ) -> CavityAnalysis:
     """Measure cavity widths via per-component outward ray-casting.
 
@@ -2747,7 +2812,8 @@ def _analyze_cavity_widths(
             problematic_regions=[],
         )
 
-    tris = np.asarray(triangles, dtype=np.float64)
+    if tris is None:
+        tris = np.asarray(triangles, dtype=np.float64)
     if tris.ndim != 3 or tris.shape[1] != 3 or tris.shape[2] != 3:
         return CavityAnalysis(0.0, 0, [])
 
@@ -2788,7 +2854,8 @@ def _analyze_cavity_widths(
 
     # Component labelling — same approach as walls (single-body meshes
     # take one iteration; lattices loop per-strut).
-    comp_ids = _label_mesh_components(tris)
+    if comp_ids is None:
+        comp_ids = _label_mesh_components(tris)
     origin_comps = comp_ids[valid_indices[sample_idx]]
     valid_face_comps = comp_ids[valid_indices]
 
@@ -3061,28 +3128,35 @@ _MAX_SELF_SUPPORTING_BRIDGE_MM: float = 10.0
 _MAX_LATERAL_REACH_MM: float = 2.0
 
 
-def _analyze_downward_regions(
+def _downward_region_members(
     triangles: list[tuple[tuple[float, ...], ...]],
     z_min: float,
-    *,
-    layer_height: float = 0.2,
-) -> list[_DownwardRegion]:
-    """Aggregate support-needing downward faces into connected regions
-    and measure each region's worst bridgeable span (see
-    :class:`_DownwardRegion`)."""
+    layer_height: float,
+    tris: np.ndarray | None,
+) -> tuple[list[int], list[bool]]:
+    """The triangles a downward region may hold, in index order, and
+    whether each is a flat ceiling: not resting on the plate, centroid above
+    the plate band, facing down at or past the region limit.
 
-    def _vkey(v: tuple[float, ...]) -> tuple[int, int, int]:
-        return (
-            int(round(v[0] * 1_000_000)),
-            int(round(v[1] * 1_000_000)),
-            int(round(v[2] * 1_000_000)),
-        )
-
-    def _ekey(a: tuple[float, ...], b: tuple[float, ...]) -> tuple:
-        ka, kb = _vkey(a), _vkey(b)
-        return (ka, kb) if ka < kb else (kb, ka)
-
+    Read from the ``(T, 3, 3)`` array when the caller holds one, by the
+    same arithmetic in the same order as the per-triangle helpers, so the
+    two readings agree to the bit; from the tuples otherwise.
+    """
     bed_threshold = _bed_threshold_z(z_min, layer_height)
+    if tris is not None and tris.ndim == 3 and tris.shape[1:] == (3, 3) and tris.shape[0] == len(triangles):
+        z = tris[:, :, 2]
+        on_plate = (z <= bed_threshold).all(axis=1)
+        centroid_z = (z[:, 0] + z[:, 1] + z[:, 2]) / 3.0
+        e1 = tris[:, 1, :] - tris[:, 0, :]
+        e2 = tris[:, 2, :] - tris[:, 0, :]
+        nx = e1[:, 1] * e2[:, 2] - e1[:, 2] * e2[:, 1]
+        ny = e1[:, 2] * e2[:, 0] - e1[:, 0] * e2[:, 2]
+        nz = e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]
+        length = np.sqrt(nx * nx + ny * ny + nz * nz)
+        too_short = length < 1e-12
+        unit_nz = np.where(too_short, 0.0, nz / np.where(too_short, 1.0, length))
+        member = ~on_plate & ~(centroid_z <= bed_threshold) & ~(unit_nz > _DOWNWARD_REGION_NZ_LIMIT)
+        return np.flatnonzero(member).tolist(), (unit_nz[member] <= _BRIDGE_FLAT_NZ_LIMIT).tolist()
 
     member_idx: list[int] = []
     is_flat: list[bool] = []
@@ -3097,7 +3171,102 @@ def _analyze_downward_regions(
             continue
         member_idx.append(i)
         is_flat.append(nn[2] <= _BRIDGE_FLAT_NZ_LIMIT)
+    return member_idx, is_flat
 
+
+#: The grid the region edge keys snap corners to, per mm.
+_REGION_KEY_PER_MM: float = 1_000_000.0
+
+
+def _mesh_edges_among(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    asked: set[tuple],
+    tris: np.ndarray | None,
+    ekey: Callable[[tuple[float, ...], tuple[float, ...]], tuple],
+) -> dict[tuple, list[int]]:
+    """Every triangle on each edge in *asked*, in index order, keyed as
+    *ekey* keys an edge: the full-mesh edge map, cut to the edges read.
+
+    With the ``(T, 3, 3)`` array the corners are snapped and the edges
+    hashed in one pass, and only the slots whose hash matches an asked edge
+    are keyed exactly; a hash match that is not an asked edge is dropped at
+    that exact check, so the map is the one a pass over every edge gives.
+    Without the array, or with an extent the snap cannot hold, every edge
+    is keyed.
+    """
+    mesh_edges: dict[tuple, list[int]] = {}
+    if not asked:
+        return mesh_edges
+    corners = ((0, 1), (1, 2), (2, 0))
+    snapped_ok = (
+        tris is not None
+        and tris.ndim == 3
+        and tris.shape[1:] == (3, 3)
+        and tris.shape[0] == len(triangles)
+        and np.isfinite(tris).all()
+        and float(np.abs(tris).max()) * _REGION_KEY_PER_MM < 2.0**62
+    )
+    if snapped_ok:
+        keys = np.rint(tris * _REGION_KEY_PER_MM).astype(np.int64)  # (T, 3, 3)
+        rows = []
+        for i, j in corners:
+            ka, kb = keys[:, i, :], keys[:, j, :]
+            b_lower = (kb[:, 0] < ka[:, 0]) | (
+                (kb[:, 0] == ka[:, 0])
+                & ((kb[:, 1] < ka[:, 1]) | ((kb[:, 1] == ka[:, 1]) & (kb[:, 2] < ka[:, 2])))
+            )
+            lo = np.where(b_lower[:, None], kb, ka)
+            hi = np.where(b_lower[:, None], ka, kb)
+            rows.append(np.concatenate([lo, hi], axis=1))
+        all_rows = np.stack(rows, axis=1).reshape(-1, 6).astype(np.uint64)  # slot = 3 * i + edge
+        weights = np.array([73856093, 19349663, 83492791, 49979687, 86028157, 15485863], dtype=np.uint64)
+        asked_rows = np.array([a + b for a, b in asked], dtype=np.int64).astype(np.uint64).reshape(-1, 6)
+        with np.errstate(over="ignore"):
+            all_hash = (all_rows * weights).sum(axis=1)
+            asked_hash = (asked_rows * weights).sum(axis=1)
+        slots = np.flatnonzero(np.isin(all_hash, asked_hash))
+        for slot in slots.tolist():
+            i, edge = divmod(slot, 3)
+            tri = triangles[i]
+            a, b = corners[edge]
+            e = ekey(tri[a], tri[b])
+            if e in asked:
+                mesh_edges.setdefault(e, []).append(i)
+        return mesh_edges
+    for i, tri in enumerate(triangles):
+        for a, b in corners:
+            e = ekey(tri[a], tri[b])
+            if e in asked:
+                mesh_edges.setdefault(e, []).append(i)
+    return mesh_edges
+
+
+def _analyze_downward_regions(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    z_min: float,
+    *,
+    layer_height: float = 0.2,
+    tris: np.ndarray | None = None,
+) -> list[_DownwardRegion]:
+    """Aggregate support-needing downward faces into connected regions
+    and measure each region's worst bridgeable span (see
+    :class:`_DownwardRegion`).  *tris* is the same triangles as a
+    ``(T, 3, 3)`` array when the caller holds one; built here otherwise."""
+
+    def _vkey(v: tuple[float, ...]) -> tuple[int, int, int]:
+        return (
+            int(round(v[0] * 1_000_000)),
+            int(round(v[1] * 1_000_000)),
+            int(round(v[2] * 1_000_000)),
+        )
+
+    def _ekey(a: tuple[float, ...], b: tuple[float, ...]) -> tuple:
+        ka, kb = _vkey(a), _vkey(b)
+        return (ka, kb) if ka < kb else (kb, ka)
+
+    bed_threshold = _bed_threshold_z(z_min, layer_height)
+
+    member_idx, is_flat = _downward_region_members(triangles, z_min, layer_height, tris)
     if not member_idx:
         return []
 
@@ -3130,25 +3299,41 @@ def _analyze_downward_regions(
             else:
                 edge_owner[e] = local
 
-    # Full-mesh edge map so boundary edges can be classified by their
-    # non-region neighbour (supported wall below vs free rise above).
-    mesh_edges: dict[tuple, list[int]] = {}
-    for i, tri in enumerate(triangles):
-        for e in (
-            _ekey(tri[0], tri[1]),
-            _ekey(tri[1], tri[2]),
-            _ekey(tri[2], tri[0]),
-        ):
-            mesh_edges.setdefault(e, []).append(i)
-
     # Group members per region root.
     groups: dict[int, list[int]] = {}
     for local in range(len(member_idx)):
         groups.setdefault(_find(local), []).append(local)
 
+    # The boundary edges of every region with a bridge deck -- the only
+    # edges the full-mesh edge map below is ever asked about -- read once
+    # here, each with the corners the last of its region's triangles gave
+    # it, as the region loop below reads them.
+    boundary: dict[int, tuple[dict[tuple, int], dict[tuple, tuple]]] = {}
+    for root, locals_ in groups.items():
+        if not any(is_flat[lo] for lo in locals_):
+            continue
+        edge_count: dict[tuple, int] = {}
+        edge_verts: dict[tuple, tuple] = {}
+        for lo in locals_:
+            tri = triangles[member_idx[lo]]
+            for a, b in ((tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])):
+                e = _ekey(a, b)
+                edge_count[e] = edge_count.get(e, 0) + 1
+                edge_verts[e] = (a, b)
+        boundary[root] = (edge_count, edge_verts)
+    asked = {e for edge_count, _ in boundary.values() for e, count in edge_count.items() if count == 1}
+
+    # Full-mesh edge map so boundary edges can be classified by their
+    # non-region neighbour (supported wall below vs free rise above):
+    # every triangle on each asked edge, in index order.
+    mesh_edges = _mesh_edges_among(triangles, asked, tris, _ekey)
+
     # Lazy full-mesh array for the material-directly-below probe (only
     # built if some deck point fails both the chord and lateral tests).
-    _tris_arr: np.ndarray | None = None
+    _tris_arr: np.ndarray | None = tris
+    # The per-triangle half of that probe's cast, prepared once for every
+    # deck point asked (each probe is one point against the whole mesh).
+    _inside: _InsideMeshTest | None = None
 
     def _solid_directly_below(cx: float, cy: float, cz: float) -> bool:
         """True when the point one-and-a-half layers under the deck is
@@ -3156,19 +3341,23 @@ def _analyze_downward_regions(
         boolean seam, a feature starting flush on a floor) and prints
         as an ordinary layer bond even though the mesh topology reads
         it as an unanchored underside."""
-        nonlocal _tris_arr
+        nonlocal _tris_arr, _inside
         if _tris_arr is None:
             _tris_arr = np.asarray(triangles, dtype=np.float64)
         probe = np.array(
             [[cx, cy, cz - 1.5 * layer_height]], dtype=np.float64,
         )
         try:
-            return bool(_points_inside_mesh(probe, _tris_arr)[0])
+            if _inside is None:
+                if _tris_arr.shape[0] == 0:
+                    return False
+                _inside = _InsideMeshTest(_tris_arr)
+            return bool(_inside(probe)[0])
         except (ValueError, IndexError):
             return False
 
     regions: list[_DownwardRegion] = []
-    for locals_ in groups.values():
+    for root, locals_ in groups.items():
         tri_indices = [member_idx[lo] for lo in locals_]
         flat_indices = [member_idx[lo] for lo in locals_ if is_flat[lo]]
 
@@ -3192,14 +3381,7 @@ def _analyze_downward_regions(
         # Boundary edges of the region: edges owned by exactly one
         # region triangle.  Each carries a supported flag from its
         # non-region neighbours.
-        edge_count: dict[tuple, int] = {}
-        edge_verts: dict[tuple, tuple] = {}
-        for gi in tri_indices:
-            tri = triangles[gi]
-            for a, b in ((tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])):
-                e = _ekey(a, b)
-                edge_count[e] = edge_count.get(e, 0) + 1
-                edge_verts[e] = (a, b)
+        edge_count, edge_verts = boundary[root]
 
         seg_a: list[tuple[float, float]] = []
         seg_b: list[tuple[float, float]] = []
@@ -3702,42 +3884,58 @@ def _points_inside_mesh(
     ``points`` is ``(P, 3)``, ``triangles`` is ``(T, 3, 3)``.  Returns a
     ``(P,)`` bool array.
     """
-    P = points.shape[0]
-    T = triangles.shape[0]
-    if P == 0 or T == 0:
-        return np.zeros(P, dtype=bool)
+    if points.shape[0] == 0 or triangles.shape[0] == 0:
+        return np.zeros(points.shape[0], dtype=bool)
+    return _InsideMeshTest(triangles)(points)
+
+
+class _InsideMeshTest:
+    """:func:`_points_inside_mesh` with the per-triangle half of the cast
+    worked out once, for a caller that tests points one at a time against
+    one mesh.  The per-point half is the same arithmetic either way."""
 
     # Near-vertical, cast downward, with a slight off-axis tilt.  Down
     # excludes everything above the probe plane (the overhang surface
     # and any top faces coplanar with it); the tilt avoids coplanar
     # degeneracies against the axis-aligned faces typical of 3D models.
-    d = np.array([0.0511, 0.0337, -1.0], dtype=np.float64)
+    _DOWN = np.array([0.0511, 0.0337, -1.0], dtype=np.float64)
 
-    v0 = triangles[:, 0, :]                       # (T, 3)
-    e1 = triangles[:, 1, :] - v0                  # (T, 3)
-    e2 = triangles[:, 2, :] - v0                  # (T, 3)
-    h = np.cross(d, e2)                           # (T, 3)
-    a = np.einsum("tj,tj->t", e1, h)              # (T,)
-    parallel = np.abs(a) < 1e-9
-    inv_a = np.where(parallel, 0.0, 1.0 / np.where(parallel, 1.0, a))
+    def __init__(self, triangles: np.ndarray) -> None:
+        d = self._DOWN
+        self.T = triangles.shape[0]
+        self.v0 = triangles[:, 0, :]                       # (T, 3)
+        self.e1 = triangles[:, 1, :] - self.v0             # (T, 3)
+        self.e2 = triangles[:, 2, :] - self.v0             # (T, 3)
+        self.h = np.cross(d, self.e2)                      # (T, 3)
+        a = np.einsum("tj,tj->t", self.e1, self.h)         # (T,)
+        self.parallel = np.abs(a) < 1e-9
+        self.inv_a = np.where(self.parallel, 0.0, 1.0 / np.where(self.parallel, 1.0, a))
 
-    crossings = np.zeros(P, dtype=np.int64)
-    chunk = max(1, 1_000_000 // T)                # bound (chunk, T) memory
-    for start in range(0, P, chunk):
-        pts = points[start:start + chunk]         # (C, 3)
-        s = pts[:, None, :] - v0[None, :, :]      # (C, T, 3)
-        u = np.einsum("ctj,tj->ct", s, h) * inv_a[None, :]
-        q = np.cross(s, e1[None, :, :])           # (C, T, 3)
-        v = np.einsum("ctj,j->ct", q, d) * inv_a[None, :]
-        t = np.einsum("ctj,tj->ct", q, e2) * inv_a[None, :]
-        hit = (
-            (~parallel[None, :])
-            & (u >= 0.0) & (u <= 1.0)
-            & (v >= 0.0) & (u + v <= 1.0)
-            & (t > 1e-7)
+    def __call__(self, points: np.ndarray) -> np.ndarray:
+        P = points.shape[0]
+        T = self.T
+        if P == 0 or T == 0:
+            return np.zeros(P, dtype=bool)
+        d, v0, e1, e2, h, parallel, inv_a = (
+            self._DOWN, self.v0, self.e1, self.e2, self.h, self.parallel, self.inv_a,
         )
-        crossings[start:start + chunk] = hit.sum(axis=1)
-    return (crossings % 2) == 1
+        crossings = np.zeros(P, dtype=np.int64)
+        chunk = max(1, 1_000_000 // T)                # bound (chunk, T) memory
+        for start in range(0, P, chunk):
+            pts = points[start:start + chunk]         # (C, 3)
+            s = pts[:, None, :] - v0[None, :, :]      # (C, T, 3)
+            u = np.einsum("ctj,tj->ct", s, h) * inv_a[None, :]
+            q = np.cross(s, e1[None, :, :])           # (C, T, 3)
+            v = np.einsum("ctj,j->ct", q, d) * inv_a[None, :]
+            t = np.einsum("ctj,tj->ct", q, e2) * inv_a[None, :]
+            hit = (
+                (~parallel[None, :])
+                & (u >= 0.0) & (u <= 1.0)
+                & (v >= 0.0) & (u + v <= 1.0)
+                & (t > 1e-7)
+            )
+            crossings[start:start + chunk] = hit.sum(axis=1)
+        return (crossings % 2) == 1
 
 
 def _likely_bridge_substituted(
@@ -5280,6 +5478,7 @@ def _footing_section_modulus(
     *,
     layer_height: float = 0.2,
     height: float | None = None,
+    tris: np.ndarray | None = None,
 ) -> float:
     """The section modulus (mm³) of the part's bed contact about the axis
     it tips over most easily; ``0.0`` when nothing touches the bed.
@@ -5332,9 +5531,9 @@ def _footing_section_modulus(
     order = np.argsort(labels, kind="stable")
     starts = np.searchsorted(labels[order], np.arange(patches + 1))
     points = pts[np.lexsort((a, labels))[starts[1:] - 1]].mean(axis=1)
-    joins = _footing_join_heights(
-        np.asarray(triangles, dtype=np.float64)[:, :, :3], z_min, points, height, _JOIN_WORK,
-    )
+    if tris is None:
+        tris = np.asarray(triangles, dtype=np.float64)
+    joins = _footing_join_heights(tris[:, :, :3], z_min, points, height, _JOIN_WORK)
     for i in range(patches):
         alone, used = _contact_modulus(pts[order[starts[i] : starts[i + 1]]], float(joins[i]), budget)
         budget -= used
@@ -6059,8 +6258,10 @@ def _analyze_cost(
     from kiln.generation.validation import analyze_mesh
 
     estimator = CostEstimator()
-    # Read the file once for both estimates below: the second read of a
-    # 300k-triangle model was a quarter of the whole analysis (2026-10-26).
+    # Read the file once for every estimate below: the second read of a
+    # 300k-triangle model was a quarter of the whole analysis (2026-10-26),
+    # and the PLA and low-infill alternatives each read it again until
+    # they were handed this reading too.
     mesh_analysis = analyze_mesh(file_path)
 
     estimate = estimator.estimate_from_mesh(
@@ -6112,6 +6313,7 @@ def _analyze_cost(
             infill_percent=infill_percent,
             include_supports=needs_supports,
             adhesion_type=adhesion_type,
+            analysis=mesh_analysis,
         )
         savings = estimate.total_cost_usd - pla_est.total_cost_usd
         if savings > 0.01:
@@ -6128,6 +6330,7 @@ def _analyze_cost(
             infill_percent=10.0,
             include_supports=needs_supports,
             adhesion_type=adhesion_type,
+            analysis=mesh_analysis,
         )
         savings = estimate.total_cost_usd - low_est.total_cost_usd
         if savings > 0.01:
@@ -6439,6 +6642,7 @@ def _summarize_regions(
     z_min: float,
     *,
     layer_height: float = 0.2,
+    tris: np.ndarray | None = None,
 ) -> list[RegionSummary]:
     """Each downward region as a person would point at it, largest first.
 
@@ -6452,7 +6656,8 @@ def _summarize_regions(
     """
     if not regions or not triangles:
         return []
-    tris = np.asarray(triangles, dtype=np.float64)  # (T, 3, 3)
+    if tris is None:
+        tris = np.asarray(triangles, dtype=np.float64)  # (T, 3, 3)
     edge1 = tris[:, 1] - tris[:, 0]
     edge2 = tris[:, 2] - tris[:, 0]
     normals = np.cross(edge1, edge2)
@@ -6531,6 +6736,7 @@ def _support_area(
     threshold_deg: float,
     layer_height: float,
     exempt: set[int],
+    tris: np.ndarray | None = None,
 ) -> tuple[float, float]:
     """``(underside, held_up)``: the part's underside and the part of it
     supports must hold, in mm2, each face's area projected onto the plate.
@@ -6545,7 +6751,8 @@ def _support_area(
     """
     if not triangles:
         return 0.0, 0.0
-    tris = np.asarray(triangles, dtype=np.float64)
+    if tris is None:
+        tris = np.asarray(triangles, dtype=np.float64)
     normals = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
     twice_area = np.linalg.norm(normals, axis=1)
     downward = normals[:, 2] < 0
@@ -6569,12 +6776,15 @@ def _judge_supports(
     layer_height: float,
     material: str,
     overlay: dict[str, Any] | None,
+    tris: np.ndarray | None = None,
 ) -> SupportJudgement:
     """The support half of :func:`analyze_printability`, on a loaded mesh:
     the overhangs, the bridges, the support volume, and the exemptions
     that turn a flagged underside a slicer prints anyway back into "no
     supports".  One body for the report and for :func:`judge_supports`,
-    so the two cannot drift."""
+    so the two cannot drift.  *tris* is the same triangles as a
+    ``(T, 3, 3)`` array when the caller holds one, handed to each reading
+    below that would otherwise build its own."""
     overhangs = _analyze_overhangs(
         triangles,
         max_overhang_angle=resolved_threshold,
@@ -6585,7 +6795,7 @@ def _judge_supports(
         overlay=overlay,
     )
     downward_regions = _analyze_downward_regions(
-        triangles, z_min, layer_height=layer_height,
+        triangles, z_min, layer_height=layer_height, tris=tris,
     )
     bridging = _analyze_bridging(
         triangles,
@@ -6727,7 +6937,7 @@ def _judge_supports(
     )
     underside, held_up = _support_area(
         triangles, z_min, threshold_deg=resolved_threshold,
-        layer_height=layer_height, exempt=_exempt_overhang_tris,
+        layer_height=layer_height, exempt=_exempt_overhang_tris, tris=tris,
     )
     supports = _dc_replace(
         supports,
@@ -6741,7 +6951,7 @@ def _judge_supports(
         supports=supports,
         overhang_threshold_deg=resolved_threshold,
         triangle_count=len(triangles),
-        regions=_summarize_regions(triangles, downward_regions, z_min, layer_height=layer_height),
+        regions=_summarize_regions(triangles, downward_regions, z_min, layer_height=layer_height, tris=tris),
         downward_regions=downward_regions,
         overhang_scoring_pct=_overhang_scoring_pct,
         self_supporting_overhang_count=_self_supporting_overhang_count,
@@ -7027,6 +7237,12 @@ def _analyze_printability_here(
     # call can pass it through to the Pro+ rod-feature analyzer
     # (computed there, not here — the algorithm is a Pro-tier wedge).
     tris_arr_for_pro: np.ndarray | None = None
+    # The same array, and the component label of each triangle, built once
+    # here and handed to every reading below that reads them; each would
+    # otherwise rebuild both from the same triangles (measured 2026-10-26:
+    # three labellings and six array builds of one 327,680-triangle mesh).
+    shared_tris: np.ndarray | None = None
+    shared_comp_ids: np.ndarray | None = None
     if len(triangles) > 0:
         try:
             tris_arr = np.asarray(triangles, dtype=np.float64)
@@ -7034,10 +7250,10 @@ def _analyze_printability_here(
             # Genus is Euler arithmetic on this mesh's own vertices, edges
             # and faces, so it takes the component count of the same
             # scheme (shared edges, exact corners), not the piece count.
-            mesh_genus = _compute_mesh_genus(
-                tris_arr, int(_label_mesh_components(tris_arr).max() + 1),
-            )
+            comp_labels = _label_mesh_components(tris_arr)
+            mesh_genus = _compute_mesh_genus(tris_arr, int(comp_labels.max() + 1))
             tris_arr_for_pro = tris_arr
+            shared_tris, shared_comp_ids = tris_arr, comp_labels
             if component_count >= 2 and pieces is not None:
                 # Per-component bbox volume.  Coefficient of variation
                 # (std / mean) measures spread; uniformity = 1 - clamp(cv,
@@ -7062,6 +7278,7 @@ def _analyze_printability_here(
             component_size_uniformity = 0.0
             mesh_genus = 0
             tris_arr_for_pro = None
+            shared_tris = shared_comp_ids = None
     # Walls are measured once, against the floor they will be judged by:
     # the material's minimum wall when kiln-pro supplies one, the nozzle
     # otherwise.  The topology is part of the question; the answer can
@@ -7079,15 +7296,17 @@ def _analyze_printability_here(
     thin_walls, sub_nozzle_wall_pct = _measure_thin_walls(
         triangles, vertices,
         nozzle_diameter=nozzle_diameter, thin_below_mm=wall_floor, corner_budget=corner_budget,
+        tris=shared_tris, comp_ids=shared_comp_ids,
     )
     cavities = _analyze_cavity_widths(
         triangles, vertices, nozzle_diameter=nozzle_diameter, corner_budget=corner_budget,
+        tris=shared_tris, comp_ids=shared_comp_ids,
     )
     bed_adhesion = _analyze_bed_adhesion(triangles, z_min, bbox, layer_height=layer_height)
     judged = _judge_supports(
         triangles, z_min, bbox,
         resolved_threshold=_resolved_threshold, layer_height=layer_height,
-        material=material, overlay=judgment_overlay,
+        material=material, overlay=judgment_overlay, tris=shared_tris,
     )
     overhangs, bridging, supports = judged.overhangs, judged.bridging, judged.supports
     _overhang_scoring_pct = judged.overhang_scoring_pct
@@ -7107,6 +7326,7 @@ def _analyze_printability_here(
         overlay=judgment_overlay,
         footing_modulus_mm3=_footing_section_modulus(
             triangles, z_min, layer_height=layer_height, height=bbox["z_max"] - bbox["z_min"],
+            tris=shared_tris,
         ),
     )
 

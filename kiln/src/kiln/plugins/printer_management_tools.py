@@ -327,6 +327,119 @@ class _PrinterManagementToolsPlugin:
                 )
 
         # ------------------------------------------------------------------
+        # set_machine_repair
+        # ------------------------------------------------------------------
+
+        @mcp.tool()
+        def set_machine_repair(
+            machine_name: str,
+            status: str = "",
+            kind: str | None = None,
+            note: str | None = None,
+            when: str | None = None,
+            same_as: str = "",
+            different_from: str = "",
+        ) -> dict:
+            """Tell Kiln a printer needs repair, or that you have repaired it.
+
+            Kiln judges a printer by its own prints.  Mark it ``needed`` when
+            you are taking it out of service: routing stops choosing it, and
+            a print you start on it yourself still runs, with a warning.
+            Mark it ``done`` once it is fixed: from that moment it is judged
+            by what it prints next, and its earlier prints stop counting
+            against it.  Nothing is deleted, and the record stays yours.
+
+            Signed in, a mark follows the printer to your Kiln account and
+            to your other computers, and marks made elsewhere (another
+            computer, the web) come back here.  When your account cannot
+            tell whether a printer marked from another computer is this
+            one, the reply carries a ``questions`` list; answer one with
+            ``same_as`` (it is this printer) or ``different_from`` (it is
+            not), passing the question's id and no status.
+
+            Args:
+                machine_name: The printer, by its name here.
+                status: ``needed`` (out of service until repaired), ``done``
+                    (repaired; ``kind`` required), or ``clear`` (take back
+                    the latest mark).  Left out only to answer a question.
+                kind: What was repaired: nozzle, hotend, extruder, bed,
+                    belts, or other.  Required for ``done``; optional for
+                    ``needed``.
+                note: What you did, in your own words (optional; kept on
+                    this computer, never sent to your account).
+                when: When it happened, ISO 8601 (``2026-10-20T14:00``).
+                    Left out, now.  A repair may be dated up to 30 days
+                    back; never ahead.
+                same_as: The id of a question from an earlier reply: this
+                    printer IS the one marked from the other computer.
+                different_from: The id of a question: it is NOT (also undoes
+                    a wrong yes; never asked again for that pair).
+
+            Returns ``recorded``, the printer, ``status``, ``kind``,
+            ``marked_at``, the printer's ``condition`` now, ``next`` (one
+            sentence), for ``done`` a ``reset`` block saying how many
+            earlier prints no longer count, and, signed in, ``account``
+            (whether the mark reached it) and any ``questions``.  Refuses,
+            by name, a printer Kiln cannot tell apart from another, a time
+            ahead or too far back, and the hosted server, where the record
+            is not kept.
+            """
+            if err := _srv._check_auth("write"):
+                return err
+
+            from kiln.machine_repairs import RepairRefused, answer_identity, mark
+
+            try:
+                if same_as or different_from:
+                    if same_as and different_from:
+                        return _srv._error_dict(
+                            "Answer one question at a time: same_as or different_from, not both.",
+                            code="REPAIR_ANSWER_AMBIGUOUS",
+                        )
+                    if status:
+                        return _srv._error_dict(
+                            "Answering a question takes no status; mark the printer in a second call.",
+                            code="REPAIR_ANSWER_AMBIGUOUS",
+                        )
+                    result = answer_identity(machine_name, same_as or different_from, same=bool(same_as))
+                    return {"success": True, **result}
+                if not status:
+                    return _srv._error_dict(
+                        "status is needed, done or clear; or answer a question with same_as / different_from.",
+                        code="REPAIR_STATUS_UNKNOWN",
+                    )
+                result = mark(machine_name, status, kind=kind, note=note, when=when)
+                result.update(_account_after_mark())
+                return {"success": True, **result}
+            except RepairRefused as exc:
+                return _srv._error_dict(exc.message, code=exc.code)
+            except Exception as exc:
+                _logger.exception("Error in set_machine_repair")
+                return _srv._error_dict(
+                    f"Failed to record the printer's repair: {exc}", code="INTERNAL_ERROR",
+                )
+
+        def _account_after_mark() -> dict:
+            """The mark's trip to the account, done now so the reply can say
+            whether it arrived and carry the account's questions.  Nothing
+            when nobody is signed in; the local record stands either way."""
+            try:
+                from kiln.auth_session import resolve_api_bearer
+
+                if not resolve_api_bearer().token:
+                    return {}
+                from kiln.machine_repair_courier import _ACCOUNT_REPLY_WAIT_S, sync
+
+                synced = sync(timeout=_ACCOUNT_REPLY_WAIT_S)
+            except Exception as exc:  # noqa: BLE001 -- the account is a copy; the record is here
+                _logger.debug("set_machine_repair: account not reached", exc_info=True)
+                return {"account": {"synced": False, "why": "not_reached", "error": str(exc)}}
+            out: dict = {"account": {k: v for k, v in synced.items() if k != "questions"}}
+            if synced.get("questions"):
+                out["questions"] = synced["questions"]
+            return out
+
+        # ------------------------------------------------------------------
         # release_printer_lock
         # ------------------------------------------------------------------
 

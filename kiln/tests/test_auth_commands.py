@@ -145,9 +145,10 @@ class TestLoginProviderHint:
         # Non-zero exit, but NOT Click's bare "No such option" failure.
         assert r.exit_code != 0
         assert "No such option" not in r.output
-        # The redirect names the right command + flag.
-        assert "kiln identity link" in r.output
-        assert "--provider github" in r.output
+        # It says what to run instead, and never names a command a plain
+        # install does not have.
+        assert "kiln signin" in r.output
+        assert "kiln identity" not in r.output
 
     def test_provider_flag_message_goes_to_stderr(self, monkeypatch):
         import click
@@ -168,7 +169,7 @@ class TestLoginProviderHint:
 
         # The hint is operator guidance, not pipeable output — stderr only,
         # so `kiln login | ...` stays clean.
-        assert "kiln identity link" in r.stderr
+        assert "kiln signin" in r.stderr and "kiln identity" not in r.stderr
         assert r.stdout == ""
 
     def test_provider_flag_is_hidden_from_help(self):

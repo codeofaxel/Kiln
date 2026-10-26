@@ -55,6 +55,8 @@ except ImportError:
     GenerationError = Exception  # type: ignore[misc,assignment]
 
 from kiln.cli.auth_commands import register_auth_cli
+from kiln.machine_repairs import KINDS as _REPAIR_KINDS
+from kiln.machine_repairs import STATUSES as _REPAIR_STATUSES
 from kiln.cli.bridge_commands import register_bridge_cli
 from kiln.cli.config import (
     PrinterNameTaken,
@@ -910,8 +912,14 @@ def _route_printer_for_job(
     *,
     material: str,
     candidates: list[dict[str, Any]],
+    version_id: str | None = None,
 ) -> tuple[str | None, dict[str, Any] | None, str | None]:
-    """Return (printer_name, routing_data, error_message)."""
+    """Return (printer_name, routing_data, error_message).
+
+    *version_id* is the kept design version being printed, when the door
+    knows it; the router then scores each candidate's own settled results
+    with that version (the counts ``collect_routing_candidates`` attached).
+    """
     if not candidates:
         return None, None, "No eligible printers available for this file/material."
 
@@ -919,8 +927,15 @@ def _route_printer_for_job(
 
     try:
         router = get_job_router()
+        # The version only when the installed router takes one: a kiln-pro
+        # older than this release still reads the criteria.
+        extra = (
+            {"version_id": version_id}
+            if version_id and "version_id" in getattr(RoutingCriteria, "__dataclass_fields__", {})
+            else {}
+        )
         result = router.route_job(
-            RoutingCriteria(material=material),
+            RoutingCriteria(material=material, **extra),
             available_printers=candidates,
         )
         chosen = result.recommended_printer.printer_id
@@ -4195,6 +4210,81 @@ def repair_guide_cmd(topic, hms_code, step, plan_only, power_off_confirmed, prin
         sys.exit(1)
 
 
+@machine.command("repair")
+@click.argument("machine_name")
+@click.argument("status", required=False, default=None,
+                type=click.Choice(list(_REPAIR_STATUSES), case_sensitive=False))
+@click.option("--kind", default=None, type=click.Choice(list(_REPAIR_KINDS), case_sensitive=False),
+              help="What was repaired. Required for done; optional for needed.")
+@click.option("--note", default=None, help="What you did, in your own words (kept on this computer).")
+@click.option("--when", default=None, help="When it happened, ISO 8601 (2026-10-20T14:00). Default: now. A repair may be dated up to 30 days back, never ahead.")
+@click.option("--same-as", "same_as", default=None, metavar="QUESTION_ID",
+              help="Answer your account's question: this printer IS the one marked from another computer.")
+@click.option("--different-from", "different_from", default=None, metavar="QUESTION_ID",
+              help="Answer your account's question: this printer is NOT that one (never asked again).")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def machine_repair_cmd(machine_name: str, status: str | None, kind: str | None, note: str | None,
+                       when: str | None, same_as: str | None, different_from: str | None, json_mode: bool) -> None:
+    """Mark a printer as needing repair, or as repaired.
+
+    Runs the same tool the MCP server exposes (set_machine_repair). NEEDED
+    takes the printer out of routing until it is marked DONE; a print you
+    start on it yourself still runs, with a warning. DONE records the
+    repair (--kind says what was done) and from then on Kiln judges the
+    printer by its next prints; earlier ones stop counting against it,
+    and nothing is deleted. CLEAR takes back the latest mark.
+
+    Signed in, a mark follows the printer to your Kiln account and your
+    other computers. When the account asks whether a printer marked from
+    another computer is this one, answer with --same-as or
+    --different-from and the question's id, with no status.
+    """
+    from kiln.server import ensure_runtime_config
+
+    ensure_runtime_config()
+    try:
+        from kiln.machine_repairs import RepairRefused, answer_identity, mark
+
+        try:
+            if same_as or different_from:
+                if (same_as and different_from) or status:
+                    click.echo(format_error(
+                        "Answer one question at a time, with no status: --same-as or --different-from.",
+                        code="REPAIR_ANSWER_AMBIGUOUS", json_mode=json_mode))
+                    sys.exit(1)
+                result = answer_identity(machine_name, same_as or different_from, same=bool(same_as))
+            elif not status:
+                click.echo(format_error(
+                    "STATUS is needed, done or clear; or answer a question with --same-as / --different-from.",
+                    code="REPAIR_STATUS_UNKNOWN", json_mode=json_mode))
+                sys.exit(1)
+            else:
+                result = mark(machine_name, status, kind=kind, note=note, when=when)
+                try:
+                    from kiln.auth_session import resolve_api_bearer
+
+                    if resolve_api_bearer().token:
+                        from kiln.machine_repair_courier import _ACCOUNT_REPLY_WAIT_S, sync
+
+                        synced = sync(timeout=_ACCOUNT_REPLY_WAIT_S)
+                        result["account"] = {k: v for k, v in synced.items() if k != "questions"}
+                        if synced.get("questions"):
+                            result["questions"] = synced["questions"]
+                except Exception as exc:  # noqa: BLE001 -- the account is a copy; the record is here
+                    result["account"] = {"synced": False, "why": "not_reached", "error": str(exc)}
+        except RepairRefused as exc:
+            click.echo(format_error(exc.message, code=exc.code, json_mode=json_mode))
+            sys.exit(1)
+        click.echo(format_response("success", data=result, json_mode=json_mode))
+    except click.ClickException:
+        raise
+    except SystemExit:
+        raise
+    except Exception as exc:
+        click.echo(format_error(f"Failed to record the printer's repair: {exc}", json_mode=json_mode))
+        sys.exit(1)
+
+
 @cli.command("emergency-trip")
 @click.argument("printer_name")
 @click.option("--input", "input_name", default="external_button", help="Which input tripped.")
@@ -6922,15 +7012,22 @@ def ingest_watch_cmd(
 
             file_ext = path.suffix.lower()
             pending_counts = {name: len(items) for name, items in pending.items()}
+            # A dropped file that is a print of a kept version is routed by
+            # each machine's results with it, the same way route_print_job is.
+            from kiln.auto_record_hook import version_of_print_file
+
+            version_id = version_of_print_file(str(path))
             candidates = _collect_routing_candidates(
                 adapters=adapters,
                 material=material_type,
                 pending_counts=pending_counts,
                 file_extension=file_ext,
+                version_id=version_id,
             )
             chosen, routing_data, route_error = _route_printer_for_job(
                 material=material_type,
                 candidates=candidates,
+                version_id=version_id,
             )
             if route_error or not chosen:
                 errors.append(f"{path.name}: {route_error or 'no routing candidate'}")

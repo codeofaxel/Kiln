@@ -304,12 +304,9 @@ def auth_login(no_browser: bool, timeout: int, provider: str | None) -> None:
     """Sign in to your Kiln account via OAuth (Google / Apple / GitHub).
 
     This is KILN ACCOUNT AUTHENTICATION — use this to log in to the
-    Kiln REST API + workshop as yourself.  Completely distinct from
-    ``kiln identity link``, which attaches a provider identity (e.g.
-    GitHub) to your tenant for design-release signing.  If you want
-    to "log in to Kiln", this is the command.  If you want to
-    "connect my GitHub account so I can sign design releases with my
-    GitHub identity", that's ``kiln identity link``.
+    Kiln REST API + workshop as yourself.  If you want to "log in to
+    Kiln", this is the command.  Connecting a GitHub identity for
+    signing design releases is a different thing, and is not this.
 
     Launches the device-code flow: opens your browser to a small
     provider-picker page, polls until you finish signing in, then
@@ -320,23 +317,18 @@ def auth_login(no_browser: bool, timeout: int, provider: str | None) -> None:
     alias: ``kiln login`` (same command, same flow).
     """
     # `--provider` isn't an option for account sign-in (this command picks
-    # the provider for you on the browser page).  It's the natural wrong
-    # guess for "connect my GitHub identity to sign design releases", which
-    # is a separate command.  Redirect there and bail WITHOUT signing in,
-    # so we never half-start a device flow the user didn't mean to run.
+    # the provider for you on the browser page).  Say so and bail WITHOUT
+    # signing in, so we never half-start a device flow the user didn't mean
+    # to run.  No other command is named: none on a plain install links an
+    # identity today, and a pointer to a command the person lacks is worse
+    # than none (tests/test_auth_commands.py pins it).
     if provider is not None:
-        target = str(provider).strip().lower() or "github"
         click.echo(
             "`--provider` isn't an option for `kiln login` (that's account "
-            "sign-in, which picks the provider for you in the browser).",
+            "sign-in, which picks the provider for you in the browser). "
+            "Run `kiln signin` to sign in.",
             err=True,
         )
-        click.echo(
-            "To connect a GitHub identity for signing design releases, run:",
-            err=True,
-        )
-        click.echo("", err=True)
-        click.echo(f"    kiln identity link --provider {target}", err=True)
         sys.exit(2)
 
     # 1) Start the device flow, asking for this computer's own machine

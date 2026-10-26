@@ -740,3 +740,45 @@ class TestAPictureIsConfirmedBeforeItIsShown:
         monkeypatch.setenv("KILN_REPAIR_GUIDE_PROBE", "0")
         monkeypatch.setattr(rg.urllib.request, "urlopen", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not be called")))
         assert _REAL_PROBE("https://wiki.bambulab.com/x.jpeg") == "unverified"
+
+
+# --- defects a lap found (2026-10-25; each fails at 3ce7748a) ---
+
+
+class TestTheLastStepPointsAtTheRepairRecord:
+    """The repair record's design names repair_guide's closing line: a guide
+    walked to its end is the moment a person has just fixed the printer, and
+    the record (set_machine_repair) is how Kiln stops judging the machine by
+    the prints before the fix.  The branch built the record and left the
+    guide's last step saying nothing about it."""
+
+    def test_the_last_step_offers_the_mark_with_the_suggested_kind(self, with_pro):
+        out = rg.repair_guide("bambu_a1_mini", topic="cutter", step=5, power_off_confirmed=True,
+                              printer_name="shop")
+        assert out["done"] is True
+        record = out["record_the_repair"]
+        assert record["tool"] == "set_machine_repair" and record["status"] == "done"
+        assert record["kind"] == "other" and record["machine_name"] == "shop"
+        # And the terminal's own words for the same mark.
+        assert record["command"] == "kiln machine repair shop done --kind other"
+        # The person's word, never Kiln's: the agent asks before it marks.
+        assert "ask" in record["agent_note"]
+
+    def test_no_other_step_carries_it(self, with_pro):
+        out = rg.repair_guide("bambu_a1_mini", topic="cutter", step=1, power_off_confirmed=True)
+        assert "record_the_repair" not in out
+
+    def test_the_suggested_kinds_are_the_records_own_words(self):
+        from kiln.machine_repairs import KINDS
+
+        assert set(rg.REPAIR_KIND_OF_TOPIC.values()) <= set(KINDS)
+
+    def test_routine_care_offers_no_mark(self, with_pro, monkeypatch):
+        """A lubrication or a bed level is care, not a repair (Adam,
+        2026-10-25: routine care would let anyone wipe a bad record)."""
+        care = {**POWERED_GUIDE, "topic": "lubrication"}
+        monkeypatch.setattr(guide_bridge, "_reader", lambda: _StubReader())
+        monkeypatch.setattr(guide_bridge, "find_guide", lambda *a, **k: {
+            "slug": "prusa:mk4/lube", "guide": care, "start_at_step": 1})
+        out = rg.repair_guide("prusa_mk4", topic="lubrication", step=2)
+        assert out["done"] is True and "record_the_repair" not in out

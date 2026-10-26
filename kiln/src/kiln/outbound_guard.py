@@ -178,7 +178,12 @@ SENDERS: dict[str, tuple[str, str]] = {
         "make, and what they push, pull or clone with their own account; its request "
         "helper also carries kiln/outcome_courier.py's print endings, built field by field "
         "(a random id, version ids, the machine as machine_code(), model and material "
-        "words, nozzle, ending, who settled it, a failure word, two times) and scrubbed",
+        "words, nozzle, ending, who settled it, a failure word, two times) and scrubbed; "
+        "and kiln/machine_repair_courier.py's repair marks and printer announcements "
+        "(a random id, the machine as machine_code(), a status word, a kind word, two "
+        "times; per printer its code, model word and a one-way shared code -- never the "
+        "note, the name, the serial or the access code) and the person's answer to an "
+        "identity question (a question id and same/different), scrubbed",
     ),
     "kiln/account_plan.py": ("own_schema", "asks which plan the signed-in account holds; sends only the sign-in"),
     "kiln/plugins/spend_cap_tools.py": (

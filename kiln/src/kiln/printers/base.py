@@ -3544,6 +3544,21 @@ class PrinterAdapter(ABC):
             result = self._start_print_impl(file_name, **impl_kwargs)
         finally:
             _discard_copies(kept)
+        if getattr(result, "success", False):
+            # A printer the person marked needs repair still starts -- their
+            # hands, their call -- and the result says so in one sentence,
+            # here, so every door that starts a print says it.  Never a
+            # refusal, and never a reason not to report the start.
+            try:
+                from kiln.machine_repairs import start_warning
+
+                warning = start_warning(self)
+                if warning:
+                    result.message = f"{result.message} {warning}".strip()
+            except Exception:  # noqa: BLE001 — a warning that cannot be read is no warning
+                import logging as _logging
+
+                _logging.getLogger(__name__).debug("repair warning not read", exc_info=True)
         if getattr(result, "success", False) and not is_resume_mode_3mf(file_name):
             # A resume 3MF continues the print that's already running (a
             # mid-print swap), so it isn't a new print to count.

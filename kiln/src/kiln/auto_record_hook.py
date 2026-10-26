@@ -742,32 +742,26 @@ def open_pending_outcome(
         return None
 
 
-def _version_of_sliced_model(file_name: str | None) -> dict[str, Any]:
-    """The kept version a printer-side file was sliced from, read off this
-    computer's own records; ``{}`` when they cannot say so for certain.
+#: Files that ARE a model: their own bytes can name the kept version exactly.
+_MODEL_FILE_SUFFIXES = frozenset({".stl", ".3mf", ".obj", ".step", ".stp"})
 
-    The chain is exact at every step: the slice ledger names the model the
-    G-code (or its wrap) was made from (:func:`kiln.monitor_twin.sliced_entry_for`,
-    written by this computer's slicer), and the model's bytes are matched to
-    the version whose kept model is exactly those bytes (the design history,
+
+def _identity_of_models(models: list[Any]) -> dict[str, Any]:
+    """The kept version whose model is exactly the bytes of one of *models*.
+
+    Each existing file is hashed and matched to the version whose kept model
+    is exactly those bytes (the design history,
     :class:`kiln.history_vault.HistoryVault`).  Never a file name.  Two
     versions sharing one model name the design and no version; a model no
-    version keeps, a file Kiln did not slice here, or records that cannot be
-    read name nothing.  This is what lets a reprint, a retry or a print
-    started any other way land on the version it really printed.
+    version keeps, or records that cannot be read, name nothing.
     """
-    if not file_name:
-        return {}
     try:
         import hashlib
 
         from kiln.history_vault import HistoryVault, _kiln_home
-        from kiln.monitor_twin import sliced_entry_for
 
-        entry = sliced_entry_for(file_name)
-        if not entry or not (_kiln_home() / "history_vault.db").is_file():
+        if not (_kiln_home() / "history_vault.db").is_file():
             return {}
-        models = [entry.get("input"), entry.get("source")]
         shas: list[str] = []
         for model in models:
             if isinstance(model, str) and os.path.isfile(model):
@@ -784,13 +778,59 @@ def _version_of_sliced_model(file_name: str | None) -> dict[str, Any]:
         finally:
             vault.close()
     except Exception:  # noqa: BLE001 -- identity never blocks a print
-        _logger.debug("version of the sliced model not resolved", exc_info=True)
+        _logger.debug("version of the model not resolved", exc_info=True)
         return {}
     if len(found) == 1:
         version_id, design_id = next(iter(found))
         return {"version_id": version_id, "design_id": design_id}
     designs = {d for _v, d in found}
     return {"design_id": designs.pop()} if len(designs) == 1 else {}
+
+
+def _version_of_sliced_model(file_name: str | None) -> dict[str, Any]:
+    """The kept version a printer-side file was sliced from, read off this
+    computer's own records; ``{}`` when they cannot say so for certain.
+
+    The chain is exact at every step: the slice ledger names the model the
+    G-code (or its wrap) was made from (:func:`kiln.monitor_twin.sliced_entry_for`,
+    written by this computer's slicer), and the model's bytes are matched to
+    the version whose kept model is exactly those bytes
+    (:func:`_identity_of_models`).  A file Kiln did not slice here names
+    nothing.  This is what lets a reprint, a retry or a print started any
+    other way land on the version it really printed.
+    """
+    if not file_name:
+        return {}
+    try:
+        from kiln.monitor_twin import sliced_entry_for
+
+        entry = sliced_entry_for(file_name)
+    except Exception:  # noqa: BLE001 -- identity never blocks a print
+        _logger.debug("slice ledger not read", exc_info=True)
+        return {}
+    if not entry:
+        return {}
+    return _identity_of_models([entry.get("input"), entry.get("source")])
+
+
+def version_of_print_file(file_path: str | None) -> str | None:
+    """The kept version *file_path* is a print of, or ``None``.
+
+    The same identity the print's own row gets at its start
+    (:func:`print_identity_at_start`), asked BEFORE the print by a door that
+    chooses a machine for it: a sliced file through the slice ledger
+    (:func:`_version_of_sliced_model`), a model file through its own bytes.
+    Exactly one version or none -- a design with two versions of one model
+    is not a version, and routing by a guessed version would score machines
+    on prints of something else.  Never raises.
+    """
+    if not isinstance(file_path, str) or not file_path.strip():
+        return None
+    found = _version_of_sliced_model(os.path.basename(file_path))
+    if not found.get("version_id") and os.path.splitext(file_path)[1].lower() in _MODEL_FILE_SUFFIXES:
+        found = _identity_of_models([file_path])
+    version_id = found.get("version_id")
+    return version_id if isinstance(version_id, str) and version_id else None
 
 
 def print_identity_at_start(
@@ -822,13 +862,12 @@ def print_identity_at_start(
     if isinstance(sync_id, str) and re.fullmatch(r"[0-9a-f]{32}", sync_id.strip()):
         out["account_sync_id"] = sync_id.strip()
     try:
-        from kiln.registry import machine_fingerprint
+        from kiln.registry import stable_machine_fingerprint
 
-        fp = machine_fingerprint(adapter)
-        # An adapter with neither serial nor address fingerprints as its own
-        # object id -- distinct per process, meaningless across them.  A row
-        # keyed on that would split one machine's history per restart.
-        if fp and ":object:" not in fp:
+        # The machine, or nothing: an adapter that fingerprints as its own
+        # object id names no machine (stable_machine_fingerprint).
+        fp = stable_machine_fingerprint(adapter)
+        if fp:
             out["machine_fingerprint"] = fp
     except Exception:  # noqa: BLE001 -- identity never blocks a print
         pass
