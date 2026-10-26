@@ -300,6 +300,8 @@ def test_on_kilns_servers_nothing_is_learned(kiln_env, monkeypatch):
 
     assert lpt.pace_for("voron") is None
     assert lpt.learned_time_left("voron", 100) is None
+    # Not even "none yet": the caller's prints are on their computer, not here.
+    assert lpt.learned_time(3600, "voron") is None
 
 
 # ---------------------------------------------------------------------------

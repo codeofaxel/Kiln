@@ -208,7 +208,8 @@ def learned_time(
     """The time a print of *slicer_seconds* will really take on the printer.
 
     ``None`` when there is no slicer time or no printer to learn from (none
-    named, and not exactly one known of that model).  Otherwise::
+    named, and not exactly one known of that model), and on Kiln's servers,
+    where the caller's prints are not.  Otherwise::
 
         {"seconds", "slicer_seconds", "printer", "prints", "learned", "said"}
 
@@ -216,7 +217,7 @@ def learned_time(
     rests on :data:`MIN_PRINTS` prints, else the slicer's; ``said`` says which,
     and from how many prints.
     """
-    if not slicer_seconds or slicer_seconds <= 0:
+    if not slicer_seconds or slicer_seconds <= 0 or _hosted():
         return None
     name, assumed = resolve_printer(printer_name, printer_model)
     if not name:
