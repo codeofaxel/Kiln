@@ -3708,9 +3708,23 @@ def temp(
         # its own path, and it refused a legitimate 350°C on the machines rated
         # for it.  A false "safe" is the error direction that damages hardware,
         # so the copy had to go rather than be corrected to a better constant.
-        from kiln.server import _get_temp_limits
+        from kiln.printers.base import outcome_printer_name
+        from kiln.server import (
+            _emergency_latch_error,
+            _get_temp_limits,
+            _resolve_effective_printer_name,
+        )
 
         max_tool, max_bed = _get_temp_limits(printer_name)
+
+        # Heat stays off on an emergency-stopped machine, the rule
+        # set_temperature keeps; turning a heater off is always allowed.
+        # Asked under both names one machine answers to.
+        if (tool_temp or 0) > 0 or (bed_temp or 0) > 0:
+            for name in (_resolve_effective_printer_name(printer_name), outcome_printer_name(adapter)):
+                if block := _emergency_latch_error("kiln temp", name):
+                    click.echo(format_error(block["error"]["message"], json_mode=json_mode))
+                    sys.exit(1)
 
         results: dict[str, Any] = {}
         if tool_temp is not None:

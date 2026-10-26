@@ -888,6 +888,7 @@ class EmergencyCoordinator:
             registry = PrinterRegistry()
 
         adapter = registry.get(printer_id)
+        end_pause_hold(adapter)
 
         gcode = list(_FDM_EMERGENCY_GCODE)
         actions = list(_FDM_EMERGENCY_ACTIONS)
@@ -1103,6 +1104,25 @@ class EmergencyCoordinator:
 
 _coordinator: EmergencyCoordinator | None = None
 _coordinator_lock = threading.Lock()
+
+
+def end_pause_hold(adapter: Any) -> None:
+    """End the pause hold on *adapter*'s machine before its emergency stop goes out.
+
+    The hold re-sets heater targets every two minutes while a print is
+    paused, and nothing on the stop path used to end it: a printer that
+    still read PAUSED after its stop had both heaters switched back on.
+    Called by every door that sends an emergency stop, ahead of the send,
+    so the hold cannot slip a push in between.  Never raises.
+    """
+    try:
+        from kiln.server import _pause_keepalive
+    except ImportError:
+        return
+    try:
+        _pause_keepalive.stop(adapter)
+    except Exception:
+        logger.warning("emergency: could not end the pause hold", exc_info=True)
 
 
 def get_emergency_coordinator() -> EmergencyCoordinator:

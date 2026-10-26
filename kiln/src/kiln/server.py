@@ -4859,9 +4859,12 @@ _CONFIRM_TOKEN_TTL: float = 300.0  # 5 minutes
 # Design:
 #   - One daemon thread per PAUSED MACHINE, keyed by machine fingerprint.
 #     Idempotent ``start`` so repeat pauses don't compound threads.
-#   - ``stop(adapter)`` is called from resume/cancel/error paths.
+#   - ``stop(adapter)`` is called from resume/cancel/error paths, and from
+#     every emergency stop (``kiln.emergency``, the print watchdog).
 #   - All adapter calls are best-effort; a failed re-assert is logged
 #     once at INFO level and the loop keeps trying.
+#   - Doubt never heats: an emergency latch ends the hold, an unreadable
+#     printer skips the round, and a target someone else set is followed.
 #
 # Every entry point takes the adapter it is actually driving, and the
 # thread re-asserts on THAT adapter.  A process-wide singleton bound to
@@ -4870,6 +4873,36 @@ _CONFIRM_TOKEN_TTL: float = 300.0  # 5 minutes
 # targets onto the FIRST — reheating an idle printer, or fighting a
 # running print's own temperatures, for as long as the pause lasted.
 _PAUSE_KEEPALIVE_INTERVAL_S: float = 120.0  # 2 min — well under firmware idle threshold
+
+# A target read back within this of what the hold last asked for is the
+# hold's own request: some firmware stores targets in whole degrees.  Any
+# further off, someone else set it.
+_HOLD_READBACK_TOLERANCE_C: float = 1.0
+
+
+def _machine_is_latched(adapter: PrinterAdapter, label: str | None) -> bool:
+    """Is *adapter*'s machine emergency-stopped, under any name it answers to?
+
+    A latch is filed under the name the stop was aimed at, and one machine
+    answers to two (``default`` and its config.yaml name), so the question
+    is asked under every one.  A latch Kiln cannot read counts as set: the
+    only consumer is the pause hold deciding whether to heat.
+    """
+    from kiln.emergency import get_emergency_coordinator
+
+    names = {label} if label else set()
+    try:
+        names.update(_get_registry().names_for(adapter))
+    except Exception as exc:
+        logger.debug("Pause keep-alive: registry names unavailable (%s)", exc)
+    try:
+        coordinator = get_emergency_coordinator()
+        return any(coordinator.is_stopped(name) for name in names)
+    except Exception as exc:
+        logger.warning(
+            "Pause keep-alive: emergency latch unreadable (%s); heating nothing", exc,
+        )
+        return True
 
 
 class _PauseKeepAlive:
@@ -4935,11 +4968,44 @@ class _PauseKeepAlive:
                 "thread": thread,
                 "stop_event": stop_event,
                 "targets": targets,
+                # What the hold last sent per heater, so a target someone
+                # else set can be told from the hold's own.
+                "pushed": {},
                 "adapter": adapter,
                 "label": label,
             }
             thread.start()
             return True
+
+    def retarget(
+        self, adapter: PrinterAdapter, *, tool: float | None = None, bed: float | None = None,
+    ) -> dict[str, float] | None:
+        """Hold the targets a person just set on *adapter*, instead of the old ones.
+
+        Without this a heater switched off during a pause came back on at the
+        next round.  ``None`` leaves that heater's target as it was.  Returns
+        the targets held from now on, or ``None`` when this machine has no
+        hold; a hold left with nothing to heat ends.
+        """
+        with self._lock:
+            key = self._key(adapter)
+            entry = self._entries.get(key)
+            if entry is None:
+                return None
+            for heater, value in (("tool", tool), ("bed", bed)):
+                if value is not None:
+                    entry["targets"][heater] = max(float(value), 0.0)
+                    entry["pushed"][heater] = max(float(value), 0.0)
+            held = dict(entry["targets"])
+            if not any(target > 0 for target in held.values()):
+                del self._entries[key]
+                entry["stop_event"].set()
+            return held
+
+    def _drop(self, key: str, entry: dict[str, Any]) -> None:
+        with self._lock:
+            if self._entries.get(key) is entry:
+                del self._entries[key]
 
     def stop(self, adapter: PrinterAdapter) -> None:
         """Signal *adapter*'s thread to exit.  Safe when none is running.
@@ -4986,12 +5052,21 @@ class _PauseKeepAlive:
                 return
 
     def _reassert(self, key: str, stop_event: threading.Event) -> bool:
-        """Push the captured targets once. ``False`` means stop looping.
+        """Push the held targets once. ``False`` means stop looping.
 
         Split out of :meth:`_loop` so the first assert and every later one are
         the SAME code — a separate "do it once up front" branch would be a
         second implementation of the only thing this class does, free to drift
         from the one the tests exercise.
+
+        Every doubt resolves to heating nothing.  An emergency stop on this
+        machine ends the hold, whichever door raised it.  A printer Kiln
+        cannot read is not heated that round (this used to say "continuing"
+        and heat anyway, so an e-stopped machine whose reading failed came
+        back on).  And a target the printer reports that is not the one the
+        hold last sent was set by someone else — at the printer's screen,
+        with ``kiln temp`` from another terminal, in the maker's app — so the
+        hold takes it, and a heater switched off stays off.
         """
         try:
             from kiln.printers.base import PrinterStatus
@@ -5004,47 +5079,83 @@ class _PauseKeepAlive:
                 if entry is None or entry["stop_event"] is not stop_event:
                     return False
                 adapter = entry["adapter"]
-                targets = dict(entry["targets"])
+                label = entry.get("label")
 
-            # Stop if the printer left PAUSED on its own (resume,
-            # cancel, error, or operator pressed buttons on the printer).
+            if _machine_is_latched(adapter, label):
+                logger.warning(
+                    "Pause keep-alive: %s is emergency-stopped; the hold ends", label,
+                )
+                self._drop(key, entry)
+                return False
+
             try:
                 state = adapter.get_state()
-                # ``confirmed_state``: it looks through a FAULT headline, so a
-                # fault raised while the machine kept working still matches here,
-                # and it is as strict about staleness as the bare state word was:
-                # an expired reading is not evidence that anything ended.
-                if state.confirmed_state != PrinterStatus.PAUSED:
-                    logger.debug(
-                        "Pause keep-alive: printer state is %s, not paused — exiting loop",
-                        state.state,
-                    )
-                    with self._lock:
-                        if self._entries.get(key) is entry:
-                            del self._entries[key]
-                    return False
             except Exception as exc:
-                logger.debug("Pause keep-alive: state read failed (%s); continuing", exc)
+                logger.info(
+                    "Pause keep-alive: could not read %s (%s); heating nothing this round",
+                    label, exc,
+                )
+                return True
+            # Stop if the printer left PAUSED on its own (resume, cancel,
+            # error, or operator pressed buttons on the printer).
+            # ``confirmed_state``: it looks through a FAULT headline, so a
+            # fault raised while the machine kept working still matches here,
+            # and it is as strict about staleness as the bare state word was:
+            # an expired reading is not evidence that anything ended.
+            if state.confirmed_state != PrinterStatus.PAUSED:
+                logger.debug(
+                    "Pause keep-alive: printer state is %s, not paused — exiting loop",
+                    state.state,
+                )
+                self._drop(key, entry)
+                return False
 
-            if targets.get("tool", 0) > 0:
+            with self._lock:
+                if self._entries.get(key) is not entry:
+                    return False
+                targets = self._follow_outside_changes(entry, state)
+            if not any(target > 0 for target in targets.values()):
+                self._drop(key, entry)
+                return False
+
+            for heater, setter in (("tool", adapter.set_tool_temp), ("bed", adapter.set_bed_temp)):
+                target = targets.get(heater, 0.0)
+                if target <= 0:
+                    continue
+                # Asked again right before each send: a stop or an emergency
+                # stop that landed since the checks above ends the hold here.
+                with self._lock:
+                    if self._entries.get(key) is not entry:
+                        return False
                 try:
-                    adapter.set_tool_temp(targets["tool"])
+                    setter(target)
                 except Exception as exc:
-                    logger.info(
-                        "Pause keep-alive: set_tool_temp(%s) failed: %s",
-                        targets["tool"], exc,
-                    )
-            if targets.get("bed", 0) > 0:
-                try:
-                    adapter.set_bed_temp(targets["bed"])
-                except Exception as exc:
-                    logger.info(
-                        "Pause keep-alive: set_bed_temp(%s) failed: %s",
-                        targets["bed"], exc,
-                    )
+                    logger.info("Pause keep-alive: %s target %s failed: %s", heater, target, exc)
+                    continue
+                with self._lock:
+                    entry.setdefault("pushed", {})[heater] = target
         except Exception as exc:  # noqa: BLE001 — never let a daemon die silently
             logger.warning("Pause keep-alive loop error (continuing): %s", exc)
         return True
+
+    @staticmethod
+    def _follow_outside_changes(entry: dict[str, Any], state: Any) -> dict[str, float]:
+        """The targets to hold, after taking any someone else set.  Caller holds the lock."""
+        targets = entry["targets"]
+        pushed = entry.setdefault("pushed", {})
+        for heater, reading in (("tool", state.tool_temp_target), ("bed", state.bed_temp_target)):
+            asked = pushed.get(heater)
+            if asked is None or reading is None:
+                continue
+            if abs(float(reading) - asked) > _HOLD_READBACK_TOLERANCE_C:
+                logger.info(
+                    "Pause keep-alive: %s %s target is now %s, set outside the hold; "
+                    "the hold follows it",
+                    entry.get("label"), heater, reading,
+                )
+                targets[heater] = max(float(reading), 0.0)
+                pushed[heater] = targets[heater]
+        return dict(targets)
 
 
 _pause_keepalive = _PauseKeepAlive()
@@ -10778,6 +10889,16 @@ def set_temperature(
                 results["success"] = False
         if unconfirmed:
             rate_warnings.extend(unconfirmed)
+
+        # A paused machine's hold now keeps what was just asked for, so a
+        # heater switched off stays off instead of coming back at the next
+        # round.  Taken whether or not the printer confirmed the change.
+        held = _pause_keepalive.retarget(adapter, tool=tool_temp, bed=bed_temp)
+        if held is not None:
+            results["pause_hold"] = {
+                "active": _pause_keepalive.is_running(adapter),
+                "targets": held,
+            }
 
         # -- Heater-off safety net ----------------------------------------
         # Some OctoPrint setups don't reliably turn off heaters at 0 deg C.
