@@ -44,7 +44,6 @@ def test_the_walk_sees_the_doors_it_was_written_for():
         "scheduler.py::tick",
         "job_splitter.py::submit_split_plan",
         "plugins/queue_tools.py::submit_job",
-        "plugins/fleet_tools.py::fleet_submit_job",
         "cli/main.py::print_cmd",
         "cli/main.py::slice",
         "cli/main.py::generate_and_print_cmd",

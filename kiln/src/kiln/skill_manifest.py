@@ -236,7 +236,8 @@ class SkillManifest:
                 "fleet_status() — all printers overview",
                 "fleet_pause() / fleet_resume() / fleet_cancel() — stop the fleet gracefully",
                 "route_print_job(file_path, material, quality) — intelligent job routing",
-                "fleet_job_status(job_id) — track distributed jobs",
+                "plan_multi_copy_split(file_path, copies) — copies across your printers, wherever there is safe room",
+                "split_plan_status(plan_id) — follow a run across your printers",
             ],
         }
     )

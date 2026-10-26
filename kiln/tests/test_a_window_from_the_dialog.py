@@ -1299,7 +1299,10 @@ def test_no_tool_opens_or_extends_a_window_or_answers_the_dialog():
 
 
 def test_the_doors_are_held_by_exactly_the_functions_that_should_hold_them():
-    callers = _callers_of({*_OPENERS, "ask_user_to_confirm", "_obtain_print_consent", "DialogAnswer", "consent_from_dialog_answer"})
+    callers = _callers_of({
+        *_OPENERS, "ask_user_to_confirm", "_obtain_print_consent", "_ask_for_a_run", "DialogAnswer",
+        "consent_from_dialog_answer",
+    })
     # The terminal door: the command, and nothing else.
     assert callers["open_window"] == {"consent_commands.py::window"}
     assert callers["extend_window"] == {"consent_commands.py::extend"}
@@ -1307,14 +1310,17 @@ def test_the_doors_are_held_by_exactly_the_functions_that_should_hold_them():
     assert callers["open_window_from_dialog"] == {"server.py::_open_window_from_answer"}
     assert callers["_open_window"] == {"consent_windows.py::open_window", "consent_windows.py::open_window_from_dialog"}
     # The dialog itself: asked by the asker, which is called by the wrapper.
-    assert callers["ask_user_to_confirm"] == {"server.py::_obtain_print_consent"}
+    # A copies run across printers is asked about as a run, by its own asker,
+    # which only the wrapper's asker calls (and which opens no window).
+    assert callers["ask_user_to_confirm"] == {"server.py::_obtain_print_consent", "server.py::_ask_for_a_run"}
+    assert callers["_ask_for_a_run"] == {"server.py::_obtain_print_consent"}
     assert callers["_obtain_print_consent"] == {"server.py::_call_tool_with_context"}
     # An answer is built by the one parser — from what a host, the hosted
     # wire or a native sheet handed back — and by the shim only for its own
     # could-not-ask outcomes.  Nowhere else, and never in a tool.
     assert callers["DialogAnswer"] == {"print_consent.py::answer_from_content", "mcp_compat.py::ask_user_to_confirm"}
     # The grant every surface calls is called by the MCP asker alone in this repo.
-    assert callers["consent_from_dialog_answer"] == {"server.py::_obtain_print_consent"}
+    assert callers["consent_from_dialog_answer"] == {"server.py::_obtain_print_consent", "server.py::_ask_for_a_run"}
 
 
 def test_a_flag_or_variable_still_does_not_open_one():

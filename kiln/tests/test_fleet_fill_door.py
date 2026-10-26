@@ -223,7 +223,7 @@ class TestTheRun:
         later = [j for j in world.q.list_jobs() if j.id != first.id and j.printer_name == "A"][0]
         st = world.tools["split_plan_status"](plan["plan_id"])
         assert st["success"] is True and st["progress"]["copies_to_come"] == 50
-        assert st["message"] == "40 copies: 0 plates printed, 0 printing, 3 waiting; 50 copies still to come."
+        assert st["message"] == "0 of 40 copies printed: 0 plates printed, 0 printing, 3 waiting; 50 copies still to come."
         out = world.tools["cancel_split_plan"](plan["plan_id"])
         assert out["cancelled"] == 3
         assert world.q.get_job(later.id).status == JobStatus.CANCELLED
@@ -330,3 +330,197 @@ class TestTheGoIsForThePartSeen:
         assert out["success"] is False and out["error"]["code"] == "CONSENT_SCOPE", out
         assert "not started on B" in out["error"]["message"]
         assert world.q.list_jobs() == []
+
+
+# ---------------------------------------------------------------------------
+# The old fleet doors, retired into this one
+# ---------------------------------------------------------------------------
+
+
+class TestTheOldFleetDoors:
+    def _fleet_tools(self, world):
+        from kiln.plugins import fleet_tools
+
+        class _MCP:
+            tools: dict = {}
+
+            def tool(self, *a, **k):
+                def deco(fn):
+                    _MCP.tools[fn.__name__] = fn
+                    return fn
+                return deco
+
+        fleet_tools.plugin.register(_MCP())
+        return _MCP.tools
+
+    def test_fleet_submit_job_points_here_and_queues_nothing(self, world):
+        tools = self._fleet_tools(world)
+        out = tools["fleet_submit_job"](world.part, printer_name="A")
+        assert out["success"] is False and out["error"]["code"] == "RETIRED"
+        assert "plan_multi_copy_split" in out["error"]["message"] and "Nothing was queued" in out["error"]["message"]
+        assert world.q.list_jobs() == []
+        assert world.printers["A"].get_state.call_count == 0, "it reads no printer"
+
+    def test_fleet_job_status_points_at_the_run_status(self, world):
+        out = self._fleet_tools(world)["fleet_job_status"]("abc")
+        assert out["error"]["code"] == "RETIRED" and "split_plan_status" in out["error"]["message"]
+
+    def test_fleet_utilization_counts_the_real_queue(self, world):
+        """A/B: with the old orchestrator branch back, the job figures came
+        from a table nothing fills (or were None) -- "assert None == {...}"."""
+        world.q.submit("a.gcode", printer_name="A")
+        world.q.submit("b.gcode", printer_name="B")
+        out = self._fleet_tools(world)["fleet_utilization"]()
+        assert out["success"] is True
+        assert out["utilization"]["job_metrics"] == {"queued": 2, "running": 0, "completed": 0, "failed": 0}
+        assert out["utilization"]["total_printers"] == 3
+
+
+# ---------------------------------------------------------------------------
+# A failed plate's copies go back in the run
+# ---------------------------------------------------------------------------
+
+
+class TestAFailedPlate:
+    def _printing_fill_job(self, world, copies=8, retries=0):
+        from kiln.printers.base import JobResult
+
+        job = world.srv._queue_fill_rest(world.part, copies, printer_name="A", printer_id=None, overrides=None,
+                                         slicer_path=None, spacing_mm=10.0, signoff=None,
+                                         run={"split_plan_id": "run-1"})["job_id"]
+        if retries:
+            fill = {**world.q.get_job(job).metadata["fill"], "failed_retries": retries}
+            world.q.update_metadata(job, {"fill": fill})
+        world.q.mark_starting(job, printer_name="A")
+        world.q.mark_printing(job)
+        sched = JobScheduler(world.q, world.reg, EventBus())
+        sched._active_jobs[job] = "A"
+        sched._seen_printing.add(job)
+        a = world.printers["A"]
+
+        def ends(result):
+            a.get_state.return_value = PrinterState(connected=True, state=PrinterStatus.IDLE,
+                                                    last_job_result=getattr(JobResult, result.upper()))
+            sched.tick()
+        return job, sched, ends
+
+    def _others(self, world, job):
+        return [j for j in world.q.list_jobs() if j.id != job]
+
+    def test_a_failed_plate_is_queued_again_for_a_cleared_plate(self, world):
+        """A/B: with ``_settle_fill_plate`` not called, nothing is queued
+        again and the run is 8 copies short -- "assert [] == [8]"."""
+        job, _sched, ends = self._printing_fill_job(world)
+        ends("failed")
+        again = self._others(world, job)
+        assert [j.metadata["fill"]["copies"] for j in again] == [8]
+        assert again[0].metadata["fill"]["failed_retries"] == 1 and again[0].metadata["split_plan_id"] == "run-1"
+        assert again[0].printer_name == "A" and "beside_plate" not in again[0].metadata["fill"]
+        assert world.q.get_job(job).metadata["ended"] == "failed"
+
+    def test_a_good_plate_and_a_cancel_are_not_reprinted(self, world):
+        for ending in ("completed", "cancelled"):
+            job, _sched, ends = self._printing_fill_job(world)
+            ends(ending)
+            assert world.q.get_job(job).metadata["ended"] in ("success", "cancelled"), ending
+            assert not [j for j in world.q.list_jobs() if (j.metadata.get("fill") or {}).get("failed_retries")], ending
+
+    def test_after_two_retries_it_stops_and_says_so(self, world):
+        job, _sched, ends = self._printing_fill_job(world, retries=2)
+        ends("failed")
+        assert [j for j in self._others(world, job) if j.status == JobStatus.QUEUED] == []
+        assert "did not queue its copies" in world.q.get_job(job).metadata["not_requeued"]
+
+    def test_a_started_plate_means_its_own_copies(self, world):
+        """A retry reprints the copies ON the plate, never the ones already
+        queued after it.  A/B: without the metadata update, the job still
+        asks for 20 -- "assert 20 == 12"."""
+        job = world.srv._queue_fill_rest(world.part, 20, printer_name="A", printer_id=None, overrides=None,
+                                         slicer_path=None, spacing_mm=10.0, signoff=None)["job_id"]
+        sched = JobScheduler(world.q, world.reg, EventBus())
+        world.q.mark_starting(job, printer_name="A")
+        slice_step = SimpleNamespace(name="slice", success=True, data={"copies": {"placed": 12}})
+        start = SimpleNamespace(name="start_print", success=True, data={"file_name": "plate.gcode"})
+        sched._preparing.add(job)
+        sched._finish_fill_job(world.q.get_job(job), "A", SimpleNamespace(success=True, steps=[slice_step, start]), None)
+        assert world.q.get_job(job).metadata["fill"]["copies"] == 12
+        rest = self._others(world, job)
+        assert [j.metadata["fill"]["copies"] for j in rest] == [8]
+
+
+# ---------------------------------------------------------------------------
+# How long the run keeps the busiest printer printing
+# ---------------------------------------------------------------------------
+
+
+def test_the_plan_says_roughly_how_long_the_busiest_printer_prints(world):
+    from kiln.generation.validation import estimate_print_time_from_mesh
+
+    world.printers["B"].get_job.return_value = JobProgress(print_time_left_seconds=3600)
+    out = _plan(world, 40, A=(10, 0, 0, "clear"), B=(6, 4, 1, "occupied"))
+    finish = out["finish"]
+    per = estimate_print_time_from_mesh(world.part)["estimated_time_seconds"]
+    assert finish["printers_seconds"]["A"] == round(10 * per, 1)
+    assert finish["printers_seconds"]["B"] == round(3600 + 10 * per, 1), "B finishes its own print first"
+    assert finish["busiest"] == "B"
+    assert "plus clearing its plate once in between" in finish["sentence"]
+    assert finish["sentence"] in out["message"]
+
+
+# ---------------------------------------------------------------------------
+# The person is asked about the run itself
+# ---------------------------------------------------------------------------
+
+
+class TestTheRunIsAsked:
+    def test_the_plan_step_asks_nothing(self, world):
+        import asyncio
+
+        assert asyncio.run(world.srv._ask_for_a_run("plan_multi_copy_split", {"file_path": world.part}, object())) is None
+
+    def test_the_go_asks_about_the_part_the_copies_and_the_printers(self, world, monkeypatch):
+        """A/B: with plan_multi_copy_split off the consent map, the go is
+        never asked about and no yes is recorded -- "TypeError: expected an
+        instance of Token, got None"."""
+        import asyncio
+
+        from kiln import print_consent
+
+        plan = _plan(world)
+        asked: list[str] = []
+
+        async def confirm(ctx, message, *, offer_window=True, offer_fleet=False):
+            asked.append(message)
+            assert offer_window is False and offer_fleet is False, "a window for one printer never stands in for a run"
+            return print_consent.DialogAnswer(action="accept")
+
+        monkeypatch.setattr(world.srv, "host_can_ask_the_user", lambda mcp, ctx: True)
+        monkeypatch.setattr(world.srv, "ask_user_to_confirm", confirm)
+        async def ask_and_read():
+            token = await world.srv._obtain_print_consent(
+                "plan_multi_copy_split", {"file_path": world.part, "plan_id": plan["plan_id"], "submit": True}, object(),
+            )
+            current = print_consent._current.get()
+            print_consent._current.reset(token)
+            return current
+
+        current = asyncio.run(ask_and_read())
+        assert len(asked) == 1 and "on 2 printers (A, B)" in asked[0] and "40 in all: 30 now, 10 later" in asked[0]
+        assert current is not None and current.printer_name is None, "the yes covers the run's printers"
+
+    def test_a_no_queues_nothing(self, world, monkeypatch):
+        import asyncio
+
+        from kiln import print_consent
+
+        plan = _plan(world)
+
+        async def decline(ctx, message, **kw):
+            return print_consent.DialogAnswer(action="decline")
+
+        monkeypatch.setattr(world.srv, "host_can_ask_the_user", lambda mcp, ctx: True)
+        monkeypatch.setattr(world.srv, "ask_user_to_confirm", decline)
+        with pytest.raises(RuntimeError, match="the run was declined. Nothing was queued."):
+            asyncio.run(world.srv._obtain_print_consent(
+                "plan_multi_copy_split", {"file_path": world.part, "plan_id": plan["plan_id"], "submit": True}, object(),
+            ))

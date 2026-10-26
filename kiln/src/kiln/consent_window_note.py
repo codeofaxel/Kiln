@@ -208,7 +208,7 @@ def block_for_window(window: Any, *, close_hint: str | None = None, outcome: str
 
 
 #: The doors that put a job on the queue rather than on the machine.
-_QUEUE_DOORS = frozenset({"submit_job", "fleet_submit_job"})
+_QUEUE_DOORS = frozenset({"submit_job", "plan_multi_copy_split"})
 
 
 def outcome_of(name: str, args: dict, result: dict) -> str:

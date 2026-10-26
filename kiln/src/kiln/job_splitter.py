@@ -606,9 +606,18 @@ def fill_progress(plan_id: str) -> dict[str, Any] | None:
     _model, record, status = found
     per: dict[str, dict[str, int]] = {}
     for job in _jobs_of(plan_id):
-        row = per.setdefault(str(job.printer_name or ""), {"done": 0, "printing": 0, "waiting": 0, "failed": 0, "copies_to_come": 0})
-        if job.status == JobStatus.COMPLETED:
+        row = per.setdefault(str(job.printer_name or ""), {
+            "done": 0, "printing": 0, "waiting": 0, "failed": 0, "copies_done": 0, "copies_to_come": 0,
+        })
+        ended = (job.metadata or {}).get("ended")
+        if job.status == JobStatus.COMPLETED and ended in ("failed", "cancelled", "unknown"):
+            # The printer went idle, but the plate did not come out: a failed
+            # plate's copies are queued again (kiln.scheduler), a cancel is
+            # the person's, and an ending nobody saw is asked about.
+            row["failed"] += 1
+        elif job.status == JobStatus.COMPLETED:
             row["done"] += 1
+            row["copies_done"] += int(((job.metadata or {}).get("fill") or {}).get("copies") or 0)
         elif job.status in (JobStatus.PRINTING, JobStatus.STARTING):
             row["printing"] += 1
         elif job.status == JobStatus.QUEUED:
@@ -621,6 +630,7 @@ def fill_progress(plan_id: str) -> dict[str, Any] | None:
         "status": status,
         "wanted": int(record.get("copies") or 0),
         "printers": [{"printer": name, "plates": counts} for name, counts in per.items()],
+        "copies_done": sum(r["copies_done"] for r in per.values()),
         "copies_to_come": sum(r["copies_to_come"] for r in per.values()),
     }
 

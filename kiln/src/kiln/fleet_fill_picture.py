@@ -35,7 +35,7 @@ _NEEDS_YOU = (0xF2, 0xC1, 0x4E)
 _TILE_W, _BED_BOX, _LABEL_H, _NOTE_H = 280, 220, 44, 104
 _NOTE_LINES = 5
 _TILE_H = _LABEL_H + _BED_BOX + _NOTE_H
-_GAP, _MARGIN, _HEADER_H, _SECTION_H = 18, 28, 74, 40
+_GAP, _MARGIN, _HEADER_H, _SECTION_H = 18, 28, 98, 40
 _MAX_COLUMNS = 6
 
 #: What an unrecorded plate says on the picture.
@@ -55,6 +55,8 @@ def draw(
     beds: Mapping[str, Sequence[float] | None],
     on_plate: Mapping[str, Sequence[Sequence[float]]] | None = None,
     models: Mapping[str, str] | None = None,
+    printing_seconds: Mapping[str, float] | None = None,
+    finish: str = "",
     title: str = "",
     out_path: str | None = None,
 ) -> str:
@@ -64,7 +66,8 @@ def draw(
     does not know it: the plate is drawn as a square and labelled so);
     *on_plate* each printer's parts already there, as footprints
     ``[x0, y0, x1, y1]``; *part_size_mm* the part's ``[x, y, ...]``; *models*
-    the model each printer is declared as.  Raises only what Pillow raises.
+    the model each printer is declared as; *printing_seconds* each
+    printer's rough printing time for the run.  Raises only what Pillow raises.
     """
     from PIL import Image, ImageDraw
 
@@ -86,8 +89,9 @@ def draw(
     y = _MARGIN
     d.text((_MARGIN, y), title or "Copies across your printers", font=big, fill=_TEXT)
     y += 36
-    for line in _wrap(d, str(plan.get("summary") or ""), mid, width - 2 * _MARGIN)[:1]:
-        d.text((_MARGIN, y), line, font=load_font(17), fill=_TEXT_DIM)
+    for line in [str(plan.get("summary") or ""), finish][: 2 if finish else 1]:
+        d.text((_MARGIN, y), _fit(d, line, small, width - 2 * _MARGIN), font=small, fill=_TEXT_DIM)
+        y += 22
     y = _MARGIN + _HEADER_H
 
     for name, rows in sections:
@@ -97,7 +101,7 @@ def draw(
             col, line = i % columns, i // columns
             x0 = _MARGIN + col * (_TILE_W + _GAP)
             y0 = y + line * (_TILE_H + _GAP)
-            _tile(d, x0, y0, row, part_size_mm, beds, on_plate or {}, models or {}, mid, small)
+            _tile(d, x0, y0, row, part_size_mm, beds, on_plate or {}, models or {}, mid, small, printing_seconds or {})
         lines = -(-len(rows) // columns)
         y += lines * _TILE_H + max(0, lines - 1) * _GAP + _GAP
 
@@ -124,7 +128,7 @@ def _sections(plan: Mapping[str, Any]) -> list[tuple[str, list[dict[str, Any]]]]
 def _tile(
     d: Any, x0: int, y0: int, row: Mapping[str, Any], part: Sequence[float] | None,
     beds: Mapping[str, Sequence[float] | None], on_plate: Mapping[str, Sequence[Sequence[float]]],
-    models: Mapping[str, str], mid: Any, small: Any,
+    models: Mapping[str, str], mid: Any, small: Any, printing_seconds: Mapping[str, float],
 ) -> None:
     name = str(row.get("printer") or "")
     d.text((x0, y0), _fit(d, name, mid, _TILE_W), font=mid, fill=_TEXT)
@@ -156,11 +160,16 @@ def _tile(
         now, later, plates = int(row.get("now") or 0), int(row.get("later") or 0), int(row.get("later_plates") or 0)
         first = f"{now} now" + (" beside what is there" if row.get("status") == "occupied" else "")
         d.text((x0, note_y), _fit(d, first, small, _TILE_W), font=small, fill=_COPY_EDGE)
+        lines = []
         if later:
-            d.text((x0, note_y + 20), f"{later} later, in {plates} more plate{'s' if plates != 1 else ''}",
-                   font=small, fill=_TEXT_DIM)
+            lines.append(f"{later} later, in {plates} more plate{'s' if plates != 1 else ''}")
+        seconds = printing_seconds.get(name)
+        if seconds:
+            lines.append(f"about {_hours(seconds)} of printing")
         if not bed:
-            d.text((x0, note_y + 40), "bed size not known to Kiln", font=small, fill=_TEXT_DIM)
+            lines.append("bed size not known to Kiln")
+        for i, line in enumerate(lines):
+            d.text((x0, note_y + 20 * (i + 1)), line, font=small, fill=_TEXT_DIM)
         return
     why = " ".join(str(w) for w in row.get("why") or [])
     if row.get("status") == "unknown":
@@ -186,6 +195,13 @@ def _wrap(d: Any, text: str, font: Any, width: float) -> list[str]:
         lines = lines[:_NOTE_LINES]
         lines[-1] = _fit(d, lines[-1] + " ...", font, width)
     return lines
+
+
+def _hours(seconds: float) -> str:
+    """The same words the plan's sentence uses for a duration."""
+    from kiln.generation.validation import _human_duration
+
+    return _human_duration(seconds)
 
 
 def _model_words(model: str) -> str:

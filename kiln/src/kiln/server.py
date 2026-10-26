@@ -2595,7 +2595,9 @@ _CONSENT_FILE_ARG: dict[str, str] = {
     "run_quick_print": "model_path",
     "run_reslice_and_print": "model_path",
     "submit_job": "file_name",
-    "fleet_submit_job": "file_path",
+    # The go of a copies plan across the printers: asked as a RUN
+    # (:func:`_ask_for_a_run`), and only when it is the go.
+    "plan_multi_copy_split": "file_path",
     "reprint_with_material": "file_path",
     "multi_copy_print": "model_path",
     "multi_color_copies": "model_path",
@@ -2696,6 +2698,8 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
     arg_name = _CONSENT_FILE_ARG.get(tool_name)
     if arg_name is None or ctx is None:
         return None
+    if tool_name in _RUN_TOOLS:
+        return await _ask_for_a_run(tool_name, arguments, ctx)
     if os.environ.get("KILN_SKIP_PREVIEW_GATE", "").strip() in ("1", "true", "yes"):
         return None  # one switch turns off consent prompts, as it always did
     file_value = str(arguments.get(arg_name) or "")
@@ -2807,6 +2811,66 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
     return await _offer_screen_code(
         tool_name, file_value, aimed, ctx, hook_path=None, fallback=f"unavailable:{answer.detail}",
     )
+
+
+#: Tools whose go starts a run across several printers: the person is asked
+#: about the run itself, every time, and a standing window for one printer
+#: never stands in for it.  Their plan step asks nothing.
+_RUN_TOOLS = frozenset({"plan_multi_copy_split"})
+
+
+async def _ask_for_a_run(tool_name: str, arguments: dict[str, Any], ctx: Any):
+    """Ask the person about a copies run across their printers before it is
+    queued: the part, how many copies, and which printers.  ``None`` when
+    this is not the go, or nobody can be asked (the go then needs a preview
+    token, and says so); raises when the person says no."""
+    if not arguments.get("submit"):
+        return None
+    if os.environ.get("KILN_SKIP_PREVIEW_GATE", "").strip() in ("1", "true", "yes"):
+        return None
+    file_value = str(arguments.get("file_path") or "")
+    try:
+        from kiln.job_splitter import _fill_record
+
+        found = _fill_record(str(arguments.get("plan_id") or ""))
+    except Exception:  # noqa: BLE001 -- no plan: the tool refuses on its own
+        found = None
+    if found is None:
+        return None
+    fill = found[1].get("fill") or {}
+    names = [str(p.get("printer")) for p in fill.get("printers") or [] if p.get("now") or p.get("later")]
+    try:
+        can_ask = bool(host_can_ask_the_user(mcp, ctx)) and not screen_code.host_dialog_hook(_host_client_name(ctx))
+    except Exception:  # noqa: BLE001 -- cannot ask is not approved
+        can_ask = False
+    if not can_ask or not names:
+        return None
+    shown = ", ".join(names[:6]) + (f" and {len(names) - 6} more" if len(names) > 6 else "")
+    message = describe_print_request(
+        tool_name,
+        file_name=os.path.basename(file_value) or file_value,
+        printer_name=f"{len(names)} printer{'s' if len(names) != 1 else ''} ({shown})",
+        extra={
+            "copies": (
+                f"{fill.get('wanted')} in all: {fill.get('now')} now, "
+                f"{fill.get('later')} later as each plate is cleared"
+            ),
+        },
+        terminal_available=not _hosted_now(),
+    )
+    answer = await ask_user_to_confirm(ctx, message, offer_window=False, offer_fleet=False)
+    if answer.accepted:
+        # No printer named: the yes covers the printers of this run, which
+        # the go checks against the plan before anything is queued.
+        return consent_from_dialog_answer(tool_name, file_value, None, answer, aimed="")
+    _audit(tool_name, "consent_refused", details={"file": file_value, "action": answer.action})
+    if answer.action in ("decline", "cancel"):
+        raise RuntimeError(
+            f"{tool_name} was not started: the run was "
+            + ("declined" if answer.action == "decline" else "dismissed without an answer")
+            + ". Nothing was queued."
+        )
+    return None
 
 
 def bed_question(printer: str) -> str:
@@ -23868,8 +23932,8 @@ def stop_printer_health_monitoring(printer_name: str) -> dict:
 
 # estimate_print_progress — moved to plugins/estimate_tools.py
 
-# route_print_job, fleet_submit_job, fleet_job_status, fleet_utilization
-# — extracted to plugins/fleet_tools.py
+# route_print_job, fleet_utilization (and the retired fleet_submit_job,
+# fleet_job_status) — in plugins/fleet_tools.py
 
 
 # cache_design, list_cached_designs, get_cached_design

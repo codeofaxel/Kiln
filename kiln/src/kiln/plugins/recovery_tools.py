@@ -120,6 +120,7 @@ def _plan_fill(file_path: str, copies: int, material: str, *, quality: str | Non
     if answer.get("success") is not True:
         return answer
     plan = answer["fill"]
+    finish = _finish_estimate(plan, file_path, adapters)
     from kiln import plate_state
 
     seen: dict[str, str] = {}
@@ -130,7 +131,7 @@ def _plan_fill(file_path: str, copies: int, material: str, *, quality: str | Non
     plan_id = save_fill_plan(file_path, copies, str(material).strip(), plan, plates=seen)
     picture = None
     try:
-        picture = _draw_fill(plan, file_path, adapters, placement)
+        picture = _draw_fill(plan, file_path, adapters, placement, finish)
     except Exception:  # noqa: BLE001 -- a plan without its picture still says itself
         _logger.warning("copies plan picture failed", exc_info=True)
     go = (
@@ -142,12 +143,65 @@ def _plan_fill(file_path: str, copies: int, material: str, *, quality: str | Non
         "success": True,
         "plan_id": plan_id,
         "plan": plan,
+        "finish": finish,
         "picture": picture,
-        "message": f"{plan.get('summary')} {go}",
+        "message": f"{plan.get('summary')} {finish['sentence'] if finish else ''} {go}".replace("  ", " "),
     }
 
 
-def _draw_fill(plan: dict, file_path: str, adapters: dict, placement: Any) -> str:
+def _finish_estimate(plan: dict, file_path: str, adapters: dict) -> dict | None:
+    """How long the run keeps the busiest printer printing, roughly.
+
+    Each copy's time comes from the part's own size
+    (:func:`kiln.generation.validation.estimate_print_time_from_mesh`, a
+    planning figure with its own range); a printer's run is the print it is
+    still finishing, then its plate now, then each later plate.  The time to
+    clear a plate between is the person's and is not guessed.  ``None`` when
+    the part cannot be measured.
+    """
+    from kiln.generation.validation import EST_TIME_RANGE, _human_duration, estimate_print_time_from_mesh
+
+    try:
+        per_copy = float(estimate_print_time_from_mesh(file_path)["estimated_time_seconds"])
+    except Exception:  # noqa: BLE001 -- no figure is said as none, never guessed
+        return None
+    printers: dict[str, float] = {}
+    for row in plan.get("printers") or []:
+        name = str(row.get("printer"))
+        waiting = 0.0
+        try:
+            left = adapters[name].get_job().print_time_left_seconds
+            waiting = float(left) if left else 0.0
+        except Exception:  # noqa: BLE001 -- a printer that says nothing adds nothing
+            waiting = 0.0
+        copies = int(row.get("now") or 0) + int(row.get("later") or 0)
+        printers[name] = round(waiting + copies * per_copy, 1)
+    if not printers:
+        return None
+    busiest = max(printers, key=printers.get)
+    printing = printers[busiest]
+    low, high = printing * EST_TIME_RANGE[0], printing * EST_TIME_RANGE[1]
+    plates = 1 + int(next((r.get("later_plates") or 0 for r in plan["printers"] if r["printer"] == busiest), 0))
+    clears = plates - 1
+    between = (
+        f", plus clearing its plate {'once' if clears == 1 else 'twice' if clears == 2 else f'{clears} times'} in between"
+        if clears else ""
+    )
+    return {
+        "per_copy_seconds": round(per_copy, 1),
+        "printers_seconds": printers,
+        "busiest": busiest,
+        "seconds": printing,
+        "range_seconds": [round(low, 1), round(high, 1)],
+        "sentence": (
+            f"Roughly {_human_duration(printing)} of printing on the busiest printer ({busiest}; "
+            f"{_human_duration(low)} to {_human_duration(high)}){between}: an estimate from the part's size, "
+            "not a slice."
+        ),
+    }
+
+
+def _draw_fill(plan: dict, file_path: str, adapters: dict, placement: Any, finish: dict | None = None) -> str:
     """The plan's picture, from what this install knows of each plate."""
     from kiln import plate_state
     from kiln.fleet_fill_picture import draw
@@ -165,7 +219,10 @@ def _draw_fill(plan: dict, file_path: str, adapters: dict, placement: Any) -> st
     import os
 
     title = f"{plan.get('wanted')} copies of {os.path.splitext(os.path.basename(file_path))[0]}"
-    return draw(plan, part_size_mm=part, beds=beds, on_plate=on_plate, models=models, title=title)
+    return draw(
+        plan, part_size_mm=part, beds=beds, on_plate=on_plate, models=models, title=title,
+        printing_seconds=(finish or {}).get("printers_seconds"), finish=(finish or {}).get("sentence", ""),
+    )
 
 
 def _same_file(a: str, b: str) -> bool:
@@ -186,16 +243,15 @@ def _same_file(a: str, b: str) -> bool:
     return first is not None and first == digest(b)
 
 
-def _submit_fill(file_path: str, plan_id: str | None, preview_token: str | None) -> dict:
-    """Queue a kept copies plan, after the person's yes for the part."""
+def _submit_fill(file_path: str, plan_id: str) -> dict:
+    """Queue a kept copies plan.  The door took the person's yes for the part
+    (the preview gate) before calling this."""
     import os
 
     import kiln.server as _srv
     from kiln import print_signoff
     from kiln.job_splitter import _fill_record, submit_fill_plan
 
-    if not plan_id:
-        return _srv._error_dict("submit needs the plan_id the plan answered.", code="VALIDATION_ERROR")
     found = _fill_record(plan_id)
     if found is None:
         return _srv._error_dict(f"No copies plan {plan_id!r} on this computer; plan the copies first.", code="NOT_FOUND")
@@ -207,8 +263,6 @@ def _submit_fill(file_path: str, plan_id: str | None, preview_token: str | None)
             f"{os.path.basename(file_path)} is not the part plan {plan_id} was made for; plan this part first.",
             code="PLAN_PART_MISMATCH",
         )
-    if block := _srv._preview_gate_error("plan_multi_copy_split", file_path, preview_token):
-        return block
     signoff = print_signoff.record_for(print_signoff.current())
     # Every printer the plan queues to must be one the yes covers: refused
     # here, whole, rather than job by job at the printer.
@@ -243,12 +297,13 @@ def _fill_progress_sentence(run: dict) -> str:
     failed = sum(p["failed"] for p in plates)
     if run.get("status") == "planned":
         return "This plan has not been queued yet."
+    good = run.get("copies_done") or 0
     parts = [f"{done} plate{'s' if done != 1 else ''} printed", f"{printing} printing", f"{waiting} waiting"]
     if failed:
-        parts.append(f"{failed} failed or cancelled")
+        parts.append(f"{failed} that did not come out (a failed plate's copies are queued again)")
     more = run.get("copies_to_come") or 0
     tail = f"; {more} copies still to come" if more else ""
-    return f"{run.get('wanted')} copies: " + ", ".join(parts) + tail + "."
+    return f"{good} of {run.get('wanted')} copies printed: " + ", ".join(parts) + tail + "."
 
 
 class _RecoveryToolsPlugin:
@@ -564,7 +619,11 @@ class _RecoveryToolsPlugin:
             if isinstance(copies, bool) or not isinstance(copies, int) or copies < 1:
                 return _srv._error_dict("copies must be a whole number of at least 1", code="VALIDATION_ERROR")
             if submit:
-                return _submit_fill(file_path, plan_id, preview_token)
+                if not plan_id:
+                    return _srv._error_dict("submit needs the plan_id the plan answered.", code="VALIDATION_ERROR")
+                if block := _srv._preview_gate_error("plan_multi_copy_split", file_path, preview_token):
+                    return block
+                return _submit_fill(file_path, plan_id)
             try:
                 return _plan_fill(file_path, copies, material, quality=quality, priority=priority)
             except Exception as exc:

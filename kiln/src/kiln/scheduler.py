@@ -203,6 +203,10 @@ _TURN_CODES = frozenset({"TIER_CONCURRENT_PRINT_LIMIT", "TIER_SINGLE_PRINTER_LIM
 
 WAIT_PLATE = "plate"
 WAIT_TURN = "turn"
+
+#: How many times in a row a failed plate of copies is queued again on its
+#: printer before Kiln stops and says so (:meth:`JobScheduler._settle_fill_plate`).
+FAILED_PLATE_RETRIES = 2
 WAIT_SWITCH = "switch"
 WAIT_RECOVERING = "recovering"
 
@@ -503,6 +507,9 @@ class JobScheduler:
         self._plate_answers: dict[tuple[str, str], tuple[tuple[str, str], Any]] = {}
         # One printer at a time: the wait for another printer's print.
         self._turn_wait: TurnWait | None = None
+        # job_id -> how its print ended ("success", "failed", "cancelled",
+        # "unknown"), as last recorded, for a plate of copies to settle on.
+        self._last_ending: dict[str, str] = {}
         # Jobs already announced as waiting for the queue to move to them.
         self._switch_announced: set[str] = set()
         # The printers last read as idle, for a reader asking why a job waits.
@@ -840,6 +847,7 @@ class JobScheduler:
         ``cancelled`` never contribute (the helper refuses non-verdicts, and
         the call sites don't ask).
         """
+        self._last_ending[job_id] = outcome
         if not self._persistence:
             return
         try:
@@ -1057,9 +1065,14 @@ class JobScheduler:
                  "copies": placed},
                 source="scheduler",
             )
-            wanted = int(((job.metadata or {}).get("fill") or {}).get("copies") or 0)
+            fill = dict((job.metadata or {}).get("fill") or {})
+            wanted = int(fill.get("copies") or 0)
             if placed is not None and 0 < placed < wanted:
                 self._queue_rest(job, wanted - placed)
+            if placed is not None and placed > 0:
+                # From here the job is this plate: a retry reprints these
+                # copies, never the ones just queued as the plate after it.
+                self._queue.update_metadata(job.id, {"fill": {**fill, "copies": placed}})
             return
         with self._lock:
             self._active_jobs.pop(job.id, None)
@@ -1077,15 +1090,53 @@ class JobScheduler:
         why = str(error) if error is not None else str(getattr(result, "message", "") or "the plate did not start")
         self._requeue_or_fail(job.id, f"The next plate of copies did not start on {printer_name}: {why}", [])
 
-    def _queue_rest(self, job: Any, copies: int) -> None:
+    def _settle_fill_plate(self, job_id: str) -> None:
+        """A plate of copies the printer reported failed goes back in the run.
+
+        The copies it held are queued again on the same printer, as a plate
+        that waits for the failed one to be cleared, so a run ends with the
+        copies the person asked for.  At most :data:`FAILED_PLATE_RETRIES`
+        times in a row on one printer: a plate that keeps failing is a
+        printer or part problem to look at, and the job says so instead.
+        A cancel is the person's, an ending nobody saw is asked about, and
+        neither is reprinted.  Never raises."""
+        try:
+            ending = self._last_ending.pop(job_id, None)
+            job = self._queue.get_job(job_id)
+            fill = (job.metadata or {}).get("fill") if job is not None else None
+            if not isinstance(fill, dict) or ending is None:
+                return
+            self._queue.update_metadata(job_id, {"ended": ending})
+            if ending != "failed":
+                return
+            copies = int(fill.get("copies") or 0)
+            tries = int(fill.get("failed_retries") or 0)
+            if copies < 1:
+                return
+            if tries >= FAILED_PLATE_RETRIES:
+                self._queue.update_metadata(job_id, {"not_requeued": (
+                    f"This plate of {copies} failed on {job.printer_name} again, so Kiln did not queue its copies a "
+                    f"{tries + 2}{'rd' if tries + 2 == 3 else 'th'} time. Look at the printer and the part, then queue "
+                    "them yourself."
+                )})
+                return
+            self._queue_rest(job, copies, failed_retries=tries + 1)
+        except Exception:  # noqa: BLE001 -- bookkeeping never stops the queue
+            logger.debug("could not settle the plate of job %s", job_id, exc_info=True)
+
+    def _queue_rest(self, job: Any, copies: int, *, failed_retries: int = 0) -> None:
         """Queue the copies this plate could not take as the plate after it,
         on the same terms: the same part, printer and yes, and the fleet plan
-        it belongs to."""
+        it belongs to.  *failed_retries* counts a failed plate queued again
+        (:meth:`_settle_fill_plate`); a plate after a good one starts at 0."""
         metadata = {k: v for k, v in (job.metadata or {}).items() if k in ("preview_signoff", "split_plan_id")}
         # The next plate starts on a cleared plate: never beside the copies
         # this one leaves behind.
-        fill = {k: v for k, v in ((job.metadata or {}).get("fill") or {}).items() if k != "beside_plate"}
+        fill = {k: v for k, v in ((job.metadata or {}).get("fill") or {}).items()
+                if k not in ("beside_plate", "failed_retries")}
         fill["copies"] = int(copies)
+        if failed_retries:
+            fill["failed_retries"] = int(failed_retries)
         rest_id = self._queue.submit(
             file_name=job.file_name, printer_name=job.printer_name, submitted_by="multi_copy_print",
             priority=getattr(job, "priority", 0), metadata={**metadata, "fill": fill},
@@ -1730,6 +1781,7 @@ class JobScheduler:
                             ),
                             determined_by="inferred",
                         )
+                    self._settle_fill_plate(job_id)
                     self._forget_watch(job_id)
                     completed.append(job_id)
 

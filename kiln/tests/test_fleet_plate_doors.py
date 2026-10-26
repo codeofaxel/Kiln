@@ -1,6 +1,6 @@
 """The fleet routing doors read each candidate's plate, and route onto none they cannot see.
 
-``route_print_job``, ``fleet_submit_job`` and ``suggest_printer_for_job``
+``route_print_job`` and ``suggest_printer_for_job``
 now carry a ``plate`` block per printer from kiln-pro's fleet survey
 (``kiln.placement_fleet.for_fleet``: the single-machine placement verdict
 asked once per machine).  Public Kiln owns the doors and the job envelope
@@ -12,10 +12,8 @@ do with the answer:
 * ``route_print_job`` hands every candidate the job's envelope and the
   registry's own adapters, attaches the block to each candidate before the
   router sees them, and relays a no-room refusal with per-machine sentences;
-* ``fleet_submit_job`` surveys the named printer or the whole fleet before
-  anything is queued, refuses ``NO_ROOM`` with each machine's sentence and
-  never reaches the orchestrator -- and leaves the preview sign-off standing
-  for the retry;
+* ``fleet_submit_job`` is retired: it points at ``plan_multi_copy_split``
+  and queues nothing;
 * the survey's tier gate is relayed as it is, one gate;
 * a server without kiln-pro's survey asks Kiln's servers, never routes blind
   (the served route itself is pinned in ``test_route_print_job_plain_install.py``);
@@ -216,67 +214,17 @@ class TestRoutePrintJob:
 
 
 class TestFleetSubmitJob:
-    def test_no_room_refuses_at_submission_and_the_orchestrator_never_hears_of_it(self, doors, tmp_path):
-
-        d = doors(["a", "b"], plates={
-            "a": _block(status="occupied", has_room=False, refusals=["part.gcode was not sliced for a start beside what is on a's plate"]),
-            "b": _block(status="unknown", has_room=False, refusals=["Kiln does not know what is on this plate"]),
-        })
+    def test_it_is_retired_and_points_at_the_copies_plan(self, doors, tmp_path):
+        """Retired 2026-10-26: plan_multi_copy_split reads every plate and
+        queues what it plans (pinned in test_fleet_fill_door.py).  The old
+        name queues nothing, surveys nothing and reaches no orchestrator."""
+        d = doors(["a", "b"], plates={})
         path = tmp_path / "part.gcode"
         path.write_text("G28\n")
         result = d.tools["fleet_submit_job"](str(path), material="PLA")
-        assert result["success"] is False
-        assert result["error"]["code"] == "NO_ROOM"
-        assert "Nothing was queued" in result["error"]["message"]
-        assert list(result["per_machine"]) == ["a", "b"]
-        assert "not sliced for a start" in result["per_machine"]["a"][0]
-        assert d.orch.calls == []
-        ask = d.survey.asked[0]
-        assert ask["names"] == ["a", "b"] and ask["job"]["sliced_gcode_path"] == str(path)
-
-    def test_a_named_printer_is_surveyed_alone(self, doors, tmp_path):
-        d = doors(["a", "b"], plates={"b": _block(has_room=False, refusals=["no room on b"])})
-        path = tmp_path / "part.gcode"
-        path.write_text("G28\n")
-        result = d.tools["fleet_submit_job"](str(path), printer_name="b")
-        assert result["success"] is False and result["per_machine"] == {"b": ["no room on b"]}
-        assert d.survey.asked[0]["names"] == ["b"]
-        assert d.orch.calls == []
-
-    def test_with_room_the_job_is_queued_and_the_answer_says_which_plates_have_it(self, doors, tmp_path):
-        d = doors(["a", "b"], plates={"a": _block(), "b": _block(status="occupied", has_room=False, refusals=["the jar"])})
-        path = tmp_path / "part.gcode"
-        path.write_text("G28\n")
-        result = d.tools["fleet_submit_job"](str(path), material="PLA")
-        assert result["success"] is True, result
-        assert result["submission"] == "queued"
-        assert result["plates"]["a"]["has_room"] is True and result["plates"]["b"]["has_room"] is False
-        assert len(d.orch.calls) == 1 and d.orch.calls[0]["file_path"] == str(path)
-
-    def test_the_refusal_comes_before_the_sign_off_is_spent(self, doors, tmp_path, monkeypatch):
-        """A person's yes on the preview stands for the retry that clears a plate."""
-        from kiln import print_signoff
-
-        d = doors(["a"], plates={"a": _block(has_room=False, refusals=["the jar"])})
-        cleared: list[bool] = []
-        monkeypatch.setattr(print_signoff, "clear", lambda: cleared.append(True))
-        path = tmp_path / "part.gcode"
-        path.write_text("G28\n")
-        result = d.tools["fleet_submit_job"](str(path))
-        assert result["error"]["code"] == "NO_ROOM"
-        assert cleared == []
-
-    def test_the_gate_and_a_missing_survey_are_honest_refusals(self, doors, tmp_path):
-        path = tmp_path / "part.gcode"
-        path.write_text("G28\n")
-        gate = {"success": False, "error": "Fleet plate placement requires Kiln Business", "code": "TIER_REQUIRED"}
-        d = doors(["a"], gate=gate)
-        assert d.tools["fleet_submit_job"](str(path)) == gate
-        assert d.orch.calls == []
-        d = doors(["a"], survey_missing=True)
-        result = d.tools["fleet_submit_job"](str(path))
-        assert result["success"] is False and result["error"]["code"] == "ROUTING_UNAVAILABLE"
-        assert d.orch.calls == []
+        assert result["success"] is False and result["error"]["code"] == "RETIRED"
+        assert "plan_multi_copy_split" in result["error"]["message"]
+        assert d.survey.asked == [] and d.orch.calls == []
 
 
 class TestSuggestPrinterForJob:
