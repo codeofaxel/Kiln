@@ -72,6 +72,18 @@ EMPTY_PLATE_ESTIMATE_NOTE = (
 )
 
 
+def _with_learned_time(response: dict[str, Any], printer_id: str | None) -> dict[str, Any]:
+    """*response* with ``learned_time`` when the only printer Kiln knows of
+    (of *printer_id*'s model, when one was named) has timed prints: the
+    slicer's time as that printer really prints it."""
+    from kiln.learned_print_time import learned_time
+
+    learned = learned_time(response.get("estimated_time_seconds"), None, printer_model=printer_id or None)
+    if learned:
+        response["learned_time"] = learned
+    return response
+
+
 def _estimate_slice(input_path: str, **kwargs: Any) -> tuple[Any, dict | None, dict[str, Any]]:
     """The shared slice step for a door that only estimates.
 
@@ -294,6 +306,15 @@ class _EstimateToolsPlugin:
                 }
                 if isinstance(getattr(result, "filament", None), SliceFilament):
                     estimate["filament"] = result.filament.to_dict()
+                # The slicer's time as this printer really prints it, from
+                # its own prints (kiln.learned_print_time).
+                from kiln.learned_print_time import learned_time
+
+                learned = learned_time(
+                    time_sec, printer_name, printer_model=effective_printer_id or printer_id or None,
+                )
+                if learned:
+                    estimate["learned_time"] = learned
 
                 # 5. Printability analysis, of the file that was SLICED: the
                 # bed-fit gate may have turned the part to fit, and the brim
@@ -354,6 +375,10 @@ class _EstimateToolsPlugin:
                 parts: list[str] = [f"Estimated {time_human}"]
                 if filament_g is not None:
                     parts[0] += f", {filament_g}g {mat_upper}"
+                if learned and learned["learned"]:
+                    parts[0] = learned["said"].rstrip(".")
+                    if filament_g is not None:
+                        parts.insert(1, f"Uses {filament_g}g {mat_upper}")
                 # The verdict, never the score: the score is in the report
                 # for comparing versions of a part.
                 if verdict_text:
@@ -557,7 +582,7 @@ class _EstimateToolsPlugin:
                 if file_path.lower().endswith((".gcode", ".gco", ".g")):
                     result = _parse_gcode_estimates(file_path)
                     derive_filament_weight(result, material or None)
-                    return {"success": True, **result}
+                    return _with_learned_time({"success": True, **result}, printer_id)
 
                 # Otherwise, slice first with the right profile -- through
                 # the same shared step as every slice door, never refusing
@@ -586,7 +611,7 @@ class _EstimateToolsPlugin:
                 _attach_placement(response, sinfo["placement"])
                 if sinfo.get("plate_note"):
                     response["plate_note"] = sinfo["plate_note"]
-                return response
+                return _with_learned_time(response, printer_id)
             except Exception as exc:
                 return _srv._error_dict(f"Print estimation failed: {exc}", code="ESTIMATE_ERROR")
 
@@ -661,12 +686,14 @@ class _EstimateToolsPlugin:
             total_layers: int | None = None,
             current_layer: int | None = None,
         ) -> dict:
-            """Estimate print progress with phase-aware time prediction.
+            """Estimate print progress and when the print running now will end.
 
             Breaks a print into phases -- preparing, printing, cooling, and
-            post-processing -- and uses historical data from the print outcomes
-            database to estimate time remaining.  Typically more accurate than
-            raw firmware estimates for predicting true completion time.
+            post-processing -- from how far it has got and how long it has
+            run.  When the printer has finished enough prints Kiln started,
+            ``learned_time_left`` says when this one should end by its own
+            record (the slicer's time for the file, as this printer really
+            prints it), beside the printer's own countdown.
 
             Supply ``elapsed_seconds``, ``total_layers``, and ``current_layer``
             when available; any omitted values will be read from the printer's
@@ -685,16 +712,35 @@ class _EstimateToolsPlugin:
             import kiln.server as _srv
 
             try:
-                from kiln.progress import get_progress_estimator
+                from kiln.learned_print_time import learned_time_left
+                from kiln.printers.base import outcome_printer_name
+                from kiln.progress import estimate_progress_from_pct
 
-                estimator = get_progress_estimator()
-                estimate = estimator.estimate(
-                    printer_name=printer_name,
-                    elapsed_seconds=elapsed_seconds,
-                    total_layers=total_layers,
-                    current_layer=current_layer,
+                adapter = _srv._get_registry().get(printer_name)
+                _state, job = _srv.read_status(adapter)
+                jd = job.to_dict()
+                elapsed = elapsed_seconds if elapsed_seconds is not None else jd.get("print_time_seconds")
+                layer = current_layer if current_layer is not None else jd.get("current_layer")
+                layers = total_layers if total_layers is not None else jd.get("total_layers")
+                pct = (
+                    100.0 * float(layer) / float(layers)
+                    if layer is not None and layers
+                    else jd.get("completion")
                 )
-                return {"success": True, "progress": estimate.to_dict()}
+                if jd.get("active") is False or elapsed is None or pct is None:
+                    return _srv._error_dict(
+                        f"{printer_name} has no print running that says how far it has got; nothing to estimate.",
+                        code="NO_ACTIVE_JOB",
+                    )
+                estimate = estimate_progress_from_pct(progress_pct=float(pct), elapsed_s=float(elapsed))
+                out: dict[str, Any] = {"success": True, "progress": estimate.to_dict()}
+                if jd.get("print_time_left_seconds") is not None:
+                    out["printer_time_left_seconds"] = jd["print_time_left_seconds"]
+                left = learned_time_left(outcome_printer_name(adapter), float(elapsed))
+                if left:
+                    out["learned_time_left"] = left
+                    out["message"] = left["said"]
+                return out
             except Exception as exc:
                 _logger.exception("Error in estimate_print_progress")
                 return _srv._error_dict(

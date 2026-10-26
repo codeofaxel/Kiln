@@ -3807,7 +3807,7 @@ class PrinterAdapter(ABC):
                 # under the family name, the row could never be found again:
                 # each print left one more forever-pending row and its real
                 # ending was inserted as a second row beside it.
-                open_pending_outcome(
+                opened = open_pending_outcome(
                     outcome_printer_name(self),
                     file_name,
                     material_type=(
@@ -3819,6 +3819,11 @@ class PrinterAdapter(ABC):
                     # this row, so the start is where it is written.
                     identity=print_identity_at_start(self, kwargs, file_name),
                 )
+                # The slicer's time for the file, beside the row, so the
+                # ending can be laid against it (kiln.learned_print_time).
+                from kiln.learned_print_time import note_start_estimate
+
+                note_start_estimate(opened, file_name)
             except Exception:  # noqa: BLE001 — bookkeeping must never affect a print
                 import logging as _logging
 
@@ -7197,6 +7202,12 @@ def _record_print_duration(
     # print and nothing collapses them; the hours row and the outcome row also
     # stop naming the same job.
     record_print_hours_for_job(job_label, hours, reported=not watched)
+    # The same trusted length goes on the print's own row, where it is laid
+    # against the slicer's time to learn this printer's pace.  The hook that
+    # just ran settled that row under this very label.
+    from kiln.learned_print_time import note_print_seconds
+
+    note_print_seconds(job_label, hours * 3600.0)
 
 
 #: How long after Kiln's own load / unload / cancel a slot change still

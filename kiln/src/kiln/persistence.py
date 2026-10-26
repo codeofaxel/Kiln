@@ -680,6 +680,18 @@ class KilnDB:
             self._conn.execute(
                 "ALTER TABLE print_outcomes ADD COLUMN account_pushed_state TEXT DEFAULT NULL"
             )
+        # How long the print took against what the slicer said it would
+        # (kiln.learned_print_time).  ``estimated_seconds`` is the slicer's
+        # time for the file, read at the START Kiln sent; ``print_seconds``
+        # is how long it really printed, written only from an ending Kiln
+        # can vouch for (``_record_print_duration``'s watched-or-frozen
+        # rule), never from a guess.  Kept on this computer: neither goes to
+        # the account (``outcome_courier.account_row`` names its fields).
+        for name in self.PRINT_TIME_COLUMNS:
+            if name not in columns:
+                self._conn.execute(
+                    f"ALTER TABLE print_outcomes ADD COLUMN {name} REAL DEFAULT NULL"
+                )
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_print_outcomes_version ON print_outcomes(version_id)"
         )
@@ -2699,6 +2711,9 @@ class KilnDB:
         "account_sync_id": "TEXT",
     }
 
+    #: The print-time pair on an outcome row; see ``_migrate_print_outcomes``.
+    PRINT_TIME_COLUMNS = ("estimated_seconds", "print_seconds")
+
     def save_print_outcome(self, outcome: dict[str, Any]) -> int:
         """Save a print outcome record.  Returns row id.
 
@@ -3015,6 +3030,95 @@ class KilnDB:
             return self.save_print_outcome(row)
         except ValueError:
             return None
+
+    def set_outcome_estimate(self, job_id: str, seconds: float) -> bool:
+        """Write the slicer's time for the print *job_id* names, once.
+
+        The start's own figure: a row that already carries one keeps it.
+        Returns whether a row took it.
+        """
+        return self._set_print_time("estimated_seconds", job_id, seconds)
+
+    def record_print_seconds(self, job_id: str, seconds: float) -> bool:
+        """Write how long the print *job_id* names really printed, once.
+
+        Called only with a duration Kiln can vouch for (see
+        ``kiln.printers.base._record_print_duration``); the first one wins,
+        so a second door witnessing the same ending changes nothing.
+        """
+        return self._set_print_time("print_seconds", job_id, seconds)
+
+    def _set_print_time(self, column: str, job_id: str, seconds: float) -> bool:
+        if column not in self.PRINT_TIME_COLUMNS or not job_id:
+            return False
+        if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not 0 < seconds < 1e7:
+            return False
+        with self._write_lock:
+            cur = self._conn.execute(
+                f"UPDATE print_outcomes SET {column} = ? WHERE job_id = ? AND {column} IS NULL",
+                (float(seconds), job_id),
+            )
+            self._conn.commit()
+            return bool(getattr(cur, "rowcount", 0))
+
+    def print_time_rows(
+        self,
+        printer_names: list[str],
+        machine_fingerprint: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """This machine's finished prints that carry both times, newest first.
+
+        Only ``success``: a cancelled or failed print stopped short of the
+        time it was estimated for.  The machine is its fingerprint when the
+        rows carry one, else any of its registered names.
+        """
+        clauses = []
+        params: list[Any] = []
+        if machine_fingerprint:
+            clauses.append("machine_fingerprint = ?")
+            params.append(machine_fingerprint)
+        names = [n for n in printer_names if n]
+        if names:
+            clauses.append(f"printer_name IN ({', '.join('?' for _ in names)})")
+            params.extend(names)
+        if not clauses:
+            return []
+        params.append(int(limit))
+        rows = self._conn.execute(
+            "SELECT job_id, printer_name, estimated_seconds, print_seconds, created_at, ended_at "
+            f"FROM print_outcomes WHERE ({' OR '.join(clauses)}) AND outcome = 'success' "
+            "AND estimated_seconds IS NOT NULL AND print_seconds IS NOT NULL "
+            "ORDER BY COALESCE(ended_at, created_at) DESC LIMIT ?",
+            params,
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def running_print_estimate(
+        self,
+        printer_names: list[str],
+        machine_fingerprint: str | None = None,
+    ) -> dict[str, Any] | None:
+        """The print Kiln started that is still open on this machine, with
+        the slicer's time for it, or ``None``."""
+        clauses = []
+        params: list[Any] = []
+        if machine_fingerprint:
+            clauses.append("machine_fingerprint = ?")
+            params.append(machine_fingerprint)
+        names = [n for n in printer_names if n]
+        if names:
+            clauses.append(f"printer_name IN ({', '.join('?' for _ in names)})")
+            params.extend(names)
+        if not clauses:
+            return None
+        row = self._conn.execute(
+            "SELECT job_id, printer_name, file_name, estimated_seconds, created_at "
+            f"FROM print_outcomes WHERE ({' OR '.join(clauses)}) AND outcome = 'pending' "
+            "AND estimated_seconds IS NOT NULL ORDER BY created_at DESC LIMIT 1",
+            params,
+        ).fetchone()
+        return dict(row) if row is not None else None
 
     def list_unresolved_outcomes(
         self,

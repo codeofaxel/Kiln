@@ -169,12 +169,17 @@ def _printer_times(
     One copy and two copies of the part are sliced once per printer MODEL,
     with that model's own profile (:func:`_model_times`), which splits the
     slicer's time into what each copy adds and what each plate costs once;
-    each printer adds the print it is still finishing (its own countdown).
+    each printer adds the print it is still finishing (when it should end by
+    its own record, else its own countdown).  A printer with prints Kiln
+    has timed sends its ``pace`` beside the slicer's times: how much longer
+    or shorter its prints run than the slicer says, and over how many
+    prints (:mod:`kiln.learned_print_time`); the plan's share reads it.
     Returns ``(times per printer, times per model, each printer's model)``;
     a printer whose model could not be sliced here, or that has no model
     set, has no time.
     """
     from kiln import plate_state
+    from kiln.learned_print_time import learned_time_left, pace_for
 
     model_of: dict[str, str] = {}
     for name in names:
@@ -193,13 +198,20 @@ def _printer_times(
             continue
         per_copy, per_plate = per_model[model]
         try:
-            left = adapters[name].get_job().print_time_left_seconds
+            job = adapters[name].get_job()
+            left = job.print_time_left_seconds
             busy = float(left) if left else 0.0
+            if busy:
+                learned = learned_time_left(name, getattr(job, "print_time_seconds", None))
+                busy = float(learned["seconds_left"]) if learned else busy
         except Exception:  # noqa: BLE001 -- a printer that says nothing adds nothing
             busy = 0.0
         times[name] = {
             "per_copy_seconds": round(per_copy, 1), "per_plate_seconds": round(per_plate, 1), "busy_seconds": busy,
         }
+        pace = pace_for(name)
+        if pace is not None:
+            times[name]["pace"] = {"factor": round(pace.factor, 4), "prints": pace.prints}
     return times, per_model, model_of
 
 
@@ -225,8 +237,8 @@ def _finish_estimate(
     )
     which = "busiest printer" if not plan.get("untimed") else "busiest printer Kiln could time"
     sentence = (
-        f"About {_human_duration(seconds)} of printing on the {which} ({busiest}){between}, by the slicer's own "
-        f"estimate for each printer model.{_share_trade(plan, finish)}"
+        f"About {_human_duration(seconds)} of printing on the {which} ({busiest}){between}, "
+        f"{_timed_by_words(plan)}.{_share_trade(plan, finish)}"
     )
     untimed = _untimed_sentence(plan, model_of, timed, asked=asked)
     untimed_printers = [str(p) for p in plan.get("untimed") or []]
@@ -239,8 +251,33 @@ def _finish_estimate(
         "other": finish.get("other"),
         "untimed_models": sorted({model_of.get(p, "") for p in untimed_printers if p not in timed} - {""}),
         "no_model_printers": [p for p in untimed_printers if not model_of.get(p)],
+        "timed_by": dict(plan.get("timed_by") or {}),
         "sentence": f"{sentence} {untimed}" if untimed else sentence,
     }
+
+
+def _timed_by_words(plan: dict) -> str:
+    """Where the plan's times came from, in words: the slicer's estimate for
+    each model, and which printers it was corrected for by how long prints
+    really take on them (their own, or others of their model)."""
+    timed_by = plan.get("timed_by") if isinstance(plan.get("timed_by"), dict) else {}
+    own = sorted(p for p, t in timed_by.items() if isinstance(t, dict) and t.get("from") == "own_prints")
+    kin = sorted(p for p, t in timed_by.items() if isinstance(t, dict) and t.get("from") == "same_model_prints")
+    if not own and not kin:
+        return "by the slicer's own estimate for each printer model"
+
+    def listed(names: list[str]) -> str:
+        return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+
+    said = []
+    if own:
+        said.append(f"for {listed(own)} by {'its' if len(own) == 1 else 'their'} own past prints")
+    if kin:
+        said.append(f"for {listed(kin)} by past prints on other printers of the same model")
+    return (
+        "by the slicer's estimate for each printer model, corrected by how long prints really take: "
+        + "; ".join(said)
+    )
 
 
 def _untimed_sentence(plan: dict, model_of: dict[str, str], timed: set[str], *, asked: str = "soonest") -> str:

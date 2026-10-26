@@ -7144,6 +7144,11 @@ def printer_status(
             "printer": printer_block,
             "job": job.to_dict(),
         }
+        # When the print should really end, from this printer's own prints,
+        # beside the printer's countdown.  See kiln.learned_print_time.
+        from kiln.learned_print_time import attach_time_left
+
+        attach_time_left(response["job"], adapter)
         # A print carrying a hardware plan: when the next stop comes, what
         # goes in at it, or what goes in now that the print is done.  At both
         # detail levels -- the lite read is the one polled through a print.
@@ -7708,6 +7713,11 @@ def monitor_print(
         )
         elapsed_str = _format_duration(elapsed_s)
         remaining_str = _format_duration(remaining_s)
+        # The printer's countdown is the printer's; beside it, when the print
+        # should end by this printer's own record (kiln.learned_print_time).
+        from kiln.learned_print_time import attach_time_left
+
+        _learned_left = attach_time_left(jd, adapter)
         _no_reading = "unknown (read the printer's display)" if temperature_note else "N/A"
         nozzle_str = (
             f"{tool_actual:.0f}°C → {tool_target:.0f}°C target"
@@ -7971,6 +7981,7 @@ def monitor_print(
             f"- File: {file_name}",
             f"- Layer: {layer_str}",
             f"- Time elapsed: {elapsed_str} | Remaining: {remaining_str}",
+            *([f"- Kiln expects: {_learned_left['said']}"] if _learned_left else []),
             f"- Nozzle: {nozzle_str}",
             f"- Bed: {bed_str}",
         ]
