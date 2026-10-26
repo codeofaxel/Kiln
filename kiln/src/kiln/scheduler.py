@@ -285,13 +285,23 @@ def _verb(label: str, one: str, several: str) -> str:
 
 def plate_wait_sentence(
     file_name: str, printers: list[str], state: Any, *, code: str, camera: bool, label: str | None = None,
+    beside: bool = False,
 ) -> str:
     """What a job waiting for a plate says, in one breath: what is there,
     that this file is next, and the one thing that starts it.  *label* is
-    what the person calls the job (:func:`_job_label`), when not its file."""
+    what the person calls the job (:func:`_job_label`), when not its file;
+    *beside* says it is copies planned beside what was on the plate."""
     name = label or _file_label(file_name)
     from kiln.plate_state import PLATE_CHANGED_CODE
 
+    if code == PLATE_CHANGED_CODE and beside:
+        where = printers[0] if printers else "the printer"
+        return (
+            f"{_cap(name)} {_verb(name, 'was', 'were')} planned beside what was on {where}'s plate when you saw the "
+            f"plan, and the plate has changed since, so {_verb(name, 'it waits', 'they wait')} rather than start "
+            f"there. Clear the plate and say so (tell your assistant the plate is clear, or run `kiln plate clear`), "
+            f"and Kiln prints {_verb(name, 'it', 'them')} on the empty plate."
+        )
     if code == PLATE_CHANGED_CODE:
         where = printers[0] if printers else "the printer"
         return (
@@ -314,6 +324,11 @@ def plate_wait_sentence(
         f"the plate is clear, or run "
         f"`kiln plate clear`), and Kiln {_verb(name, 'starts ' + name, 'prints the next plate of them')} on its own.{look}"
     )
+
+
+def _planned_beside(job: Any) -> bool:
+    """Whether *job* is a run's copies planned beside what was on its plate."""
+    return bool(((getattr(job, "metadata", None) or {}).get("fill") or {}).get("beside_plate"))
 
 
 def turn_wait_sentence(file_name: str, printer_name: str | None, busy: list[str], *, label: str | None = None) -> str:
@@ -1064,9 +1079,13 @@ class JobScheduler:
 
     def _queue_rest(self, job: Any, copies: int) -> None:
         """Queue the copies this plate could not take as the plate after it,
-        on the same terms: the same part, printer and yes."""
-        metadata = {k: v for k, v in (job.metadata or {}).items() if k in ("preview_signoff",)}
-        fill = {**((job.metadata or {}).get("fill") or {}), "copies": int(copies)}
+        on the same terms: the same part, printer and yes, and the fleet plan
+        it belongs to."""
+        metadata = {k: v for k, v in (job.metadata or {}).items() if k in ("preview_signoff", "split_plan_id")}
+        # The next plate starts on a cleared plate: never beside the copies
+        # this one leaves behind.
+        fill = {k: v for k, v in ((job.metadata or {}).get("fill") or {}).items() if k != "beside_plate"}
+        fill["copies"] = int(copies)
         rest_id = self._queue.submit(
             file_name=job.file_name, printer_name=job.printer_name, submitted_by="multi_copy_print",
             priority=getattr(job, "priority", 0), metadata={**metadata, "fill": fill},
@@ -1319,6 +1338,14 @@ class JobScheduler:
         cached = self._plate_answers.get(key)
         if cached is not None and cached[0] == version:
             return cached[1]
+        beside = ((job.metadata or {}).get("fill") or {}).get("beside_plate")
+        if isinstance(beside, str) and beside:
+            # A run's first plate on a printer whose plate held parts when the
+            # person saw the plan: laid out beside them at its turn, and only
+            # while the plate still holds exactly what they saw.
+            code = None if version[1] == beside else plate_state.PLATE_CHANGED_CODE
+            self._plate_answers[key] = (version, code)
+            return code
         held = plate_state.start_hold(adapter, file_name=job.file_name)
         code = None if held is None else held[0]
         self._plate_answers[key] = (version, code)
@@ -1444,7 +1471,7 @@ class JobScheduler:
                     "kind": WAIT_PLATE, "waiting_jobs": [job.id for job in still],
                     "message": plate_wait_sentence(
                         first.file_name, [printer_name], block["state"], code=code, camera=block["camera"],
-                        label=_job_label(first),
+                        label=_job_label(first), beside=_planned_beside(first),
                     ),
                 },
                 source="scheduler",
@@ -1503,7 +1530,7 @@ class JobScheduler:
             camera = any(plate_blocks.get(p, {}).get("camera") for p in printers)
             note["sentence"] = plate_wait_sentence(
                 job.file_name, printers, wait.get("_state"), code=str(wait.get("code") or ""), camera=camera,
-                label=_job_label(job),
+                label=_job_label(job), beside=_planned_beside(job),
             )
         before = (job.metadata or {}).get("waiting")
         same = isinstance(before, dict) and before.get("kind") == note.get("kind") and before.get("printers") == printers

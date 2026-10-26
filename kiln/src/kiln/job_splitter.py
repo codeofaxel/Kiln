@@ -7,6 +7,17 @@ assembly splitting (multi-STL archive across fleet).
 
 Uses the printer registry to discover available printers and their
 build volumes.
+
+Copies of one part across the fleet wherever there is safe room (Kiln
+Business, https://kiln3d.com/pricing) are planned on Kiln's servers
+(:mod:`kiln._pro_fleet_fill_bridge`) and kept here as a FILL plan: the plan
+the person saw, saved under its id, and queued as one job per printer when
+they say go (:func:`submit_fill_plan`).  Each printer's job is laid out for
+its plate when its turn comes and queues the copies that plate cannot take
+as the plate after it, on the same printer, carrying the plan's id, so the
+whole run is one plan to follow (:func:`fill_progress`) and to stop
+(:func:`cancel_split_plan`).  :func:`plan_multi_copy_split` below is the
+blind spread: it reads no plate.
 """
 
 from __future__ import annotations
@@ -402,6 +413,8 @@ def get_split_progress(plan_id: str) -> SplitProgress:
         )
 
     parts_data = json.loads(dict(row)["parts"])
+    if not isinstance(parts_data, list):
+        parts_data = []
     total = len(parts_data)
     completed = sum(1 for p in parts_data if p.get("status") == "completed")
     failed = sum(1 for p in parts_data if p.get("status") == "failed")
@@ -442,17 +455,21 @@ def cancel_split_plan(plan_id: str) -> dict[str, Any]:
     if not row:
         return {"success": False, "error": f"Split plan {plan_id} not found"}
 
-    parts_data = json.loads(dict(row)["parts"])
+    record = dict(row)
+    if record.get("split_type") == FILL_SPLIT_TYPE:
+        return _cancel_fill_plan(plan_id)
+    parts_data = json.loads(record["parts"])
     cancelled = 0
     errors: list[str] = []
+
+    # The queue accessor lives on the server module (see submit_split_plan);
+    # ``kiln.queue`` has none, and asking it for one failed every cancel.
+    import kiln.server as _srv
 
     for part in parts_data:
         if part.get("status") in ("pending", "printing") and part.get("job_id"):
             try:
-                from kiln.queue import get_queue
-
-                queue = get_queue()
-                queue.cancel(part["job_id"])
+                _srv._get_queue().cancel(part["job_id"])
                 part["status"] = "cancelled"
                 cancelled += 1
             except Exception as exc:
@@ -473,4 +490,168 @@ def cancel_split_plan(plan_id: str) -> dict[str, Any]:
         "plan_id": plan_id,
         "cancelled_count": cancelled,
         "errors": errors,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Fill plans: copies across the fleet, wherever there is safe room
+# ---------------------------------------------------------------------------
+
+FILL_SPLIT_TYPE = "fill"
+
+
+def save_fill_plan(
+    model_path: str, copies: int, material: str, fill: dict[str, Any], plates: dict[str, str] | None = None,
+) -> str:
+    """Keep the plan the person was shown, and the part, under a new plan id.
+
+    The part is copied into Kiln's own folder first, as a queued copies job
+    keeps it (``kiln.server._queue_fill_rest``), so tidying the folder it
+    came from loses nothing.  *plates* is each occupied plate's record
+    fingerprint as the plan saw it.  Returns the plan id.
+    """
+    import os
+
+    from kiln.asset_store import kiln_root, persist_asset
+    from kiln.persistence import get_db
+
+    kept = persist_asset(model_path, os.path.join(kiln_root(), "queued_parts"), prefix="part") or model_path
+    plan_id = str(uuid.uuid4())
+    record = {"copies": int(copies), "material": material, "fill": fill, "plates": dict(plates or {}), "queued": []}
+    db = get_db()
+    db._conn.execute(
+        """INSERT INTO split_plans (id, original_file, split_type, parts, total_printers, created_at, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (plan_id, kept, FILL_SPLIT_TYPE, json.dumps(record), len(fill.get("printers") or []), time.time(), "planned"),
+    )
+    db._conn.commit()
+    return plan_id
+
+
+def _fill_record(plan_id: str) -> tuple[str, dict[str, Any], str] | None:
+    """``(model_path, record, status)`` for a fill plan, or ``None``."""
+    from kiln.persistence import get_db
+
+    row = get_db()._conn.execute("SELECT * FROM split_plans WHERE id = ?", (plan_id,)).fetchone()
+    if not row or dict(row).get("split_type") != FILL_SPLIT_TYPE:
+        return None
+    row = dict(row)
+    try:
+        record = json.loads(row["parts"])
+    except (TypeError, ValueError):
+        return None
+    return str(row.get("original_file") or ""), record if isinstance(record, dict) else {}, str(row.get("status") or "")
+
+
+def submit_fill_plan(plan_id: str, signoff: dict[str, Any] | None) -> dict[str, Any]:
+    """Queue a kept fill plan: one copies job per printer, pinned to it.
+
+    Each job asks for the copies that printer prints now and later; it is
+    laid out for its plate when its turn comes, and what that plate cannot
+    take is queued again on the same printer (the queue's own copies path),
+    so later plates follow as plates are cleared.  *signoff* is the person's
+    yes, carried on every job.  The caller takes the gate first.  Queues
+    nothing a second time: a plan already queued answers what it queued.
+    """
+    import kiln.server as _srv
+    from kiln.persistence import get_db
+
+    found = _fill_record(plan_id)
+    if found is None:
+        return {"success": False, "error": {"code": "NOT_FOUND", "message": f"No copies plan {plan_id!r} on this computer."}}
+    model_path, record, status = found
+    if status in ("submitted", "cancelled"):
+        return {"success": True, "plan_id": plan_id, "queued": list(record.get("queued") or []), "already": status}
+    queued: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for row in (record.get("fill") or {}).get("printers") or []:
+        copies = int(row.get("now") or 0) + int(row.get("later") or 0)
+        if copies < 1:
+            continue
+        beside = (record.get("plates") or {}).get(str(row["printer"])) if row.get("status") == "occupied" and row.get("now") else None
+        out = _srv._queue_fill_rest(
+            model_path, copies, printer_name=str(row["printer"]), printer_id=None, overrides=None,
+            slicer_path=None, spacing_mm=10.0, signoff=signoff, run={"split_plan_id": plan_id},
+            beside_plate=beside or None,
+        )
+        if out.get("job_id"):
+            queued.append({"printer": out.get("printer_name") or row["printer"], "job_id": out["job_id"], "copies": copies})
+        else:
+            errors.append(f"{row['printer']}: {out.get('why') or 'could not be queued'}")
+    record["queued"] = queued
+    db = get_db()
+    db._conn.execute(
+        "UPDATE split_plans SET parts = ?, status = ? WHERE id = ?",
+        (json.dumps(record), "submitted" if queued else "planned", plan_id),
+    )
+    db._conn.commit()
+    return {"success": bool(queued), "plan_id": plan_id, "queued": queued, "errors": errors}
+
+
+def _jobs_of(plan_id: str) -> list[Any]:
+    """Every queue job of the run: the first per printer and every plate queued after it."""
+    import kiln.server as _srv
+
+    return [j for j in _srv._get_queue().list_jobs() if (j.metadata or {}).get("split_plan_id") == plan_id]
+
+
+def fill_progress(plan_id: str) -> dict[str, Any] | None:
+    """Where a queued fill plan stands, per printer: plates printed, printing
+    and waiting, and the copies still to come.  ``None`` for no such plan."""
+    from kiln.queue import JobStatus
+
+    found = _fill_record(plan_id)
+    if found is None:
+        return None
+    _model, record, status = found
+    per: dict[str, dict[str, int]] = {}
+    for job in _jobs_of(plan_id):
+        row = per.setdefault(str(job.printer_name or ""), {"done": 0, "printing": 0, "waiting": 0, "failed": 0, "copies_to_come": 0})
+        if job.status == JobStatus.COMPLETED:
+            row["done"] += 1
+        elif job.status in (JobStatus.PRINTING, JobStatus.STARTING):
+            row["printing"] += 1
+        elif job.status == JobStatus.QUEUED:
+            row["waiting"] += 1
+            row["copies_to_come"] += int(((job.metadata or {}).get("fill") or {}).get("copies") or 0)
+        elif job.status in (JobStatus.FAILED, JobStatus.CANCELLED):
+            row["failed"] += 1
+    return {
+        "plan_id": plan_id,
+        "status": status,
+        "wanted": int(record.get("copies") or 0),
+        "printers": [{"printer": name, "plates": counts} for name, counts in per.items()],
+        "copies_to_come": sum(r["copies_to_come"] for r in per.values()),
+    }
+
+
+def _cancel_fill_plan(plan_id: str) -> dict[str, Any]:
+    """Cancel every job of a fill plan that has not reached a printer."""
+    import kiln.server as _srv
+    from kiln.persistence import get_db
+    from kiln.queue import JobStatus
+
+    cancelled, printing, errors = 0, [], []
+    for job in _jobs_of(plan_id):
+        if job.status == JobStatus.QUEUED:
+            try:
+                _srv._get_queue().cancel(job.id)
+                cancelled += 1
+            except Exception as exc:  # noqa: BLE001 -- said, never lost
+                errors.append(f"{job.printer_name}: {exc}")
+        elif job.status in (JobStatus.PRINTING, JobStatus.STARTING):
+            printing.append(str(job.printer_name))
+    found = _fill_record(plan_id)
+    if found is not None:
+        db = get_db()
+        db._conn.execute("UPDATE split_plans SET status = ? WHERE id = ?", ("cancelled", plan_id))
+        db._conn.commit()
+    still = f" Still printing, untouched: {', '.join(printing)} (cancel_print stops one)." if printing else ""
+    return {
+        "success": not errors,
+        "plan_id": plan_id,
+        "cancelled": cancelled,
+        "printing": printing,
+        "errors": errors,
+        "message": f"Cancelled {cancelled} queued plate{'s' if cancelled != 1 else ''} of this run.{still}",
     }

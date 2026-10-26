@@ -508,7 +508,8 @@ def plate_reading(name: str, adapter: Any, job: Mapping[str, Any] | None) -> dic
          "unknowns": [str]}
 
     ``request`` is :func:`request_for` with ``placement="auto"`` -- the plate
-    record, the occupant's file, the part's size or the sliced file.
+    record, the occupant's file, the part's size or the sliced file, and
+    ``copies`` when *job* asks how many of a mesh this plate takes.
     ``camera`` says which camera could settle an unknown plate and
     ``camera_clause`` is the sentence that offers it.  A sliced file's
     quiet-start ``contract`` names the plate it was sliced beside, and
@@ -523,6 +524,11 @@ def plate_reading(name: str, adapter: Any, job: Mapping[str, Any] | None) -> dic
     job = dict(job or {})
     part = job.get("part") if isinstance(job.get("part"), dict) else None
     sliced = job.get("sliced_gcode_path") if isinstance(job.get("sliced_gcode_path"), str) else None
+    # Copies of a mesh: how many of them this plate takes is asked with the
+    # plate.  A sliced file is one fixed print and is never filled.
+    copies = job.get("copies") if isinstance(job.get("copies"), int) and not isinstance(job.get("copies"), bool) else None
+    if sliced or part is None or (copies is not None and copies < 1):
+        copies = None
     file_name = str(job.get("file") or (os.path.basename(sliced) if sliced else "") or "the file")
     reading: dict[str, Any] = {
         "schema": READING_SCHEMA, "request": None, "file_name": file_name, "camera": None,
@@ -544,7 +550,7 @@ def plate_reading(name: str, adapter: Any, job: Mapping[str, Any] | None) -> dic
             reading["camera_clause"] = plate_state.camera_could_settle(adapter)
             printer_id = plate_state.declared_model_of(adapter)
             reading["request"] = request_for(
-                adapter, printer_id, placement="auto", part=part, sliced_gcode_path=sliced,
+                adapter, printer_id, placement="auto", part=part, sliced_gcode_path=sliced, copies=copies,
             )
             if sliced:
                 contract = plate_state.quiet_start_contract_for(file_name, local_path=sliced)
@@ -574,7 +580,8 @@ def fleet_readings(
     form the hosted service takes: each request through :func:`hosted_form`
     with the job's own sliced file left OUT of every request -- the job is
     one file and travels once, beside the readings, so twenty machines do
-    not carry twenty copies of it.
+    not carry twenty copies of it, and each machine's serial as a one-way
+    code.
     """
     out: dict[str, dict[str, Any]] = {}
     for raw in names:
@@ -582,6 +589,12 @@ def fleet_readings(
         reading = plate_reading(name, (adapters or {}).get(name), job)
         if wire and isinstance(reading.get("request"), dict):
             reading["request"] = hosted_form({**reading["request"], "sliced_gcode": None})
+            # The fleet doors are asks a person made, so the served door
+            # passes their arguments as given: the machine's serial is coded
+            # here, one way, before it leaves (kiln.outbound_guard).
+            from kiln.outbound_guard import machine_code
+
+            reading["request"]["serial"] = machine_code(reading["request"].get("serial")) or ""
         out[name] = reading
     return out
 

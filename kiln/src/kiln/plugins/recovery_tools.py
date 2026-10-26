@@ -72,6 +72,149 @@ def _classify_drift_kind_from_failure(
     return "unknown"
 
 
+_MESH_EXTENSIONS = (".stl", ".3mf", ".obj")
+
+
+def _plan_fill(file_path: str, copies: int, material: str, *, quality: str | None, priority: str | None) -> dict:
+    """Ask for the copies plan over every registered printer, keep it, draw it."""
+    import os
+
+    import kiln.server as _srv
+    from kiln import _pro_fleet_fill_bridge as fleet_fill
+    from kiln import _pro_placement_bridge as placement
+    from kiln.auto_record_hook import version_of_print_file
+    from kiln.job_splitter import save_fill_plan
+    from kiln.queue import JobStatus
+    from kiln.routing_candidates import collect_routing_candidates
+
+    if os.path.splitext(file_path)[1].lower() not in _MESH_EXTENSIONS:
+        return _srv._error_dict(
+            "Copies are laid out from the part's mesh: give the STL, 3MF or OBJ, not a sliced file.",
+            code="VALIDATION_ERROR",
+        )
+    if not material or not str(material).strip():
+        return _srv._error_dict("material is required: the plan only uses printers that can run it.", code="VALIDATION_ERROR")
+    registry = _srv._get_registry()
+    names = registry.list_names()
+    if not names:
+        return _srv._error_dict("No printers registered. Register printers before planning copies across them.", code="NO_PRINTERS")
+    pending: dict[str, int] = {}
+    for job in _srv._get_queue().list_jobs(status=JobStatus.QUEUED):
+        if job.printer_name:
+            pending[job.printer_name] = pending.get(job.printer_name, 0) + 1
+    adapters = {name: registry.get(name) for name in names}
+    version = version_of_print_file(file_path)
+    # No file type to match: each printer's plate is sliced for that printer
+    # when its turn comes.
+    candidates = collect_routing_candidates(
+        adapters=adapters, material=str(material).strip(), pending_counts=pending, version_id=version,
+    )
+    if not candidates:
+        return _srv._error_dict("No registered printer can accept this file type.", code="NO_ELIGIBLE_PRINTERS")
+    answer = fleet_fill.ask(
+        file_path, copies, material=str(material).strip(), candidates=candidates, adapters=adapters,
+        quality_priority={"draft": 1, "standard": 3, "fine": 5}.get((quality or "standard").lower(), 3),
+        speed_priority={"low": 1, "normal": 3, "high": 5}.get((priority or "normal").lower(), 3),
+        version_id=version,
+    )
+    if answer.get("success") is not True:
+        return answer
+    plan = answer["fill"]
+    from kiln import plate_state
+
+    seen: dict[str, str] = {}
+    for name, adapter in adapters.items():
+        state = plate_state.read(adapter)
+        if state.occupied:
+            seen[name] = plate_state.fingerprint(state)
+    plan_id = save_fill_plan(file_path, copies, str(material).strip(), plan, plates=seen)
+    picture = None
+    try:
+        picture = _draw_fill(plan, file_path, adapters, placement)
+    except Exception:  # noqa: BLE001 -- a plan without its picture still says itself
+        _logger.warning("copies plan picture failed", exc_info=True)
+    go = (
+        f"Show the person the plan; when they say go, call plan_multi_copy_split again with plan_id={plan_id!r} "
+        "and submit=True."
+        if plan.get("now") or plan.get("later") else "Nothing can be queued as the plates stand."
+    )
+    return {
+        "success": True,
+        "plan_id": plan_id,
+        "plan": plan,
+        "picture": picture,
+        "message": f"{plan.get('summary')} {go}",
+    }
+
+
+def _draw_fill(plan: dict, file_path: str, adapters: dict, placement: Any) -> str:
+    """The plan's picture, from what this install knows of each plate."""
+    from kiln import plate_state
+    from kiln.fleet_fill_picture import draw
+    from kiln.printers.bed_fit import get_build_volume
+
+    beds, on_plate, models = {}, {}, {}
+    for name, adapter in adapters.items():
+        model = plate_state.declared_model_of(adapter) or ""
+        models[name] = model
+        volume = get_build_volume(model) if model else None
+        beds[name] = [float(volume[0]), float(volume[1])] if volume else None
+        state = plate_state.read(adapter)
+        on_plate[name] = [list(j.footprint_mm) for j in state.jobs if j.footprint_mm] if state.occupied else []
+    part = (placement.job_envelope(file_path).get("part") or {}).get("size_mm")
+    import os
+
+    title = f"{plan.get('wanted')} copies of {os.path.splitext(os.path.basename(file_path))[0]}"
+    return draw(plan, part_size_mm=part, beds=beds, on_plate=on_plate, models=models, title=title)
+
+
+def _submit_fill(file_path: str, plan_id: str | None, preview_token: str | None) -> dict:
+    """Queue a kept copies plan, after the person's yes for the part."""
+    import kiln.server as _srv
+    from kiln import print_signoff
+    from kiln.job_splitter import _fill_record, submit_fill_plan
+
+    if not plan_id:
+        return _srv._error_dict("submit needs the plan_id the plan answered.", code="VALIDATION_ERROR")
+    found = _fill_record(plan_id)
+    if found is None:
+        return _srv._error_dict(f"No copies plan {plan_id!r} on this computer; plan the copies first.", code="NOT_FOUND")
+    if block := _srv._preview_gate_error("plan_multi_copy_split", file_path, preview_token):
+        return block
+    signoff = print_signoff.record_for(print_signoff.current())
+    out = submit_fill_plan(plan_id, signoff)
+    if out.get("already"):
+        out["message"] = f"This plan was already {out['already']}; nothing was queued again."
+        return out
+    if not out.get("success"):
+        return {**_srv._error_dict("Kiln could not queue this plan: " + "; ".join(out.get("errors") or []), code="QUEUE_ERROR"), **out}
+    total = sum(int(q["copies"]) for q in out["queued"])
+    printers = len(out["queued"])
+    out["message"] = (
+        f"Queued {total} copies on {printers} printer{'s' if printers != 1 else ''}. Each starts on its own once its "
+        "plate is clear, and later plates follow on the same printer as each plate is cleared. "
+        f"split_plan_status({plan_id!r}) follows the run; cancel_split_plan stops it."
+    )
+    return out
+
+
+def _fill_progress_sentence(run: dict) -> str:
+    """Where a copies run stands, in a sentence."""
+    plates = [p["plates"] for p in run.get("printers") or []]
+    done = sum(p["done"] for p in plates)
+    printing = sum(p["printing"] for p in plates)
+    waiting = sum(p["waiting"] for p in plates)
+    failed = sum(p["failed"] for p in plates)
+    if run.get("status") == "planned":
+        return "This plan has not been queued yet."
+    parts = [f"{done} plate{'s' if done != 1 else ''} printed", f"{printing} printing", f"{waiting} waiting"]
+    if failed:
+        parts.append(f"{failed} failed or cancelled")
+    more = run.get("copies_to_come") or 0
+    tail = f"; {more} copies still to come" if more else ""
+    return f"{run.get('wanted')} copies: " + ", ".join(parts) + tail + "."
+
+
 class _RecoveryToolsPlugin:
     """Failure recovery, job splitting, generation feedback, and AI-driven recovery tools.
 
@@ -79,7 +222,7 @@ class _RecoveryToolsPlugin:
         - analyze_print_failure_smart
         - get_recovery_plan
         - failure_history
-        - plan_multi_copy_split
+        - plan_multi_copy_split (Kiln Business: copies across printers, wherever there is safe room)
         - plan_assembly_split
         - split_plan_status
         - cancel_split_plan
@@ -108,6 +251,8 @@ class _RecoveryToolsPlugin:
 
     def register(self, mcp: Any) -> None:  # noqa: PLR0915
         """Register recovery, splitting, and feedback tools with the MCP server."""
+
+        import kiln.server as _srv
 
         # ---------------------------------------------------------------
         # Failure Recovery Tools
@@ -332,47 +477,63 @@ class _RecoveryToolsPlugin:
         # ---------------------------------------------------------------
 
         @mcp.tool()
+        @_srv.requires_tier(_srv.LicenseTier.BUSINESS)
         def plan_multi_copy_split(
             file_path: str,
             copies: int,
             material: str = "pla",
+            plan_id: str | None = None,
+            submit: bool = False,
+            preview_token: str | None = None,
+            quality: str | None = None,
+            priority: str | None = None,
         ) -> dict:
-            """Plan parallel printing of multiple copies across printers.
+            """Plan many copies of one part across your printers, wherever there is safe room.
 
-            Distributes N copies of a file across available printers in the
-            fleet for maximum parallelism.
+            Requires Kiln Business.  Kiln reads every registered printer's
+            plate as it stands and works out how many copies each printer
+            takes now -- an empty plate filled, an occupied one filled
+            beside what is already there -- and how many follow as later
+            plates once a plate is cleared.  A printer marked needs repair,
+            a plate nobody has looked at, or a plate with no room takes
+            none, and says why.  Below Kiln Business, copies print on one
+            printer with ``multi_copy_print(fill=True)``, plate after plate.
+
+            Two steps.  Call it with the part (STL, 3MF or OBJ) and how many
+            copies: it answers ``plan_id``, the plan per printer, and
+            ``picture``, a top-down map of every plate.  AGENT DISPLAY
+            CONTRACT: show ``picture`` to the person before anything is
+            queued, and say ``message``.  When they say go, call it again
+            with the same ``file_path`` and ``copies``, ``plan_id`` and
+            ``submit=True`` (and ``preview_token``): one job per printer is
+            queued, printers run side by side, each waits for its plate to
+            be clear, and later plates follow on the same printer.  Follow
+            the run with ``split_plan_status(plan_id)``; stop it with
+            ``cancel_split_plan(plan_id)``.
 
             Args:
-                file_path: Path to the G-code or model file.
-                copies: Number of copies to print.
-                material: Material type (default ``"pla"``).
+                file_path: The part, as a mesh (STL, 3MF or OBJ).
+                copies: How many copies in all.
+                material: The filament (default ``"pla"``).
+                plan_id: The plan to queue, from the first call.
+                submit: Queue the plan named by ``plan_id``.
+                preview_token: The person's yes for the part, when submitting.
+                quality: "draft", "standard" or "fine".
+                priority: "low", "normal" or "high".
             """
             import kiln.server as _srv
-            from kiln.job_splitter import plan_multi_copy_split as _plan
 
             if err := _srv._check_auth("queue"):
                 return err
-            if copies < 1:
-                return _srv._error_dict(
-                    "copies must be at least 1",
-                    code="VALIDATION_ERROR",
-                )
+            if isinstance(copies, bool) or not isinstance(copies, int) or copies < 1:
+                return _srv._error_dict("copies must be a whole number of at least 1", code="VALIDATION_ERROR")
+            if submit:
+                return _submit_fill(file_path, plan_id, preview_token)
             try:
-                plan = _plan(file_path, copies, material=material)
-                return {
-                    "success": True,
-                    "plan": plan.to_dict(),
-                    "message": (
-                        f"Split {copies} copies across {plan.total_printers} printers. "
-                        f"Time savings: {plan.time_savings_percentage:.0f}%."
-                    ),
-                }
+                return _plan_fill(file_path, copies, material, quality=quality, priority=priority)
             except Exception as exc:
                 _logger.exception("Unexpected error in plan_multi_copy_split")
-                return _srv._error_dict(
-                    f"Unexpected error planning split: {exc}",
-                    code="INTERNAL_ERROR",
-                )
+                return _srv._error_dict(f"Unexpected error planning copies: {exc}", code="INTERNAL_ERROR")
 
         @mcp.tool()
         def plan_assembly_split(
@@ -423,11 +584,14 @@ class _RecoveryToolsPlugin:
                 plan_id: The plan ID returned by submitting a split plan.
             """
             import kiln.server as _srv
-            from kiln.job_splitter import get_split_progress
+            from kiln.job_splitter import fill_progress, get_split_progress
 
             if err := _srv._check_auth("read"):
                 return err
             try:
+                run = fill_progress(plan_id)
+                if run is not None:
+                    return {"success": True, "progress": run, "message": _fill_progress_sentence(run)}
                 progress = get_split_progress(plan_id)
                 return {
                     "success": True,

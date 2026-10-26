@@ -19394,6 +19394,8 @@ def _queue_fill_rest(
     slicer_path: str | None,
     spacing_mm: float,
     signoff: dict[str, Any] | None,
+    run: dict[str, Any] | None = None,
+    beside_plate: str | None = None,
 ) -> dict[str, Any]:
     """Queue the copies a fill left as one job for the next plate.
 
@@ -19403,7 +19405,12 @@ def _queue_fill_rest(
     still does not fit is queued again the same way.  It goes to the
     printer that took this plate and carries the person's yes for this run.
     The part is copied into Kiln's own folder first, so tidying the folder
-    it came from does not lose the rest of the run.  ``{"job_id",
+    it came from does not lose the rest of the run.  *run* is metadata the
+    run carries on every plate (a fleet plan's ``split_plan_id``).
+    *beside_plate* is the plate record's fingerprint when the person was
+    shown this plate's copies laid out beside what is on it: the job may
+    then be laid out beside those parts at its turn, and only while the
+    plate still holds exactly them (the queue checks).  ``{"job_id",
     "printer_name"}``, or ``{"why"}`` when it could not be queued.  Never
     raises.
     """
@@ -19424,8 +19431,10 @@ def _queue_fill_rest(
                     "printer_id": printer_id,
                     "overrides": dict(overrides) if overrides else None,
                     "slicer_path": slicer_path,
+                    **({"beside_plate": beside_plate} if beside_plate else {}),
                 },
                 **({"preview_signoff": signoff} if signoff else {}),
+                **(dict(run) if run else {}),
             },
         )
         _get_event_bus().publish(
