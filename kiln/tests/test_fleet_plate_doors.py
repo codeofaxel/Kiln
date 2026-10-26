@@ -145,20 +145,10 @@ def doors(monkeypatch, tmp_path):
         jr.RoutingValidationError = _NoRoom
         jr.get_job_router = lambda: router
         monkeypatch.setitem(sys.modules, "kiln.job_router", jr)
-        orch = SimpleNamespace(calls=[])
-
-        def submit_job_result(file_path, **kw):
-            orch.calls.append({"file_path": file_path, **kw})
-            return SimpleNamespace(job_id="job-1", to_dict=lambda: {"job_id": "job-1"}), False
-
-        orch.submit_job_result = submit_job_result
-        fo = types.ModuleType("kiln.fleet_orchestrator")
-        fo.get_fleet_orchestrator = lambda: orch
-        monkeypatch.setitem(sys.modules, "kiln.fleet_orchestrator", fo)
         mcp = _FakeMCP()
         fleet_tools._FleetToolsPlugin().register(mcp)
         learning_tools._LearningToolsPlugin().register(mcp)
-        return SimpleNamespace(tools=mcp.tools, survey=survey, router=router, orch=orch, registry=registry)
+        return SimpleNamespace(tools=mcp.tools, survey=survey, router=router, registry=registry)
 
     return make
 
@@ -224,7 +214,7 @@ class TestFleetSubmitJob:
         result = d.tools["fleet_submit_job"](str(path), material="PLA")
         assert result["success"] is False and result["error"]["code"] == "RETIRED"
         assert "plan_multi_copy_split" in result["error"]["message"]
-        assert d.survey.asked == [] and d.orch.calls == []
+        assert d.survey.asked == []
 
 
 class TestSuggestPrinterForJob:
