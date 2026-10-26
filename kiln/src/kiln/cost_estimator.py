@@ -687,6 +687,7 @@ class CostEstimator:
         adhesion_type: str = "none",
         electricity_rate: float = 0.12,
         printer_wattage: float = 200.0,
+        analysis: Any | None = None,
     ) -> CostEstimate:
         """Estimate print cost directly from a 3D mesh file (STL/OBJ/GLB).
 
@@ -716,8 +717,12 @@ class CostEstimator:
 
         warnings: list[str] = []
 
-        # Analyze mesh geometry (stdlib-based, no external deps)
-        analysis = analyze_mesh(file_path)
+        # Analyze mesh geometry (stdlib-based, no external deps) -- unless
+        # the caller already has: a caller estimating twice (once as asked,
+        # once at a cheaper setting) reads a 300k-triangle file once, not
+        # twice.
+        if analysis is None:
+            analysis = analyze_mesh(file_path)
         if analysis.printability_issues and analysis.volume_mm3 <= 0:
             raise ValueError(
                 f"Mesh has zero or negative volume ({analysis.volume_mm3:.2f} mm³). "

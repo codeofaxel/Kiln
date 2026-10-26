@@ -21,13 +21,30 @@ from kiln.child_interpreter import MEMORY, TIME_LIMIT
 #: The allowance, in MB.  Unset or not a positive number: no limit.
 ALLOWANCE_ENV = "KILN_HOLE_CHECK_MAX_MB"
 
-#: The check reads a 1.1M-triangle mesh in about 30 s on a laptop; past
-#: this it is stuck -- or starved: on the shared server a check that took
-#: 1 s elsewhere ran past six minutes under load (2026-10-16), and the
-#: person waiting had been told "no answer" by their chat at four.  A check
-#: that cannot finish inside a minute is stopped and SAID, and the part's
-#: printability is judged without it.
+#: How long the check in its own process is given: a minute, plus time for
+#: the model's size.  Past that it is stuck -- or starved: on the shared
+#: server a check that took 1 s elsewhere ran past six minutes under load
+#: (2026-10-16), and the person waiting had been told "no answer" by their
+#: chat at four.  A check that cannot finish in its time is stopped and
+#: SAID, and the part's printability is judged without it.
 _CHILD_TIMEOUT_S = 60
+
+#: ...and this much more per triangle the file states.  Measured: the check
+#: reads 327,680 triangles in about 10 s on a laptop, 30 us a triangle; the
+#: shared server, throttled, runs it ten times slower (2026-10-25: a model
+#: of that size was stopped at the flat minute on ordinary use), so ten
+#: times that is what the server needs.  A file that states no count gets
+#: the flat minute.
+_S_PER_TRIANGLE = 0.0003
+
+#: The most any model is given.
+_MAX_CHILD_TIMEOUT_S = 10 * 60
+
+
+def time_limit_s(file_path: str) -> float:
+    """How long the check of *file_path* is given in its own process."""
+    stated = stated_triangles(file_path) or 0
+    return min(_MAX_CHILD_TIMEOUT_S, _CHILD_TIMEOUT_S + stated * _S_PER_TRIANGLE)
 
 
 class HoleCheckStopped(Exception):
@@ -47,16 +64,14 @@ class HoleCheckStopped(Exception):
         cause: str | None = None,
         held_mb: float | None = None,
         allowed_mb: float | None = None,
+        time_limit_s: float | None = None,
     ) -> None:
         super().__init__(reason)
         self.cause = cause
         self.held_mb = held_mb
         self.allowed_mb = allowed_mb
-
-    @property
-    def time_limit_s(self) -> int | None:
-        """The time the check was given, when that is what stopped it."""
-        return _CHILD_TIMEOUT_S if self.cause == TIME_LIMIT else None
+        #: The time the check was given, when that is what stopped it.
+        self.time_limit_s = time_limit_s
 
 
 def allowance_mb() -> float | None:
@@ -131,19 +146,25 @@ def find_holes(file_path: str, *, diagnostics: dict[str, int] | None = None) -> 
 
     from kiln.child_interpreter import ChildOverMemory, run_in_child
 
+    limit = time_limit_s(file_path)
     try:
         answer = run_in_child(
             __file__,
             {"path": os.path.abspath(file_path)},
-            timeout_s=_CHILD_TIMEOUT_S,
+            timeout_s=limit,
             what="the hole check",
             error=HoleCheckStopped,
             max_memory_mb=allowed,
         )
     except ChildOverMemory as exc:
         raise HoleCheckStopped(str(exc), cause=MEMORY, held_mb=exc.held_mb, allowed_mb=exc.allowed_mb) from exc
-    # A time limit, a crash or a refusal arrives as HoleCheckStopped already,
-    # its cause set where run_in_child raised it.
+    except HoleCheckStopped as exc:
+        # A time limit, a crash or a refusal arrives as HoleCheckStopped
+        # already, its cause set where run_in_child raised it; the time
+        # limit was this file's own.
+        if exc.cause == TIME_LIMIT:
+            exc.time_limit_s = limit
+        raise
     if "error" in answer:
         kinds = {"ValueError": ValueError, "FileNotFoundError": FileNotFoundError}
         raise kinds.get(answer["error"], OSError)(answer["message"])

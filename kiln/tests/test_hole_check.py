@@ -159,6 +159,7 @@ def test_a_check_past_its_time_limit_is_said_as_time_and_never_as_memory(two_bor
     monkeypatch.setattr(hole_check, "RUN_HERE_BELOW_TRIANGLES", 0)
     monkeypatch.setenv(hole_check.ALLOWANCE_ENV, "20000")  # memory is never what stops it
     monkeypatch.setattr(hole_check, "_CHILD_TIMEOUT_S", 0.3)
+    monkeypatch.setattr(hole_check, "_S_PER_TRIANGLE", 0.0)
     # A check that is slow for whatever reason; a warm child can finish this one inside 0.3 s.
     monkeypatch.setattr(child_interpreter, "_BOOTSTRAP", "import time; time.sleep(30); " + child_interpreter._BOOTSTRAP)
     with pytest.raises(hole_check.HoleCheckStopped) as stopped:
@@ -231,3 +232,17 @@ def test_a_binary_stl_header_is_believed_only_when_the_file_agrees(two_bores, tm
     lying.write_bytes(Path(two_bores).read_bytes()[:80] + struct.pack("<I", 1000) + Path(two_bores).read_bytes()[84:])
     assert hole_check.stated_triangles(str(lying)) is None
     assert hole_check.stated_triangles(str(tmp_path / "missing.stl")) is None
+
+
+def test_the_time_limit_grows_with_the_model(two_bores, tmp_path):
+    """A flat minute stopped a 325k-triangle check on the shared server
+    under ordinary use (2026-10-25); the limit follows the size the file
+    states, and a file stating none gets the flat minute."""
+    assert hole_check.time_limit_s(two_bores) == pytest.approx(60 + 96 * 0.0003)
+    big = tmp_path / "big.stl"
+    big.write_bytes(b"\x00" * 80 + struct.pack("<I", 325_000) + b"\x00" * (50 * 325_000))
+    assert hole_check.time_limit_s(str(big)) == pytest.approx(60 + 325_000 * 0.0003)
+    assert hole_check.time_limit_s(str(tmp_path / "none.obj")) == 60
+    huge = tmp_path / "huge.stl"
+    huge.write_bytes(b"\x00" * 80 + struct.pack("<I", 3_000_000) + b"\x00" * (50 * 3_000_000))
+    assert hole_check.time_limit_s(str(huge)) == 600

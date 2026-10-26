@@ -6056,8 +6056,12 @@ def _analyze_cost(
     brim or raft the adhesion decision chose.
     """
     from kiln.cost_estimator import CostEstimator
+    from kiln.generation.validation import analyze_mesh
 
     estimator = CostEstimator()
+    # Read the file once for both estimates below: the second read of a
+    # 300k-triangle model was a quarter of the whole analysis (2026-10-26).
+    mesh_analysis = analyze_mesh(file_path)
 
     estimate = estimator.estimate_from_mesh(
         file_path,
@@ -6068,6 +6072,7 @@ def _analyze_cost(
         nozzle_mm=nozzle_mm,
         include_supports=needs_supports,
         adhesion_type=adhesion_type,
+        analysis=mesh_analysis,
     )
 
     # --- Cost-saving recommendations ---
@@ -6081,6 +6086,7 @@ def _analyze_cost(
             infill_percent=15.0,
             include_supports=needs_supports,
             adhesion_type=adhesion_type,
+            analysis=mesh_analysis,
         )
         savings = estimate.total_cost_usd - lower_est.total_cost_usd
         if savings > 0.01:
