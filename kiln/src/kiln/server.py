@@ -18847,6 +18847,7 @@ def multi_copy_print(
     overrides: str | dict[str, Any] | None = None,
     slicer_path: str | None = None,
     preview_token: str | None = None,
+    fill: bool = False,
 ) -> dict:
     """Print multiple copies of a model arranged on one build plate.
 
@@ -18858,17 +18859,26 @@ def multi_copy_print(
     duplication for OrcaSlicer or when fine control is needed.  Copies that do
     not all fit the bed are refused, saying so, never sliced short.
 
+    With ``fill=True`` (an STL, 1 to 50 copies) Kiln places as many copies
+    as fit on the plate as it stands, up to ``copies``, beside anything
+    already there, and never refuses because fewer fit: the result says how
+    many it placed (``copies_placed``).  How many fit is answered on every
+    tier; placing copies beside a part still on the plate is a kiln-pro
+    feature (https://kiln3d.com/pricing).
+
     Requires a slicer (PrusaSlicer or OrcaSlicer) installed locally.
     The printer must be idle and connected.
 
     Args:
         model_path: Path to input model (STL, OBJ).
-        copies: Number of copies to print (2-20).
+        copies: Number of copies to print (2-20; with ``fill``, at most
+            this many, 1-50).
         printer_name: Registered printer name in fleet.
         printer_id: Printer model ID for auto-profile selection.
         spacing_mm: Gap between copies in mm (default 10).
         overrides: JSON string of slicer parameter overrides.
         slicer_path: Explicit path to the slicer binary.
+        fill: Place as many copies as fit on the plate as it stands.
     """
     if err := _check_auth("print"):
         return err
@@ -18881,10 +18891,11 @@ def multi_copy_print(
     signoff = print_signoff.record_for(print_signoff.current())
 
     # --- Validation ---
-    if copies < 2:
-        return _error_dict("copies must be >= 2.", code="VALIDATION_ERROR")
-    if copies > 20:
-        return _error_dict("copies must be <= 20.", code="VALIDATION_ERROR")
+    min_copies, max_copies = (1, 50) if fill else (2, 20)
+    if copies < min_copies:
+        return _error_dict(f"copies must be >= {min_copies}.", code="VALIDATION_ERROR")
+    if copies > max_copies:
+        return _error_dict(f"copies must be <= {max_copies}.", code="VALIDATION_ERROR")
     if spacing_mm < 0:
         return _error_dict("spacing_mm must be >= 0.", code="VALIDATION_ERROR")
 
@@ -18903,6 +18914,32 @@ def multi_copy_print(
         parsed_overrides, _arg_err = parse_json_object(overrides, "overrides")
         if _arg_err is not None:
             return _arg_err
+
+        if fill:
+            # The plate gate lays the copies (as many as fit, beside anything
+            # already there) and the slicer gets one merged part: no
+            # --duplicate, which would centre a grid on whatever is there.
+            result = _pipeline_reslice_and_print(
+                model_path=model_path,
+                printer_name=printer_name,
+                printer_id=printer_id,
+                overrides=parsed_overrides,
+                slicer_path=slicer_path,
+                copies=copies,
+                spacing_mm=spacing_mm,
+                signoff=signoff,
+            )
+            placed = None
+            for step in getattr(result, "steps", None) or []:
+                if getattr(step, "name", None) == "slice":
+                    block = (getattr(step, "data", None) or {}).get("copies")
+                    placed = block.get("placed") if isinstance(block, dict) else None
+            summary = {"success": result.success, **result.to_dict()}
+            summary["copies"] = copies
+            summary["copies_requested"] = copies
+            summary["copies_placed"] = placed
+            summary["strategy"] = "fill"
+            return summary
 
         # --- Detect slicer and choose strategy ---
         from kiln.slicer import find_slicer, supports_duplicate_flag
