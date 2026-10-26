@@ -633,15 +633,36 @@ def test_a_bed_held_past_the_limit_is_left_to_the_printer_and_resume_still_rehea
     hold = server._pause_keepalive
     with hold._lock:
         hold._entries[hold._key(workshop)]["held_since"] -= server._BED_HOLD_LIMIT_S
+    _age_the_pause(workshop)
 
+    assert _round(workshop) is True  # bed released; the kept-hot nozzle still switched off
+    assert workshop.sent == [("tool", 0.0)]
     assert _round(workshop) is False
-    assert workshop.sent == []
     assert not hold.is_running(workshop)
 
     workshop.tool_actual = 40.0
     server.resume_print(printer_name="workshop")
     assert ("tool", 220.0) in workshop.sent
     assert workshop.events == ["resume at 220"]
+
+
+def test_no_nozzle_is_heated_ahead_once_its_hold_has_ended():
+    """The fleet head start heats only a nozzle a running hold can switch
+    back off; past the hold, the resume heats it under its own watch."""
+    _garage, workshop = _bench()
+    _pause(workshop, "workshop")
+    hold = server._pause_keepalive
+    with hold._lock:
+        hold._entries[hold._key(workshop)]["held_since"] -= server._BED_HOLD_LIMIT_S
+    _age_the_pause(workshop)
+    _round(workshop)  # bed released, nozzle switched off
+    _round(workshop)  # nothing left: the hold ends
+    workshop.tool_actual = 40.0
+    workshop.sent.clear()
+
+    server._begin_resume_reheat(workshop)
+
+    assert workshop.sent == []
 
 
 def test_a_fault_auto_pause_holds_no_heat():

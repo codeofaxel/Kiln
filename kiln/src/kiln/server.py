@@ -5165,7 +5165,11 @@ class _PauseKeepAlive:
         with self._lock:
             key = self._key(adapter)
             entry = self._entries.get(key)
-            if entry is not None and entry["nozzle"] != _NOZZLE_PERSONS:
+            # No hold, nothing to switch a nozzle heated ahead back off:
+            # that resume heats it itself, under its own watch.
+            if entry is None or not entry["thread"].is_alive():
+                return None
+            if entry["nozzle"] != _NOZZLE_PERSONS:
                 entry["nozzle"] = _NOZZLE_WATCHING
                 entry["paused_at"] = time.monotonic()
             return self._resume_nozzle.get(key)
@@ -5294,13 +5298,15 @@ class _PauseKeepAlive:
             with self._lock:
                 if self._entries.get(key) is not entry:
                     return False
-                if time.monotonic() - entry.get("held_since", time.monotonic()) >= _BED_HOLD_LIMIT_S:
+                if entry["bed"] > 0 and (
+                    time.monotonic() - entry.get("held_since", time.monotonic()) >= _BED_HOLD_LIMIT_S
+                ):
+                    # The bed only: a nozzle still being decided stays watched.
                     logger.info(
                         "Pause hold: %s has been paused %.0f min; the bed is left to the printer",
                         label, _BED_HOLD_LIMIT_S / 60,
                     )
-                    del self._entries[key]
-                    return False
+                    entry["bed"] = 0.0
                 self._follow_outside_bed_change(entry, state)
                 switch_nozzle_off = self._settle_nozzle(entry, state, time.monotonic())
                 bed = entry["bed"]
