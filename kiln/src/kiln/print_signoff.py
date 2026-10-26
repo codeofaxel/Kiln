@@ -242,6 +242,22 @@ def record_for(clearance: Clearance | None) -> dict[str, Any] | None:
     }
 
 
+def covered_printers(record: dict[str, Any] | None) -> list[str] | None:
+    """The printers a stored clearance reaches, by name -- or ``None`` when
+    it reaches every printer (a fleet-wide yes, or one aimed at none).  The
+    same rule as :func:`record_refusal`, asked the other way round, for a
+    door choosing a printer BEFORE it queues there."""
+    if not isinstance(record, dict) or not record:
+        return None
+    scope = _scope_from_record(record.get("scope"))
+    if scope == SCOPE_FLEET:
+        return None
+    if isinstance(scope, tuple):
+        return list(scope)
+    aimed = record.get("printer_name") or None
+    return [str(aimed)] if aimed else None
+
+
 def record_refusal(record: dict[str, Any] | None, printer_name: str | None) -> str | None:
     """Why a stored clearance may NOT start on *printer_name* now — or
     ``None`` when it may.

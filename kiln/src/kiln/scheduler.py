@@ -335,6 +335,19 @@ def _planned_beside(job: Any) -> bool:
     return bool(((getattr(job, "metadata", None) or {}).get("fill") or {}).get("beside_plate"))
 
 
+def _miss_words(answer: Any) -> str:
+    """What a served answer that is not a decision says, in one sentence:
+    the door's own miss wording, a server refusal's message, or a tier
+    line -- so the job's note names why the copies stayed where they were."""
+    if not isinstance(answer, dict):
+        return "Kiln could not ask its servers where these copies should go."
+    error = answer.get("error")
+    text = error.get("message") if isinstance(error, dict) else error
+    if not text and answer.get("required_tier"):
+        text = f"Moving a failed plate's copies to another printer is part of Kiln {str(answer['required_tier']).title()}."
+    return str(text or answer.get("message") or "Kiln's servers gave no answer about where these copies should go.").strip()
+
+
 def turn_wait_sentence(file_name: str, printer_name: str | None, busy: list[str], *, label: str | None = None) -> str:
     """What a job waiting its turn says: whose print it waits for, and that
     it keeps its place.  The plan that runs printers side by side is
@@ -1098,6 +1111,10 @@ class JobScheduler:
         copies the person asked for.  At most :data:`FAILED_PLATE_RETRIES`
         times in a row on one printer: a plate that keeps failing is a
         printer or part problem to look at, and the job says so instead.
+        A plate of a FLEET run (one with a ``split_plan_id``) first asks
+        Kiln's servers, off this thread, whether its copies print again here,
+        move to another printer the person's yes covers, or stop
+        (:meth:`_reroute_failed_plate`); on any miss it does the above.
         A cancel is the person's, an ending nobody saw is asked about, and
         neither is reprinted.  Never raises."""
         try:
@@ -1113,37 +1130,143 @@ class JobScheduler:
             tries = int(fill.get("failed_retries") or 0)
             if copies < 1:
                 return
-            if tries >= FAILED_PLATE_RETRIES:
-                self._queue.update_metadata(job_id, {"not_requeued": (
-                    f"This plate of {copies} failed on {job.printer_name} again, so Kiln did not queue its copies a "
-                    f"{tries + 2}{'rd' if tries + 2 == 3 else 'th'} time. Look at the printer and the part, then queue "
-                    "them yourself."
-                )})
+            if self._kept_fleet_run(job):
+                self._spawn(lambda: self._reroute_failed_plate(job, copies, tries))
                 return
-            self._queue_rest(job, copies, failed_retries=tries + 1)
+            self._retry_here(job, copies, tries)
         except Exception:  # noqa: BLE001 -- bookkeeping never stops the queue
             logger.debug("could not settle the plate of job %s", job_id, exc_info=True)
 
-    def _queue_rest(self, job: Any, copies: int, *, failed_retries: int = 0) -> None:
+    def _kept_fleet_run(self, job: Any) -> bool:
+        """Whether *job* is a plate of a fleet run this computer kept (a
+        ``split_plan_id`` with its plan on record): the only plate whose
+        copies may move to another printer.  A run with no record left --
+        or one printer's own copies -- is retried where it was."""
+        plan_id = (job.metadata or {}).get("split_plan_id")
+        if not plan_id:
+            return False
+        try:
+            from kiln.job_splitter import _fill_record
+
+            return _fill_record(str(plan_id)) is not None
+        except Exception:  # noqa: BLE001 -- a record Kiln cannot read is no record
+            return False
+
+    def _retry_here(self, job: Any, copies: int, tries: int, *, because: str | None = None) -> None:
+        """Today's floor for a failed plate: its copies queued again on the
+        same printer, up to :data:`FAILED_PLATE_RETRIES` times in a row, then
+        the job says so.  *because* is said first when this is the fallback
+        for an answer Kiln could not get."""
+        lead = f"{because} " if because else ""
+        if tries >= FAILED_PLATE_RETRIES:
+            self._queue.update_metadata(job.id, {"not_requeued": (
+                f"{lead}This plate of {copies} failed on {job.printer_name} again, so Kiln did not queue its copies a "
+                f"{tries + 2}{'rd' if tries + 2 == 3 else 'th'} time. Look at the printer and the part, then queue "
+                "them yourself."
+            )})
+            return
+        if because:
+            self._queue.update_metadata(job.id, {"requeued_here": f"{because} The copies print again on {job.printer_name}."})
+        self._queue_rest(job, copies, failed_retries=tries + 1)
+
+    def _reroute_failed_plate(self, job: Any, copies: int, tries: int) -> None:
+        """Where a fleet run's failed plate goes: the server's answer, acted
+        on.  ``move`` queues the copies on the printer it names, as the
+        first plate there (laid out beside what is on that plate when the
+        answer placed them so), once the yes this job carries is checked to
+        cover that printer -- a yes it does not cover keeps the copies here
+        and says so; ``retry`` and every miss are :meth:`_retry_here`;
+        ``stop`` queues nothing and carries the reason.  Never raises.
+        Runs off the tick thread: the readings it sends include the
+        slicer's times for the part."""
+        try:
+            from kiln import _pro_fleet_fill_bridge as fleet_fill
+            from kiln import print_signoff
+            from kiln.job_splitter import failed_plate_report
+
+            report = failed_plate_report(job, registry=self._registry, queue=self._queue)
+            if report is None:
+                self._retry_here(job, copies, tries)
+                return
+            answer = fleet_fill.ask(
+                report["file_path"], copies, material=report["material"], candidates=report["candidates"],
+                adapters=report["adapters"], times=report["times"], failed=report["failed"], asked_by_user=False,
+            )
+            verdict = answer.get("failed_plate") if isinstance(answer, dict) and answer.get("success") is True else None
+            if not isinstance(verdict, dict) or verdict.get("decision") not in ("retry", "move", "stop"):
+                self._retry_here(job, copies, tries, because=_miss_words(answer))
+                return
+            decision, target = str(verdict.get("decision")), verdict.get("printer")
+            self._queue.update_metadata(job.id, {"failed_plate": {
+                "decision": decision, "to": target if decision == "move" else None,
+                "why": str(verdict.get("summary") or ""), "reasons": [str(w) for w in (verdict.get("why") or [])],
+            }})
+            if decision == "move" and isinstance(target, str) and target and target != job.printer_name:
+                refusal = print_signoff.record_refusal((job.metadata or {}).get("preview_signoff"), target)
+                if refusal:
+                    self._retry_here(job, copies, tries, because=f"Kiln would have moved these copies to {target}, but {refusal}")
+                    return
+                self._queue_rest(
+                    job, copies, printer_name=target, beside_plate=self._planned_beside(answer, target), moved_from=job.printer_name,
+                )
+                logger.info("Job %s: its %d copies moved from %s to %s", job.id, copies, job.printer_name, target)
+            elif decision == "retry":
+                self._retry_here(job, copies, tries)
+            else:
+                self._queue.update_metadata(job.id, {"not_requeued": str(verdict.get("summary") or "Kiln did not queue these copies again.")})
+        except Exception:  # noqa: BLE001 -- an answer that could not be had is the floor, never a lost plate
+            logger.warning("Job %s: could not ask where its failed plate's copies go", job.id, exc_info=True)
+            try:
+                self._retry_here(job, copies, tries, because="Kiln could not ask its servers where these copies should go.")
+            except Exception:  # noqa: BLE001
+                logger.debug("could not queue the failed plate of job %s again", job.id, exc_info=True)
+
+    def _planned_beside(self, answer: dict[str, Any], target: str) -> str | None:
+        """The target plate's record fingerprint when the answer laid the
+        copies out beside what is on it, so the queue starts them only while
+        the plate still holds exactly that; ``None`` for a cleared plate."""
+        row = next((r for r in (answer.get("fill") or {}).get("printers") or [] if r.get("printer") == target), {})
+        if row.get("status") != "occupied" or not row.get("now"):
+            return None
+        try:
+            from kiln import plate_state
+
+            state = plate_state.read(self._registry.get(target))
+            return plate_state.fingerprint(state) if state.occupied else None
+        except Exception:  # noqa: BLE001 -- a plate Kiln cannot read now is laid out at its turn
+            return None
+
+    def _queue_rest(
+        self, job: Any, copies: int, *, failed_retries: int = 0, printer_name: str | None = None,
+        beside_plate: str | None = None, moved_from: str | None = None,
+    ) -> None:
         """Queue the copies this plate could not take as the plate after it,
         on the same terms: the same part, printer and yes, and the fleet plan
         it belongs to.  *failed_retries* counts a failed plate queued again
-        (:meth:`_settle_fill_plate`); a plate after a good one starts at 0."""
+        (:meth:`_settle_fill_plate`); a plate after a good one starts at 0.
+        *printer_name* sends them to another printer instead (a failed plate
+        moved, :meth:`_reroute_failed_plate`), *beside_plate* the plate they
+        were laid out beside there, and *moved_from* where they failed."""
         metadata = {k: v for k, v in (job.metadata or {}).items() if k in ("preview_signoff", "split_plan_id")}
         # The next plate starts on a cleared plate: never beside the copies
         # this one leaves behind.
         fill = {k: v for k, v in ((job.metadata or {}).get("fill") or {}).items()
-                if k not in ("beside_plate", "failed_retries")}
+                if k not in ("beside_plate", "failed_retries", "moved_from")}
         fill["copies"] = int(copies)
         if failed_retries:
             fill["failed_retries"] = int(failed_retries)
+        if beside_plate:
+            fill["beside_plate"] = beside_plate
+        if moved_from:
+            fill["moved_from"] = moved_from
+        where = printer_name or job.printer_name
         rest_id = self._queue.submit(
-            file_name=job.file_name, printer_name=job.printer_name, submitted_by="multi_copy_print",
+            file_name=job.file_name, printer_name=where, submitted_by="multi_copy_print",
             priority=getattr(job, "priority", 0), metadata={**metadata, "fill": fill},
         )
         self._event_bus.publish(
             EventType.JOB_QUEUED,
-            {"job_id": rest_id, "file_name": job.file_name, "printer_name": job.printer_name, "copies": int(copies)},
+            {"job_id": rest_id, "file_name": job.file_name, "printer_name": where, "copies": int(copies)},
             source="scheduler",
         )
         logger.info("Job %s: %d copies did not fit; queued as job %s for the next plate", job.id, copies, rest_id)

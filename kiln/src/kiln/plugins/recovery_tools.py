@@ -522,12 +522,14 @@ def _fill_progress_sentence(run: dict) -> str:
     printing = sum(p["printing"] for p in plates)
     waiting = sum(p["waiting"] for p in plates)
     failed = sum(p["failed"] for p in plates)
+    moved = sum(p.get("moved", 0) for p in plates)
     if run.get("status") == "planned":
         return "This plan has not been queued yet."
     good = run.get("copies_done") or 0
     parts = [f"{done} plate{'s' if done != 1 else ''} printed", f"{printing} printing", f"{waiting} waiting"]
     if failed:
-        parts.append(f"{failed} that did not come out (a failed plate's copies are queued again)")
+        where = f", {moved} of them moved to another printer" if moved else ""
+        parts.append(f"{failed} that did not come out (a failed plate's copies are queued again{where})")
     more = run.get("copies_to_come") or 0
     tail = f"; {more} copies still to come" if more else ""
     return f"{good} of {run.get('wanted')} copies printed: " + ", ".join(parts) + tail + "."

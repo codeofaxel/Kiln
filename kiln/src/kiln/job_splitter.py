@@ -595,9 +595,97 @@ def _jobs_of(plan_id: str) -> list[Any]:
     return [j for j in _srv._get_queue().list_jobs() if (j.metadata or {}).get("split_plan_id") == plan_id]
 
 
+def failed_plate_report(job: Any, *, registry: Any, queue: Any) -> dict[str, Any] | None:
+    """What the queue sends Kiln's servers about a plate of a fleet run that
+    failed, read on this computer: the part and the run's material, every
+    registered printer as a routing candidate, the printers' slicer times
+    for the part, and the ``failed`` block -- where, how many copies, how
+    many failures in a row there, the printer's own fault reading now, the
+    run's plates done and failed per printer, and the printers the person's
+    yes covers.  ``None`` when the job is not a plate of a kept fleet run.
+    Nothing here decides anything; the decision is the server's
+    (``plan_fleet_fill``), and the queue acts on it.
+    """
+    from kiln import print_signoff
+    from kiln.auto_record_hook import version_of_print_file
+    from kiln.plugins.recovery_tools import _printer_times
+    from kiln.printers.base import describe_screen_faults
+    from kiln.printers.engagement import internal_read
+    from kiln.queue import JobStatus
+    from kiln.routing_candidates import collect_routing_candidates
+
+    meta = job.metadata or {}
+    plan_id = meta.get("split_plan_id")
+    fill = meta.get("fill") or {}
+    found = _fill_record(str(plan_id)) if plan_id else None
+    if found is None or not fill.get("model_path"):
+        return None
+    _kept, record, _status = found
+    material = str(record.get("material") or "").strip() or "pla"
+    file_path = str(fill["model_path"])
+    names = registry.list_names()
+    adapters = {name: registry.get(name) for name in names}
+    pending: dict[str, int] = {}
+    for queued in queue.list_jobs(status=JobStatus.QUEUED):
+        if queued.printer_name:
+            pending[queued.printer_name] = pending.get(queued.printer_name, 0) + 1
+    candidates = collect_routing_candidates(
+        adapters=adapters, material=material, pending_counts=pending, version_id=version_of_print_file(file_path),
+    )
+    times, _per_model, _model_of = _printer_times(file_path, [str(c["printer_id"]) for c in candidates], adapters, material)
+    # The failed printer's own reading, as it stands now: its state word,
+    # its fault codes and the lines its screen shows.  Raw; the server reads it.
+    fault: dict[str, Any] = {"state": "unknown", "codes": [], "lines": []}
+    adapter = adapters.get(str(job.printer_name))
+    if adapter is not None:
+        try:
+            with internal_read():
+                state = adapter.get_state()
+            word = getattr(getattr(state, "state", None), "value", None)
+            fault["state"] = str(word or "unknown").lower()
+            faults = getattr(state, "faults", None) or []
+            fault["codes"] = [str(f.get("code")) for f in faults if isinstance(f, dict) and f.get("code")][:12]
+            lines = describe_screen_faults(faults)
+            note = getattr(state, "fault_note", None)
+            if isinstance(note, str) and note.strip():
+                lines.append(note.strip())
+            fault["lines"] = [line[:300] for line in lines][:12]
+        except Exception:  # noqa: BLE001 -- a printer that will not answer is a reading too
+            fault["state"] = "offline"
+    run: dict[str, dict[str, int]] = {}
+    for other in _jobs_of(str(plan_id)):
+        if other.id == job.id:
+            continue
+        row = run.setdefault(str(other.printer_name or ""), {"done": 0, "failed": 0})
+        ended = (other.metadata or {}).get("ended")
+        if other.status == JobStatus.COMPLETED and ended == "success":
+            row["done"] += 1
+        elif (other.status == JobStatus.COMPLETED and ended == "failed") or other.status == JobStatus.FAILED:
+            row["failed"] += 1
+    here = run.setdefault(str(job.printer_name or ""), {"done": 0, "failed": 0})
+    here["failed"] += 1
+    run = {name: counts for name, counts in run.items() if name in adapters}
+    return {
+        "file_path": file_path,
+        "material": material,
+        "candidates": candidates,
+        "adapters": adapters,
+        "times": times,
+        "failed": {
+            "printer": str(job.printer_name or ""),
+            "copies": int(fill.get("copies") or 0),
+            "tries": int(fill.get("failed_retries") or 0) + 1,
+            "fault": fault,
+            "run": run,
+            "allowed": print_signoff.covered_printers(meta.get("preview_signoff")),
+        },
+    }
+
+
 def fill_progress(plan_id: str) -> dict[str, Any] | None:
     """Where a queued fill plan stands, per printer: plates printed, printing
-    and waiting, and the copies still to come.  ``None`` for no such plan."""
+    and waiting, failed, and moved to another printer, and the copies still
+    to come.  ``None`` for no such plan."""
     from kiln.queue import JobStatus
 
     found = _fill_record(plan_id)
@@ -607,9 +695,11 @@ def fill_progress(plan_id: str) -> dict[str, Any] | None:
     per: dict[str, dict[str, int]] = {}
     for job in _jobs_of(plan_id):
         row = per.setdefault(str(job.printer_name or ""), {
-            "done": 0, "printing": 0, "waiting": 0, "failed": 0, "copies_done": 0, "copies_to_come": 0,
+            "done": 0, "printing": 0, "waiting": 0, "failed": 0, "moved": 0, "copies_done": 0, "copies_to_come": 0,
         })
         ended = (job.metadata or {}).get("ended")
+        if ((job.metadata or {}).get("failed_plate") or {}).get("decision") == "move":
+            row["moved"] += 1
         if job.status == JobStatus.COMPLETED and ended in ("failed", "cancelled", "unknown"):
             # The printer went idle, but the plate did not come out: a failed
             # plate's copies are queued again (kiln.scheduler), a cancel is

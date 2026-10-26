@@ -745,3 +745,171 @@ class TestTheRunIsAsked:
             asyncio.run(world.srv._obtain_print_consent(
                 "plan_multi_copy_split", {"file_path": world.part, "plan_id": plan["plan_id"], "submit": True}, object(),
             ))
+
+
+# ---------------------------------------------------------------------------
+# A failed plate of a fleet run asks where its copies go (Kiln Business)
+# ---------------------------------------------------------------------------
+
+
+def _verdict(decision: str, printer: str | None, copies: int = 24, **over) -> dict:
+    return {"schema": "failed_plate/1", "decision": decision, "printer": printer, "copies": copies,
+            "fault_read_as": "printer", "why": ["A's own reading points at the machine", f"The copies print on {printer}"],
+            "summary": f"The copies print on {printer}.", **over}
+
+
+class TestAFailedPlateOfAFleetRun:
+    """The queue's own retry is the floor; the server's decision is acted on
+    only when it comes, and a move only inside the person's yes.  A/B: on
+    the tree before this change every case queues the copies on A again."""
+
+    def _run(self, world, monkeypatch):
+        """A kept, queued run: A's first plate printing; returns its job id and the scheduler."""
+        from kiln.printers.base import JobResult
+
+        plan_id = _plan(world)["plan_id"]
+        out = _go(world, plan_id, monkeypatch)
+        assert out.get("success") is True, out
+        job = next(j for j in world.q.list_jobs() if j.printer_name == "A").id
+        world.q.mark_starting(job, printer_name="A")
+        world.q.mark_printing(job)
+        # The failed print stays on A's plate, as it would: the plate record
+        # holds it, so a plate queued again there waits to be cleared rather
+        # than start in the same tick.
+        mark_occupied(world.printers["A"], JAR)
+        sched = JobScheduler(world.q, world.reg, EventBus())
+        sched._spawn = lambda work: work()
+        sched._active_jobs[job] = "A"
+        sched._seen_printing.add(job)
+        a = world.printers["A"]
+
+        def fails(faults=None):
+            a.get_state.return_value = PrinterState(connected=True, state=PrinterStatus.IDLE,
+                                                    last_job_result=JobResult.FAILED, faults=faults)
+            sched.tick()
+        return plan_id, job, fails
+
+    @staticmethod
+    def _retried(world, job):
+        """The plates queued again on the same printer after *job* failed
+        (the same tick may already have started one on an idle printer, so
+        they are known by their mark, never by their status)."""
+        return [j for j in world.q.list_jobs() if j.id != job and (j.metadata.get("fill") or {}).get("failed_retries")]
+
+    @staticmethod
+    def _moved(world):
+        return [j for j in world.q.list_jobs() if (j.metadata.get("fill") or {}).get("moved_from")]
+
+    def test_a_move_queues_the_copies_on_the_printer_named_and_says_why(self, world, monkeypatch):
+        plan_id, job, fails = self._run(world, monkeypatch)
+        world.answer["value"] = {"success": True, "fill": _fill(B=(24, 0, 0, "clear")), "failed_plate": _verdict("move", "B")}
+        fails(faults=[{"code": "0700-8003", "kind": "hms", "screen_text": "The extruder is clogged."}])
+        moved = self._moved(world)
+        assert [(j.printer_name, j.metadata["fill"]["copies"], j.metadata["fill"]["moved_from"]) for j in moved] == [("B", 34, "A")]
+        assert moved[0].metadata["split_plan_id"] == plan_id and "failed_retries" not in moved[0].metadata["fill"]
+        assert self._retried(world, job) == []
+        note = world.q.get_job(job).metadata["failed_plate"]
+        assert note["decision"] == "move" and note["to"] == "B" and note["reasons"]
+        # What was sent: the queue's own ask, with the printer's reading and the run's record.
+        ask = world.sent[-1]
+        assert ask["tool"] == "plan_fleet_fill" and ask["_asked_by_user"] is False and ask["copies"] == 34
+        assert ask["failed"]["printer"] == "A" and ask["failed"]["tries"] == 1
+        assert ask["failed"]["fault"]["codes"] == ["0700-8003"] and "clogged" in ask["failed"]["fault"]["lines"][0]
+        assert ask["failed"]["run"]["A"] == {"done": 0, "failed": 1} and "B" in ask["failed"]["run"]
+        assert "SERA" not in json.dumps(ask)
+
+    def test_a_retry_queues_them_here_again(self, world, monkeypatch):
+        _plan_id, job, fails = self._run(world, monkeypatch)
+        world.answer["value"] = {"success": True, "fill": _fill(), "failed_plate": _verdict("retry", "A")}
+        fails()
+        assert [(j.printer_name, j.metadata["fill"]["failed_retries"]) for j in self._retried(world, job)] == [("A", 1)]
+        assert world.q.get_job(job).metadata["failed_plate"]["decision"] == "retry"
+
+    def test_a_stop_queues_nothing_and_carries_the_reason(self, world, monkeypatch):
+        _plan_id, job, fails = self._run(world, monkeypatch)
+        world.answer["value"] = {"success": True, "fill": _fill(), "failed_plate": _verdict(
+            "stop", None, summary="Kiln did not queue these copies again: look at the part and the material.")}
+        before = {j.id for j in world.q.list_jobs()}
+        fails()
+        assert {j.id for j in world.q.list_jobs()} == before
+        assert "look at the part" in world.q.get_job(job).metadata["not_requeued"]
+
+    def test_a_miss_keeps_the_same_printer_retry_and_says_so(self, world, monkeypatch):
+        _plan_id, job, fails = self._run(world, monkeypatch)
+        world.answer["value"] = ConnectionError("no route to host")
+        fails()
+        assert [(j.printer_name, j.metadata["fill"]["failed_retries"]) for j in self._retried(world, job)] == [("A", 1)]
+        note = world.q.get_job(job).metadata["requeued_here"]
+        assert "won't move any copies" in note and "The copies print again on A." in note
+        assert "failed_plate" not in world.q.get_job(job).metadata
+
+    def test_below_business_nothing_moves(self, world, monkeypatch):
+        _plan_id, job, fails = self._run(world, monkeypatch)
+        world.answer["value"] = {"success": False, "status": "error", "required_tier": "business",
+                                 "error": "Fleet fill requires Kiln Business", "code": "TIER_REQUIRED"}
+        fails()
+        assert [(j.printer_name, j.metadata["fill"]["failed_retries"]) for j in self._retried(world, job)] == [("A", 1)]
+        assert self._moved(world) == [] and "Kiln Business" in world.q.get_job(job).metadata["requeued_here"]
+
+    def test_a_move_outside_the_yes_is_refused_in_words_and_the_copies_stay(self, world, monkeypatch):
+        _plan_id, job, fails = self._run(world, monkeypatch)
+        world.q.update_metadata(job, {"preview_signoff": {"tool": "plan_multi_copy_split", "scope": ["A"]}})
+        world.answer["value"] = {"success": True, "fill": _fill(B=(24, 0, 0, "clear")), "failed_plate": _verdict("move", "B")}
+        fails()
+        assert world.sent[-1]["failed"]["allowed"] == ["A"]
+        assert self._moved(world) == []
+        assert [(j.printer_name, j.metadata["fill"]["failed_retries"]) for j in self._retried(world, job)] == [("A", 1)]
+        note = world.q.get_job(job).metadata["requeued_here"]
+        assert "would have moved these copies to B" in note and "covers A, not B" in note
+
+    def test_the_third_failure_in_a_row_still_stops_on_a_miss(self, world, monkeypatch):
+        _plan_id, job, fails = self._run(world, monkeypatch)
+        world.q.update_metadata(job, {"fill": {**world.q.get_job(job).metadata["fill"], "failed_retries": 2}})
+        world.answer["value"] = ConnectionError("no route to host")
+        fails()
+        assert world.sent[-1]["failed"]["tries"] == 3
+        assert self._retried(world, job) == [] and self._moved(world) == []
+        assert "did not queue its copies" in world.q.get_job(job).metadata["not_requeued"]
+
+    def test_one_printer_s_own_copies_never_ask(self, world, monkeypatch):
+        """``multi_copy_print(fill=True)`` on one printer carries no run: the
+        same-printer retry, with nothing sent."""
+        from kiln.printers.base import JobResult
+
+        job = world.srv._queue_fill_rest(world.part, 8, printer_name="A", printer_id=None, overrides=None,
+                                         slicer_path=None, spacing_mm=10.0, signoff=None)["job_id"]
+        world.q.mark_starting(job, printer_name="A")
+        world.q.mark_printing(job)
+        sched = JobScheduler(world.q, world.reg, EventBus())
+        sched._spawn = lambda work: work()
+        sched._active_jobs[job] = "A"
+        sched._seen_printing.add(job)
+        world.printers["A"].get_state.return_value = PrinterState(connected=True, state=PrinterStatus.IDLE,
+                                                                   last_job_result=JobResult.FAILED)
+        sched.tick()
+        assert world.sent == []
+        again = [j for j in world.q.list_jobs() if j.id != job]
+        assert [(j.printer_name, j.metadata["fill"]["failed_retries"]) for j in again] == [("A", 1)]
+
+    def test_the_run_status_counts_a_moved_plate(self, world, monkeypatch):
+        plan_id, _job, fails = self._run(world, monkeypatch)
+        world.answer["value"] = {"success": True, "fill": _fill(B=(24, 0, 0, "clear")), "failed_plate": _verdict("move", "B")}
+        fails()
+        out = world.tools["split_plan_status"](plan_id)
+        assert "1 of them moved to another printer" in out["message"], out["message"]
+
+
+class TestWhichPrintersAYesCovers:
+    def test_the_rule_the_queue_checks_with_asked_the_other_way_round(self):
+        from kiln.print_signoff import covered_printers, record_refusal
+
+        for record, covered in (
+            ({"scope": "fleet"}, None),
+            ({"scope": ["A", "B"], "printer_name": "A"}, ["A", "B"]),
+            ({"printer_name": "A"}, ["A"]),
+            ({"printer_name": None}, None),
+            (None, None),
+        ):
+            assert covered_printers(record) == covered, record
+            for name in ("A", "B", "C"):
+                assert (record_refusal(record, name) is None) == (covered is None or name in covered), (record, name)

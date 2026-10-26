@@ -46,10 +46,6 @@ _PERSONS_OWN_ASK = {
         "runs only when the person names the rules on check_material_environment; "
         "the per-requirement verdict is the feature they reached for"
     ),
-    "_pro_fleet_fill_bridge": (
-        "runs only when the person asks to plan copies of a part across their printers "
-        "on Kiln Business; the plan is the feature they reached for"
-    ),
     "_pro_fleet_materials_bridge": (
         "runs only when the person asks a material inventory door about several "
         "machines on Kiln Business; the cross-machine answer is what they reached for"
@@ -87,6 +83,11 @@ _PERSONS_OWN_ASK = {
 #: name, never a default, so the AST check below still sees who said it.
 _CALLER_DECIDES = {
     "_pro_decoration_bridge": "asked_by_user",
+    # The fleet fill bridge carries the person's own plan of copies across
+    # their printers (True, from plan_multi_copy_split) and the queue's
+    # question about a plate of that run that failed (False, from the
+    # scheduler: nobody reached for anything when a plate failed at 3 am).
+    "_pro_fleet_fill_bridge": "asked_by_user",
 }
 
 
